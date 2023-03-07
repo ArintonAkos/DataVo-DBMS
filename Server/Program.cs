@@ -4,9 +4,9 @@ using ABKR.Utils;
 try
 {
     string inputFilePath = ConsoleInputHandler.GetSourceFileName();
-    Parser parser = new(inputFileName);
+    Parser parser = new(inputFilePath);
 
-    Console.WriteLine(parser.Parse(FileHandler.GetFileText(inputFileName)));
+    Console.WriteLine(parser.Parse());
 }
 catch (Exception e)
 {
@@ -17,5 +17,5 @@ catch (Exception e)
 
 String handleConsoleInput()
 {
-
+    return String.Empty;
 }
