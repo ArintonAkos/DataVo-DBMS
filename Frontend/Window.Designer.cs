@@ -154,9 +154,9 @@
             // 
             // textEditor
             // 
-            this.textEditor.Location = new System.Drawing.Point(0, 67);
+            this.textEditor.Location = new System.Drawing.Point(12, 67);
             this.textEditor.Name = "textEditor";
-            this.textEditor.Size = new System.Drawing.Size(800, 240);
+            this.textEditor.Size = new System.Drawing.Size(772, 240);
             this.textEditor.TabIndex = 3;
             this.textEditor.Text = "";
             // 
