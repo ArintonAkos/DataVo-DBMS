@@ -43,9 +43,13 @@
             this.tabMessages = new System.Windows.Forms.TabPage();
             this.textEditor = new System.Windows.Forms.RichTextBox();
             this.menuSaveFile = new System.Windows.Forms.ToolStripMenuItem();
+            this.tabOutputText = new System.Windows.Forms.RichTextBox();
+            this.tabMessagesText = new System.Windows.Forms.RichTextBox();
             this.menu.SuspendLayout();
             this.strip.SuspendLayout();
             this.tabPanel.SuspendLayout();
+            this.tabOutput.SuspendLayout();
+            this.tabMessages.SuspendLayout();
             this.SuspendLayout();
             // 
             // menu
@@ -138,6 +142,7 @@
             // 
             // tabOutput
             // 
+            this.tabOutput.Controls.Add(this.tabOutputText);
             this.tabOutput.Location = new System.Drawing.Point(4, 25);
             this.tabOutput.Name = "tabOutput";
             this.tabOutput.Padding = new System.Windows.Forms.Padding(3);
@@ -148,6 +153,7 @@
             // 
             // tabMessages
             // 
+            this.tabMessages.Controls.Add(this.tabMessagesText);
             this.tabMessages.Location = new System.Drawing.Point(4, 25);
             this.tabMessages.Name = "tabMessages";
             this.tabMessages.Padding = new System.Windows.Forms.Padding(3);
@@ -176,6 +182,32 @@
             this.menuSaveFile.Text = "Save file";
             this.menuSaveFile.Click += new System.EventHandler(this.menuSaveFile_Click);
             // 
+            // tabOutputText
+            // 
+            this.tabOutputText.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.tabOutputText.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.tabOutputText.Location = new System.Drawing.Point(0, 0);
+            this.tabOutputText.Name = "tabOutputText";
+            this.tabOutputText.ReadOnly = true;
+            this.tabOutputText.Size = new System.Drawing.Size(750, 104);
+            this.tabOutputText.TabIndex = 0;
+            this.tabOutputText.Text = "";
+            // 
+            // tabMessagesText
+            // 
+            this.tabMessagesText.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.tabMessagesText.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.tabMessagesText.Location = new System.Drawing.Point(0, 0);
+            this.tabMessagesText.Name = "tabMessagesText";
+            this.tabMessagesText.ReadOnly = true;
+            this.tabMessagesText.Size = new System.Drawing.Size(750, 108);
+            this.tabMessagesText.TabIndex = 0;
+            this.tabMessagesText.Text = "";
+            // 
             // Window
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
@@ -195,6 +227,8 @@
             this.strip.ResumeLayout(false);
             this.strip.PerformLayout();
             this.tabPanel.ResumeLayout(false);
+            this.tabOutput.ResumeLayout(false);
+            this.tabMessages.ResumeLayout(false);
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -216,6 +250,8 @@
         private System.Windows.Forms.TabPage tabMessages;
         private System.Windows.Forms.RichTextBox textEditor;
         private System.Windows.Forms.ToolStripMenuItem menuSaveFile;
+        private System.Windows.Forms.RichTextBox tabOutputText;
+        private System.Windows.Forms.RichTextBox tabMessagesText;
     }
 }
 
