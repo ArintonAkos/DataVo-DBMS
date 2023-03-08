@@ -26,12 +26,10 @@ namespace Frontend
         {
             try
             {
-                Request request = new Request();
-                request.CommandType = "";
-                request.Data = textEditor.Text;
+                Request request = new Request { CommandType = "", Data = textEditor.Text };
 
-                var jsonObject = JsonConvert.SerializeObject(request);
-                var data = new StringContent(jsonObject, Encoding.UTF8, "application/json");
+                string jsonObject = JsonConvert.SerializeObject(request);
+                StringContent data = new StringContent(jsonObject, Encoding.UTF8, "application/json");
 
                 string url = "http://localhost:8001";
                 var response = await httpClient.PostAsync(url, data);
