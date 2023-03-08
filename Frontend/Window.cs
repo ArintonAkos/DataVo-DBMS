@@ -37,7 +37,7 @@ namespace Frontend
 
                 tabMessagesText.Text = result;
 
-            } catch (Exception ex)
+            } catch (HttpRequestException ex)
             {
                 Console.WriteLine(ex.Message);
             }
