@@ -1,20 +1,17 @@
-﻿using System;
+﻿using Frontend.Client.Requests;
+using Newtonsoft.Json;
+using System;
 using System.IO;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Net.NetworkInformation;
+using System.Net.Http;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml.Schema;
 
 namespace Frontend
 {
     public partial class Window : Form
     {
+        static readonly HttpClient httpClient = new HttpClient();
+
         public Window()
         {
             InitializeComponent();
@@ -25,9 +22,27 @@ namespace Frontend
             stripFilenameLabel.Text = string.Empty;
         }
 
-        private void stripExecute_Click(object sender, EventArgs e)
+        private async void stripExecute_Click(object sender, EventArgs e)
         {
+            try
+            {
+                Request request = new Request();
+                request.CommandType = "";
+                request.Data = textEditor.Text;
 
+                var jsonObject = JsonConvert.SerializeObject(request);
+                var data = new StringContent(jsonObject, Encoding.UTF8, "application/json");
+
+                string url = "http://localhost:8001";
+                var response = await httpClient.PostAsync(url, data);
+                var result = await response.Content.ReadAsStringAsync();
+
+                tabMessagesText.Text = result;
+
+            } catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
         }
 
         private void menuNewFile_Click(object sender, EventArgs e)
