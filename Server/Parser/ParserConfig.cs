@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ABKR.Parser
+namespace Server.Parser
 {
     internal class ParserConfig
     {

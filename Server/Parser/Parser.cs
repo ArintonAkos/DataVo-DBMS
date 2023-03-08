@@ -1,23 +1,26 @@
-﻿using ABKR.Utils;
+﻿using Server.Parser.Actions;
+using Server.Server.Requests;
+using Server.Server.Responses;
+using Server.Utils;
 using System;
 
 
-namespace ABKR.Parser
+namespace Server.Parser
 {
-    public class Parser
+    internal class Parser
     {
-        private String _filePath { get; set; }
+        private Request _request { get; set; }
 
-        public Parser(String filePath)
+        public Parser(Request request)
         {
-            this._filePath = filePath;
+            this._request = request;
         }
 
-        public String Parse()
+        public Response Parse()
         {
-            String fileContent = FileHandler.GetFileText(this._filePath);
+            DbAction action = RequestMapper.ToAction(this._request);
 
-            return String.Empty;
+            return action.Perform();
         }
     }
 }

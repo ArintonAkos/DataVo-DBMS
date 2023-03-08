@@ -1,5 +1,5 @@
-﻿using ABKR.Exceptions;
-using ABKR.Parser;
+﻿using Server.Exceptions;
+using Server.Parser;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ABKR.Utils
+namespace Server.Utils
 {
     internal class FileHandler
     {

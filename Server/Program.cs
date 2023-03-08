@@ -1,21 +1,12 @@
-﻿using ABKR.Parser;
-using ABKR.Utils;
+﻿using Server.Logging;
+using Server.Server;
 
 try
 {
-    string inputFilePath = ConsoleInputHandler.GetSourceFileName();
-    Parser parser = new(inputFilePath);
-
-    Console.WriteLine(parser.Parse());
-}
-catch (Exception e)
+    HttpServer httpServer = new();
+    await httpServer.Start();
+} catch (Exception e)
 {
-    Console.WriteLine(e.Message);
-}
-
-
-
-String handleConsoleInput()
-{
-    return String.Empty;
+    Logger.Error("Stopping SERVER! An error occured!");
+    Logger.Error(e.Message);
 }
