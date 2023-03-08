@@ -37,11 +37,12 @@
             this.strip = new System.Windows.Forms.ToolStrip();
             this.stripExecute = new System.Windows.Forms.ToolStripButton();
             this.stripSeparator = new System.Windows.Forms.ToolStripSeparator();
-            this.stripFileNameLabel = new System.Windows.Forms.ToolStripLabel();
+            this.stripFilenameLabel = new System.Windows.Forms.ToolStripLabel();
             this.tabPanel = new System.Windows.Forms.TabControl();
             this.tabOutput = new System.Windows.Forms.TabPage();
             this.tabMessages = new System.Windows.Forms.TabPage();
             this.textEditor = new System.Windows.Forms.RichTextBox();
+            this.menuSaveFile = new System.Windows.Forms.ToolStripMenuItem();
             this.menu.SuspendLayout();
             this.strip.SuspendLayout();
             this.tabPanel.SuspendLayout();
@@ -54,7 +55,7 @@
             this.menuFile});
             this.menu.Location = new System.Drawing.Point(0, 0);
             this.menu.Name = "menu";
-            this.menu.Size = new System.Drawing.Size(800, 28);
+            this.menu.Size = new System.Drawing.Size(782, 28);
             this.menu.TabIndex = 0;
             this.menu.Text = "menuStrip1";
             // 
@@ -63,6 +64,7 @@
             this.menuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.menuNewFile,
             this.menuOpenFile,
+            this.menuSaveFile,
             this.menuExit});
             this.menuFile.Name = "menuFile";
             this.menuFile.Size = new System.Drawing.Size(46, 24);
@@ -71,21 +73,21 @@
             // menuNewFile
             // 
             this.menuNewFile.Name = "menuNewFile";
-            this.menuNewFile.Size = new System.Drawing.Size(153, 26);
+            this.menuNewFile.Size = new System.Drawing.Size(224, 26);
             this.menuNewFile.Text = "New file";
             this.menuNewFile.Click += new System.EventHandler(this.menuNewFile_Click);
             // 
             // menuOpenFile
             // 
             this.menuOpenFile.Name = "menuOpenFile";
-            this.menuOpenFile.Size = new System.Drawing.Size(153, 26);
+            this.menuOpenFile.Size = new System.Drawing.Size(224, 26);
             this.menuOpenFile.Text = "Open file";
             this.menuOpenFile.Click += new System.EventHandler(this.menuOpenFile_Click);
             // 
             // menuExit
             // 
             this.menuExit.Name = "menuExit";
-            this.menuExit.Size = new System.Drawing.Size(153, 26);
+            this.menuExit.Size = new System.Drawing.Size(224, 26);
             this.menuExit.Text = "Exit";
             this.menuExit.Click += new System.EventHandler(this.menuExit_Click);
             // 
@@ -95,10 +97,10 @@
             this.strip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.stripExecute,
             this.stripSeparator,
-            this.stripFileNameLabel});
+            this.stripFilenameLabel});
             this.strip.Location = new System.Drawing.Point(0, 28);
             this.strip.Name = "strip";
-            this.strip.Size = new System.Drawing.Size(800, 27);
+            this.strip.Size = new System.Drawing.Size(782, 27);
             this.strip.TabIndex = 1;
             this.strip.Text = "toolStrip1";
             // 
@@ -116,20 +118,22 @@
             this.stripSeparator.Name = "stripSeparator";
             this.stripSeparator.Size = new System.Drawing.Size(6, 27);
             // 
-            // stripFileNameLabel
+            // stripFilenameLabel
             // 
-            this.stripFileNameLabel.Name = "stripFileNameLabel";
-            this.stripFileNameLabel.Size = new System.Drawing.Size(69, 24);
-            this.stripFileNameLabel.Text = "./filepath";
+            this.stripFilenameLabel.Name = "stripFilenameLabel";
+            this.stripFilenameLabel.Size = new System.Drawing.Size(69, 24);
+            this.stripFilenameLabel.Text = "./filepath";
             // 
             // tabPanel
             // 
+            this.tabPanel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.tabPanel.Controls.Add(this.tabOutput);
             this.tabPanel.Controls.Add(this.tabMessages);
             this.tabPanel.Location = new System.Drawing.Point(12, 313);
             this.tabPanel.Name = "tabPanel";
             this.tabPanel.SelectedIndex = 0;
-            this.tabPanel.Size = new System.Drawing.Size(776, 133);
+            this.tabPanel.Size = new System.Drawing.Size(758, 133);
             this.tabPanel.TabIndex = 2;
             // 
             // tabOutput
@@ -137,7 +141,7 @@
             this.tabOutput.Location = new System.Drawing.Point(4, 25);
             this.tabOutput.Name = "tabOutput";
             this.tabOutput.Padding = new System.Windows.Forms.Padding(3);
-            this.tabOutput.Size = new System.Drawing.Size(768, 104);
+            this.tabOutput.Size = new System.Drawing.Size(750, 104);
             this.tabOutput.TabIndex = 0;
             this.tabOutput.Text = "Output";
             this.tabOutput.UseVisualStyleBackColor = true;
@@ -147,24 +151,36 @@
             this.tabMessages.Location = new System.Drawing.Point(4, 25);
             this.tabMessages.Name = "tabMessages";
             this.tabMessages.Padding = new System.Windows.Forms.Padding(3);
-            this.tabMessages.Size = new System.Drawing.Size(768, 104);
+            this.tabMessages.Size = new System.Drawing.Size(750, 104);
             this.tabMessages.TabIndex = 1;
             this.tabMessages.Text = "Messages";
             this.tabMessages.UseVisualStyleBackColor = true;
             // 
             // textEditor
             // 
-            this.textEditor.Location = new System.Drawing.Point(12, 67);
+            this.textEditor.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.textEditor.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.textEditor.Location = new System.Drawing.Point(12, 69);
             this.textEditor.Name = "textEditor";
-            this.textEditor.Size = new System.Drawing.Size(772, 240);
+            this.textEditor.Size = new System.Drawing.Size(754, 238);
             this.textEditor.TabIndex = 3;
             this.textEditor.Text = "";
+            this.textEditor.KeyDown += new System.Windows.Forms.KeyEventHandler(this.textEditor_KeyDown);
+            // 
+            // menuSaveFile
+            // 
+            this.menuSaveFile.Name = "menuSaveFile";
+            this.menuSaveFile.Size = new System.Drawing.Size(224, 26);
+            this.menuSaveFile.Text = "Save file";
+            this.menuSaveFile.Click += new System.EventHandler(this.menuSaveFile_Click);
             // 
             // Window
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.ClientSize = new System.Drawing.Size(782, 453);
             this.Controls.Add(this.textEditor);
             this.Controls.Add(this.tabPanel);
             this.Controls.Add(this.strip);
@@ -194,11 +210,12 @@
         private System.Windows.Forms.ToolStrip strip;
         private System.Windows.Forms.ToolStripButton stripExecute;
         private System.Windows.Forms.ToolStripSeparator stripSeparator;
-        private System.Windows.Forms.ToolStripLabel stripFileNameLabel;
+        private System.Windows.Forms.ToolStripLabel stripFilenameLabel;
         private System.Windows.Forms.TabControl tabPanel;
         private System.Windows.Forms.TabPage tabOutput;
         private System.Windows.Forms.TabPage tabMessages;
         private System.Windows.Forms.RichTextBox textEditor;
+        private System.Windows.Forms.ToolStripMenuItem menuSaveFile;
     }
 }
 
