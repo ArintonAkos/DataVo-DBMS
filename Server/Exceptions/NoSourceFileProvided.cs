@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ABKR.Exceptions
+namespace Server.Exceptions
 {
     internal class NoSourceFileProvided : Exception
     {
