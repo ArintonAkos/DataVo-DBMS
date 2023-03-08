@@ -1,0 +1,204 @@
+﻿namespace Frontend
+{
+    partial class Window
+    {
+        /// <summary>
+        /// Required designer variable.
+        /// </summary>
+        private System.ComponentModel.IContainer components = null;
+
+        /// <summary>
+        /// Clean up any resources being used.
+        /// </summary>
+        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        #region Windows Form Designer generated code
+
+        /// <summary>
+        /// Required method for Designer support - do not modify
+        /// the contents of this method with the code editor.
+        /// </summary>
+        private void InitializeComponent()
+        {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Window));
+            this.menu = new System.Windows.Forms.MenuStrip();
+            this.menuFile = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuNewFile = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuOpenFile = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuExit = new System.Windows.Forms.ToolStripMenuItem();
+            this.strip = new System.Windows.Forms.ToolStrip();
+            this.stripExecute = new System.Windows.Forms.ToolStripButton();
+            this.stripSeparator = new System.Windows.Forms.ToolStripSeparator();
+            this.stripFileNameLabel = new System.Windows.Forms.ToolStripLabel();
+            this.tabPanel = new System.Windows.Forms.TabControl();
+            this.tabOutput = new System.Windows.Forms.TabPage();
+            this.tabMessages = new System.Windows.Forms.TabPage();
+            this.textEditor = new System.Windows.Forms.RichTextBox();
+            this.menu.SuspendLayout();
+            this.strip.SuspendLayout();
+            this.tabPanel.SuspendLayout();
+            this.SuspendLayout();
+            // 
+            // menu
+            // 
+            this.menu.ImageScalingSize = new System.Drawing.Size(20, 20);
+            this.menu.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.menuFile});
+            this.menu.Location = new System.Drawing.Point(0, 0);
+            this.menu.Name = "menu";
+            this.menu.Size = new System.Drawing.Size(800, 28);
+            this.menu.TabIndex = 0;
+            this.menu.Text = "menuStrip1";
+            // 
+            // menuFile
+            // 
+            this.menuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.menuNewFile,
+            this.menuOpenFile,
+            this.menuExit});
+            this.menuFile.Name = "menuFile";
+            this.menuFile.Size = new System.Drawing.Size(46, 24);
+            this.menuFile.Text = "File";
+            // 
+            // menuNewFile
+            // 
+            this.menuNewFile.Name = "menuNewFile";
+            this.menuNewFile.Size = new System.Drawing.Size(153, 26);
+            this.menuNewFile.Text = "New file";
+            this.menuNewFile.Click += new System.EventHandler(this.menuNewFile_Click);
+            // 
+            // menuOpenFile
+            // 
+            this.menuOpenFile.Name = "menuOpenFile";
+            this.menuOpenFile.Size = new System.Drawing.Size(153, 26);
+            this.menuOpenFile.Text = "Open file";
+            this.menuOpenFile.Click += new System.EventHandler(this.menuOpenFile_Click);
+            // 
+            // menuExit
+            // 
+            this.menuExit.Name = "menuExit";
+            this.menuExit.Size = new System.Drawing.Size(153, 26);
+            this.menuExit.Text = "Exit";
+            this.menuExit.Click += new System.EventHandler(this.menuExit_Click);
+            // 
+            // strip
+            // 
+            this.strip.ImageScalingSize = new System.Drawing.Size(20, 20);
+            this.strip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.stripExecute,
+            this.stripSeparator,
+            this.stripFileNameLabel});
+            this.strip.Location = new System.Drawing.Point(0, 28);
+            this.strip.Name = "strip";
+            this.strip.Size = new System.Drawing.Size(800, 27);
+            this.strip.TabIndex = 1;
+            this.strip.Text = "toolStrip1";
+            // 
+            // stripExecute
+            // 
+            this.stripExecute.Image = ((System.Drawing.Image)(resources.GetObject("stripExecute.Image")));
+            this.stripExecute.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.stripExecute.Name = "stripExecute";
+            this.stripExecute.Size = new System.Drawing.Size(84, 24);
+            this.stripExecute.Text = "Execute";
+            this.stripExecute.Click += new System.EventHandler(this.stripExecute_Click);
+            // 
+            // stripSeparator
+            // 
+            this.stripSeparator.Name = "stripSeparator";
+            this.stripSeparator.Size = new System.Drawing.Size(6, 27);
+            // 
+            // stripFileNameLabel
+            // 
+            this.stripFileNameLabel.Name = "stripFileNameLabel";
+            this.stripFileNameLabel.Size = new System.Drawing.Size(69, 24);
+            this.stripFileNameLabel.Text = "./filepath";
+            // 
+            // tabPanel
+            // 
+            this.tabPanel.Controls.Add(this.tabOutput);
+            this.tabPanel.Controls.Add(this.tabMessages);
+            this.tabPanel.Location = new System.Drawing.Point(12, 313);
+            this.tabPanel.Name = "tabPanel";
+            this.tabPanel.SelectedIndex = 0;
+            this.tabPanel.Size = new System.Drawing.Size(776, 133);
+            this.tabPanel.TabIndex = 2;
+            // 
+            // tabOutput
+            // 
+            this.tabOutput.Location = new System.Drawing.Point(4, 25);
+            this.tabOutput.Name = "tabOutput";
+            this.tabOutput.Padding = new System.Windows.Forms.Padding(3);
+            this.tabOutput.Size = new System.Drawing.Size(768, 104);
+            this.tabOutput.TabIndex = 0;
+            this.tabOutput.Text = "Output";
+            this.tabOutput.UseVisualStyleBackColor = true;
+            // 
+            // tabMessages
+            // 
+            this.tabMessages.Location = new System.Drawing.Point(4, 25);
+            this.tabMessages.Name = "tabMessages";
+            this.tabMessages.Padding = new System.Windows.Forms.Padding(3);
+            this.tabMessages.Size = new System.Drawing.Size(768, 104);
+            this.tabMessages.TabIndex = 1;
+            this.tabMessages.Text = "Messages";
+            this.tabMessages.UseVisualStyleBackColor = true;
+            // 
+            // textEditor
+            // 
+            this.textEditor.Location = new System.Drawing.Point(12, 67);
+            this.textEditor.Name = "textEditor";
+            this.textEditor.Size = new System.Drawing.Size(772, 240);
+            this.textEditor.TabIndex = 3;
+            this.textEditor.Text = "";
+            // 
+            // Window
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.Controls.Add(this.textEditor);
+            this.Controls.Add(this.tabPanel);
+            this.Controls.Add(this.strip);
+            this.Controls.Add(this.menu);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.MainMenuStrip = this.menu;
+            this.Name = "Window";
+            this.Text = "VABA ABKR";
+            this.Load += new System.EventHandler(this.Window_Load);
+            this.menu.ResumeLayout(false);
+            this.menu.PerformLayout();
+            this.strip.ResumeLayout(false);
+            this.strip.PerformLayout();
+            this.tabPanel.ResumeLayout(false);
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
+        }
+
+        #endregion
+
+        private System.Windows.Forms.MenuStrip menu;
+        private System.Windows.Forms.ToolStripMenuItem menuFile;
+        private System.Windows.Forms.ToolStripMenuItem menuNewFile;
+        private System.Windows.Forms.ToolStripMenuItem menuOpenFile;
+        private System.Windows.Forms.ToolStripMenuItem menuExit;
+        private System.Windows.Forms.ToolStrip strip;
+        private System.Windows.Forms.ToolStripButton stripExecute;
+        private System.Windows.Forms.ToolStripSeparator stripSeparator;
+        private System.Windows.Forms.ToolStripLabel stripFileNameLabel;
+        private System.Windows.Forms.TabControl tabPanel;
+        private System.Windows.Forms.TabPage tabOutput;
+        private System.Windows.Forms.TabPage tabMessages;
+        private System.Windows.Forms.RichTextBox textEditor;
+    }
+}
+
