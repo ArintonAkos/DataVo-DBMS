@@ -1,11 +1,8 @@
 ﻿using Server.Parser.Actions;
+using Server.Parser.Commands;
 using Server.Parser.DDL;
 using Server.Server.Requests;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 
 namespace Server.Parser
 {
@@ -13,23 +10,62 @@ namespace Server.Parser
     {
         private static readonly Dictionary<String, Type> _commands = new()
         {
-            { "CreateDatabase", typeof(CreateDatabase) },
-            { "DropDatabase", typeof(DropDatabase) },
-            { "CreateTable", typeof(CreateTable) },
-            { "DropTable", typeof(DropTable) },
+            { Patterns.CreateDatabase, typeof(CreateDatabase) },
+            { Patterns.DropDatabase, typeof(DropDatabase) },
+            { Patterns.CreateTable, typeof(CreateTable) },
+            { Patterns.DropTable, typeof(DropTable) },
         };
+        private static readonly KeyValuePair<String, Type> _goCommand = new(Patterns.Go, typeof(Go));
 
-        public static DbAction ToAction(Request request)
+        public static List<Queue<DbAction>> ToRunnables(Request request)
         {
-            var type = _commands.GetValueOrDefault(request.CommandType);
+            List<Queue<DbAction>> runnables = new();
+            Queue<DbAction> actions = new();
 
-            if (type == null)
+            var sqlFile = request.Data;
+
+            REPEAT:
+            while (!String.IsNullOrEmpty(sqlFile.Trim()))
             {
-                var commandTypes = String.Join(", ", _commands.ToArray());
-                throw new Exception($"Invalid Command Type: {request.CommandType}. \nSupported command types: {commandTypes}");
+                if (MatchCommand(_goCommand, ref sqlFile) != null)
+                {
+                    runnables.Add(actions);
+                    actions.Clear();
+                }
+
+                foreach (KeyValuePair<String, Type> command in _commands)
+                {
+                    var action = MatchCommand(command, ref sqlFile);
+
+                    if (action != null)
+                    {
+                        actions.Enqueue(action);
+                        goto REPEAT;
+                    }
+                }
+
+                throw new Exception($"Parse Error!");
             }
             
-            return (DbAction)Activator.CreateInstance(type, request.Data);
+            if (actions.Count != 0)
+            {
+                runnables.Add(actions);
+            }
+
+            return runnables;
+        }
+
+        public static DbAction? MatchCommand(KeyValuePair<String, Type> command, ref String sqlFile)
+        {
+            Match match = Regex.Match(sqlFile, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+            if (match.Success)
+            {
+                sqlFile = sqlFile.Substring(match.Index + match.Length);
+                return (DbAction)Activator.CreateInstance(command.Value, match);
+            }
+
+            return null;
         }
 
         public static bool IsValid(String commandName)

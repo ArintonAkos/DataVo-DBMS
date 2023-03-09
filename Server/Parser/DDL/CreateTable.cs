@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
@@ -15,11 +16,11 @@ namespace Server.Parser.DDL
 {
     internal class CreateTable : DbAction
     {    
-        public CreateTableModel Model { get; private set; }   
+        public CreateTableModel Model { get; private set; }
 
-        public CreateTable(string rawData)
+        public CreateTable(Match match)
         {
-            this.Model = JsonConvert.DeserializeObject<CreateTableModel>(rawData);
+            //this.Model = JsonConvert.DeserializeObject<CreateTableModel>(rawData);
         }
 
         public Response Perform()
