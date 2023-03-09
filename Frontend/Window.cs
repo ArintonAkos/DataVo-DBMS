@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using System;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Windows.Forms;
@@ -26,7 +27,7 @@ namespace Frontend
         {
             try
             {
-                Request request = new Request { CommandType = "", Data = textEditor.Text };
+                Request request = new Request { Data = textEditor.Text };
 
                 string jsonObject = JsonConvert.SerializeObject(request);
                 StringContent data = new StringContent(jsonObject, Encoding.UTF8, "application/json");
@@ -35,7 +36,7 @@ namespace Frontend
                 var response = await httpClient.PostAsync(url, data);
                 var result = await response.Content.ReadAsStringAsync();
 
-                tabMessagesText.Text = result;
+                tabMessagesText.Text += result + "\n";
 
             } catch (HttpRequestException ex)
             {
