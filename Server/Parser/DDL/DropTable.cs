@@ -1,18 +1,27 @@
-﻿using Server.Parser.Actions;
+﻿using Server.Logging;
+using Server.Models.DDL;
+using Server.Parser.Actions;
 using Server.Server.Responses;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
 {
     internal class DropTable : DbAction
     {
+        private readonly DropTableModel _model;
+
+        public DropTable(Match match)
+        {
+            _model = DropTableModel.FromMatch(match);
+        }
+
         public Response Perform()
         {
-            throw new NotImplementedException();
+            // Drop MongoDb database
+            Logger.Info(_model.TableName);
+
+
+            return new Response();
         }
     }
 }

@@ -18,9 +18,17 @@ namespace Server.Parser
 
         public Response Parse()
         {
-            DbAction action = RequestMapper.ToAction(this._request);
+            List<Queue<DbAction>> runnables = RequestMapper.ToRunnables(this._request);
 
-            return action.Perform();
+            foreach (var runnable in runnables) 
+            {
+                while (runnable.Any())
+                {
+                    runnable.Dequeue().Perform();
+                }
+            }
+
+            return new Response();
         }
     }
 }
