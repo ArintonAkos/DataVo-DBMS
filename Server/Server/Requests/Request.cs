@@ -10,14 +10,7 @@ namespace Server.Server.Requests
 {
     internal class Request
     {
-        [JsonProperty("command_type")]
-        public String CommandType { get; set; }
         [JsonProperty("data")]
         public String Data { get; set; }
-
-        public bool IsValid()
-        {
-            return RequestMapper.IsValid(CommandType);
-        }
     }
 }

@@ -52,14 +52,14 @@ namespace Server.Server
             Logger.Info($"New Request from {context.Request.UserHostName}");
             Logger.Info($"{context.Request.UserHostName}: {content}");
 
-            var response = JsonConvert.DeserializeObject<Request>(content);
+            var request = JsonConvert.DeserializeObject<Request>(content);
 
-            if (response == null)
+            if (request == null)
             {
                 throw new Exception("Error while parsing data!");
             }
 
-            var parser = new Parser.Parser(response);
+            var parser = new Parser.Parser(request);
 
             return parser.Parse();
         }
