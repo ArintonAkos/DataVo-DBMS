@@ -28,6 +28,7 @@ namespace Server.Parser.DDL
         {
             // TO-DO: Create Table in MongoDB
 
+            Context.ListDbs();
             XML<CreateTableModel>.CreateAndSave(Model, "databases", $"{Model.TableName}.xml");
 
             Messages.Add($"Table {Model.TableName} successfully created!");
