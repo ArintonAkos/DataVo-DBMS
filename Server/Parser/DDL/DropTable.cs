@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
 {
-    internal class DropTable : DbAction
+    internal class DropTable : BaseDbAction
     {
         private readonly DropTableModel _model;
 
@@ -15,7 +15,7 @@ namespace Server.Parser.DDL
             _model = DropTableModel.FromMatch(match);
         }
 
-        public Response Perform()
+        public override Response Perform()
         {
             // Drop MongoDb database
             Logger.Info(_model.TableName);

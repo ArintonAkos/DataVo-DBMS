@@ -15,7 +15,9 @@ namespace Server.Utils
             CreateDirIfDoesntExist(folder);
 
             XmlSerializer serializer = new(typeof(T));
-            using StreamWriter writer = new StreamWriter(folder + "\\" + fileName);
+            
+            // If we need a string not an xml file, this should be rewriteteen to StringWriter
+            using StreamWriter writer = new(folder + "\\" + fileName);
 
             serializer.Serialize(writer, obj);
         }
