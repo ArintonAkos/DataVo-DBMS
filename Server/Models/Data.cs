@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Numerics;
 using System.Text;
@@ -10,15 +11,13 @@ namespace Server.Models
 {
     public class Data
     {
-        [JsonProperty("type")]
+        [Required(ErrorMessage = "Data must belong to a table!")]
+        public string Table { get; set; }
+        
+        [Required(ErrorMessage = "Data must have a type!")]
         public String Type { get; set; }
-        [JsonProperty("value")]
+        
+        [Required(ErrorMessage = "Data must have a value!")]
         public String Value { get; set; }
-        [JsonProperty("is_null")]
-        public Boolean? IsNull { get; set; }
-        [JsonProperty("length")]
-        public Int32? Length { get; set; }
-        [JsonProperty("is_primary_key")]
-        public Boolean? IsPrimaryKey { get; set; }
     }
 }

@@ -22,12 +22,13 @@ namespace Server.Parser
             List<Queue<DbAction>> runnables = new();
             Queue<DbAction> actions = new();
 
-            var sqlFile = request.Data;
+            var rawSqlCode = request.Data;
+            int lineCount = 0;
 
             REPEAT:
-            while (!String.IsNullOrEmpty(sqlFile.Trim()))
+            while (!String.IsNullOrEmpty(rawSqlCode.Trim()))
             {
-                if (MatchCommand(_goCommand, ref sqlFile) != null)
+                if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount) != null)
                 {
                     runnables.Add(actions);
                     actions.Clear();
@@ -35,7 +36,7 @@ namespace Server.Parser
 
                 foreach (KeyValuePair<String, Type> command in _commands)
                 {
-                    var action = MatchCommand(command, ref sqlFile);
+                    var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
 
                     if (action != null)
                     {
@@ -44,7 +45,7 @@ namespace Server.Parser
                     }
                 }
 
-                throw new Exception($"Parse Error!");
+                throw new Exception($"Invalid Keyword: {FirstKeyWord(rawSqlCode)} at line: {lineCount}!");
             }
             
             if (actions.Count != 0)
@@ -55,22 +56,23 @@ namespace Server.Parser
             return runnables;
         }
 
-        public static DbAction? MatchCommand(KeyValuePair<String, Type> command, ref String sqlFile)
+        private static DbAction? MatchCommand(KeyValuePair<String, Type> command, ref String rawSqlCode, ref int lineCount)
         {
-            Match match = Regex.Match(sqlFile, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            Match match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
             if (match.Success)
             {
-                sqlFile = sqlFile.Substring(match.Index + match.Length);
+                lineCount += match.Value.Split("\r\n|\r|\n").Length;
+                rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
                 return (DbAction)Activator.CreateInstance(command.Value, match);
             }
 
             return null;
         }
 
-        public static bool IsValid(String commandName)
+        private static String FirstKeyWord(String rawSqlCode)
         {
-            return _commands.ContainsKey(commandName);
+            return rawSqlCode.Trim().Split(" |\t").FirstOrDefault() ?? String.Empty;
         }
     }
 }

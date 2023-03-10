@@ -20,7 +20,7 @@ namespace Server.Parser.DDL
 
         public CreateTable(Match match)
         {
-            //this.Model = JsonConvert.DeserializeObject<CreateTableModel>(rawData);
+            this.Model = CreateTableModel.FromMatch(match);
         }
 
         public Response Perform()
