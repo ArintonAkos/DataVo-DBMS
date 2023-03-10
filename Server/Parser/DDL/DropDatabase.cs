@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace Server.Parser.DDL
 {
-    internal class DropDatabase : DbAction
+    internal class DropDatabase : BaseDbAction
     {
         private readonly DropDatabaseModel _model;
 
@@ -21,7 +21,7 @@ namespace Server.Parser.DDL
             _model = DropDatabaseModel.FromMatch(match);
         }
 
-        public Response Perform()
+        public override Response Perform()
         {
             // Drop MongoDb database
             Logger.Info(_model.DatabaseName);
