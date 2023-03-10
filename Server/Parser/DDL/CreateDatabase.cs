@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
 {
-    internal class CreateDatabase : DbAction
+    internal class CreateDatabase : BaseDbAction
     {
         private readonly CreateDatabaseModel _model;
 
@@ -15,7 +15,7 @@ namespace Server.Parser.DDL
             _model = CreateDatabaseModel.FromMatch(match);
         }
 
-        public Response Perform()
+        public override Response Perform()
         {
             // Create MongoDb database
             Logger.Info(_model.DatabaseName);
