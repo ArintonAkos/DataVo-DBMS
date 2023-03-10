@@ -11,7 +11,7 @@ using System.Xml.Serialization;
 namespace Server.Models
 {
     [Serializable]
-    [XmlType("ForeignKey")]
+    [XmlType("foreignKey")]
     public class ForeignKey
     {
         [XmlIgnore]
