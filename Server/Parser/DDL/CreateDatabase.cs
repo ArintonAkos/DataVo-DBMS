@@ -2,6 +2,7 @@
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Responses;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -17,7 +18,7 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // Create MongoDb database
+            DbContext.Instance.GetDatabase(_model.DatabaseName);
             Logger.Info(_model.DatabaseName);
 
             Messages.Add($"Database {_model.DatabaseName} successfully created!");
