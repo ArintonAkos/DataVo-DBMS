@@ -11,25 +11,27 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL
 {
-    internal class CreateTable : DbAction
+    internal class CreateTable : BaseDbAction
     {    
         public CreateTableModel Model { get; private set; }
 
         public CreateTable(Match match)
         {
-            //this.Model = JsonConvert.DeserializeObject<CreateTableModel>(rawData);
+            this.Model = CreateTableModel.FromMatch(match);
         }
 
-        public Response Perform()
+        public override Response Perform()
         {
             if (Model.TableName.ContainsAny("#", " ", ".", "/", "\\", "_"))
             {
                 throw new Exception("Database Name Contains invalid characters!");
             }
 
+            Context.ListDbs();
             XML<CreateTableModel>.CreateAndSave(Model, "databases", $"{Model.TableName}.xml");
 
             return new Response()

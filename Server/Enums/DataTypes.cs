@@ -4,9 +4,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Server.Server.MongoDB
+namespace Server.Enums
 {
-    internal class MongoDB
+    [Serializable]
+    public enum DataTypes
     {
+        Int,
+        Float,
+        Varchar
     }
 }

@@ -6,13 +6,14 @@ using System.Threading.Tasks;
 
 namespace Server.Parser.Commands
 {
-    internal class Patterns
+    internal static class Patterns
     {
         public static String CreateTable
         {
             get
             {
-                return @"^\s?create\stable\s([A-Z_]+)\s(\(\s*.*\s*\))";
+                var columns = @$"\s*(?<Columns>({Column},?)+)";
+                return @$"^\s*create\s+table\s+(?<TableName>[A-Z_]+)\s+\({columns}\)";
             }
         }
 
@@ -20,7 +21,7 @@ namespace Server.Parser.Commands
         {
             get
             {
-                return @"^\s?drop\stable\s([A-Z_]+)";
+                return @"^\s*drop\s+table\s+([A-Z_]+)";
             }
         }
 
@@ -28,7 +29,7 @@ namespace Server.Parser.Commands
         {
             get
             {
-                return @"^\s?create\sdatabase\s([A-Z_]+)";
+                return @"^\s*create\s+database\s+([A-Z_]+)";
             }
         }
 
@@ -36,7 +37,7 @@ namespace Server.Parser.Commands
         {
             get
             {
-                return @"^\s?drop\sdatabase\s([A-Z_]+)";
+                return @"^\s*drop\s+database\s+([A-Z_]+)";
             }
         }
 
@@ -44,8 +45,44 @@ namespace Server.Parser.Commands
         {
             get
             {
-                return @"^\s?go(\s+|$)";
+                return @"^\s*go(\s+|$)";
             }
+        }
+
+        public static String Column
+        {
+            get
+            {
+                string integer = @"\s*int";
+                string floating = @"\s*float";
+                string varchar = @"\s*varchar\(\s*(?<Length>[0-9]+)\s*\)";
+                string primary = @"\s*(?<PrimaryKey>primary\s+key)";
+                string foreign = @"\s*(?<ForeignKey>references\s+(?<ForeignTable>[A-Z_]+)\s*\(\s*(?<ForeignColumn>[A-Z_]+)\s*\))";
+
+                return @$"\s*(?<FieldName>[A-Z_]+)\s+(?<Type>{varchar}|{integer}|{floating})(\s+{primary})?(\s+{foreign})?\s*";
+            }
+        }
+
+        public static String Value
+        {
+            get
+            {
+                string integerValue = @"(?<Integer>\s*\b[0-9]+\b\s*)";
+                string floatingValue = @"(?<Floating>\s*[+-]?([0-9]*[.])?[0-9]+\s*)";
+                string varcharValue = @"(?<VarChar>\s*'.*')";
+
+                return @$"\s*(?<Column>{varcharValue}|{integerValue}|{floatingValue})\s*";
+            }
+        }
+
+        public static String AddStartLine(this String s)
+        {
+            return @"^\s*" + s;
+        }
+
+        public static String AddEndLine(this String s)
+        {
+            return s + @"\s*$";
         }
     }
 }
