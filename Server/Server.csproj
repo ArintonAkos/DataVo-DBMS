@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Enums\" />
     <Folder Include="Models\DQL\" />
     <Folder Include="Parser\DQL\" />
   </ItemGroup>
