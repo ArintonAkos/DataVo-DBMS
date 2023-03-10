@@ -32,7 +32,7 @@ namespace Server.Parser.DDL
             }
 
             Context.ListDbs();
-            XML<CreateTableModel>.CreateAndSave(Model, "databases", $"{Model.TableName}.xml");
+            XML<CreateTableModel>.InsertObjIntoXML(Model, "Databases", "databases", $"{Model.TableName}.xml");
 
             return new Response()
             {
