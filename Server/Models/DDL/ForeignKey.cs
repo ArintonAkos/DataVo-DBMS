@@ -13,7 +13,8 @@ namespace Server.Models
     [Serializable]
     [XmlType("ForeignKey")]
     public class ForeignKey
-    {        
+    {
+        [XmlIgnore]
         [Required(ErrorMessage = "Source field attribute is required in Foreign Key!")]
         public Field SourceField { get; set; }
         
