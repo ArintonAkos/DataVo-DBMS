@@ -1,17 +1,10 @@
-﻿using Newtonsoft.Json;
-using Server.Models.DDL;
+﻿using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Responses;
+using Server.Models;
 using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Xml.Linq;
-using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL
 {
@@ -29,9 +22,13 @@ namespace Server.Parser.DDL
             // TO-DO: Create Table in MongoDB
 
             Context.ListDbs();
-            XML<CreateTableModel>.CreateAndSave(Model, "databases", $"{Model.TableName}.xml");
+            XML<CreateTableModel>.InsertObjIntoXML(Model, "Databases", "databases", $"{Model.TableName}.xml");
 
-            Messages.Add($"Table {Model.TableName} successfully created!");
+            return new Response()
+            {
+                Code = HttpStatusCode.OK,
+                Meta = "Database successfully created!",
+            };
         }
     }
 }

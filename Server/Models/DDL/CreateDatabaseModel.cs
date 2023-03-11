@@ -1,4 +1,5 @@
-﻿using Server.Utils;
+﻿using MongoDB.Driver.Core.Operations;
+using Server.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,11 +10,8 @@ using System.Xml.Serialization;
 
 namespace Server.Models.DDL
 {
-    [XmlRoot("Database")]
-    [Serializable]
-    internal class CreateDatabaseModel
+    public class CreateDatabaseModel
     {
-        [XmlAttribute]
         public String DatabaseName { get; set; }
 
         public CreateDatabaseModel(String databaseName)
@@ -23,7 +21,16 @@ namespace Server.Models.DDL
 
         public static CreateDatabaseModel FromMatch(Match match)
         {
-            return new CreateDatabaseModel(match.NthGroup(1).Value);
+            return new CreateDatabaseModel(match.NthGroup(1).Value); ;
+        }
+
+        public Database ToDatabase()
+        {
+            return new Database()
+            {
+                DatabaseName = this.DatabaseName,
+                Tables = new()
+            };
         }
     }
 }

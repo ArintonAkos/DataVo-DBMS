@@ -4,6 +4,8 @@ using Server.Parser.Actions;
 using Server.Server.Responses;
 using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
+using Server.Utils;
+using Server.Models;
 
 namespace Server.Parser.DDL
 {
@@ -18,10 +20,20 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            DbContext.Instance.GetDatabase(_model.DatabaseName);
-            Logger.Info(_model.DatabaseName);
+            if (_model.DatabaseName.ContainsAny("#", " ", ".", "/", "\\", "_"))
+            {
+                throw new Exception("Database Name Contains invalid characters!");
+            }
 
-            Messages.Add($"Database {_model.DatabaseName} successfully created!");
+            //DbContext.Instance.GetDatabase(_model.DatabaseName);
+            XML<Database>.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
+            Logger.Info($"Database with name: {_model.DatabaseName} successfully created!");
+
+            return new Response()
+            {
+                Code = System.Net.HttpStatusCode.OK,
+                Meta = "Database successfully created",
+            };
         }
     }
 }

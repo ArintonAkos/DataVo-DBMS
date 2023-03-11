@@ -1,41 +1,33 @@
-﻿using Newtonsoft.Json;
-using Server.Parser.Commands;
-using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
+﻿using Server.Parser.Commands;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Xml.Serialization;
 
 namespace Server.Models.DDL
 {
-    [XmlRoot("Table")]
-    [Serializable]
     public class CreateTableModel
     {
-        [XmlAttribute]
-        [Required(ErrorMessage = "Table name not found!")]
         public string TableName { get; set; }
 
-        [XmlArray("Structure")]
-        [XmlArrayItem("Attribute")]
-        [Required(ErrorMessage = "Table fields are missing!")]
         public List<Field> Fields { get; set; }
 
-        [XmlArray("primaryKey")]
-        [XmlArrayItem("pkAttribute")]
-        public List<string> PrimaryKeys { get; set; }
+        public List<String> PrimaryKeys
+        {
+            get
+            {
+                return Fields.FindAll(f => f.IsPrimaryKey == true)
+                    .Select(f => f.Name)
+                    .ToList();
+            }
+        }
 
-        [XmlArray("foreignKeys")]
-        [XmlArrayItem("foreignKey")]
-        public List<ForeignKey> ForeignKeys { get; set; }
-
-        [XmlIgnore]
-        public bool ForeignKeysSpecified => ForeignKeys.Count > 0;
+        public List<ForeignKey> ForeignKeys
+        {
+            get
+            {
+                return Fields.FindAll(f => f.ForeignKey != null)
+                    .Select(f => f.ForeignKey!)
+                    .ToList();
+            }
+        }
 
         private CreateTableModel() { }
 
@@ -43,21 +35,6 @@ namespace Server.Models.DDL
         {
             this.TableName = tableName;
             this.Fields = fields;
-            this.PrimaryKeys = new ();
-            this.ForeignKeys= new ();
-
-            foreach (Field field in Fields)
-            {
-                if (field.IsPrimaryKey == true)
-                {
-                    PrimaryKeys.Add(field.Name);
-                }
-
-                if (field.ForeignKey != null)
-                {
-                    ForeignKeys.Add(field.ForeignKey);
-                }
-            }
         }
 
         public static CreateTableModel FromMatch(Match match)
@@ -77,6 +54,16 @@ namespace Server.Models.DDL
 
 
             return new CreateTableModel(tableName, fields);
+        }
+
+        public Table ToTable()
+        {
+            return new()
+            {
+                Fields = Fields,
+                PrimaryKeys = PrimaryKeys,
+                ForeignKeys = ForeignKeys,
+            };
         }
     }
 }
