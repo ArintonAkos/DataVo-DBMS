@@ -25,7 +25,7 @@ namespace Server.Parser.DDL
                 throw new Exception("Database Name Contains invalid characters!");
             }
 
-            //DbContext.Instance.GetDatabase(_model.DatabaseName);
+            DbContext.Instance.GetDatabase(_model.DatabaseName);
             XML<Database>.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
             Logger.Info($"Database with name: {_model.DatabaseName} successfully created!");
 
