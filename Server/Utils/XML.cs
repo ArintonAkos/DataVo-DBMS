@@ -13,16 +13,12 @@ namespace Server.Utils
                 XmlDocument doc = CreateDocumentIfDoesntExist(folder, fileName);
                 var rootNodeList = doc.GetElementsByTagName(tag);
 
-                if (rootNodeList.Count == 0 )
+                if (rootNodeList.Count == 0)
                 {
-                    throw new Exception("Tag doesnt exist!");
+                    throw new Exception($"Tag {tag} doesnt exist!");
                 }
 
                 var nav = rootNodeList[0].CreateNavigator();
-                var emptyNamepsaces = new XmlSerializerNamespaces(new[] {
-                    XmlQualifiedName.Empty
-                });
-
                 using (var writer = nav.AppendChild())
                 {
                     var serializer = new XmlSerializer(obj.GetType());
@@ -41,15 +37,15 @@ namespace Server.Utils
 
         private static XmlDocument CreateDocumentIfDoesntExist(String dirName, String fileName)
         {
-            XmlDocument doc = new XmlDocument();
+            XmlDocument doc = new();
 
-            bool dirExists = System.IO.Directory.Exists(dirName);
+            bool dirExists = Directory.Exists(dirName);
             if (!dirExists)
             {
-                System.IO.Directory.CreateDirectory(dirName);
+                Directory.CreateDirectory(dirName);
             }
 
-            bool fileExists = System.IO.File.Exists(fileName);
+            bool fileExists = File.Exists(dirName + "\\" + fileName);
             if (!fileExists)
             {
                 doc.LoadXml("<Databases></Databases>");
@@ -57,10 +53,12 @@ namespace Server.Utils
                 using StreamWriter writer = new(dirName + "\\" + fileName);
                 doc.Save(writer);
 
+                Logger.Info("Created Catalog.xml");
+
                 return doc;
             }
 
-            doc.LoadXml(dirName + "\\" + fileName);
+            doc.Load(dirName + "\\" + fileName);
             return doc;
         }
     }

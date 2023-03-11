@@ -1,17 +1,10 @@
-﻿using Newtonsoft.Json;
-using Server.Models.DDL;
+﻿using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Responses;
+using Server.Models;
 using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Xml.Linq;
-using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL
 {
@@ -28,16 +21,16 @@ namespace Server.Parser.DDL
         {
             if (Model.TableName.ContainsAny("#", " ", ".", "/", "\\", "_"))
             {
-                throw new Exception("Database Name Contains invalid characters!");
+                throw new Exception("Table Name Contains invalid characters!");
             }
 
             Context.ListDbs();
-            XML<CreateTableModel>.InsertObjIntoXML(Model, "Databases", "databases", $"{Model.TableName}.xml");
+            XML<Table>.InsertObjIntoXML(Model.ToTable(), "Tables", "databases", "Catalog.xml");
 
             return new Response()
             {
                 Code = HttpStatusCode.OK,
-                Meta = "Database successfully created!",
+                Meta = "Table successfully created!",
             };
         }
     }

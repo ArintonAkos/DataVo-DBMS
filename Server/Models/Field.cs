@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using System.Xml.Serialization;
 using static MongoDB.Driver.WriteConcern;
 
-namespace Server.Models.DDL
+namespace Server.Models
 {
     [XmlType("Attribute")]
     [Serializable]
@@ -24,16 +24,16 @@ namespace Server.Models.DDL
 
         [XmlAttribute]
         [Required(ErrorMessage = "Field must have a name!")]
-        public String Name { get; set; }
+        public string Name { get; set; }
 
         [XmlAttribute, DefaultValue(-1)]
-        public Int32 IsNull { get; set; }
+        public int IsNull { get; set; }
 
         [XmlAttribute, DefaultValue(0)]
-        public Int32 Length { get; set; }
+        public int Length { get; set; }
 
         [XmlIgnore]
-        public Boolean? IsPrimaryKey { get; set; }
+        public bool? IsPrimaryKey { get; set; }
 
         [XmlIgnore]
         public ForeignKey? ForeignKey { get; set; }
@@ -47,16 +47,16 @@ namespace Server.Models.DDL
                 Name = match.Groups["FieldName"].Value,
                 Type = type,
                 Table = tableName,
-                IsPrimaryKey = !String.IsNullOrEmpty(match.Groups["PrimaryKey"]?.Value),
+                IsPrimaryKey = !string.IsNullOrEmpty(match.Groups["PrimaryKey"]?.Value),
                 IsNull = -1,
             };
 
             if (field.Type == DataTypes.Varchar)
             {
-                field.Length = Int32.Parse(match.Groups["Length"].Value);
+                field.Length = int.Parse(match.Groups["Length"].Value);
             }
 
-            if (!String.IsNullOrEmpty(match.Groups["ForeignKey"]?.Value))
+            if (!string.IsNullOrEmpty(match.Groups["ForeignKey"]?.Value))
             {
                 field.CreateForeignKey(new Field()
                 {
@@ -78,7 +78,7 @@ namespace Server.Models.DDL
             };
         }
 
-        private static String GetTypeString(String type)
+        private static string GetTypeString(string type)
         {
             if (type.Contains("int"))
             {
