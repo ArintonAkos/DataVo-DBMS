@@ -12,10 +12,5 @@ namespace Frontend.Client.Responses
         public String Meta { get; set; }
         [JsonProperty]
         public String Data { get; set; }
-
-        public String ToJson()
-        {
-            return JsonConvert.SerializeObject(this);
-        }
     }
 }

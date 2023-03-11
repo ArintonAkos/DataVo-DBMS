@@ -51,6 +51,7 @@
   <ItemGroup>
     <Compile Include="Client\Requests\Request.cs" />
     <Compile Include="Client\Responses\Response.cs" />
+    <Compile Include="Services\HttpService.cs" />
     <Compile Include="Window.cs">
       <SubType>Form</SubType>
     </Compile>
