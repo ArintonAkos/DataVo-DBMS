@@ -1,4 +1,5 @@
-﻿using Server.Models.DDL;
+﻿using Server.Models;
+using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Utils;
 using System.Text.RegularExpressions;
@@ -18,7 +19,7 @@ namespace Server.Parser.DDL
         {
             // TO-DO: Create Table in MongoDB
 
-            XML<CreateTableModel>.InsertObjIntoXML(Model, "table", "databases", $"{Model.TableName}.xml");
+            XML<Table>.InsertObjIntoXML(Model.ToTable(), "Tables", "databases", "Catalog.xml");
 
             Messages.Add($"Table {Model.TableName} successfully created!");
         }
