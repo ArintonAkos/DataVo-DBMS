@@ -4,9 +4,9 @@ using Server.Logging;
 
 namespace Server.Utils
 {
-    internal class XML<T> where T : class
+    internal class XML
     {
-        internal static void InsertObjIntoXML(T obj, String tag, String folder, String fileName)
+        internal static void InsertObjIntoXML<T>(T obj, String tag, String folder, String fileName) where T : class
         {
             try
             {
