@@ -60,6 +60,7 @@ namespace Server.Models.DDL
         {
             return new()
             {
+                TableName = TableName,
                 Fields = Fields,
                 PrimaryKeys = PrimaryKeys,
                 ForeignKeys = ForeignKeys,
