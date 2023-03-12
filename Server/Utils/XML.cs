@@ -1,5 +1,7 @@
 ﻿using System.Xml;
+using System.Xml.Linq;
 using System.Xml.Serialization;
+using System.Xml.XPath;
 using Server.Logging;
 
 namespace Server.Utils
@@ -10,20 +12,28 @@ namespace Server.Utils
         {
             try
             {
-                XmlDocument doc = CreateDocumentIfDoesntExist(folder, fileName);
-                var rootNodeList = doc.GetElementsByTagName(tag);
+                XDocument doc = CreateDocumentIfDoesntExist(folder, fileName);
 
-                if (rootNodeList.Count == 0)
+                var rootNodeList = doc!
+                    .Descendants()
+                    .Where(e => e.Name == tag)
+                    .ToList();
+
+                if (rootNodeList.Count == 0) 
                 {
-                    throw new Exception($"Tag {tag} doesnt exist!");
+                    throw new Exception("Tag doesn't exist!");
                 }
 
-                var nav = rootNodeList[0]!.CreateNavigator();
-                using (var writer = nav!.AppendChild())
+                using (var writer = new StringWriter())
                 {
+                    var rootNode = rootNodeList.First();
+
                     var serializer = new XmlSerializer(obj.GetType());
-                    writer.WriteWhitespace("");
                     serializer.Serialize(writer, obj);
+
+                    XElement element = XElement.Parse(writer.ToString());
+                    rootNode.Add(element);
+
                     writer.Close();
                 }
 
@@ -35,9 +45,9 @@ namespace Server.Utils
             }
         }
 
-        private static XmlDocument CreateDocumentIfDoesntExist(String dirName, String fileName)
+        private static XDocument CreateDocumentIfDoesntExist(String dirName, String fileName)
         {
-            XmlDocument doc = new();
+            XDocument doc = new();
 
             bool dirExists = Directory.Exists(dirName);
             if (!dirExists)
@@ -48,17 +58,16 @@ namespace Server.Utils
             bool fileExists = File.Exists(dirName + "\\" + fileName);
             if (!fileExists)
             {
-                doc.LoadXml("<Databases></Databases>");
-
-                using StreamWriter writer = new(dirName + "\\" + fileName);
-                doc.Save(writer);
+                doc.Add(new XElement("Databases"));
+                doc.Save(dirName + "\\" + fileName);
 
                 Logger.Info("Created Catalog.xml");
 
                 return doc;
             }
 
-            doc.Load(dirName + "\\" + fileName);
+            doc = XDocument.Load(dirName+ "\\" + fileName);
+
             return doc;
         }
     }
