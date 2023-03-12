@@ -15,13 +15,12 @@ namespace Server.Parser.DDL
             _model = DropTableModel.FromMatch(match);
         }
 
-        public override Response Perform()
+        public override void PerformAction()
         {
             // Drop MongoDb database
             Logger.Info(_model.TableName);
 
-
-            return new Response();
+            Messages.Add($"Table {_model.TableName} successfully dropped!");
         }
     }
 }

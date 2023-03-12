@@ -24,21 +24,13 @@ namespace Server.Parser.DDL
             this.Model = CreateTableModel.FromMatch(match);
         }
 
-        public override Response Perform()
+        public override void PerformAction()
         {
-            if (Model.TableName.ContainsAny("#", " ", ".", "/", "\\", "_"))
-            {
-                throw new Exception("Database Name Contains invalid characters!");
-            }
+            // TO-DO: Create Table in MongoDB
 
-            Context.ListDbs();
             XML<CreateTableModel>.CreateAndSave(Model, "databases", $"{Model.TableName}.xml");
 
-            return new Response()
-            {
-                Code = HttpStatusCode.OK,
-                Meta = "Database successfully created!",
-            };
+            Messages.Add($"Table {Model.TableName} successfully created!");
         }
     }
 }

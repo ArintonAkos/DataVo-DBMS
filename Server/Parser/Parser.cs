@@ -9,26 +9,41 @@ namespace Server.Parser
 {
     internal class Parser
     {
-        private Request _request { get; set; }
+        private Request Request { get; set; }
 
         public Parser(Request request)
         {
-            this._request = request;
+            this.Request = request;
         }
 
         public Response Parse()
         {
-            List<Queue<DbAction>> runnables = RequestMapper.ToRunnables(this._request);
+            Response response = new();
+
+            List<Queue<IDbAction>> runnables = RequestMapper.ToRunnables(this.Request);
 
             foreach (var runnable in runnables) 
             {
+                ScriptResponse scriptResponse = new();
+
                 while (runnable.Any())
                 {
-                    runnable.Dequeue().Perform();
+                    try
+                    {
+                        scriptResponse.Actions.Add(runnable.Dequeue().Perform());
+                    }
+                    catch (Exception ex)
+                    {
+                        scriptResponse.Actions.Add(ActionResponse.Error(ex));
+                        scriptResponse.IsSuccess = false;
+                        break;
+                    }
                 }
+
+                response.Data.Add(scriptResponse);
             }
 
-            return new Response();
+            return response;
         }
     }
 }

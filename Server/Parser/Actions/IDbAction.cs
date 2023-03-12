@@ -7,8 +7,8 @@ using System.Threading.Tasks;
 
 namespace Server.Parser.Actions
 {
-    internal interface DbAction
+    internal interface IDbAction
     {
-        public Response Perform();
+        public ActionResponse Perform();
     }
 }

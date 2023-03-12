@@ -15,12 +15,12 @@ namespace Server.Parser.DDL
             _model = CreateDatabaseModel.FromMatch(match);
         }
 
-        public override Response Perform()
+        public override void PerformAction()
         {
             // Create MongoDb database
             Logger.Info(_model.DatabaseName);
 
-            return new Response();
+            Messages.Add($"Database {_model.DatabaseName} successfully created!");
         }
     }
 }

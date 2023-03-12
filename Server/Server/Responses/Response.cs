@@ -11,15 +11,11 @@ namespace Server.Server.Responses
     internal class Response
     {
         [JsonProperty]
-        public HttpStatusCode Code { get; set; }
-        [JsonProperty]
-        public String Meta { get; set; }
-        [JsonProperty]
-        public String Data { get; set; }
+        public List<ScriptResponse> Data { get; set; } = new();
 
         public String ToJson()
         {
-            return JsonConvert.SerializeObject(this);
+            return JsonConvert.SerializeObject(this, Formatting.Indented);
         }
     }
 }

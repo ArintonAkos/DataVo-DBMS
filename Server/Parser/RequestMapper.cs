@@ -17,10 +17,10 @@ namespace Server.Parser
         };
         private static readonly KeyValuePair<String, Type> _goCommand = new(Patterns.Go, typeof(Go));
 
-        public static List<Queue<DbAction>> ToRunnables(Request request)
+        public static List<Queue<IDbAction>> ToRunnables(Request request)
         {
-            List<Queue<DbAction>> runnables = new();
-            Queue<DbAction> actions = new();
+            List<Queue<IDbAction>> runnables = new();
+            Queue<IDbAction> actions = new();
 
             var rawSqlCode = request.Data;
             int lineCount = 0;
@@ -32,6 +32,7 @@ namespace Server.Parser
                 {
                     runnables.Add(actions);
                     actions.Clear();
+                    continue;
                 }
 
                 foreach (KeyValuePair<String, Type> command in _commands)
@@ -56,15 +57,15 @@ namespace Server.Parser
             return runnables;
         }
 
-        private static DbAction? MatchCommand(KeyValuePair<String, Type> command, ref String rawSqlCode, ref int lineCount)
+        private static IDbAction? MatchCommand(KeyValuePair<String, Type> command, ref String rawSqlCode, ref int lineCount)
         {
             Match match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
             if (match.Success)
             {
-                lineCount += match.Value.Split("\r\n|\r|\n").Length;
+                lineCount += Regex.Split(match.Value, "\r\n|\r|\n").Length;
                 rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
-                return (DbAction)Activator.CreateInstance(command.Value, match);
+                return (IDbAction)Activator.CreateInstance(command.Value, match);
             }
 
             return null;
