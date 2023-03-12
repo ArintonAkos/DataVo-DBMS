@@ -1,13 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Xml.Serialization;
 
 namespace Server.Models
 {
-    internal class Database
+    [Serializable]
+    [XmlRoot("Database")]
+    public class Database
     {
-        public String TableName { get; set; }
+        [XmlAttribute]
+        public String DatabaseName { get; set; }
+
+        [XmlArray("Tables")]
+        [XmlArrayItem("Table")]
+        public List<Table> Tables { get; set; }
+
+        public Database() { }
     }
 }

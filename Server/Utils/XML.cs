@@ -1,35 +1,65 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml;
+﻿using System.Xml;
 using System.Xml.Serialization;
+using Server.Logging;
 
 namespace Server.Utils
 {
     internal class XML<T> where T : class
     {
-        internal static void CreateAndSave(T obj, String folder, String fileName)
+        internal static void InsertObjIntoXML(T obj, String tag, String folder, String fileName)
         {
-            CreateDirIfDoesntExist(folder);
+            try
+            {
+                XmlDocument doc = CreateDocumentIfDoesntExist(folder, fileName);
+                var rootNodeList = doc.GetElementsByTagName(tag);
 
-            XmlSerializer serializer = new(typeof(T));
-            
-            // If we need a string not an xml file, this should be rewriteteen to StringWriter
-            using StreamWriter writer = new(folder + "\\" + fileName);
+                if (rootNodeList.Count == 0)
+                {
+                    throw new Exception($"Tag {tag} doesnt exist!");
+                }
 
-            serializer.Serialize(writer, obj);
+                var nav = rootNodeList[0].CreateNavigator();
+                using (var writer = nav.AppendChild())
+                {
+                    var serializer = new XmlSerializer(obj.GetType());
+                    writer.WriteWhitespace("");
+                    serializer.Serialize(writer, obj);
+                    writer.Close();
+                }
+
+                doc.Save(folder + "\\" + fileName);
+
+            } catch(Exception ex)
+            {
+                Logger.Error(ex.Message);
+            }
         }
 
-        private static void CreateDirIfDoesntExist(String dirName)
+        private static XmlDocument CreateDocumentIfDoesntExist(String dirName, String fileName)
         {
-            bool exists = System.IO.Directory.Exists(dirName);
+            XmlDocument doc = new();
 
-            if (!exists)
+            bool dirExists = Directory.Exists(dirName);
+            if (!dirExists)
             {
-                System.IO.Directory.CreateDirectory(dirName);
+                Directory.CreateDirectory(dirName);
             }
+
+            bool fileExists = File.Exists(dirName + "\\" + fileName);
+            if (!fileExists)
+            {
+                doc.LoadXml("<Databases></Databases>");
+
+                using StreamWriter writer = new(dirName + "\\" + fileName);
+                doc.Save(writer);
+
+                Logger.Info("Created Catalog.xml");
+
+                return doc;
+            }
+
+            doc.Load(dirName + "\\" + fileName);
+            return doc;
         }
     }
 }

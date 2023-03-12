@@ -1,30 +1,34 @@
-﻿using Newtonsoft.Json;
-using Server.Parser.Commands;
-using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
+﻿using Server.Parser.Commands;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Xml.Serialization;
 
 namespace Server.Models.DDL
 {
-    [XmlRoot("Table")]
-    [Serializable]
     public class CreateTableModel
     {
-        [XmlAttribute]
-        [Required(ErrorMessage = "Table name not found!")]
         public string TableName { get; set; }
 
-        [XmlArray("Columns")]
-        [XmlArrayItem("Column")]
-        [Required(ErrorMessage = "Table fields are missing!")]
         public List<Field> Fields { get; set; }
-       
+
+        public List<String> PrimaryKeys
+        {
+            get
+            {
+                return Fields.FindAll(f => f.IsPrimaryKey == true)
+                    .Select(f => f.Name)
+                    .ToList();
+            }
+        }
+
+        public List<ForeignKey> ForeignKeys
+        {
+            get
+            {
+                return Fields.FindAll(f => f.ForeignKey != null)
+                    .Select(f => f.ForeignKey!)
+                    .ToList();
+            }
+        }
+
         private CreateTableModel() { }
 
         public CreateTableModel(string tableName, List<Field> fields)
@@ -50,6 +54,16 @@ namespace Server.Models.DDL
 
 
             return new CreateTableModel(tableName, fields);
+        }
+
+        public Table ToTable()
+        {
+            return new()
+            {
+                Fields = Fields,
+                PrimaryKeys = PrimaryKeys,
+                ForeignKeys = ForeignKeys,
+            };
         }
     }
 }

@@ -1,7 +1,10 @@
 ﻿using Frontend.Client.Requests;
+using Frontend.Client.Responses;
+using Frontend.Services;
 using Newtonsoft.Json;
 using System;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Windows.Forms;
@@ -10,8 +13,6 @@ namespace Frontend
 {
     public partial class Window : Form
     {
-        static readonly HttpClient httpClient = new HttpClient();
-
         public Window()
         {
             InitializeComponent();
@@ -24,23 +25,12 @@ namespace Frontend
 
         private async void stripExecute_Click(object sender, EventArgs e)
         {
-            try
-            {
-                Request request = new Request { CommandType = "", Data = textEditor.Text };
+            Response response = await HttpService.Post(new Request 
+            { 
+                Data = textEditor.Text 
+            });
 
-                string jsonObject = JsonConvert.SerializeObject(request);
-                StringContent data = new StringContent(jsonObject, Encoding.UTF8, "application/json");
-
-                string url = "http://localhost:8001";
-                var response = await httpClient.PostAsync(url, data);
-                var result = await response.Content.ReadAsStringAsync();
-
-                tabMessagesText.Text = result;
-
-            } catch (HttpRequestException ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
+            tabMessagesText.Text = response.Data;
         }
 
         private void menuNewFile_Click(object sender, EventArgs e)

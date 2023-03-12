@@ -1,14 +1,9 @@
 ﻿using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace Server.Models.DDL
 {
-    internal class CreateDatabaseModel
+    public class CreateDatabaseModel
     {
         public String DatabaseName { get; set; }
 
@@ -19,7 +14,16 @@ namespace Server.Models.DDL
 
         public static CreateDatabaseModel FromMatch(Match match)
         {
-            return new CreateDatabaseModel(match.NthGroup(1).Value);
+            return new CreateDatabaseModel(match.NthGroup(1).Value); ;
+        }
+
+        public Database ToDatabase()
+        {
+            return new Database()
+            {
+                DatabaseName = this.DatabaseName,
+                Tables = new()
+            };
         }
     }
 }
