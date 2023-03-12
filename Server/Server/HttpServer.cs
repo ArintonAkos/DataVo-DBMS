@@ -34,19 +34,12 @@ namespace Server.Server
                     await WriteResponse(context, response);
                 } catch (Exception ex)
                 {
-                    await WriteResponse(context, new Response()
-                    {
-                        Data = ex.Message,
-                        Code = HttpStatusCode.InternalServerError,
-                        Meta = "error"
-                    });
+                    await WriteResponse(context, new ErrorResponse(ex));
                 }
-
-                
             }
         }
 
-        public Response ProcessRequest(HttpListenerContext context)
+        public static Response ProcessRequest(HttpListenerContext context)
         {
             var content = GetRequestContent(context.Request);
             Logger.Info($"New Request from {context.Request.UserHostName}");
@@ -66,18 +59,14 @@ namespace Server.Server
 
         public async Task WriteResponse(HttpListenerContext context, Response response)
         {
-            context.Response.StatusCode = (int)response.Code;
+            using var sw = new StreamWriter(context.Response.OutputStream);
+            await sw.FlushAsync();
+            sw.Write(response.ToJson());
 
-            using (var sw = new StreamWriter(context.Response.OutputStream))
-            {
-                await sw.FlushAsync();
-                sw.Write(response.Data);
-
-                Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.Data}");
-            }
+            Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.ToJson()}");
         }
 
-        private String GetRequestContent(HttpListenerRequest request)
+        private static String GetRequestContent(HttpListenerRequest request)
         {
             string text;
 
