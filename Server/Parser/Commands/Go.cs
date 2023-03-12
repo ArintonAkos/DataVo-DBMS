@@ -1,19 +1,13 @@
 ﻿using Server.Parser.Actions;
 using Server.Server.Responses;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Server.Parser.Commands
 {
-    internal class Go : DbAction
+    internal class Go : IDbAction
     {
-        public Response Perform()
+        public ActionResponse Perform()
         {
-            // silence...
-            return new Response();
+            return ActionResponse.Default();
         }
     }
 }

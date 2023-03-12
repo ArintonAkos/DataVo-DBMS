@@ -21,13 +21,12 @@ namespace Server.Parser.DDL
             _model = DropDatabaseModel.FromMatch(match);
         }
 
-        public override Response Perform()
+        public override void PerformAction()
         {
             // Drop MongoDb database
             Logger.Info(_model.DatabaseName);
 
-
-            return new Response();
+            Messages.Add($"Database {_model.DatabaseName} successfully dropped!");
         }
     }
 }
