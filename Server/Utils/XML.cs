@@ -18,8 +18,8 @@ namespace Server.Utils
                     throw new Exception($"Tag {tag} doesnt exist!");
                 }
 
-                var nav = rootNodeList[0].CreateNavigator();
-                using (var writer = nav.AppendChild())
+                var nav = rootNodeList[0]!.CreateNavigator();
+                using (var writer = nav!.AppendChild())
                 {
                     var serializer = new XmlSerializer(obj.GetType());
                     writer.WriteWhitespace("");

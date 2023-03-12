@@ -1,4 +1,5 @@
 ﻿using Server.Logging;
+using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Responses;
@@ -29,11 +30,7 @@ namespace Server.Parser.DDL
             XML<Database>.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
             Logger.Info($"Database with name: {_model.DatabaseName} successfully created!");
 
-            return new Response()
-            {
-                Code = System.Net.HttpStatusCode.OK,
-                Meta = "Database successfully created",
-            };
+            Messages.Add($"Database {_model.DatabaseName} successfully created!");
         }
     }
 }
