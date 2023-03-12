@@ -21,7 +21,7 @@ namespace Server.Parser.DDL
             // Create MongoDb database
             Logger.Info(_model.DatabaseName);
 
-            XML<Database>.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
+            XML.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
 
             Messages.Add($"Database {_model.DatabaseName} successfully created!");
         }
