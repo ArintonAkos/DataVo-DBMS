@@ -22,7 +22,7 @@ namespace Server.Parser.DDL
         {
             // TO-DO: Create Table in MongoDB
 
-            XML.InsertObjIntoXML(Model.ToTable(), "Tables", "databases", "Catalog.xml");
+            Catalog.CreateTable(Model.ToTable(), "University");
 
             return new Response()
             {

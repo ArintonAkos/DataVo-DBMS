@@ -2,8 +2,6 @@
 using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Server.Responses;
-using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 using Server.Utils;
 using Server.Models;
@@ -26,9 +24,7 @@ namespace Server.Parser.DDL
                 throw new Exception("Database Name Contains invalid characters!");
             }
 
-            DbContext.Instance.GetDatabase(_model.DatabaseName);
-            XML<Database>.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
-            Logger.Info($"Database with name: {_model.DatabaseName} successfully created!");
+            XML.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
 
             Messages.Add($"Database {_model.DatabaseName} successfully created!");
         }
