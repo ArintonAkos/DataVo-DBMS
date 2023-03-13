@@ -2,7 +2,6 @@
 using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Utils;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -21,7 +20,7 @@ namespace Server.Parser.DDL
             // Create MongoDb database
             Logger.Info(_model.DatabaseName);
 
-            XML.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
+            Catalog.CreateDatabase(_model.ToDatabase());
 
             Messages.Add($"Database {_model.DatabaseName} successfully created!");
         }
