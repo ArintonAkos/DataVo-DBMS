@@ -17,6 +17,13 @@ namespace Server.Models
 
         public static void CreateDatabase(Database database)
         {
+            XElement? existingDatabase = GetDatabaseElement(database.DatabaseName);
+
+            if (existingDatabase != null)
+            {
+                throw new Exception("Database already exists!");
+            }
+
             XElement root = _doc.Descendants()
                 .Where(e => e.Name == "Databases")
                 .ToList()
@@ -27,13 +34,47 @@ namespace Server.Models
 
         public static void CreateTable(Table table, String databaseName)
         {
-            XElement root = _doc.Descendants()
-                .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")!.Value == databaseName)
-                .Elements("Tables")
-                .ToList()
+            XElement? rootDatabase = GetDatabaseElement(databaseName);
+            if (rootDatabase == null)
+            {
+                throw new Exception("Database does not exist!");
+            }
+
+            XElement? existingTable = GetTableElement(databaseName, table.TableName);
+            if (existingTable != null)
+            {
+                throw new Exception($"Table already exists in database {databaseName}");
+            }
+            
+            XElement root = rootDatabase.Elements("Tables")
+                .ToList() 
                 .First();
 
             InsertIntoXML(table, root);
+        }
+
+        private static XElement? GetDatabaseElement(String databaseName)
+        {
+            List<XElement> databases = _doc.Descendants()
+                .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
+                .ToList();
+
+            return databases.FirstOrDefault();
+        } 
+
+        private static XElement? GetTableElement(String databaseName, String tableName)
+        {
+            XElement? rootDatabase = GetDatabaseElement(databaseName);
+            if (rootDatabase == null)
+            {
+                return null;
+            }
+
+            List<XElement> tables = rootDatabase.Descendants()
+                .Where(e => e.Name == "Table" && e.Attribute("TableName")?.Value == tableName)
+                .ToList();
+
+            return tables.FirstOrDefault();
         }
 
         private static void CreateCatalogIfDoesntExist()

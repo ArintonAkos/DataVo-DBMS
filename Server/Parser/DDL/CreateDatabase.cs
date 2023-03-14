@@ -2,6 +2,8 @@
 using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.MongoDB;
+using System.Data;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -17,12 +19,19 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // Create MongoDb database
-            Logger.Info(_model.DatabaseName);
+            try
+            {
+                Catalog.CreateDatabase(_model.ToDatabase());
 
-            Catalog.CreateDatabase(_model.ToDatabase());
+                Logger.Info($"New database {_model.DatabaseName} successfully created!");
 
-            Messages.Add($"Database {_model.DatabaseName} successfully created!");
+                Messages.Add($"Database {_model.DatabaseName} successfully created!");
+            }
+            catch (Exception ex) 
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
         }
     }
 }
