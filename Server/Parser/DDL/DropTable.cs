@@ -32,8 +32,6 @@ namespace Server.Parser.DDL
                 Logger.Error(ex.Message);
                 Messages.Add(ex.Message);
             }
-
-            
         }
     }
 }
