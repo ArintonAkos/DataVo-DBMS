@@ -24,15 +24,16 @@ namespace Server.Server.MongoDB
             }
         }
 
-        public void ListDbs()
+        public async void CreateTable(String tableName, String databaseName)
         {
-            var dbList = ListDatabases().ToList();
+            var database = GetDatabase(databaseName);
+            await database.CreateCollectionAsync(tableName);
+        }
 
-            Console.WriteLine("The list of databases on this server is: ");
-            foreach (var db in dbList)
-            {
-                Console.WriteLine(db);
-            }
+        public async void DropTable(String tableName, String databaseName)
+        {
+            var database = GetDatabase(databaseName);
+            await database.DropCollectionAsync(tableName);
         }
     }
 }

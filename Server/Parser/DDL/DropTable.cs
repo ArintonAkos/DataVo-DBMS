@@ -1,7 +1,8 @@
 ﻿using Server.Logging;
+using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Server.Responses;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -17,10 +18,22 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // Drop MongoDb database
-            Logger.Info(_model.TableName);
+            try
+            {
+                Catalog.DropTable(_model.TableName, "University");
 
-            Messages.Add($"Table {_model.TableName} successfully dropped!");
+                DbContext.Instance.DropTable(_model.TableName, "University");
+
+                Logger.Info(_model.TableName);
+                Messages.Add($"Table {_model.TableName} successfully dropped!");
+            }
+            catch (Exception ex) 
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
+
+            
         }
     }
 }
