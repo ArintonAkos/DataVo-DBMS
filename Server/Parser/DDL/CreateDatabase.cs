@@ -24,7 +24,6 @@ namespace Server.Parser.DDL
                 Catalog.CreateDatabase(_model.ToDatabase());
 
                 Logger.Info($"New database {_model.DatabaseName} successfully created!");
-
                 Messages.Add($"Database {_model.DatabaseName} successfully created!");
             }
             catch (Exception ex) 
