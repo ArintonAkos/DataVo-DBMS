@@ -2,8 +2,6 @@
 using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Server.MongoDB;
-using System.Data;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL

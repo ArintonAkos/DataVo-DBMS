@@ -51,6 +51,30 @@ namespace Server.Models
             InsertIntoXML(table, root);
         }
 
+        public static void DropDatabase(String databaseName)
+        {
+            XElement? database = GetDatabaseElement(databaseName);
+
+            if (database == null)
+            {
+                return;
+            }
+
+            RemoveFromXML(database);
+        }
+
+        public static void DropTable(String tableName, String databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+
+            if (table == null)
+            {
+                return;
+            }
+
+            RemoveFromXML(table);
+        }
+
         private static XElement? GetDatabaseElement(String databaseName)
         {
             List<XElement> databases = _doc.Descendants()
@@ -122,6 +146,12 @@ namespace Server.Models
             {
                 Logger.Error(ex.Message);
             }
+        }
+
+        private static void RemoveFromXML(XElement element)
+        {
+            element.Remove();
+            _doc.Save(_dirName + "\\" + _fileName);
         }
     }
 }
