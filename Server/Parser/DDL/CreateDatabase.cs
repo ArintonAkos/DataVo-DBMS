@@ -2,6 +2,8 @@
 using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.MongoDB;
+using System.Data;
 using System.Text.RegularExpressions;
 using Server.Utils;
 using Server.Models;
@@ -19,14 +21,19 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            if (_model.DatabaseName.ContainsAny("#", " ", ".", "/", "\\", "_"))
+            try
             {
-                throw new Exception("Database Name Contains invalid characters!");
+                Catalog.CreateDatabase(_model.ToDatabase());
+
+                Logger.Info($"New database {_model.DatabaseName} successfully created!");
+
+                Messages.Add($"Database {_model.DatabaseName} successfully created!");
             }
-
-            XML.InsertObjIntoXML(_model.ToDatabase(), "Databases", "databases", "Catalog.xml");
-
-            Messages.Add($"Database {_model.DatabaseName} successfully created!");
+            catch (Exception ex) 
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
         }
     }
 }
