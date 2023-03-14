@@ -1,10 +1,8 @@
-﻿using Server.Models;
+﻿using Server.Logging;
+using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Server.Responses;
-using Server.Models;
-using Server.Utils;
-using System.Net;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -22,13 +20,19 @@ namespace Server.Parser.DDL
         {
             // TO-DO: Create Table in MongoDB
 
-            Catalog.CreateTable(Model.ToTable(), "University");
-
-            return new Response()
+            try
             {
-                Code = HttpStatusCode.OK,
-                Meta = "Database successfully created!",
-            };
+                Catalog.CreateTable(Model.ToTable(), "University");
+
+                Logger.Info($"New table {Model.TableName} successfully created!");
+
+                Messages.Add($"Table {Model.TableName} successfully created!");
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e.Message);
+                Messages.Add(e.Message);
+            }
         }
     }
 }
