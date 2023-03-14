@@ -18,14 +18,12 @@ namespace Server.Models
         public static void CreateDatabase(Database database)
         {
             XElement? existingDatabase = GetDatabaseElement(database.DatabaseName);
-
             if (existingDatabase != null)
             {
                 throw new Exception("Database already exists!");
             }
 
-            XElement root = _doc.Descendants()
-                .Where(e => e.Name == "Databases")
+            XElement root = _doc.Elements("Databases")
                 .ToList()
                 .First();
 
@@ -37,13 +35,13 @@ namespace Server.Models
             XElement? rootDatabase = GetDatabaseElement(databaseName);
             if (rootDatabase == null)
             {
-                throw new Exception("Database does not exist!");
+                throw new Exception($"Database {databaseName} does not exist!");
             }
 
-            XElement? existingTable = GetTableElement(databaseName, table.TableName);
+            XElement? existingTable = GetTableElement(rootDatabase, table.TableName);
             if (existingTable != null)
             {
-                throw new Exception($"Table already exists in database {databaseName}");
+                throw new Exception($"Table {table.TableName} already exists in database {databaseName}!");
             }
             
             XElement root = rootDatabase.Elements("Tables")
@@ -70,7 +68,12 @@ namespace Server.Models
                 return null;
             }
 
-            List<XElement> tables = rootDatabase.Descendants()
+            return GetTableElement(rootDatabase, tableName);
+        }
+
+        private static XElement? GetTableElement(XElement database, String tableName)
+        {
+            List<XElement> tables = database.Descendants()
                 .Where(e => e.Name == "Table" && e.Attribute("TableName")?.Value == tableName)
                 .ToList();
 
