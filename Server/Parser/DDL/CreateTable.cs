@@ -18,14 +18,13 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // TO-DO: Create Table in MongoDB
-
             try
             {
                 Catalog.CreateTable(Model.ToTable(), "University");
 
-                Logger.Info($"New table {Model.TableName} successfully created!");
+                DbContext.Instance.CreateTable(Model.TableName, "University");
 
+                Logger.Info($"New table {Model.TableName} successfully created!");
                 Messages.Add($"Table {Model.TableName} successfully created!");
             }
             catch (Exception e)

@@ -1,12 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using Server.Logging;
+using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
-using Server.Server.Responses;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -23,10 +20,20 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // Drop MongoDb database
-            Logger.Info(_model.DatabaseName);
+            try
+            {
+                Catalog.DropDatabase(_model.DatabaseName);
 
-            Messages.Add($"Database {_model.DatabaseName} successfully dropped!");
+                DbContext.Instance.DropDatabase(_model.DatabaseName);
+
+                Logger.Info(_model.DatabaseName);
+                Messages.Add($"Database {_model.DatabaseName} successfully dropped!");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
         }
     }
 }
