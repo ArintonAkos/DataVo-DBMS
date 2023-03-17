@@ -38,6 +38,9 @@ namespace Server.Models
         [XmlIgnore]
         public ForeignKey? ForeignKey { get; set; }
 
+        [XmlIgnore]
+        public bool? IsUnique { get; set; }
+
         public static Field FromMatch(Match match, string tableName)
         {
             DataTypes type = (DataTypes)Enum.Parse(typeof(DataTypes), GetTypeString(match.Groups["Type"].Value), true);
@@ -48,6 +51,7 @@ namespace Server.Models
                 Type = type,
                 Table = tableName,
                 IsPrimaryKey = !string.IsNullOrEmpty(match.Groups["PrimaryKey"]?.Value),
+                IsUnique = !string.IsNullOrEmpty(match.Groups["Unique"]?.Value),
                 IsNull = -1,
             };
 
