@@ -3,8 +3,6 @@ using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using System.Text.RegularExpressions;
-using Server.Utils;
-using Server.Models;
 
 namespace Server.Parser.DDL
 {
