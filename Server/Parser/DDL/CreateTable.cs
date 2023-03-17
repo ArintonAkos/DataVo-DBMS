@@ -1,6 +1,8 @@
-﻿using Server.Models;
+﻿using Server.Logging;
+using Server.Models;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -16,11 +18,20 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // TO-DO: Create Table in MongoDB
+            try
+            {
+                Catalog.CreateTable(Model.ToTable(), "University");
 
-            Catalog.CreateTable(Model.ToTable(), "University");
+                DbContext.Instance.CreateTable(Model.TableName, "University");
 
-            Messages.Add($"Table {Model.TableName} successfully created!");
+                Logger.Info($"New table {Model.TableName} successfully created!");
+                Messages.Add($"Table {Model.TableName} successfully created!");
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e.Message);
+                Messages.Add(e.Message);
+            }
         }
     }
 }

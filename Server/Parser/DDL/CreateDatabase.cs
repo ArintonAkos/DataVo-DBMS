@@ -17,12 +17,18 @@ namespace Server.Parser.DDL
 
         public override void PerformAction()
         {
-            // Create MongoDb database
-            Logger.Info(_model.DatabaseName);
+            try
+            {
+                Catalog.CreateDatabase(_model.ToDatabase());
 
-            Catalog.CreateDatabase(_model.ToDatabase());
-
-            Messages.Add($"Database {_model.DatabaseName} successfully created!");
+                Logger.Info($"New database {_model.DatabaseName} successfully created!");
+                Messages.Add($"Database {_model.DatabaseName} successfully created!");
+            }
+            catch (Exception ex) 
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
         }
     }
 }
