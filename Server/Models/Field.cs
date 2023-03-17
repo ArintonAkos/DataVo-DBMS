@@ -1,12 +1,8 @@
-﻿using MongoDB.Bson.IO;
-using Newtonsoft.Json.Linq;
-using Server.Enums;
+﻿using Server.Enums;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Xml.Serialization;
-using static MongoDB.Driver.WriteConcern;
 
 namespace Server.Models
 {
@@ -61,25 +57,29 @@ namespace Server.Models
             }
 
             if (!string.IsNullOrEmpty(match.Groups["ForeignKey"]?.Value))
-            {
-                field.CreateForeignKey(new Field()
+            {   
+                var refTables = match.Groups["ForeignTable"].Captures;
+                var refAttributes = match.Groups["ForeignColumn"].Captures;
+
+                List<Reference> references = new();
+
+                for (int i = 0; i < refTables.Count && i < refAttributes.Count; ++i)
                 {
-                    Table = match.Groups["ForeignTable"].Value,
-                    Name = match.Groups["ForeignColumn"].Value,
-                    Type = field.Type
-                });
+                    references.Add(new()
+                    {
+                        ReferenceTableName = refTables[i].Value,
+                        ReferenceAttributeName = refAttributes[i].Value,
+                    });
+                }
+
+                field.ForeignKey = new()
+                {
+                    AttributeName = field.Name,
+                    References = references,
+                };
             }
 
             return field;
-        }
-
-        public void CreateForeignKey(Field reference)
-        {
-            ForeignKey = new ForeignKey
-            {
-                SourceField = this,
-                DestinationField = reference
-            };
         }
 
         private static string GetTypeString(string type)
