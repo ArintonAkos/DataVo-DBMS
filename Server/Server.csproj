@@ -16,7 +16,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Models\DQL\" />
     <Folder Include="Parser\DQL\" />
   </ItemGroup>
 

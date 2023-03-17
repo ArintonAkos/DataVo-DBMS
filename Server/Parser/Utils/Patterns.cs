@@ -1,9 +1,8 @@
-﻿
-namespace Server.Parser.Commands
+﻿namespace Server.Parser.Utils
 {
     internal static class Patterns
     {
-        public static String CreateTable
+        public static string CreateTable
         {
             get
             {
@@ -12,7 +11,7 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String DropTable
+        public static string DropTable
         {
             get
             {
@@ -20,7 +19,7 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String CreateDatabase
+        public static string CreateDatabase
         {
             get
             {
@@ -28,7 +27,7 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String DropDatabase
+        public static string DropDatabase
         {
             get
             {
@@ -36,7 +35,7 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String Go
+        public static string Go
         {
             get
             {
@@ -44,7 +43,15 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String Column
+        public static string Use
+        {
+            get
+            {
+                return @"^\s*use\s+(?<DatabaseName>[A-Z_]+)\s*";
+            }
+        }
+
+        public static string Column
         {
             get
             {
@@ -58,7 +65,7 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String Value
+        public static string Value
         {
             get
             {
@@ -70,12 +77,12 @@ namespace Server.Parser.Commands
             }
         }
 
-        public static String AddStartLine(this String s)
+        public static string AddStartLine(this string s)
         {
             return @"^\s*" + s;
         }
 
-        public static String AddEndLine(this String s)
+        public static string AddEndLine(this string s)
         {
             return s + @"\s*$";
         }

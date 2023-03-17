@@ -3,30 +3,31 @@ using Server.Parser.Commands;
 using Server.Parser.DDL;
 using Server.Server.Requests;
 using System.Text.RegularExpressions;
+using Server.Parser.Utils;
 
-namespace Server.Parser
+namespace Server.Parser.Utils
 {
     internal class RequestMapper
     {
-        private static readonly Dictionary<String, Type> _commands = new()
+        private static readonly Dictionary<string, Type> _commands = new()
         {
             { Patterns.CreateDatabase, typeof(CreateDatabase) },
             { Patterns.DropDatabase, typeof(DropDatabase) },
             { Patterns.CreateTable, typeof(CreateTable) },
             { Patterns.DropTable, typeof(DropTable) },
         };
-        private static readonly KeyValuePair<String, Type> _goCommand = new(Patterns.Go, typeof(Go));
+        private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 
         public static List<Queue<IDbAction>> ToRunnables(Request request)
         {
             List<Queue<IDbAction>> runnables = new();
             Queue<IDbAction> actions = new();
 
-            var rawSqlCode = request.Data;
+            var rawSqlCode = request.Data.Replace(";", "");
             int lineCount = 0;
 
-            REPEAT:
-            while (!String.IsNullOrEmpty(rawSqlCode.Trim()))
+        REPEAT:
+            while (!string.IsNullOrEmpty(rawSqlCode.Trim()))
             {
                 if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount) != null)
                 {
@@ -35,7 +36,7 @@ namespace Server.Parser
                     continue;
                 }
 
-                foreach (KeyValuePair<String, Type> command in _commands)
+                foreach (KeyValuePair<string, Type> command in _commands)
                 {
                     var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
 
@@ -48,7 +49,7 @@ namespace Server.Parser
 
                 throw new Exception($"Invalid Keyword: {FirstKeyWord(rawSqlCode)} at line: {lineCount}!");
             }
-            
+
             if (actions.Count != 0)
             {
                 runnables.Add(actions);
@@ -57,7 +58,7 @@ namespace Server.Parser
             return runnables;
         }
 
-        private static IDbAction? MatchCommand(KeyValuePair<String, Type> command, ref String rawSqlCode, ref int lineCount)
+        private static IDbAction? MatchCommand(KeyValuePair<string, Type> command, ref string rawSqlCode, ref int lineCount)
         {
             Match match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
@@ -71,9 +72,9 @@ namespace Server.Parser
             return null;
         }
 
-        private static String FirstKeyWord(String rawSqlCode)
+        private static string FirstKeyWord(string rawSqlCode)
         {
-            return rawSqlCode.Trim().Split(" |\t").FirstOrDefault() ?? String.Empty;
+            return rawSqlCode.Trim().Split(" |\t").FirstOrDefault() ?? string.Empty;
         }
     }
 }

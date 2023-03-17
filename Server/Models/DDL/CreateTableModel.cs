@@ -1,4 +1,4 @@
-﻿using Server.Parser.Commands;
+﻿using Server.Parser.Patterns;
 using System.Text.RegularExpressions;
 
 namespace Server.Models.DDL
