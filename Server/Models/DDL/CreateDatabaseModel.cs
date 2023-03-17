@@ -14,7 +14,7 @@ namespace Server.Models.DDL
 
         public static CreateDatabaseModel FromMatch(Match match)
         {
-            return new CreateDatabaseModel(match.NthGroup(1).Value); ;
+            return new CreateDatabaseModel(match.NthGroup(1).Value);
         }
 
         public Database ToDatabase()

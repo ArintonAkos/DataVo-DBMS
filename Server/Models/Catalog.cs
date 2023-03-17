@@ -28,7 +28,7 @@ namespace Server.Models
         public static void CreateTable(Table table, String databaseName)
         {
             XElement root = _doc.Descendants()
-                .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")!.Value == databaseName)
+                .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
                 .Elements("Tables")
                 .ToList()
                 .First();
@@ -44,18 +44,17 @@ namespace Server.Models
                 Directory.CreateDirectory(_dirName);
             }
 
-            bool fileExists = File.Exists(_dirName + "\\" + _fileName);
-            if (!fileExists)
+            if (!File.Exists(FilePath))
             {
                 _doc.Add(new XElement("Databases"));
-                _doc.Save(_dirName + "\\" + _fileName);
+                _doc.Save(FilePath);
 
                 Logger.Info($"Created {_fileName}");
 
                 return;
             }
 
-            _doc = XDocument.Load(_dirName + "\\" + _fileName);
+            _doc = XDocument.Load(FilePath);
         }
 
         private static void InsertIntoXML<T>(T obj, XElement root) where T : class
@@ -72,11 +71,19 @@ namespace Server.Models
 
                 writer.Close();
 
-                _doc.Save(_dirName + "\\" + _fileName);
+                _doc.Save(FilePath);
             } 
             catch (Exception ex)
             {
                 Logger.Error(ex.Message);
+            }
+        }
+
+        private static String FilePath
+        {
+            get
+            {
+                return _dirName + "\\" + _fileName;
             }
         }
     }
