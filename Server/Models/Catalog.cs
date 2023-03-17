@@ -106,8 +106,7 @@ namespace Server.Models
 
         private static void CreateCatalogIfDoesntExist()
         {
-            bool dirExists = Directory.Exists(_dirName);
-            if (!dirExists)
+            if (!Directory.Exists(_dirName))
             {
                 Directory.CreateDirectory(_dirName);
             }
@@ -130,9 +129,11 @@ namespace Server.Models
             try
             {
                 using var writer = new StringWriter();
+                var namespaces = new XmlSerializerNamespaces();
                 var serializer = new XmlSerializer(obj.GetType());
-                
-                serializer.Serialize(writer, obj);
+
+                namespaces.Add("", "");
+                serializer.Serialize(writer, obj, namespaces);
 
                 XElement element = XElement.Parse(writer.ToString());
                 root.Add(element);
