@@ -1,4 +1,5 @@
-﻿using Server.Server.Responses;
+﻿using Server.Parser;
+using Server.Server.Responses;
 using Server.Logging;
 using System.Net;
 using Newtonsoft.Json;
@@ -13,7 +14,7 @@ namespace Server.Server
         public HttpServer()
         {
             _httpListener = new HttpListener();
-            _httpListener.Prefixes.Add("http://+:8001/");
+            _httpListener.Prefixes.Add("http://localhost:8001/");
         }
 
         public async Task Start()

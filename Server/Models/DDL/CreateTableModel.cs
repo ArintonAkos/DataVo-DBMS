@@ -19,6 +19,17 @@ namespace Server.Models.DDL
             }
         }
 
+        public List<String> UniqueAttributes
+        {
+            get
+            {
+                return Fields.FindAll(f => f.IsUnique == true)
+                    .Select(f => f.Name)
+                    .ToList ();
+            }
+        }
+        
+
         public List<ForeignKey> ForeignKeys
         {
             get
@@ -63,7 +74,9 @@ namespace Server.Models.DDL
                 TableName = TableName,
                 Fields = Fields,
                 PrimaryKeys = PrimaryKeys,
+                UniqueAttributes = UniqueAttributes,
                 ForeignKeys = ForeignKeys,
+                IndexFiles = new(),
             };
         }
     }
