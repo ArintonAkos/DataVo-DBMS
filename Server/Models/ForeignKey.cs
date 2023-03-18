@@ -1,6 +1,4 @@
-﻿using Newtonsoft.Json;
-using System.ComponentModel.DataAnnotations;
-using System.Xml.Serialization;
+﻿using System.Xml.Serialization;
 
 namespace Server.Models
 {
@@ -9,17 +7,9 @@ namespace Server.Models
     public class ForeignKey
     {
         [XmlElement("FkAttribute")]
-        public string SourceFieldAttributeName { get; set; }
+        public String AttributeName { get; set; }
 
-        [XmlElement("Reference")]
-        public Reference Reference { get; set; }
-
-        [XmlIgnore]
-        [Required(ErrorMessage = "Source field attribute is required in Foreign Key!")]
-        public Field SourceField { get; set; }
-
-        [XmlIgnore]
-        [Required(ErrorMessage = "Destination field attribute is required in Foreign Key!")]
-        public Field DestinationField { get; set; }
+        [XmlArray("References")]
+        public List<Reference> References { get; set; }
     }
 }

@@ -59,9 +59,10 @@
                 string floating = @"\s*float";
                 string varchar = @"\s*varchar\(\s*(?<Length>[0-9]+)\s*\)";
                 string primary = @"\s*(?<PrimaryKey>primary\s+key)";
-                string foreign = @"\s*(?<ForeignKey>references\s+(?<ForeignTable>[A-Z_]+)\s*\(\s*(?<ForeignColumn>[A-Z_]+)\s*\))";
+                string unique = @"\s*(?<Unique>unique)";
+                string foreign = @"\s*(?<ForeignKey>references\s+((?<ForeignTable>[A-Z_]+)\s*\(\s*(?<ForeignColumn>[A-Z_]+)\s*\)\s*)+)";
 
-                return @$"\s*(?<FieldName>[A-Z_]+)\s+(?<Type>{varchar}|{integer}|{floating})(\s+{primary})?(\s+{foreign})?\s*";
+                return @$"\s*(?<FieldName>[A-Z_]+)\s+(?<Type>{varchar}|{integer}|{floating})(\s+{primary})?(\s+{unique})?(\s+{foreign})?\s*";
             }
         }
 
