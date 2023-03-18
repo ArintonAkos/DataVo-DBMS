@@ -1,5 +1,5 @@
 ﻿using Server.Logging;
-using Server.Models;
+using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.MongoDB;
@@ -8,24 +8,24 @@ using System.Text.RegularExpressions;
 namespace Server.Parser.DDL
 {
     internal class CreateTable : BaseDbAction
-    {    
-        public CreateTableModel Model { get; private set; }
+    {
+        private readonly CreateTableModel _model;
 
         public CreateTable(Match match)
         {
-            this.Model = CreateTableModel.FromMatch(match);
+            this._model = CreateTableModel.FromMatch(match);
         }
 
         public override void PerformAction()
         {
             try
             {
-                Catalog.CreateTable(Model.ToTable(), "University");
+                Catalog.CreateTable(_model.ToTable(), "University");
 
-                DbContext.Instance.CreateTable(Model.TableName, "University");
+                DbContext.Instance.CreateTable(_model.TableName, "University");
 
-                Logger.Info($"New table {Model.TableName} successfully created!");
-                Messages.Add($"Table {Model.TableName} successfully created!");
+                Logger.Info($"New table {_model.TableName} successfully created!");
+                Messages.Add($"Table {_model.TableName} successfully created!");
             }
             catch (Exception e)
             {

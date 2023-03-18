@@ -1,4 +1,5 @@
-﻿using Server.Parser.Patterns;
+﻿using Server.Models.Catalog;
+using Server.Parser.Utils;
 using System.Text.RegularExpressions;
 
 namespace Server.Models.DDL

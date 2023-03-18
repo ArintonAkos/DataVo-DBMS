@@ -1,4 +1,5 @@
 ﻿using MongoDB.Driver.Core.Operations;
+using Server.Models.Catalog;
 using Server.Utils;
 using System;
 using System.Collections.Generic;
