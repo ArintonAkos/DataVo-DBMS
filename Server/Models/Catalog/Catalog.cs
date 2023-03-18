@@ -52,6 +52,8 @@ namespace Server.Models.Catalog
                 throw new Exception($"Table {table.TableName} already exists in database {databaseName}!");
             }
 
+            ValidateForeignKeys(table, databaseName);
+
             XElement root = rootDatabase.Elements("Tables")
                 .ToList()
                 .First();
@@ -110,6 +112,36 @@ namespace Server.Models.Catalog
                 .ToList();
 
             return tables.FirstOrDefault();
+        }
+
+        private static XElement? GetTableAttributeElement(XElement table, string attributeName)
+        {
+            List<XElement> attributes = table.Descendants()
+                .Where(e => e.Name == "Attribute" && e.Attribute("Name")?.Value == attributeName)
+                .ToList();
+
+            return attributes.FirstOrDefault();
+        }
+
+        private static void ValidateForeignKeys(Table table, string databaseName)
+        {
+            foreach (ForeignKey foreignKey in table.ForeignKeys)
+            {
+                foreach (Reference reference in foreignKey.References)
+                {
+                    XElement? refTable = GetTableElement(databaseName, reference.ReferenceTableName);
+                    if (refTable == null)
+                    {
+                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    }
+
+                    XElement? refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
+                    if (refAttribute == null)
+                    {
+                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    }
+                }
+            }
         }
 
         private static void CreateCatalogIfDoesntExist()
