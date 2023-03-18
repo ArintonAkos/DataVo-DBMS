@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Server.Parser.Commands
@@ -14,12 +15,13 @@ namespace Server.Parser.Commands
 
         public Use(Match match)
         {
-            this._model = UseModel.Parse(match);
+            this._model = UseModel.FromMatch(match);
         }
 
         public override void PerformAction()
         {
-            throw new NotImplementedException();
+            // Use the database
+
         }
     }
 }
