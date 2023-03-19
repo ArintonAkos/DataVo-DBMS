@@ -1,4 +1,5 @@
 ﻿using Server.Enums;
+using Server.Models.Catalog;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -21,11 +22,6 @@ namespace Server.Models.Factories
         {
             return new DataFactory();
         }
-
-        //public DataFactory FromMatch()
-        //{
-
-        //}
 
         public DataFactory SetRawValue(String rawValue)
         {
