@@ -2,7 +2,7 @@
 using Server.Enums;
 using System.ComponentModel.DataAnnotations;
 
-namespace Server.Models
+namespace Server.Models.Catalog
 {
     public class Data
     {

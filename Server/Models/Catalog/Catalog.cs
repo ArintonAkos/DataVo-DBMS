@@ -2,13 +2,21 @@
 using System.Xml.Linq;
 using System.Xml.Serialization;
 
-namespace Server.Models
+namespace Server.Models.Catalog
 {
     internal class Catalog
     {
         private static XDocument _doc = new();
-        private static readonly String _dirName = "databases";
-        private static readonly String _fileName = "Catalog.xml";
+        private static readonly string _dirName = "databases";
+        private static readonly string _fileName = "Catalog.xml";
+
+        private static string FilePath
+        {
+            get
+            {
+                return _dirName + "\\" + _fileName;
+            }
+        }
 
         static Catalog()
         {
@@ -30,7 +38,7 @@ namespace Server.Models
             InsertIntoXML(database, root);
         }
 
-        public static void CreateTable(Table table, String databaseName)
+        public static void CreateTable(Table table, string databaseName)
         {
             XElement? rootDatabase = GetDatabaseElement(databaseName);
             if (rootDatabase == null)
@@ -43,15 +51,17 @@ namespace Server.Models
             {
                 throw new Exception($"Table {table.TableName} already exists in database {databaseName}!");
             }
-            
+
+            ValidateForeignKeys(table, databaseName);
+
             XElement root = rootDatabase.Elements("Tables")
-                .ToList() 
+                .ToList()
                 .First();
 
             InsertIntoXML(table, root);
         }
 
-        public static void DropDatabase(String databaseName)
+        public static void DropDatabase(string databaseName)
         {
             XElement? database = GetDatabaseElement(databaseName);
 
@@ -63,7 +73,7 @@ namespace Server.Models
             RemoveFromXML(database);
         }
 
-        public static void DropTable(String tableName, String databaseName)
+        public static void DropTable(string tableName, string databaseName)
         {
             XElement? table = GetTableElement(databaseName, tableName);
 
@@ -75,16 +85,16 @@ namespace Server.Models
             RemoveFromXML(table);
         }
 
-        private static XElement? GetDatabaseElement(String databaseName)
+        private static XElement? GetDatabaseElement(string databaseName)
         {
             List<XElement> databases = _doc.Descendants()
                 .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
                 .ToList();
 
             return databases.FirstOrDefault();
-        } 
+        }
 
-        private static XElement? GetTableElement(String databaseName, String tableName)
+        private static XElement? GetTableElement(string databaseName, string tableName)
         {
             XElement? rootDatabase = GetDatabaseElement(databaseName);
             if (rootDatabase == null)
@@ -95,13 +105,43 @@ namespace Server.Models
             return GetTableElement(rootDatabase, tableName);
         }
 
-        private static XElement? GetTableElement(XElement database, String tableName)
+        private static XElement? GetTableElement(XElement database, string tableName)
         {
             List<XElement> tables = database.Descendants()
                 .Where(e => e.Name == "Table" && e.Attribute("TableName")?.Value == tableName)
                 .ToList();
 
             return tables.FirstOrDefault();
+        }
+
+        private static XElement? GetTableAttributeElement(XElement table, string attributeName)
+        {
+            List<XElement> attributes = table.Descendants()
+                .Where(e => e.Name == "Attribute" && e.Attribute("Name")?.Value == attributeName)
+                .ToList();
+
+            return attributes.FirstOrDefault();
+        }
+
+        private static void ValidateForeignKeys(Table table, string databaseName)
+        {
+            foreach (ForeignKey foreignKey in table.ForeignKeys)
+            {
+                foreach (Reference reference in foreignKey.References)
+                {
+                    XElement? refTable = GetTableElement(databaseName, reference.ReferenceTableName);
+                    if (refTable == null)
+                    {
+                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    }
+
+                    XElement? refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
+                    if (refAttribute == null)
+                    {
+                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    }
+                }
+            }
         }
 
         private static void CreateCatalogIfDoesntExist()
@@ -141,18 +181,10 @@ namespace Server.Models
                 writer.Close();
 
                 _doc.Save(FilePath);
-            } 
+            }
             catch (Exception ex)
             {
                 Logger.Error(ex.Message);
-            }
-        }
-
-        private static String FilePath
-        {
-            get
-            {
-                return _dirName + "\\" + _fileName;
             }
         }
 
