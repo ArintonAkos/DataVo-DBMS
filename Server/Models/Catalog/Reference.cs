@@ -1,15 +1,15 @@
 ﻿using System.Xml.Serialization;
 
-namespace Server.Models
+namespace Server.Models.Catalog
 {
     [Serializable]
     [XmlRoot("References")]
     public class Reference
     {
         [XmlElement("RefTable")]
-        public String ReferenceTableName { get; set; }
-        
+        public string ReferenceTableName { get; set; }
+
         [XmlElement("RefAttribute")]
-        public String ReferenceAttributeName { get; set; }
+        public string ReferenceAttributeName { get; set; }
     }
 }

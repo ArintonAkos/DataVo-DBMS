@@ -1,21 +1,21 @@
 ﻿using System.Xml.Serialization;
 
-namespace Server.Models
+namespace Server.Models.Catalog
 {
     [Serializable]
     [XmlRoot("Table")]
     public class Table
     {
         [XmlAttribute]
-        public String TableName { get; set; }
+        public string TableName { get; set; }
 
         [XmlArray("Structure")]
         [XmlArrayItem("Attribute")]
         public List<Field> Fields { get; set; }
-        
+
         [XmlArray("PrimaryKeys")]
         [XmlArrayItem("PkAttribute")]
-        public List<String> PrimaryKeys { get; set; }
+        public List<string> PrimaryKeys { get; set; }
 
         [XmlArray("ForeignKeys")]
         [XmlArrayItem("ForeignKey")]
@@ -26,7 +26,7 @@ namespace Server.Models
 
         [XmlArray("UniqueKeys")]
         [XmlArrayItem("UniqueAttribute")]
-        public List<String> UniqueAttributes { get; set; }
+        public List<string> UniqueAttributes { get; set; }
 
         [XmlIgnore]
         public bool UniqueAttributesSpecified => UniqueAttributes.Count > 0;

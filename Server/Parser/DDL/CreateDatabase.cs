@@ -1,5 +1,5 @@
 ﻿using Server.Logging;
-using Server.Models;
+using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using System.Text.RegularExpressions;

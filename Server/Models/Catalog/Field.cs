@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 using System.Xml.Serialization;
 
-namespace Server.Models
+namespace Server.Models.Catalog
 {
     [XmlType("Attribute")]
     [Serializable]
@@ -57,7 +57,7 @@ namespace Server.Models
             }
 
             if (!string.IsNullOrEmpty(match.Groups["ForeignKey"]?.Value))
-            {   
+            {
                 var refTables = match.Groups["ForeignTable"].Captures;
                 var refAttributes = match.Groups["ForeignColumn"].Captures;
 
