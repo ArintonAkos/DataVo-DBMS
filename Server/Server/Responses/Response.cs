@@ -2,10 +2,10 @@
 
 namespace Server.Server.Responses
 {
-    internal class Response
+    public class Response
     {
-        [JsonProperty]
-        public List<ScriptResponse> Data { get; set; } = new();
+        [JsonProperty("data")]
+        public dynamic Data { get; set; }
 
         public String ToJson()
         {

@@ -21,11 +21,11 @@ namespace Server.Parser.Actions
         /// Do actions on the Messages, Fields, Data fields.
         /// These values will be returned.
         /// </summary>
-        public abstract void PerformAction();
+        public abstract void PerformAction(string session);
 
-        public ActionResponse Perform()
+        public ActionResponse Perform(string session)
         {
-            PerformAction();
+            PerformAction(session);
 
             return ActionResponse.FromRaw(Messages, Data, Fields);
         }

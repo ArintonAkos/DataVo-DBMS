@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Server.Server.Requests
+namespace Server.Server.Responses.Controllers.Auth
 {
-    public class Request
+    public class SessionResponse : Response
     {
         [JsonProperty("data")]
-        public string Data { get; set; } = string.Empty;
+        public new Guid Data { get; set; }
     }
 }

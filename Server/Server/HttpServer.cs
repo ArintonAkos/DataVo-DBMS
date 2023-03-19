@@ -3,7 +3,8 @@ using Server.Server.Responses;
 using Server.Logging;
 using System.Net;
 using Newtonsoft.Json;
-using Server.Server.Requests;
+using Server.Server.Http;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Server
 {
@@ -14,7 +15,7 @@ namespace Server.Server
         public HttpServer()
         {
             _httpListener = new HttpListener();
-            _httpListener.Prefixes.Add("http://localhost:8001/");
+            _httpListener.Prefixes.Add("http://+:8001/");
         }
 
         public async Task Start()
@@ -27,55 +28,34 @@ namespace Server.Server
             {
                 var context = await _httpListener.GetContextAsync();
 
-                try
-                {
-                    Response response = ProcessRequest(context);
-                    
-                    await WriteResponse(context, response);
-                } catch (Exception ex)
-                {
-                    await WriteResponse(context, new ErrorResponse(ex));
-                }
+                Task.Factory.StartNew(() => ProcessRequest(context));
             }
         }
 
-        public static Response ProcessRequest(HttpListenerContext context)
+        private async Task ProcessRequest(HttpListenerContext context)
         {
-            var content = GetRequestContent(context.Request);
-            Logger.Info($"New Request from {context.Request.UserHostName}");
-            Logger.Info($"{context.Request.UserHostName}: {content}");
-
-            var request = JsonConvert.DeserializeObject<Request>(content);
-
-            if (request == null)
+            try
             {
-                throw new Exception("Error while parsing data!");
+                Logger.Info($"New Request from {context.Request.UserHostName}");
+                //Logger.Info($"{context.Request.UserHostName}: {content}");
+
+                Response response = Router.HandleRequest(context);
+
+                await WriteResponse(context, response);
             }
-
-            var parser = new Parser.Parser(request);
-
-            return parser.Parse();
+            catch (Exception ex)
+            {
+                await WriteResponse(context, new ErrorResponse(ex));
+            }
         }
 
         public async Task WriteResponse(HttpListenerContext context, Response response)
         {
             using var sw = new StreamWriter(context.Response.OutputStream);
             await sw.FlushAsync();
-            sw.Write(response.ToJson());
+            await sw.WriteAsync(response.ToJson());
 
             Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.ToJson()}");
-        }
-
-        private static String GetRequestContent(HttpListenerRequest request)
-        {
-            string text;
-
-            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
-            {
-                text = reader.ReadToEnd();
-            }
-
-            return text;
         }
     }
 }

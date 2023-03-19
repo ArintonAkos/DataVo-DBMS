@@ -1,11 +1,7 @@
 ﻿using Server.Models.DQL;
 using Server.Parser.Actions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using Server.Server.Cache;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace Server.Parser.Commands
 {
@@ -18,10 +14,10 @@ namespace Server.Parser.Commands
             this._model = UseModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(string session)
         {
             // Use the database
-
+            CacheStorage.Set(session, _model.DatabaseName);
         }
     }
 }

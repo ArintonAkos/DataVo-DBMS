@@ -1,9 +1,9 @@
 ﻿using Server.Parser.Actions;
 using Server.Parser.Commands;
 using Server.Parser.DDL;
-using Server.Server.Requests;
 using System.Text.RegularExpressions;
 using Server.Parser.Utils;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.Utils
 {
@@ -18,7 +18,7 @@ namespace Server.Parser.Utils
         };
         private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 
-        public static List<Queue<IDbAction>> ToRunnables(Request request)
+        public static List<Queue<IDbAction>> ToRunnables(ParseRequest request)
         {
             List<Queue<IDbAction>> runnables = new();
             Queue<IDbAction> actions = new();

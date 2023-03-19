@@ -4,6 +4,6 @@ namespace Server.Parser.Actions
 {
     internal interface IDbAction
     {
-        public ActionResponse Perform();
+        public ActionResponse Perform(string session);
     }
 }

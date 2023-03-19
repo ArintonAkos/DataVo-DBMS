@@ -5,7 +5,7 @@ namespace Server.Parser.Commands
 {
     internal class Go : IDbAction
     {
-        public ActionResponse Perform()
+        public ActionResponse Perform(string session)
         {
             return ActionResponse.Default();
         }
