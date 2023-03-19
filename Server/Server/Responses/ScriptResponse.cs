@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses
 {
-    internal class ScriptResponse
+    class ScriptResponse
     {
         [JsonProperty]
         public List<ActionResponse> Actions { get; set; } = new();

@@ -16,7 +16,7 @@ namespace Server.Parser.DDL
             this.Model = CreateTableModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(string session)
         {
             try
             {

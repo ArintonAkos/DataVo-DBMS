@@ -16,7 +16,7 @@ namespace Server.Parser.DDL
             _model = DropDatabaseModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(string session)
         {
             try
             {

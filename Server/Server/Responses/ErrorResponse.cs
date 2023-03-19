@@ -10,12 +10,12 @@ namespace Server.Server.Responses
     {
         public ErrorResponse(Exception e)
         {
-            this.Data = new()
+            this.Data = new
             {
-                new ScriptResponse
+                IsSuccess = false,
+                Actions = new List<ActionResponse>() 
                 {
-                    IsSuccess = false,
-                    Actions = new() { ActionResponse.Error(e) }
+                    ActionResponse.Error(e) 
                 }
             };
         }

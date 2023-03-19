@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Server.Server.Requests
+namespace Server.Server.Responses.Controllers.Parser
 {
-    public class Request
+    class ParseResponse : Response
     {
         [JsonProperty("data")]
-        public string Data { get; set; } = string.Empty;
+        public new List<ScriptResponse> Data { get; set; } = new();
     }
 }
