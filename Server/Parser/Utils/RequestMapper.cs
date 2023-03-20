@@ -2,7 +2,6 @@
 using Server.Parser.Commands;
 using Server.Parser.DDL;
 using System.Text.RegularExpressions;
-using Server.Parser.Utils;
 using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.Utils
@@ -15,6 +14,8 @@ namespace Server.Parser.Utils
             { Patterns.DropDatabase, typeof(DropDatabase) },
             { Patterns.CreateTable, typeof(CreateTable) },
             { Patterns.DropTable, typeof(DropTable) },
+            { Patterns.CreateIndex, typeof(CreateIndex) },
+            { Patterns.DropIndex, typeof(DropIndex) },
         };
         private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 

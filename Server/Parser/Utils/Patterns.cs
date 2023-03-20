@@ -35,6 +35,22 @@
             }
         }
 
+        public static string CreateIndex
+        {
+            get
+            {
+                return @"^\s*create\s+index\s+(?<IndexName>[A-Z_]+)\s+on\s+(?<TableName>[A-Z_]+)\(((?<Column>[A-Z_]+),?\s*)+\)";
+            }
+        }
+
+        public static string DropIndex
+        {
+            get
+            {
+                return @"^\s*drop\s+index\s+([A-Z_]+)\s+from\s+([A-Z_]+)";
+            }
+        }
+
         public static string Go
         {
             get

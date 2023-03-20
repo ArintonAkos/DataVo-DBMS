@@ -85,6 +85,41 @@ namespace Server.Models.Catalog
             RemoveFromXML(table);
         }
 
+        public static void CreateIndex(IndexFile indexFile, string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                throw new Exception("Table referred by index file doesn't exist!");
+            }
+
+            foreach (string columnName in indexFile.AttributeNames)
+            {
+                XElement? column = GetTableAttributeElement(table, columnName);
+                if (column == null)
+                {
+                    throw new Exception("Column refered by index file doesn't exist!");
+                }
+            }
+
+            XElement root = table.Elements("IndexFiles")
+                .ToList()
+                .First();
+
+            InsertIntoXML(indexFile, root);
+        }
+
+        public static void DropIndex(string indexName, string tableName, string databaseName)
+        {
+            XElement? indexFile = GetTableIndexElement(indexName, tableName, databaseName);
+            if (indexFile == null)
+            {
+                throw new Exception($"Index file {indexName} doesn't exist!");
+            }
+
+            RemoveFromXML(indexFile);
+        }
+
         private static XElement? GetDatabaseElement(string databaseName)
         {
             List<XElement> databases = _doc.Descendants()
@@ -121,6 +156,26 @@ namespace Server.Models.Catalog
                 .ToList();
 
             return attributes.FirstOrDefault();
+        }
+
+        private static XElement? GetTableIndexElement(string indexName, string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null) 
+            {
+                return null;
+            }
+
+            return GetTableIndexElement(table, indexName);
+        }
+
+        private static XElement? GetTableIndexElement(XElement table, string indexName) 
+        {
+            List<XElement> indexFiles = table.Descendants()
+                .Where(e => e.Name == "IndexFile" && e.Attribute("IndexName")?.Value == indexName)
+                .ToList();
+
+            return indexFiles.FirstOrDefault();
         }
 
         private static void ValidateForeignKeys(Table table, string databaseName)
