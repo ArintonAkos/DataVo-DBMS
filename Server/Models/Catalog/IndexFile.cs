@@ -11,6 +11,6 @@ namespace Server.Models.Catalog
 
         [XmlArray("IndexAttributes")]
         [XmlArrayItem("IAttribute")]
-        List<string> FieldNames { get; set; }
+        public List<string> AttributeNames { get; set; }
     }
 }
