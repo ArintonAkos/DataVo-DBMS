@@ -10,6 +10,15 @@ namespace Server.Models.DML
         public List<List<string>> Rows { get; set; }
         public List<string> Columns { get; set; }
 
+        public InsertIntoModel(string tableName, List<List<string>> rows, List<string> columns)
+        {
+            TableName = tableName;
+            Rows = rows;
+            Columns = columns;
+
+            ValidateInputData();
+        }
+
         public static InsertIntoModel FromMatch(Match match)
         {
             string columnsRaw = match.Groups["Columns"].Value.RemoveWhiteSpaces();
@@ -22,12 +31,7 @@ namespace Server.Models.DML
                 .Select(v => v.Value.RemoveWhiteSpaces().Split(",").ToList())
                 .ToList();
 
-            return new InsertIntoModel
-            { 
-                TableName = match.Groups["TableName"].Value,
-                Rows = rows,
-                Columns = columns 
-            };
+            return new InsertIntoModel(match.Groups["TableName"].Value, rows, columns);
         }
 
         public void ValidateInputData()

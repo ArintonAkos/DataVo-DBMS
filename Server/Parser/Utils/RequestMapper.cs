@@ -15,7 +15,9 @@ namespace Server.Parser.Utils
             { Patterns.DropDatabase, typeof(DropDatabase) },
             { Patterns.CreateTable, typeof(CreateTable) },
             { Patterns.DropTable, typeof(DropTable) },
-            { Patterns.InsertInto, typeof(InsertInto) }
+            { Patterns.InsertInto, typeof(InsertInto) },
+            { Patterns.CreateIndex, typeof(CreateIndex) },
+            { Patterns.DropIndex, typeof(DropIndex) },
         };
         private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 

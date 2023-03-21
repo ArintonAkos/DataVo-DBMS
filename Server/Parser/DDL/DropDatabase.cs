@@ -24,7 +24,7 @@ namespace Server.Parser.DDL
 
                 DbContext.Instance.DropDatabase(_model.DatabaseName);
 
-                Logger.Info(_model.DatabaseName);
+                Logger.Info($"Database {_model.DatabaseName} successfully dropped!");
                 Messages.Add($"Database {_model.DatabaseName} successfully dropped!");
             }
             catch (Exception ex)
