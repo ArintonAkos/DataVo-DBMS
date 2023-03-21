@@ -67,9 +67,7 @@ namespace Server.Server.Http
 
         private static string ValidateHttpMethod(HttpListenerRequest request, MethodInfo method)
         {
-            Method? httpMethod = method.GetCustomAttributes(true)
-                .OfType<Method>()
-                .FirstOrDefault();
+            Method? httpMethod = method.GetCustomAttribute<Method>(true);
 
             if (httpMethod == null)
             {
@@ -84,25 +82,23 @@ namespace Server.Server.Http
             return httpMethod.HttpMethod;
         }
 
-        private static List<Type> HttpControllers
-        {
-            get
-            {
-                return Assembly.GetExecutingAssembly()
-                    .GetTypes()
-                    .Where(type => type.Namespace == _controllerNameSpace)
-                    .ToList();
-            }
-        }
+        private static List<Type> HttpControllers => Assembly.GetExecutingAssembly()
+            .GetTypes()
+            .Where(type => type.Namespace == _controllerNameSpace)
+            .ToList();
 
         private static Type GetController(string controllerName)
         {
             Type? controller = HttpControllers
-                .FirstOrDefault(c => ValidateControllerAlias(c, controllerName));
+                .FirstOrDefault(c =>
+                    c.GetCustomAttributes<Route>(true)
+                        ?.Any(p => p.Path == controllerName) 
+                    ?? false
+                );
 
             if (controller == null)
             {
-                throw new Exception("Controller not found!");
+                throw new ArgumentException("Controller not found.");
             }
 
             return controller;
@@ -111,7 +107,11 @@ namespace Server.Server.Http
         private static MethodInfo GetMethod(Type controller, string methodName)
         {
             MethodInfo? method = controller.GetMethods()
-                .FirstOrDefault(m => ValidateMethodAlias(m, methodName));
+                .FirstOrDefault(m => 
+                    m.GetCustomAttributes<Route>(true)
+                        ?.Any(p => p.Path == methodName)
+                    ?? false
+                );
 
             if (method == null)
             {
@@ -121,31 +121,10 @@ namespace Server.Server.Http
             return method;
         }
 
-        private static bool ValidateControllerAlias(Type controller, string path)
-        {
-            return controller
-                .GetCustomAttributes<Route>(true)
-                .Any(route => route.Path == path);
-        }
-
-        private static bool ValidateMethodAlias(MethodInfo method, string path)
-        {
-            return method
-                .GetCustomAttributes(true)
-                .OfType<Route>()
-                .Any(route => route.Path == path);
-        }
-
         private static String GetRequestContent(HttpListenerRequest request)
         {
-            string text;
-
-            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
-            {
-                text = reader.ReadToEnd();
-            }
-
-            return text;
+            using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+            return reader.ReadToEnd();
         }
 
         private static Request? GetRequest(HttpListenerRequest request, MethodInfo method)
