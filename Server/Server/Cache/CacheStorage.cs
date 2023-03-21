@@ -8,6 +8,7 @@ namespace Server.Server.Cache
 {
     internal class CacheStorage
     {
+        //                            <SessionKey, DatabaseName>
         private static readonly Dictionary<string, string> _cache = new();
 
         public static string Get(string key)
