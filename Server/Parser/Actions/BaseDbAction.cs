@@ -21,9 +21,9 @@ namespace Server.Parser.Actions
         /// Do actions on the Messages, Fields, Data fields.
         /// These values will be returned.
         /// </summary>
-        public abstract void PerformAction(string session);
+        public abstract void PerformAction(Guid session);
 
-        public ActionResponse Perform(string session)
+        public ActionResponse Perform(Guid session)
         {
             PerformAction(session);
 

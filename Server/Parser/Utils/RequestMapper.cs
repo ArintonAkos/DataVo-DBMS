@@ -2,8 +2,8 @@
 using Server.Parser.Commands;
 using Server.Parser.DDL;
 using System.Text.RegularExpressions;
-using Server.Parser.Utils;
 using Server.Server.Requests.Controllers.Parser;
+using Server.Parser.DML;
 
 namespace Server.Parser.Utils
 {
@@ -15,6 +15,7 @@ namespace Server.Parser.Utils
             { Patterns.DropDatabase, typeof(DropDatabase) },
             { Patterns.CreateTable, typeof(CreateTable) },
             { Patterns.DropTable, typeof(DropTable) },
+            { Patterns.InsertInto, typeof(InsertInto) }
         };
         private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 
@@ -38,12 +39,28 @@ namespace Server.Parser.Utils
 
                 foreach (KeyValuePair<string, Type> command in _commands)
                 {
-                    var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
-
-                    if (action != null)
+                    try
                     {
-                        actions.Enqueue(action);
-                        goto REPEAT;
+                        var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
+
+                        if (action != null)
+                        {
+                            actions.Enqueue(action);
+                            goto REPEAT;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        while (ex.InnerException != null)
+                        {
+                            ex = ex.InnerException;
+                        }
+
+                        throw new Exception(
+                            $"Exception thrown at: {FirstKeyWord(rawSqlCode)}\n" +
+                            $"Line: {lineCount}\n" +
+                            $"Message: {ex.Message}"
+                        );
                     }
                 }
 
@@ -64,9 +81,11 @@ namespace Server.Parser.Utils
 
             if (match.Success)
             {
+                IDbAction action = (IDbAction)Activator.CreateInstance(command.Value, match)!;
                 lineCount += Regex.Split(match.Value, "\r\n|\r|\n").Length;
                 rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
-                return (IDbAction)Activator.CreateInstance(command.Value, match)!;
+
+                return action;
             }
 
             return null;

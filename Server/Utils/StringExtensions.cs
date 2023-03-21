@@ -1,4 +1,6 @@
 ﻿
+using System.Text.RegularExpressions;
+
 namespace Server.Utils
 {
     internal static class StringExtensions
@@ -12,6 +14,16 @@ namespace Server.Utils
             }
 
             return false;
+        }
+
+        public static string RemoveWhiteSpaces(this string source)
+        {
+            return Regex.Replace(source, @"\s+", "");
+        }
+
+        public static string MatchToParsable(this string source)
+        {
+            return Regex.Replace(source, @"^\((.*)\),", @"$1");
         }
     }
 }

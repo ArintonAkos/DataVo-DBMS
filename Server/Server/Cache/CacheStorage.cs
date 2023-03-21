@@ -9,14 +9,14 @@ namespace Server.Server.Cache
     internal class CacheStorage
     {
         //                            <SessionKey, DatabaseName>
-        private static readonly Dictionary<string, string> _cache = new();
+        private static readonly Dictionary<Guid, string> _cache = new();
 
-        public static string Get(string key)
+        public static string Get(Guid key)
         {
             return _cache[key];
         }
 
-        public static void Set(string key, string value)
+        public static void Set(Guid key, string value)
         {
             _cache[key] = value;
         }
