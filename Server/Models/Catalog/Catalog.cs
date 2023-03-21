@@ -87,9 +87,15 @@ namespace Server.Models.Catalog
 
         private static XElement? GetDatabaseElement(string databaseName)
         {
-            List<XElement> databases = _doc.Descendants()
-                .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
-                .ToList();
+            List<XElement> databases;
+
+            lock (_doc)
+            {
+                 databases = _doc.Descendants()
+                    .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
+                    .ToList();
+
+            }
 
             return databases.FirstOrDefault();
         }
@@ -151,17 +157,20 @@ namespace Server.Models.Catalog
                 Directory.CreateDirectory(_dirName);
             }
 
-            if (!File.Exists(FilePath))
+            lock (_doc)
             {
-                _doc.Add(new XElement("Databases"));
-                _doc.Save(FilePath);
+                if (!File.Exists(FilePath))
+                {
+                    _doc.Add(new XElement("Databases"));
+                    _doc.Save(FilePath);
 
-                Logger.Info($"Created {_fileName}");
+                    Logger.Info($"Created {_fileName}");
 
-                return;
+                    return;
+                }
+
+                _doc = XDocument.Load(FilePath);
             }
-
-            _doc = XDocument.Load(FilePath);
         }
 
         private static void InsertIntoXML<T>(T obj, XElement root) where T : class

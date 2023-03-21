@@ -19,7 +19,7 @@ namespace Server.Server.Http
                 throw new Exception("Error parsing request!");
             }
 
-            if (request.Request.Url.Segments.Length < 2)
+            if (request.Request.Url.Segments.Length < 3)
             {
                 throw new Exception("Invalid URL path!");
             }
@@ -31,28 +31,37 @@ namespace Server.Server.Http
             MethodInfo method = GetMethod(controller, methodName);
 
             string httpMethod = ValidateHttpMethod(request.Request, method);
+            object[]? parameters = null;
 
             switch (httpMethod)
             {
                 case "GET":
                     var dict = request.Request.QueryString;
 
-                    object[] @params = method.GetParameters()
-                            .Select((p, i) => Convert.ChangeType(dict[p.Name], p.ParameterType))
-                            .ToArray()!;
-
-                    return (Response)method.Invoke(null, @params)!;
+                    parameters = method.GetParameters()
+                            ?.Select((p, i) => Convert.ChangeType(dict[p.Name], p.ParameterType))
+                            ?.ToArray()!;
+                    break;
                 case "POST":
                     var requestObject = GetRequest(request.Request, method);
-                    
-                    if (requestObject == null)
+                    if (requestObject != null)
                     {
-                        return (Response)method.Invoke(null, null)!;
+                        parameters = new object[] { requestObject };
                     }
-
-                    return (Response)method.Invoke(null, new object[] { requestObject })!;
+                    
+                    break;
                 default:
                     throw new Exception("Unsupported HTTP method!");
+            }
+
+            try
+            {
+                var returnValue = method.Invoke(null, parameters);
+                return (Response)returnValue!;
+            }
+            catch (Exception ex)
+            {
+                throw ex.InnerException ?? ex;
             }
         }
 

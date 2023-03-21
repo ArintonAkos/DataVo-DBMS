@@ -66,7 +66,7 @@ namespace Server.Parser.Utils
             {
                 lineCount += Regex.Split(match.Value, "\r\n|\r|\n").Length;
                 rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
-                return (IDbAction)Activator.CreateInstance(command.Value, match);
+                return (IDbAction)Activator.CreateInstance(command.Value, match)!;
             }
 
             return null;

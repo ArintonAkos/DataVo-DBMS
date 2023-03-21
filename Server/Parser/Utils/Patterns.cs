@@ -51,6 +51,14 @@
             }
         }
 
+        public static string InsertInto
+        {
+            get
+            {
+                return @"^\s*insert\s+into\s+(?<TableName>[A-Z_]+)\s*\((?<Columns>(\s*\w+\s*,?\s*)+)\)\s*VALUES\s*\((?<Values>(\s*('[^']*'|[^,()]+)\s*,?\s*)+)\)\s*";
+            }
+        }
+
         public static string Column
         {
             get
