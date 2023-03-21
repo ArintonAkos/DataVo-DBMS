@@ -44,6 +44,7 @@ namespace Server.Server.Http
                     break;
                 case "POST":
                     var requestObject = GetRequest(request.Request, method);
+                    
                     if (requestObject != null)
                     {
                         parameters = new object[] { requestObject };
@@ -61,7 +62,12 @@ namespace Server.Server.Http
             }
             catch (Exception ex)
             {
-                throw ex.InnerException ?? ex;
+                while (ex.InnerException != null)
+                {
+                    ex = ex.InnerException;
+                }
+
+                throw ex;
             }
         }
 
@@ -142,7 +148,14 @@ namespace Server.Server.Http
             MethodInfo deserializeGeneric = typeof(Router).GetMethod(nameof(Router.DeserializeObject))!;
             MethodInfo generic = deserializeGeneric.MakeGenericMethod(paramType);
 
-            return (Request?)generic.Invoke(null, new object[] { content });
+            try
+            {
+                return (Request?)generic.Invoke(null, new object[] { content });
+            }
+            catch (Exception ex) 
+            {
+                throw ex.InnerException ?? ex;
+            }
         }
 
         public static T? DeserializeObject<T>(string content)

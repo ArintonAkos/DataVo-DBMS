@@ -15,7 +15,7 @@ namespace Server.Parser.DDL
             _model = CreateDatabaseModel.FromMatch(match);
         }
 
-        public override void PerformAction(string session)
+        public override void PerformAction(Guid session)
         {
             try
             {

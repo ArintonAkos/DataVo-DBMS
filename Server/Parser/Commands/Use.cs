@@ -14,7 +14,7 @@ namespace Server.Parser.Commands
             this._model = UseModel.FromMatch(match);
         }
 
-        public override void PerformAction(string session)
+        public override void PerformAction(Guid session)
         {
             // Use the database
             CacheStorage.Set(session, _model.DatabaseName);
