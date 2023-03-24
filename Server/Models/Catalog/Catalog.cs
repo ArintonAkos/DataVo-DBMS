@@ -120,6 +120,45 @@ namespace Server.Models.Catalog
             RemoveFromXML(indexFile);
         }
 
+        public static List<string> GetTablePrimaryKeys(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return new();
+            }
+
+            List<string> primaryKeys = new();
+            foreach (var element in table.Elements("PrimaryKeys").ToList())
+            {
+                primaryKeys.Add(element.Value);
+            }
+
+            return primaryKeys;
+        }
+
+        public static List<Column> GetTableColumnTypes(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return new();
+            }
+
+            List<Column> columns = new();
+            foreach (XElement element in table.Descendants().Where(e => e.Name == "Attribute").ToList())
+            {
+                columns.Add(new Column()
+                {
+                    Type = element.Attribute("Type")!.Value,
+                    Length = string.IsNullOrEmpty(element.Attribute("Length")?.Value) ?
+                             0 : int.Parse(element.Attribute("Length")!.Value),
+                });
+            }
+
+            return columns;
+        }
+
         private static XElement? GetDatabaseElement(string databaseName)
         {
             List<XElement> databases;
@@ -129,7 +168,6 @@ namespace Server.Models.Catalog
                  databases = _doc.Descendants()
                     .Where(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName)
                     .ToList();
-
             }
 
             return databases.FirstOrDefault();
@@ -155,6 +193,17 @@ namespace Server.Models.Catalog
             return tables.FirstOrDefault();
         }
 
+        private static XElement? GetTableIndexElement(string indexName, string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return null;
+            }
+
+            return GetTableIndexElement(table, indexName);
+        }
+
         private static XElement? GetTableAttributeElement(XElement table, string attributeName)
         {
             List<XElement> attributes = table.Descendants()
@@ -162,17 +211,6 @@ namespace Server.Models.Catalog
                 .ToList();
 
             return attributes.FirstOrDefault();
-        }
-
-        private static XElement? GetTableIndexElement(string indexName, string tableName, string databaseName)
-        {
-            XElement? table = GetTableElement(databaseName, tableName);
-            if (table == null) 
-            {
-                return null;
-            }
-
-            return GetTableIndexElement(table, indexName);
         }
 
         private static XElement? GetTableIndexElement(XElement table, string indexName) 
