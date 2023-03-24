@@ -34,17 +34,5 @@ namespace Server.Models.Catalog
         [XmlArray("IndexFiles")]
         [XmlArrayItem("IndexFile")]
         public List<IndexFile> IndexFiles { get; set; }
-
-        public Field GetColumn(String columnName)
-        {
-            Field? field = Fields.FirstOrDefault(f => f.Name == columnName);
-
-            if (field == null)
-            {
-                throw new Exception($"Column '{columnName}' doesn't exist in table {TableName}.");
-            }
-
-            return field;
-        }
     }
 }

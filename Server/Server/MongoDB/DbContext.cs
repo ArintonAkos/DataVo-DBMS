@@ -1,4 +1,5 @@
-﻿using MongoDB.Driver;
+﻿using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace Server.Server.MongoDB
 {
@@ -29,6 +30,20 @@ namespace Server.Server.MongoDB
         {
             var database = GetDatabase(databaseName);
             await database.DropCollectionAsync(tableName);
+        }
+
+        public async void InsertIntoTable(BsonDocument values, String tableName, String databaseName)
+        {
+            try
+            {
+                var database = GetDatabase(databaseName);
+                var table = database.GetCollection<BsonDocument>(tableName);
+                await table.InsertOneAsync(values);
+            }
+            catch (Exception)
+            {
+                throw;
+            }
         }
     }
 }
