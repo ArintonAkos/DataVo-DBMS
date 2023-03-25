@@ -2,6 +2,7 @@
 using Frontend.Client.Responses;
 using Newtonsoft.Json;
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +11,7 @@ namespace Frontend.Services
 {
     internal class HttpService
     {
-        public static String URL = "http://localhost:8001";
+        public static String URL = "http://localhost:8001/parser/parse";
         private static readonly HttpClient _httpClient = new HttpClient();
 
         public async static Task<Response> Post(Request request)
@@ -29,12 +30,7 @@ namespace Frontend.Services
             {
                 Console.WriteLine(ex.Message);
 
-                return new Response()
-                {
-                    Code = System.Net.HttpStatusCode.NotFound,
-                    Meta = "Error",
-                    Data = ex.Message
-                };
+                return new ErrorResponse(ex);
             }
         }
     }

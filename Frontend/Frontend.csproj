@@ -8,10 +8,11 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>Frontend</RootNamespace>
     <AssemblyName>Frontend</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -62,7 +63,16 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Client\Requests\Request.cs" />
+    <Compile Include="Client\Responses\ActionResponse.cs" />
+    <Compile Include="Client\Responses\Controllers\Auth\SessionResponse.cs" />
+    <Compile Include="Client\Responses\Controllers\Parser\ParseResponse.cs" />
+    <Compile Include="Client\Responses\ErrorResponse.cs" />
+    <Compile Include="Client\Responses\Parts\ActionDataResponse.cs" />
+    <Compile Include="Client\Responses\Parts\ActionFieldResponse.cs" />
+    <Compile Include="Client\Responses\Parts\DataResponse.cs" />
+    <Compile Include="Client\Responses\Parts\FieldResponse.cs" />
     <Compile Include="Client\Responses\Response.cs" />
+    <Compile Include="Client\Responses\ScriptResponse.cs" />
     <Compile Include="Services\HttpService.cs" />
     <Compile Include="Window.cs">
       <SubType>Form</SubType>
