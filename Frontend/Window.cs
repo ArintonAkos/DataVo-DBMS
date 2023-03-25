@@ -1,6 +1,10 @@
 ﻿using System;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using Frontend.Client.Requests;
+using Frontend.Client.Responses;
+using Frontend.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace Frontend
@@ -12,31 +16,42 @@ namespace Frontend
             InitializeComponent();
         }
 
-        private void InitializeEditorTree()
+        private void AddFolderToEditorTree(TreeNode root, string folderPath)
         {
-            EditorTree.BeginUpdate();
-            EditorTree.Nodes.Add(new TreeNode("Visual Query Designers"));
-            EditorTree.Nodes.Add(new TreeNode("Open folder"));
-            EditorTree.EndUpdate();
+            root.Text = Path.GetFileName(folderPath);
+            root.Name = folderPath;
+            root.Nodes.Clear();
+
+            foreach (string folder in Directory.GetDirectories(folderPath))
+            {
+                root.Nodes.Add(new TreeNode());
+                AddFolderToEditorTree(root.Nodes[root.Nodes.Count - 1], folder);
+            }
+
+            foreach (string file in Directory.GetFiles(folderPath))
+            {
+                root.Nodes.Add(new TreeNode()
+                {
+                    Text = Path.GetFileName(file),
+                    Name = file
+                });
+            }
         }
 
-        private void OpenFolderForEditorTree(string directory)
+        private void OpenFolderForEditorTree(string folderPath)
         {
             EditorTree.BeginUpdate();
-            EditorTree.Nodes[0].Text = Path.GetFileName(directory);
 
-            foreach (string file in Directory.GetFiles(directory))
-            {
-                EditorTree.Nodes[0].Nodes.Add(new TreeNode(Path.GetFileName(file)));
-            }
+            AddFolderToEditorTree(EditorTree.Nodes[0], folderPath);
 
             EditorTree.Nodes[0].Expand();
             EditorTree.EndUpdate();
         }
 
-        private void CreateNewEditorTab(string filename)
+        private void CreateNewEditorTab(string filePath)
         {
-            TabPage tabPage = new TabPage(filename);
+            TabPage tabPage = new TabPage(Path.GetFileName(filePath));
+            tabPage.Name = filePath;
             EditorTabControl.TabPages.Add(tabPage);
 
             RichTextBox textBox = new RichTextBox();
@@ -46,6 +61,14 @@ namespace Frontend
             tabPage.Controls.Add(textBox);
         }
 
+        private void CreateNewEditorTabWithContent(string filePath)
+        {
+            CreateNewEditorTab(filePath);
+
+            RichTextBox textBox = GetEditorTextBox(EditorTabControl.TabCount - 1);
+            textBox.Text = File.ReadAllText(filePath);
+        }
+
         private RichTextBox GetEditorTextBox(int index)
         {
             return (RichTextBox)EditorTabControl.TabPages[index].Controls[0];
@@ -53,8 +76,6 @@ namespace Frontend
 
         private void Window_Load(object sender, EventArgs e)
         {
-            InitializeEditorTree();
-
             EditorTabControl.TabPages.Clear();
         }
 
@@ -67,7 +88,7 @@ namespace Frontend
             if (saveFileDialog.ShowDialog() == DialogResult.OK)
             {
                 File.Create(saveFileDialog.FileName);
-                CreateNewEditorTab(Path.GetFileName(saveFileDialog.FileName));
+                CreateNewEditorTab(saveFileDialog.FileName);
             }
         }
 
@@ -79,10 +100,16 @@ namespace Frontend
 
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
-                CreateNewEditorTab(Path.GetFileName(openFileDialog.FileName));
-                
-                RichTextBox textBox = GetEditorTextBox(EditorTabControl.TabPages.Count - 1);
-                textBox.Text = File.ReadAllText(openFileDialog.FileName);
+                CreateNewEditorTabWithContent(openFileDialog.FileName);
+            }
+        }
+
+        private void MenuSaveFileOption_Click(object sender, EventArgs e)
+        {
+            if (EditorTabControl.TabPages.Count > 0)
+            {
+                RichTextBox textBox = GetEditorTextBox(EditorTabControl.SelectedIndex);
+                File.WriteAllText(EditorTabControl.SelectedTab.Name, textBox.Text);
             }
         }
 
@@ -103,9 +130,44 @@ namespace Frontend
             Application.Exit();
         }
 
-        private void StripExecuteButton_Click(object sender, EventArgs e)
+        private async void StripExecuteButton_Click(object sender, EventArgs e)
         {
+            Response response = await HttpService.Post(new Request()
+            {
+                Data = GetEditorTextBox(EditorTabControl.SelectedIndex).Text
+            });
 
+            foreach (ActionResponse action in response.Data.Actions)
+            {
+                action.Messages.ForEach(message => ResponseTabMessagesText.Text += message + "\n");
+            }
+        }
+
+        private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (!File.Exists(e.Node.Name) || Path.GetExtension(e.Node.Text) != ".sql") 
+            {
+                return;
+            }
+
+            foreach (TabPage tab in EditorTabControl.TabPages)
+            {
+                if (tab.Name == e.Node.Name)
+                {
+                    EditorTabControl.SelectedTab = tab;
+                    return;
+                }
+            }
+
+            CreateNewEditorTabWithContent(e.Node.Name);
+        }
+
+        private void EditorTabControl_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Modifiers == Keys.Control && e.KeyCode == Keys.S)
+            {
+                MenuSaveFileOption_Click(this, e);
+            }
         }
     }
 }

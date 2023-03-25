@@ -29,10 +29,13 @@
         private void InitializeComponent()
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Window));
+            System.Windows.Forms.TreeNode treeNode3 = new System.Windows.Forms.TreeNode("OpenFolder");
             this.menu = new System.Windows.Forms.MenuStrip();
             this.MenuFileOption = new System.Windows.Forms.ToolStripMenuItem();
             this.MenuNewFileOption = new System.Windows.Forms.ToolStripMenuItem();
             this.MenuOpenFileOption = new System.Windows.Forms.ToolStripMenuItem();
+            this.MenuSaveFileOption = new System.Windows.Forms.ToolStripMenuItem();
+            this.MenuOpenFolderOption = new System.Windows.Forms.ToolStripMenuItem();
             this.MenuExitOption = new System.Windows.Forms.ToolStripMenuItem();
             this.strip = new System.Windows.Forms.ToolStrip();
             this.StripExecuteButton = new System.Windows.Forms.ToolStripButton();
@@ -43,12 +46,11 @@
             this.tabMessages = new System.Windows.Forms.TabPage();
             this.ResponseTabMessagesText = new System.Windows.Forms.RichTextBox();
             this.EditorSplitContainer = new System.Windows.Forms.SplitContainer();
+            this.EditorExplorerLabel = new System.Windows.Forms.Label();
+            this.EditorTree = new System.Windows.Forms.TreeView();
             this.EditorTabControl = new System.Windows.Forms.TabControl();
             this.EditorTab1 = new System.Windows.Forms.TabPage();
             this.EditorTab1Text = new System.Windows.Forms.RichTextBox();
-            this.EditorTree = new System.Windows.Forms.TreeView();
-            this.MenuOpenFolderOption = new System.Windows.Forms.ToolStripMenuItem();
-            this.EditorExplorerLabel = new System.Windows.Forms.Label();
             this.menu.SuspendLayout();
             this.strip.SuspendLayout();
             this.ResponseTabPanel.SuspendLayout();
@@ -78,6 +80,7 @@
             this.MenuFileOption.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.MenuNewFileOption,
             this.MenuOpenFileOption,
+            this.MenuSaveFileOption,
             this.MenuOpenFolderOption,
             this.MenuExitOption});
             this.MenuFileOption.Name = "MenuFileOption";
@@ -97,6 +100,20 @@
             this.MenuOpenFileOption.Size = new System.Drawing.Size(224, 26);
             this.MenuOpenFileOption.Text = "Open file";
             this.MenuOpenFileOption.Click += new System.EventHandler(this.MenuOpenFileOption_Click);
+            // 
+            // MenuSaveFileOption
+            // 
+            this.MenuSaveFileOption.Name = "MenuSaveFileOption";
+            this.MenuSaveFileOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuSaveFileOption.Text = "Save file";
+            this.MenuSaveFileOption.Click += new System.EventHandler(this.MenuSaveFileOption_Click);
+            // 
+            // MenuOpenFolderOption
+            // 
+            this.MenuOpenFolderOption.Name = "MenuOpenFolderOption";
+            this.MenuOpenFolderOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuOpenFolderOption.Text = "Open folder";
+            this.MenuOpenFolderOption.Click += new System.EventHandler(this.MenuOpenFolderOption_Click);
             // 
             // MenuExitOption
             // 
@@ -211,6 +228,35 @@
             this.EditorSplitContainer.SplitterDistance = 75;
             this.EditorSplitContainer.TabIndex = 3;
             // 
+            // EditorExplorerLabel
+            // 
+            this.EditorExplorerLabel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.EditorExplorerLabel.AutoSize = true;
+            this.EditorExplorerLabel.Location = new System.Drawing.Point(4, 6);
+            this.EditorExplorerLabel.Name = "EditorExplorerLabel";
+            this.EditorExplorerLabel.Size = new System.Drawing.Size(57, 16);
+            this.EditorExplorerLabel.TabIndex = 1;
+            this.EditorExplorerLabel.Text = "Explorer";
+            this.EditorExplorerLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // EditorTree
+            // 
+            this.EditorTree.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.EditorTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.EditorTree.Location = new System.Drawing.Point(4, 28);
+            this.EditorTree.Name = "EditorTree";
+            treeNode3.Name = "EditorTreeOpenFolder";
+            treeNode3.Tag = "None";
+            treeNode3.Text = "OpenFolder";
+            this.EditorTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
+            treeNode3});
+            this.EditorTree.Size = new System.Drawing.Size(68, 217);
+            this.EditorTree.TabIndex = 0;
+            this.EditorTree.NodeMouseDoubleClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.EditorTree_NodeMouseDoubleClick);
+            // 
             // EditorTabControl
             // 
             this.EditorTabControl.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
@@ -222,6 +268,7 @@
             this.EditorTabControl.SelectedIndex = 0;
             this.EditorTabControl.Size = new System.Drawing.Size(673, 246);
             this.EditorTabControl.TabIndex = 0;
+            this.EditorTabControl.KeyDown += new System.Windows.Forms.KeyEventHandler(this.EditorTabControl_KeyDown);
             // 
             // EditorTab1
             // 
@@ -245,36 +292,6 @@
             this.EditorTab1Text.Size = new System.Drawing.Size(672, 221);
             this.EditorTab1Text.TabIndex = 0;
             this.EditorTab1Text.Text = "";
-            // 
-            // EditorTree
-            // 
-            this.EditorTree.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.EditorTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.EditorTree.Location = new System.Drawing.Point(4, 28);
-            this.EditorTree.Name = "EditorTree";
-            this.EditorTree.Size = new System.Drawing.Size(68, 217);
-            this.EditorTree.TabIndex = 0;
-            // 
-            // MenuOpenFolderOption
-            // 
-            this.MenuOpenFolderOption.Name = "MenuOpenFolderOption";
-            this.MenuOpenFolderOption.Size = new System.Drawing.Size(224, 26);
-            this.MenuOpenFolderOption.Text = "Open folder";
-            this.MenuOpenFolderOption.Click += new System.EventHandler(this.MenuOpenFolderOption_Click);
-            // 
-            // EditorExplorerLabel
-            // 
-            this.EditorExplorerLabel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.EditorExplorerLabel.AutoSize = true;
-            this.EditorExplorerLabel.Location = new System.Drawing.Point(4, 6);
-            this.EditorExplorerLabel.Name = "EditorExplorerLabel";
-            this.EditorExplorerLabel.Size = new System.Drawing.Size(57, 16);
-            this.EditorExplorerLabel.TabIndex = 1;
-            this.EditorExplorerLabel.Text = "Explorer";
-            this.EditorExplorerLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // Window
             // 
@@ -331,6 +348,7 @@
         private System.Windows.Forms.TreeView EditorTree;
         private System.Windows.Forms.ToolStripMenuItem MenuOpenFolderOption;
         private System.Windows.Forms.Label EditorExplorerLabel;
+        private System.Windows.Forms.ToolStripMenuItem MenuSaveFileOption;
     }
 }
 
