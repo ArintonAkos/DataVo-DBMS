@@ -137,7 +137,7 @@ namespace Server.Models.Catalog
             return primaryKeys;
         }
 
-        public static List<Column> GetTableColumnTypes(string tableName, string databaseName)
+        public static List<Column> GetTableColumnTypes(List<string> columnNames, string tableName, string databaseName)
         {
             XElement? table = GetTableElement(databaseName, tableName);
             if (table == null)
@@ -146,13 +146,19 @@ namespace Server.Models.Catalog
             }
 
             List<Column> columns = new();
-            foreach (XElement element in table.Descendants().Where(e => e.Name == "Attribute").ToList())
+            foreach (string columnName in columnNames)
             {
+                XElement? column = GetTableAttributeElement(table, columnName);
+                if (column == null)
+                {
+                    throw new Exception($"Column {columnName} does not exist in table {tableName}!");
+                }
+
                 columns.Add(new Column()
                 {
-                    Type = element.Attribute("Type")!.Value,
-                    Length = string.IsNullOrEmpty(element.Attribute("Length")?.Value) ?
-                             0 : int.Parse(element.Attribute("Length")!.Value),
+                    Type = column.Attribute("Type")!.Value,
+                    Length = string.IsNullOrEmpty(column.Attribute("Length")?.Value) ?
+                             0 : int.Parse(column.Attribute("Length")!.Value),
                 });
             }
 

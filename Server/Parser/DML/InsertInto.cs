@@ -21,12 +21,12 @@ namespace Server.Parser.DML
         {
             try
             {
-                BsonDocument bsonData = ProcessTableRows();
+                List<BsonDocument> values = ProcessTableRows();
 
-                DbContext.Instance.InsertIntoTable(bsonData, _model.TableName, "University");
+                DbContext.Instance.InsertIntoTable(values, _model.TableName, "University");
 
-                Messages.Add($"Successfully inserted values into table {_model.TableName}!");
-                Logger.Info($"Successfully inserted values into table {_model.TableName}!");
+                Messages.Add($"Rows affected {values.Count}!");
+                Logger.Info($"Rows affected {values.Count}!");
             }
             catch (Exception e)
             {
@@ -35,16 +35,22 @@ namespace Server.Parser.DML
             }
         }
 
-        private BsonDocument ProcessTableRows()
+        private List<BsonDocument> ProcessTableRows()
         {
             List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, "University");
-            List<Column> columns = Catalog.GetTableColumnTypes(_model.TableName, "University");
-            BsonDocument bsonData = new();
+            List<Column> columns = Catalog.GetTableColumnTypes(_model.Columns, _model.TableName, "University");
+            List<BsonDocument> bsonData = new();
+
+            int rowNumber = 0;
 
             foreach (var row in _model.Rows)
             {
+                bool invalidRow = false;
                 string id = string.Empty;
                 string data = string.Empty;
+                
+                rowNumber++;
+
                 for (int i = 0; i < row.Count; ++i)
                 {
                     Column tableColumn = columns[i];
@@ -52,7 +58,10 @@ namespace Server.Parser.DML
 
                     if (tableColumn.ParsedValue == null)
                     {
-                        throw new Exception("Argument types does not match!");
+                        invalidRow = true;
+                        Messages.Add($"Type of argument doesn't match with column type in row {rowNumber}!");
+                        Logger.Error($"Type of argument doesn't match with column type in row {rowNumber}!");
+                        break;
                     }
 
                     if (primaryKeys.Contains(_model.Columns[i]))
@@ -64,8 +73,14 @@ namespace Server.Parser.DML
                     data += tableColumn.ParsedValue + "#";
                 }
 
-                bsonData.Add(new BsonElement("_id", id.Remove(id.Length - 1)));
-                bsonData.Add(new BsonElement("columns", data.Remove(data.Length - 1)));
+                if (!invalidRow)
+                {
+                    BsonDocument bsonDoc = new();
+                    bsonDoc.Add(new BsonElement("_id", id.Remove(id.Length - 1)));
+                    bsonDoc.Add(new BsonElement("columns", data.Remove(data.Length - 1)));
+
+                    bsonData.Add(bsonDoc);
+                }
             }
 
             return bsonData;

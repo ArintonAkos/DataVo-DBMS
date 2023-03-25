@@ -20,7 +20,7 @@ namespace Server.Models.Catalog
                         "Varchar" => (Length < Value.Length) ? Value[..Length] : Value,
                         "Int" => int.Parse(Value),
                         "Float" => float.Parse(Value),
-                        _ => throw new FormatException("Unsupported type!")
+                        _ => null
                     };
                 }
                 catch (Exception) 
