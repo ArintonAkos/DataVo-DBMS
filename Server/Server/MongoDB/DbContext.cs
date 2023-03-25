@@ -6,10 +6,10 @@ namespace Server.Server.MongoDB
     internal class DbContext : MongoClient
     {
         private DbContext() : base("mongodb://localhost:27017/")
-        {
-        }
+        { }
 
         private static DbContext _instance;
+        
         public static DbContext Instance
         {
             get
@@ -32,17 +32,17 @@ namespace Server.Server.MongoDB
             await database.DropCollectionAsync(tableName);
         }
 
-        public async void InsertIntoTable(BsonDocument values, String tableName, String databaseName)
+        public void InsertIntoTable(List<BsonDocument> values, String tableName, String databaseName)
         {
             try
             {
                 var database = GetDatabase(databaseName);
                 var table = database.GetCollection<BsonDocument>(tableName);
-                await table.InsertOneAsync(values);
+                table.InsertMany(values);
             }
             catch (Exception)
             {
-                throw;
+                throw new Exception("Insert operation failed, mongodb threw an exception!");
             }
         }
     }
