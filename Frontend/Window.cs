@@ -1,13 +1,7 @@
-﻿using Frontend.Client.Requests;
-using Frontend.Client.Responses;
-using Frontend.Services;
-using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
 using System.Windows.Forms;
+using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace Frontend
 {
@@ -18,67 +12,100 @@ namespace Frontend
             InitializeComponent();
         }
 
+        private void InitializeEditorTree()
+        {
+            EditorTree.BeginUpdate();
+            EditorTree.Nodes.Add(new TreeNode("Visual Query Designers"));
+            EditorTree.Nodes.Add(new TreeNode("Open folder"));
+            EditorTree.EndUpdate();
+        }
+
+        private void OpenFolderForEditorTree(string directory)
+        {
+            EditorTree.BeginUpdate();
+            EditorTree.Nodes[0].Text = Path.GetFileName(directory);
+
+            foreach (string file in Directory.GetFiles(directory))
+            {
+                EditorTree.Nodes[0].Nodes.Add(new TreeNode(Path.GetFileName(file)));
+            }
+
+            EditorTree.Nodes[0].Expand();
+            EditorTree.EndUpdate();
+        }
+
+        private void CreateNewEditorTab(string filename)
+        {
+            TabPage tabPage = new TabPage(filename);
+            EditorTabControl.TabPages.Add(tabPage);
+
+            RichTextBox textBox = new RichTextBox();
+            textBox.Dock = DockStyle.Fill;
+            textBox.BorderStyle = BorderStyle.None;
+
+            tabPage.Controls.Add(textBox);
+        }
+
+        private RichTextBox GetEditorTextBox(int index)
+        {
+            return (RichTextBox)EditorTabControl.TabPages[index].Controls[0];
+        }
+
         private void Window_Load(object sender, EventArgs e)
         {
-            stripFilenameLabel.Text = string.Empty;
+            InitializeEditorTree();
+
+            EditorTabControl.TabPages.Clear();
         }
 
-        private async void stripExecute_Click(object sender, EventArgs e)
+        private void MenuNewFileOption_Click(object sender, EventArgs e)
         {
-            Response response = await HttpService.Post(new Request 
-            { 
-                Data = textEditor.Text 
-            });
+            SaveFileDialog saveFileDialog = new SaveFileDialog();
+            saveFileDialog.Filter = "SQL files (*.sql)|*.sql";
+            saveFileDialog.RestoreDirectory = true;
 
-            tabMessagesText.Text = response.Data;
-        }
-
-        private void menuNewFile_Click(object sender, EventArgs e)
-        {
-            SaveFileDialog fileChooser = new SaveFileDialog();
-
-            fileChooser.InitialDirectory = "c:\\";
-            fileChooser.Filter = "SQL files (*.sql)|*.sql";
-            fileChooser.RestoreDirectory = true;
-
-            if (fileChooser.ShowDialog() == DialogResult.OK)
+            if (saveFileDialog.ShowDialog() == DialogResult.OK)
             {
-                stripFilenameLabel.Text = fileChooser.FileName;
-                File.Create(stripFilenameLabel.Text);
+                File.Create(saveFileDialog.FileName);
+                CreateNewEditorTab(Path.GetFileName(saveFileDialog.FileName));
             }
         }
 
-        private void menuOpenFile_Click(object sender, EventArgs e)
+        private void MenuOpenFileOption_Click(object sender, EventArgs e)
         {
-            OpenFileDialog fileChooser = new OpenFileDialog();
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.Filter = "SQL files (*.sql)|*.sql";
+            openFileDialog.RestoreDirectory = true;
 
-            fileChooser.InitialDirectory = "c:\\";
-            fileChooser.Filter = "SQL files (*.sql)|*.sql";
-            fileChooser.RestoreDirectory = true;
-
-            if (fileChooser.ShowDialog() == DialogResult.OK)
+            if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
-                stripFilenameLabel.Text = fileChooser.FileName;
-                textEditor.Text = File.ReadAllText(stripFilenameLabel.Text);
+                CreateNewEditorTab(Path.GetFileName(openFileDialog.FileName));
+                
+                RichTextBox textBox = GetEditorTextBox(EditorTabControl.TabPages.Count - 1);
+                textBox.Text = File.ReadAllText(openFileDialog.FileName);
             }
         }
 
-        private void menuSaveFile_Click(object sender, EventArgs e)
+        private void MenuOpenFolderOption_Click(object sender, EventArgs e)
         {
-            File.WriteAllText(stripFilenameLabel.Text, textEditor.Text);
+            CommonOpenFileDialog dialog = new CommonOpenFileDialog();
+            dialog.RestoreDirectory = true;
+            dialog.IsFolderPicker = true;
+
+            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
+            {
+                OpenFolderForEditorTree(dialog.FileName);
+            }
         }
 
-        private void menuExit_Click(object sender, EventArgs e)
+        private void MenuExitOption_Click(object sender, EventArgs e)
         {
             Application.Exit();
         }
 
-        private void textEditor_KeyDown(object sender, KeyEventArgs e)
+        private void StripExecuteButton_Click(object sender, EventArgs e)
         {
-            if (e.Modifiers == Keys.Control && e.KeyCode == Keys.S)
-            {
-                menuSaveFile_Click(this, e);
-            }
+
         }
     }
 }
