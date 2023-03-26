@@ -1,10 +1,8 @@
 ﻿using Server.Logging;
-using Server.Models;
+using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using System.Text.RegularExpressions;
-using Server.Utils;
-using Server.Models;
 
 namespace Server.Parser.DDL
 {
@@ -17,7 +15,7 @@ namespace Server.Parser.DDL
             _model = CreateDatabaseModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(Guid session)
         {
             try
             {

@@ -1,21 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Server.Server.Responses.Controllers.Parser;
 
 namespace Server.Server.Responses
 {
-    internal class ErrorResponse : Response
+    internal class ErrorResponse : ParseResponse
     {
         public ErrorResponse(Exception e)
         {
-            this.Data = new()
+            Data = new()
             {
-                new ScriptResponse
+                new()
                 {
                     IsSuccess = false,
-                    Actions = new() { ActionResponse.Error(e) }
+                    Actions = new List<ActionResponse>()
+                    {
+                        ActionResponse.Error(e)
+                    }
                 }
             };
         }

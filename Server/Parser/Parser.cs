@@ -1,24 +1,23 @@
 ﻿using Server.Parser.Actions;
-using Server.Server.Requests;
+using Server.Parser.Utils;
+using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses;
-using Server.Utils;
-using System;
-
+using Server.Server.Responses.Controllers.Parser;
 
 namespace Server.Parser
 {
     internal class Parser
     {
-        private Request Request { get; set; }
+        private ParseRequest Request { get; set; }
 
-        public Parser(Request request)
+        public Parser(ParseRequest request)
         {
             this.Request = request;
         }
 
-        public Response Parse()
+        public ParseResponse Parse()
         {
-            Response response = new();
+            ParseResponse response = new();
 
             List<Queue<IDbAction>> runnables = RequestMapper.ToRunnables(this.Request);
 
@@ -30,7 +29,7 @@ namespace Server.Parser
                 {
                     try
                     {
-                        scriptResponse.Actions.Add(runnable.Dequeue().Perform());
+                        scriptResponse.Actions.Add(runnable.Dequeue().Perform(Request.Session));
                     }
                     catch (Exception ex)
                     {

@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿
+using System.Text.RegularExpressions;
 
 namespace Server.Utils
 {
@@ -17,6 +14,16 @@ namespace Server.Utils
             }
 
             return false;
+        }
+
+        public static string RemoveWhiteSpaces(this string source)
+        {
+            return Regex.Replace(source, @"\s+", "");
+        }
+
+        public static string MatchToParsable(this string source)
+        {
+            return Regex.Replace(source, @"^\((.*)\),", @"$1");
         }
     }
 }

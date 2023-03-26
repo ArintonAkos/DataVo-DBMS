@@ -1,5 +1,5 @@
 ﻿using Server.Logging;
-using Server.Models;
+using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.MongoDB;
@@ -16,7 +16,7 @@ namespace Server.Parser.DDL
             _model = DropTableModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(Guid session)
         {
             try
             {
@@ -24,7 +24,7 @@ namespace Server.Parser.DDL
 
                 DbContext.Instance.DropTable(_model.TableName, "University");
 
-                Logger.Info(_model.TableName);
+                Logger.Info($"Table {_model.TableName} successfully dropped!");
                 Messages.Add($"Table {_model.TableName} successfully dropped!");
             }
             catch (Exception ex) 
@@ -32,8 +32,6 @@ namespace Server.Parser.DDL
                 Logger.Error(ex.Message);
                 Messages.Add(ex.Message);
             }
-
-            
         }
     }
 }
