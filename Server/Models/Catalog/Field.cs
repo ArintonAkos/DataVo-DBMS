@@ -94,6 +94,16 @@ namespace Server.Models.Catalog
                 return "float";
             }
 
+            if (type.Contains("bit"))
+            {
+                return "bit";
+            }
+
+            if (type.Contains("date"))
+            {
+                return "date";
+            }
+
             return "varchar";
         }
     }
