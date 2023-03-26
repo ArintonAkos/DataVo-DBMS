@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using Frontend.Client.Requests;
 using Frontend.Client.Responses;
@@ -52,13 +54,15 @@ namespace Frontend
         {
             TabPage tabPage = new TabPage(Path.GetFileName(filePath));
             tabPage.Name = filePath;
-            EditorTabControl.TabPages.Add(tabPage);
 
             RichTextBox textBox = new RichTextBox();
             textBox.Dock = DockStyle.Fill;
             textBox.BorderStyle = BorderStyle.None;
+            textBox.Font = new Font("Consolas", 11);
 
             tabPage.Controls.Add(textBox);
+
+            EditorTabControl.TabPages.Add(tabPage);
         }
 
         private void CreateNewEditorTabWithContent(string filePath)
@@ -106,7 +110,7 @@ namespace Frontend
 
         private void MenuSaveFileOption_Click(object sender, EventArgs e)
         {
-            if (EditorTabControl.TabPages.Count > 0)
+            if (EditorTabControl.SelectedIndex >= 0)
             {
                 RichTextBox textBox = GetEditorTextBox(EditorTabControl.SelectedIndex);
                 File.WriteAllText(EditorTabControl.SelectedTab.Name, textBox.Text);
@@ -132,6 +136,11 @@ namespace Frontend
 
         private async void StripExecuteButton_Click(object sender, EventArgs e)
         {
+            if (EditorTabControl.SelectedIndex < 0)
+            {
+                return;
+            }
+
             ParseResponse response = await HttpService.Post(new Request()
             {
                 Data = GetEditorTextBox(EditorTabControl.SelectedIndex).Text
@@ -150,7 +159,7 @@ namespace Frontend
 
         private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
-            if (!File.Exists(e.Node.Name) || Path.GetExtension(e.Node.Text) != ".sql") 
+            if (!File.Exists(e.Node.Name) || Path.GetExtension(e.Node.Text) != ".sql")
             {
                 return;
             }
@@ -172,6 +181,19 @@ namespace Frontend
             if (e.Modifiers == Keys.Control && e.KeyCode == Keys.S)
             {
                 MenuSaveFileOption_Click(this, e);
+            }
+        }
+
+        private void EditorTabPage_MouseClicked(object sender, MouseEventArgs e)
+        {
+            var tabControl = sender as TabControl;
+            var tabs = tabControl.TabPages;
+
+            if (e.Button == MouseButtons.Middle)
+            {
+                tabs.Remove(tabs.Cast<TabPage>()
+                        .Where((t, i) => tabControl.GetTabRect(i).Contains(e.Location))
+                        .First());
             }
         }
     }
