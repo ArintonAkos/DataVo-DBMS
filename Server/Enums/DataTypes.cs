@@ -6,6 +6,8 @@ namespace Server.Enums
     {
         Int,
         Float,
+        Bit,
+        Date,
         Varchar
     }
 }

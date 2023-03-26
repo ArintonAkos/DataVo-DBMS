@@ -1,4 +1,6 @@
 ﻿
+using System.Globalization;
+
 namespace Server.Models.Catalog
 {
     public class Column
@@ -18,6 +20,8 @@ namespace Server.Models.Catalog
                     return Type switch
                     {
                         "Varchar" => (Length < Value.Length) ? Value[..Length] : Value,
+                        "Date" => DateOnly.Parse(Value),
+                        "Bit" => bool.Parse(Value),
                         "Int" => int.Parse(Value),
                         "Float" => float.Parse(Value),
                         _ => null
