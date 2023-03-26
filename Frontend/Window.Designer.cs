@@ -29,7 +29,7 @@
         private void InitializeComponent()
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Window));
-            System.Windows.Forms.TreeNode treeNode3 = new System.Windows.Forms.TreeNode("OpenFolder");
+            System.Windows.Forms.TreeNode treeNode1 = new System.Windows.Forms.TreeNode("Open folder");
             this.menu = new System.Windows.Forms.MenuStrip();
             this.MenuFileOption = new System.Windows.Forms.ToolStripMenuItem();
             this.MenuNewFileOption = new System.Windows.Forms.ToolStripMenuItem();
@@ -71,7 +71,7 @@
             this.MenuFileOption});
             this.menu.Location = new System.Drawing.Point(0, 0);
             this.menu.Name = "menu";
-            this.menu.Size = new System.Drawing.Size(782, 28);
+            this.menu.Size = new System.Drawing.Size(782, 30);
             this.menu.TabIndex = 0;
             this.menu.Text = "menuStrip1";
             // 
@@ -84,41 +84,41 @@
             this.MenuOpenFolderOption,
             this.MenuExitOption});
             this.MenuFileOption.Name = "MenuFileOption";
-            this.MenuFileOption.Size = new System.Drawing.Size(46, 24);
+            this.MenuFileOption.Size = new System.Drawing.Size(46, 26);
             this.MenuFileOption.Text = "File";
             // 
             // MenuNewFileOption
             // 
             this.MenuNewFileOption.Name = "MenuNewFileOption";
-            this.MenuNewFileOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuNewFileOption.Size = new System.Drawing.Size(172, 26);
             this.MenuNewFileOption.Text = "New file";
             this.MenuNewFileOption.Click += new System.EventHandler(this.MenuNewFileOption_Click);
             // 
             // MenuOpenFileOption
             // 
             this.MenuOpenFileOption.Name = "MenuOpenFileOption";
-            this.MenuOpenFileOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuOpenFileOption.Size = new System.Drawing.Size(172, 26);
             this.MenuOpenFileOption.Text = "Open file";
             this.MenuOpenFileOption.Click += new System.EventHandler(this.MenuOpenFileOption_Click);
             // 
             // MenuSaveFileOption
             // 
             this.MenuSaveFileOption.Name = "MenuSaveFileOption";
-            this.MenuSaveFileOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuSaveFileOption.Size = new System.Drawing.Size(172, 26);
             this.MenuSaveFileOption.Text = "Save file";
             this.MenuSaveFileOption.Click += new System.EventHandler(this.MenuSaveFileOption_Click);
             // 
             // MenuOpenFolderOption
             // 
             this.MenuOpenFolderOption.Name = "MenuOpenFolderOption";
-            this.MenuOpenFolderOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuOpenFolderOption.Size = new System.Drawing.Size(172, 26);
             this.MenuOpenFolderOption.Text = "Open folder";
             this.MenuOpenFolderOption.Click += new System.EventHandler(this.MenuOpenFolderOption_Click);
             // 
             // MenuExitOption
             // 
             this.MenuExitOption.Name = "MenuExitOption";
-            this.MenuExitOption.Size = new System.Drawing.Size(224, 26);
+            this.MenuExitOption.Size = new System.Drawing.Size(172, 26);
             this.MenuExitOption.Text = "Exit";
             this.MenuExitOption.Click += new System.EventHandler(this.MenuExitOption_Click);
             // 
@@ -128,9 +128,9 @@
             this.strip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.StripExecuteButton,
             this.stripSeparator});
-            this.strip.Location = new System.Drawing.Point(0, 28);
+            this.strip.Location = new System.Drawing.Point(0, 30);
             this.strip.Name = "strip";
-            this.strip.Size = new System.Drawing.Size(782, 27);
+            this.strip.Size = new System.Drawing.Size(782, 31);
             this.strip.TabIndex = 1;
             this.strip.Text = "toolStrip1";
             // 
@@ -139,14 +139,14 @@
             this.StripExecuteButton.Image = ((System.Drawing.Image)(resources.GetObject("StripExecuteButton.Image")));
             this.StripExecuteButton.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.StripExecuteButton.Name = "StripExecuteButton";
-            this.StripExecuteButton.Size = new System.Drawing.Size(84, 24);
+            this.StripExecuteButton.Size = new System.Drawing.Size(84, 28);
             this.StripExecuteButton.Text = "Execute";
             this.StripExecuteButton.Click += new System.EventHandler(this.StripExecuteButton_Click);
             // 
             // stripSeparator
             // 
             this.stripSeparator.Name = "stripSeparator";
-            this.stripSeparator.Size = new System.Drawing.Size(6, 27);
+            this.stripSeparator.Size = new System.Drawing.Size(6, 31);
             // 
             // ResponseTabPanel
             // 
@@ -163,10 +163,10 @@
             // tabOutput
             // 
             this.tabOutput.Controls.Add(this.ResponseTabOutputText);
-            this.tabOutput.Location = new System.Drawing.Point(4, 25);
+            this.tabOutput.Location = new System.Drawing.Point(4, 27);
             this.tabOutput.Name = "tabOutput";
             this.tabOutput.Padding = new System.Windows.Forms.Padding(3);
-            this.tabOutput.Size = new System.Drawing.Size(750, 104);
+            this.tabOutput.Size = new System.Drawing.Size(750, 102);
             this.tabOutput.TabIndex = 0;
             this.tabOutput.Text = "Output";
             this.tabOutput.UseVisualStyleBackColor = true;
@@ -180,7 +180,7 @@
             this.ResponseTabOutputText.Location = new System.Drawing.Point(0, 0);
             this.ResponseTabOutputText.Name = "ResponseTabOutputText";
             this.ResponseTabOutputText.ReadOnly = true;
-            this.ResponseTabOutputText.Size = new System.Drawing.Size(754, 104);
+            this.ResponseTabOutputText.Size = new System.Drawing.Size(754, 102);
             this.ResponseTabOutputText.TabIndex = 0;
             this.ResponseTabOutputText.Text = "";
             // 
@@ -235,7 +235,7 @@
             this.EditorExplorerLabel.AutoSize = true;
             this.EditorExplorerLabel.Location = new System.Drawing.Point(4, 6);
             this.EditorExplorerLabel.Name = "EditorExplorerLabel";
-            this.EditorExplorerLabel.Size = new System.Drawing.Size(57, 16);
+            this.EditorExplorerLabel.Size = new System.Drawing.Size(72, 18);
             this.EditorExplorerLabel.TabIndex = 1;
             this.EditorExplorerLabel.Text = "Explorer";
             this.EditorExplorerLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -248,11 +248,11 @@
             this.EditorTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.EditorTree.Location = new System.Drawing.Point(4, 28);
             this.EditorTree.Name = "EditorTree";
-            treeNode3.Name = "EditorTreeOpenFolder";
-            treeNode3.Tag = "None";
-            treeNode3.Text = "OpenFolder";
+            treeNode1.Name = "EditorTreeOpenFolder";
+            treeNode1.Tag = "None";
+            treeNode1.Text = "Open folder";
             this.EditorTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
-            treeNode3});
+            treeNode1});
             this.EditorTree.Size = new System.Drawing.Size(68, 217);
             this.EditorTree.TabIndex = 0;
             this.EditorTree.NodeMouseDoubleClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.EditorTree_NodeMouseDoubleClick);
@@ -269,14 +269,15 @@
             this.EditorTabControl.Size = new System.Drawing.Size(673, 246);
             this.EditorTabControl.TabIndex = 0;
             this.EditorTabControl.KeyDown += new System.Windows.Forms.KeyEventHandler(this.EditorTabControl_KeyDown);
+            this.EditorTabControl.MouseClick += new System.Windows.Forms.MouseEventHandler(this.EditorTabPage_MouseClicked);
             // 
             // EditorTab1
             // 
             this.EditorTab1.Controls.Add(this.EditorTab1Text);
-            this.EditorTab1.Location = new System.Drawing.Point(4, 25);
+            this.EditorTab1.Location = new System.Drawing.Point(4, 27);
             this.EditorTab1.Name = "EditorTab1";
             this.EditorTab1.Padding = new System.Windows.Forms.Padding(3);
-            this.EditorTab1.Size = new System.Drawing.Size(665, 217);
+            this.EditorTab1.Size = new System.Drawing.Size(665, 215);
             this.EditorTab1.TabIndex = 0;
             this.EditorTab1.Text = "path";
             this.EditorTab1.UseVisualStyleBackColor = true;
@@ -289,7 +290,7 @@
             this.EditorTab1Text.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.EditorTab1Text.Location = new System.Drawing.Point(0, 0);
             this.EditorTab1Text.Name = "EditorTab1Text";
-            this.EditorTab1Text.Size = new System.Drawing.Size(672, 221);
+            this.EditorTab1Text.Size = new System.Drawing.Size(672, 219);
             this.EditorTab1Text.TabIndex = 0;
             this.EditorTab1Text.Text = "";
             // 
@@ -302,8 +303,8 @@
             this.Controls.Add(this.ResponseTabPanel);
             this.Controls.Add(this.strip);
             this.Controls.Add(this.menu);
+            this.Font = new System.Drawing.Font("Consolas", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-            this.MainMenuStrip = this.menu;
             this.Name = "Window";
             this.Text = "Datavo DBMS";
             this.Load += new System.EventHandler(this.Window_Load);
