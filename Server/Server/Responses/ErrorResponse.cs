@@ -1,13 +1,14 @@
-﻿
+﻿using Server.Server.Responses.Controllers.Parser;
+
 namespace Server.Server.Responses
 {
-    public class ErrorResponse : Response
+    internal class ErrorResponse : ParseResponse
     {
         public ErrorResponse(Exception e)
         {
-            this.Data = new()
+            Data = new()
             {
-                new ScriptResponse()
+                new()
                 {
                     IsSuccess = false,
                     Actions = new List<ActionResponse>()

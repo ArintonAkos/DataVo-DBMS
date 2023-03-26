@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Frontend.Client.Responses
 {
-    public class ScriptResponse
+    internal class ScriptResponse
     {
         [JsonProperty]
         public List<ActionResponse> Actions { get; set; } = new List<ActionResponse>();

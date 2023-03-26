@@ -5,7 +5,7 @@ using System;
 
 namespace Frontend.Client.Responses
 {
-    public class ActionResponse
+    internal class ActionResponse
     {
         [JsonProperty]
         public ActionDataResponse Data { get; set; }
