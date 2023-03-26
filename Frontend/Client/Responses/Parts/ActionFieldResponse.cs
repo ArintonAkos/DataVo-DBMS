@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Frontend.Client.Responses.Parts
 {
-    public class ActionFieldResponse
+    internal class ActionFieldResponse
     {
         [JsonProperty]
         public List<FieldResponse> Fields { get; set; } = new List<FieldResponse>();

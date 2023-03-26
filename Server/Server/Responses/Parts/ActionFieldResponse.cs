@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses.Parts
 {
-    public class ActionFieldResponse
+    internal class ActionFieldResponse
     {
         [JsonProperty]
         public List<FieldResponse> Fields { get; set; } = new();

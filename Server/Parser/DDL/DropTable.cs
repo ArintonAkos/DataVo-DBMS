@@ -24,7 +24,7 @@ namespace Server.Parser.DDL
 
                 DbContext.Instance.DropTable(_model.TableName, "University");
 
-                Logger.Info(_model.TableName);
+                Logger.Info($"Table {_model.TableName} successfully dropped!");
                 Messages.Add($"Table {_model.TableName} successfully dropped!");
             }
             catch (Exception ex) 

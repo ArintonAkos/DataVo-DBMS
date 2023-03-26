@@ -1,11 +1,10 @@
 ﻿using Newtonsoft.Json;
-using System.Collections.Generic;
 
 namespace Frontend.Client.Responses
 {
-    public class Response
+    internal class Response
     {
         [JsonProperty("data")]
-        public List<ScriptResponse> Data { get; set; }
+        public dynamic Data { get; set; }
     }
 }

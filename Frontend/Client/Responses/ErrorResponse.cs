@@ -1,13 +1,14 @@
-﻿using System;
+﻿using Frontend.Client.Responses.Controllers.Parser;
+using System;
 using System.Collections.Generic;
 
 namespace Frontend.Client.Responses
 {
-    public class ErrorResponse : Response
+    internal class ErrorResponse : ParseResponse
     {
         public ErrorResponse(Exception e)
         {
-            Data = new List<ScriptResponse>
+            Data = new List<ScriptResponse>()
             {
                 new ScriptResponse()
                 {

@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses.Parts
 {
-    public class ActionDataResponse
+    internal class ActionDataResponse
     {
         [JsonProperty]
         public List<List<DataResponse>> Data { get; set; } = new();

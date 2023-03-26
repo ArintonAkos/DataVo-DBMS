@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows.Forms;
 using Frontend.Client.Requests;
 using Frontend.Client.Responses;
+using Frontend.Client.Responses.Controllers.Parser;
 using Frontend.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
@@ -131,17 +132,18 @@ namespace Frontend
 
         private async void StripExecuteButton_Click(object sender, EventArgs e)
         {
-            Response response = await HttpService.Post(new Request()
+            ParseResponse response = await HttpService.Post(new Request()
             {
                 Data = GetEditorTextBox(EditorTabControl.SelectedIndex).Text
             });
 
-            foreach (ActionResponse action in response.Data[0].Actions)
+            foreach (ScriptResponse scriptResp in response.Data)
             {
-                action.Messages.ForEach(message => ResponseTabMessagesText.Text += message + "\n");
+                foreach (ActionResponse actionResp in scriptResp.Actions)
+                {
+                    actionResp.Messages.ForEach(message => ResponseTabMessagesText.Text += message + "\n");
+                }
             }
-
-            ResponseTabPanel.SelectedTab = tabMessages;
         }
 
         private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
