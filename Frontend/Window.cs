@@ -154,7 +154,7 @@ namespace Frontend
                 }
             }
 
-            ResponseTabPanel.SelectedTab = tabMessages;
+            ResponseTabPanel.SelectedTab = ResponseTabMessages;
         }
 
         private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
