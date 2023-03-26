@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using Frontend.Client.Requests;
 using Frontend.Client.Responses;
@@ -137,10 +136,12 @@ namespace Frontend
                 Data = GetEditorTextBox(EditorTabControl.SelectedIndex).Text
             });
 
-            foreach (ActionResponse action in response.Data.Actions)
+            foreach (ActionResponse action in response.Data[0].Actions)
             {
                 action.Messages.ForEach(message => ResponseTabMessagesText.Text += message + "\n");
             }
+
+            ResponseTabPanel.SelectedTab = tabMessages;
         }
 
         private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)

@@ -7,12 +7,15 @@ namespace Frontend.Client.Responses
     {
         public ErrorResponse(Exception e)
         {
-            this.Data = new ScriptResponse()
+            Data = new List<ScriptResponse>
             {
-                IsSuccess = false,
-                Actions = new List<ActionResponse>() 
+                new ScriptResponse()
                 {
-                    ActionResponse.Error(e) 
+                    IsSuccess = false,
+                    Actions = new List<ActionResponse>()
+                    {
+                        ActionResponse.Error(e)
+                    }
                 }
             };
         }
