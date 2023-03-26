@@ -5,7 +5,7 @@ namespace Server.Server.Responses
     public class Response
     {
         [JsonProperty("data")]
-        public dynamic Data { get; set; }
+        public List<ScriptResponse> Data { get; set; }
 
         public String ToJson()
         {
