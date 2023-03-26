@@ -1,11 +1,6 @@
 ﻿using Server.Server.MongoDB;
 using Server.Server.Responses;
 using Server.Server.Responses.Parts;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Server.Parser.Actions
 {
@@ -26,11 +21,11 @@ namespace Server.Parser.Actions
         /// Do actions on the Messages, Fields, Data fields.
         /// These values will be returned.
         /// </summary>
-        public abstract void PerformAction();
+        public abstract void PerformAction(Guid session);
 
-        public ActionResponse Perform()
+        public ActionResponse Perform(Guid session)
         {
-            PerformAction();
+            PerformAction(session);
 
             return ActionResponse.FromRaw(Messages, Data, Fields);
         }

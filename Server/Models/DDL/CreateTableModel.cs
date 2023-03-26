@@ -1,4 +1,5 @@
-﻿using Server.Parser.Commands;
+﻿using Server.Parser.Utils;
+using Server.Models.Catalog;
 using System.Text.RegularExpressions;
 
 namespace Server.Models.DDL
@@ -18,6 +19,17 @@ namespace Server.Models.DDL
                     .ToList();
             }
         }
+
+        public List<String> UniqueAttributes
+        {
+            get
+            {
+                return Fields.FindAll(f => f.IsUnique == true)
+                    .Select(f => f.Name)
+                    .ToList ();
+            }
+        }
+        
 
         public List<ForeignKey> ForeignKeys
         {
@@ -63,7 +75,9 @@ namespace Server.Models.DDL
                 TableName = TableName,
                 Fields = Fields,
                 PrimaryKeys = PrimaryKeys,
+                UniqueAttributes = UniqueAttributes,
                 ForeignKeys = ForeignKeys,
+                IndexFiles = new(),
             };
         }
     }

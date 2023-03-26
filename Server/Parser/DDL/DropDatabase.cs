@@ -1,11 +1,9 @@
-﻿using Microsoft.Extensions.Logging;
-using Server.Logging;
-using Server.Models;
+﻿using Server.Logging;
+using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace Server.Parser.DDL
 {
@@ -18,7 +16,7 @@ namespace Server.Parser.DDL
             _model = DropDatabaseModel.FromMatch(match);
         }
 
-        public override void PerformAction()
+        public override void PerformAction(Guid session)
         {
             try
             {
@@ -26,7 +24,7 @@ namespace Server.Parser.DDL
 
                 DbContext.Instance.DropDatabase(_model.DatabaseName);
 
-                Logger.Info(_model.DatabaseName);
+                Logger.Info($"Database {_model.DatabaseName} successfully dropped!");
                 Messages.Add($"Database {_model.DatabaseName} successfully dropped!");
             }
             catch (Exception ex)

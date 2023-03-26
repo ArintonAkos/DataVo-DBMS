@@ -1,19 +1,15 @@
-﻿using MongoDB.Driver;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace Server.Server.MongoDB
 {
     internal class DbContext : MongoClient
     {
         private DbContext() : base("mongodb://localhost:27017/")
-        {
-        }
+        { }
 
         private static DbContext _instance;
+        
         public static DbContext Instance
         {
             get
@@ -34,6 +30,20 @@ namespace Server.Server.MongoDB
         {
             var database = GetDatabase(databaseName);
             await database.DropCollectionAsync(tableName);
+        }
+
+        public void InsertIntoTable(List<BsonDocument> values, String tableName, String databaseName)
+        {
+            try
+            {
+                var database = GetDatabase(databaseName);
+                var table = database.GetCollection<BsonDocument>(tableName);
+                table.InsertMany(values);
+            }
+            catch (Exception)
+            {
+                throw new Exception("Insert operation failed, mongodb threw an exception!");
+            }
         }
     }
 }

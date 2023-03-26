@@ -1,12 +1,6 @@
-﻿using MongoDB.Driver.Core.Operations;
+﻿using Server.Models.Catalog;
 using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Xml.Serialization;
 
 namespace Server.Models.DDL
 {
@@ -21,7 +15,7 @@ namespace Server.Models.DDL
 
         public static CreateDatabaseModel FromMatch(Match match)
         {
-            return new CreateDatabaseModel(match.NthGroup(1).Value); ;
+            return new CreateDatabaseModel(match.NthGroup(1).Value);
         }
 
         public Database ToDatabase()
