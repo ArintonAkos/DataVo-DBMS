@@ -151,7 +151,7 @@ namespace Server.Models.Catalog
 
         public static List<Column> GetTableColumnsByName(List<string> columnNames, string tableName, string databaseName)
         {
-            XElement? table = GetTableElement(databaseName, tableName);
+            XElement? table = GetTableElement(databaseName, tableName)
                 ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
 
             List<Column> columns = new();
