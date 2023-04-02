@@ -100,6 +100,25 @@ namespace Server.Models.Catalog
             RemoveFromXML(indexFile);
         }
 
+        public static List<string> GetDatabases()
+        {
+            return _doc.Elements("Databases")
+                .Elements("Database")
+                .Select(e => e.Attribute("DatabaseName")!.Value)
+                .ToList();
+        }
+
+        public static List<string> GetTables(string databaseName)
+        {
+            XElement? rootDatabase = GetDatabaseElement(databaseName)
+                ?? throw new Exception($"Database {databaseName} does not exist!");
+            
+            return rootDatabase.Elements("Tables")
+                .Elements("Table")
+                .Select(e => e.Attribute("TableName")!.Value)
+                .ToList();
+        }
+
         public static List<string> GetTablePrimaryKeys(string tableName, string databaseName)
         {
             XElement? table = GetTableElement(databaseName, tableName);
@@ -113,13 +132,27 @@ namespace Server.Models.Catalog
                 .ToList();
         }
 
-        public static List<Column> GetTableColumnByName(List<string> columnNames, string tableName, string databaseName)
+        public static List<Column> GetTableColumns(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName)
+                ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
+
+            return table.Elements("Structure")
+                .Elements("Attribute")
+                .Select(e => new Column()
+                {
+                    Name = e.Attribute("Name")!.Value,
+                    Type = e.Attribute("Type")!.Value,
+                    Length = string.IsNullOrEmpty(e.Attribute("Length")?.Value) ? 
+                             0 : int.Parse(e.Attribute("Length")!.Value),
+                })
+                .ToList();
+        }
+
+        public static List<Column> GetTableColumnsByName(List<string> columnNames, string tableName, string databaseName)
         {
             XElement? table = GetTableElement(databaseName, tableName);
-            if (table == null)
-            {
-                return new();
-            }
+                ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
 
             List<Column> columns = new();
             foreach (string columnName in columnNames)
