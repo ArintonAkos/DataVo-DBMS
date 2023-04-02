@@ -21,7 +21,7 @@ namespace Server.Parser.DML
         {
             try
             {
-                List<BsonDocument> values = ProcessTableRows();
+                List<BsonDocument> values = ProcessTableRows("University");
 
                 DbContext.Instance.InsertIntoTable(values, _model.TableName, "University");
 
@@ -35,10 +35,16 @@ namespace Server.Parser.DML
             }
         }
 
-        private List<BsonDocument> ProcessTableRows()
+        private List<BsonDocument> ProcessTableRows(string databaseName)
         {
-            List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, "University");
-            List<Column> columns = Catalog.GetTableColumnTypes(_model.Columns, _model.TableName, "University");
+            List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
+            
+            List<Column> columns = Catalog.GetTableColumnByName(_model.Columns, _model.TableName, databaseName);
+            if (columns.Count == 0)
+            {
+                throw new Exception($"Table {_model.TableName} doesn't exist in database {databaseName}!");
+            }
+            
             List<BsonDocument> bsonData = new();
 
             int rowNumber = 0;
