@@ -51,6 +51,30 @@
             }
         }
 
+        public static string ShowDatabases
+        {
+            get
+            {
+                return @"^\s*show\s+databases\s*";
+            }
+        }
+
+        public static string ShowTables
+        {
+            get
+            {
+                return @"^\s*show\s+tables\s*";
+            }
+        }
+
+        public static string Describe
+        {
+            get
+            {
+                return @"^\s*describe\s+([A-Z_]+)\s*";
+            }
+        }
+
         public static string Go
         {
             get

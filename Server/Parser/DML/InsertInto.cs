@@ -38,13 +38,7 @@ namespace Server.Parser.DML
         private List<BsonDocument> ProcessTableRows(string databaseName)
         {
             List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
-            
-            List<Column> columns = Catalog.GetTableColumnByName(_model.Columns, _model.TableName, databaseName);
-            if (columns.Count == 0)
-            {
-                throw new Exception($"Table {_model.TableName} doesn't exist in database {databaseName}!");
-            }
-            
+            List<Column> columns = Catalog.GetTableColumnsByName(_model.Columns, _model.TableName, databaseName);
             List<BsonDocument> bsonData = new();
 
             int rowNumber = 0;
