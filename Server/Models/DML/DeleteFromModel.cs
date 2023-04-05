@@ -16,7 +16,7 @@ namespace Server.Models.DML
         public static DeleteFromModel FromMatch(Match match)
         {
             string tableName = match.Groups["TableName"].Value;
-            WhereModel whereModel = WhereModel.FromString(match.Groups["Where"].Value);
+            WhereModel whereModel = WhereModel.FromString(match.Groups["WhereStatement"].Value);
 
             return new DeleteFromModel
             {

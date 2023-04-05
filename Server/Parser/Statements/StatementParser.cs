@@ -87,12 +87,18 @@ namespace Server.Parser.Statements
             while (pos < input.Length)
             {
                 char c = input[pos];
+                int remainingLength = input.Length - (pos + 1);
 
                 if (char.IsWhiteSpace(c))
                 {
                     pos++;
                 }
-                else if (c == '(' || c == ')' || Operators.LogicalOperators.Contains(input.Substring(pos, 2)))
+                else if (c == '(' || c == ')')
+                {
+                    tokens.Enqueue(c.ToString());
+                    pos++;
+                }
+                else if (remainingLength >= 1 && Operators.LogicalOperators.Contains(input.Substring(pos, 2)))
                 {
                     tokens.Enqueue(input.Substring(pos, 2));
                     pos += 2;
@@ -174,7 +180,7 @@ namespace Server.Parser.Statements
 
             while (tokens.Any())
             {
-                string token = tokens.Peek();
+                string token = tokens.Dequeue();
 
                 if (token == "(")
                 {

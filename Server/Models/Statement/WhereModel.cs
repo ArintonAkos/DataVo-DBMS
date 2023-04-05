@@ -14,6 +14,7 @@ namespace Server.Models.Statement
 
         public static WhereModel FromString(string value)
         {
+            value = value.Remove(0, 5);
             Node statement = StatementParser.Parse(value);
 
             return new WhereModel
