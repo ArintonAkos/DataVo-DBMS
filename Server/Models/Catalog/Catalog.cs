@@ -40,12 +40,9 @@ namespace Server.Models.Catalog
 
         public static void CreateTable(Table table, string databaseName)
         {
-            XElement? rootDatabase = GetDatabaseElement(databaseName);
-            if (rootDatabase == null)
-            {
-                throw new Exception($"Database {databaseName} does not exist!");
-            }
-
+            XElement? rootDatabase = GetDatabaseElement(databaseName) 
+                ?? throw new Exception($"Database {databaseName} does not exist!");
+            
             XElement? existingTable = GetTableElement(rootDatabase, table.TableName);
             if (existingTable != null)
             {
@@ -63,43 +60,29 @@ namespace Server.Models.Catalog
 
         public static void DropDatabase(string databaseName)
         {
-            XElement? database = GetDatabaseElement(databaseName);
-
-            if (database == null)
-            {
-                return;
-            }
+            XElement? database = GetDatabaseElement(databaseName)
+                ?? throw new Exception($"Database {databaseName} does not exist!");
 
             RemoveFromXML(database);
         }
 
         public static void DropTable(string tableName, string databaseName)
         {
-            XElement? table = GetTableElement(databaseName, tableName);
-
-            if (table == null)
-            {
-                return;
-            }
+            XElement? table = GetTableElement(databaseName, tableName)
+                ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
 
             RemoveFromXML(table);
         }
 
         public static void CreateIndex(IndexFile indexFile, string tableName, string databaseName)
         {
-            XElement? table = GetTableElement(databaseName, tableName);
-            if (table == null)
-            {
-                throw new Exception("Table referred by index file doesn't exist!");
-            }
-
+            XElement? table = GetTableElement(databaseName, tableName) 
+                ?? throw new Exception("Table referred by index file doesn't exist!");
+            
             foreach (string columnName in indexFile.AttributeNames)
             {
-                XElement? column = GetTableAttributeElement(table, columnName);
-                if (column == null)
-                {
-                    throw new Exception("Column refered by index file doesn't exist!");
-                }
+                XElement? column = GetTableAttributeElement(table, columnName) 
+                    ?? throw new Exception("Column refered by index file doesn't exist!");
             }
 
             XElement root = table.Elements("IndexFiles")
@@ -111,13 +94,29 @@ namespace Server.Models.Catalog
 
         public static void DropIndex(string indexName, string tableName, string databaseName)
         {
-            XElement? indexFile = GetTableIndexElement(indexName, tableName, databaseName);
-            if (indexFile == null)
-            {
-                throw new Exception($"Index file {indexName} doesn't exist!");
-            }
-
+            XElement? indexFile = GetTableIndexElement(indexName, tableName, databaseName) 
+                ?? throw new Exception($"Index file {indexName} doesn't exist!");
+            
             RemoveFromXML(indexFile);
+        }
+
+        public static List<string> GetDatabases()
+        {
+            return _doc.Elements("Databases")
+                .Elements("Database")
+                .Select(e => e.Attribute("DatabaseName")!.Value)
+                .ToList();
+        }
+
+        public static List<string> GetTables(string databaseName)
+        {
+            XElement? rootDatabase = GetDatabaseElement(databaseName)
+                ?? throw new Exception($"Database {databaseName} does not exist!");
+            
+            return rootDatabase.Elements("Tables")
+                .Elements("Table")
+                .Select(e => e.Attribute("TableName")!.Value)
+                .ToList();
         }
 
         public static List<string> GetTablePrimaryKeys(string tableName, string databaseName)
@@ -128,34 +127,42 @@ namespace Server.Models.Catalog
                 return new();
             }
 
-            List<string> primaryKeys = new();
-            foreach (var element in table.Elements("PrimaryKeys").ToList())
-            {
-                primaryKeys.Add(element.Value);
-            }
-
-            return primaryKeys;
+            return table.Elements("PrimaryKeys")
+                .Select(e => e.Value)
+                .ToList();
         }
 
-        public static List<Column> GetTableColumnTypes(List<string> columnNames, string tableName, string databaseName)
+        public static List<Column> GetTableColumns(string tableName, string databaseName)
         {
-            XElement? table = GetTableElement(databaseName, tableName);
-            if (table == null)
-            {
-                return new();
-            }
+            XElement? table = GetTableElement(databaseName, tableName)
+                ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
+
+            return table.Elements("Structure")
+                .Elements("Attribute")
+                .Select(e => new Column()
+                {
+                    Name = e.Attribute("Name")!.Value,
+                    Type = e.Attribute("Type")!.Value,
+                    Length = string.IsNullOrEmpty(e.Attribute("Length")?.Value) ? 
+                             0 : int.Parse(e.Attribute("Length")!.Value),
+                })
+                .ToList();
+        }
+
+        public static List<Column> GetTableColumnsByName(List<string> columnNames, string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName)
+                ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
 
             List<Column> columns = new();
             foreach (string columnName in columnNames)
             {
-                XElement? column = GetTableAttributeElement(table, columnName);
-                if (column == null)
-                {
-                    throw new Exception($"Column {columnName} does not exist in table {tableName}!");
-                }
-
+                XElement? column = GetTableAttributeElement(table, columnName) 
+                    ?? throw new Exception($"Column {columnName} does not exist in table {tableName}!");
+                
                 columns.Add(new Column()
                 {
+                    Name = columnName,
                     Type = column.Attribute("Type")!.Value,
                     Length = string.IsNullOrEmpty(column.Attribute("Length")?.Value) ?
                              0 : int.Parse(column.Attribute("Length")!.Value),
@@ -234,17 +241,11 @@ namespace Server.Models.Catalog
             {
                 foreach (Reference reference in foreignKey.References)
                 {
-                    XElement? refTable = GetTableElement(databaseName, reference.ReferenceTableName);
-                    if (refTable == null)
-                    {
-                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
-                    }
-
-                    XElement? refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
-                    if (refAttribute == null)
-                    {
-                        throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
-                    }
+                    XElement? refTable = GetTableElement(databaseName, reference.ReferenceTableName) 
+                        ?? throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    
+                    XElement? refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName) 
+                        ?? throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
                 }
             }
         }

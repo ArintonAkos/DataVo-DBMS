@@ -1,10 +1,9 @@
 ﻿
-using System.Globalization;
-
 namespace Server.Models.Catalog
 {
     public class Column
     {
+        public string Name { get; set; }
         public string Type { get; set; }
         public int Length { get; set; }
         public string? Value { get; set; }
