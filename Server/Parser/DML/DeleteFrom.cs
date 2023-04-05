@@ -20,7 +20,16 @@ namespace Server.Parser.DML
 
         public override void PerformAction(Guid session)
         {
-            
+            // TO-DO: @Bulcsu - Implement this method
+            // We should get the data chunked from the database (2000 chunks maybe?)
+            // We should run the _model.WhereModel.Evaluate() method on each element of the chunk.
+            // If the result is true, we should keep the element in the chunk
+            // So you will have to run a filter on it
+            // Append the chunks and the return value will be the concatenateed lists of filtered chunks.
+
+            // We need chunks so we don't oerload the network and the server cpu and memory
+
+            // _model.WhereModel.Evaluate();
         }
     }
 }

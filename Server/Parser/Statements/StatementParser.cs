@@ -63,7 +63,7 @@ namespace Server.Parser.Statements
         /// </summary>
         /// <param name="input">The input string which will be parsed.</param>
         /// <returns>An object containing the </returns>
-        public static Node Parser(string input)
+        public static Node Parse(string input)
         {
             Queue<string> tokens = Tokenize(input);
             
@@ -211,7 +211,6 @@ namespace Server.Parser.Statements
                         {
                             Type = Node.NodeType.Operator,
                             Value = op,
-                            Left = null,
                             Right = right
                         };
 
@@ -274,7 +273,7 @@ namespace Server.Parser.Statements
             return values.Pop();
         }
 
-        private static bool isColumnName(string str)
+        private static bool IsColumnName(string str)
         {
             // Column names can only contain letters, digits, and underscores
             return Regex.IsMatch(str, "^[a-zA-Z0-9_]+$");

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Server.Parser.Statements;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -9,33 +10,26 @@ namespace Server.Models.Statement
 {
     internal class WhereModel
     {
-        private Stack<object> Stack;
+        private Node Statement;
 
-        public static WhereModel FromMatch(Match match)
+        public static WhereModel FromString(string value)
         {
-            var stack = ParseInputString(match.Value);
+            Node statement = StatementParser.Parse(value);
 
             return new WhereModel
             {
-                Stack = stack
+                Statement = statement
             };
         }
 
-        private static Stack<object> ParseInputString(string inputString)
+        public Boolean Evaluate(Dictionary<string, dynamic> dictionary)
         {
-            string[] tokens = inputString.Split(' ').Reverse().ToArray();
+            // TO-DO: @Bulcsu - Implement this method
+            // I'm not sure what the input parameter type should be,
+            // but my suggestions would be to get a dictionary with the
+            // column names as keys and the values as values
 
-            foreach (string token in tokens)
-            {
-                if (token == "AND" || token == "OR")
-                {
-                    stack.Push(token);
-                }
-                else
-                {
-                    stack.Push(token);
-                }
-            }
+            return StatementEvaluator.Evaluate(Statement, dictionary);
         }
     }
 }
