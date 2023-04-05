@@ -75,9 +75,11 @@ namespace Server.Parser.DML
 
                 if (!invalidRow)
                 {
-                    BsonDocument bsonDoc = new();
-                    bsonDoc.Add(new BsonElement("_id", id.Remove(id.Length - 1)));
-                    bsonDoc.Add(new BsonElement("columns", data.Remove(data.Length - 1)));
+                    BsonDocument bsonDoc = new()
+                    {
+                        new BsonElement("_id", id.Remove(id.Length - 1)),
+                        new BsonElement("columns", data.Remove(data.Length - 1))
+                    };
 
                     bsonData.Add(bsonDoc);
                 }

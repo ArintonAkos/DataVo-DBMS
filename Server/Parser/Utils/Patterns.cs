@@ -104,6 +104,23 @@
             }
         }
 
+        public static string DeleteFrom
+        {
+            get
+            {
+                return $@"^\s*delete\s+from\s+(?<TableName>[A-Z_]+)\s+(?<WhereStatement>{Where})\s*"; 
+               
+            }
+        }
+
+        public static string Where
+        {
+            get
+            {
+                return @"\s*where\s+(?<Conditions>(?<MainCondition>\w+\s*(=|<>|>|<|>=|<=|LIKE)\s*('[^']*'|[\w.]+))(?<AdditionalConditions>\s+(AND|OR)\s+(\w+\s*(=|<>|>|<|>=|<=|LIKE)\s*('[^']*'|[\w.]+)))*)\s*";
+            }
+        }
+
         public static string AddStartLine(this string s)
         {
             return @"^\s*" + s;
