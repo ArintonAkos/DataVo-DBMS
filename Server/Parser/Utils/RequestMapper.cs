@@ -18,6 +18,7 @@ namespace Server.Parser.Utils
             { Patterns.InsertInto, typeof(InsertInto) },
             { Patterns.CreateIndex, typeof(CreateIndex) },
             { Patterns.DropIndex, typeof(DropIndex) },
+            { Patterns.DeleteFrom, typeof(DeleteFrom) },
         };
         private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
 

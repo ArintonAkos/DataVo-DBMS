@@ -15,9 +15,9 @@ namespace Server.Models.Statement
             Operator
         }
 
-        public Node Left { get; set; }
-        public Node Right { get; set; }
+        public Node? Left { get; set; } = null;
+        public Node? Right { get; set; } = null;
         public NodeType Type { get; set; }
-        public string Value { get; set; }
+        public string? Value { get; set; } = null;
     }
 }
