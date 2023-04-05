@@ -132,7 +132,7 @@
         {
             get
             {
-                return $@"^\s*delete\s+from\s+(?<TableName>[A-Z_]+)\s+(?<WhereStatement>\s*where\s+(?<Conditions>(.*)+\s*)+;\s*)\s*"; 
+                return $@"^\s*delete\s+from\s+(?<TableName>[A-Z_]+)\s+(?<WhereStatement>{Where})\s*"; 
             }
         }
 
@@ -140,7 +140,7 @@
         {
             get
             {
-                return @"\s*where\s+(?<Conditions>(.*)+\s*)+;\s*";
+                return @"where(\s+\(?\s*(\w+)\s*(=|<|>|like)+\s*[''A-Z1-9]+\)?(\s+and|\s+or)?)+";
             }
         }
 
