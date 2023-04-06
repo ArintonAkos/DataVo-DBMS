@@ -1,10 +1,12 @@
 ﻿using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Driver;
 using Server.Enums;
 using Server.Utils;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -26,7 +28,7 @@ namespace Server.Models.Statement
             Double,
             Boolean,
             Null, // Any Type can be null, so we need a special type for it
-            Operator,
+            Operator
         }
 
         public class NodeValue
@@ -61,7 +63,7 @@ namespace Server.Models.Statement
             {
                 dynamic parsedValue;
                 NodeValueType valueType;
-                
+
                 if (rawValue.StartsWith("'") && rawValue.EndsWith("'"))
                 {
                     parsedValue = rawValue.TruncateLeftRight(1);
@@ -104,7 +106,7 @@ namespace Server.Models.Statement
             /// <exception cref="Exception">Thrown when the given parameter is not a known logical operator.</exception>
             public static NodeValue Operator(string rawValue)
             {
-                if (!Operators.LogicalOperators.Contains(rawValue))
+                if (!Operators.Supported().Contains(rawValue))
                 {
                     throw new Exception($"{rawValue} is not a known logical operator!");
                 }
@@ -160,7 +162,28 @@ namespace Server.Models.Statement
                     "<=" => result <= 0,
                     "=" => result == 0,
                     "!=" => result != 0,
+                    "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
                     _ => throw new Exception("Invalid operator: " + Operator),
+                };
+            }
+
+            private Boolean HandleArithmeticOperators(string Operator, NodeValue other)
+            {
+                if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
+                {
+                    throw new Exception($"Arithmetic operator can only be used for numeric types!");
+                }
+
+                dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
+                dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
+                
+                return Operator switch
+                {
+                    "+" => typedValue + typedOtherValue,
+                    "-" => typedValue - typedOtherValue,
+                    "*" => typedValue * typedOtherValue,
+                    "/" => typedValue / typedOtherValue,
+                    _ => throw new Exception($"Invalid operator: {Operator} for types!"),
                 };
             }
 
@@ -188,7 +211,12 @@ namespace Server.Models.Statement
             /// <returns>The converted value.</returns>
             private static IComparable ConvertValueToGeneric(dynamic value)
             {
-                return (IComparable)Convert.ChangeType(value, typeof(IComparable));
+                return value;                
+            }
+
+            private static dynamic ConvertGenericToType(IComparable comparable, Type type)
+            {
+                return Convert.ChangeType(comparable, type);
             }
         }
 
