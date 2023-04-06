@@ -59,5 +59,13 @@ namespace Server.Enums
             UPPER,
             LOWER
         };
+
+        public static List<String> Supported()
+        {
+            return ConditionOperators
+                .Concat(LogicalOperators)
+                .Concat(ArithmeticOperators)
+                .ToList();
+        }
     }
 }
