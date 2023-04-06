@@ -25,5 +25,17 @@ namespace Server.Utils
         {
             return Regex.Replace(source, @"^\((.*)\),", @"$1");
         }
+
+        public static string TruncateLeftRight(this string source, int charsToTruncate)
+        {
+            if (source.Length < charsToTruncate)
+            {
+                return source;
+            }
+
+            return source
+                .Remove(source.Length - 1, 1)
+                .Remove(0, 1);
+        }
     }
 }
