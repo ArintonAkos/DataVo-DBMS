@@ -25,7 +25,6 @@ namespace Server.Models.Statement
             Int,
             Double,
             Boolean,
-
             Null, // Any Type can be null, so we need a special type for it
             Operator,
         }
