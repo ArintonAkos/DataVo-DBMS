@@ -1,14 +1,5 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
-using MongoDB.Driver;
-using Server.Enums;
+﻿using Server.Enums;
 using Server.Utils;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Server.Models.Statement
 {
