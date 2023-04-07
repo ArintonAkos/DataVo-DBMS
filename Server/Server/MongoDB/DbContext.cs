@@ -45,5 +45,31 @@ namespace Server.Server.MongoDB
                 throw new Exception("Insert operation failed, mongodb threw an exception!");
             }
         }
+
+        public async void DeleteFormTable(List<String> toBeDeletedIds, String tableName, String databaseName)
+        {
+            if (toBeDeletedIds.Count == 0)
+            {
+                return;
+            }
+
+            var database = GetDatabase(databaseName);
+            var table = database.GetCollection<BsonDocument>(tableName);
+            var filter = Builders<BsonDocument>.Filter.Empty;
+            toBeDeletedIds.ForEach(id =>
+            {
+                var additionalFilter = Builders<BsonDocument>.Filter.Eq("_id", id);
+                filter |= additionalFilter; 
+            });
+            await table.DeleteManyAsync(filter);
+        }
+
+        public List<BsonDocument> GetStoredData(String tableName, String databaseName)
+        {
+            var database = GetDatabase(databaseName);
+            var table = database.GetCollection<BsonDocument>(tableName);
+            return table.Find(Builders<BsonDocument>.Filter.Empty)
+                .ToList();
+        }
     }
 }

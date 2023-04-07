@@ -1,16 +1,12 @@
-﻿using Server.Parser.Statements;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
+﻿using MongoDB.Bson;
+using Server.Models.Catalog;
+using Server.Parser.Statements;
 
 namespace Server.Models.Statement
 {
     internal class WhereModel
     {
-        private Node Statement;
+        private Node Statement { get; set; }
 
         public static WhereModel FromString(string value)
         {
@@ -23,14 +19,51 @@ namespace Server.Models.Statement
             };
         }
 
-        public Boolean Evaluate(Dictionary<string, dynamic> dictionary)
+        public List<string> Evaluate(List<string> primaryKeys, List<Column> tableColumns, List<BsonDocument> tableData)
         {
-            // TO-DO: @Bulcsu - Implement this method
-            // I'm not sure what the input parameter type should be,
-            // but my suggestions would be to get a dictionary with the
-            // column names as keys and the values as values
+            List<Dictionary<string, dynamic>> dataDictionary = ParseTableData(primaryKeys, tableColumns, tableData);
+            List<string> rowIds = tableData.Select(e => e.GetElement("_id").Value.AsString).ToList();
+            List<string> matchingRows = new();
 
-            return StatementEvaluator.Evaluate(Statement, dictionary);
+            for (int i = 0; i < dataDictionary.Count; i++)
+            {
+                if (StatementEvaluator.Evaluate(Statement, dataDictionary[i]))
+                {
+                    matchingRows.Add(rowIds[i]);
+                }
+            }
+
+            return matchingRows;
+        }
+
+        private List<Dictionary<string, dynamic>> ParseTableData(List<string> primaryKeys, List<Column> tableColumns, List<BsonDocument> tableData)
+        {
+            List<Dictionary<string, dynamic>> parsedTableData = new();
+
+            foreach (BsonDocument data in tableData)
+            {
+                string[] primaryKeyValues = data.GetElement("_id").Value.AsString.Split("#");
+                string[] columnValues = data.GetElement("columns").Value.AsString.Split("#");
+                Dictionary<string, dynamic> row = new();
+
+                int primaryKeyIdx = 0;
+                int columnValueIdx = 0;
+                foreach (Column column in tableColumns)
+                {
+                    if (primaryKeys.Contains(column.Name))
+                    {
+                        row[column.Name] = primaryKeyValues[primaryKeyIdx++];
+                    }
+                    else
+                    {
+                        row[column.Name] = columnValues[columnValueIdx++];
+                    }
+                }
+
+                parsedTableData.Add(row);
+            }
+
+            return parsedTableData;
         }
     }
 }

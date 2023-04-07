@@ -1,11 +1,10 @@
-﻿using Server.Models.DML;
+﻿using MongoDB.Bson;
+using Server.Logging;
+using Server.Models.Catalog;
+using Server.Models.DML;
 using Server.Parser.Actions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace Server.Parser.DML
 {
@@ -20,16 +19,24 @@ namespace Server.Parser.DML
 
         public override void PerformAction(Guid session)
         {
-            // TO-DO: @Bulcsu - Implement this method
-            // We should get the data chunked from the database (2000 chunks maybe?)
-            // We should run the _model.WhereModel.Evaluate() method on each element of the chunk.
-            // If the result is true, we should keep the element in the chunk
-            // So you will have to run a filter on it
-            // Append the chunks and the return value will be the concatenateed lists of filtered chunks.
+            try
+            {
+                List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, "University");
+                List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, "University");
+                List<BsonDocument> tableData = DbContext.Instance.GetStoredData(_model.TableName, "University");
+                
+                List<string> toBeDeleted = _model.WhereModel.Evaluate(primaryKeys, tableColumns, tableData);
+                
+                DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
 
-            // We need chunks so we don't oerload the network and the server cpu and memory
-
-            // _model.WhereModel.Evaluate();
+                Logger.Info($"Rows affected: {toBeDeleted.Count}");
+                Messages.Add($"Rows affected: {toBeDeleted.Count}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex.Message);
+                Messages.Add(ex.Message);
+            }
         }
     }
 }
