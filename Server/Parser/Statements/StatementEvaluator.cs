@@ -1,4 +1,5 @@
-﻿using Server.Models.Statement;
+﻿using Amazon.Runtime.Internal.Util;
+using Server.Models.Statement;
 
 namespace Server.Parser.Statements
 {
@@ -18,27 +19,21 @@ namespace Server.Parser.Statements
 
         private static dynamic EvaluateExpression(Node node, Dictionary<string, object> data)
         {
-            return node.Type switch
+            switch (node.Type)
             {
-                Node.NodeType.Value => node.Value,
-                Node.NodeType.Column => node.FromColumnToNodeValue(data),
-                Node.NodeType.Operator => HandleOperator(node, data),
-                _ => throw new Exception("Invalid node type: " + node.Type),
+                case Node.NodeType.Value:
+                    return node.Value;
+                case Node.NodeType.Column:
+                    return node.FromColumnToNodeValue(data).Value;
+                case Node.NodeType.Operator:
+                    Node.NodeValue leftNodeValue = EvaluateExpression(node.Left!, data);
+                    Node.NodeValue rightNodeValue = EvaluateExpression(node.Right!, data);
+                    string op = (string)node.Value.Value!;
+
+                    return leftNodeValue.Compare(op, rightNodeValue);
             };
-        }
 
-        private static Boolean HandleOperator(Node node, Dictionary<string, object> data) 
-        {
-            if (node.Left == null || node.Right == null)
-            {
-                return false;
-            }
-
-            EvaluateExpression(node.Left, data);
-            EvaluateExpression(node.Right, data);
-
-            string operatorStr = (string)node.Value.Value!;
-            return node.Left.Compare(operatorStr, node.Right);
+            throw new Exception("Invalid node type!");
         }
     }
 }

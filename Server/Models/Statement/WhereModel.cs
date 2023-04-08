@@ -27,7 +27,9 @@ namespace Server.Models.Statement
 
             for (int i = 0; i < dataDictionary.Count; i++)
             {
-                if (StatementEvaluator.Evaluate(Statement, dataDictionary[i]))
+                Node statementInstance = Statement;
+                
+                if (StatementEvaluator.Evaluate(statementInstance, dataDictionary[i]))
                 {
                     matchingRows.Add(rowIds[i]);
                 }

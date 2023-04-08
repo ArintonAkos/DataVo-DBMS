@@ -255,13 +255,13 @@ namespace Server.Models.Statement
                 throw new Exception("Column names must be string!");
             }
 
-            Node newNode = this;
             string columnName = (string)Value.Value;
-
-            newNode.Type = NodeType.Value;
-            newNode.Value = NodeValue.Parse(data[columnName]);
-
-            return newNode;
+            
+            return new()
+            {
+                Type = NodeType.Value,
+                Value = NodeValue.Parse(data[columnName])
+            };
         }
     }
 }
