@@ -26,8 +26,9 @@ namespace Frontend
 
             foreach (string folder in Directory.GetDirectories(folderPath))
             {
-                root.Nodes.Add(new TreeNode());
-                AddFolderToEditorTree(root.Nodes[root.Nodes.Count - 1], folder);
+                TreeNode newNode = new TreeNode();
+                root.Nodes.Add(newNode);
+                AddFolderToEditorTree(newNode, folder);
             }
 
             foreach (string file in Directory.GetFiles(folderPath))
@@ -55,10 +56,12 @@ namespace Frontend
             TabPage tabPage = new TabPage(Path.GetFileName(filePath));
             tabPage.Name = filePath;
 
-            RichTextBox textBox = new RichTextBox();
-            textBox.Dock = DockStyle.Fill;
-            textBox.BorderStyle = BorderStyle.None;
-            textBox.Font = new Font("Consolas", 11);
+            RichTextBox textBox = new RichTextBox()
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Consolas", 11)
+            };
 
             tabPage.Controls.Add(textBox);
 
@@ -158,7 +161,6 @@ namespace Frontend
             }
 
             ResponseTabPanel.SelectedTab = ResponseTabMessages;
-
             StripExecuteButton.Enabled = true;
         }
 
