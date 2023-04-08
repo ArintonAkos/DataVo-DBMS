@@ -48,19 +48,10 @@ namespace Server.Server.MongoDB
 
         public async void DeleteFormTable(List<String> toBeDeletedIds, String tableName, String databaseName)
         {
-            if (toBeDeletedIds.Count == 0)
-            {
-                return;
-            }
-
             var database = GetDatabase(databaseName);
             var table = database.GetCollection<BsonDocument>(tableName);
-            var filter = Builders<BsonDocument>.Filter.Empty;
-            toBeDeletedIds.ForEach(id =>
-            {
-                var additionalFilter = Builders<BsonDocument>.Filter.Eq("_id", id);
-                filter |= additionalFilter; 
-            });
+            var filter = Builders<BsonDocument>.Filter.In("_id", toBeDeletedIds);           
+
             await table.DeleteManyAsync(filter);
         }
 
