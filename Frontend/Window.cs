@@ -141,9 +141,12 @@ namespace Frontend
                 return;
             }
 
+            StripExecuteButton.Enabled = false;
+
+            RichTextBox activeTab = GetEditorTextBox(EditorTabControl.SelectedIndex);
             ParseResponse response = await HttpService.Post(new Request()
             {
-                Data = GetEditorTextBox(EditorTabControl.SelectedIndex).Text
+                Data = string.IsNullOrEmpty(activeTab.SelectedText) ? activeTab.Text : activeTab.SelectedText
             });
 
             foreach (ScriptResponse scriptResp in response.Data)
@@ -155,6 +158,8 @@ namespace Frontend
             }
 
             ResponseTabPanel.SelectedTab = ResponseTabMessages;
+
+            StripExecuteButton.Enabled = true;
         }
 
         private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
