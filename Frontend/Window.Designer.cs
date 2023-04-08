@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            this.components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Window));
             System.Windows.Forms.TreeNode treeNode1 = new System.Windows.Forms.TreeNode("Open folder");
             this.Menu = new System.Windows.Forms.MenuStrip();
@@ -44,15 +45,16 @@
             this.ResponseTabOutput = new System.Windows.Forms.TabPage();
             this.ResponseTabOutputText = new System.Windows.Forms.RichTextBox();
             this.ResponseTabMessages = new System.Windows.Forms.TabPage();
+            this.ResponseTabMessagesText = new System.Windows.Forms.RichTextBox();
             this.EditorSplitContainer = new System.Windows.Forms.SplitContainer();
-            this.EditorExplorerLabel = new System.Windows.Forms.Label();
+            this.SidebarPanel = new System.Windows.Forms.TableLayoutPanel();
             this.EditorTree = new System.Windows.Forms.TreeView();
+            this.EditorExplorerLabel = new System.Windows.Forms.Label();
             this.EditorTabControl = new System.Windows.Forms.TabControl();
             this.EditorTab1 = new System.Windows.Forms.TabPage();
             this.EditorTab1Text = new System.Windows.Forms.RichTextBox();
             this.MainSplitContainer = new System.Windows.Forms.SplitContainer();
-            this.ResponseTabMessagesText = new System.Windows.Forms.RichTextBox();
-            this.SidebarPanel = new System.Windows.Forms.TableLayoutPanel();
+            this.EditorTreeImageList = new System.Windows.Forms.ImageList(this.components);
             this.Menu.SuspendLayout();
             this.strip.SuspendLayout();
             this.ResponseTabPanel.SuspendLayout();
@@ -62,13 +64,13 @@
             this.EditorSplitContainer.Panel1.SuspendLayout();
             this.EditorSplitContainer.Panel2.SuspendLayout();
             this.EditorSplitContainer.SuspendLayout();
+            this.SidebarPanel.SuspendLayout();
             this.EditorTabControl.SuspendLayout();
             this.EditorTab1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.MainSplitContainer)).BeginInit();
             this.MainSplitContainer.Panel1.SuspendLayout();
             this.MainSplitContainer.Panel2.SuspendLayout();
             this.MainSplitContainer.SuspendLayout();
-            this.SidebarPanel.SuspendLayout();
             this.SuspendLayout();
             // 
             // Menu
@@ -78,7 +80,7 @@
             this.MenuFileOption});
             this.Menu.Location = new System.Drawing.Point(0, 0);
             this.Menu.Name = "Menu";
-            this.Menu.Size = new System.Drawing.Size(782, 30);
+            this.Menu.Size = new System.Drawing.Size(782, 28);
             this.Menu.TabIndex = 0;
             this.Menu.Text = "menuStrip1";
             // 
@@ -91,7 +93,7 @@
             this.MenuOpenFolderOption,
             this.MenuExitOption});
             this.MenuFileOption.Name = "MenuFileOption";
-            this.MenuFileOption.Size = new System.Drawing.Size(46, 26);
+            this.MenuFileOption.Size = new System.Drawing.Size(46, 24);
             this.MenuFileOption.Text = "File";
             // 
             // MenuNewFileOption
@@ -135,9 +137,9 @@
             this.strip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.StripExecuteButton,
             this.stripSeparator});
-            this.strip.Location = new System.Drawing.Point(0, 30);
+            this.strip.Location = new System.Drawing.Point(0, 28);
             this.strip.Name = "strip";
-            this.strip.Size = new System.Drawing.Size(782, 31);
+            this.strip.Size = new System.Drawing.Size(782, 27);
             this.strip.TabIndex = 1;
             this.strip.Text = "toolStrip1";
             // 
@@ -146,14 +148,14 @@
             this.StripExecuteButton.Image = ((System.Drawing.Image)(resources.GetObject("StripExecuteButton.Image")));
             this.StripExecuteButton.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.StripExecuteButton.Name = "StripExecuteButton";
-            this.StripExecuteButton.Size = new System.Drawing.Size(84, 28);
+            this.StripExecuteButton.Size = new System.Drawing.Size(84, 24);
             this.StripExecuteButton.Text = "Execute";
             this.StripExecuteButton.Click += new System.EventHandler(this.StripExecuteButton_Click);
             // 
             // stripSeparator
             // 
             this.stripSeparator.Name = "stripSeparator";
-            this.stripSeparator.Size = new System.Drawing.Size(6, 31);
+            this.stripSeparator.Size = new System.Drawing.Size(6, 27);
             // 
             // ResponseTabPanel
             // 
@@ -201,6 +203,17 @@
             this.ResponseTabMessages.Text = "Messages";
             this.ResponseTabMessages.UseVisualStyleBackColor = true;
             // 
+            // ResponseTabMessagesText
+            // 
+            this.ResponseTabMessagesText.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.ResponseTabMessagesText.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.ResponseTabMessagesText.Location = new System.Drawing.Point(3, 3);
+            this.ResponseTabMessagesText.Name = "ResponseTabMessagesText";
+            this.ResponseTabMessagesText.ReadOnly = true;
+            this.ResponseTabMessagesText.Size = new System.Drawing.Size(738, 62);
+            this.ResponseTabMessagesText.TabIndex = 0;
+            this.ResponseTabMessagesText.Text = "";
+            // 
             // EditorSplitContainer
             // 
             this.EditorSplitContainer.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
@@ -220,6 +233,39 @@
             this.EditorSplitContainer.SplitterDistance = 80;
             this.EditorSplitContainer.TabIndex = 3;
             // 
+            // SidebarPanel
+            // 
+            this.SidebarPanel.ColumnCount = 1;
+            this.SidebarPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.SidebarPanel.Controls.Add(this.EditorTree, 0, 1);
+            this.SidebarPanel.Controls.Add(this.EditorExplorerLabel, 0, 0);
+            this.SidebarPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.SidebarPanel.Location = new System.Drawing.Point(0, 0);
+            this.SidebarPanel.Name = "SidebarPanel";
+            this.SidebarPanel.RowCount = 2;
+            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
+            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.SidebarPanel.Size = new System.Drawing.Size(80, 268);
+            this.SidebarPanel.TabIndex = 1;
+            // 
+            // EditorTree
+            // 
+            this.EditorTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.EditorTree.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.EditorTree.ImageIndex = 0;
+            this.EditorTree.ImageList = this.EditorTreeImageList;
+            this.EditorTree.Location = new System.Drawing.Point(3, 25);
+            this.EditorTree.Name = "EditorTree";
+            treeNode1.Name = "EditorTreeOpenFolder";
+            treeNode1.Tag = "None";
+            treeNode1.Text = "Open folder";
+            this.EditorTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
+            treeNode1});
+            this.EditorTree.SelectedImageIndex = 0;
+            this.EditorTree.Size = new System.Drawing.Size(74, 240);
+            this.EditorTree.TabIndex = 0;
+            this.EditorTree.NodeMouseDoubleClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.EditorTree_NodeMouseDoubleClick);
+            // 
             // EditorExplorerLabel
             // 
             this.EditorExplorerLabel.AutoSize = true;
@@ -231,21 +277,6 @@
             this.EditorExplorerLabel.TabIndex = 1;
             this.EditorExplorerLabel.Text = "Explorer";
             this.EditorExplorerLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // EditorTree
-            // 
-            this.EditorTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.EditorTree.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.EditorTree.Location = new System.Drawing.Point(3, 25);
-            this.EditorTree.Name = "EditorTree";
-            treeNode1.Name = "EditorTreeOpenFolder";
-            treeNode1.Tag = "None";
-            treeNode1.Text = "Open folder";
-            this.EditorTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
-            treeNode1});
-            this.EditorTree.Size = new System.Drawing.Size(74, 240);
-            this.EditorTree.TabIndex = 0;
-            this.EditorTree.NodeMouseDoubleClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.EditorTree_NodeMouseDoubleClick);
             // 
             // EditorTabControl
             // 
@@ -300,31 +331,12 @@
             this.MainSplitContainer.SplitterDistance = 274;
             this.MainSplitContainer.TabIndex = 4;
             // 
-            // ResponseTabMessagesText
+            // EditorTreeImageList
             // 
-            this.ResponseTabMessagesText.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.ResponseTabMessagesText.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.ResponseTabMessagesText.Location = new System.Drawing.Point(3, 3);
-            this.ResponseTabMessagesText.Name = "ResponseTabMessagesText";
-            this.ResponseTabMessagesText.ReadOnly = true;
-            this.ResponseTabMessagesText.Size = new System.Drawing.Size(738, 62);
-            this.ResponseTabMessagesText.TabIndex = 0;
-            this.ResponseTabMessagesText.Text = "";
-            // 
-            // SidebarPanel
-            // 
-            this.SidebarPanel.ColumnCount = 1;
-            this.SidebarPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.SidebarPanel.Controls.Add(this.EditorTree, 0, 1);
-            this.SidebarPanel.Controls.Add(this.EditorExplorerLabel, 0, 0);
-            this.SidebarPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.SidebarPanel.Location = new System.Drawing.Point(0, 0);
-            this.SidebarPanel.Name = "SidebarPanel";
-            this.SidebarPanel.RowCount = 2;
-            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
-            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.SidebarPanel.Size = new System.Drawing.Size(80, 268);
-            this.SidebarPanel.TabIndex = 1;
+            this.EditorTreeImageList.ImageStream = ((System.Windows.Forms.ImageListStreamer)(resources.GetObject("EditorTreeImageList.ImageStream")));
+            this.EditorTreeImageList.TransparentColor = System.Drawing.Color.Transparent;
+            this.EditorTreeImageList.Images.SetKeyName(0, "folder.png");
+            this.EditorTreeImageList.Images.SetKeyName(1, "file.png");
             // 
             // Window
             // 
@@ -350,14 +362,14 @@
             this.EditorSplitContainer.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.EditorSplitContainer)).EndInit();
             this.EditorSplitContainer.ResumeLayout(false);
+            this.SidebarPanel.ResumeLayout(false);
+            this.SidebarPanel.PerformLayout();
             this.EditorTabControl.ResumeLayout(false);
             this.EditorTab1.ResumeLayout(false);
             this.MainSplitContainer.Panel1.ResumeLayout(false);
             this.MainSplitContainer.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.MainSplitContainer)).EndInit();
             this.MainSplitContainer.ResumeLayout(false);
-            this.SidebarPanel.ResumeLayout(false);
-            this.SidebarPanel.PerformLayout();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -388,6 +400,7 @@
         private System.Windows.Forms.SplitContainer MainSplitContainer;
         private System.Windows.Forms.RichTextBox ResponseTabMessagesText;
         private System.Windows.Forms.TableLayoutPanel SidebarPanel;
+        private System.Windows.Forms.ImageList EditorTreeImageList;
     }
 }
 

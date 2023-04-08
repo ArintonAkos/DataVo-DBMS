@@ -26,7 +26,11 @@ namespace Frontend
 
             foreach (string folder in Directory.GetDirectories(folderPath))
             {
-                TreeNode newNode = new TreeNode();
+                TreeNode newNode = new TreeNode()
+                {
+                    ImageIndex = 0,
+                    SelectedImageIndex = 0
+                };
                 root.Nodes.Add(newNode);
                 AddFolderToEditorTree(newNode, folder);
             }
@@ -35,6 +39,8 @@ namespace Frontend
             {
                 root.Nodes.Add(new TreeNode()
                 {
+                    ImageIndex = 1,
+                    SelectedImageIndex = 1,
                     Text = Path.GetFileName(file),
                     Name = file
                 });
