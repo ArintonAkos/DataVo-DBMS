@@ -34,6 +34,11 @@ namespace Server.Server.MongoDB
 
         public void InsertIntoTable(List<BsonDocument> values, String tableName, String databaseName)
         {
+            if (values.Count == 0)
+            {
+                return;
+            }
+
             try
             {
                 var database = GetDatabase(databaseName);
@@ -59,8 +64,7 @@ namespace Server.Server.MongoDB
         {
             var database = GetDatabase(databaseName);
             var table = database.GetCollection<BsonDocument>(tableName);
-            return table.Find(Builders<BsonDocument>.Filter.Empty)
-                .ToList();
+            return table.Find(Builders<BsonDocument>.Filter.Empty).ToList();
         }
     }
 }
