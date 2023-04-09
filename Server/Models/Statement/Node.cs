@@ -32,6 +32,7 @@ namespace Server.Models.Statement
             /// </summary>
             /// <param name="value">The value to be held by this NodeValue object.</param>
             /// <param name="valueType">The NodeValueType of the specified value.</param>
+            public NodeValue() { }
             public NodeValue(IComparable value, NodeValueType valueType)
             {
                 Value = value;
@@ -128,11 +129,15 @@ namespace Server.Models.Statement
             /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
             /// <returns>True if the comparison is true, otherwise false.</returns>
             /// <exception cref="Exception">Thrown when the type of this NodeValue object is not equal to the type of the other NodeValue object.</exception>
-            public Boolean Compare(string Operator, NodeValue other)
+            public NodeValue Compare(string Operator, NodeValue other)
             {
                 if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
                 {
-                    return CompareNullValues(Operator, other);
+                    return new NodeValue()
+                    {
+                        Value = CompareNullValues(Operator, other),
+                        ValueType = NodeValueType.Boolean
+                    };
                 }
 
                 Type currentNodeType = Value!.GetType();
@@ -145,16 +150,22 @@ namespace Server.Models.Statement
 
                 int result = Value.CompareTo(other.Value);
 
-                return Operator switch
+                return new NodeValue() 
                 {
-                    ">" => result > 0,
-                    "<" => result < 0,
-                    ">=" => result >= 0,
-                    "<=" => result <= 0,
-                    "=" => result == 0,
-                    "!=" => result != 0,
-                    "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
-                    _ => throw new Exception("Invalid operator: " + Operator),
+                    Value = Operator switch
+                    {
+                        ">" => result > 0,
+                        "<" => result < 0,
+                        ">=" => result >= 0,
+                        "<=" => result <= 0,
+                        "=" => result == 0,
+                        "!=" => result != 0,
+                        "AND" => (Boolean)Value && (Boolean)other.Value,
+                        "OR" => (Boolean)Value || (Boolean)other.Value,
+                        "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
+                        _ => throw new Exception("Invalid operator: " + Operator),
+                    },
+                    ValueType = NodeValueType.Boolean
                 };
             }
 
@@ -215,33 +226,6 @@ namespace Server.Models.Statement
         public Node? Right { get; set; } = null;
         public NodeType Type { get; set; }
         public NodeValue Value { get; set; }
-
-        /// <summary>
-        /// Compares the current node's value with the value of another node using the specified comparison operator.
-        /// </summary>
-        /// <param name="Operator">The comparison operator to use, such as ">" or "<=".</param>
-        /// <param name="other">The other node to compare with.</param>
-        /// <returns>True if the comparison is true, otherwise false.</returns>
-        /// <exception cref="Exception">Thrown if the types of the current node's value and the other node's value are not equal or if the current node's value is null.</exception>
-        /// <remarks>
-        /// This function checks if the other node is null, in which case it returns true as a null value is considered to be less than any other value.
-        /// If the current node's value is null, it throws an exception as comparison cannot be performed on null values.
-        /// It then delegates the comparison to the Value object of the current node, which performs the actual comparison based on the specified operator.
-        /// </remarks>
-        public Boolean Compare(string Operator, Node other)
-        {
-            if (other == null)
-            {
-                return true;
-            }
-
-            if (Value == null)
-            {
-                throw new Exception("Calling compare on an empty value object?");
-            }
-
-            return Value.Compare(Operator, other.Value);
-        }
 
         public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
         {

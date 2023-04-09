@@ -1,5 +1,4 @@
-﻿using Amazon.Runtime.Internal.Util;
-using Server.Models.Statement;
+﻿using Server.Models.Statement;
 
 namespace Server.Parser.Statements
 {
@@ -9,9 +8,9 @@ namespace Server.Parser.Statements
         {
             dynamic returnValue = EvaluateExpression(node, data);
 
-            if (returnValue is bool || returnValue is Boolean) 
+            if (returnValue is Node.NodeValue && returnValue.ValueType is Node.NodeValueType.Boolean) 
             {
-                return returnValue;
+                return returnValue.Value;
             }
 
             throw new Exception("Error evaluating the statement! The result must a boolean value!");
