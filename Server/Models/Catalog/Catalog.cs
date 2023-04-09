@@ -149,29 +149,6 @@ namespace Server.Models.Catalog
                 .ToList();
         }
 
-        public static List<Column> GetTableColumnsByName(List<string> columnNames, string tableName, string databaseName)
-        {
-            XElement? table = GetTableElement(databaseName, tableName)
-                ?? throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
-
-            List<Column> columns = new();
-            foreach (string columnName in columnNames)
-            {
-                XElement? column = GetTableAttributeElement(table, columnName) 
-                    ?? throw new Exception($"Column {columnName} does not exist in table {tableName}!");
-                
-                columns.Add(new Column()
-                {
-                    Name = columnName,
-                    Type = column.Attribute("Type")!.Value,
-                    Length = string.IsNullOrEmpty(column.Attribute("Length")?.Value) ?
-                             0 : int.Parse(column.Attribute("Length")!.Value),
-                });
-            }
-
-            return columns;
-        }
-
         private static XElement? GetDatabaseElement(string databaseName)
         {
             List<XElement> databases;
