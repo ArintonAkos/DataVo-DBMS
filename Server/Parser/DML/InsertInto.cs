@@ -42,7 +42,7 @@ namespace Server.Parser.DML
             List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
             _model.Columns.ForEach(name =>
             {
-                if (!tableColumns.Any(x => x.Name == name))
+                if (!tableColumns.Any(column => column.Name == name))
                 {
                     throw new Exception($"Column {name} doesn't exist in table {_model.TableName}!");
                 }
