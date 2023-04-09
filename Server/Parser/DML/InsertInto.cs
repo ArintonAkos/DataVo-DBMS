@@ -25,8 +25,8 @@ namespace Server.Parser.DML
 
                 DbContext.Instance.InsertIntoTable(values, _model.TableName, "University");
 
-                Messages.Add($"Rows affected {values.Count}!");
-                Logger.Info($"Rows affected {values.Count}!");
+                Messages.Add($"Rows affected: {values.Count}");
+                Logger.Info($"Rows affected: {values.Count}");
             }
             catch (Exception e)
             {
@@ -38,7 +38,16 @@ namespace Server.Parser.DML
         private List<BsonDocument> ProcessTableRows(string databaseName)
         {
             List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
-            List<Column> columns = Catalog.GetTableColumnsByName(_model.Columns, _model.TableName, databaseName);
+            
+            List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
+            _model.Columns.ForEach(name =>
+            {
+                if (!tableColumns.Any(x => x.Name == name))
+                {
+                    throw new Exception($"Column {name} doesn't exist in table {_model.TableName}!");
+                }
+            });
+
             List<BsonDocument> bsonData = new();
 
             int rowNumber = 0;
@@ -51,10 +60,9 @@ namespace Server.Parser.DML
                 
                 rowNumber++;
 
-                for (int i = 0; i < row.Count; ++i)
+                foreach (Column tableColumn in tableColumns)
                 {
-                    Column tableColumn = columns[i];
-                    tableColumn.Value = row[i].Replace("'", "");
+                    tableColumn.Value = row[tableColumn.Name].Replace("'", "");
 
                     if (tableColumn.ParsedValue == null)
                     {
@@ -64,7 +72,7 @@ namespace Server.Parser.DML
                         break;
                     }
 
-                    if (primaryKeys.Contains(_model.Columns[i]))
+                    if (primaryKeys.Contains(tableColumn.Name))
                     {
                         id += tableColumn.ParsedValue + "#";
                         continue;
