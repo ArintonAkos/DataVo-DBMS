@@ -1,5 +1,6 @@
 ﻿using Server.Enums;
 using Server.Models.Statement;
+using Server.Utils;
 using static Server.Models.Statement.Node;
 
 namespace Server.Parser.Statements
@@ -37,7 +38,6 @@ namespace Server.Parser.Statements
             while (pos < input.Length)
             {
                 char c = input[pos];
-                int remainingLength = input.Length - (pos + 1);
 
                 if (char.IsWhiteSpace(c))
                 {
@@ -48,20 +48,10 @@ namespace Server.Parser.Statements
                     tokens.Enqueue(c.ToString());
                     pos++;
                 }
-                else if (remainingLength >= 1 && Operators.LogicalOperators.Contains(input.Substring(pos, 2)))
+                else if (Operators.ContainsOperator(input, pos, out int length))
                 {
-                    tokens.Enqueue(input.Substring(pos, 2));
-                    pos += 2;
-                }
-                else if (Operators.LogicalOperators.Contains(c.ToString()))
-                {
-                    tokens.Enqueue(c.ToString());
-                    pos++;
-                }
-                else if (Operators.ArithmeticOperators.Contains(c.ToString()))
-                {
-                    tokens.Enqueue(c.ToString());
-                    pos++;
+                    tokens.Enqueue(input.Substring(pos, length).Serialize());
+                    pos += length;
                 }
                 else if (char.IsLetter(c))
                 {

@@ -37,5 +37,15 @@ namespace Server.Utils
                 .Remove(source.Length - 1, 1)
                 .Remove(0, 1);
         }
+
+        public static string Serialize(this string source)
+        {
+            return source.ToUpper();
+        }
+
+        public static bool EqualsSerialized(this string source, string value)
+        {
+            return source.Serialize().Equals(value.Serialize());
+        }
     }
 }
