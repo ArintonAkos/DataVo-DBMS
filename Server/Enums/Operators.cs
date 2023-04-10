@@ -1,4 +1,5 @@
-﻿
+﻿using Server.Utils;
+
 namespace Server.Enums
 {
     public class Operators
@@ -61,6 +62,27 @@ namespace Server.Enums
                 .Concat(LogicalOperators)
                 .Concat(ArithmeticOperators)
                 .ToList();
+        }
+
+        public static bool ContainsOperator(string input, int pos, out int length)
+        {
+            int remainingLength = input.Length - (pos + 1);
+            length = -1;
+
+            string? supportedOperator = Supported().FirstOrDefault(op =>
+            {
+                int opLen = op.Length;
+
+                return (remainingLength >= opLen - 1 && op.EqualsSerialized(input.Substring(pos, opLen)));
+            });
+
+
+            if (supportedOperator != null) 
+            {
+                length = supportedOperator.Length;
+            }
+
+            return supportedOperator != null;
         }
     }
 }
