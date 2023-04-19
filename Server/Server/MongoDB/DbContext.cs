@@ -1,5 +1,6 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Driver;
+using Server.Models.Catalog;
 
 namespace Server.Server.MongoDB
 {
@@ -20,19 +21,19 @@ namespace Server.Server.MongoDB
             }
         }
 
-        public async void CreateTable(String tableName, String databaseName)
+        public async void CreateTable(string tableName, string databaseName)
         {
             var database = GetDatabase(databaseName);
             await database.CreateCollectionAsync(tableName);
         }
 
-        public async void DropTable(String tableName, String databaseName)
+        public async void DropTable(string tableName, string databaseName)
         {
             var database = GetDatabase(databaseName);
             await database.DropCollectionAsync(tableName);
         }
 
-        public void InsertIntoTable(List<BsonDocument> values, String tableName, String databaseName)
+        public void InsertIntoTable(List<BsonDocument> values, string tableName, string databaseName)
         {
             if (values.Count == 0)
             {
@@ -51,7 +52,7 @@ namespace Server.Server.MongoDB
             }
         }
 
-        public async void DeleteFormTable(List<String> toBeDeletedIds, String tableName, String databaseName)
+        public async void DeleteFormTable(List<string> toBeDeletedIds, string tableName, string databaseName)
         {
             var database = GetDatabase(databaseName);
             var table = database.GetCollection<BsonDocument>(tableName);
@@ -60,7 +61,43 @@ namespace Server.Server.MongoDB
             await table.DeleteManyAsync(filter);
         }
 
-        public List<BsonDocument> GetStoredData(String tableName, String databaseName)
+        public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
+        {
+            List<string> primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
+            List<Column> tableColumns = Catalog.GetTableColumns(tableName, databaseName);
+            List<BsonDocument> bsonData = GetStoredData(tableName, databaseName);
+
+            Dictionary<string, Dictionary<string, dynamic>> parsedTableData = new();
+
+            foreach (BsonDocument data in bsonData)
+            {
+                string[] primaryKeyValues = data.GetElement("_id").Value.AsString.Split("#");
+                string[] columnValues = data.GetElement("columns").Value.AsString.Split("#");
+                Dictionary<string, dynamic> row = new();
+
+                int primaryKeyIdx = 0;
+                int columnValueIdx = 0;
+                foreach (Column column in tableColumns)
+                {
+                    if (primaryKeys.Contains(column.Name))
+                    {
+                        column.Value = primaryKeyValues[primaryKeyIdx++];
+                    }
+                    else
+                    {
+                        column.Value = columnValues[columnValueIdx++];
+                    }
+
+                    row[column.Name] = column.ParsedValue!;
+                }
+
+                parsedTableData[data.GetElement("_id").Value.AsString] = row;
+            }
+
+            return parsedTableData;
+        }
+
+        private List<BsonDocument> GetStoredData(string tableName, string databaseName)
         {
             var database = GetDatabase(databaseName);
             var table = database.GetCollection<BsonDocument>(tableName);

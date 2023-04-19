@@ -18,6 +18,7 @@ namespace Server.Models.Statement
             Int,
             Double,
             Boolean,
+            Date,
             Null, // Any Type can be null, so we need a special type for it
             Operator
         }
@@ -27,16 +28,26 @@ namespace Server.Models.Statement
             public IComparable? Value;
             public NodeValueType ValueType;
 
-            /// <summary>
-            /// Initializes a new instance of the NodeValue class with the specified value and NodeValueType.
-            /// </summary>
-            /// <param name="value">The value to be held by this NodeValue object.</param>
-            /// <param name="valueType">The NodeValueType of the specified value.</param>
             public NodeValue() { }
+
             public NodeValue(IComparable value, NodeValueType valueType)
             {
                 Value = value;
                 ValueType = valueType;
+            }
+
+            public NodeValue(dynamic value)
+            {
+                Value = value;
+                ValueType = value.GetType().Name switch
+                {
+                    "String" => NodeValueType.String,
+                    "Int32" => NodeValueType.Int,
+                    "Double" => NodeValueType.Double,
+                    "Boolean" => NodeValueType.Boolean,
+                    "DateOnly" => NodeValueType.Date,
+                    _ => NodeValueType.Null
+                };
             }
 
             /// <summary>
@@ -76,6 +87,11 @@ namespace Server.Models.Statement
                     parsedValue = boolValue;
                     valueType = NodeValueType.Boolean;
                 }
+                else if (DateOnly.TryParse(rawValue, out DateOnly dateValue))
+                {
+                    parsedValue = dateValue;
+                    valueType = NodeValueType.Date;
+                }
                 else if (rawValue == null)
                 {
                     parsedValue = 0;
@@ -86,8 +102,7 @@ namespace Server.Models.Statement
                     throw new Exception($"{rawValue} is not any known primitive type!");
                 }
 
-                IComparable convertedValue = ConvertValueToGeneric(parsedValue);
-                return new(convertedValue, valueType);
+                return new NodeValue(parsedValue, valueType);
             }
 
             /// <summary>
@@ -103,8 +118,7 @@ namespace Server.Models.Statement
                     throw new Exception($"{rawValue} is not a known logical operator!");
                 }
 
-                IComparable convertedValue = ConvertValueToGeneric(rawValue);
-                return new(convertedValue, NodeValueType.Operator);
+                return new NodeValue(rawValue, NodeValueType.Operator);
             }
 
             /// <summary>
@@ -118,8 +132,7 @@ namespace Server.Models.Statement
             /// </remarks>
             public static NodeValue RawString(string rawValue)
             {
-                IComparable convertedValue = ConvertValueToGeneric(rawValue);
-                return new(convertedValue, NodeValueType.String);
+                return new(rawValue, NodeValueType.String);
             }
 
             /// <summary>
@@ -206,16 +219,6 @@ namespace Server.Models.Statement
                 };
             }
 
-            /// <summary>
-            /// Converts the given dynamic value to the generic type of the NodeValue object.
-            /// </summary>
-            /// <param name="value">The dynamic value to be converted.</param>
-            /// <returns>The converted value.</returns>
-            private static IComparable ConvertValueToGeneric(dynamic value)
-            {
-                return value;                
-            }
-
             private static dynamic ConvertGenericToType(IComparable comparable, Type type)
             {
                 return Convert.ChangeType(comparable, type);
@@ -244,7 +247,7 @@ namespace Server.Models.Statement
             return new()
             {
                 Type = NodeType.Value,
-                Value = NodeValue.Parse(data[columnName])
+                Value = new NodeValue(data[columnName])
             };
         }
     }

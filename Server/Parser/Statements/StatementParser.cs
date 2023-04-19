@@ -69,7 +69,7 @@ namespace Server.Parser.Statements
                 {
                     string number = string.Empty;
                     
-                    while (pos < input.Length && char.IsDigit(input[pos]))
+                    while (pos < input.Length && (char.IsDigit(input[pos]) || input[pos] == '.' || input[pos] == '/'))
                     {
                         number += input[pos];
                         pos++;
@@ -228,6 +228,11 @@ namespace Server.Parser.Statements
         private static bool IsValue(string token)
         {
             if (token.StartsWith("'") && token.EndsWith("'"))
+            {
+                return true;
+            }
+
+            if (DateOnly.TryParse(token, out _)) 
             {
                 return true;
             }

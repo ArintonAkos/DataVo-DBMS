@@ -140,7 +140,7 @@
         {
             get
             {
-                return @"where(\s+\(?\s*(\w+)\s*(=|<|>|like)+\s*[''A-Z1-9]+\)?(\s+and|\s+or)?)+";
+                return @"where(\s+\(?\s*(\w+)\s*(=|<|>|like)+\s*[''A-Z0-9./]+\)?(\s+and|\s+or)?)+";
             }
         }
 
