@@ -4,7 +4,7 @@ namespace Server.Parser.Statements
 {
     internal class StatementEvaluator
     {
-        public static Boolean Evaluate(Node node, Dictionary<string, object> data)
+        public static Boolean Evaluate(Node node, Dictionary<string, dynamic> data)
         {
             dynamic returnValue = EvaluateExpression(node, data);
 
@@ -16,7 +16,7 @@ namespace Server.Parser.Statements
             throw new Exception("Error evaluating the statement! The result must a boolean value!");
         }
 
-        private static dynamic EvaluateExpression(Node node, Dictionary<string, object> data)
+        private static dynamic EvaluateExpression(Node node, Dictionary<string, dynamic> data)
         {
             switch (node.Type)
             {

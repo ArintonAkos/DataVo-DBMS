@@ -1,6 +1,4 @@
-﻿using MongoDB.Bson;
-using Server.Models.Catalog;
-using Server.Models.Statement;
+﻿using Server.Models.Statement;
 
 namespace Server.Parser.Statements
 {
@@ -13,53 +11,21 @@ namespace Server.Parser.Statements
             _model = WhereModel.FromString(match);
         }
 
-        public List<string> Evaluate(List<string> primaryKeys, List<Column> tableColumns, List<BsonDocument> tableData)
+        public List<string> Evaluate(Dictionary<string, Dictionary<string, dynamic>> tableContents)
         {
-            List<Dictionary<string, dynamic>> dataDictionary = ParseTableData(primaryKeys, tableColumns, tableData);
-            List<string> rowIds = tableData.Select(e => e.GetElement("_id").Value.AsString).ToList();
             List<string> matchingRows = new();
 
-            for (int i = 0; i < dataDictionary.Count; i++)
+            foreach (var rowContent in tableContents)
             {
                 Node statementInstance = _model.Statement;
 
-                if (StatementEvaluator.Evaluate(statementInstance, dataDictionary[i]))
+                if (StatementEvaluator.Evaluate(statementInstance, rowContent.Value))
                 {
-                    matchingRows.Add(rowIds[i]);
+                    matchingRows.Add(rowContent.Key);
                 }
             }
 
             return matchingRows;
-        }
-
-        private List<Dictionary<string, dynamic>> ParseTableData(List<string> primaryKeys, List<Column> tableColumns, List<BsonDocument> tableData)
-        {
-            List<Dictionary<string, dynamic>> parsedTableData = new();
-
-            foreach (BsonDocument data in tableData)
-            {
-                string[] primaryKeyValues = data.GetElement("_id").Value.AsString.Split("#");
-                string[] columnValues = data.GetElement("columns").Value.AsString.Split("#");
-                Dictionary<string, dynamic> row = new();
-
-                int primaryKeyIdx = 0;
-                int columnValueIdx = 0;
-                foreach (Column column in tableColumns)
-                {
-                    if (primaryKeys.Contains(column.Name))
-                    {
-                        row[column.Name] = primaryKeyValues[primaryKeyIdx++];
-                    }
-                    else
-                    {
-                        row[column.Name] = columnValues[columnValueIdx++];
-                    }
-                }
-
-                parsedTableData.Add(row);
-            }
-
-            return parsedTableData;
         }
     }
 }

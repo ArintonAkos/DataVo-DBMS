@@ -21,11 +21,10 @@ namespace Server.Parser.DML
         {
             try
             {
-                List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, "University");
-                List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, "University");
-                List<BsonDocument> tableData = DbContext.Instance.GetStoredData(_model.TableName, "University");
+                Dictionary<string, Dictionary<string, dynamic>> tableContents = 
+                    DbContext.Instance.GetTableContents(_model.TableName, "University");
                 
-                List<string> toBeDeleted = _model.WhereStatement.Evaluate(primaryKeys, tableColumns, tableData);
+                List<string> toBeDeleted = _model.WhereStatement.Evaluate(tableContents);
                 
                 DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
 
