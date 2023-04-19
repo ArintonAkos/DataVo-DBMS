@@ -25,7 +25,7 @@ namespace Server.Parser.DML
                 List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, "University");
                 List<BsonDocument> tableData = DbContext.Instance.GetStoredData(_model.TableName, "University");
                 
-                List<string> toBeDeleted = _model.WhereModel.Evaluate(primaryKeys, tableColumns, tableData);
+                List<string> toBeDeleted = _model.WhereStatement.Evaluate(primaryKeys, tableColumns, tableData);
                 
                 DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
 
