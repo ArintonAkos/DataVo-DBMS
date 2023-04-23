@@ -39,7 +39,7 @@
         {
             get
             {
-                return @"^\s*create\s+index\s+(?<IndexName>[A-Z_]+)\s+on\s+(?<TableName>[A-Z_]+)\(((?<Column>[A-Z_]+),?\s*)+\)";
+                return @"^\s*create\s+index\s+(?<IndexName>[A-Z_]+)\s+on\s+(?<TableName>[A-Z_]+)\((?<Column>[A-Z_]+)\s*\)";
             }
         }
 

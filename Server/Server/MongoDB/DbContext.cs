@@ -33,6 +33,37 @@ namespace Server.Server.MongoDB
             await database.DropCollectionAsync(tableName);
         }
 
+        public async void CreateIndex(List<BsonDocument> values, string indexName, string tableName, string databaseName)
+        {
+            var database = GetDatabase(databaseName);
+
+            string indexTableName = $"{tableName}_{indexName}_index";
+            await database.CreateCollectionAsync(indexTableName);
+            
+            InsertIntoTable(values, indexTableName, databaseName);
+        }
+
+        public async void DropIndex(string indexName, string tableName, string databaseName)
+        {
+            var database = GetDatabase(databaseName);
+            string indexTableName = $"{tableName}_{indexName}_index";
+            await database.DropCollectionAsync(indexTableName);
+        }
+
+        public void InsertOneIntoTable(BsonDocument value, string tableName, string databaseName)
+        {
+            try
+            {
+                var database = GetDatabase(databaseName);
+                var table = database.GetCollection<BsonDocument>(tableName);
+                table.InsertOne(value);
+            }
+            catch (Exception)
+            {
+                throw new Exception("Insert operation failed, mongodb threw an exception!");
+            }
+        }
+
         public void InsertIntoTable(List<BsonDocument> values, string tableName, string databaseName)
         {
             if (values.Count == 0)
@@ -59,6 +90,88 @@ namespace Server.Server.MongoDB
             var filter = Builders<BsonDocument>.Filter.In("_id", toBeDeletedIds);           
 
             await table.DeleteManyAsync(filter);
+        }
+
+        public void DeleteFromIndex(List<string> toBeDeletedIds, string indexName, string tableName, string databaseName)
+        {
+            string indexTableName = $"{tableName}_{indexName}_index";
+
+            var database = GetDatabase(databaseName);
+            var table = database.GetCollection<BsonDocument>(indexTableName);
+
+            List<BsonDocument> indexData = table.Find(Builders<BsonDocument>.Filter.Empty).ToList();
+            foreach (BsonDocument indexRow in indexData)
+            {
+                List<string> columns = indexRow.GetElement("columns").Value.AsString.Split("##").ToList();
+                bool needsUpdate = false;
+
+                toBeDeletedIds.ForEach(id =>
+                {
+                    if (columns.Contains(id))
+                    {
+                        columns.Remove(id);
+                        needsUpdate = true;
+                    }
+                });
+
+                if (needsUpdate)
+                {
+                    var filter = Builders<BsonDocument>.Filter.Eq("_id", indexRow.GetElement("_id").Value.AsString);
+
+                    if (columns.Count == 0)
+                    {
+                        table.DeleteOne(filter);
+                        return;
+                    }
+
+                    string columnString = string.Join("##", columns);
+                    var update = Builders<BsonDocument>.Update.Set("columns", columnString);
+                    table.UpdateOne(filter, update);
+                }
+            }
+        }
+
+        public bool TableContainsRow(string rowId, string tableName, string databaseName)
+        {
+            var database = GetDatabase(databaseName);
+            var table = database.GetCollection<BsonDocument>(tableName);
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", rowId);
+
+            return table.Find(filter).Any();
+        }
+
+        public bool IndexContainsRow(string rowId, string indexName, string tableName, string databaseName)
+        {
+            string indexTableName = $"{tableName}_{indexName}_index";
+
+            return TableContainsRow(rowId, indexTableName, databaseName);
+        }
+
+        public void UpdateIndex(string value, string rowId, string indexName, string tableName, string databaseName)
+        {
+            string indexTableName = $"{tableName}_{indexName}_index";
+            
+            var database = GetDatabase(databaseName);
+            var table = database.GetCollection<BsonDocument>(indexTableName);
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", value);
+
+            BsonDocument newBsonDoc = new()
+            {
+                new BsonElement("_id", value)
+            };
+
+            BsonDocument? currentValue = table.Find(filter).FirstOrDefault();
+            if (currentValue == null)
+            {
+                newBsonDoc.Add("columns", rowId);
+                table.InsertOne(newBsonDoc);
+
+                return;
+            }
+
+            string newColumns = currentValue.GetElement("columns").Value.AsString + "##" + rowId;
+            newBsonDoc.Add(new BsonElement("columns", newColumns));
+            table.ReplaceOne(filter, newBsonDoc);
         }
 
         public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)

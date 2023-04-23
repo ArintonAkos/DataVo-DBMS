@@ -3,6 +3,8 @@ using Server.Logging;
 using Server.Parser.Actions;
 using System.Text.RegularExpressions;
 using Server.Models.Catalog;
+using Server.Server.MongoDB;
+using MongoDB.Bson;
 
 namespace Server.Parser.DDL
 {
@@ -21,6 +23,13 @@ namespace Server.Parser.DDL
             {
                 Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, "University");
 
+                Dictionary<string, Dictionary<string, dynamic>> tableData =
+                    DbContext.Instance.GetTableContents(_model.TableName, "University");
+
+                List<BsonDocument> indexValues = CreateIndexContents(tableData);
+
+                DbContext.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, "University");
+
                 Logger.Info($"New index file {_model.IndexName} successfully created!");
                 Messages.Add($"New index file {_model.IndexName} successfully created!");
             }
@@ -29,6 +38,49 @@ namespace Server.Parser.DDL
                 Logger.Error(ex.Message);
                 Messages.Add(ex.Message);
             }
+        }
+
+        private List<BsonDocument> CreateIndexContents(Dictionary<string, Dictionary<string, dynamic>> tableData)
+        {
+            Dictionary<string, string> indexContentDict = new();
+            List<BsonDocument> indexContents = new();
+
+            foreach(var row in tableData)
+            {
+                string key = string.Empty;
+
+                foreach (var col in row.Value)
+                {
+                    if (_model.Attributes.Contains(col.Key))
+                    {
+                        key += col.Value + "##";
+                    }
+                }
+
+                key = key.Remove(key.Length - 2, 2);
+
+                if (indexContentDict.ContainsKey(key))
+                {
+                    indexContentDict[key] += $"##{row.Key}";
+                }
+                else
+                {
+                    indexContentDict.Add(key, row.Key);
+                }
+            }
+
+            foreach (var entry in indexContentDict)
+            {
+                BsonDocument bsonDoc = new()
+                {
+                    new BsonElement("_id", entry.Key),
+                    new BsonElement("columns", entry.Value)
+                };
+
+                indexContents.Add(bsonDoc);
+            }
+
+            return indexContents;
         }
     }
 }

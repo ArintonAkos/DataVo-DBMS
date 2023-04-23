@@ -1,4 +1,5 @@
-﻿using Server.Logging;
+﻿using MongoDB.Driver;
+using Server.Logging;
 using System.Xml.Linq;
 using System.Xml.Serialization;
 
@@ -78,7 +79,13 @@ namespace Server.Models.Catalog
         {
             XElement? table = GetTableElement(databaseName, tableName) 
                 ?? throw new Exception("Table referred by index file doesn't exist!");
-            
+
+            XElement? indexElement = GetTableIndexElement(table, indexFile.IndexFileName);
+            if (indexElement != null)
+            {
+                throw new Exception($"Index file {indexFile.IndexFileName} already exists in table {tableName}!");
+            }
+
             foreach (string columnName in indexFile.AttributeNames)
             {
                 XElement? column = GetTableAttributeElement(table, columnName) 
@@ -129,6 +136,47 @@ namespace Server.Models.Catalog
 
             return table.Elements("PrimaryKeys")
                 .Select(e => e.Value)
+                .ToList();
+        }
+
+        public static List<ForeignKey> GetTableForeignKeys(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return new();
+            }
+
+            return table.Elements("ForeignKeys")
+                .Elements("ForeignKey")
+                .Select(e => ConvertFromXml<ForeignKey>(e)!)
+                .ToList();
+        }
+
+        public static List<string> GetTableUniqueKeys(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return new();
+            }
+
+            return table.Elements("UniqueKeys")
+                .Select(e => e.Value)
+                .ToList();
+        }
+
+        public static List<IndexFile> GetTableIndexes(string tableName, string databaseName)
+        {
+            XElement? table = GetTableElement(databaseName, tableName);
+            if (table == null)
+            {
+                return new();
+            }
+
+            return table.Elements("IndexFiles")
+                .Elements("IndexFile")
+                .Select(e => ConvertFromXml<IndexFile>(e)!)
                 .ToList();
         }
 
@@ -278,6 +326,22 @@ namespace Server.Models.Catalog
         {
             element.Remove();
             _doc.Save(FilePath);
+        }
+
+        private static T? ConvertFromXml<T>(XElement element) where T : class
+        {
+            try
+            {
+                var serializer = new XmlSerializer(typeof(T));
+                var reader = element.CreateReader();
+                return (T?)serializer.Deserialize(reader);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex.Message);
+            }
+
+            return null;
         }
     }
 }

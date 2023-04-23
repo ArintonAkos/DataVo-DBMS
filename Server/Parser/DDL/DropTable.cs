@@ -20,6 +20,14 @@ namespace Server.Parser.DDL
         {
             try
             {
+                Catalog.GetTableIndexes(_model.TableName, "University")
+                .Select(e => e.IndexFileName)
+                .ToList()
+                .ForEach(indexFile =>
+                {
+                    DbContext.Instance.DropIndex(indexFile, _model.TableName, "University");
+                });
+                
                 Catalog.DropTable(_model.TableName, "University");
 
                 DbContext.Instance.DropTable(_model.TableName, "University");
