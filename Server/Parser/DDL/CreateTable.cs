@@ -24,6 +24,12 @@ namespace Server.Parser.DDL
 
                 DbContext.Instance.CreateTable(_model.TableName, "University");
 
+                List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, "University");
+                uniqueKeys.ForEach(key =>
+                {
+                    DbContext.Instance.CreateIndex(new(), $"_UK_{key}", _model.TableName, "University");
+                });
+
                 Logger.Info($"New table {_model.TableName} successfully created!");
                 Messages.Add($"Table {_model.TableName} successfully created!");
             }

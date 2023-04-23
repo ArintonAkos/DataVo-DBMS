@@ -2,6 +2,7 @@
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DDL
@@ -22,6 +23,8 @@ namespace Server.Parser.DDL
                 Logger.Info(_model.TableName);
 
                 Catalog.DropIndex(_model.IndexName, _model.TableName, "University");
+
+                DbContext.Instance.DropIndex(_model.IndexName, _model.TableName, "University");
 
                 Logger.Info($"Index file {_model.IndexName} successfully dropped!");
                 Messages.Add($"Index file {_model.IndexName} successfully dropped!");

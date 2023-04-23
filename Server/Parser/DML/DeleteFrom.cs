@@ -1,5 +1,4 @@
-﻿using MongoDB.Bson;
-using Server.Logging;
+﻿using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DML;
 using Server.Parser.Actions;
@@ -27,6 +26,14 @@ namespace Server.Parser.DML
                 List<string> toBeDeleted = _model.WhereStatement.Evaluate(tableContents);
                 
                 DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
+
+                Catalog.GetTableIndexes(_model.TableName, "University")
+                .Select(e => e.IndexFileName)
+                .ToList()
+                .ForEach(indexFile =>
+                {
+                    DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, "University");
+                });
 
                 Logger.Info($"Rows affected: {toBeDeleted.Count}");
                 Messages.Add($"Rows affected: {toBeDeleted.Count}");
