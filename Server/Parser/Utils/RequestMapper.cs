@@ -4,6 +4,7 @@ using Server.Parser.DDL;
 using System.Text.RegularExpressions;
 using Server.Server.Requests.Controllers.Parser;
 using Server.Parser.DML;
+using Server.Server.Requests;
 
 namespace Server.Parser.Utils
 {
@@ -30,7 +31,7 @@ namespace Server.Parser.Utils
             List<Queue<IDbAction>> runnables = new();
             Queue<IDbAction> actions = new();
 
-            var rawSqlCode = request.Data.Replace(";", "");
+            var rawSqlCode = HandleRequestData(request.Data);
             int lineCount = 0;
 
         REPEAT:
@@ -39,7 +40,7 @@ namespace Server.Parser.Utils
                 if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount) != null)
                 {
                     runnables.Add(actions);
-                    actions.Clear();
+                    actions = new();
                     continue;
                 }
 
@@ -81,9 +82,22 @@ namespace Server.Parser.Utils
             return runnables;
         }
 
+        private static string HandleRequestData(string data)
+        {
+            return RemoveSqlComments(data.Replace(";", ""));
+        }
+
+        private static string RemoveSqlComments(string input)
+        {
+            string pattern = @"(--[^\r\n]*|/\*[\s\S]*?\*/)";
+            string output = Regex.Replace(input, pattern, string.Empty, RegexOptions.Multiline);
+
+            return output;
+        }
+
         private static IDbAction? MatchCommand(KeyValuePair<string, Type> command, ref string rawSqlCode, ref int lineCount)
         {
-            Match match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            Match match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase);
 
             if (match.Success)
             {

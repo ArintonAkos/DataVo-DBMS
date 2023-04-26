@@ -61,6 +61,7 @@ namespace Server.Enums
             return ConditionOperators
                 .Concat(LogicalOperators)
                 .Concat(ArithmeticOperators)
+                .OrderByDescending(op => op.Length)
                 .ToList();
         }
 
