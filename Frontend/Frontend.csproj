@@ -73,6 +73,36 @@
     <Compile Include="Client\Responses\Parts\FieldResponse.cs" />
     <Compile Include="Client\Responses\Response.cs" />
     <Compile Include="Client\Responses\ScriptResponse.cs" />
+    <Compile Include="Components\EditorControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Components\EditorControl.Designer.cs">
+      <DependentUpon>EditorControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Components\ExplorerControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Components\ExplorerControl.Designer.cs">
+      <DependentUpon>ExplorerControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Components\ResponseControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Components\ResponseControl.Designer.cs">
+      <DependentUpon>ResponseControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Components\TextQueryControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Components\TextQueryControl.Designer.cs">
+      <DependentUpon>TextQueryControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Components\VisualQueryControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Components\VisualQueryControl.Designer.cs">
+      <DependentUpon>VisualQueryControl.cs</DependentUpon>
+    </Compile>
     <Compile Include="Services\HttpService.cs" />
     <Compile Include="Window.cs">
       <SubType>Form</SubType>
@@ -82,6 +112,21 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <EmbeddedResource Include="Components\EditorControl.resx">
+      <DependentUpon>EditorControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Components\ExplorerControl.resx">
+      <DependentUpon>ExplorerControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Components\ResponseControl.resx">
+      <DependentUpon>ResponseControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Components\TextQueryControl.resx">
+      <DependentUpon>TextQueryControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Components\VisualQueryControl.resx">
+      <DependentUpon>VisualQueryControl.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="Window.resx">
       <DependentUpon>Window.cs</DependentUpon>
     </EmbeddedResource>
@@ -109,9 +154,9 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-  <ItemGroup />
   <ItemGroup>
     <None Include="Assets\close.png" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
