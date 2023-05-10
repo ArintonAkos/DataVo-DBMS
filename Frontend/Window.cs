@@ -1,11 +1,9 @@
 ﻿using System;
-using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 using Frontend.Client.Requests;
-using Frontend.Client.Responses;
 using Frontend.Client.Responses.Controllers.Parser;
+using Frontend.Components;
 using Frontend.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
@@ -13,83 +11,30 @@ namespace Frontend
 {
     public partial class Window : Form
     {
+        private ExplorerControl _explorerTree;
+        private EditorControl _editorControl;
+        private ResponseControl _responseControl;
+
         public Window()
         {
             InitializeComponent();
         }
 
-        private void AddFolderToEditorTree(TreeNode root, string folderPath)
-        {
-            root.Text = Path.GetFileName(folderPath);
-            root.Name = folderPath;
-            root.Nodes.Clear();
-
-            foreach (string folder in Directory.GetDirectories(folderPath))
-            {
-                TreeNode newNode = new TreeNode()
-                {
-                    ImageIndex = 0,
-                    SelectedImageIndex = 0
-                };
-                root.Nodes.Add(newNode);
-                AddFolderToEditorTree(newNode, folder);
-            }
-
-            foreach (string file in Directory.GetFiles(folderPath))
-            {
-                root.Nodes.Add(new TreeNode()
-                {
-                    ImageIndex = 1,
-                    SelectedImageIndex = 1,
-                    Text = Path.GetFileName(file),
-                    Name = file
-                });
-            }
-        }
-
-        private void OpenFolderForEditorTree(string folderPath)
-        {
-            EditorTree.BeginUpdate();
-
-            AddFolderToEditorTree(EditorTree.Nodes[0], folderPath);
-
-            EditorTree.Nodes[0].Expand();
-            EditorTree.EndUpdate();
-        }
-
-        private void CreateNewEditorTab(string filePath)
-        {
-            TabPage tabPage = new TabPage(Path.GetFileName(filePath));
-            tabPage.Name = filePath;
-
-            RichTextBox textBox = new RichTextBox()
-            {
-                Dock = DockStyle.Fill,
-                BorderStyle = BorderStyle.None,
-                Font = new Font("Consolas", 11)
-            };
-
-            tabPage.Controls.Add(textBox);
-
-            EditorTabControl.TabPages.Add(tabPage);
-        }
-
-        private void CreateNewEditorTabWithContent(string filePath)
-        {
-            CreateNewEditorTab(filePath);
-
-            RichTextBox textBox = GetEditorTextBox(EditorTabControl.TabCount - 1);
-            textBox.Text = File.ReadAllText(filePath);
-        }
-
-        private RichTextBox GetEditorTextBox(int index)
-        {
-            return (RichTextBox)EditorTabControl.TabPages[index].Controls[0];
-        }
-
         private void Window_Load(object sender, EventArgs e)
         {
-            EditorTabControl.TabPages.Clear();
+            _editorControl = new EditorControl() 
+            {
+                Dock = DockStyle.Fill,
+            };
+
+            _explorerTree = new ExplorerControl(_editorControl)
+            {
+                Dock = DockStyle.Fill,
+            };
+
+            SidebarPanel.Controls.Add(_explorerTree);
+            EditorPanel.Controls.Add(_editorControl);
+            ResponsePanel.Controls.Add(_responseControl);
         }
 
         private void MenuNewFileOption_Click(object sender, EventArgs e)
@@ -101,7 +46,7 @@ namespace Frontend
             if (saveFileDialog.ShowDialog() == DialogResult.OK)
             {
                 File.Create(saveFileDialog.FileName);
-                CreateNewEditorTab(saveFileDialog.FileName);
+                _editorControl.CreateTextEditorTab(saveFileDialog.FileName);
             }
         }
 
@@ -113,17 +58,13 @@ namespace Frontend
 
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
-                CreateNewEditorTabWithContent(openFileDialog.FileName);
+                _editorControl.CreateTextEditorTabWithContent(openFileDialog.FileName);
             }
         }
 
         private void MenuSaveFileOption_Click(object sender, EventArgs e)
         {
-            if (EditorTabControl.SelectedIndex >= 0)
-            {
-                RichTextBox textBox = GetEditorTextBox(EditorTabControl.SelectedIndex);
-                File.WriteAllText(EditorTabControl.SelectedTab.Name, textBox.Text);
-            }
+            _editorControl.SaveActiveTabContent();
         }
 
         private void MenuOpenFolderOption_Click(object sender, EventArgs e)
@@ -134,7 +75,7 @@ namespace Frontend
 
             if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
             {
-                OpenFolderForEditorTree(dialog.FileName);
+                _explorerTree.OpenFolder(dialog.FileName);
             }
         }
 
@@ -145,69 +86,21 @@ namespace Frontend
 
         private async void StripExecuteButton_Click(object sender, EventArgs e)
         {
-            if (EditorTabControl.SelectedIndex < 0)
+            if (_editorControl.TabControl.SelectedIndex < 0)
             {
                 return;
             }
 
             StripExecuteButton.Enabled = false;
 
-            RichTextBox activeTab = GetEditorTextBox(EditorTabControl.SelectedIndex);
             ParseResponse response = await HttpService.Post(new Request()
             {
-                Data = string.IsNullOrEmpty(activeTab.SelectedText) ? activeTab.Text : activeTab.SelectedText
+                Data = _editorControl.GetActiveTabContent(),
             });
 
-            foreach (ScriptResponse scriptResp in response.Data)
-            {
-                foreach (ActionResponse actionResp in scriptResp.Actions)
-                {
-                    actionResp.Messages.ForEach(message => ResponseTabMessagesText.Text += message + "\n");
-                }
-            }
+            _responseControl.HandleResponse(response);
 
-            ResponseTabPanel.SelectedTab = ResponseTabMessages;
             StripExecuteButton.Enabled = true;
-        }
-
-        private void EditorTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
-        {
-            if (!File.Exists(e.Node.Name) || Path.GetExtension(e.Node.Text) != ".sql")
-            {
-                return;
-            }
-
-            foreach (TabPage tab in EditorTabControl.TabPages)
-            {
-                if (tab.Name == e.Node.Name)
-                {
-                    EditorTabControl.SelectedTab = tab;
-                    return;
-                }
-            }
-
-            CreateNewEditorTabWithContent(e.Node.Name);
-        }
-
-        private void EditorTabControl_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Modifiers == Keys.Control && e.KeyCode == Keys.S)
-            {
-                MenuSaveFileOption_Click(this, e);
-            }
-        }
-
-        private void EditorTabPage_MouseClicked(object sender, MouseEventArgs e)
-        {
-            var tabControl = sender as TabControl;
-            var tabs = tabControl.TabPages;
-
-            if (e.Button == MouseButtons.Middle)
-            {
-                tabs.Remove(tabs.Cast<TabPage>()
-                        .Where((t, i) => tabControl.GetTabRect(i).Contains(e.Location))
-                        .First());
-            }
         }
     }
 }
