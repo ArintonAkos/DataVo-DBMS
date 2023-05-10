@@ -1,13 +1,10 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses
-{
-    internal class ScriptResponse
-    {
-        [JsonProperty]
-        public List<ActionResponse> Actions { get; set; } = new();
+namespace Server.Server.Responses;
 
-        [JsonProperty]
-        public Boolean IsSuccess { get; set; } = true;
-    }
+internal class ScriptResponse
+{
+    [JsonProperty] public List<ActionResponse> Actions { get; set; } = new();
+
+    [JsonProperty] public bool IsSuccess { get; set; } = true;
 }

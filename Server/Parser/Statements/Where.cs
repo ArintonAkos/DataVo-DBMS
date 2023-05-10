@@ -1,31 +1,76 @@
 ﻿using Server.Models.Statement;
+using Server.Server.MongoDB;
 
-namespace Server.Parser.Statements
+namespace Server.Parser.Statements;
+
+internal class Where
 {
-    internal class Where
+    private readonly WhereModel _model;
+
+    public Where(string match)
     {
-        private readonly WhereModel _model;
+        _model = WhereModel.FromString(match);
+    }
 
-        public Where(string match)
+    public HashSet<string> Evaluate(HashSet<string> indexedColumns)
+    {
+        Optimize(_model.Statement, indexedColumns);
+        return EvaluateNode(_model.Statement);
+    }
+
+    private HashSet<string> EvaluateNode(Node node)
+    {
+        HashSet<string> resultSet = new();
+
+        if (node.Type == Node.NodeType.And)
         {
-            _model = WhereModel.FromString(match);
+            var leftResultSet = EvaluateNode(node.Left);
+            var rightResultSet = EvaluateNode(node.Right);
+
+            resultSet.UnionWith(leftResultSet);
+            resultSet.IntersectWith(rightResultSet);
         }
-
-        public List<string> Evaluate(Dictionary<string, Dictionary<string, dynamic>> tableContents)
+        else if (node.Type == Node.NodeType.Or)
         {
-            List<string> matchingRows = new();
+            var leftResultSet = EvaluateNode(node.Left);
+            var rightResultSet = EvaluateNode(node.Right);
 
-            foreach (var rowContent in tableContents)
+            resultSet.UnionWith(leftResultSet);
+            resultSet.UnionWith(rightResultSet);
+        }
+        else if (node.Type == Node.NodeType.Column)
+        {
+            if (node.UseIndex)
             {
-                Node statementInstance = _model.Statement;
+                // Fetch data from the index and add the corresponding row keys to the resultSet
+                List<string> indexedRows =
+                    DbContext.Instance.GetRowsByIndex(node.Value.Value, node.Value.Table, node.Value.Database);
 
-                if (StatementEvaluator.Evaluate(statementInstance, rowContent.Value))
-                {
-                    matchingRows.Add(rowContent.Key);
-                }
+                foreach (var rowKey in indexedRows) resultSet.Add(rowKey);
             }
+            else
+            {
+                // Fetch data from MongoDB directly using a full search query
+                List<string> matchingRows =
+                    DbContext.Instance.GetRowsByQuery(node.Value.Value, node.Value.Table, node.Value.Database);
 
-            return matchingRows;
+                foreach (var rowKey in matchingRows) resultSet.Add(rowKey);
+            }
         }
+
+        return resultSet;
+    }
+
+    private void Optimize(Node? node, HashSet<string> indexedColumns)
+    {
+        if (node == null) return;
+
+        if (node.Type == Node.NodeType.Column && indexedColumns.Contains(node.Value.Value))
+            node.UseIndex = true;
+        else
+            node.UseIndex = false;
+
+        Optimize(node.Left, indexedColumns);
+        Optimize(node.Right, indexedColumns);
     }
 }

@@ -1,11 +1,10 @@
-﻿namespace Server.Parser.Utils
+﻿namespace Server.Parser.Utils;
+
+internal class ParserConfig
 {
-    internal class ParserConfig
-    {
-        public static string OUTPUT_FILE_NAME = "";
+    public static string OUTPUT_FILE_NAME = "";
 
-        public static bool IS_TEST = false;
+    public static bool IS_TEST = false;
 
-        public static string FILE_EXTENSION = "abkr";
-    }
+    public static string FILE_EXTENSION = "abkr";
 }

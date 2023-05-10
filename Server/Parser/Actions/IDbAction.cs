@@ -1,9 +1,8 @@
 ﻿using Server.Server.Responses;
 
-namespace Server.Parser.Actions
+namespace Server.Parser.Actions;
+
+internal interface IDbAction
 {
-    internal interface IDbAction
-    {
-        public ActionResponse Perform(Guid session);
-    }
+    public ActionResponse Perform(Guid session);
 }

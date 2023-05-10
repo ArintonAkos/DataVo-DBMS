@@ -1,9 +1,7 @@
-﻿
-namespace Server.Enums
+﻿namespace Server.Enums;
+
+public enum Status
 {
-    public enum Status
-    {
-        Failed,
-        Successful
-    }
+    Failed,
+    Successful
 }

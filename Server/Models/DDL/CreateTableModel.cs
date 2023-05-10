@@ -1,84 +1,86 @@
-﻿using Server.Parser.Utils;
+﻿using System.Text.RegularExpressions;
 using Server.Models.Catalog;
-using System.Text.RegularExpressions;
+using Server.Parser.Utils;
 
-namespace Server.Models.DDL
+namespace Server.Models.DDL;
+
+public class CreateTableModel
 {
-    public class CreateTableModel
+    private CreateTableModel()
     {
-        public string TableName { get; set; }
+    }
 
-        public List<Field> Fields { get; set; }
+    public CreateTableModel(string tableName, List<Field> fields)
+    {
+        TableName = tableName;
+        Fields = fields;
+    }
 
-        public List<String> PrimaryKeys
+    public string TableName { get; set; }
+
+    public List<Field> Fields { get; set; }
+
+    public List<string> PrimaryKeys
+    {
+        get
         {
-            get
-            {
-                return Fields.FindAll(f => f.IsPrimaryKey == true)
-                    .Select(f => f.Name)
-                    .ToList();
-            }
+            return Fields.FindAll(f => f.IsPrimaryKey == true)
+                .Select(f => f.Name)
+                .ToList();
+        }
+    }
+
+    public List<string> UniqueAttributes
+    {
+        get
+        {
+            return Fields.FindAll(f => f.IsUnique == true)
+                .Select(f => f.Name)
+                .ToList();
+        }
+    }
+
+
+    public List<ForeignKey> ForeignKeys
+    {
+        get
+        {
+            return Fields.FindAll(f => f.ForeignKey != null)
+                .Select(f => f.ForeignKey!)
+                .ToList();
+        }
+    }
+
+    public static CreateTableModel FromMatch(Match match)
+    {
+        var tableName = match.Groups["TableName"].Value;
+        List<Field> fields = new();
+
+        var pattern = Patterns.Column;
+        var columns = Regex.Match(match.Groups["Columns"].Value, pattern,
+            RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+        while (columns.Success)
+        {
+            fields.Add(Field.FromMatch(columns, tableName));
+
+            columns = columns.NextMatch();
         }
 
-        public List<String> UniqueAttributes
+
+        return new CreateTableModel(tableName, fields);
+    }
+
+    public Table ToTable()
+    {
+        return new Table
         {
-            get
-            {
-                return Fields.FindAll(f => f.IsUnique == true)
-                    .Select(f => f.Name)
-                    .ToList ();
-            }
-        }
-        
-
-        public List<ForeignKey> ForeignKeys
-        {
-            get
-            {
-                return Fields.FindAll(f => f.ForeignKey != null)
-                    .Select(f => f.ForeignKey!)
-                    .ToList();
-            }
-        }
-
-        private CreateTableModel() { }
-
-        public CreateTableModel(string tableName, List<Field> fields)
-        {
-            this.TableName = tableName;
-            this.Fields = fields;
-        }
-
-        public static CreateTableModel FromMatch(Match match)
-        {
-            String tableName = match.Groups["TableName"].Value;
-            List<Field> fields = new();
-
-            String pattern = Patterns.Column;
-            Match columns = Regex.Match(match.Groups["Columns"].Value, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
-
-            while (columns.Success)
-            {
-                fields.Add(Field.FromMatch(columns, tableName));
-
-                columns = columns.NextMatch();
-            }
-
-
-            return new CreateTableModel(tableName, fields);
-        }
-
-        public Table ToTable()
-        {
-            return new()
-            {
-                TableName = TableName,
-                Fields = Fields,
-                PrimaryKeys = PrimaryKeys,
-                UniqueAttributes = UniqueAttributes,
-                ForeignKeys = ForeignKeys,
-                IndexFiles = new(),
-            };
-        }
+            TableName = TableName,
+            Fields = Fields,
+            PrimaryKeys = PrimaryKeys,
+            UniqueAttributes = UniqueAttributes,
+            ForeignKeys = ForeignKeys,
+            IndexFiles = new List<IndexFile>()
+        };
     }
 }

@@ -1,36 +1,22 @@
 ﻿using Server.Exceptions;
 using Server.Parser.Utils;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Server.Utils
+namespace Server.Utils;
+
+internal class FileHandler
 {
-    internal class FileHandler
+    internal static void ValidateFile(string path)
     {
-        internal static void ValidateFile(string path)
-        {
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException($"File not found: {path}!");
-            }
+        if (!File.Exists(path)) throw new FileNotFoundException($"File not found: {path}!");
 
-            if (path.Split(".").Last() != ParserConfig.FILE_EXTENSION)
-            {
-                throw new FileExtensionNotSupported(ParserConfig.FILE_EXTENSION);
-            }
-        }
+        if (path.Split(".").Last() != ParserConfig.FILE_EXTENSION)
+            throw new FileExtensionNotSupported(ParserConfig.FILE_EXTENSION);
+    }
 
-        public static String GetFileText(string path)
-        {
-            ValidateFile(path);
+    public static string GetFileText(string path)
+    {
+        ValidateFile(path);
 
-            return File.ReadAllText(path);
-        }
+        return File.ReadAllText(path);
     }
 }

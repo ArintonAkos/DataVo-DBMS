@@ -1,6 +1,7 @@
 ﻿# DataVo Database Server
 
-This repository contains the server-side code for the DataVo project, a powerful and flexible database server built with C#. The DataVo server offers a robust and high-performance solution for managing and accessing your data with ease.
+This repository contains the server-side code for the DataVo project, a powerful and flexible database server built with
+C#. The DataVo server offers a robust and high-performance solution for managing and accessing your data with ease.
 
 ## Table of Contents
 
@@ -56,7 +57,8 @@ The server should now be running and listening for incoming connections.
 
 ## Usage
 
-You can now interact with the DataVo server using the provided client libraries or by implementing your own client application. The server will respond to requests sent over the network using the DataVo query language.
+You can now interact with the DataVo server using the provided client libraries or by implementing your own client
+application. The server will respond to requests sent over the network using the DataVo query language.
 
 ## Project Structure
 

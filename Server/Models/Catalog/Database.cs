@@ -1,18 +1,14 @@
 ﻿using System.Xml.Serialization;
 
-namespace Server.Models.Catalog
+namespace Server.Models.Catalog;
+
+[Serializable]
+[XmlRoot("Database")]
+public class Database
 {
-    [Serializable]
-    [XmlRoot("Database")]
-    public class Database
-    {
-        [XmlAttribute]
-        public string DatabaseName { get; set; }
+    [XmlAttribute] public string DatabaseName { get; set; }
 
-        [XmlArray("Tables")]
-        [XmlArrayItem("Table")]
-        public List<Table> Tables { get; set; }
-
-        public Database() { }
-    }
+    [XmlArray("Tables")]
+    [XmlArrayItem("Table")]
+    public List<Table> Tables { get; set; }
 }

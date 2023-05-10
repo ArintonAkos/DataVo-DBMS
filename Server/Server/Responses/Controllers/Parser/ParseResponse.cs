@@ -1,10 +1,8 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses.Controllers.Parser
+namespace Server.Server.Responses.Controllers.Parser;
+
+internal class ParseResponse : Response
 {
-    internal class ParseResponse : Response
-    {
-        [JsonProperty("data")]
-        public new List<ScriptResponse> Data { get; set; } = new();
-    }
+    [JsonProperty("data")] public new List<ScriptResponse> Data { get; set; } = new();
 }
