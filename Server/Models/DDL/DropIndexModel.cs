@@ -14,8 +14,5 @@ public class DropIndexModel
     public string TableName { get; set; }
     public string IndexName { get; set; }
 
-    public static DropIndexModel FromMatch(Match match)
-    {
-        return new DropIndexModel(match.NthGroup(1).Value, match.NthGroup(2).Value);
-    }
+    public static DropIndexModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value, match.NthGroup(n: 2).Value);
 }

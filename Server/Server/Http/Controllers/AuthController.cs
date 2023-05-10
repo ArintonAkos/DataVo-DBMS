@@ -8,11 +8,9 @@ internal class AuthController
 {
     [Method("GET")]
     [Route("session")]
-    public static SessionResponse Authenticate()
-    {
-        return new SessionResponse
+    public static SessionResponse Authenticate() =>
+        new()
         {
-            Data = Guid.NewGuid()
+            Data = Guid.NewGuid(),
         };
-    }
 }

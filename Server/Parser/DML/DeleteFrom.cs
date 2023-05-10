@@ -11,16 +11,13 @@ internal class DeleteFrom : BaseDbAction
 {
     private readonly DeleteFromModel _model;
 
-    public DeleteFrom(Match match)
-    {
-        _model = DeleteFromModel.FromMatch(match);
-    }
+    public DeleteFrom(Match match) => _model = DeleteFromModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {
         try
         {
-            var tableContents =
+            Dictionary<string, Dictionary<string, dynamic>> tableContents =
                 DbContext.Instance.GetTableContents(_model.TableName, "University");
             HashSet<string> indexedColumns = GetIndexedColumns(_model.TableName, "University");
 

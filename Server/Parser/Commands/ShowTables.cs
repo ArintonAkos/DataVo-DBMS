@@ -19,7 +19,7 @@ internal class ShowTables : BaseDbAction
             Catalog.GetTables("University")
                 .ForEach(tableName => Fields.Add(new FieldResponse
                 {
-                    FieldName = tableName
+                    FieldName = tableName,
                 }));
         }
         catch (Exception ex)

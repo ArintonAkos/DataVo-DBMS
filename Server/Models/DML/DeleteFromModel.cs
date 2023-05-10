@@ -10,13 +10,13 @@ internal class DeleteFromModel
 
     public static DeleteFromModel FromMatch(Match match)
     {
-        var tableName = match.Groups["TableName"].Value;
+        string tableName = match.Groups["TableName"].Value;
         var whereStatement = new Where(match.Groups["WhereStatement"].Value);
 
         return new DeleteFromModel
         {
             TableName = tableName,
-            WhereStatement = whereStatement
+            WhereStatement = whereStatement,
         };
     }
 }

@@ -7,5 +7,5 @@ public enum DataTypes
     Float,
     Bit,
     Date,
-    Varchar
+    Varchar,
 }

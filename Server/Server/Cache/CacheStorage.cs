@@ -5,10 +5,7 @@ internal class CacheStorage
     //                            <SessionKey, DatabaseName>
     private static readonly Dictionary<Guid, string> _cache = new();
 
-    public static string Get(Guid key)
-    {
-        return _cache[key];
-    }
+    public static string Get(Guid key) => _cache[key];
 
     public static void Set(Guid key, string value)
     {

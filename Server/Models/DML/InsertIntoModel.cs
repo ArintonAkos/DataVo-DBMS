@@ -32,11 +32,17 @@ internal class InsertIntoModel
                 .ToList();
 
             if (row.Count != columns.Count)
+            {
                 throw new Exception("The number of values provided in a row must be the same as " +
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
+            }
 
             Dictionary<string, string> rowDict = new();
-            for (var i = 0; i < row.Count; ++i) rowDict.Add(columns[i], row[i]);
+            for (int i = 0; i < row.Count; ++i)
+            {
+                rowDict.Add(columns[i], row[i]);
+            }
+
             rows.Add(rowDict);
         }
 

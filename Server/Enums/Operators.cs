@@ -28,7 +28,7 @@ public class Operators
     public static List<string> ConditionOperators = new()
     {
         AND,
-        OR
+        OR,
     };
 
     public static List<string> LogicalOperators = new()
@@ -38,7 +38,7 @@ public class Operators
         GREATER_THAN,
         LESS_THAN,
         GREATER_THAN_OR_EQUAL_TO,
-        LESS_THAN_OR_EQUAL_TO
+        LESS_THAN_OR_EQUAL_TO,
     };
 
     public static List<string> ArithmeticOperators = new()
@@ -46,14 +46,14 @@ public class Operators
         ADD,
         SUBTRACT,
         MUL,
-        DIVIDE
+        DIVIDE,
     };
 
     public static List<string> FunctionOperators = new()
     {
         LEN,
         UPPER,
-        LOWER
+        LOWER,
     };
 
     public static List<string> Supported()
@@ -67,18 +67,21 @@ public class Operators
 
     public static bool ContainsOperator(string input, int pos, out int length)
     {
-        var remainingLength = input.Length - (pos + 1);
+        int remainingLength = input.Length - (pos + 1);
         length = -1;
 
-        var supportedOperator = Supported().FirstOrDefault(op =>
+        string? supportedOperator = Supported().FirstOrDefault(op =>
         {
-            var opLen = op.Length;
+            int opLen = op.Length;
 
             return remainingLength >= opLen - 1 && op.EqualsSerialized(input.Substring(pos, opLen));
         });
 
 
-        if (supportedOperator != null) length = supportedOperator.Length;
+        if (supportedOperator != null)
+        {
+            length = supportedOperator.Length;
+        }
 
         return supportedOperator != null;
     }

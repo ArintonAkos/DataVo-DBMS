@@ -4,15 +4,9 @@ namespace Server.Models.DQL;
 
 internal class UseModel
 {
-    public UseModel(string databaseName)
-    {
-        DatabaseName = databaseName;
-    }
+    public UseModel(string databaseName) => DatabaseName = databaseName;
 
     public string DatabaseName { get; set; }
 
-    public static UseModel FromMatch(Match match)
-    {
-        return new UseModel(match.Groups["DatabaseName"].Value);
-    }
+    public static UseModel FromMatch(Match match) => new(match.Groups["DatabaseName"].Value);
 }

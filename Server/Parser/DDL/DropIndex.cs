@@ -11,10 +11,7 @@ internal class DropIndex : BaseDbAction
 {
     private readonly DropIndexModel _model;
 
-    public DropIndex(Match match)
-    {
-        _model = DropIndexModel.FromMatch(match);
-    }
+    public DropIndex(Match match) => _model = DropIndexModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

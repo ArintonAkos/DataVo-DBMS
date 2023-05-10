@@ -11,24 +11,34 @@ internal class Router
 {
     private static readonly string _controllerNameSpace = "Server.Server.Http.Controllers";
 
-    private static List<Type> HttpControllers => Assembly.GetExecutingAssembly()
-        .GetTypes()
-        .Where(type => type.Namespace == _controllerNameSpace)
-        .ToList();
+    private static List<Type> HttpControllers
+    {
+        get =>
+            Assembly.GetExecutingAssembly()
+                .GetTypes()
+                .Where(type => type.Namespace == _controllerNameSpace)
+                .ToList();
+    }
 
     public static Response HandleRequest(HttpListenerContext request)
     {
-        if (request.Request.Url == null) throw new Exception("Error parsing request!");
+        if (request.Request.Url == null)
+        {
+            throw new Exception("Error parsing request!");
+        }
 
-        if (request.Request.Url.Segments.Length < 3) throw new Exception("Invalid URL path!");
+        if (request.Request.Url.Segments.Length < 3)
+        {
+            throw new Exception("Invalid URL path!");
+        }
 
-        var controllerName = request.Request.Url.Segments[1].Replace("/", "");
-        var methodName = request.Request.Url.Segments[2].Replace("/", "");
+        string controllerName = request.Request.Url.Segments[1].Replace("/", "");
+        string methodName = request.Request.Url.Segments[2].Replace("/", "");
 
         var controller = GetController(controllerName);
         var method = GetMethod(controller, methodName);
 
-        var httpMethod = ValidateHttpMethod(request.Request, method);
+        string httpMethod = ValidateHttpMethod(request.Request, method);
         object[]? parameters = null;
 
         switch (httpMethod)
@@ -43,7 +53,10 @@ internal class Router
             case "POST":
                 var requestObject = GetRequest(request.Request, method);
 
-                if (requestObject != null) parameters = new object[] { requestObject };
+                if (requestObject != null)
+                {
+                    parameters = new object[] { requestObject, };
+                }
 
                 break;
             default:
@@ -52,12 +65,15 @@ internal class Router
 
         try
         {
-            var returnValue = method.Invoke(null, parameters);
+            object? returnValue = method.Invoke(obj: null, parameters);
             return (Response)returnValue!;
         }
         catch (Exception ex)
         {
-            while (ex.InnerException != null) ex = ex.InnerException;
+            while (ex.InnerException != null)
+            {
+                ex = ex.InnerException;
+            }
 
             throw ex;
         }
@@ -65,11 +81,17 @@ internal class Router
 
     private static string ValidateHttpMethod(HttpListenerRequest request, MethodInfo method)
     {
-        var httpMethod = method.GetCustomAttribute<Method>(true);
+        var httpMethod = method.GetCustomAttribute<Method>(inherit: true);
 
-        if (httpMethod == null) throw new Exception("Method attribute not found!");
+        if (httpMethod == null)
+        {
+            throw new Exception("Method attribute not found!");
+        }
 
-        if (request.HttpMethod != httpMethod.HttpMethod) throw new Exception("HTTP method not found!");
+        if (request.HttpMethod != httpMethod.HttpMethod)
+        {
+            throw new Exception("HTTP method not found!");
+        }
 
         return httpMethod.HttpMethod;
     }
@@ -78,12 +100,15 @@ internal class Router
     {
         var controller = HttpControllers
             .FirstOrDefault(c =>
-                c.GetCustomAttributes<Route>(true)
+                c.GetCustomAttributes<Route>(inherit: true)
                     ?.Any(p => p.Path == controllerName)
                 ?? false
             );
 
-        if (controller == null) throw new ArgumentException("Controller not found.");
+        if (controller == null)
+        {
+            throw new ArgumentException("Controller not found.");
+        }
 
         return controller;
     }
@@ -92,12 +117,15 @@ internal class Router
     {
         var method = controller.GetMethods()
             .FirstOrDefault(m =>
-                m.GetCustomAttributes<Route>(true)
+                m.GetCustomAttributes<Route>(inherit: true)
                     ?.Any(p => p.Path == methodName)
                 ?? false
             );
 
-        if (method == null) throw new Exception("Method not found!");
+        if (method == null)
+        {
+            throw new Exception("Method not found!");
+        }
 
         return method;
     }
@@ -110,19 +138,22 @@ internal class Router
 
     private static Request? GetRequest(HttpListenerRequest request, MethodInfo method)
     {
-        var content = GetRequestContent(request);
+        string content = GetRequestContent(request);
         var paramType = method.GetParameters()
             .Select(p => p.ParameterType)
             .FirstOrDefault();
 
-        if (paramType == null) return null;
+        if (paramType == null)
+        {
+            return null;
+        }
 
         var deserializeGeneric = typeof(Router).GetMethod(nameof(DeserializeObject))!;
         var generic = deserializeGeneric.MakeGenericMethod(paramType);
 
         try
         {
-            return (Request?)generic.Invoke(null, new object[] { content });
+            return (Request?)generic.Invoke(obj: null, new object[] { content, });
         }
         catch (Exception ex)
         {
@@ -130,8 +161,5 @@ internal class Router
         }
     }
 
-    public static T? DeserializeObject<T>(string content)
-    {
-        return JsonConvert.DeserializeObject<T>(content);
-    }
+    public static T? DeserializeObject<T>(string content) => JsonConvert.DeserializeObject<T>(content);
 }

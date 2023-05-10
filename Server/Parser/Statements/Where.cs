@@ -7,10 +7,7 @@ internal class Where
 {
     private readonly WhereModel _model;
 
-    public Where(string match)
-    {
-        _model = WhereModel.FromString(match);
-    }
+    public Where(string match) => _model = WhereModel.FromString(match);
 
     public HashSet<string> Evaluate(HashSet<string> indexedColumns)
     {
@@ -24,16 +21,16 @@ internal class Where
 
         if (node.Type == Node.NodeType.And)
         {
-            var leftResultSet = EvaluateNode(node.Left);
-            var rightResultSet = EvaluateNode(node.Right);
+            HashSet<string> leftResultSet = EvaluateNode(node.Left);
+            HashSet<string> rightResultSet = EvaluateNode(node.Right);
 
             resultSet.UnionWith(leftResultSet);
             resultSet.IntersectWith(rightResultSet);
         }
         else if (node.Type == Node.NodeType.Or)
         {
-            var leftResultSet = EvaluateNode(node.Left);
-            var rightResultSet = EvaluateNode(node.Right);
+            HashSet<string> leftResultSet = EvaluateNode(node.Left);
+            HashSet<string> rightResultSet = EvaluateNode(node.Right);
 
             resultSet.UnionWith(leftResultSet);
             resultSet.UnionWith(rightResultSet);
@@ -46,7 +43,10 @@ internal class Where
                 List<string> indexedRows =
                     DbContext.Instance.GetRowsByIndex(node.Value.Value, node.Value.Table, node.Value.Database);
 
-                foreach (var rowKey in indexedRows) resultSet.Add(rowKey);
+                foreach (string rowKey in indexedRows)
+                {
+                    resultSet.Add(rowKey);
+                }
             }
             else
             {
@@ -54,7 +54,10 @@ internal class Where
                 List<string> matchingRows =
                     DbContext.Instance.GetRowsByQuery(node.Value.Value, node.Value.Table, node.Value.Database);
 
-                foreach (var rowKey in matchingRows) resultSet.Add(rowKey);
+                foreach (string rowKey in matchingRows)
+                {
+                    resultSet.Add(rowKey);
+                }
             }
         }
 
@@ -63,12 +66,19 @@ internal class Where
 
     private void Optimize(Node? node, HashSet<string> indexedColumns)
     {
-        if (node == null) return;
+        if (node == null)
+        {
+            return;
+        }
 
         if (node.Type == Node.NodeType.Column && indexedColumns.Contains(node.Value.Value))
+        {
             node.UseIndex = true;
+        }
         else
+        {
             node.UseIndex = false;
+        }
 
         Optimize(node.Left, indexedColumns);
         Optimize(node.Right, indexedColumns);

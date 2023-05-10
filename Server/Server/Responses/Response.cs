@@ -6,8 +6,5 @@ internal class Response
 {
     [JsonProperty("data")] public dynamic Data { get; set; }
 
-    public string ToJson()
-    {
-        return JsonConvert.SerializeObject(this, Formatting.Indented);
-    }
+    public string ToJson() => JsonConvert.SerializeObject(this, Formatting.Indented);
 }

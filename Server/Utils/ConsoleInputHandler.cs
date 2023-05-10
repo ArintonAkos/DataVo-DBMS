@@ -8,7 +8,7 @@ internal class ConsoleInputHandler
     {
         if (Environment.GetCommandLineArgs().Length > 1)
         {
-            var sourceFile = Environment.GetCommandLineArgs()[1];
+            string sourceFile = Environment.GetCommandLineArgs()[1];
 
             FileHandler.ValidateFile(sourceFile);
 
