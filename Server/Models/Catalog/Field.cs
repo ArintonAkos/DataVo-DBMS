@@ -22,9 +22,13 @@ public class Field
     [Required(ErrorMessage = "Field must have a name!")]
     public string Name { get; set; }
 
-    [XmlAttribute] [DefaultValue(-1)] public int IsNull { get; set; }
+    [XmlAttribute]
+    [DefaultValue(value: -1)]
+    public int IsNull { get; set; }
 
-    [XmlAttribute] [DefaultValue(0)] public int Length { get; set; }
+    [XmlAttribute]
+    [DefaultValue(value: 0)]
+    public int Length { get; set; }
 
     [XmlIgnore] public bool? IsPrimaryKey { get; set; }
 
@@ -34,7 +38,8 @@ public class Field
 
     public static Field FromMatch(Match match, string tableName)
     {
-        var type = (DataTypes)Enum.Parse(typeof(DataTypes), GetTypeString(match.Groups["Type"].Value), true);
+        var type = (DataTypes)Enum.Parse(typeof(DataTypes), GetTypeString(match.Groups["Type"].Value),
+            ignoreCase: true);
 
         Field field = new()
         {
@@ -43,10 +48,13 @@ public class Field
             Table = tableName,
             IsPrimaryKey = !string.IsNullOrEmpty(match.Groups["PrimaryKey"]?.Value),
             IsUnique = !string.IsNullOrEmpty(match.Groups["Unique"]?.Value),
-            IsNull = -1
+            IsNull = -1,
         };
 
-        if (field.Type == DataTypes.Varchar) field.Length = int.Parse(match.Groups["Length"].Value);
+        if (field.Type == DataTypes.Varchar)
+        {
+            field.Length = int.Parse(match.Groups["Length"].Value);
+        }
 
         if (!string.IsNullOrEmpty(match.Groups["ForeignKey"]?.Value))
         {
@@ -55,17 +63,19 @@ public class Field
 
             List<Reference> references = new();
 
-            for (var i = 0; i < refTables.Count && i < refAttributes.Count; ++i)
+            for (int i = 0; i < refTables.Count && i < refAttributes.Count; ++i)
+            {
                 references.Add(new Reference
                 {
                     ReferenceTableName = refTables[i].Value,
-                    ReferenceAttributeName = refAttributes[i].Value
+                    ReferenceAttributeName = refAttributes[i].Value,
                 });
+            }
 
             field.ForeignKey = new ForeignKey
             {
                 AttributeName = field.Name,
-                References = references
+                References = references,
             };
         }
 
@@ -74,13 +84,25 @@ public class Field
 
     private static string GetTypeString(string type)
     {
-        if (type.Contains("int")) return "int";
+        if (type.Contains("int"))
+        {
+            return "int";
+        }
 
-        if (type.Contains("float")) return "float";
+        if (type.Contains("float"))
+        {
+            return "float";
+        }
 
-        if (type.Contains("bit")) return "bit";
+        if (type.Contains("bit"))
+        {
+            return "bit";
+        }
 
-        if (type.Contains("date")) return "date";
+        if (type.Contains("date"))
+        {
+            return "date";
+        }
 
         return "varchar";
     }

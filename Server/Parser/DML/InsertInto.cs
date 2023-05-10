@@ -12,16 +12,13 @@ internal class InsertInto : BaseDbAction
 {
     private readonly InsertIntoModel _model;
 
-    public InsertInto(Match match)
-    {
-        _model = InsertIntoModel.FromMatch(match);
-    }
+    public InsertInto(Match match) => _model = InsertIntoModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {
         try
         {
-            var rowsAffected = ProcessAndInsertTableRows("University");
+            int rowsAffected = ProcessAndInsertTableRows("University");
 
             Messages.Add($"Rows affected: {rowsAffected}");
             Logger.Info($"Rows affected: {rowsAffected}");
@@ -35,28 +32,30 @@ internal class InsertInto : BaseDbAction
 
     private int ProcessAndInsertTableRows(string databaseName)
     {
-        var primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
-        var uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
-        var foreignKeys = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
-        var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
-        var tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
+        List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
+        List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
+        List<ForeignKey> foreignKeys = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
+        List<IndexFile> indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
+        List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
 
         _model.Columns.ForEach(name =>
         {
             if (!tableColumns.Any(column => column.Name == name))
+            {
                 throw new Exception($"Column {name} doesn't exist in table {_model.TableName}!");
+            }
         });
 
         List<BsonDocument> bsonData = new();
 
-        var rowNumber = 0;
-        var rowsAffected = 0;
+        int rowNumber = 0;
+        int rowsAffected = 0;
 
-        foreach (var row in _model.Rows)
+        foreach (Dictionary<string, string> row in _model.Rows)
         {
-            var invalidRow = false;
-            var id = string.Empty;
-            var data = string.Empty;
+            bool invalidRow = false;
+            string? id = string.Empty;
+            string? data = string.Empty;
 
             rowNumber++;
 
@@ -109,8 +108,15 @@ internal class InsertInto : BaseDbAction
 
             if (!invalidRow)
             {
-                if (!string.IsNullOrEmpty(id)) id = id.Remove(id.Length - 1);
-                if (!string.IsNullOrEmpty(data)) data = data.Remove(data.Length - 1);
+                if (!string.IsNullOrEmpty(id))
+                {
+                    id = id.Remove(id.Length - 1);
+                }
+
+                if (!string.IsNullOrEmpty(data))
+                {
+                    data = data.Remove(data.Length - 1);
+                }
 
                 if (DbContext.Instance.TableContainsRow(id, _model.TableName, databaseName))
                 {
@@ -134,20 +140,23 @@ internal class InsertInto : BaseDbAction
         BsonDocument bsonDoc = new()
         {
             new BsonElement("_id", id),
-            new BsonElement("columns", data)
+            new BsonElement("columns", data),
         };
 
         DbContext.Instance.InsertOneIntoTable(bsonDoc, _model.TableName, databaseName);
 
         foreach (var index in indexFiles)
         {
-            var indexValue = string.Empty;
-            foreach (var indexAttribute in index.AttributeNames)
+            string? indexValue = string.Empty;
+            foreach (string indexAttribute in index.AttributeNames)
+            {
                 indexValue += tableColumns
                     .Where(col => col.Name == indexAttribute)
                     .First()
                     .ParsedValue + "##";
-            indexValue = indexValue.Remove(indexValue.Length - 2, 2);
+            }
+
+            indexValue = indexValue.Remove(indexValue.Length - 2, count: 2);
 
             DbContext.Instance.UpdateIndex(indexValue, id, index.IndexFileName, _model.TableName, databaseName);
         }
@@ -156,8 +165,12 @@ internal class InsertInto : BaseDbAction
     private bool CheckForeignKeyConstraint(ForeignKey foreignKey, string columnValue, string databaseName)
     {
         foreach (var reference in foreignKey.References)
+        {
             if (!DbContext.Instance.TableContainsRow(columnValue, reference.ReferenceTableName, databaseName))
+            {
                 return false;
+            }
+        }
 
         return true;
     }

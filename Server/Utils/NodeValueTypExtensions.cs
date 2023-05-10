@@ -4,10 +4,7 @@ namespace Server.Utils;
 
 public static class NodeValueTypExtensions
 {
-    public static bool IsNumeric(this NodeValueType type)
-    {
-        return type == NodeValueType.Int || type == NodeValueType.Double;
-    }
+    public static bool IsNumeric(this NodeValueType type) => type == NodeValueType.Int || type == NodeValueType.Double;
 
     public static Type ToType(this NodeValueType type)
     {
@@ -19,7 +16,7 @@ public static class NodeValueTypExtensions
             NodeValueType.Boolean => typeof(bool),
             NodeValueType.Null => typeof(int),
             NodeValueType.Operator => typeof(string),
-            _ => throw new Exception("Unknown NodeValueType!")
+            _ => throw new Exception("Unknown NodeValueType!"),
         };
     }
 }

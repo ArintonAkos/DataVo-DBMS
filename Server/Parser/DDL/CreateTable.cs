@@ -12,10 +12,7 @@ internal class CreateTable : BaseDbAction
 {
     private readonly CreateTableModel _model;
 
-    public CreateTable(Match match)
-    {
-        _model = CreateTableModel.FromMatch(match);
-    }
+    public CreateTable(Match match) => _model = CreateTableModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {
@@ -25,7 +22,7 @@ internal class CreateTable : BaseDbAction
 
             DbContext.Instance.CreateTable(_model.TableName, "University");
 
-            var uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, "University");
+            List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, "University");
             uniqueKeys.ForEach(key =>
             {
                 DbContext.Instance.CreateIndex(new List<BsonDocument>(), $"_UK_{key}", _model.TableName,

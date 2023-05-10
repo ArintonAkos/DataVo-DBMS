@@ -3,5 +3,5 @@
 public enum Status
 {
     Failed,
-    Successful
+    Successful,
 }

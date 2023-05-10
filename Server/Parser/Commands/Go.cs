@@ -10,8 +10,5 @@ internal class Go : IDbAction
     {
     }
 
-    public ActionResponse Perform(Guid session)
-    {
-        return ActionResponse.Default();
-    }
+    public ActionResponse Perform(Guid session) => ActionResponse.Default();
 }

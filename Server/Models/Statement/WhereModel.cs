@@ -8,12 +8,12 @@ internal class WhereModel
 
     public static WhereModel FromString(string value)
     {
-        value = value.Remove(0, 5);
+        value = value.Remove(startIndex: 0, count: 5);
         var statement = StatementParser.Parse(value);
 
         return new WhereModel
         {
-            Statement = statement
+            Statement = statement,
         };
     }
 }

@@ -4,18 +4,16 @@ namespace Server.Server.Responses;
 
 internal class ErrorResponse : ParseResponse
 {
-    public ErrorResponse(Exception e)
-    {
+    public ErrorResponse(Exception e) =>
         Data = new List<ScriptResponse>
         {
-            new ScriptResponse
+            new()
             {
                 IsSuccess = false,
                 Actions = new List<ActionResponse>
                 {
-                    ActionResponse.Error(e)
-                }
-            }
+                    ActionResponse.Error(e),
+                },
+            },
         };
-    }
 }

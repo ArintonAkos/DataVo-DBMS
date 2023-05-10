@@ -38,7 +38,7 @@ internal class DbContext : MongoClient
     {
         var database = GetDatabase(databaseName);
 
-        var indexTableName = $"{tableName}_{indexName}_index";
+        string indexTableName = $"{tableName}_{indexName}_index";
         await database.CreateCollectionAsync(indexTableName);
 
         InsertIntoTable(values, indexTableName, databaseName);
@@ -47,7 +47,7 @@ internal class DbContext : MongoClient
     public async void DropIndex(string indexName, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
-        var indexTableName = $"{tableName}_{indexName}_index";
+        string indexTableName = $"{tableName}_{indexName}_index";
         await database.DropCollectionAsync(indexTableName);
     }
 
@@ -56,7 +56,7 @@ internal class DbContext : MongoClient
         try
         {
             var database = GetDatabase(databaseName);
-            var table = database.GetCollection<BsonDocument>(tableName);
+            IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
             table.InsertOne(value);
         }
         catch (Exception)
@@ -67,12 +67,15 @@ internal class DbContext : MongoClient
 
     public void InsertIntoTable(List<BsonDocument> values, string tableName, string databaseName)
     {
-        if (values.Count == 0) return;
+        if (values.Count == 0)
+        {
+            return;
+        }
 
         try
         {
             var database = GetDatabase(databaseName);
-            var table = database.GetCollection<BsonDocument>(tableName);
+            IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
             table.InsertMany(values);
         }
         catch (Exception)
@@ -84,24 +87,24 @@ internal class DbContext : MongoClient
     public async void DeleteFormTable(List<string> toBeDeletedIds, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
-        var table = database.GetCollection<BsonDocument>(tableName);
-        var filter = Builders<BsonDocument>.Filter.In("_id", toBeDeletedIds);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.In("_id", toBeDeletedIds);
 
         await table.DeleteManyAsync(filter);
     }
 
     public void DeleteFromIndex(List<string> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
-        var indexTableName = $"{tableName}_{indexName}_index";
+        string indexTableName = $"{tableName}_{indexName}_index";
 
         var database = GetDatabase(databaseName);
-        var table = database.GetCollection<BsonDocument>(indexTableName);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
 
         var indexData = table.Find(Builders<BsonDocument>.Filter.Empty).ToList();
         foreach (var indexRow in indexData)
         {
             var columns = indexRow.GetElement("columns").Value.AsString.Split("##").ToList();
-            var needsUpdate = false;
+            bool needsUpdate = false;
 
             toBeDeletedIds.ForEach(id =>
             {
@@ -114,7 +117,8 @@ internal class DbContext : MongoClient
 
             if (needsUpdate)
             {
-                var filter = Builders<BsonDocument>.Filter.Eq("_id", indexRow.GetElement("_id").Value.AsString);
+                FilterDefinition<BsonDocument>? filter =
+                    Builders<BsonDocument>.Filter.Eq("_id", indexRow.GetElement("_id").Value.AsString);
 
                 if (columns.Count == 0)
                 {
@@ -122,8 +126,8 @@ internal class DbContext : MongoClient
                     return;
                 }
 
-                var columnString = string.Join("##", columns);
-                var update = Builders<BsonDocument>.Update.Set("columns", columnString);
+                string columnString = string.Join("##", columns);
+                UpdateDefinition<BsonDocument>? update = Builders<BsonDocument>.Update.Set("columns", columnString);
                 table.UpdateOne(filter, update);
             }
         }
@@ -132,30 +136,30 @@ internal class DbContext : MongoClient
     public bool TableContainsRow(string rowId, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
-        var table = database.GetCollection<BsonDocument>(tableName);
-        var filter = Builders<BsonDocument>.Filter.Eq("_id", rowId);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Eq("_id", rowId);
 
         return table.Find(filter).Any();
     }
 
     public bool IndexContainsRow(string rowId, string indexName, string tableName, string databaseName)
     {
-        var indexTableName = $"{tableName}_{indexName}_index";
+        string indexTableName = $"{tableName}_{indexName}_index";
 
         return TableContainsRow(rowId, indexTableName, databaseName);
     }
 
     public void UpdateIndex(string value, string rowId, string indexName, string tableName, string databaseName)
     {
-        var indexTableName = $"{tableName}_{indexName}_index";
+        string indexTableName = $"{tableName}_{indexName}_index";
 
         var database = GetDatabase(databaseName);
-        var table = database.GetCollection<BsonDocument>(indexTableName);
-        var filter = Builders<BsonDocument>.Filter.Eq("_id", value);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Eq("_id", value);
 
         BsonDocument newBsonDoc = new()
         {
-            new BsonElement("_id", value)
+            new BsonElement("_id", value),
         };
 
         var currentValue = table.Find(filter).FirstOrDefault();
@@ -167,33 +171,37 @@ internal class DbContext : MongoClient
             return;
         }
 
-        var newColumns = currentValue.GetElement("columns").Value.AsString + "##" + rowId;
+        string newColumns = currentValue.GetElement("columns").Value.AsString + "##" + rowId;
         newBsonDoc.Add(new BsonElement("columns", newColumns));
         table.ReplaceOne(filter, newBsonDoc);
     }
 
     public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
     {
-        var primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
-        var tableColumns = Catalog.GetTableColumns(tableName, databaseName);
-        var bsonData = GetStoredData(tableName, databaseName);
+        List<string> primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
+        List<Column> tableColumns = Catalog.GetTableColumns(tableName, databaseName);
+        List<BsonDocument> bsonData = GetStoredData(tableName, databaseName);
 
         Dictionary<string, Dictionary<string, dynamic>> parsedTableData = new();
 
         foreach (var data in bsonData)
         {
-            var primaryKeyValues = data.GetElement("_id").Value.AsString.Split("#");
-            var columnValues = data.GetElement("columns").Value.AsString.Split("#");
+            string[] primaryKeyValues = data.GetElement("_id").Value.AsString.Split("#");
+            string[] columnValues = data.GetElement("columns").Value.AsString.Split("#");
             Dictionary<string, dynamic> row = new();
 
-            var primaryKeyIdx = 0;
-            var columnValueIdx = 0;
+            int primaryKeyIdx = 0;
+            int columnValueIdx = 0;
             foreach (var column in tableColumns)
             {
                 if (primaryKeys.Contains(column.Name))
+                {
                     column.Value = primaryKeyValues[primaryKeyIdx++];
+                }
                 else
+                {
                     column.Value = columnValues[columnValueIdx++];
+                }
 
                 row[column.Name] = column.ParsedValue!;
             }
@@ -207,7 +215,7 @@ internal class DbContext : MongoClient
     private List<BsonDocument> GetStoredData(string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
-        var table = database.GetCollection<BsonDocument>(tableName);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
         return table.Find(Builders<BsonDocument>.Filter.Empty).ToList();
     }
 }

@@ -11,7 +11,10 @@ public class Column
     {
         get
         {
-            if (Value == null) return null;
+            if (Value == null)
+            {
+                return null;
+            }
 
             try
             {
@@ -22,7 +25,7 @@ public class Column
                     "Bit" => bool.Parse(Value),
                     "Int" => int.Parse(Value),
                     "Float" => float.Parse(Value),
-                    _ => null
+                    _ => null,
                 };
             }
             catch (Exception)

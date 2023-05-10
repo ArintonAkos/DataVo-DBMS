@@ -12,10 +12,7 @@ internal class CreateIndex : BaseDbAction
 {
     private readonly CreateIndexModel _model;
 
-    public CreateIndex(Match match)
-    {
-        _model = CreateIndexModel.FromMatch(match);
-    }
+    public CreateIndex(Match match) => _model = CreateIndexModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {
@@ -23,10 +20,10 @@ internal class CreateIndex : BaseDbAction
         {
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, "University");
 
-            var tableData =
+            Dictionary<string, Dictionary<string, dynamic>> tableData =
                 DbContext.Instance.GetTableContents(_model.TableName, "University");
 
-            var indexValues = CreateIndexContents(tableData);
+            List<BsonDocument> indexValues = CreateIndexContents(tableData);
 
             DbContext.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, "University");
 
@@ -45,28 +42,36 @@ internal class CreateIndex : BaseDbAction
         Dictionary<string, string> indexContentDict = new();
         List<BsonDocument> indexContents = new();
 
-        foreach (var row in tableData)
+        foreach (KeyValuePair<string, Dictionary<string, dynamic>> row in tableData)
         {
-            var key = string.Empty;
+            string? key = string.Empty;
 
-            foreach (var col in row.Value)
+            foreach (KeyValuePair<string, dynamic> col in row.Value)
+            {
                 if (_model.Attributes.Contains(col.Key))
+                {
                     key += col.Value + "##";
+                }
+            }
 
-            key = key.Remove(key.Length - 2, 2);
+            key = key.Remove(key.Length - 2, count: 2);
 
             if (indexContentDict.ContainsKey(key))
+            {
                 indexContentDict[key] += $"##{row.Key}";
+            }
             else
+            {
                 indexContentDict.Add(key, row.Key);
+            }
         }
 
-        foreach (var entry in indexContentDict)
+        foreach (KeyValuePair<string, string> entry in indexContentDict)
         {
             BsonDocument bsonDoc = new()
             {
                 new BsonElement("_id", entry.Key),
-                new BsonElement("columns", entry.Value)
+                new BsonElement("columns", entry.Value),
             };
 
             indexContents.Add(bsonDoc);

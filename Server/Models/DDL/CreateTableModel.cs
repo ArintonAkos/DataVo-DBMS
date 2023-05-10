@@ -53,10 +53,10 @@ public class CreateTableModel
 
     public static CreateTableModel FromMatch(Match match)
     {
-        var tableName = match.Groups["TableName"].Value;
+        string tableName = match.Groups["TableName"].Value;
         List<Field> fields = new();
 
-        var pattern = Patterns.Column;
+        string pattern = Patterns.Column;
         var columns = Regex.Match(match.Groups["Columns"].Value, pattern,
             RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
@@ -71,16 +71,14 @@ public class CreateTableModel
         return new CreateTableModel(tableName, fields);
     }
 
-    public Table ToTable()
-    {
-        return new Table
+    public Table ToTable() =>
+        new()
         {
             TableName = TableName,
             Fields = Fields,
             PrimaryKeys = PrimaryKeys,
             UniqueAttributes = UniqueAttributes,
             ForeignKeys = ForeignKeys,
-            IndexFiles = new List<IndexFile>()
+            IndexFiles = new List<IndexFile>(),
         };
-    }
 }

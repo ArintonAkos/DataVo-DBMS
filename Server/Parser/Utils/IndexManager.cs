@@ -1,19 +1,43 @@
-﻿using Server.Server.MongoDB;
+﻿using Server.Models.Catalog;
+using Server.Models.Statement;
 
 namespace Server.Parser.Utils;
 
 public class IndexManager
 {
-    public static string GetBestIndex(List<string> columns)
+    private readonly string _databaseName;
+    private readonly string _tableName;
+
+    public IndexManager(string databaseName, string tableName)
     {
-        // This method should return the best index for the given columns.
-        // You can implement your own logic to determine the best index based on your needs.
-        // For now, this method returns the first available index.
+        _databaseName = databaseName;
+        _tableName = tableName;
+    }
 
-        List<string> availableIndexes = DbContext.Instance.GetIndexes(columns);
+    public string GetBestIndex(List<string> columns, IEnumerable<Node> expressionNodes)
+    {
+        List<IndexFile> availableIndexes =
+            Catalog.GetTableIndexes(_tableName, _databaseName);
 
-        if (availableIndexes.Count > 0) return availableIndexes.First();
+        if (!expressionNodes.Any())
+        {
+            return string.Empty;
+        }
 
-        return string.Empty;
+        int maxColumnsMatched = 0;
+        string bestIndexFileName = string.Empty;
+
+        foreach (var index in availableIndexes)
+        {
+            int columnsMatched = columns.Intersect(index.AttributeNames).Count();
+
+            if (columnsMatched > maxColumnsMatched)
+            {
+                maxColumnsMatched = columnsMatched;
+                bestIndexFileName = index.IndexFileName;
+            }
+        }
+
+        return bestIndexFileName;
     }
 }

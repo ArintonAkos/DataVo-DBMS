@@ -12,10 +12,7 @@ internal abstract class BaseDbAction : IDbAction
 
     protected List<string> Messages = new();
 
-    public BaseDbAction()
-    {
-        Context = DbContext.Instance;
-    }
+    public BaseDbAction() => Context = DbContext.Instance;
 
     public ActionResponse Perform(Guid session)
     {

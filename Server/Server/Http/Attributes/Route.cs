@@ -5,8 +5,5 @@ public class Route : Attribute
 {
     public string Path;
 
-    public Route(string path)
-    {
-        Path = path;
-    }
+    public Route(string path) => Path = path;
 }

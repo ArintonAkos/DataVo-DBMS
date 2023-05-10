@@ -7,10 +7,15 @@ internal class FileHandler
 {
     internal static void ValidateFile(string path)
     {
-        if (!File.Exists(path)) throw new FileNotFoundException($"File not found: {path}!");
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"File not found: {path}!");
+        }
 
         if (path.Split(".").Last() != ParserConfig.FILE_EXTENSION)
+        {
             throw new FileExtensionNotSupported(ParserConfig.FILE_EXTENSION);
+        }
     }
 
     public static string GetFileText(string path)

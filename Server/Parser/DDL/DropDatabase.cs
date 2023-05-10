@@ -11,10 +11,7 @@ internal class DropDatabase : BaseDbAction
 {
     private readonly DropDatabaseModel _model;
 
-    public DropDatabase(Match match)
-    {
-        _model = DropDatabaseModel.FromMatch(match);
-    }
+    public DropDatabase(Match match) => _model = DropDatabaseModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

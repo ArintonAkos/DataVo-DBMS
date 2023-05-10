@@ -5,8 +5,5 @@ internal class Method : Attribute
 {
     public readonly string HttpMethod;
 
-    public Method(string httpMethod)
-    {
-        HttpMethod = httpMethod;
-    }
+    public Method(string httpMethod) => HttpMethod = httpMethod;
 }

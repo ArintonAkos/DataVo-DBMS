@@ -18,21 +18,22 @@ public class CreateIndexModel
 
     public static CreateIndexModel FromMatch(Match match)
     {
-        var indexName = match.Groups["IndexName"].Value;
-        var tableName = match.Groups["TableName"].Value;
+        string indexName = match.Groups["IndexName"].Value;
+        string tableName = match.Groups["TableName"].Value;
         List<string> attributes = new();
 
-        foreach (Capture column in match.Groups["Column"].Captures) attributes.Add(column.Value);
+        foreach (Capture column in match.Groups["Column"].Captures)
+        {
+            attributes.Add(column.Value);
+        }
 
         return new CreateIndexModel(indexName, tableName, attributes);
     }
 
-    public IndexFile ToIndexFile()
-    {
-        return new IndexFile
+    public IndexFile ToIndexFile() =>
+        new()
         {
             IndexFileName = IndexName,
-            AttributeNames = Attributes
+            AttributeNames = Attributes,
         };
-    }
 }

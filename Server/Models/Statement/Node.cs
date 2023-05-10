@@ -9,8 +9,9 @@ public class Node
     {
         Value,
         Column,
+        Operator,
         And,
-        Or
+        Or,
     }
 
     public enum NodeValueType
@@ -21,7 +22,7 @@ public class Node
         Boolean,
         Date,
         Null, // Any Type can be null, so we need a special type for it
-        Operator
+        Operator,
     }
 
     public Node? Left { get; set; } = null;
@@ -32,16 +33,22 @@ public class Node
 
     public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
     {
-        if (Type != NodeType.Column) throw new Exception("Only column nodes can be converted to value!");
+        if (Type != NodeType.Column)
+        {
+            throw new Exception("Only column nodes can be converted to value!");
+        }
 
-        if (Value.ValueType != NodeValueType.String) throw new Exception("Column names must be string!");
+        if (Value.ValueType != NodeValueType.String)
+        {
+            throw new Exception("Column names must be string!");
+        }
 
-        var columnName = (string)Value.Value;
+        string? columnName = (string)Value.Value;
 
         return new Node
         {
             Type = NodeType.Value,
-            Value = new NodeValue(data[columnName])
+            Value = new NodeValue(data[columnName]),
         };
     }
 
@@ -70,7 +77,7 @@ public class Node
                 "Double" => NodeValueType.Double,
                 "Boolean" => NodeValueType.Boolean,
                 "DateOnly" => NodeValueType.Date,
-                _ => NodeValueType.Null
+                _ => NodeValueType.Null,
             };
         }
 
@@ -95,20 +102,20 @@ public class Node
 
             if (rawValue.StartsWith("'") && rawValue.EndsWith("'"))
             {
-                parsedValue = rawValue.TruncateLeftRight(1);
+                parsedValue = rawValue.TruncateLeftRight(charsToTruncate: 1);
                 valueType = NodeValueType.String;
             }
-            else if (int.TryParse(rawValue, out var intValue))
+            else if (int.TryParse(rawValue, out int intValue))
             {
                 parsedValue = intValue;
                 valueType = NodeValueType.Int;
             }
-            else if (double.TryParse(rawValue, out var doubleValue))
+            else if (double.TryParse(rawValue, out double doubleValue))
             {
                 parsedValue = doubleValue;
                 valueType = NodeValueType.Double;
             }
-            else if (bool.TryParse(rawValue, out var boolValue))
+            else if (bool.TryParse(rawValue, out bool boolValue))
             {
                 parsedValue = boolValue;
                 valueType = NodeValueType.Boolean;
@@ -118,7 +125,7 @@ public class Node
                 parsedValue = dateValue;
                 valueType = NodeValueType.Date;
             }
-            else if (rawValue == null)
+            else if (rawValue is null)
             {
                 parsedValue = 0;
                 valueType = NodeValueType.Null;
@@ -140,7 +147,9 @@ public class Node
         public static NodeValue Operator(string rawValue)
         {
             if (!Operators.Supported().Contains(rawValue))
+            {
                 throw new Exception($"{rawValue} is not a known logical operator!");
+            }
 
             return new NodeValue(rawValue, NodeValueType.Operator);
         }
@@ -156,10 +165,7 @@ public class Node
         ///     The NodeValueType of the returned NodeValue is set to NodeValueType.String, indicating that it stores a string
         ///     value.
         /// </remarks>
-        public static NodeValue RawString(string rawValue)
-        {
-            return new NodeValue(rawValue, NodeValueType.String);
-        }
+        public static NodeValue RawString(string rawValue) => new(rawValue, NodeValueType.String);
 
         /// <summary>
         ///     Compares the current NodeValue object with another NodeValue object of the same type.
@@ -175,20 +181,24 @@ public class Node
         public NodeValue Compare(string Operator, NodeValue other)
         {
             if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
+            {
                 return new NodeValue
                 {
                     Value = CompareNullValues(Operator, other),
-                    ValueType = NodeValueType.Boolean
+                    ValueType = NodeValueType.Boolean,
                 };
+            }
 
             var currentNodeType = Value!.GetType();
             var otherNodeType = other.Value!.GetType();
 
             if (currentNodeType != otherNodeType)
+            {
                 throw new Exception(
                     $"The type of {Value} (Type: {currentNodeType}) is not equal to the type of {other.Value} (Type: {otherNodeType})!");
+            }
 
-            var result = Value.CompareTo(other.Value);
+            int result = Value.CompareTo(other.Value);
 
             return new NodeValue
             {
@@ -203,19 +213,21 @@ public class Node
                     "AND" => (bool)Value && (bool)other.Value,
                     "OR" => (bool)Value || (bool)other.Value,
                     "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
-                    _ => throw new Exception("Invalid operator: " + Operator)
+                    _ => throw new Exception("Invalid operator: " + Operator),
                 },
-                ValueType = NodeValueType.Boolean
+                ValueType = NodeValueType.Boolean,
             };
         }
 
         private bool HandleArithmeticOperators(string Operator, NodeValue other)
         {
             if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
+            {
                 throw new Exception("Arithmetic operator can only be used for numeric types!");
+            }
 
-            var typedValue = ConvertGenericToType(Value, ValueType.ToType());
-            var typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
+            dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
+            dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
 
             return Operator switch
             {
@@ -223,7 +235,7 @@ public class Node
                 "-" => typedValue - typedOtherValue,
                 "*" => typedValue * typedOtherValue,
                 "/" => typedValue / typedOtherValue,
-                _ => throw new Exception($"Invalid operator: {Operator} for types!")
+                _ => throw new Exception($"Invalid operator: {Operator} for types!"),
             };
         }
 
@@ -240,14 +252,12 @@ public class Node
             {
                 ">" or "<" or ">=" or "<=" => false,
                 "=" => other.ValueType == NodeValueType.Null && ValueType == NodeValueType.Null,
-                "!=" => (other.ValueType == NodeValueType.Null) ^ (ValueType == NodeValueType.Null),
-                _ => throw new Exception("Invalid operator: " + Operator)
+                "!=" => other.ValueType == NodeValueType.Null ^ ValueType == NodeValueType.Null,
+                _ => throw new Exception("Invalid operator: " + Operator),
             };
         }
 
-        private static dynamic ConvertGenericToType(IComparable comparable, Type type)
-        {
-            return Convert.ChangeType(comparable, type);
-        }
+        private static dynamic ConvertGenericToType(IComparable comparable, Type type) =>
+            Convert.ChangeType(comparable, type);
     }
 }

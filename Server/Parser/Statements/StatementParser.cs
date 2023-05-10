@@ -1,29 +1,32 @@
 ﻿using Server.Enums;
 using Server.Models.Statement;
+using Server.Parser.Utils;
 using Server.Utils;
 using static Server.Models.Statement.Node;
 
 namespace Server.Parser.Statements;
 
-public class StatementParser
+public static class StatementParser
 {
     /// <summary>
     ///     This method parses a raw input string into a Queue of tokens.
-    ///     Than with the token it creates a tree of nodes representng the
+    ///     Than with the token it creates a tree of nodes representing the
     ///     condition using the polish notation.
+    ///     The tree is than rearranged to be more efficient and the root node is returned.
     /// </summary>
     /// <param name="input">The input string which will be parsed.</param>
     /// <returns>An object containing the </returns>
     public static Node Parse(string input)
     {
-        var tokens = Tokenize(input);
+        Queue<string> tokens = Tokenize(input);
 
-        return ParseExpression(tokens);
+        var statementTree = ParseExpression(tokens);
+        return TreeRearranger.Rearrange(statementTree)!;
     }
 
     /// <summary>
     ///     This function tokenizes the input string.
-    ///     It splits the input data into different element with the stame attribute.
+    ///     It splits the input data into different element with the same attribute.
     ///     For example for an input string "a = 1 and b > 2" it will return a queue of tokens
     ///     of ["a", "=", "1", "and", "b", ">", "2"]
     /// </summary>
@@ -33,11 +36,11 @@ public class StatementParser
     private static Queue<string> Tokenize(string input)
     {
         Queue<string> tokens = new();
-        var pos = 0;
+        int pos = 0;
 
         while (pos < input.Length)
         {
-            var c = input[pos];
+            char c = input[pos];
 
             if (char.IsWhiteSpace(c))
             {
@@ -48,14 +51,14 @@ public class StatementParser
                 tokens.Enqueue(c.ToString());
                 pos++;
             }
-            else if (Operators.ContainsOperator(input, pos, out var length))
+            else if (Operators.ContainsOperator(input, pos, out int length))
             {
                 tokens.Enqueue(input.Substring(pos, length).Serialize());
                 pos += length;
             }
             else if (char.IsLetter(c))
             {
-                var identifier = string.Empty;
+                string identifier = string.Empty;
 
                 while (pos < input.Length && (char.IsLetterOrDigit(input[pos]) || input[pos] == '_'))
                 {
@@ -67,7 +70,7 @@ public class StatementParser
             }
             else if (char.IsDigit(c))
             {
-                var number = string.Empty;
+                string number = string.Empty;
 
                 while (pos < input.Length && (char.IsDigit(input[pos]) || input[pos] == '.' || input[pos] == '/'))
                 {
@@ -79,10 +82,11 @@ public class StatementParser
             }
             else if (c == '\'')
             {
-                var str = c.ToString();
+                string str = c.ToString();
                 pos++;
 
                 while (pos < input.Length && input[pos] != '\'')
+                {
                     if (input[pos] == '\\' && pos + 1 < input.Length && input[pos + 1] == '\'')
                     {
                         str += '\'';
@@ -93,9 +97,12 @@ public class StatementParser
                         str += input[pos];
                         pos++;
                     }
+                }
 
                 if (pos >= input.Length || input[pos] != '\'')
+                {
                     throw new ArgumentException("Unterminated string literal");
+                }
 
                 str += input[pos].ToString();
                 pos++;
@@ -117,7 +124,7 @@ public class StatementParser
 
         while (tokens.Any())
         {
-            var token = tokens.Dequeue();
+            string token = tokens.Dequeue();
 
             if (token == "(")
             {
@@ -127,7 +134,7 @@ public class StatementParser
             {
                 while (operators.Count > 0 && operators.Peek() != "(")
                 {
-                    var op = operators.Pop();
+                    string op = operators.Pop();
                     var right = values.Pop();
                     var left = values.Pop();
 
@@ -136,7 +143,7 @@ public class StatementParser
                         Type = NodeType.Operator,
                         Value = NodeValue.Operator(op),
                         Left = left,
-                        Right = right
+                        Right = right,
                     };
 
                     values.Push(node);
@@ -164,16 +171,17 @@ public class StatementParser
             {
                 while (operators.Count > 0 && GetPrecedence(token) <= GetPrecedence(operators.Peek()))
                 {
-                    var op = operators.Pop();
+                    string op = operators.Pop();
                     var right = values.Pop();
                     var left = values.Pop();
+                    var type = GetNodeType(op);
 
                     Node node = new()
                     {
-                        Type = NodeType.Operator,
+                        Type = type,
                         Value = NodeValue.Operator(op),
                         Left = left,
-                        Right = right
+                        Right = right,
                     };
 
                     values.Push(node);
@@ -186,7 +194,7 @@ public class StatementParser
                 Node node = new()
                 {
                     Type = NodeType.Value,
-                    Value = NodeValue.Parse(token)
+                    Value = NodeValue.Parse(token),
                 };
                 values.Push(node);
             }
@@ -195,7 +203,7 @@ public class StatementParser
                 Node node = new()
                 {
                     Type = NodeType.Column,
-                    Value = NodeValue.RawString(token)
+                    Value = NodeValue.RawString(token),
                 };
                 values.Push(node);
             }
@@ -203,7 +211,7 @@ public class StatementParser
 
         while (operators.Count > 0)
         {
-            var op = operators.Pop();
+            string op = operators.Pop();
             var right = values.Pop();
             var left = values.Pop();
 
@@ -212,7 +220,7 @@ public class StatementParser
                 Type = NodeType.Operator,
                 Value = NodeValue.Operator(op),
                 Left = left,
-                Right = right
+                Right = right,
             };
             values.Push(node);
         }
@@ -220,36 +228,63 @@ public class StatementParser
         return values.Pop();
     }
 
+    private static NodeType GetNodeType(string op)
+    {
+        string uppercaseOp = op.ToUpper();
+
+        return uppercaseOp switch
+        {
+            "AND" => NodeType.And,
+            "OR" => NodeType.Or,
+            "=" or "!=" or ">" or "<" or ">=" or "<=" => NodeType.Operator,
+            "+" or "-" or "*" or "/" => NodeType.Operator,
+            _ => throw new ArgumentException($"Invalid operator: {op}"),
+        };
+    }
+
     private static bool IsValue(string token)
     {
-        if (token.StartsWith("'") && token.EndsWith("'")) return true;
+        if (token.StartsWith("'") && token.EndsWith("'"))
+        {
+            return true;
+        }
 
-        if (DateOnly.TryParse(token, out _)) return true;
+        if (DateOnly.TryParse(token, out _))
+        {
+            return true;
+        }
 
-        if (bool.TryParse(token, out _)) return true;
+        if (bool.TryParse(token, out _))
+        {
+            return true;
+        }
 
-        if (int.TryParse(token, out _)) return true;
+        if (int.TryParse(token, out _))
+        {
+            return true;
+        }
 
-        if (double.TryParse(token, out _)) return true;
+        if (double.TryParse(token, out _))
+        {
+            return true;
+        }
 
         return false;
     }
 
-    private static bool IsOperator(string token)
-    {
-        return Operators.Supported().Contains(token);
-    }
+    private static bool IsOperator(string token) => Operators.Supported().Contains(token);
 
     private static int GetPrecedence(string op)
     {
         return op switch
         {
-            "AND" or "OR" => 1,
-            "=" or "!=" or ">" or "<" or ">=" or "<=" => 2,
-            "+" or "-" => 3,
-            "*" or "/" => 4,
-            "LEN" or "UPPER" or "LOWER" or "NOT" => 5,
-            _ => -1
+            "OR" => 1,
+            "AND" => 2,
+            "=" or "!=" or ">" or "<" or ">=" or "<=" => 3,
+            "+" or "-" => 4,
+            "*" or "/" => 5,
+            // "LEN" or "UPPER" or "LOWER" => 6, //  or "NOT"
+            _ => -1,
         };
     }
 }

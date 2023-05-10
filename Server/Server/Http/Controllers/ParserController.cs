@@ -11,7 +11,10 @@ internal class ParserController
     [Route("parse")]
     public static ParseResponse Parse(ParseRequest request)
     {
-        if (request == null) throw new Exception("Error while parsing data!");
+        if (request == null)
+        {
+            throw new Exception("Error while parsing data!");
+        }
 
         var parser = new Parser.Parser(request);
 

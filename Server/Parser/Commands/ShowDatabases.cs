@@ -19,7 +19,7 @@ internal class ShowDatabases : BaseDbAction
             Catalog.GetDatabases()
                 .ForEach(databaseName => Fields.Add(new FieldResponse
                 {
-                    FieldName = databaseName
+                    FieldName = databaseName,
                 }));
         }
         catch (Exception ex)

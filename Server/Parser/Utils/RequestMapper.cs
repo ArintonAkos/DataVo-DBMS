@@ -21,7 +21,7 @@ internal class RequestMapper
         { Patterns.ShowDatabases, typeof(ShowDatabases) },
         { Patterns.ShowTables, typeof(ShowTables) },
         { Patterns.Describe, typeof(Describe) },
-        { Patterns.DeleteFrom, typeof(DeleteFrom) }
+        { Patterns.DeleteFrom, typeof(DeleteFrom) },
     };
 
     private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
@@ -31,8 +31,8 @@ internal class RequestMapper
         List<Queue<IDbAction>> runnables = new();
         Queue<IDbAction> actions = new();
 
-        var rawSqlCode = HandleRequestData(request.Data);
-        var lineCount = 0;
+        string rawSqlCode = HandleRequestData(request.Data);
+        int lineCount = 0;
 
         REPEAT:
         while (!string.IsNullOrEmpty(rawSqlCode.Trim()))
@@ -44,7 +44,8 @@ internal class RequestMapper
                 continue;
             }
 
-            foreach (var command in _commands)
+            foreach (KeyValuePair<string, Type> command in _commands)
+            {
                 try
                 {
                     var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
@@ -57,7 +58,10 @@ internal class RequestMapper
                 }
                 catch (Exception ex)
                 {
-                    while (ex.InnerException != null) ex = ex.InnerException;
+                    while (ex.InnerException != null)
+                    {
+                        ex = ex.InnerException;
+                    }
 
                     throw new Exception(
                         $"Exception thrown at: {FirstKeyWord(rawSqlCode)}\n" +
@@ -65,24 +69,25 @@ internal class RequestMapper
                         $"Message: {ex.Message}"
                     );
                 }
+            }
 
             throw new Exception($"Invalid Keyword: {FirstKeyWord(rawSqlCode)} at line: {lineCount}!");
         }
 
-        if (actions.Count != 0) runnables.Add(actions);
+        if (actions.Count != 0)
+        {
+            runnables.Add(actions);
+        }
 
         return runnables;
     }
 
-    private static string HandleRequestData(string data)
-    {
-        return RemoveSqlComments(data.Replace(";", ""));
-    }
+    private static string HandleRequestData(string data) => RemoveSqlComments(data.Replace(";", ""));
 
     private static string RemoveSqlComments(string input)
     {
-        var pattern = @"(--[^\r\n]*|/\*[\s\S]*?\*/)";
-        var output = Regex.Replace(input, pattern, string.Empty, RegexOptions.Multiline);
+        string pattern = @"(--[^\r\n]*|/\*[\s\S]*?\*/)";
+        string output = Regex.Replace(input, pattern, string.Empty, RegexOptions.Multiline);
 
         return output;
     }
@@ -103,8 +108,6 @@ internal class RequestMapper
         return null;
     }
 
-    private static string FirstKeyWord(string rawSqlCode)
-    {
-        return rawSqlCode.Trim().Split(" |\t").FirstOrDefault() ?? string.Empty;
-    }
+    private static string FirstKeyWord(string rawSqlCode) =>
+        rawSqlCode.Trim().Split(" |\t").FirstOrDefault() ?? string.Empty;
 }

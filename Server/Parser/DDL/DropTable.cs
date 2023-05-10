@@ -11,10 +11,7 @@ internal class DropTable : BaseDbAction
 {
     private readonly DropTableModel _model;
 
-    public DropTable(Match match)
-    {
-        _model = DropTableModel.FromMatch(match);
-    }
+    public DropTable(Match match) => _model = DropTableModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {
