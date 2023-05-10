@@ -1,20 +1,19 @@
-﻿using Server.Utils;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
+using Server.Utils;
 
-namespace Server.Models.DDL
+namespace Server.Models.DDL;
+
+internal class DropDatabaseModel
 {
-    internal class DropDatabaseModel
+    public DropDatabaseModel(string databaseName)
     {
-        public String DatabaseName { get; set; }
+        DatabaseName = databaseName;
+    }
 
-        public DropDatabaseModel(String databaseName)
-        {
-            this.DatabaseName = databaseName;
-        }
+    public string DatabaseName { get; set; }
 
-        public static DropDatabaseModel FromMatch(Match match)
-        {
-            return new DropDatabaseModel(match.NthGroup(1).Value);
-        }
+    public static DropDatabaseModel FromMatch(Match match)
+    {
+        return new DropDatabaseModel(match.NthGroup(1).Value);
     }
 }

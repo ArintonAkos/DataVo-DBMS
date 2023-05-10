@@ -1,30 +1,29 @@
-﻿using Server.Models.Catalog;
+﻿using System.Text.RegularExpressions;
+using Server.Models.Catalog;
 using Server.Utils;
-using System.Text.RegularExpressions;
 
-namespace Server.Models.DDL
+namespace Server.Models.DDL;
+
+public class CreateDatabaseModel
 {
-    public class CreateDatabaseModel
+    public CreateDatabaseModel(string databaseName)
     {
-        public String DatabaseName { get; set; }
+        DatabaseName = databaseName;
+    }
 
-        public CreateDatabaseModel(String databaseName)
-        {
-            this.DatabaseName = databaseName;
-        }
+    public string DatabaseName { get; set; }
 
-        public static CreateDatabaseModel FromMatch(Match match)
-        {
-            return new CreateDatabaseModel(match.NthGroup(1).Value);
-        }
+    public static CreateDatabaseModel FromMatch(Match match)
+    {
+        return new CreateDatabaseModel(match.NthGroup(1).Value);
+    }
 
-        public Database ToDatabase()
+    public Database ToDatabase()
+    {
+        return new Database
         {
-            return new Database()
-            {
-                DatabaseName = this.DatabaseName,
-                Tables = new()
-            };
-        }
+            DatabaseName = DatabaseName,
+            Tables = new List<Table>()
+        };
     }
 }

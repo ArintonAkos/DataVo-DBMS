@@ -1,12 +1,11 @@
 ﻿using System.Text.RegularExpressions;
 
-namespace Server.Utils
+namespace Server.Utils;
+
+internal static class MatchExtensions
 {
-    internal static class MatchExtensions
+    public static Group NthGroup(this Match match, int n)
     {
-        public static Group NthGroup(this Match match, int n)
-        {
-            return match.Groups.Values.Skip(n).First();
-        }
+        return match.Groups.Values.Skip(n).First();
     }
 }

@@ -1,6 +1,6 @@
-﻿using Frontend.Client.Responses.Controllers.Parser;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using Frontend.Client.Responses.Controllers.Parser;
 
 namespace Frontend.Client.Responses
 {
@@ -8,12 +8,12 @@ namespace Frontend.Client.Responses
     {
         public ErrorResponse(Exception e)
         {
-            Data = new List<ScriptResponse>()
+            Data = new List<ScriptResponse>
             {
-                new ScriptResponse()
+                new ScriptResponse
                 {
                     IsSuccess = false,
-                    Actions = new List<ActionResponse>()
+                    Actions = new List<ActionResponse>
                     {
                         ActionResponse.Error(e)
                     }

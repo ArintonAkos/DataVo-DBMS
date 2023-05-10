@@ -1,19 +1,18 @@
 ﻿using System.Text.RegularExpressions;
 
-namespace Server.Models.DQL
+namespace Server.Models.DQL;
+
+internal class UseModel
 {
-    internal class UseModel
+    public UseModel(string databaseName)
     {
-        public String DatabaseName { get; set; }
+        DatabaseName = databaseName;
+    }
 
-        public UseModel(String databaseName)
-        {
-            this.DatabaseName = databaseName;
-        }
+    public string DatabaseName { get; set; }
 
-        public static UseModel FromMatch(Match match)
-        {
-            return new UseModel(match.Groups["DatabaseName"].Value);
-        }
+    public static UseModel FromMatch(Match match)
+    {
+        return new UseModel(match.Groups["DatabaseName"].Value);
     }
 }

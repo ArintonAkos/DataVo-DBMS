@@ -2,32 +2,31 @@
 using Server.Server.Responses;
 using Server.Server.Responses.Parts;
 
-namespace Server.Parser.Actions
+namespace Server.Parser.Actions;
+
+internal abstract class BaseDbAction : IDbAction
 {
-    internal abstract class BaseDbAction : IDbAction
+    protected DbContext Context;
+    protected List<List<DataResponse>> Data = new();
+    protected List<FieldResponse> Fields = new();
+
+    protected List<string> Messages = new();
+
+    public BaseDbAction()
     {
-        protected DbContext Context;
-
-        protected List<String> Messages = new();
-        protected List<FieldResponse> Fields = new();
-        protected List<List<DataResponse>> Data = new();
-
-        public BaseDbAction()
-        {
-            this.Context = DbContext.Instance;
-        }
-
-        /// <summary>
-        /// Do actions on the Messages, Fields, Data fields.
-        /// These values will be returned.
-        /// </summary>
-        public abstract void PerformAction(Guid session);
-
-        public ActionResponse Perform(Guid session)
-        {
-            PerformAction(session);
-
-            return ActionResponse.FromRaw(Messages, Data, Fields);
-        }
+        Context = DbContext.Instance;
     }
+
+    public ActionResponse Perform(Guid session)
+    {
+        PerformAction(session);
+
+        return ActionResponse.FromRaw(Messages, Data, Fields);
+    }
+
+    /// <summary>
+    ///     Do actions on the Messages, Fields, Data fields.
+    ///     These values will be returned.
+    /// </summary>
+    public abstract void PerformAction(Guid session);
 }

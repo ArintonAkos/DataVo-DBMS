@@ -1,59 +1,58 @@
-﻿using Server.Server.Responses;
+﻿using System.Net;
 using Server.Logging;
-using System.Net;
 using Server.Server.Http;
+using Server.Server.Responses;
 
-namespace Server.Server
+namespace Server.Server;
+
+internal class HttpServer
 {
-    internal class HttpServer
+    private readonly HttpListener _httpListener;
+
+    public HttpServer()
     {
-        private readonly HttpListener _httpListener;
+        _httpListener = new HttpListener();
+        _httpListener.Prefixes.Add("http://+:8001/");
+        //_httpListener.Prefixes.Add("http://localhost:8001/");
+    }
 
-        public HttpServer()
+    public async Task Start()
+    {
+        Logger.Info("Starting server on port 8001");
+        _httpListener.Start();
+        Logger.Info("Server listening on port 8001");
+
+        while (true)
         {
-            _httpListener = new HttpListener();
-            _httpListener.Prefixes.Add("http://+:8001/");
-            //_httpListener.Prefixes.Add("http://localhost:8001/");
-        }
+            var context = await _httpListener.GetContextAsync();
 
-        public async Task Start()
+            Task.Factory.StartNew(() => ProcessRequest(context));
+        }
+    }
+
+    private async Task ProcessRequest(HttpListenerContext context)
+    {
+        try
         {
-            Logger.Info("Starting server on port 8001");
-            _httpListener.Start();
-            Logger.Info("Server listening on port 8001");
+            Logger.Info($"New Request from {context.Request.UserHostName}");
+            //Logger.Info($"{context.Request.UserHostName}: {content}");
 
-            while (true)
-            {
-                var context = await _httpListener.GetContextAsync();
+            var response = Router.HandleRequest(context);
 
-                Task.Factory.StartNew(() => ProcessRequest(context));
-            }
+            await WriteResponse(context, response);
         }
-
-        private async Task ProcessRequest(HttpListenerContext context)
+        catch (Exception ex)
         {
-            try
-            {
-                Logger.Info($"New Request from {context.Request.UserHostName}");
-                //Logger.Info($"{context.Request.UserHostName}: {content}");
-
-                Response response = Router.HandleRequest(context);
-
-                await WriteResponse(context, response);
-            }
-            catch (Exception ex)
-            {
-                await WriteResponse(context, new ErrorResponse(ex));
-            }
+            await WriteResponse(context, new ErrorResponse(ex));
         }
+    }
 
-        public async Task WriteResponse(HttpListenerContext context, Response response)
-        {
-            using var sw = new StreamWriter(context.Response.OutputStream);
-            await sw.FlushAsync();
-            await sw.WriteAsync(response.ToJson());
+    public async Task WriteResponse(HttpListenerContext context, Response response)
+    {
+        using var sw = new StreamWriter(context.Response.OutputStream);
+        await sw.FlushAsync();
+        await sw.WriteAsync(response.ToJson());
 
-            Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.ToJson()}");
-        }
+        Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.ToJson()}");
     }
 }

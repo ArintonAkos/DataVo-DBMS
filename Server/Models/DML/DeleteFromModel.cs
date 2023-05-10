@@ -1,23 +1,22 @@
-﻿using Server.Parser.Statements;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
+using Server.Parser.Statements;
 
-namespace Server.Models.DML
+namespace Server.Models.DML;
+
+internal class DeleteFromModel
 {
-    internal class DeleteFromModel
+    public string TableName { get; set; }
+    public Where WhereStatement { get; set; }
+
+    public static DeleteFromModel FromMatch(Match match)
     {
-        public String TableName { get; set; }
-        public Where WhereStatement { get; set; }
+        var tableName = match.Groups["TableName"].Value;
+        var whereStatement = new Where(match.Groups["WhereStatement"].Value);
 
-        public static DeleteFromModel FromMatch(Match match)
+        return new DeleteFromModel
         {
-            string tableName = match.Groups["TableName"].Value;
-            Where whereStatement = new Where(match.Groups["WhereStatement"].Value);
-
-            return new DeleteFromModel
-            {
-                TableName = tableName,
-                WhereStatement = whereStatement
-            };
-        }
+            TableName = tableName,
+            WhereStatement = whereStatement
+        };
     }
 }
