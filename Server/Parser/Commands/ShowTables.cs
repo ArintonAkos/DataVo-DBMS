@@ -1,29 +1,31 @@
-﻿using Server.Parser.Actions;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Server.Logging;
 using Server.Models.Catalog;
+using Server.Parser.Actions;
+using Server.Server.Responses.Parts;
 
-namespace Server.Parser.Commands
+namespace Server.Parser.Commands;
+
+internal class ShowTables : BaseDbAction
 {
-    internal class ShowTables : BaseDbAction
+    public ShowTables(Match match)
     {
-        public ShowTables(Match match) { }
+    }
 
-        public override void PerformAction(Guid session)
+    public override void PerformAction(Guid session)
+    {
+        try
         {
-            try
-            {
-                Catalog.GetTables("University")
-                .ForEach(tableName => Fields.Add(new()
+            Catalog.GetTables("University")
+                .ForEach(tableName => Fields.Add(new FieldResponse
                 {
-                    FieldName = tableName
+                    FieldName = tableName,
                 }));
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex.Message);
-                Messages.Add(ex.Message);
-            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex.Message);
+            Messages.Add(ex.Message);
         }
     }
 }

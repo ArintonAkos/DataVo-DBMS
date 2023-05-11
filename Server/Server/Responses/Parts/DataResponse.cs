@@ -1,13 +1,10 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses.Parts
-{
-    internal class DataResponse
-    {
-        [JsonProperty]
-        public string Value { get; set; }
+namespace Server.Server.Responses.Parts;
 
-        [JsonProperty]
-        public string FieldName { get; set; }
-    }
+internal class DataResponse
+{
+    [JsonProperty] public string Value { get; set; }
+
+    [JsonProperty] public string FieldName { get; set; }
 }

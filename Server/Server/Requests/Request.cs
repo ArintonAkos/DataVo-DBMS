@@ -1,17 +1,11 @@
-﻿using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
+using Newtonsoft.Json;
 
-namespace Server.Server.Requests
+namespace Server.Server.Requests;
+
+public class Request
 {
-    public class Request
-    {
-        [Required(ErrorMessage = "Data parameter is required!")]
-        [JsonProperty("data")]
-        public string Data { get; set; } = string.Empty;
-    }
+    [Required(ErrorMessage = "Data parameter is required!")]
+    [JsonProperty("data")]
+    public string Data { get; set; } = string.Empty;
 }

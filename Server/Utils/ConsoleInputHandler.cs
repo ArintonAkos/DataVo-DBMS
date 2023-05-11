@@ -1,21 +1,20 @@
 ﻿using Server.Exceptions;
 
-namespace Server.Utils
+namespace Server.Utils;
+
+internal class ConsoleInputHandler
 {
-    internal class ConsoleInputHandler
+    public static string GetSourceFileName()
     {
-        public static String GetSourceFileName()
+        if (Environment.GetCommandLineArgs().Length > 1)
         {
-            if (Environment.GetCommandLineArgs().Length > 1)
-            {
-                string sourceFile = Environment.GetCommandLineArgs()[1];
+            string sourceFile = Environment.GetCommandLineArgs()[1];
 
-                FileHandler.ValidateFile(sourceFile);
+            FileHandler.ValidateFile(sourceFile);
 
-                return sourceFile;
-            }
-
-            throw new NoSourceFileProvided();
+            return sourceFile;
         }
+
+        throw new NoSourceFileProvided();
     }
 }

@@ -1,15 +1,14 @@
-﻿using Server.Parser.Actions;
+﻿using System.Text.RegularExpressions;
+using Server.Parser.Actions;
 using Server.Server.Responses;
-using System.Text.RegularExpressions;
 
-namespace Server.Parser.Commands
+namespace Server.Parser.Commands;
+
+internal class Go : IDbAction
 {
-    internal class Go : IDbAction
+    public Go(Match match)
     {
-        public Go(Match match) { }
-        public ActionResponse Perform(Guid session)
-        {
-            return ActionResponse.Default();
-        }
     }
+
+    public ActionResponse Perform(Guid session) => ActionResponse.Default();
 }

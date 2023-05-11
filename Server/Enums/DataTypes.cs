@@ -1,13 +1,11 @@
-﻿
-namespace Server.Enums
+﻿namespace Server.Enums;
+
+[Serializable]
+public enum DataTypes
 {
-    [Serializable]
-    public enum DataTypes
-    {
-        Int,
-        Float,
-        Bit,
-        Date,
-        Varchar
-    }
+    Int,
+    Float,
+    Bit,
+    Date,
+    Varchar,
 }

@@ -1,31 +1,50 @@
-﻿using Server.Models.Statement;
+﻿using System.Data;
+using Server.Models.Statement;
+using Server.Server.MongoDB;
 
-namespace Server.Parser.Statements
+namespace Server.Parser.Statements;
+
+internal class Where
 {
-    internal class Where
-    {
-        private readonly WhereModel _model;
+    private readonly WhereModel _model;
 
-        public Where(string match)
+    public Where(string match) => _model = WhereModel.FromString(match);
+
+    // Ide sztem nem datarow kell csak betettem IDE ezt javasolta
+    public List<DataRow> Evaluate(HashSet<string> indexedColumns)
+    {
+        Optimize(_model.Statement, indexedColumns);
+        var evaluator = new StatementEvaluator(_model.Database, _model.Table);
+        HashSet<string> rowKeys = evaluator.Evaluate(_model.Statement);
+
+        return DbContext.Instance.GetRows(rowKeys, _model.Table, _model.Database);
+    }
+
+    private void Optimize(Node? node, HashSet<string> indexedColumns)
+    {
+        if (node == null)
         {
-            _model = WhereModel.FromString(match);
+            return;
         }
 
-        public List<string> Evaluate(Dictionary<string, Dictionary<string, dynamic>> tableContents)
+        if (node.Type == Node.NodeType.Column && indexedColumns.Contains(node.Value.Value))
         {
-            List<string> matchingRows = new();
+            node.UseIndex = true;
+        }
+        else
+        {
+            node.UseIndex = false;
+        }
 
-            foreach (var rowContent in tableContents)
-            {
-                Node statementInstance = _model.Statement;
+        Optimize(node.Left, indexedColumns);
+        Optimize(node.Right, indexedColumns);
+    }
 
-                if (StatementEvaluator.Evaluate(statementInstance, rowContent.Value))
-                {
-                    matchingRows.Add(rowContent.Key);
-                }
-            }
-
-            return matchingRows;
+    private static void CheckLeftAndRightHandOperand(Node? left, Node? right)
+    {
+        if (left == null || right == null)
+        {
+            throw new Exception("Invalid WHERE statement!");
         }
     }
 }

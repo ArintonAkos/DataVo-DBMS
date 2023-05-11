@@ -1,10 +1,8 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses.Controllers.Auth
+namespace Server.Server.Responses.Controllers.Auth;
+
+internal class SessionResponse : Response
 {
-    internal class SessionResponse : Response
-    {
-        [JsonProperty("data")]
-        public new Guid Data { get; set; }
-    }
+    [JsonProperty("data")] public new Guid Data { get; set; }
 }

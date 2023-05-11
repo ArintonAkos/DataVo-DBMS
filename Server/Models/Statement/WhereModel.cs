@@ -1,22 +1,19 @@
-﻿using MongoDB.Bson;
-using Server.Models.Catalog;
-using Server.Parser.Statements;
+﻿using Server.Parser.Statements;
 
-namespace Server.Models.Statement
+namespace Server.Models.Statement;
+
+internal class WhereModel
 {
-    internal class WhereModel
+    public Node Statement { get; set; }
+
+    public static WhereModel FromString(string value)
     {
-        public Node Statement { get; set; }
+        value = value.Remove(startIndex: 0, count: 5);
+        var statement = StatementParser.Parse(value);
 
-        public static WhereModel FromString(string value)
+        return new WhereModel
         {
-            value = value.Remove(0, 5);
-            Node statement = StatementParser.Parse(value);
-
-            return new WhereModel
-            {
-                Statement = statement
-            };
-        }
+            Statement = statement,
+        };
     }
 }
