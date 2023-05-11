@@ -7,6 +7,8 @@ namespace Frontend.Components
         public VisualQueryControl()
         {
             InitializeComponent();
+
+            Tag = "VQueryEditor";
         }
 
         

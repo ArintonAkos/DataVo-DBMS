@@ -32,6 +32,11 @@ namespace Frontend
                 Dock = DockStyle.Fill,
             };
 
+            _responseControl = new ResponseControl()
+            {
+                Dock = DockStyle.Fill,
+            };
+
             SidebarPanel.Controls.Add(_explorerTree);
             EditorPanel.Controls.Add(_editorControl);
             ResponsePanel.Controls.Add(_responseControl);

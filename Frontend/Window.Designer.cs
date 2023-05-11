@@ -28,7 +28,6 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Window));
             this.Menu = new System.Windows.Forms.MenuStrip();
             this.MenuFileOption = new System.Windows.Forms.ToolStripMenuItem();
@@ -41,7 +40,6 @@
             this.StripExecuteButton = new System.Windows.Forms.ToolStripButton();
             this.stripSeparator = new System.Windows.Forms.ToolStripSeparator();
             this.EditorSplitContainer = new System.Windows.Forms.SplitContainer();
-            this.EditorTreeImageList = new System.Windows.Forms.ImageList(this.components);
             this.MainSplitContainer = new System.Windows.Forms.SplitContainer();
             this.EditorPanel = new System.Windows.Forms.Panel();
             this.SidebarPanel = new System.Windows.Forms.Panel();
@@ -161,13 +159,6 @@
             this.EditorSplitContainer.SplitterDistance = 80;
             this.EditorSplitContainer.TabIndex = 3;
             // 
-            // EditorTreeImageList
-            // 
-            this.EditorTreeImageList.ImageStream = ((System.Windows.Forms.ImageListStreamer)(resources.GetObject("EditorTreeImageList.ImageStream")));
-            this.EditorTreeImageList.TransparentColor = System.Drawing.Color.Transparent;
-            this.EditorTreeImageList.Images.SetKeyName(0, "folder.png");
-            this.EditorTreeImageList.Images.SetKeyName(1, "file.png");
-            // 
             // MainSplitContainer
             // 
             this.MainSplitContainer.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
@@ -256,7 +247,6 @@
         private System.Windows.Forms.ToolStripMenuItem MenuOpenFolderOption;
         private System.Windows.Forms.ToolStripMenuItem MenuSaveFileOption;
         private System.Windows.Forms.SplitContainer MainSplitContainer;
-        private System.Windows.Forms.ImageList EditorTreeImageList;
         private System.Windows.Forms.Panel SidebarPanel;
         private System.Windows.Forms.Panel EditorPanel;
         private System.Windows.Forms.Panel ResponsePanel;
