@@ -55,6 +55,13 @@ namespace Frontend.Components
 
         private void ExplorerTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
+            if (e.Node.Name == "databases")
+            {
+                _editorControl.CreateVisualQueryEditorTab("University");
+
+                return;
+            }
+
             if (!File.Exists(e.Node.Name) || Path.GetExtension(e.Node.Text) != ".sql")
             {
                 return;

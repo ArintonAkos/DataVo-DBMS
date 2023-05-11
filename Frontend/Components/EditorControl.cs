@@ -15,24 +15,46 @@ namespace Frontend.Components
             tabControl.TabPages.Clear();
         }
 
-        private RichTextBox GetTextEditorTextbox(int index)
+        private TextQueryControl GetEditorTextControl(int index)
         {
-            if (tabControl.TabPages[index].Controls[0].Tag == "TextEditor")
-            {
-                TextQueryControl txEdCtrl = (TextQueryControl)tabControl.TabPages[index].Controls[0];
-                return txEdCtrl.TextBox;
-            }
+            return (tabControl.TabPages[index].Controls[0].Tag.ToString() == "TextEditor")
+                ? (TextQueryControl)tabControl.TabPages[index].Controls[0]
+                : null;
+        }
 
-            return null;
+        private VisualQueryControl GetEditorVisualQueryControl(int index)
+        {
+            return (tabControl.TabPages[index].Controls[0].Tag.ToString() == "VQueryEditor")
+                ? (VisualQueryControl)tabControl.TabPages[index].Controls[0]
+                : null;
         }
 
         public void CreateTextEditorTab(string filePath)
         {
-            TabPage tabPage = new TabPage(Path.GetFileName(filePath));
+            TabPage tabPage = new TabPage()
+            {
+                Text = Path.GetFileName(filePath),
+                Name = filePath,
+            };
 
             tabPage.Controls.Add(new TextQueryControl()
             {
-                Name = filePath,
+                Dock = DockStyle.Fill
+            });
+
+            tabControl.TabPages.Add(tabPage);
+        }
+
+        public void CreateVisualQueryEditorTab(string database)
+        {
+            TabPage tabPage = new TabPage()
+            {
+                Text = $"VQ: {database}",
+                Name = database,
+            };
+
+            tabPage.Controls.Add(new VisualQueryControl()
+            {
                 Dock = DockStyle.Fill
             });
 
@@ -43,7 +65,7 @@ namespace Frontend.Components
         {
             CreateTextEditorTab(filePath);
 
-            RichTextBox textBox = GetTextEditorTextbox(tabControl.TabCount - 1);
+            RichTextBox textBox = GetEditorTextControl(tabControl.TabCount - 1).TextBox;
             textBox.Text = File.ReadAllText(filePath);
         }
 
@@ -51,10 +73,12 @@ namespace Frontend.Components
         {
             if (tabControl.SelectedIndex >= 0)
             {
-                RichTextBox textBox = GetTextEditorTextbox(tabControl.SelectedIndex);
-                if (textBox != null)
+                TextQueryControl textControl = GetEditorTextControl(tabControl.SelectedIndex);
+                if (textControl != null)
                 {
-                    return string.IsNullOrEmpty(textBox.SelectedText) ? textBox.Text : textBox.SelectedText;
+                    return string.IsNullOrEmpty(textControl.TextBox.SelectedText) 
+                        ? textControl.TextBox.Text 
+                        : textControl.TextBox.SelectedText;
                 }
             }
 
@@ -65,8 +89,11 @@ namespace Frontend.Components
         {
             if (tabControl.SelectedIndex >= 0)
             {
-                RichTextBox textBox = GetTextEditorTextbox(tabControl.SelectedIndex);
-                File.WriteAllText(tabControl.SelectedTab.Name, textBox.Text);
+                TextQueryControl textControl = GetEditorTextControl(tabControl.SelectedIndex);
+                if (textControl != null)
+                {
+                    File.WriteAllText(tabControl.SelectedTab.Name, textControl.TextBox.Text);
+                }
             }
         }
 
