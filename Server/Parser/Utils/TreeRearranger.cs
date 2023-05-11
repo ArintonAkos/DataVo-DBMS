@@ -1,4 +1,5 @@
-﻿using Server.Models.Statement;
+﻿using Server.Enums;
+using Server.Models.Statement;
 
 namespace Server.Parser.Utils;
 
@@ -44,5 +45,40 @@ public class TreeRearranger
         }
 
         return root;
+    }
+
+    public static Node SimplifyAlgebraicExpressions(Node node)
+    {
+        if (node.Type == Node.NodeType.Value)
+        {
+            return node;
+        }
+
+        if (node.Left != null)
+        {
+            node.Left = SimplifyAlgebraicExpressions(node.Left);
+        }
+
+        if (node.Right != null)
+        {
+            node.Right = SimplifyAlgebraicExpressions(node.Right);
+        }
+
+        if (node.Value.ValueType != Node.NodeValueType.Operator)
+        {
+            return node;
+        }
+
+        if (node.Left?.Type == Node.NodeType.Value && node.Right?.Type == Node.NodeType.Value)
+        {
+            string @operator = node.Value.Value as string ?? throw new Exception("Invalid operator!");
+
+            if (Operators.ArithmeticOperators.Contains(@operator))
+            {
+                return node.Left.HandleAlgebraicExpression(@operator, node.Right);
+            }
+        }
+
+        return node;
     }
 }

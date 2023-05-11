@@ -1,4 +1,5 @@
-﻿using Server.Models.Statement;
+﻿using System.Data;
+using Server.Models.Statement;
 using Server.Server.MongoDB;
 
 namespace Server.Parser.Statements;
@@ -9,59 +10,14 @@ internal class Where
 
     public Where(string match) => _model = WhereModel.FromString(match);
 
-    public HashSet<string> Evaluate(HashSet<string> indexedColumns)
+    // Ide sztem nem datarow kell csak betettem IDE ezt javasolta
+    public List<DataRow> Evaluate(HashSet<string> indexedColumns)
     {
         Optimize(_model.Statement, indexedColumns);
-        return EvaluateNode(_model.Statement);
-    }
+        var evaluator = new StatementEvaluator(_model.Database, _model.Table);
+        HashSet<string> rowKeys = evaluator.Evaluate(_model.Statement);
 
-    private HashSet<string> EvaluateNode(Node node)
-    {
-        HashSet<string> resultSet = new();
-
-        if (node.Type == Node.NodeType.And)
-        {
-            HashSet<string> leftResultSet = EvaluateNode(node.Left);
-            HashSet<string> rightResultSet = EvaluateNode(node.Right);
-
-            resultSet.UnionWith(leftResultSet);
-            resultSet.IntersectWith(rightResultSet);
-        }
-        else if (node.Type == Node.NodeType.Or)
-        {
-            HashSet<string> leftResultSet = EvaluateNode(node.Left);
-            HashSet<string> rightResultSet = EvaluateNode(node.Right);
-
-            resultSet.UnionWith(leftResultSet);
-            resultSet.UnionWith(rightResultSet);
-        }
-        else if (node.Type == Node.NodeType.Column)
-        {
-            if (node.UseIndex)
-            {
-                // Fetch data from the index and add the corresponding row keys to the resultSet
-                List<string> indexedRows =
-                    DbContext.Instance.GetRowsByIndex(node.Value.Value, node.Value.Table, node.Value.Database);
-
-                foreach (string rowKey in indexedRows)
-                {
-                    resultSet.Add(rowKey);
-                }
-            }
-            else
-            {
-                // Fetch data from MongoDB directly using a full search query
-                List<string> matchingRows =
-                    DbContext.Instance.GetRowsByQuery(node.Value.Value, node.Value.Table, node.Value.Database);
-
-                foreach (string rowKey in matchingRows)
-                {
-                    resultSet.Add(rowKey);
-                }
-            }
-        }
-
-        return resultSet;
+        return DbContext.Instance.GetRows(rowKeys, _model.Table, _model.Database);
     }
 
     private void Optimize(Node? node, HashSet<string> indexedColumns)
@@ -82,5 +38,13 @@ internal class Where
 
         Optimize(node.Left, indexedColumns);
         Optimize(node.Right, indexedColumns);
+    }
+
+    private static void CheckLeftAndRightHandOperand(Node? left, Node? right)
+    {
+        if (left == null || right == null)
+        {
+            throw new Exception("Invalid WHERE statement!");
+        }
     }
 }

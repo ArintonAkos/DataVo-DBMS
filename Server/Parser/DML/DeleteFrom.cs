@@ -17,13 +17,11 @@ internal class DeleteFrom : BaseDbAction
     {
         try
         {
-            Dictionary<string, Dictionary<string, dynamic>> tableContents =
-                DbContext.Instance.GetTableContents(_model.TableName, "University");
             HashSet<string> indexedColumns = GetIndexedColumns(_model.TableName, "University");
 
-            List<string> toBeDeleted = _model.WhereStatement.Evaluate(tableContents);
+            List<string> toBeDeleted = _model.WhereStatement.Evaluate(indexedColumns).Select(row => row.);
 
-            DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
+            DbContext.Instance.DeleteFromTable(toBeDeleted, _model.TableName, "University");
 
             Catalog.GetTableIndexes(_model.TableName, "University")
                 .Select(e => e.IndexFileName)

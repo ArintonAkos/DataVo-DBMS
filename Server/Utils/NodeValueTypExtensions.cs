@@ -16,6 +16,7 @@ public static class NodeValueTypExtensions
             NodeValueType.Boolean => typeof(bool),
             NodeValueType.Null => typeof(int),
             NodeValueType.Operator => typeof(string),
+            NodeValueType.Date => typeof(DateOnly),
             _ => throw new Exception("Unknown NodeValueType!"),
         };
     }
