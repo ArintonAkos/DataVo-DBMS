@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses.Parts;
 
-internal class DataResponse
+public class DataResponse
 {
     [JsonProperty] public string Value { get; set; }
 

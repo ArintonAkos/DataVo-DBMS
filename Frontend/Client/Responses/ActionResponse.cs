@@ -5,7 +5,7 @@ using Newtonsoft.Json;
 
 namespace Frontend.Client.Responses
 {
-    internal class ActionResponse
+    public class ActionResponse
     {
         [JsonProperty] public ActionDataResponse Data { get; set; }
 

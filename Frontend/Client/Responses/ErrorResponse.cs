@@ -4,7 +4,7 @@ using Frontend.Client.Responses.Controllers.Parser;
 
 namespace Frontend.Client.Responses
 {
-    internal class ErrorResponse : ParseResponse
+    public class ErrorResponse : ParseResponse
     {
         public ErrorResponse(Exception e) =>
             Data = new List<ScriptResponse>
