@@ -21,7 +21,9 @@ public static class StatementParser
         Queue<string> tokens = Tokenize(input);
 
         var statementTree = ParseExpression(tokens);
-        return TreeRearranger.Rearrange(statementTree)!;
+        statementTree = TreeRearranger.Rearrange(statementTree)!;
+
+        return TreeRearranger.SimplifyAlgebraicExpressions(statementTree);
     }
 
     /// <summary>

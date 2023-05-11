@@ -108,11 +108,13 @@ internal class DbContext : MongoClient
 
             toBeDeletedIds.ForEach(id =>
             {
-                if (columns.Contains(id))
+                if (!columns.Contains(id))
                 {
-                    columns.Remove(id);
-                    needsUpdate = true;
+                    return;
                 }
+
+                columns.Remove(id);
+                needsUpdate = true;
             });
 
             if (needsUpdate)

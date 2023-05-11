@@ -25,10 +25,10 @@ public class Node
         Operator,
     }
 
-    public Node? Left { get; set; } = null;
-    public Node? Right { get; set; } = null;
-    public NodeType Type { get; set; }
-    public NodeValue Value { get; set; }
+    public Node? Left { get; set; }
+    public Node? Right { get; set; }
+    public NodeType Type { get; init; }
+    public NodeValue Value { get; init; }
     public bool UseIndex { get; set; }
 
     public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
@@ -52,16 +52,58 @@ public class Node
         };
     }
 
+    public IEnumerable<Node> GetIndexedSubtrees()
+    {
+        var subtrees = new List<Node>();
+        GetIndexedSubtreesRecursive(this, subtrees);
+        return subtrees;
+    }
+
+    private static void GetIndexedSubtreesRecursive(Node node, ICollection<Node> subtrees)
+    {
+        while (true)
+        {
+            if (node.UseIndex)
+            {
+                subtrees.Add(node);
+            }
+            else
+            {
+                if (node.Left != null)
+                {
+                    GetIndexedSubtreesRecursive(node.Left, subtrees);
+                }
+
+                if (node.Right != null)
+                {
+                    node = node.Right;
+                    continue;
+                }
+            }
+
+            break;
+        }
+    }
+
+    public static bool MatchesCombinedIndex(IEnumerable<Node> indexedSubtrees, List<string> combinedIndexes)
+    {
+        IOrderedEnumerable<string?> indexedColumns =
+            indexedSubtrees.Select(node => node.Value.Value as string).OrderBy(x => x);
+
+        string indexedColumnsString = string.Join("#", indexedColumns);
+
+        return combinedIndexes.Contains(indexedColumnsString);
+    }
+
+    public Node HandleAlgebraicExpression(string @operator, Node other) => new()
+        { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
+
     public class NodeValue
     {
         public IComparable? Value;
         public NodeValueType ValueType;
 
-        public NodeValue()
-        {
-        }
-
-        public NodeValue(IComparable value, NodeValueType valueType)
+        private NodeValue(IComparable value, NodeValueType valueType)
         {
             Value = value;
             ValueType = valueType;
@@ -95,47 +137,39 @@ public class Node
         ///     If the rawValue can be parsed to a boolean, the function returns the corresponding NodeValue object.
         ///     If the rawValue is null, the function returns a NodeValue object with a Null value type and a default value of 0.
         /// </remarks>
-        public static NodeValue Parse(string rawValue)
+        public static NodeValue Parse(string? rawValue)
         {
-            dynamic parsedValue;
-            NodeValueType valueType;
+            if (rawValue is null)
+            {
+                return new NodeValue(value: 0, NodeValueType.Null);
+            }
 
             if (rawValue.StartsWith("'") && rawValue.EndsWith("'"))
             {
-                parsedValue = rawValue.TruncateLeftRight(charsToTruncate: 1);
-                valueType = NodeValueType.String;
-            }
-            else if (int.TryParse(rawValue, out int intValue))
-            {
-                parsedValue = intValue;
-                valueType = NodeValueType.Int;
-            }
-            else if (double.TryParse(rawValue, out double doubleValue))
-            {
-                parsedValue = doubleValue;
-                valueType = NodeValueType.Double;
-            }
-            else if (bool.TryParse(rawValue, out bool boolValue))
-            {
-                parsedValue = boolValue;
-                valueType = NodeValueType.Boolean;
-            }
-            else if (DateOnly.TryParse(rawValue, out var dateValue))
-            {
-                parsedValue = dateValue;
-                valueType = NodeValueType.Date;
-            }
-            else if (rawValue is null)
-            {
-                parsedValue = 0;
-                valueType = NodeValueType.Null;
-            }
-            else
-            {
-                throw new Exception($"{rawValue} is not any known primitive type!");
+                return new NodeValue(rawValue.TruncateLeftRight(charsToTruncate: 1), NodeValueType.String);
             }
 
-            return new NodeValue(parsedValue, valueType);
+            if (int.TryParse(rawValue, out int intValue))
+            {
+                return new NodeValue(intValue, NodeValueType.Int);
+            }
+
+            if (double.TryParse(rawValue, out double doubleValue))
+            {
+                return new NodeValue(doubleValue, NodeValueType.Double);
+            }
+
+            if (bool.TryParse(rawValue, out bool boolValue))
+            {
+                return new NodeValue(boolValue, NodeValueType.Boolean);
+            }
+
+            if (DateOnly.TryParse(rawValue, out var dateValue))
+            {
+                return new NodeValue(dateValue, NodeValueType.Date);
+            }
+
+            throw new Exception($"{rawValue} is not any known primitive type!");
         }
 
         /// <summary>
@@ -167,26 +201,11 @@ public class Node
         /// </remarks>
         public static NodeValue RawString(string rawValue) => new(rawValue, NodeValueType.String);
 
-        /// <summary>
-        ///     Compares the current NodeValue object with another NodeValue object of the same type.
-        /// </summary>
-        /// <param name="Operator">
-        ///     A string representing the comparison operator to use, such as ">" or "<=".</param>
-        /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
-        /// <returns>True if the comparison is true, otherwise false.</returns>
-        /// <exception cref="Exception">
-        ///     Thrown when the type of this NodeValue object is not equal to the type of the other
-        ///     NodeValue object.
-        /// </exception>
-        public NodeValue Compare(string Operator, NodeValue other)
+        public NodeValue SolveAlgebraicExpression(string @operator, NodeValue other)
         {
             if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
             {
-                return new NodeValue
-                {
-                    Value = CompareNullValues(Operator, other),
-                    ValueType = NodeValueType.Boolean,
-                };
+                throw new Exception("Cannot solve algebra expression with null values!");
             }
 
             var currentNodeType = Value!.GetType();
@@ -198,62 +217,58 @@ public class Node
                     $"The type of {Value} (Type: {currentNodeType}) is not equal to the type of {other.Value} (Type: {otherNodeType})!");
             }
 
-            int result = Value.CompareTo(other.Value);
+            ValidateAlgebraicExpression(@operator, other);
 
-            return new NodeValue
+            if (!Operators.ArithmeticOperators.Contains(@operator))
             {
-                Value = Operator switch
-                {
-                    ">" => result > 0,
-                    "<" => result < 0,
-                    ">=" => result >= 0,
-                    "<=" => result <= 0,
-                    "=" => result == 0,
-                    "!=" => result != 0,
-                    "AND" => (bool)Value && (bool)other.Value,
-                    "OR" => (bool)Value || (bool)other.Value,
-                    "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
-                    _ => throw new Exception("Invalid operator: " + Operator),
-                },
-                ValueType = NodeValueType.Boolean,
-            };
+                throw new Exception("Invalid arithmetic operator: " + @operator);
+            }
+
+            dynamic derivedValue = HandleArithmeticOperators(@operator, other);
+
+            return new NodeValue(derivedValue);
         }
 
-        private bool HandleArithmeticOperators(string Operator, NodeValue other)
+        private dynamic HandleArithmeticOperators(string @operator, NodeValue other)
         {
-            if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
-            {
-                throw new Exception("Arithmetic operator can only be used for numeric types!");
-            }
+            ValidateAlgebraicExpression(@operator, other);
 
             dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
             dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
 
-            return Operator switch
+            return @operator switch
             {
                 "+" => typedValue + typedOtherValue,
                 "-" => typedValue - typedOtherValue,
                 "*" => typedValue * typedOtherValue,
                 "/" => typedValue / typedOtherValue,
-                _ => throw new Exception($"Invalid operator: {Operator} for types!"),
+                _ => throw new Exception($"Invalid operator: {@operator} for types!"),
             };
+        }
+
+        private void ValidateAlgebraicExpression(string @operator, NodeValue other)
+        {
+            if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
+            {
+                throw new Exception("Arithmetic operator can only be used for numeric types!");
+            }
         }
 
         /// <summary>
         ///     Compares two NodeValue objects that have a ValueType of Null.
         /// </summary>
-        /// <param name="Operator">
+        /// <param name="operator">
         ///     A string representing the comparison operator to use, such as ">" or "<=".</param>
         /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
         /// <returns>True if the comparison is true, otherwise false.</returns>
-        private bool CompareNullValues(string Operator, NodeValue other)
+        private bool CompareNullValues(string @operator, NodeValue other)
         {
-            return Operator switch
+            return @operator switch
             {
                 ">" or "<" or ">=" or "<=" => false,
                 "=" => other.ValueType == NodeValueType.Null && ValueType == NodeValueType.Null,
                 "!=" => other.ValueType == NodeValueType.Null ^ ValueType == NodeValueType.Null,
-                _ => throw new Exception("Invalid operator: " + Operator),
+                _ => throw new Exception("Invalid operator: " + @operator),
             };
         }
 

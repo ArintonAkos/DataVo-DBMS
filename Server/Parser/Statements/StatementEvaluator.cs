@@ -1,6 +1,4 @@
 ﻿using Server.Models.Statement;
-using Server.Utils;
-using System.Linq;
 
 namespace Server.Parser.Statements;
 
@@ -22,7 +20,7 @@ internal class StatementEvaluator
             return _databaseService.GetData(_tableName, root);
         }
 
-        var indexedSubtrees = root.GetIndexedSubtrees();
+        IEnumerable<Node> indexedSubtrees = root.GetIndexedSubtrees();
         List<string> combinedIndexes = _databaseService.GetCombinedIndexes(_tableName);
 
         HashSet<string> leftResult = Evaluate(root.Left);
@@ -40,11 +38,41 @@ internal class StatementEvaluator
         {
             return new HashSet<string>(leftResult.Intersect(rightResult));
         }
-        else if (root.Value.Value == "OR")
+
+        if (root.Value.Value == "OR")
         {
             return new HashSet<string>(leftResult.Union(rightResult));
         }
 
         throw new Exception("Invalid node type!");
     }
+
+    // ezt a kettot kellene kombinalni, mindkettoben van valami olyan dolog ami jol fog nekunk jonni
+
+    // public HashSet<string> Evaluate(Node root)
+    // {
+    //     if (root.Type == Node.NodeType.Value || root.Type == Node.NodeType.Column)
+    //     {
+    //         return DbContext.Instance.GetRowsByIndex(root.Value.Value, _tableName, _databaseName);
+    //     }
+    //     else if (root.Type == Node.NodeType.Operator)
+    //     {
+    //         var leftResult = Evaluate(root.Left!);
+    //         var rightResult = Evaluate(root.Right!);
+    //
+    //         switch (root.Value.Value)
+    //         {
+    //             case "AND":
+    //                 return new HashSet<string>(leftResult.Intersect(rightResult));
+    //             case "OR":
+    //                 return new HashSet<string>(leftResult.Union(rightResult));
+    //             default:
+    //                 throw new Exception($"Invalid operator: {root.Value.Value}");
+    //         }
+    //     }
+    //     else
+    //     {
+    //         throw new Exception($"Invalid node type: {root.Type}");
+    //     }
+    // }
 }
