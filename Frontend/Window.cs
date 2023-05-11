@@ -1,7 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.Windows.Forms;
-using Frontend.Client.Requests;
 using Frontend.Client.Responses.Controllers.Parser;
 using Frontend.Components;
 using Frontend.Services;
@@ -98,10 +97,8 @@ namespace Frontend
 
             StripExecuteButton.Enabled = false;
 
-            ParseResponse response = await HttpService.Post(new Request()
-            {
-                Data = _editorControl.GetActiveTabContent(),
-            });
+            string query = _editorControl.GetActiveTabContent();
+            ParseResponse response = await ParseService.GetParseResponse(query);
 
             _responseControl.HandleResponse(response);
 
