@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 
 namespace Frontend.Client.Responses
 {
-    internal class ScriptResponse
+    public class ScriptResponse
     {
         [JsonProperty] public List<ActionResponse> Actions { get; set; } = new List<ActionResponse>();
 

@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 using Server.Server.Responses.Parts;
 using System.Collections.Generic;
 
-namespace Server.Server.Responses.Controllers.Database
+namespace Frontend.Client.Responses.Controllers.DatabaseListResponse
 {
     public class DatabaseListResponse : Response
     {

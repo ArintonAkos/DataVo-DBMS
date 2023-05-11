@@ -1,5 +1,10 @@
-﻿using System;
+﻿using Frontend.Services;
+using Server.Server.Responses.Controllers.Database;
+using Server.Server.Responses.Parts;
+using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Frontend.Components
@@ -13,11 +18,13 @@ namespace Frontend.Components
         private Point mouseOffset;
         private readonly TextBox sqlTextBox;
         private ListBox table1ListBox, table2ListBox;
+        private List<DatabaseModel> Databases = new List<DatabaseModel>();
 
         public VisualQueryControl()
         {
             InitializeComponent();
-
+            FetchDatabases();
+            
             CreateDraggablePanel(ref draggablePanel1, new Point(x: 10, y: 10), "Table1",
                 new[] { "Column1_1", "Column1_2", });
             CreateDraggablePanel(ref draggablePanel2, new Point(x: 220, y: 10), "Table2",
@@ -130,6 +137,13 @@ namespace Frontend.Components
             {
                 sqlTextBox.Text = "You must select one column from each table for a select operation.";
             }
+        }
+
+        private async Task FetchDatabases()
+        {
+            var response = await DatabaseService.GetDatabaseList();
+
+            Databases = response.Data;
         }
     }
 }

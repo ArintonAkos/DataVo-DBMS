@@ -3,7 +3,7 @@ using Server.Server.Responses.Parts;
 
 namespace Server.Server.Responses;
 
-internal class ActionResponse
+public class ActionResponse
 {
     [JsonProperty] public ActionDataResponse Data { get; set; }
 

@@ -75,6 +75,12 @@
     <Compile Include="Client\Responses\Parts\FieldResponse.cs" />
     <Compile Include="Client\Responses\Response.cs" />
     <Compile Include="Client\Responses\ScriptResponse.cs" />
+    <Compile Include="Components\DraggablePanel.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Components\DraggablePanel.Designer.cs">
+      <DependentUpon>DraggablePanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="Components\EditorControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -105,6 +111,10 @@
     <Compile Include="Components\VisualQueryControl.Designer.cs">
       <DependentUpon>VisualQueryControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="Models\Column.cs" />
+    <Compile Include="Models\ForeignKey.cs" />
+    <Compile Include="Models\IndexFile.cs" />
+    <Compile Include="Models\Reference.cs" />
     <Compile Include="Services\AuthService.cs" />
     <Compile Include="Services\DatabaseService.cs" />
     <Compile Include="Services\HttpService.cs" />

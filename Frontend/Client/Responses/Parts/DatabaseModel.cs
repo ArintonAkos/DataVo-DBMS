@@ -1,6 +1,7 @@
 ﻿using Server.Models.Catalog;
+using System.Collections.Generic;
 
-namespace Server.Server.Responses.Parts
+namespace Frontend.Client.Responses.Parts
 {
     public class DatabaseModel
     {
