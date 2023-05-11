@@ -31,6 +31,7 @@
             this.components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ExplorerControl));
             System.Windows.Forms.TreeNode treeNode1 = new System.Windows.Forms.TreeNode("Open folder");
+            System.Windows.Forms.TreeNode treeNode2 = new System.Windows.Forms.TreeNode("Databases", 2, 2);
             this.ImageList = new System.Windows.Forms.ImageList(this.components);
             this.SidebarPanel = new System.Windows.Forms.TableLayoutPanel();
             this.ExplorerTree = new System.Windows.Forms.TreeView();
@@ -44,6 +45,7 @@
             this.ImageList.TransparentColor = System.Drawing.Color.Transparent;
             this.ImageList.Images.SetKeyName(0, "folder.png");
             this.ImageList.Images.SetKeyName(1, "file.png");
+            this.ImageList.Images.SetKeyName(2, "database.png");
             // 
             // SidebarPanel
             // 
@@ -68,11 +70,16 @@
             this.ExplorerTree.ImageList = this.ImageList;
             this.ExplorerTree.Location = new System.Drawing.Point(3, 25);
             this.ExplorerTree.Name = "ExplorerTree";
-            treeNode1.Name = "EditorTreeOpenFolder";
+            treeNode1.Name = "openFolder";
             treeNode1.Tag = "None";
             treeNode1.Text = "Open folder";
+            treeNode2.ImageIndex = 2;
+            treeNode2.Name = "databases";
+            treeNode2.SelectedImageIndex = 2;
+            treeNode2.Text = "Databases";
             this.ExplorerTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
-            treeNode1});
+            treeNode1,
+            treeNode2});
             this.ExplorerTree.SelectedImageIndex = 0;
             this.ExplorerTree.Size = new System.Drawing.Size(158, 339);
             this.ExplorerTree.TabIndex = 0;
