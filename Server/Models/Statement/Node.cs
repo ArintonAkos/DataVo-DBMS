@@ -1,254 +1,278 @@
 ﻿using Server.Enums;
 using Server.Utils;
 
-namespace Server.Models.Statement
+namespace Server.Models.Statement;
+
+public class Node
 {
-    public class Node
+    public enum NodeType
     {
-        public enum NodeType
+        Value,
+        Column,
+        Operator,
+        And,
+        Or,
+    }
+
+    public enum NodeValueType
+    {
+        String,
+        Int,
+        Double,
+        Boolean,
+        Date,
+        Null, // Any Type can be null, so we need a special type for it
+        Operator,
+    }
+
+    public Node? Left { get; set; }
+    public Node? Right { get; set; }
+    public NodeType Type { get; init; }
+    public NodeValue Value { get; init; }
+    public bool UseIndex { get; set; }
+
+    public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
+    {
+        if (Type != NodeType.Column)
         {
-            Value,
-            Column,
-            Operator,
+            throw new Exception("Only column nodes can be converted to value!");
         }
 
-        public enum NodeValueType
+        if (Value.ValueType != NodeValueType.String)
         {
-            String,
-            Int,
-            Double,
-            Boolean,
-            Date,
-            Null, // Any Type can be null, so we need a special type for it
-            Operator
+            throw new Exception("Column names must be string!");
         }
 
-        public class NodeValue
+        string? columnName = (string)Value.Value;
+
+        return new Node
         {
-            public IComparable? Value;
-            public NodeValueType ValueType;
+            Type = NodeType.Value,
+            Value = new NodeValue(data[columnName]),
+        };
+    }
 
-            public NodeValue() { }
+    public IEnumerable<Node> GetIndexedSubtrees()
+    {
+        var subtrees = new List<Node>();
+        GetIndexedSubtreesRecursive(this, subtrees);
+        return subtrees;
+    }
 
-            public NodeValue(IComparable value, NodeValueType valueType)
+    private static void GetIndexedSubtreesRecursive(Node node, ICollection<Node> subtrees)
+    {
+        while (true)
+        {
+            if (node.UseIndex)
             {
-                Value = value;
-                ValueType = valueType;
+                subtrees.Add(node);
+            }
+            else
+            {
+                if (node.Left != null)
+                {
+                    GetIndexedSubtreesRecursive(node.Left, subtrees);
+                }
+
+                if (node.Right != null)
+                {
+                    node = node.Right;
+                    continue;
+                }
             }
 
-            public NodeValue(dynamic value)
-            {
-                Value = value;
-                ValueType = value.GetType().Name switch
-                {
-                    "String" => NodeValueType.String,
-                    "Int32" => NodeValueType.Int,
-                    "Double" => NodeValueType.Double,
-                    "Boolean" => NodeValueType.Boolean,
-                    "DateOnly" => NodeValueType.Date,
-                    _ => NodeValueType.Null
-                };
-            }
+            break;
+        }
+    }
 
-            /// <summary>
-            /// Factory function to create a new instance of NodeValue by parsing the raw value to known primitive types such as string, double, int, bool.
-            /// </summary>
-            /// <param name="rawValue">The raw value to be parsed</param>
-            /// <returns>The parsed NodeValue object</returns>
-            /// <exception cref="Exception">Thrown when the given parameter cannot be parsed as any known primitive type.</exception>
-            /// <remarks>
-            /// This function first checks if the rawValue is a string enclosed in single quotes (''), then it extracts the string value from the quotes.
-            /// If the rawValue can be parsed to an integer or a double, the function returns the corresponding NodeValue object.
-            /// If the rawValue can be parsed to a boolean, the function returns the corresponding NodeValue object.
-            /// If the rawValue is null, the function returns a NodeValue object with a Null value type and a default value of 0.
-            /// </remarks>
-            public static NodeValue Parse(string rawValue)
-            {
-                dynamic parsedValue;
-                NodeValueType valueType;
+    public static bool MatchesCombinedIndex(IEnumerable<Node> indexedSubtrees, List<string> combinedIndexes)
+    {
+        IOrderedEnumerable<string?> indexedColumns =
+            indexedSubtrees.Select(node => node.Value.Value as string).OrderBy(x => x);
 
-                if (rawValue.StartsWith("'") && rawValue.EndsWith("'"))
-                {
-                    parsedValue = rawValue.TruncateLeftRight(1);
-                    valueType = NodeValueType.String;
-                }
-                else if (int.TryParse(rawValue, out int intValue))
-                {
-                    parsedValue = intValue;
-                    valueType = NodeValueType.Int;
-                }
-                else if (double.TryParse(rawValue, out double doubleValue))
-                {
-                    parsedValue = doubleValue;
-                    valueType = NodeValueType.Double;
-                }
-                else if (bool.TryParse(rawValue, out bool boolValue))
-                {
-                    parsedValue = boolValue;
-                    valueType = NodeValueType.Boolean;
-                }
-                else if (DateOnly.TryParse(rawValue, out DateOnly dateValue))
-                {
-                    parsedValue = dateValue;
-                    valueType = NodeValueType.Date;
-                }
-                else if (rawValue == null)
-                {
-                    parsedValue = 0;
-                    valueType = NodeValueType.Null;
-                }
-                else
-                {
-                    throw new Exception($"{rawValue} is not any known primitive type!");
-                }
+        string indexedColumnsString = string.Join("#", indexedColumns);
 
-                return new NodeValue(parsedValue, valueType);
-            }
+        return combinedIndexes.Contains(indexedColumnsString);
+    }
 
-            /// <summary>
-            /// Factory function to create a new instance of NodeValue representing a logical operator.
-            /// </summary>
-            /// <param name="rawValue">The raw value to be parsed as a logical operator.</param>
-            /// <returns>The parsed NodeValue object.</returns>
-            /// <exception cref="Exception">Thrown when the given parameter is not a known logical operator.</exception>
-            public static NodeValue Operator(string rawValue)
-            {
-                if (!Operators.Supported().Contains(rawValue))
-                {
-                    throw new Exception($"{rawValue} is not a known logical operator!");
-                }
+    public Node HandleAlgebraicExpression(string @operator, Node other) => new()
+        { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
 
-                return new NodeValue(rawValue, NodeValueType.Operator);
-            }
+    public class NodeValue
+    {
+        public IComparable? Value;
+        public NodeValueType ValueType;
 
-            /// <summary>
-            /// Creates a new instance of NodeValue with the provided raw string value.
-            /// </summary>
-            /// <param name="rawValue">The raw string value to be stored in the NodeValue.</param>
-            /// <returns>A new instance of NodeValue with the specified raw string value.</returns>
-            /// <remarks>
-            /// This method converts the provided raw string value to a generic IComparable object using the ConvertValueToGeneric helper method.
-            /// The NodeValueType of the returned NodeValue is set to NodeValueType.String, indicating that it stores a string value.
-            /// </remarks>
-            public static NodeValue RawString(string rawValue)
-            {
-                return new(rawValue, NodeValueType.String);
-            }
-
-            /// <summary>
-            /// Compares the current NodeValue object with another NodeValue object of the same type.
-            /// </summary>
-            /// <param name="Operator">A string representing the comparison operator to use, such as ">" or "<=".</param>
-            /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
-            /// <returns>True if the comparison is true, otherwise false.</returns>
-            /// <exception cref="Exception">Thrown when the type of this NodeValue object is not equal to the type of the other NodeValue object.</exception>
-            public NodeValue Compare(string Operator, NodeValue other)
-            {
-                if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
-                {
-                    return new NodeValue()
-                    {
-                        Value = CompareNullValues(Operator, other),
-                        ValueType = NodeValueType.Boolean
-                    };
-                }
-
-                Type currentNodeType = Value!.GetType();
-                Type otherNodeType = other.Value!.GetType();
-
-                if (currentNodeType != otherNodeType)
-                {
-                    throw new Exception($"The type of {Value} (Type: {currentNodeType}) is not equal to the type of {other.Value} (Type: {otherNodeType})!");
-                }
-
-                int result = Value.CompareTo(other.Value);
-
-                return new NodeValue() 
-                {
-                    Value = Operator switch
-                    {
-                        ">" => result > 0,
-                        "<" => result < 0,
-                        ">=" => result >= 0,
-                        "<=" => result <= 0,
-                        "=" => result == 0,
-                        "!=" => result != 0,
-                        "AND" => (Boolean)Value && (Boolean)other.Value,
-                        "OR" => (Boolean)Value || (Boolean)other.Value,
-                        "+" or "-" or "*" or "/" => HandleArithmeticOperators(Operator, other),
-                        _ => throw new Exception("Invalid operator: " + Operator),
-                    },
-                    ValueType = NodeValueType.Boolean
-                };
-            }
-
-            private Boolean HandleArithmeticOperators(string Operator, NodeValue other)
-            {
-                if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
-                {
-                    throw new Exception($"Arithmetic operator can only be used for numeric types!");
-                }
-
-                dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
-                dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
-                
-                return Operator switch
-                {
-                    "+" => typedValue + typedOtherValue,
-                    "-" => typedValue - typedOtherValue,
-                    "*" => typedValue * typedOtherValue,
-                    "/" => typedValue / typedOtherValue,
-                    _ => throw new Exception($"Invalid operator: {Operator} for types!"),
-                };
-            }
-
-            /// <summary>
-            /// Compares two NodeValue objects that have a ValueType of Null.
-            /// </summary>
-            /// <param name="Operator">A string representing the comparison operator to use, such as ">" or "<=".</param>
-            /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
-            /// <returns>True if the comparison is true, otherwise false.</returns>
-            private Boolean CompareNullValues(string Operator, NodeValue other)
-            {
-                return Operator switch
-                {
-                    ">" or "<" or ">=" or "<=" => false,
-                    "=" => other.ValueType == NodeValueType.Null && ValueType == NodeValueType.Null,
-                    "!=" => (other.ValueType == NodeValueType.Null) ^ (ValueType == NodeValueType.Null),
-                    _ => throw new Exception("Invalid operator: " + Operator),
-                };
-            }
-
-            private static dynamic ConvertGenericToType(IComparable comparable, Type type)
-            {
-                return Convert.ChangeType(comparable, type);
-            }
+        private NodeValue(IComparable value, NodeValueType valueType)
+        {
+            Value = value;
+            ValueType = valueType;
         }
 
-        public Node? Left { get; set; } = null;
-        public Node? Right { get; set; } = null;
-        public NodeType Type { get; set; }
-        public NodeValue Value { get; set; }
-
-        public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
+        public NodeValue(dynamic value)
         {
-            if (Type != NodeType.Column)
+            Value = value;
+            ValueType = value.GetType().Name switch
             {
-                throw new Exception("Only column nodes can be converted to value!");
-            }
-
-            if (Value.ValueType != NodeValueType.String)
-            {
-                throw new Exception("Column names must be string!");
-            }
-
-            string columnName = (string)Value.Value;
-            
-            return new()
-            {
-                Type = NodeType.Value,
-                Value = new NodeValue(data[columnName])
+                "String" => NodeValueType.String,
+                "Int32" => NodeValueType.Int,
+                "Double" => NodeValueType.Double,
+                "Boolean" => NodeValueType.Boolean,
+                "DateOnly" => NodeValueType.Date,
+                _ => NodeValueType.Null,
             };
         }
+
+        /// <summary>
+        ///     Factory function to create a new instance of NodeValue by parsing the raw value to known primitive types such as
+        ///     string, double, int, bool.
+        /// </summary>
+        /// <param name="rawValue">The raw value to be parsed</param>
+        /// <returns>The parsed NodeValue object</returns>
+        /// <exception cref="Exception">Thrown when the given parameter cannot be parsed as any known primitive type.</exception>
+        /// <remarks>
+        ///     This function first checks if the rawValue is a string enclosed in single quotes (''), then it extracts the string
+        ///     value from the quotes.
+        ///     If the rawValue can be parsed to an integer or a double, the function returns the corresponding NodeValue object.
+        ///     If the rawValue can be parsed to a boolean, the function returns the corresponding NodeValue object.
+        ///     If the rawValue is null, the function returns a NodeValue object with a Null value type and a default value of 0.
+        /// </remarks>
+        public static NodeValue Parse(string? rawValue)
+        {
+            if (rawValue is null)
+            {
+                return new NodeValue(value: 0, NodeValueType.Null);
+            }
+
+            if (rawValue.StartsWith("'") && rawValue.EndsWith("'"))
+            {
+                return new NodeValue(rawValue.TruncateLeftRight(charsToTruncate: 1), NodeValueType.String);
+            }
+
+            if (int.TryParse(rawValue, out int intValue))
+            {
+                return new NodeValue(intValue, NodeValueType.Int);
+            }
+
+            if (double.TryParse(rawValue, out double doubleValue))
+            {
+                return new NodeValue(doubleValue, NodeValueType.Double);
+            }
+
+            if (bool.TryParse(rawValue, out bool boolValue))
+            {
+                return new NodeValue(boolValue, NodeValueType.Boolean);
+            }
+
+            if (DateOnly.TryParse(rawValue, out var dateValue))
+            {
+                return new NodeValue(dateValue, NodeValueType.Date);
+            }
+
+            throw new Exception($"{rawValue} is not any known primitive type!");
+        }
+
+        /// <summary>
+        ///     Factory function to create a new instance of NodeValue representing a logical operator.
+        /// </summary>
+        /// <param name="rawValue">The raw value to be parsed as a logical operator.</param>
+        /// <returns>The parsed NodeValue object.</returns>
+        /// <exception cref="Exception">Thrown when the given parameter is not a known logical operator.</exception>
+        public static NodeValue Operator(string rawValue)
+        {
+            if (!Operators.Supported().Contains(rawValue))
+            {
+                throw new Exception($"{rawValue} is not a known logical operator!");
+            }
+
+            return new NodeValue(rawValue, NodeValueType.Operator);
+        }
+
+        /// <summary>
+        ///     Creates a new instance of NodeValue with the provided raw string value.
+        /// </summary>
+        /// <param name="rawValue">The raw string value to be stored in the NodeValue.</param>
+        /// <returns>A new instance of NodeValue with the specified raw string value.</returns>
+        /// <remarks>
+        ///     This method converts the provided raw string value to a generic IComparable object using the ConvertValueToGeneric
+        ///     helper method.
+        ///     The NodeValueType of the returned NodeValue is set to NodeValueType.String, indicating that it stores a string
+        ///     value.
+        /// </remarks>
+        public static NodeValue RawString(string rawValue) => new(rawValue, NodeValueType.String);
+
+        public NodeValue SolveAlgebraicExpression(string @operator, NodeValue other)
+        {
+            if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
+            {
+                throw new Exception("Cannot solve algebra expression with null values!");
+            }
+
+            var currentNodeType = Value!.GetType();
+            var otherNodeType = other.Value!.GetType();
+
+            if (currentNodeType != otherNodeType)
+            {
+                throw new Exception(
+                    $"The type of {Value} (Type: {currentNodeType}) is not equal to the type of {other.Value} (Type: {otherNodeType})!");
+            }
+
+            ValidateAlgebraicExpression(@operator, other);
+
+            if (!Operators.ArithmeticOperators.Contains(@operator))
+            {
+                throw new Exception("Invalid arithmetic operator: " + @operator);
+            }
+
+            dynamic derivedValue = HandleArithmeticOperators(@operator, other);
+
+            return new NodeValue(derivedValue);
+        }
+
+        private dynamic HandleArithmeticOperators(string @operator, NodeValue other)
+        {
+            ValidateAlgebraicExpression(@operator, other);
+
+            dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
+            dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
+
+            return @operator switch
+            {
+                "+" => typedValue + typedOtherValue,
+                "-" => typedValue - typedOtherValue,
+                "*" => typedValue * typedOtherValue,
+                "/" => typedValue / typedOtherValue,
+                _ => throw new Exception($"Invalid operator: {@operator} for types!"),
+            };
+        }
+
+        private void ValidateAlgebraicExpression(string @operator, NodeValue other)
+        {
+            if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
+            {
+                throw new Exception("Arithmetic operator can only be used for numeric types!");
+            }
+        }
+
+        /// <summary>
+        ///     Compares two NodeValue objects that have a ValueType of Null.
+        /// </summary>
+        /// <param name="operator">
+        ///     A string representing the comparison operator to use, such as ">" or "<=".</param>
+        /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
+        /// <returns>True if the comparison is true, otherwise false.</returns>
+        private bool CompareNullValues(string @operator, NodeValue other)
+        {
+            return @operator switch
+            {
+                ">" or "<" or ">=" or "<=" => false,
+                "=" => other.ValueType == NodeValueType.Null && ValueType == NodeValueType.Null,
+                "!=" => other.ValueType == NodeValueType.Null ^ ValueType == NodeValueType.Null,
+                _ => throw new Exception("Invalid operator: " + @operator),
+            };
+        }
+
+        private static dynamic ConvertGenericToType(IComparable comparable, Type type) =>
+            Convert.ChangeType(comparable, type);
     }
 }

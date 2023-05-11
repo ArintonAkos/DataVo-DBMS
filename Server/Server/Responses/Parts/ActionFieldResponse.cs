@@ -1,10 +1,8 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses.Parts
+namespace Server.Server.Responses.Parts;
+
+internal class ActionFieldResponse
 {
-    internal class ActionFieldResponse
-    {
-        [JsonProperty]
-        public List<FieldResponse> Fields { get; set; } = new();
-    }
+    [JsonProperty] public List<FieldResponse> Fields { get; set; } = new();
 }

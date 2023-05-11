@@ -1,20 +1,13 @@
-﻿using Server.Utils;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
+using Server.Utils;
 
-namespace Server.Models.DQL
+namespace Server.Models.DQL;
+
+internal class DescribeModel
 {
-    internal class DescribeModel
-    {
-        public String TableName { get; set; }
+    public DescribeModel(string tableName) => TableName = tableName;
 
-        public DescribeModel(String tableName)
-        {
-            this.TableName = tableName;
-        }
+    public string TableName { get; set; }
 
-        public static DescribeModel FromMatch(Match match)
-        {
-            return new DescribeModel(match.NthGroup(1).Value);
-        }
-    }
+    public static DescribeModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value);
 }

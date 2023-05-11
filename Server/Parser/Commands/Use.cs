@@ -1,23 +1,19 @@
-﻿using Server.Models.DQL;
+﻿using System.Text.RegularExpressions;
+using Server.Models.DQL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
-using System.Text.RegularExpressions;
 
-namespace Server.Parser.Commands
+namespace Server.Parser.Commands;
+
+internal class Use : BaseDbAction
 {
-    internal class Use : BaseDbAction
+    private readonly UseModel _model;
+
+    public Use(Match match) => _model = UseModel.FromMatch(match);
+
+    public override void PerformAction(Guid session)
     {
-        private readonly UseModel _model;
-
-        public Use(Match match)
-        {
-            this._model = UseModel.FromMatch(match);
-        }
-
-        public override void PerformAction(Guid session)
-        {
-            // Use the database
-            CacheStorage.Set(session, _model.DatabaseName);
-        }
+        // Use the database
+        CacheStorage.Set(session, _model.DatabaseName);
     }
 }

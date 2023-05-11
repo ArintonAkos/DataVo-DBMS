@@ -1,15 +1,10 @@
 ﻿using Newtonsoft.Json;
 
-namespace Server.Server.Responses
-{
-    internal class Response
-    {
-        [JsonProperty("data")]
-        public dynamic Data { get; set; }
+namespace Server.Server.Responses;
 
-        public String ToJson()
-        {
-            return JsonConvert.SerializeObject(this, Formatting.Indented);
-        }
-    }
+internal class Response
+{
+    [JsonProperty("data")] public dynamic Data { get; set; }
+
+    public string ToJson() => JsonConvert.SerializeObject(this, Formatting.Indented);
 }

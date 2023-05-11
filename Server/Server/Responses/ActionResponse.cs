@@ -1,37 +1,28 @@
 ﻿using Newtonsoft.Json;
 using Server.Server.Responses.Parts;
 
-namespace Server.Server.Responses
+namespace Server.Server.Responses;
+
+internal class ActionResponse
 {
-    internal class ActionResponse
-    {
-        [JsonProperty]
-        public ActionDataResponse Data { get; set; }
+    [JsonProperty] public ActionDataResponse Data { get; set; }
 
-        [JsonProperty]
-        public ActionFieldResponse Fields { get; set; }
+    [JsonProperty] public ActionFieldResponse Fields { get; set; }
 
-        [JsonProperty]
-        public List<String> Messages { get; set; } = new();
+    [JsonProperty] public List<string> Messages { get; set; } = new();
 
-        public static ActionResponse FromRaw(List<String> messages, List<List<DataResponse>> data, List<FieldResponse> fields)
+    public static ActionResponse FromRaw(List<string> messages, List<List<DataResponse>> data,
+        List<FieldResponse> fields) =>
+        new()
         {
-            return new ActionResponse()
-            {
-                Messages = messages,
-                Data = new ActionDataResponse() { Data = data },
-                Fields = new ActionFieldResponse() { Fields = fields },
-            };
-        }
+            Messages = messages,
+            Data = new ActionDataResponse { Data = data, },
+            Fields = new ActionFieldResponse { Fields = fields, },
+        };
 
-        public static ActionResponse Default()
-        {
-            return FromRaw(new(), new(), new());
-        }
+    public static ActionResponse Default() =>
+        FromRaw(new List<string>(), new List<List<DataResponse>>(), new List<FieldResponse>());
 
-        public static ActionResponse Error(Exception ex)
-        {
-            return FromRaw(new() { ex.Message }, new(), new());
-        }
-    }
+    public static ActionResponse Error(Exception ex) => FromRaw(new List<string> { ex.Message, },
+        new List<List<DataResponse>>(), new List<FieldResponse>());
 }
