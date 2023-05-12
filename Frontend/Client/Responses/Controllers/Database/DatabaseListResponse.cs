@@ -1,7 +1,5 @@
-﻿using Frontend.Client.Responses;
+﻿using Frontend.Client.Responses.Parts;
 using Newtonsoft.Json;
-using Server.Server.Responses.Parts;
-using System.Collections.Generic;
 
 namespace Frontend.Client.Responses.Controllers.DatabaseListResponse
 {

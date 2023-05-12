@@ -1,4 +1,5 @@
-﻿using Server.Server.Responses.Controllers.Database;
+﻿using Frontend.Client.Responses;
+using Frontend.Client.Responses.Controllers.DatabaseListResponse;
 using System.Threading.Tasks;
 
 namespace Frontend.Services
@@ -7,7 +8,17 @@ namespace Frontend.Services
     {
         public static async Task<DatabaseListResponse> GetDatabaseList()
         {
-            return await HttpService.Get("database/list") as DatabaseListResponse;
+            var response = await HttpService.Get<DatabaseListResponse>("database/list");
+
+            if (response is null)
+            {
+                return new()
+                {
+                    Data = new(),
+                };
+            }
+
+            return (response as DatabaseListResponse)!;
         }
     }
 }

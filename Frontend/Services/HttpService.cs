@@ -11,25 +11,25 @@ namespace Frontend.Services
     internal class HttpService
     {
         public static string URL = "http://localhost:8001/";
-        private static readonly HttpClient _httpClient = new HttpClient();
+        private static readonly HttpClient _httpClient = new();
 
-        public static async Task<Response> Get(string path)
+        public static async Task<T?> Get<T>(string path) where T : Response
         {
             try
             {
                 var response = await _httpClient.GetAsync(URL + path);
                 var result = await response.Content.ReadAsStringAsync();
-
-                return JsonConvert.DeserializeObject<Response>(result);
+                
+                return JsonConvert.DeserializeObject<T>(result);
             }
             catch (HttpRequestException ex)
             {
                 Console.WriteLine(ex.Message);
-                return new ErrorResponse(ex);
+                return null;
             }
         }
 
-        public static async Task<Response> Post(string path, Request request)
+        public static async Task<T?> Post<T>(string path, Request request) where T : Response
         {
             try
             {
@@ -39,12 +39,12 @@ namespace Frontend.Services
                 var response = await _httpClient.PostAsync(URL + path, data);
                 var result = await response.Content.ReadAsStringAsync();
 
-                return JsonConvert.DeserializeObject<Response>(result);
+                return JsonConvert.DeserializeObject<T>(result);
             }
             catch (HttpRequestException ex)
             {
                 Console.WriteLine(ex.Message);
-                return new ErrorResponse(ex);
+                return null;
             }
         }
     }

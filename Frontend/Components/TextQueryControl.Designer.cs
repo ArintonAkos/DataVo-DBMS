@@ -28,34 +28,62 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.textBox = new System.Windows.Forms.RichTextBox();
-            this.SuspendLayout();
+            tableLayoutPanel1 = new TableLayoutPanel();
+            sqlRichTextBox1 = new SqlRichTextBox();
+            listBox1 = new ListBox();
+            tableLayoutPanel1.SuspendLayout();
+            SuspendLayout();
             // 
-            // textBox
+            // tableLayoutPanel1
             // 
-            this.textBox.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.textBox.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.textBox.Font = new System.Drawing.Font("Consolas", 11F);
-            this.textBox.Location = new System.Drawing.Point(0, 0);
-            this.textBox.Name = "textBox";
-            this.textBox.Size = new System.Drawing.Size(839, 427);
-            this.textBox.TabIndex = 1;
-            this.textBox.Text = "";
+            tableLayoutPanel1.ColumnCount = 2;
+            tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50F));
+            tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            tableLayoutPanel1.Controls.Add(sqlRichTextBox1, 1, 0);
+            tableLayoutPanel1.Controls.Add(listBox1, 0, 0);
+            tableLayoutPanel1.Dock = DockStyle.Fill;
+            tableLayoutPanel1.Location = new Point(0, 0);
+            tableLayoutPanel1.Name = "tableLayoutPanel1";
+            tableLayoutPanel1.RowCount = 1;
+            tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            tableLayoutPanel1.Size = new Size(734, 400);
+            tableLayoutPanel1.TabIndex = 0;
             // 
-            // TextEditorControl
+            // sqlRichTextBox1
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.Controls.Add(this.textBox);
-            this.Name = "TextEditorControl";
-            this.Size = new System.Drawing.Size(839, 427);
-            this.Tag = "TextBox";
-            this.ResumeLayout(false);
-
+            sqlRichTextBox1.Dock = DockStyle.Fill;
+            sqlRichTextBox1.Location = new Point(53, 3);
+            sqlRichTextBox1.Name = "sqlRichTextBox1";
+            sqlRichTextBox1.Size = new Size(678, 394);
+            sqlRichTextBox1.TabIndex = 0;
+            sqlRichTextBox1.Text = "";
+            // 
+            // listBox1
+            // 
+            listBox1.Dock = DockStyle.Fill;
+            listBox1.FormattingEnabled = true;
+            listBox1.ItemHeight = 15;
+            listBox1.Location = new Point(3, 3);
+            listBox1.Name = "listBox1";
+            listBox1.Size = new Size(44, 394);
+            listBox1.TabIndex = 1;
+            // 
+            // TextQueryControl
+            // 
+            AutoScaleDimensions = new SizeF(7F, 15F);
+            AutoScaleMode = AutoScaleMode.Font;
+            Controls.Add(tableLayoutPanel1);
+            Name = "TextQueryControl";
+            Size = new Size(734, 400);
+            Tag = "TextBox";
+            tableLayoutPanel1.ResumeLayout(false);
+            ResumeLayout(false);
         }
 
         #endregion
 
-        private System.Windows.Forms.RichTextBox textBox;
+        private TableLayoutPanel tableLayoutPanel1;
+        private SqlRichTextBox sqlRichTextBox1;
+        private ListBox listBox1;
     }
 }
