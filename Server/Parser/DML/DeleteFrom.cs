@@ -17,19 +17,17 @@ internal class DeleteFrom : BaseDbAction
     {
         try
         {
-            HashSet<string> indexedColumns = GetIndexedColumns(_model.TableName, "University");
+            List<string> toBeDeleted = _model.WhereStatement.Evaluate(_model.TableName, "University").ToList();
 
-            List<string> toBeDeleted = _model.WhereStatement.Evaluate(indexedColumns).Select(row => row.);
-
-            DbContext.Instance.DeleteFromTable(toBeDeleted, _model.TableName, "University");
+            DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
 
             Catalog.GetTableIndexes(_model.TableName, "University")
-                .Select(e => e.IndexFileName)
-                .ToList()
-                .ForEach(indexFile =>
-                {
-                    DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, "University");
-                });
+            .Select(e => e.IndexFileName)
+            .ToList()
+            .ForEach(indexFile =>
+            {
+                DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, "University");
+            });
 
             Logger.Info($"Rows affected: {toBeDeleted.Count}");
             Messages.Add($"Rows affected: {toBeDeleted.Count}");

@@ -208,6 +208,22 @@ internal static class Catalog
             .ToList();
     }
 
+    public static Dictionary<string, string> GetTableIndexedColumns(string tableName, string databaseName)
+    {
+        Dictionary<string, string> result = new();
+        List<IndexFile> indexFiles = GetTableIndexes(tableName, databaseName);
+
+        foreach (IndexFile index in indexFiles)
+        {
+            foreach (string attribute in index.AttributeNames)
+            {
+                result.Add(attribute, index.IndexFileName);
+            }
+        }
+
+        return result;
+    }
+
     private static XElement? GetDatabaseElement(string databaseName)
     {
         List<XElement> databases;

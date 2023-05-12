@@ -1,6 +1,7 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Driver;
 using Server.Models.Catalog;
+using System.Text.RegularExpressions;
 
 namespace Server.Server.MongoDB;
 
@@ -84,6 +85,33 @@ internal class DbContext : MongoClient
         }
     }
 
+    public void InsertIntoIndex(string value, string rowId, string indexName, string tableName, string databaseName)
+    {
+        string indexTableName = $"{tableName}_{indexName}_index";
+
+        var database = GetDatabase(databaseName);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Eq("_id", value);
+
+        BsonDocument newBsonDoc = new()
+        {
+            new BsonElement("_id", value),
+        };
+
+        var currentValue = table.Find(filter).FirstOrDefault();
+        if (currentValue == null)
+        {
+            newBsonDoc.Add("columns", rowId);
+            table.InsertOne(newBsonDoc);
+
+            return;
+        }
+
+        string newColumns = currentValue.GetElement("columns").Value.AsString + "##" + rowId;
+        newBsonDoc.Add(new BsonElement("columns", newColumns));
+        table.ReplaceOne(filter, newBsonDoc);
+    }
+
     public async void DeleteFormTable(List<string> toBeDeletedIds, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
@@ -135,6 +163,50 @@ internal class DbContext : MongoClient
         }
     }
 
+    public HashSet<string> FilterUsingPrimaryKey(string columnValue, int columnIndex, string tableName, string databaseName)
+    {
+        var database = GetDatabase(databaseName);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
+
+        string regex = "^";
+
+        for (int i = 0; i < columnIndex; ++i)
+        {
+            regex += "[^#]+#";
+        }
+
+        regex += $"{columnValue}(.*$|$)";
+
+        var filter = Builders<BsonDocument>.Filter.Regex("_id", regex);
+
+        return table.Find(filter)
+            .ToList()
+            .Select(doc => doc.GetElement("_id").Value.AsString)
+            .ToHashSet();
+    }
+
+    public HashSet<string> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
+    {
+        string indexTableName = $"{tableName}_{indexName}_index";
+        var database = GetDatabase(databaseName);
+        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
+
+        var filter = Builders<BsonDocument>.Filter.Eq("_id", columnValue);
+
+        HashSet<string> result = new();
+
+        List<BsonDocument> values = table.Find(filter)
+        .ToList();
+
+        values.ForEach(doc =>
+        {
+            string[] values = doc.GetElement("columns").Value.AsString.Split("##");
+            result.UnionWith(values);
+        });
+
+        return result;
+    }
+
     public bool TableContainsRow(string rowId, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
@@ -149,33 +221,6 @@ internal class DbContext : MongoClient
         string indexTableName = $"{tableName}_{indexName}_index";
 
         return TableContainsRow(rowId, indexTableName, databaseName);
-    }
-
-    public void UpdateIndex(string value, string rowId, string indexName, string tableName, string databaseName)
-    {
-        string indexTableName = $"{tableName}_{indexName}_index";
-
-        var database = GetDatabase(databaseName);
-        IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
-        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Eq("_id", value);
-
-        BsonDocument newBsonDoc = new()
-        {
-            new BsonElement("_id", value),
-        };
-
-        var currentValue = table.Find(filter).FirstOrDefault();
-        if (currentValue == null)
-        {
-            newBsonDoc.Add("columns", rowId);
-            table.InsertOne(newBsonDoc);
-
-            return;
-        }
-
-        string newColumns = currentValue.GetElement("columns").Value.AsString + "##" + rowId;
-        newBsonDoc.Add(new BsonElement("columns", newColumns));
-        table.ReplaceOne(filter, newBsonDoc);
     }
 
     public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
