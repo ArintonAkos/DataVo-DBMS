@@ -1,4 +1,5 @@
 ﻿using Server.Enums;
+using Server.Models.Catalog;
 using Server.Utils;
 
 namespace Server.Models.Statement;
@@ -12,6 +13,7 @@ public class Node
         Operator,
         And,
         Or,
+        Eq,
     }
 
     public enum NodeValueType
@@ -31,70 +33,6 @@ public class Node
     public NodeValue Value { get; init; }
     public bool UseIndex { get; set; }
 
-    public Node FromColumnToNodeValue(IDictionary<string, dynamic> data)
-    {
-        if (Type != NodeType.Column)
-        {
-            throw new Exception("Only column nodes can be converted to value!");
-        }
-
-        if (Value.ValueType != NodeValueType.String)
-        {
-            throw new Exception("Column names must be string!");
-        }
-
-        string? columnName = (string)Value.Value;
-
-        return new Node
-        {
-            Type = NodeType.Value,
-            Value = new NodeValue(data[columnName]),
-        };
-    }
-
-    public IEnumerable<Node> GetIndexedSubtrees()
-    {
-        var subtrees = new List<Node>();
-        GetIndexedSubtreesRecursive(this, subtrees);
-        return subtrees;
-    }
-
-    private static void GetIndexedSubtreesRecursive(Node node, ICollection<Node> subtrees)
-    {
-        while (true)
-        {
-            if (node.UseIndex)
-            {
-                subtrees.Add(node);
-            }
-            else
-            {
-                if (node.Left != null)
-                {
-                    GetIndexedSubtreesRecursive(node.Left, subtrees);
-                }
-
-                if (node.Right != null)
-                {
-                    node = node.Right;
-                    continue;
-                }
-            }
-
-            break;
-        }
-    }
-
-    public static bool MatchesCombinedIndex(IEnumerable<Node> indexedSubtrees, List<string> combinedIndexes)
-    {
-        IOrderedEnumerable<string?> indexedColumns =
-            indexedSubtrees.Select(node => node.Value.Value as string).OrderBy(x => x);
-
-        string indexedColumnsString = string.Join("#", indexedColumns);
-
-        return combinedIndexes.Contains(indexedColumnsString);
-    }
-
     public Node HandleAlgebraicExpression(string @operator, Node other) => new()
         { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
 
@@ -102,6 +40,13 @@ public class Node
     {
         public IComparable? Value;
         public NodeValueType ValueType;
+        public dynamic? ParsedValue 
+        {
+            get
+            {
+                return ConvertGenericToType(Value, ValueType.ToType());
+            } 
+        }
 
         private NodeValue(IComparable value, NodeValueType valueType)
         {
@@ -164,7 +109,7 @@ public class Node
                 return new NodeValue(boolValue, NodeValueType.Boolean);
             }
 
-            if (DateOnly.TryParse(rawValue, out var dateValue))
+            if (DateOnly.TryParse(rawValue, out DateOnly dateValue))
             {
                 return new NodeValue(dateValue, NodeValueType.Date);
             }
@@ -254,25 +199,7 @@ public class Node
             }
         }
 
-        /// <summary>
-        ///     Compares two NodeValue objects that have a ValueType of Null.
-        /// </summary>
-        /// <param name="operator">
-        ///     A string representing the comparison operator to use, such as ">" or "<=".</param>
-        /// <param name="other">The NodeValue object to compare with the current NodeValue object.</param>
-        /// <returns>True if the comparison is true, otherwise false.</returns>
-        private bool CompareNullValues(string @operator, NodeValue other)
-        {
-            return @operator switch
-            {
-                ">" or "<" or ">=" or "<=" => false,
-                "=" => other.ValueType == NodeValueType.Null && ValueType == NodeValueType.Null,
-                "!=" => other.ValueType == NodeValueType.Null ^ ValueType == NodeValueType.Null,
-                _ => throw new Exception("Invalid operator: " + @operator),
-            };
-        }
-
-        private static dynamic ConvertGenericToType(IComparable comparable, Type type) =>
+        private static dynamic? ConvertGenericToType(IComparable? comparable, Type type) =>
             Convert.ChangeType(comparable, type);
     }
 }

@@ -105,7 +105,7 @@ internal static class Patterns
 
     public static string Where
     {
-        get => @"where(\s+\(?\s*(\w+)\s*(=|<|>|like)+\s*[''A-Z0-9./]+\)?(\s+and|\s+or)?)+";
+        get => @"where(\s+\(?\s*(\w+)\s*(!|=|<|>|like)+\s*[''A-Z0-9./]+\)?(\s+and|\s+or)?)+";
     }
 
     public static string AddStartLine(this string s) => @"^\s*" + s;

@@ -139,10 +139,11 @@ public static class StatementParser
                     string op = operators.Pop();
                     var right = values.Pop();
                     var left = values.Pop();
+                    var type = GetNodeType(op);
 
                     Node node = new()
                     {
-                        Type = NodeType.Operator,
+                        Type = type,
                         Value = NodeValue.Operator(op),
                         Left = left,
                         Right = right,
@@ -216,10 +217,11 @@ public static class StatementParser
             string op = operators.Pop();
             var right = values.Pop();
             var left = values.Pop();
+            var type = GetNodeType(op);
 
             Node node = new()
             {
-                Type = NodeType.Operator,
+                Type = type,
                 Value = NodeValue.Operator(op),
                 Left = left,
                 Right = right,
@@ -238,7 +240,8 @@ public static class StatementParser
         {
             "AND" => NodeType.And,
             "OR" => NodeType.Or,
-            "=" or "!=" or ">" or "<" or ">=" or "<=" => NodeType.Operator,
+            "=" => NodeType.Eq,
+            "!=" or ">" or "<" or ">=" or "<=" => NodeType.Operator,
             "+" or "-" or "*" or "/" => NodeType.Operator,
             _ => throw new ArgumentException($"Invalid operator: {op}"),
         };
