@@ -1,7 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Windows.Forms;
-using Frontend.Client.Responses.Controllers.Parser;
+﻿using Frontend.Client.Responses.Controllers.Parser;
 using Frontend.Components;
 using Frontend.Services;
 
