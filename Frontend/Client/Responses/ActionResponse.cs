@@ -15,7 +15,7 @@ namespace Frontend.Client.Responses
 
         public static ActionResponse FromRaw(List<string> messages, List<List<DataResponse>> data,
             List<FieldResponse> fields) =>
-            new ActionResponse
+            new()
             {
                 Messages = messages,
                 Data = new ActionDataResponse { Data = data, },

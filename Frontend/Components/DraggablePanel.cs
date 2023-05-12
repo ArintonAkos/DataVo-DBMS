@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Frontend.Client.Responses.Parts;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -8,18 +9,38 @@ using System.Threading.Tasks;
 
 namespace Frontend.Components
 {
-    public partial class DraggablePanel : Component
+    public partial class DraggablePanel : UserControl
     {
-        public DraggablePanel()
+        private Point mouseOffset;
+        private DatabaseModel.Table Table { get; set; }
+
+        public DraggablePanel(DatabaseModel.Table table)
         {
+            Table = table;
             InitializeComponent();
+
+            foreach (var column in table.Columns)
+            {
+                listBox1.Items.Add(column.Name);
+            }
         }
 
-        public DraggablePanel(IContainer container)
+        private void DraggablePanel_MouseDown(object sender, MouseEventArgs e)
         {
-            container.Add(this);
+            if (e.Button == MouseButtons.Left)
+            {
+                mouseOffset = new Point(-e.X, -e.Y);
+            }
+        }
 
-            InitializeComponent();
+        private void DraggablePanel_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                var mousePos = MousePosition;
+                mousePos.Offset(mouseOffset.X, mouseOffset.Y);
+                ((Control)sender).Location = ((Control)sender).Parent.PointToClient(mousePos);
+            }
         }
     }
 }
