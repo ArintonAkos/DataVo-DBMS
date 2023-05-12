@@ -1,16 +1,18 @@
 ﻿using System;
 using System.IO;
 using System.Windows.Forms;
-using Frontend.Client.Requests;
 using Frontend.Client.Responses.Controllers.Parser;
 using Frontend.Components;
 using Frontend.Services;
-using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace Frontend
 {
     public partial class Window : Form
     {
+        public delegate void DataFetchedHandler(object source, EventArgs args);
+
+        public event DataFetchedHandler DataFetched;
+
         private ExplorerControl _explorerTree;
         private EditorControl _editorControl;
         private ResponseControl _responseControl;
@@ -22,7 +24,7 @@ namespace Frontend
 
         private void Window_Load(object sender, EventArgs e)
         {
-            _editorControl = new EditorControl() 
+            _editorControl = new EditorControl()
             {
                 Dock = DockStyle.Fill,
             };
@@ -74,13 +76,11 @@ namespace Frontend
 
         private void MenuOpenFolderOption_Click(object sender, EventArgs e)
         {
-            CommonOpenFileDialog dialog = new CommonOpenFileDialog();
-            dialog.RestoreDirectory = true;
-            dialog.IsFolderPicker = true;
+            using FolderBrowserDialog dialog = new();
 
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
+            if (dialog.ShowDialog() == DialogResult.OK)
             {
-                _explorerTree.OpenFolder(dialog.FileName);
+                _explorerTree.OpenFolder(dialog.SelectedPath);
             }
         }
 
@@ -98,10 +98,8 @@ namespace Frontend
 
             StripExecuteButton.Enabled = false;
 
-            ParseResponse response = await HttpService.Post(new Request()
-            {
-                Data = _editorControl.GetActiveTabContent(),
-            });
+            string query = _editorControl.GetActiveTabContent();
+            ParseResponse response = await ParseService.GetParseResponse(query);
 
             _responseControl.HandleResponse(response);
 

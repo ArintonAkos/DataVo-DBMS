@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses.Parts;
 
-internal class FieldResponse
+public class FieldResponse
 {
     [JsonProperty] public string FieldName { get; set; }
 }

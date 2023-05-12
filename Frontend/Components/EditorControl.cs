@@ -76,8 +76,8 @@ namespace Frontend.Components
                 TextQueryControl textControl = GetEditorTextControl(tabControl.SelectedIndex);
                 if (textControl != null)
                 {
-                    return string.IsNullOrEmpty(textControl.TextBox.SelectedText) 
-                        ? textControl.TextBox.Text 
+                    return string.IsNullOrEmpty(textControl.TextBox.SelectedText)
+                        ? textControl.TextBox.Text
                         : textControl.TextBox.SelectedText;
                 }
             }

@@ -28,134 +28,155 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.VQueryPanel = new System.Windows.Forms.TableLayoutPanel();
-            this.TablePanel = new System.Windows.Forms.TableLayoutPanel();
-            this.TableData = new System.Windows.Forms.DataGridView();
-            this.OutputData = new System.Windows.Forms.DataGridView();
-            this.QueryPanel = new System.Windows.Forms.TableLayoutPanel();
-            this.Command = new System.Windows.Forms.ComboBox();
-            this.QueryLayout = new System.Windows.Forms.FlowLayoutPanel();
-            this.VQueryPanel.SuspendLayout();
-            this.TablePanel.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.TableData)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.OutputData)).BeginInit();
-            this.QueryPanel.SuspendLayout();
-            this.SuspendLayout();
+            VQueryPanel = new TableLayoutPanel();
+            TablePanel = new TableLayoutPanel();
+            splitContainer1 = new SplitContainer();
+            TableVisualizerPanel = new Panel();
+            dataGridView1 = new DataGridView();
+            QueryPanel = new TableLayoutPanel();
+            Command = new ComboBox();
+            collapsibleTreeView1 = new CollapsibleTreeView();
+            VQueryPanel.SuspendLayout();
+            TablePanel.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)splitContainer1).BeginInit();
+            splitContainer1.Panel1.SuspendLayout();
+            splitContainer1.Panel2.SuspendLayout();
+            splitContainer1.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)dataGridView1).BeginInit();
+            QueryPanel.SuspendLayout();
+            SuspendLayout();
             // 
             // VQueryPanel
             // 
-            this.VQueryPanel.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.VQueryPanel.ColumnCount = 2;
-            this.VQueryPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 29.13505F));
-            this.VQueryPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 70.86494F));
-            this.VQueryPanel.Controls.Add(this.TablePanel, 1, 0);
-            this.VQueryPanel.Controls.Add(this.QueryPanel, 0, 0);
-            this.VQueryPanel.Location = new System.Drawing.Point(0, 0);
-            this.VQueryPanel.Name = "VQueryPanel";
-            this.VQueryPanel.RowCount = 1;
-            this.VQueryPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.VQueryPanel.Size = new System.Drawing.Size(853, 450);
-            this.VQueryPanel.TabIndex = 1;
+            VQueryPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            VQueryPanel.ColumnCount = 2;
+            VQueryPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
+            VQueryPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            VQueryPanel.Controls.Add(TablePanel, 1, 0);
+            VQueryPanel.Controls.Add(QueryPanel, 0, 0);
+            VQueryPanel.Location = new Point(0, 0);
+            VQueryPanel.Margin = new Padding(2);
+            VQueryPanel.Name = "VQueryPanel";
+            VQueryPanel.RowCount = 1;
+            VQueryPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            VQueryPanel.Size = new Size(682, 360);
+            VQueryPanel.TabIndex = 1;
             // 
             // TablePanel
             // 
-            this.TablePanel.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.TablePanel.ColumnCount = 1;
-            this.TablePanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.TablePanel.Controls.Add(this.TableData, 0, 0);
-            this.TablePanel.Controls.Add(this.OutputData, 0, 1);
-            this.TablePanel.Location = new System.Drawing.Point(251, 3);
-            this.TablePanel.Name = "TablePanel";
-            this.TablePanel.RowCount = 2;
-            this.TablePanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 51.08225F));
-            this.TablePanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 48.91775F));
-            this.TablePanel.Size = new System.Drawing.Size(599, 444);
-            this.TablePanel.TabIndex = 0;
+            TablePanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            TablePanel.ColumnCount = 1;
+            TablePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            TablePanel.Controls.Add(splitContainer1, 0, 1);
+            TablePanel.Location = new Point(152, 2);
+            TablePanel.Margin = new Padding(2);
+            TablePanel.Name = "TablePanel";
+            TablePanel.RowCount = 2;
+            TablePanel.RowStyles.Add(new RowStyle());
+            TablePanel.RowStyles.Add(new RowStyle());
+            TablePanel.Size = new Size(528, 356);
+            TablePanel.TabIndex = 0;
             // 
-            // TableData
+            // splitContainer1
             // 
-            this.TableData.BackgroundColor = System.Drawing.SystemColors.ButtonHighlight;
-            this.TableData.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.TableData.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.TableData.Location = new System.Drawing.Point(3, 3);
-            this.TableData.Name = "TableData";
-            this.TableData.RowHeadersWidth = 51;
-            this.TableData.RowTemplate.Height = 24;
-            this.TableData.Size = new System.Drawing.Size(593, 220);
-            this.TableData.TabIndex = 0;
+            splitContainer1.Dock = DockStyle.Fill;
+            splitContainer1.Location = new Point(3, 3);
+            splitContainer1.Name = "splitContainer1";
+            splitContainer1.Orientation = Orientation.Horizontal;
             // 
-            // OutputData
+            // splitContainer1.Panel1
             // 
-            this.OutputData.BackgroundColor = System.Drawing.SystemColors.ButtonHighlight;
-            this.OutputData.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.OutputData.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.OutputData.Location = new System.Drawing.Point(3, 229);
-            this.OutputData.Name = "OutputData";
-            this.OutputData.RowHeadersWidth = 51;
-            this.OutputData.RowTemplate.Height = 24;
-            this.OutputData.Size = new System.Drawing.Size(593, 212);
-            this.OutputData.TabIndex = 1;
+            splitContainer1.Panel1.Controls.Add(TableVisualizerPanel);
+            // 
+            // splitContainer1.Panel2
+            // 
+            splitContainer1.Panel2.Controls.Add(dataGridView1);
+            splitContainer1.Size = new Size(522, 350);
+            splitContainer1.SplitterDistance = 174;
+            splitContainer1.TabIndex = 0;
+            // 
+            // TableVisualizerPanel
+            // 
+            TableVisualizerPanel.BackColor = SystemColors.HighlightText;
+            TableVisualizerPanel.Dock = DockStyle.Fill;
+            TableVisualizerPanel.Location = new Point(0, 0);
+            TableVisualizerPanel.Name = "TableVisualizerPanel";
+            TableVisualizerPanel.Size = new Size(522, 174);
+            TableVisualizerPanel.TabIndex = 2;
+            // 
+            // dataGridView1
+            // 
+            dataGridView1.BackgroundColor = SystemColors.Control;
+            dataGridView1.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            dataGridView1.Dock = DockStyle.Fill;
+            dataGridView1.Location = new Point(0, 0);
+            dataGridView1.Name = "dataGridView1";
+            dataGridView1.RowTemplate.Height = 25;
+            dataGridView1.Size = new Size(522, 172);
+            dataGridView1.TabIndex = 0;
             // 
             // QueryPanel
             // 
-            this.QueryPanel.ColumnCount = 1;
-            this.QueryPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.QueryPanel.Controls.Add(this.Command, 0, 0);
-            this.QueryPanel.Controls.Add(this.QueryLayout, 0, 1);
-            this.QueryPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.QueryPanel.Location = new System.Drawing.Point(3, 3);
-            this.QueryPanel.Name = "QueryPanel";
-            this.QueryPanel.RowCount = 2;
-            this.QueryPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 8.611111F));
-            this.QueryPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 91.38889F));
-            this.QueryPanel.Size = new System.Drawing.Size(242, 444);
-            this.QueryPanel.TabIndex = 1;
+            QueryPanel.ColumnCount = 1;
+            QueryPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            QueryPanel.Controls.Add(Command, 0, 0);
+            QueryPanel.Controls.Add(collapsibleTreeView1, 0, 1);
+            QueryPanel.Dock = DockStyle.Fill;
+            QueryPanel.Location = new Point(2, 2);
+            QueryPanel.Margin = new Padding(2);
+            QueryPanel.Name = "QueryPanel";
+            QueryPanel.RowCount = 2;
+            QueryPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 8.611111F));
+            QueryPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 91.38889F));
+            QueryPanel.Size = new Size(146, 356);
+            QueryPanel.TabIndex = 1;
             // 
             // Command
             // 
-            this.Command.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.Command.FormattingEnabled = true;
-            this.Command.Location = new System.Drawing.Point(3, 3);
-            this.Command.Name = "Command";
-            this.Command.Size = new System.Drawing.Size(236, 24);
-            this.Command.TabIndex = 0;
+            Command.Dock = DockStyle.Fill;
+            Command.FormattingEnabled = true;
+            Command.Location = new Point(2, 2);
+            Command.Margin = new Padding(2);
+            Command.Name = "Command";
+            Command.Size = new Size(142, 23);
+            Command.TabIndex = 0;
             // 
-            // QueryLayout
+            // collapsibleTreeView1
             // 
-            this.QueryLayout.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.QueryLayout.Location = new System.Drawing.Point(3, 41);
-            this.QueryLayout.Name = "QueryLayout";
-            this.QueryLayout.Size = new System.Drawing.Size(236, 400);
-            this.QueryLayout.TabIndex = 1;
+            collapsibleTreeView1.Dock = DockStyle.Fill;
+            collapsibleTreeView1.Location = new Point(3, 33);
+            collapsibleTreeView1.Name = "collapsibleTreeView1";
+            collapsibleTreeView1.Size = new Size(140, 320);
+            collapsibleTreeView1.TabIndex = 1;
             // 
             // VisualQueryControl
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(120F, 120F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
-            this.Controls.Add(this.VQueryPanel);
-            this.Name = "VisualQueryControl";
-            this.Size = new System.Drawing.Size(853, 450);
-            this.VQueryPanel.ResumeLayout(false);
-            this.TablePanel.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)(this.TableData)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.OutputData)).EndInit();
-            this.QueryPanel.ResumeLayout(false);
-            this.ResumeLayout(false);
-
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Controls.Add(VQueryPanel);
+            Margin = new Padding(2);
+            Name = "VisualQueryControl";
+            Size = new Size(682, 360);
+            VQueryPanel.ResumeLayout(false);
+            TablePanel.ResumeLayout(false);
+            splitContainer1.Panel1.ResumeLayout(false);
+            splitContainer1.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)splitContainer1).EndInit();
+            splitContainer1.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)dataGridView1).EndInit();
+            QueryPanel.ResumeLayout(false);
+            ResumeLayout(false);
         }
 
         #endregion
 
         private System.Windows.Forms.TableLayoutPanel VQueryPanel;
         private System.Windows.Forms.TableLayoutPanel TablePanel;
-        private System.Windows.Forms.DataGridView TableData;
-        private System.Windows.Forms.DataGridView OutputData;
         private System.Windows.Forms.TableLayoutPanel QueryPanel;
         private System.Windows.Forms.ComboBox Command;
-        private System.Windows.Forms.FlowLayoutPanel QueryLayout;
+        private SplitContainer splitContainer1;
+        private Panel TableVisualizerPanel;
+        private DataGridView dataGridView1;
+        private CollapsibleTreeView collapsibleTreeView1;
     }
 }

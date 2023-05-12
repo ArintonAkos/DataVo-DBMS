@@ -2,7 +2,7 @@
 
 namespace Server.Server.Responses;
 
-internal class Response
+public class Response
 {
     [JsonProperty("data")] public dynamic Data { get; set; }
 
