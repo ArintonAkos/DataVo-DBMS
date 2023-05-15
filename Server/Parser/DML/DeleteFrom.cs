@@ -1,6 +1,9 @@
 ﻿using System.Text.RegularExpressions;
+using Server.Logging;
+using Server.Models.Catalog;
 using Server.Models.DML;
 using Server.Parser.Actions;
+using Server.Server.MongoDB;
 
 namespace Server.Parser.DML;
 
@@ -14,17 +17,17 @@ internal class DeleteFrom : BaseDbAction
     {
         try
         {
-            List<string> toBeDeleted = _model.WhereStatement.Evaluate(_model.TableName, "University").ToList();
+            var toBeDeleted = _model.WhereStatement.Evaluate(_model.TableName, "University").ToList();
 
             DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, "University");
 
             Catalog.GetTableIndexes(_model.TableName, "University")
-            .Select(e => e.IndexFileName)
-            .ToList()
-            .ForEach(indexFile =>
-            {
-                DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, "University");
-            });
+                .Select(e => e.IndexFileName)
+                .ToList()
+                .ForEach(indexFile =>
+                {
+                    DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, "University");
+                });
 
             Logger.Info($"Rows affected: {toBeDeleted.Count}");
             Messages.Add($"Rows affected: {toBeDeleted.Count}");

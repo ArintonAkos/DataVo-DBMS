@@ -108,6 +108,18 @@ internal static class Patterns
         get => @"where(\s+\(?\s*(\w+)\s*(!|=|<|>|like)+\s*[''A-Z0-9./]+\)?(\s+and|\s+or)?)+";
     }
 
+    public static string Select
+    {
+        get =>
+            $@"^\s*select\s+(?<Columns>(\*|(\w+(\.\w+)?(\s+as\s+\w+)?)(,\s*\w+(\.\w+)?(\s+as\s+\w+)?)*))\s+from\s+(?<TableName>\w+(\s+as\s+\w+)?){Join}(\s+{Where})?$";
+    }
+
+    public static string Join
+    {
+        get =>
+            @"(?<Joins>(?:\s+join\s+(?:\w+(\s+as\s+\w+)?)\s+on\s+(?:\w+(\.\w+)?\s*=\s*\w+(\.\w+)?))*)";
+    }
+
     public static string AddStartLine(this string s) => @"^\s*" + s;
 
     public static string AddEndLine(this string s) => s + @"\s*$";

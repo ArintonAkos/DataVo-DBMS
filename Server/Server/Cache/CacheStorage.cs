@@ -1,19 +1,19 @@
 ﻿namespace Server.Server.Cache;
 
-internal class CacheStorage
+internal static class CacheStorage
 {
-    //                            <SessionKey, DatabaseName>
-    private static readonly Dictionary<Guid, string> _cache = new();
+    //                          <SessionKey, DatabaseName>
+    private static readonly Dictionary<Guid, string> Cache = new();
 
-    public static string Get(Guid key) => _cache[key];
+    public static string Get(Guid key) => Cache[key];
 
     public static void Set(Guid key, string value)
     {
-        _cache[key] = value;
+        Cache[key] = value;
     }
 
     public static void Clear()
     {
-        _cache.Clear();
+        Cache.Clear();
     }
 }

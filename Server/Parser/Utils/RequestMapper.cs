@@ -3,6 +3,7 @@ using Server.Parser.Actions;
 using Server.Parser.Commands;
 using Server.Parser.DDL;
 using Server.Parser.DML;
+using Server.Parser.DQL;
 using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.Utils;
@@ -22,6 +23,8 @@ internal class RequestMapper
         { Patterns.ShowTables, typeof(ShowTables) },
         { Patterns.Describe, typeof(Describe) },
         { Patterns.DeleteFrom, typeof(DeleteFrom) },
+        { Patterns.Select, typeof(Select) },
+        { Patterns.Use, typeof(Use) },
     };
 
     private static readonly KeyValuePair<string, Type> _goCommand = new(Patterns.Go, typeof(Go));
@@ -92,7 +95,8 @@ internal class RequestMapper
         return output;
     }
 
-    private static IDbAction? MatchCommand(KeyValuePair<string, Type> command, ref string rawSqlCode, ref int lineCount)
+    private static IDbAction? MatchCommand(KeyValuePair<string, Type> command, ref string rawSqlCode,
+        ref int lineCount)
     {
         var match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase);
 

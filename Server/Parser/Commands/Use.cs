@@ -13,7 +13,6 @@ internal class Use : BaseDbAction
 
     public override void PerformAction(Guid session)
     {
-        // Use the database
         CacheStorage.Set(session, _model.DatabaseName);
     }
 }
