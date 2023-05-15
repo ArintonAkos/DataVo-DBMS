@@ -9,18 +9,17 @@ namespace Server.Parser.Commands;
 internal class ShowDatabases : BaseDbAction
 {
     public ShowDatabases(Match match)
-    {
-    }
+    { }
 
     public override void PerformAction(Guid session)
     {
         try
         {
             Catalog.GetDatabases()
-                .ForEach(databaseName => Fields.Add(new FieldResponse
-                {
-                    FieldName = databaseName,
-                }));
+            .ForEach(databaseName => Fields.Add(new FieldResponse
+            {
+                FieldName = databaseName,
+            }));
         }
         catch (Exception ex)
         {

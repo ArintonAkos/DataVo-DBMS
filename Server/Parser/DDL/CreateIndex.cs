@@ -4,6 +4,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL;
@@ -18,14 +19,17 @@ internal class CreateIndex : BaseDbAction
     {
         try
         {
-            Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, "University");
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
             Dictionary<string, Dictionary<string, dynamic>> tableData =
-                DbContext.Instance.GetTableContents(_model.TableName, "University");
+                DbContext.Instance.GetTableContents(_model.TableName, databaseName);
 
             List<BsonDocument> indexValues = CreateIndexContents(tableData);
 
-            DbContext.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, "University");
+            DbContext.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
 
             Logger.Info($"New index file {_model.IndexName} successfully created!");
             Messages.Add($"New index file {_model.IndexName} successfully created!");

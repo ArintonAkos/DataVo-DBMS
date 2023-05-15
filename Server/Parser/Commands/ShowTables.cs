@@ -2,6 +2,7 @@
 using Server.Logging;
 using Server.Models.Catalog;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.Responses.Parts;
 
 namespace Server.Parser.Commands;
@@ -16,11 +17,14 @@ internal class ShowTables : BaseDbAction
     {
         try
         {
-            Catalog.GetTables("University")
-                .ForEach(tableName => Fields.Add(new FieldResponse
-                {
-                    FieldName = tableName,
-                }));
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            Catalog.GetTables(databaseName)
+            .ForEach(tableName => Fields.Add(new FieldResponse
+            {
+                FieldName = tableName,
+            }));
         }
         catch (Exception ex)
         {

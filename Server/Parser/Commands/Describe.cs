@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.Responses.Parts;
 
 namespace Server.Parser.Commands;
@@ -17,11 +18,14 @@ internal class Describe : BaseDbAction
     {
         try
         {
-            Catalog.GetTableColumns(_model.TableName, "University")
-                .ForEach(column => Fields.Add(new FieldResponse
-                {
-                    FieldName = column.Name,
-                }));
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            Catalog.GetTableColumns(_model.TableName, databaseName)
+            .ForEach(column => Fields.Add(new FieldResponse
+            {
+                FieldName = column.Name,
+            }));
         }
         catch (Exception ex)
         {

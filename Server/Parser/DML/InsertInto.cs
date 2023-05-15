@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DML;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.MongoDB;
 using System.Text.RegularExpressions;
 
@@ -21,7 +22,10 @@ namespace Server.Parser.DML
         {
             try
             {
-                int rowsAffected = ProcessAndInsertTableRows("University");
+                string databaseName = CacheStorage.Get(session)
+                    ?? throw new Exception("No database in use!");
+
+                int rowsAffected = ProcessAndInsertTableRows(databaseName);
 
                 Messages.Add($"Rows affected: {rowsAffected}");
                 Logger.Info($"Rows affected: {rowsAffected}");

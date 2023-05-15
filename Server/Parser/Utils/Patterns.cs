@@ -106,7 +106,7 @@ internal static class Patterns
     public static string Where
     {
         get =>
-            @"\s*where\s+(?<WhereStatement>(\w+\s*(=|!=|<>|<|>|<=|>=)\s*\w+(\s+(and|or)\s*\w+\s*(=|!=|<>|<|>|<=|>=)\s*\w+)*))";
+            @"\s*where\s+(?<WhereStatement>([''A-Z0-9./]+\s*(=|!=|<>|<|>|<=|>=)\s*[''A-Z0-9./]+(\s+(and|or)\s*\w+\s*(=|!=|<>|<|>|<=|>=)\s*\w+)*))";
     }
 
     public static string Select

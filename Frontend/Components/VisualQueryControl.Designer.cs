@@ -81,7 +81,7 @@
             // 
             splitContainer1.Dock = DockStyle.Fill;
             splitContainer1.Location = new Point(4, 4);
-            splitContainer1.Margin = new Padding(4, 4, 4, 4);
+            splitContainer1.Margin = new Padding(4);
             splitContainer1.Name = "splitContainer1";
             splitContainer1.Orientation = Orientation.Horizontal;
             // 
@@ -102,7 +102,7 @@
             TableVisualizerPanel.BackColor = SystemColors.HighlightText;
             TableVisualizerPanel.Dock = DockStyle.Fill;
             TableVisualizerPanel.Location = new Point(0, 0);
-            TableVisualizerPanel.Margin = new Padding(4, 4, 4, 4);
+            TableVisualizerPanel.Margin = new Padding(4);
             TableVisualizerPanel.Name = "TableVisualizerPanel";
             TableVisualizerPanel.Size = new Size(652, 217);
             TableVisualizerPanel.TabIndex = 2;
@@ -113,7 +113,7 @@
             dataGridView1.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dataGridView1.Dock = DockStyle.Fill;
             dataGridView1.Location = new Point(0, 0);
-            dataGridView1.Margin = new Padding(4, 4, 4, 4);
+            dataGridView1.Margin = new Padding(4);
             dataGridView1.Name = "dataGridView1";
             dataGridView1.RowHeadersWidth = 51;
             dataGridView1.RowTemplate.Height = 25;
@@ -150,7 +150,7 @@
             // 
             collapsibleTreeView1.Dock = DockStyle.Fill;
             collapsibleTreeView1.Location = new Point(4, 42);
-            collapsibleTreeView1.Margin = new Padding(4, 4, 4, 4);
+            collapsibleTreeView1.Margin = new Padding(4);
             collapsibleTreeView1.Name = "collapsibleTreeView1";
             collapsibleTreeView1.Size = new Size(176, 400);
             collapsibleTreeView1.TabIndex = 1;
