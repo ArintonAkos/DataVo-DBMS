@@ -213,7 +213,7 @@ internal static class Catalog
         Dictionary<string, string> result = new();
         List<IndexFile> indexFiles = GetTableIndexes(tableName, databaseName);
 
-        foreach (IndexFile index in indexFiles)
+        foreach (var index in indexFiles)
         {
             foreach (string attribute in index.AttributeNames)
             {
@@ -238,7 +238,7 @@ internal static class Catalog
         return databases.FirstOrDefault();
     }
 
-    private static XElement? GetTableElement(string databaseName, string tableName)
+    public static XElement? GetTableElement(string databaseName, string tableName)
     {
         var rootDatabase = GetDatabaseElement(databaseName);
 
@@ -250,7 +250,7 @@ internal static class Catalog
         return GetTableElement(rootDatabase, tableName);
     }
 
-    private static XElement? GetTableElement(XElement database, string tableName)
+    public static XElement? GetTableElement(XElement database, string tableName)
     {
         var tables = database.Descendants()
             .Where(e => e.Name == "Table" && e.Attribute("TableName")?.Value == tableName)

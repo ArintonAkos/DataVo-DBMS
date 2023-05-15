@@ -1,7 +1,6 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Driver;
 using Server.Models.Catalog;
-using System.Text.RegularExpressions;
 
 namespace Server.Server.MongoDB;
 
@@ -163,7 +162,8 @@ internal class DbContext : MongoClient
         }
     }
 
-    public HashSet<string> FilterUsingPrimaryKey(string columnValue, int columnIndex, string tableName, string databaseName)
+    public HashSet<string> FilterUsingPrimaryKey(string columnValue, int columnIndex, string tableName,
+        string databaseName)
     {
         var database = GetDatabase(databaseName);
         IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
@@ -177,7 +177,7 @@ internal class DbContext : MongoClient
 
         regex += $"{columnValue}(.*$|$)";
 
-        var filter = Builders<BsonDocument>.Filter.Regex("_id", regex);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Regex("_id", regex);
 
         return table.Find(filter)
             .ToList()
@@ -191,12 +191,12 @@ internal class DbContext : MongoClient
         var database = GetDatabase(databaseName);
         IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(indexTableName);
 
-        var filter = Builders<BsonDocument>.Filter.Eq("_id", columnValue);
+        FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Eq("_id", columnValue);
 
         HashSet<string> result = new();
 
-        List<BsonDocument> values = table.Find(filter)
-        .ToList();
+        var values = table.Find(filter)
+            .ToList();
 
         values.ForEach(doc =>
         {
@@ -254,6 +254,38 @@ internal class DbContext : MongoClient
             }
 
             parsedTableData[data.GetElement("_id").Value.AsString] = row;
+        }
+
+        return parsedTableData;
+    }
+
+    public Dictionary<string, Dictionary<string, dynamic>> SelectFromTable(List<string> ids, List<string> columns,
+        string tableName, string databaseName)
+    {
+        var database = GetDatabase(databaseName);
+        IMongoCollection<BsonDocument> table = database.GetCollection<BsonDocument>(tableName);
+        FilterDefinition<BsonDocument> filter = Builders<BsonDocument>.Filter.In("_id", ids);
+
+        ProjectionDefinition<BsonDocument> projection = Builders<BsonDocument>.Projection.Include("_id");
+        projection = columns.Aggregate(projection, (current, column) => current.Include(column));
+
+        List<BsonDocument> result = table.Find(filter).Project(projection).ToList();
+
+        Dictionary<string, Dictionary<string, dynamic>> parsedTableData = new();
+
+        foreach (var data in result)
+        {
+            Dictionary<string, dynamic> row = new();
+
+            foreach (string column in columns)
+            {
+                if (data.TryGetValue(column, out var value))
+                {
+                    row[column] = value;
+                }
+            }
+
+            parsedTableData[data["_id"].AsString] = row;
         }
 
         return parsedTableData;
