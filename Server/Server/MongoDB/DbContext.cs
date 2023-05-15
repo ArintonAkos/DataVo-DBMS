@@ -6,7 +6,7 @@ namespace Server.Server.MongoDB;
 
 internal class DbContext : MongoClient
 {
-    private static DbContext _instance;
+    private static DbContext _instance = null!;
 
     private DbContext() : base("mongodb://localhost:27017/")
     {
@@ -259,36 +259,29 @@ internal class DbContext : MongoClient
         return parsedTableData;
     }
 
-    public Dictionary<string, Dictionary<string, dynamic>> SelectFromTable(List<string> ids, List<string> columns,
+    public Dictionary<string, Dictionary<string, dynamic>> SelectFromTable(List<string>? ids, List<string> columns,
         string tableName, string databaseName)
     {
-        var database = GetDatabase(databaseName);
-        IMongoCollection<BsonDocument> table = database.GetCollection<BsonDocument>(tableName);
-        FilterDefinition<BsonDocument> filter = Builders<BsonDocument>.Filter.In("_id", ids);
-
-        ProjectionDefinition<BsonDocument> projection = Builders<BsonDocument>.Projection.Include("_id");
-        projection = columns.Aggregate(projection, (current, column) => current.Include(column));
-
-        List<BsonDocument> result = table.Find(filter).Project(projection).ToList();
-
-        Dictionary<string, Dictionary<string, dynamic>> parsedTableData = new();
-
-        foreach (var data in result)
+        if (!columns.Any())
         {
-            Dictionary<string, dynamic> row = new();
-
-            foreach (string column in columns)
-            {
-                if (data.TryGetValue(column, out var value))
-                {
-                    row[column] = value;
-                }
-            }
-
-            parsedTableData[data["_id"].AsString] = row;
+            columns = Catalog.GetTableColumns(tableName, databaseName).Select(c => c.Name).ToList();
         }
 
-        return parsedTableData;
+        Dictionary<string, Dictionary<string, dynamic>> allTableData = GetTableContents(tableName, databaseName);
+        Dictionary<string, Dictionary<string, dynamic>> selectedData = ids == null
+            ? allTableData
+            : allTableData.Where(data => ids.Contains(data.Key)).ToDictionary(pair => pair.Key, pair => pair.Value);
+
+        foreach (Dictionary<string, dynamic> row in selectedData.Values)
+        {
+            var keysToRemove = row.Keys.Except(columns).ToList();
+            foreach (string keyToRemove in keysToRemove)
+            {
+                row.Remove(keyToRemove);
+            }
+        }
+
+        return selectedData;
     }
 
     private List<BsonDocument> GetStoredData(string tableName, string databaseName)

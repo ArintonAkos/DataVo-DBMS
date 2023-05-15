@@ -25,13 +25,18 @@ internal class Select : BaseDbAction
 
         try
         {
-            var selectedIds = _model.WhereStatement.Evaluate(_model.TableName, databaseName).ToList();
+            List<string>? selectedIds = null;
+
+            if (_model.WhereStatement.IsEvaluatable())
+            {
+                selectedIds = _model.WhereStatement.Evaluate(_model.TableName, databaseName).ToList();
+            }
 
             Dictionary<string, Dictionary<string, dynamic>> data =
                 Context.SelectFromTable(selectedIds, _model.Columns, _model.TableName, databaseName);
 
-            Logger.Info($"Rows selected: {selectedIds.Count}");
-            Messages.Add($"Rows selected: {selectedIds.Count}");
+            Logger.Info($"Rows selected: {data.Count}");
+            Messages.Add($"Rows selected: {data.Count}");
 
             Data = data.Select(row => row.Value
                 .Select(column => new DataResponse
