@@ -29,9 +29,15 @@ internal class SelectModel
         }
 
         string columns = match.Groups["Columns"].Value;
-        var columnsList = columns.Split(separator: ',')
-            .Select(c => c.Trim())
-            .ToList();
+        List<string> columnsList = new();
+
+        if (!columns.Contains(value: '*'))
+        {
+            columnsList = columns.Split(separator: ',')
+                .Select(c => c.Trim())
+                .ToList();
+        }
+
         var whereStatement = new Where(match.Groups["WhereStatement"].Value);
         var joinStatement = new Join(match.Groups["Joins"].Value);
 
@@ -50,28 +56,24 @@ internal class SelectModel
         List<Column> columns = Catalog.Catalog.GetTableColumns(TableName, databaseName);
         bool hasMissingColumnsSpecified = false;
 
-        foreach (string selectedColumn in Columns)
+        for (int i = 0; i < Columns.Count; i++)
         {
-            string columnName;
-
-            if (selectedColumn.Contains(value: '.'))
+            if (Columns[i].Contains(value: '.'))
             {
-                string[] splitColumn = selectedColumn.Split(separator: '.');
+                string[] splitColumn = Columns[i].Split(separator: '.');
                 string columnPrefix = splitColumn[0].Trim();
-                columnName = splitColumn[1].Trim();
+                string columnName = splitColumn[1].Trim();
 
                 // Validate the table alias
                 if (TableAlias != null && columnPrefix != TableAlias)
                 {
                     throw new Exception($"Invalid table alias: {columnPrefix}");
                 }
-            }
-            else
-            {
-                columnName = selectedColumn;
+
+                Columns[i] = columnName;
             }
 
-            if (columns.All(c => c.Name != columnName))
+            if (columns.All(c => c.Name != Columns[i]))
             {
                 hasMissingColumnsSpecified = true;
             }
