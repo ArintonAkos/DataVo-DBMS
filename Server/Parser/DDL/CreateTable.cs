@@ -4,6 +4,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL;
@@ -18,11 +19,14 @@ internal class CreateTable : BaseDbAction
     {
         try
         {
-            Catalog.CreateTable(_model.ToTable(), "University");
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
 
-            DbContext.Instance.CreateTable(_model.TableName, "University");
+            Catalog.CreateTable(_model.ToTable(), databaseName);
 
-            List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, "University");
+            DbContext.Instance.CreateTable(_model.TableName, databaseName);
+
+            List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
             uniqueKeys.ForEach(key =>
             {
                 DbContext.Instance.CreateIndex(new List<BsonDocument>(), $"_UK_{key}", _model.TableName,

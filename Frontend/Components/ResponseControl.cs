@@ -1,6 +1,5 @@
 ﻿using Frontend.Client.Responses;
 using Frontend.Client.Responses.Controllers.Parser;
-using System.Windows.Forms;
 
 namespace Frontend.Components
 {

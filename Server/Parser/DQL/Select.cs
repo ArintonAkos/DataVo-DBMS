@@ -15,16 +15,18 @@ internal class Select : BaseDbAction
 
     public override void PerformAction(Guid session)
     {
-        string databaseName = CacheStorage.Get(session);
-        bool hasMissingColumns = _model.Validate(databaseName);
-
-        if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
-        {
-            throw new Exception("Invalid columns specified");
-        }
-
         try
         {
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            bool hasMissingColumns = _model.Validate(databaseName);
+
+            if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
+            {
+                throw new Exception("Invalid columns specified'");
+            }
+
             List<string>? selectedIds = null;
 
             if (_model.WhereStatement.IsEvaluatable())

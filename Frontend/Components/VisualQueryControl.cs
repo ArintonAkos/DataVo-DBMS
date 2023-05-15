@@ -13,6 +13,8 @@ namespace Frontend.Components
         {
             InitializeComponent();
             InitData();
+
+            Name = "VQueryEditor";
         }
 
         private async void InitData()

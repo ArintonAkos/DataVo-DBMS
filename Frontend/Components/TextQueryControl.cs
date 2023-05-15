@@ -1,7 +1,4 @@
-﻿using System.Data;
-using System.Security.Policy;
-using System.Windows.Forms;
-
+﻿
 namespace Frontend.Components
 {
     public partial class TextQueryControl : UserControl
@@ -13,7 +10,7 @@ namespace Frontend.Components
         {
             InitializeComponent();
 
-            Tag = "TextEditor";
+            Name = "TextEditor";
 
             TextBox.TextChanged += SqlRichTextBox_TextChanged;
         }

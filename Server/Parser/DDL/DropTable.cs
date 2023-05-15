@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.Cache;
 using Server.Server.MongoDB;
 
 namespace Server.Parser.DDL;
@@ -17,14 +18,17 @@ internal class DropTable : BaseDbAction
     {
         try
         {
-            Catalog.GetTableIndexes(_model.TableName, "University")
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            Catalog.GetTableIndexes(_model.TableName, databaseName)
                 .Select(e => e.IndexFileName)
                 .ToList()
-                .ForEach(indexFile => { DbContext.Instance.DropIndex(indexFile, _model.TableName, "University"); });
+                .ForEach(indexFile => { DbContext.Instance.DropIndex(indexFile, _model.TableName, databaseName); });
 
-            Catalog.DropTable(_model.TableName, "University");
+            Catalog.DropTable(_model.TableName, databaseName);
 
-            DbContext.Instance.DropTable(_model.TableName, "University");
+            DbContext.Instance.DropTable(_model.TableName, databaseName);
 
             Logger.Info($"Table {_model.TableName} successfully dropped!");
             Messages.Add($"Table {_model.TableName} successfully dropped!");

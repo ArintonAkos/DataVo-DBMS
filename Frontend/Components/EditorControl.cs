@@ -1,6 +1,4 @@
-﻿using System.IO;
-using System.Linq;
-using System.Windows.Forms;
+﻿using Frontend.Services;
 
 namespace Frontend.Components
 {
@@ -15,58 +13,67 @@ namespace Frontend.Components
             tabControl.TabPages.Clear();
         }
 
-        private TextQueryControl GetEditorTextControl(int index)
+        private TextQueryControl? GetEditorTextControl(int index)
         {
-            return (tabControl.TabPages[index].Controls[0].Tag.ToString() == "TextEditor")
+            return (tabControl.TabPages[index].Controls[0].Name == "TextEditor")
                 ? (TextQueryControl)tabControl.TabPages[index].Controls[0]
                 : null;
         }
 
-        private VisualQueryControl GetEditorVisualQueryControl(int index)
+        private VisualQueryControl? GetEditorVisualQueryControl(int index)
         {
-            return (tabControl.TabPages[index].Controls[0].Tag.ToString() == "VQueryEditor")
+            return (tabControl.TabPages[index].Controls[0].Name == "VQueryEditor")
                 ? (VisualQueryControl)tabControl.TabPages[index].Controls[0]
                 : null;
         }
 
-        public void CreateTextEditorTab(string filePath)
+        public async Task<TextQueryControl> CreateTextEditorTab(string filePath)
         {
-            TabPage tabPage = new TabPage()
+            TabPage tabPage = new()
             {
                 Text = Path.GetFileName(filePath),
                 Name = filePath,
+                Tag = await AuthService.CreateSession()
             };
 
-            tabPage.Controls.Add(new TextQueryControl()
+            TextQueryControl textControl = new()
             {
                 Dock = DockStyle.Fill
-            });
+            };
+
+            tabPage.Controls.Add(textControl);
 
             tabControl.TabPages.Add(tabPage);
+
+            return textControl;
         }
 
-        public void CreateVisualQueryEditorTab(string database)
+        public async Task<VisualQueryControl> CreateVisualQueryEditorTab(string database)
         {
-            TabPage tabPage = new TabPage()
+            TabPage tabPage = new()
             {
                 Text = $"VQ: {database}",
                 Name = database,
+                Tag = await AuthService.CreateSession()
             };
 
-            tabPage.Controls.Add(new VisualQueryControl()
+            VisualQueryControl vqueryControl = new()
             {
                 Dock = DockStyle.Fill
-            });
+            };
+
+            tabPage.Controls.Add(vqueryControl);
 
             tabControl.TabPages.Add(tabPage);
+
+            return vqueryControl;
         }
 
-        public void CreateTextEditorTabWithContent(string filePath)
+        public async void CreateTextEditorTabWithContent(string filePath)
         {
-            CreateTextEditorTab(filePath);
+            TextQueryControl textControl = await CreateTextEditorTab(filePath);
 
-            RichTextBox textBox = GetEditorTextControl(tabControl.TabCount - 1).TextBox;
-            textBox.Text = File.ReadAllText(filePath);
+            textControl.TextBox.Text = File.ReadAllText(filePath);
         }
 
         public string GetActiveTabContent()
@@ -83,6 +90,13 @@ namespace Frontend.Components
             }
 
             return string.Empty;
+        }
+
+        public Guid GetActiveTabSession()
+        {
+            return tabControl.SelectedIndex >= 0
+                ? (Guid)tabControl.SelectedTab.Tag
+                : Guid.Empty;
         }
 
         public void SaveActiveTabContent()
@@ -108,7 +122,7 @@ namespace Frontend.Components
         private void tabControl_MouseClicked(object sender, MouseEventArgs e)
         {
             var tabControl = sender as TabControl;
-            var tabs = tabControl.TabPages;
+            var tabs = tabControl!.TabPages;
 
             if (e.Button == MouseButtons.Middle)
             {

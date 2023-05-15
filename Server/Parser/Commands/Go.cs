@@ -7,8 +7,7 @@ namespace Server.Parser.Commands;
 internal class Go : IDbAction
 {
     public Go(Match match)
-    {
-    }
+    { }
 
     public ActionResponse Perform(Guid session) => ActionResponse.Default();
 }

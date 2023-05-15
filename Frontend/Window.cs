@@ -17,10 +17,7 @@ namespace Frontend
         public Window()
         {
             InitializeComponent();
-        }
 
-        private void Window_Load(object sender, EventArgs e)
-        {
             _editorControl = new EditorControl()
             {
                 Dock = DockStyle.Fill,
@@ -35,7 +32,10 @@ namespace Frontend
             {
                 Dock = DockStyle.Fill,
             };
+        }
 
+        private void Window_Load(object sender, EventArgs e)
+        {
             SidebarPanel.Controls.Add(_explorerTree);
             EditorPanel.Controls.Add(_editorControl);
             ResponsePanel.Controls.Add(_responseControl);
@@ -96,7 +96,8 @@ namespace Frontend
             StripExecuteButton.Enabled = false;
 
             string query = _editorControl.GetActiveTabContent();
-            ParseResponse response = await ParseService.GetParseResponse(query);
+            Guid session = _editorControl.GetActiveTabSession();
+            ParseResponse response = await ParseService.GetParseResponse(query, session);
 
             _responseControl.HandleResponse(response);
 
