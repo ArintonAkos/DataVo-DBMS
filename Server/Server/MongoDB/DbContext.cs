@@ -9,8 +9,7 @@ internal class DbContext : MongoClient
     private static DbContext _instance = null!;
 
     private DbContext() : base("mongodb://localhost:27017/")
-    {
-    }
+    { }
 
     public static DbContext Instance
     {
@@ -223,11 +222,38 @@ internal class DbContext : MongoClient
         return TableContainsRow(rowId, indexTableName, databaseName);
     }
 
+    public Dictionary<string, Dictionary<string, dynamic>> SelectFromTable(List<string>? ids, List<string> columns,
+        string tableName, string databaseName)
+    {
+        if (!columns.Any())
+        {
+            columns = Catalog.GetTableColumns(tableName, databaseName).Select(c => c.Name).ToList();
+        }
+
+        Dictionary<string, Dictionary<string, dynamic>> selectedData = GetTableContents(ids, tableName, databaseName);
+
+        foreach (Dictionary<string, dynamic> row in selectedData.Values)
+        {
+            var keysToRemove = row.Keys.Except(columns).ToList();
+            foreach (string keyToRemove in keysToRemove)
+            {
+                row.Remove(keyToRemove);
+            }
+        }
+
+        return selectedData;
+    }
+
     public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
+    {
+        return GetTableContents(null, tableName, databaseName);
+    }
+
+    public Dictionary<string, Dictionary<string, dynamic>> GetTableContents(List<string>? ids, string tableName, string databaseName)
     {
         List<string> primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
         List<Column> tableColumns = Catalog.GetTableColumns(tableName, databaseName);
-        List<BsonDocument> bsonData = GetStoredData(tableName, databaseName);
+        List<BsonDocument> bsonData = GetStoredData(ids, tableName, databaseName);
 
         Dictionary<string, Dictionary<string, dynamic>> parsedTableData = new();
 
@@ -259,35 +285,20 @@ internal class DbContext : MongoClient
         return parsedTableData;
     }
 
-    public Dictionary<string, Dictionary<string, dynamic>> SelectFromTable(List<string>? ids, List<string> columns,
-        string tableName, string databaseName)
-    {
-        if (!columns.Any())
-        {
-            columns = Catalog.GetTableColumns(tableName, databaseName).Select(c => c.Name).ToList();
-        }
-
-        Dictionary<string, Dictionary<string, dynamic>> allTableData = GetTableContents(tableName, databaseName);
-        Dictionary<string, Dictionary<string, dynamic>> selectedData = ids == null
-            ? allTableData
-            : allTableData.Where(data => ids.Contains(data.Key)).ToDictionary(pair => pair.Key, pair => pair.Value);
-
-        foreach (Dictionary<string, dynamic> row in selectedData.Values)
-        {
-            var keysToRemove = row.Keys.Except(columns).ToList();
-            foreach (string keyToRemove in keysToRemove)
-            {
-                row.Remove(keyToRemove);
-            }
-        }
-
-        return selectedData;
-    }
-
-    private List<BsonDocument> GetStoredData(string tableName, string databaseName)
+    private List<BsonDocument> GetStoredData(List<string>? ids, string tableName, string databaseName)
     {
         var database = GetDatabase(databaseName);
         IMongoCollection<BsonDocument>? table = database.GetCollection<BsonDocument>(tableName);
-        return table.Find(Builders<BsonDocument>.Filter.Empty).ToList();
+
+        if (ids != null && ids.Count == 0)
+        {
+            return new();
+        }
+
+        var filter = ids != null  
+            ? Builders<BsonDocument>.Filter.In("_id", ids)
+            : Builders<BsonDocument>.Filter.Empty;
+
+        return table.Find(filter).ToList();
     }
 }

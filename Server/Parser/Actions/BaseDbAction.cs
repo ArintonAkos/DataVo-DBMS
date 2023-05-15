@@ -7,7 +7,7 @@ namespace Server.Parser.Actions;
 internal abstract class BaseDbAction : IDbAction
 {
     protected DbContext Context;
-    protected List<List<DataResponse>> Data = new();
+    protected List<List<dynamic>> Data = new();
     protected List<FieldResponse> Fields = new();
 
     protected List<string> Messages = new();

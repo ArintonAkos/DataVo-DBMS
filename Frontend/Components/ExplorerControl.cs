@@ -53,12 +53,11 @@ namespace Frontend.Components
             ExplorerTree.EndUpdate();
         }
 
-        private void ExplorerTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        private async void ExplorerTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             if (e.Node.Name == "databases")
             {
-                _editorControl.CreateVisualQueryEditorTab("University");
-
+                await _editorControl.CreateVisualQueryEditorTab("University");
                 return;
             }
 
