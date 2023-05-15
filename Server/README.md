@@ -1,5 +1,9 @@
 ﻿# DataVo Database Server
 
+![_742febb2-76f8-4922-afaa-14d0e3e70b55](https://github.com/ArintonAkos/ABKR/assets/43067524/5f90c2f1-71a9-42a5-9bac-5128750fc089)
+
+**Image was generated using Bing Image Generator**
+
 This repository contains the server-side code for the DataVo project, a powerful and flexible database server built with
 C#. The DataVo server offers a robust and high-performance solution for managing and accessing your data with ease.
 
