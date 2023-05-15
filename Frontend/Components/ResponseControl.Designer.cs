@@ -28,90 +28,78 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.tabControl = new System.Windows.Forms.TabControl();
-            this.OutputTabPanel = new System.Windows.Forms.TabPage();
-            this.OutputTextbox = new System.Windows.Forms.RichTextBox();
-            this.MessagesTabPanel = new System.Windows.Forms.TabPage();
-            this.MessagesTextbox = new System.Windows.Forms.RichTextBox();
-            this.tabControl.SuspendLayout();
-            this.OutputTabPanel.SuspendLayout();
-            this.MessagesTabPanel.SuspendLayout();
-            this.SuspendLayout();
+            tabControl = new TabControl();
+            OutputTabPanel = new TabPage();
+            MessagesTabPanel = new TabPage();
+            MessagesTextbox = new RichTextBox();
+            tabControl.SuspendLayout();
+            MessagesTabPanel.SuspendLayout();
+            SuspendLayout();
             // 
             // tabControl
             // 
-            this.tabControl.Controls.Add(this.OutputTabPanel);
-            this.tabControl.Controls.Add(this.MessagesTabPanel);
-            this.tabControl.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tabControl.Location = new System.Drawing.Point(0, 0);
-            this.tabControl.Name = "tabControl";
-            this.tabControl.SelectedIndex = 0;
-            this.tabControl.Size = new System.Drawing.Size(861, 358);
-            this.tabControl.TabIndex = 3;
+            tabControl.Controls.Add(OutputTabPanel);
+            tabControl.Controls.Add(MessagesTabPanel);
+            tabControl.Dock = DockStyle.Fill;
+            tabControl.Location = new Point(0, 0);
+            tabControl.Margin = new Padding(3, 4, 3, 4);
+            tabControl.Name = "tabControl";
+            tabControl.SelectedIndex = 0;
+            tabControl.Size = new Size(861, 448);
+            tabControl.TabIndex = 3;
             // 
             // OutputTabPanel
             // 
-            this.OutputTabPanel.Controls.Add(this.OutputTextbox);
-            this.OutputTabPanel.Location = new System.Drawing.Point(4, 25);
-            this.OutputTabPanel.Name = "OutputTabPanel";
-            this.OutputTabPanel.Padding = new System.Windows.Forms.Padding(3);
-            this.OutputTabPanel.Size = new System.Drawing.Size(853, 329);
-            this.OutputTabPanel.TabIndex = 0;
-            this.OutputTabPanel.Text = "Output";
-            this.OutputTabPanel.UseVisualStyleBackColor = true;
-            // 
-            // OutputTextbox
-            // 
-            this.OutputTextbox.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.OutputTextbox.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.OutputTextbox.Location = new System.Drawing.Point(3, 3);
-            this.OutputTextbox.Name = "OutputTextbox";
-            this.OutputTextbox.ReadOnly = true;
-            this.OutputTextbox.Size = new System.Drawing.Size(847, 323);
-            this.OutputTextbox.TabIndex = 0;
-            this.OutputTextbox.Text = "";
+            OutputTabPanel.Location = new Point(4, 29);
+            OutputTabPanel.Margin = new Padding(3, 4, 3, 4);
+            OutputTabPanel.Name = "OutputTabPanel";
+            OutputTabPanel.Padding = new Padding(3, 4, 3, 4);
+            OutputTabPanel.Size = new Size(853, 415);
+            OutputTabPanel.TabIndex = 0;
+            OutputTabPanel.Text = "Output";
+            OutputTabPanel.UseVisualStyleBackColor = true;
             // 
             // MessagesTabPanel
             // 
-            this.MessagesTabPanel.Controls.Add(this.MessagesTextbox);
-            this.MessagesTabPanel.Location = new System.Drawing.Point(4, 25);
-            this.MessagesTabPanel.Name = "MessagesTabPanel";
-            this.MessagesTabPanel.Padding = new System.Windows.Forms.Padding(3);
-            this.MessagesTabPanel.Size = new System.Drawing.Size(853, 329);
-            this.MessagesTabPanel.TabIndex = 1;
-            this.MessagesTabPanel.Text = "Messages";
-            this.MessagesTabPanel.UseVisualStyleBackColor = true;
+            MessagesTabPanel.Controls.Add(MessagesTextbox);
+            MessagesTabPanel.Location = new Point(4, 29);
+            MessagesTabPanel.Margin = new Padding(3, 4, 3, 4);
+            MessagesTabPanel.Name = "MessagesTabPanel";
+            MessagesTabPanel.Padding = new Padding(3, 4, 3, 4);
+            MessagesTabPanel.Size = new Size(853, 415);
+            MessagesTabPanel.TabIndex = 1;
+            MessagesTabPanel.Text = "Messages";
+            MessagesTabPanel.UseVisualStyleBackColor = true;
             // 
             // MessagesTextbox
             // 
-            this.MessagesTextbox.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.MessagesTextbox.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.MessagesTextbox.Location = new System.Drawing.Point(3, 3);
-            this.MessagesTextbox.Name = "MessagesTextbox";
-            this.MessagesTextbox.ReadOnly = true;
-            this.MessagesTextbox.Size = new System.Drawing.Size(847, 323);
-            this.MessagesTextbox.TabIndex = 0;
-            this.MessagesTextbox.Text = "";
+            MessagesTextbox.BorderStyle = BorderStyle.None;
+            MessagesTextbox.Dock = DockStyle.Fill;
+            MessagesTextbox.Location = new Point(3, 4);
+            MessagesTextbox.Margin = new Padding(3, 4, 3, 4);
+            MessagesTextbox.Name = "MessagesTextbox";
+            MessagesTextbox.ReadOnly = true;
+            MessagesTextbox.Size = new Size(847, 407);
+            MessagesTextbox.TabIndex = 0;
+            MessagesTextbox.Text = "";
             // 
             // ResponseControl
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.Controls.Add(this.tabControl);
-            this.Name = "ResponseControl";
-            this.Size = new System.Drawing.Size(861, 358);
-            this.tabControl.ResumeLayout(false);
-            this.OutputTabPanel.ResumeLayout(false);
-            this.MessagesTabPanel.ResumeLayout(false);
-            this.ResumeLayout(false);
-
+            AutoScaleDimensions = new SizeF(8F, 20F);
+            AutoScaleMode = AutoScaleMode.Font;
+            Controls.Add(tabControl);
+            Margin = new Padding(3, 4, 3, 4);
+            Name = "ResponseControl";
+            Size = new Size(861, 448);
+            tabControl.ResumeLayout(false);
+            MessagesTabPanel.ResumeLayout(false);
+            ResumeLayout(false);
         }
 
         #endregion
 
         private System.Windows.Forms.TabControl tabControl;
         private System.Windows.Forms.TabPage OutputTabPanel;
-        private System.Windows.Forms.RichTextBox OutputTextbox;
         private System.Windows.Forms.TabPage MessagesTabPanel;
         private System.Windows.Forms.RichTextBox MessagesTextbox;
     }

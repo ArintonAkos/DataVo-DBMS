@@ -1,5 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 using Server.Logging;
+using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
@@ -40,17 +41,39 @@ internal class Select : BaseDbAction
             Logger.Info($"Rows selected: {data.Count}");
             Messages.Add($"Rows selected: {data.Count}");
 
-            Data = data.Select(row => row.Value
-                .Select(column => new DataResponse
-                {
-                    FieldName = column.Key,
-                    Value = column.Value.ToString(),
-                }).ToList()).ToList();
+            Fields = CreateFieldsFromColumns(databaseName);
+
+            Data = data
+                .Select(row => row.Value.Values.ToList())
+                .ToList();
         }
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
             Messages.Add(ex.Message);
         }
+    }
+
+    private List<FieldResponse> CreateFieldsFromColumns(string databaseName)
+    {
+        if (_model.Columns.Count > 0)
+        {
+            return Catalog.GetTableColumns(_model.TableName, databaseName)
+                .Select(column => column.Name)
+                .Where(column => _model.Columns.Contains(column))
+                .Select(columnName => new FieldResponse()
+                {
+                    FieldName = columnName
+                })
+                .ToList();
+        }
+    
+        return Catalog.GetTableColumns(_model.TableName, databaseName)
+            .Select(col => col.Name)
+            .Select(columnName => new FieldResponse()
+            {
+                FieldName = columnName
+            })
+            .ToList();
     }
 }

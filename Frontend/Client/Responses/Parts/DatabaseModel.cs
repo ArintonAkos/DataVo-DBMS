@@ -1,6 +1,5 @@
 ﻿using Frontend.Models;
 using Server.Models.Catalog;
-using System.Collections.Generic;
 
 namespace Frontend.Client.Responses.Parts
 {

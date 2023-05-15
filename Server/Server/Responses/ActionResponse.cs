@@ -5,24 +5,24 @@ namespace Server.Server.Responses;
 
 public class ActionResponse
 {
-    [JsonProperty] public ActionDataResponse Data { get; set; }
+    [JsonProperty] public List<List<dynamic>> Data { get; set; }
 
-    [JsonProperty] public ActionFieldResponse Fields { get; set; }
+    [JsonProperty] public List<FieldResponse> Fields { get; set; }
 
     [JsonProperty] public List<string> Messages { get; set; } = new();
 
-    public static ActionResponse FromRaw(List<string> messages, List<List<DataResponse>> data,
+    public static ActionResponse FromRaw(List<string> messages, List<List<dynamic>> data,
         List<FieldResponse> fields) =>
         new()
         {
             Messages = messages,
-            Data = new ActionDataResponse { Data = data, },
-            Fields = new ActionFieldResponse { Fields = fields, },
+            Data = data,
+            Fields = fields,
         };
 
     public static ActionResponse Default() =>
-        FromRaw(new List<string>(), new List<List<DataResponse>>(), new List<FieldResponse>());
+        FromRaw(new(), new(), new());
 
     public static ActionResponse Error(Exception ex) => FromRaw(new List<string> { ex.Message, },
-        new List<List<DataResponse>>(), new List<FieldResponse>());
+        new(), new());
 }

@@ -41,7 +41,7 @@ namespace Frontend
             ResponsePanel.Controls.Add(_responseControl);
         }
 
-        private void MenuNewFileOption_Click(object sender, EventArgs e)
+        private async void MenuNewFileOption_Click(object sender, EventArgs e)
         {
             SaveFileDialog saveFileDialog = new SaveFileDialog();
             saveFileDialog.Filter = "SQL files (*.sql)|*.sql";
@@ -50,7 +50,7 @@ namespace Frontend
             if (saveFileDialog.ShowDialog() == DialogResult.OK)
             {
                 File.Create(saveFileDialog.FileName);
-                _editorControl.CreateTextEditorTab(saveFileDialog.FileName);
+                await _editorControl.CreateTextEditorTab(saveFileDialog.FileName);
             }
         }
 
