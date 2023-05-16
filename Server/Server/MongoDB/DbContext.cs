@@ -174,7 +174,7 @@ internal class DbContext : MongoClient
             regex += "[^#]+#";
         }
 
-        regex += $"{columnValue}(.*$|$)";
+        regex += $"{columnValue}(#.*$|$)";
 
         FilterDefinition<BsonDocument>? filter = Builders<BsonDocument>.Filter.Regex("_id", regex);
 
