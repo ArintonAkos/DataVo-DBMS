@@ -1,37 +1,88 @@
-﻿using Server.Models.Catalog;
-using Server.Models.Statement.Utils;
+﻿using Server.Models.Statement.Utils;
 using Server.Server.MongoDB;
+using Server.Services;
 using System.Security;
 
 namespace Server.Parser.Statements;
 
 internal class StatementEvaluator
 {
-    private readonly string _databaseName;
-    private readonly string _tableName;
-    private readonly List<string> _primaryKeys;
-    private readonly Dictionary<string, string> _indexedColumns;
-    
-    private Dictionary<string, Dictionary<string, dynamic>>? _tableContentLoaded { get; set; }
-    private Dictionary<string, Dictionary<string, dynamic>>? _tableContent 
-    {
-        get
-        {
-            _tableContentLoaded ??= DbContext.Instance.GetTableContents(_tableName, _databaseName);
-            return _tableContentLoaded;
-        }
-    }
+    private TableService tableService { get; set; }
+    private Join? joinStatements { get; set; }
 
     public StatementEvaluator(string databaseName, string tableName)
     {
-        _databaseName = databaseName;
-        _tableName = tableName;
-        _primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
-        _indexedColumns = Catalog.GetTableIndexedColumns(tableName, databaseName);
-        _tableContentLoaded = null;
+        tableService = new TableService(databaseName);
+        tableService.AddTableDetail(new TableDetail(tableName, null));
     }
 
-    public HashSet<string> Evaluate(Node root)
+    public StatementEvaluator(TableService tableService, Join joinStatements)
+    {
+        this.tableService = tableService;
+        this.joinStatements = joinStatements;
+    }
+
+    public Dictionary<string, Dictionary<string, dynamic?>> Evaluate(Node root)
+    {
+        if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
+            && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
+        {
+            return HandleTwoColumnExpression(root);
+        }
+
+        if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq)
+            && root.Left!.Type == Node.NodeType.Value
+            && root.Right!.Type == Node.NodeType.Column)
+        {
+            (root.Right, root.Left) = (root.Left, root.Right);
+
+            switch (root.Value.ParsedValue)
+            {
+                case "<": root.Value.Value = ">"; break;
+                case ">": root.Value.Value = "<"; break;
+                case "<=": root.Value.Value = ">="; break;
+                case ">=": root.Value.Value = "<="; break;
+                default: break;
+            }
+        }
+
+        if (root.Type == Node.NodeType.Eq)
+        {
+            if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value)
+            {
+                return HandleIndexableStatement(root);
+            }
+
+            return HandleConstantExpression(root);
+        }
+
+        if (root.Type == Node.NodeType.Operator)
+        {
+            if (root.Left!.Type == Node.NodeType.Column)
+            {
+                return HandleNonIndexableStatement(root);
+            }
+
+            return HandleConstantExpression(root);
+        }
+
+        var leftResult = EvaluateWithoutJoin(root.Left!);
+        var rightResult = EvaluateWithoutJoin(root.Right!);
+
+        if (root.Type == Node.NodeType.And)
+        {
+            return new HashSet<string>(leftResult.Intersect(rightResult));
+        }
+
+        if (root.Type == Node.NodeType.Or)
+        {
+            return new HashSet<string>(leftResult.Union(rightResult));
+        }
+
+        throw new Exception("Invalid tree node type!");
+    }
+
+    public HashSet<string> EvaluateWithoutJoin(Node root)
     {
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator) 
             &&  root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
@@ -75,8 +126,8 @@ internal class StatementEvaluator
             return HandleConstantExpression(root);
         }
 
-        var leftResult = Evaluate(root.Left!);
-        var rightResult = Evaluate(root.Right!);
+        var leftResult = EvaluateWithoutJoin(root.Left!);
+        var rightResult = EvaluateWithoutJoin(root.Right!);
         
         if (root.Type == Node.NodeType.And)
         {

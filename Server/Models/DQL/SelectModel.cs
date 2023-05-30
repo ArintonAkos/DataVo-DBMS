@@ -1,6 +1,4 @@
 ﻿using System.Text.RegularExpressions;
-using Server.Models.Catalog;
-using Server.Models.Statement;
 using Server.Models.Statement.Utils;
 using Server.Parser.Statements;
 using Server.Services;
@@ -16,7 +14,7 @@ internal class SelectModel
 
     public static SelectModel FromMatch(Match match, string databaseName)
     {
-        TableService tableService = new();
+        TableService tableService = new(databaseName);
 
         var tableNameWithAlias = TableParserService.ParseTableWithAlias(match.Groups["TableName"].Value);
         string tableName = tableNameWithAlias.Item1;

@@ -4,7 +4,6 @@ using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
-using Server.Server.Requests;
 using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
 
@@ -38,7 +37,7 @@ internal class Select : BaseDbAction
 
             if (_model.WhereStatement.IsEvaluatable())
             {
-                selectedIds = _model.WhereStatement.Evaluate(_model.TableName, _databaseName).ToList();
+                selectedIds = _model.WhereStatement.Evaluate(_model.TableService, _model.JoinStatement).ToList();
             }
 
             Dictionary<string, Dictionary<string, dynamic>> data =
