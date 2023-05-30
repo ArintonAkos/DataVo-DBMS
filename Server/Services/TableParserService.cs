@@ -1,4 +1,5 @@
-﻿using Server.Models.Statement.Utils;
+﻿using Server.Models.Statement;
+using Server.Models.Statement.Utils;
 
 namespace Server.Services
 {
@@ -88,22 +89,49 @@ namespace Server.Services
             }
         }
 
-        public static Tuple<Dictionary<string, TableDetail>, List<string>> ParseJoinTablesAndConditions(IEnumerable<string> joinTables, IEnumerable<string> joinConditions)
+        public static Tuple<TableDetail, JoinModel.JoinColumn, JoinModel.JoinColumn, JoinModel.JoinCondition> ParseJoinStatement(string joinStatement)
         {
-            Dictionary<string, TableDetail> tableAliases = new();
-            List<string> conditions = new();
+            // "JOIN {tableName} as {alias} ON {table1}.{column1} = {alias}.{column2}"
+            var parts = joinStatement.Split(new string[] { " ", ".", "=" }, StringSplitOptions.RemoveEmptyEntries);
+            
+            var tableName = parts[1];
+            var tableAlias = parts[3];
+            var conditionTable1 = parts[5];
+            var conditionColumn1 = parts[6];
+            var conditionTable2 = parts[7];
+            var conditionColumn2 = parts[8];
 
-            int i = 0;
-            foreach (var joinTable in joinTables)
+            TableDetail tableDetail = new(tableName, tableAlias);
+            JoinModel.JoinColumn leftColumn = new(conditionTable1, conditionColumn1);
+            JoinModel.JoinColumn rightColumn = new(conditionTable2, conditionColumn2);
+            JoinModel.JoinCondition joinCondition = new(leftColumn, rightColumn);
+
+            return Tuple.Create(tableDetail, leftColumn, rightColumn, joinCondition);
+        }
+
+        public static Tuple<Dictionary<string, TableDetail>, List<JoinModel.JoinCondition>> ParseJoinTablesAndConditions(string? joinStatement)
+        {
+            if (joinStatement is null)
             {
-                var tableWithAlias = ParseTableWithAlias(joinTable);
-                string tableName = tableWithAlias.Item1;
-                string? tableAlias = tableWithAlias.Item2;
+                return new(new(), new());
+            }
 
-                tableAliases.Add(tableAlias ?? tableName, new TableDetail(tableName, tableAlias));
+            Dictionary<string, TableDetail> tableAliases = new();
+            List<JoinModel.JoinCondition> conditions = new();
 
-                conditions.Add(joinConditions.ElementAt(i));
-                i++;
+            string[] joins = joinStatement.Split("\n");
+
+            foreach (var join in joins)
+            {
+                if (join.Length < 5)
+                {
+                    continue;
+                }
+
+                var result = ParseJoinStatement(join);
+
+                tableAliases.Add(result.Item1.GetTableNameInUse(), result.Item1);
+                conditions.Add(result.Item4);
             }
 
             return Tuple.Create(tableAliases, conditions);

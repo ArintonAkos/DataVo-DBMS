@@ -5,6 +5,7 @@ using Server.Models.DML;
 using Server.Parser.Actions;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DML;
 
@@ -12,7 +13,7 @@ internal class DeleteFrom : BaseDbAction
 {
     private readonly DeleteFromModel _model;
 
-    public DeleteFrom(Match match) => _model = DeleteFromModel.FromMatch(match);
+    public DeleteFrom(Match match, ParseRequest request) => _model = DeleteFromModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

@@ -5,6 +5,7 @@ using Server.Models.DML;
 using Server.Parser.Actions;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
+using Server.Server.Requests.Controllers.Parser;
 using System.Text.RegularExpressions;
 
 namespace Server.Parser.DML
@@ -13,7 +14,7 @@ namespace Server.Parser.DML
     {
         private readonly InsertIntoModel _model;
 
-        public InsertInto(Match match)
+        public InsertInto(Match match, ParseRequest request)
         {
             _model = InsertIntoModel.FromMatch(match);
         }

@@ -62,7 +62,7 @@ public static class StatementParser
             {
                 string identifier = string.Empty;
 
-                while (pos < input.Length && (char.IsLetterOrDigit(input[pos]) || input[pos] == '_'))
+                while (pos < input.Length && (char.IsLetterOrDigit(input[pos]) || input[pos] == '_' || c == '.'))
                 {
                     identifier += input[pos];
                     pos++;

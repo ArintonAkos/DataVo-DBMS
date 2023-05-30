@@ -28,6 +28,12 @@ public class JoinModel
             LeftColumn = new(leftTableName, leftColumnName);
             RightColumn = new(rightTableName, rightColumnName);
         }
+
+        public JoinCondition(JoinColumn leftColumn, JoinColumn rightColumn)
+        {
+            LeftColumn = leftColumn;
+            RightColumn = rightColumn;
+        }
     }
 
     public Dictionary<string, TableDetail> JoinTableDetails { get; set; } = new();
@@ -37,13 +43,10 @@ public class JoinModel
     {
         var model = new JoinModel();
 
-        var joinDetails = TableParserService.ParseJoinTablesAndConditions(
-            group.Captures.Cast<Capture>().Select(c => c.Value),
-            group.Captures.Cast<Capture>().Select(c => c.Value)
-        );
-
+        var joinDetails = TableParserService.ParseJoinTablesAndConditions(group.Value);
+        
         var joinTableNames = joinDetails.Item1;
-        var joinConditionsRaw = joinDetails.Item2;
+        var joinConditions = joinDetails.Item2;
 
         int i = 0;
         foreach (var joinDetail in joinTableNames)
@@ -55,15 +58,8 @@ public class JoinModel
             {
                 model.JoinTableDetails.Add(tableDetail.GetTableNameInUse(), tableDetail);
 
-                var conditionParts = joinConditionsRaw[i].Split('=');
-                
-                if (conditionParts.Length != 2)
-                {
-                    throw new Exception("Invalid join condition");
-                }
-
-                var leftSide = tableService.ParseAndFindTableNameByColumn(conditionParts[0]);
-                var rightSide = tableService.ParseAndFindTableNameByColumn(conditionParts[1]);
+                var leftSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].LeftColumn.TableName);
+                var rightSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].RightColumn.TableName);
 
                 var condition = new JoinCondition(
                     leftSide.Item1,
@@ -74,10 +70,8 @@ public class JoinModel
 
                 model.JoinConditions.Add(condition);
             } 
-            else
-            {
-                throw new Exception($"Table '{joinedTableName}' is already in use!");
-            }
+
+            i++;
         }
 
         return model;

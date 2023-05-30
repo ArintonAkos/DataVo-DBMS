@@ -102,7 +102,8 @@ internal class RequestMapper
 
         if (match.Success)
         {
-            var action = (IDbAction)Activator.CreateInstance(command.Value, match, request)!;
+            object[] parameters = new object[] { match, request };
+            var action = (IDbAction)Activator.CreateInstance(command.Value, parameters)!;
             lineCount += Regex.Split(match.Value, "\r\n|\r|\n").Length;
             rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
 

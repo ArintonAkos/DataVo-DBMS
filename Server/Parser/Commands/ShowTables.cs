@@ -3,13 +3,14 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Parser.Actions;
 using Server.Server.Cache;
+using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
 
 namespace Server.Parser.Commands;
 
 internal class ShowTables : BaseDbAction
 {
-    public ShowTables(Match match)
+    public ShowTables(Match match, ParseRequest request)
     {
     }
 

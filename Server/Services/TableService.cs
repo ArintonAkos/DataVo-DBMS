@@ -112,7 +112,7 @@ namespace Server.Services
             }
             else
             {
-                table = GetTableNameByColumn(columnName);
+                table = GetTableDetailByColumn(columnName).GetTableNameInUse();
             }
 
             return Tuple.Create(table!, column);
