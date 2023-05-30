@@ -102,5 +102,30 @@ namespace Server.Services
 
             selectedTable.FetchTableColumns(database);
         }
+
+        public Tuple<string, string> ParseAndFindTableNameByColumn(string columnName)
+        {
+            string column = columnName;
+            string? table;
+
+            if (columnName.Contains('.'))
+            {
+                string[] splitColumnName = columnName.Split('.');
+
+                if (splitColumnName.Length != 2)
+                {
+                    throw new Exception("Column names can only contain one '.' character!");
+                }
+
+                table = splitColumnName[0];
+                column = splitColumnName[1];
+            }
+            else
+            {
+                table = GetTableNameByColumn(columnName);
+            }
+
+            return Tuple.Create(table!, column);
+        }
     }
 }
