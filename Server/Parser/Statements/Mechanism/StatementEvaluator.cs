@@ -9,6 +9,13 @@ internal class StatementEvaluator
 {
     private TableService tableService { get; set; }
     private Join? joinStatements { get; set; }
+    private TableDetail? singleTable 
+    { 
+        get
+        {
+            return tableService.TableDetails.FirstOrDefault().Value;
+        } 
+    }
 
     public StatementEvaluator(string databaseName, string tableName)
     {
@@ -22,12 +29,21 @@ internal class StatementEvaluator
         this.joinStatements = joinStatements;
     }
 
-    public Dictionary<string, Dictionary<string, dynamic?>> Evaluate(Node root)
+    public Dictionary<string, Dictionary<string, dynamic>> Evaluate(Node root)
     {
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
             && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
         {
-            return HandleTwoColumnExpression(root);
+            TableDetail leftTable = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
+            TableDetail rightTable = tableService.GetTableDetailByColumn(root.Right.Value.ParsedValue);
+
+            if (leftTable.TableName == rightTable.TableName)
+            {
+                throw new Exception("Join like statement not permitted in where clause!");
+            }
+
+            List<string> result = HandleTwoColumnExpression(root, leftTable).ToList();
+            return DbContext.Instance.SelectFromTable(result, new(), leftTable.TableName, leftTable.DatabaseName!);
         }
 
         if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq)
@@ -50,20 +66,26 @@ internal class StatementEvaluator
         {
             if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value)
             {
-                return HandleIndexableStatement(root);
+                TableDetail table = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
+                List<string> result = HandleNonIndexableStatement(root, table).ToList();
+                return DbContext.Instance.SelectFromTable(result, new(), table.TableName, table.DatabaseName!);
             }
 
-            return HandleConstantExpression(root);
+            return new();
+            // return HandleConstantExpression(root);
         }
 
         if (root.Type == Node.NodeType.Operator)
         {
             if (root.Left!.Type == Node.NodeType.Column)
             {
-                return HandleNonIndexableStatement(root);
+                TableDetail table = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
+                List<string> result = HandleNonIndexableStatement(root, table).ToList();
+                return DbContext.Instance.SelectFromTable(result, new(), table.TableName, table.DatabaseName!);
             }
 
-            return HandleConstantExpression(root);
+            return new();
+            // return HandleConstantExpression(root);
         }
 
         var leftResult = EvaluateWithoutJoin(root.Left!);
@@ -87,7 +109,7 @@ internal class StatementEvaluator
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator) 
             &&  root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
         {
-            return HandleTwoColumnExpression(root);
+            return HandleTwoColumnExpression(root, singleTable!);
         }
 
         if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq) 
@@ -110,20 +132,20 @@ internal class StatementEvaluator
         {
             if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value) 
             {
-                return HandleIndexableStatement(root);
+                return HandleIndexableStatement(root, singleTable!);
             }
 
-            return HandleConstantExpression(root);
+            return HandleConstantExpression(root, singleTable!);
         }
 
         if (root.Type == Node.NodeType.Operator)
         {
             if (root.Left!.Type == Node.NodeType.Column)
             {
-                return HandleNonIndexableStatement(root);
+                return HandleNonIndexableStatement(root, singleTable!);
             }
 
-            return HandleConstantExpression(root);
+            return HandleConstantExpression(root, singleTable!);
         }
 
         var leftResult = EvaluateWithoutJoin(root.Left!);
@@ -142,30 +164,30 @@ internal class StatementEvaluator
         throw new Exception("Invalid tree node type!");
     }
 
-    private HashSet<string> HandleIndexableStatement(Node root)
+    private HashSet<string> HandleIndexableStatement(Node root, TableDetail table)
     {
         string? leftValue = root.Left!.Value.ParsedValue;
         string? rightValue = root.Right!.Value.Value!.ToString();
 
-        _indexedColumns.TryGetValue(leftValue!, out string? indexFile);
+        table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
         if (indexFile != null)
         {
-            return DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, _tableName, _databaseName);
+            return DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!);
         }
 
-        int columnIndex = _primaryKeys.IndexOf(leftValue!);
+        int columnIndex = table.PrimaryKeys!.IndexOf(leftValue!);
         if (columnIndex > -1)
         {
-            return DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, _tableName, _databaseName);
+            return DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, table.TableName, table.DatabaseName!);
         }
 
-        return _tableContent!
+        return table.TableContent!
             .Where(entry => entry.Value[root.Left!.Value.ParsedValue] == root.Right!.Value.ParsedValue)
             .Select(entry => entry.Key)
             .ToHashSet();
     }
 
-    private HashSet<string> HandleNonIndexableStatement(Node root)
+    private HashSet<string> HandleNonIndexableStatement(Node root, TableDetail table)
     {
         string? leftValue = root.Left!.Value.ParsedValue;
         
@@ -179,13 +201,13 @@ internal class StatementEvaluator
             _ => throw new SecurityException("Invalid operator")
         };
 
-        return _tableContent!
+        return table.TableContent!
             .Where(pred)
             .Select(entry => entry.Key)
             .ToHashSet();
     }
 
-    private HashSet<string> HandleTwoColumnExpression(Node root)
+    private HashSet<string> HandleTwoColumnExpression(Node root, TableDetail table)
     {
         string? leftValue = root.Left!.Value.ParsedValue;
         string? rightValue = root.Right!.Value.ParsedValue;
@@ -201,7 +223,7 @@ internal class StatementEvaluator
             _ => throw new SecurityException("Invalid operator")
         };
 
-        return _tableContent!
+        return table.TableContent!
             .Where(pred)
             .Select(entry => entry.Key)
             .ToHashSet();
@@ -220,8 +242,6 @@ internal class StatementEvaluator
             _ => throw new SecurityException("Invalid operator")
         };
 
-        return isCondTrue
-            ? _tableContent!.Keys.ToHashSet()
-            : new HashSet<string>();
+        return new HashSet<string>();
     }
 }

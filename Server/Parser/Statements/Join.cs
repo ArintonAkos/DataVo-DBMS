@@ -24,5 +24,9 @@ public class Join
 
     public bool ContainsJoin() => _isValid;
 
-    public HashSet<string> Evaluate(string tableName, string databaseName) => new();
+    // Lista<Táblanév, <Oszlopnév érték>>
+    public List<Dictionary<string, dynamic>> Evaluate(List<Dictionary<string, dynamic>> table)
+    {
+        
+    }
 }
