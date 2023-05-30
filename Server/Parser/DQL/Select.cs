@@ -4,6 +4,8 @@ using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
+using Server.Server.Requests;
+using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
 
 namespace Server.Parser.DQL;
@@ -11,17 +13,21 @@ namespace Server.Parser.DQL;
 internal class Select : BaseDbAction
 {
     private readonly SelectModel _model;
+    private readonly string _databaseName;
 
-    public Select(Match match) => _model = SelectModel.FromMatch(match);
+    public Select(Match match, ParseRequest request)
+    {
+        _databaseName = CacheStorage.Get(request.Session)
+                ?? throw new Exception("No database in use!");
+
+        _model = SelectModel.FromMatch(match, _databaseName);
+    }
 
     public override void PerformAction(Guid session)
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
-
-            bool hasMissingColumns = _model.Validate(databaseName);
+            bool hasMissingColumns = _model.Validate(_databaseName);
 
             if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
             {
@@ -32,16 +38,16 @@ internal class Select : BaseDbAction
 
             if (_model.WhereStatement.IsEvaluatable())
             {
-                selectedIds = _model.WhereStatement.Evaluate(_model.TableName, databaseName).ToList();
+                selectedIds = _model.WhereStatement.Evaluate(_model.TableName, _databaseName).ToList();
             }
 
             Dictionary<string, Dictionary<string, dynamic>> data =
-                Context.SelectFromTable(selectedIds, _model.Columns, _model.TableName, databaseName);
+                Context.SelectFromTable(selectedIds, _model.Columns, _model.TableName, _databaseName);
 
             Logger.Info($"Rows selected: {data.Count}");
             Messages.Add($"Rows selected: {data.Count}");
 
-            Fields = CreateFieldsFromColumns(databaseName);
+            Fields = CreateFieldsFromColumns(_databaseName);
 
             Data = data
                 .Select(row => row.Value.Values.ToList())

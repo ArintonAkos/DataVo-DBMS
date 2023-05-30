@@ -1,43 +1,74 @@
-﻿using System.Text.RegularExpressions;
+﻿using Server.Models.Statement.Utils;
+using Server.Services;
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
 
 namespace Server.Models.Statement;
 
-internal class JoinModel
+public class JoinModel
 {
-    public List<string> JoinTables { get; set; } = new();
-    public List<string?> JoinTableAliases { get; set; } = new();
-    public List<string> JoinConditions { get; set; } = new();
-
-    public static JoinModel FromMatch(Match match)
+    public class JoinCondition
     {
-        var joinTables = match.Groups["JoinTable"].Captures;
-        var joinConditions = match.Groups["JoinCondition"].Captures;
+        public string LeftTableName { get; set; }
+        public string LeftColumnName { get; set; }
+        public string RightTableName { get; set; }
+        public string RightColumnName { get; set; }
 
+        public JoinCondition(string leftTableName, string leftColumnName, string rightTableName, string rightColumnName)
+        {
+            LeftTableName = leftTableName;
+            LeftColumnName = leftColumnName;
+            RightTableName = rightTableName;
+            RightColumnName = rightColumnName;
+        }
+    }
+
+    public Dictionary<string, TableDetail> JoinTableDetails { get; set; } = new();
+    public List<JoinCondition> JoinConditions { get; set; } = new();
+
+    public static JoinModel FromMatchGroup(Group group)
+    {
         var model = new JoinModel();
 
-        for (int i = 0; i < joinTables.Count; i++)
+        var joinDetails = TableParserService.ParseJoinTablesAndConditions(
+            group.Captures.Cast<Capture>().Select(c => c.Value),
+            group.Captures.Cast<Capture>().Select(c => c.Value)
+        );
+
+        var joinTableNames = joinDetails.Item1;
+        var joinConditionsRaw = joinDetails.Item2;
+
+        int i = 0;
+        foreach (var joinDetail in joinTableNames)
         {
-            string joinTable = joinTables[i].Value;
-            string? joinTableAlias = null;
+            var joinedTableName = joinDetail.Key;
+            var tableDetail = joinDetail.Value;
 
-            if (joinTable.ToLower().Contains("as"))
+            if (!joinTableNames.ContainsKey(joinedTableName))
             {
-                var splitJoinTable = joinTable
-                    .Split("as")
-                    .Select(r => r.Replace(" ", ""))
-                    .ToList();
+                model.JoinTableDetails.Add(tableDetail.GetTableNameInUse(), tableDetail);
 
-                joinTable = splitJoinTable[index: 0];
-                joinTableAlias = splitJoinTable[index: 1];
+                var conditionParts = joinConditionsRaw[i].Split('=');
+                var leftTableColumn = conditionParts[0].Trim().Split('.');
+                var rightTableColumn = conditionParts[1].Trim().Split('.');
+
+                var condition = new JoinCondition(
+                    leftTableColumn[0],
+                    leftTableColumn[1],
+                    rightTableColumn[0],
+                    rightTableColumn[1]
+                );
+
+                model.JoinConditions.Add(condition);
+            } 
+            else
+            {
+                throw new Exception($"Table '{joinedTableName}' is already in use!");
             }
-
-            string joinCondition = joinConditions[i].Value;
-
-            model.JoinTables.Add(joinTable);
-            model.JoinTableAliases.Add(joinTableAlias);
-            model.JoinConditions.Add(joinCondition);
         }
 
         return model;
     }
+
 }

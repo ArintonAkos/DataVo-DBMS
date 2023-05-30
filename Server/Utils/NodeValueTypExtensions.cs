@@ -1,4 +1,4 @@
-﻿using static Server.Models.Statement.Node;
+﻿using static Server.Models.Statement.Utils.Node;
 
 namespace Server.Utils;
 

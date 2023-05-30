@@ -2,7 +2,7 @@
 using Server.Models.Catalog;
 using Server.Utils;
 
-namespace Server.Models.Statement;
+namespace Server.Models.Statement.Utils;
 
 public class Node
 {
@@ -34,18 +34,18 @@ public class Node
     public bool UseIndex { get; set; }
 
     public Node HandleAlgebraicExpression(string @operator, Node other) => new()
-        { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
+    { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
 
     public class NodeValue
     {
         public IComparable? Value;
         public NodeValueType ValueType;
-        public dynamic? ParsedValue 
+        public dynamic? ParsedValue
         {
             get
             {
                 return ConvertGenericToType(Value, ValueType.ToType());
-            } 
+            }
         }
 
         private NodeValue(IComparable value, NodeValueType valueType)
