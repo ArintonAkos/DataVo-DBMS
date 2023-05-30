@@ -8,7 +8,23 @@ namespace Server.Models.Statement.Utils
         public string? DatabaseName { get; set; }
         public string TableName { get; set; }
         public string? TableAlias { get; set; }
-        public List<string>? Columns { get; set; }
+
+        private List<string>? _columns { get; set; }
+        public List<string>? Columns 
+        {
+            get
+            {
+                if (DatabaseName is null)
+                {
+                    throw new Exception("Database not selected!");
+                }
+
+                _columns ??= Catalog.Catalog.GetTableColumns(TableName, DatabaseName)
+                    .Select(c => c.Name)
+                    .ToList();
+                return _columns;
+            }
+        }
 
         private List<string>? _primaryKeys { get; set; }
         public List<string>? PrimaryKeys

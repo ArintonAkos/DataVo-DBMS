@@ -7,6 +7,7 @@ namespace Server.Models.DQL;
 
 internal class SelectModel
 {
+    private Dictionary<string, List<string>>? TableColumnsInUse { get; set; }
     public string Database { get; set; }
     public TableService TableService { get; set; }
     public Where WhereStatement { get; set; }
@@ -40,7 +41,7 @@ internal class SelectModel
         Dictionary<string, List<string>>? tableColumnsInUse = TableParserService.ParseColumns(match.Groups["Columns"].Value, tableColumns);
 
         // It means that * was as the column, we add every column name to the table
-        if (tableColumnsInUse is null)
+        /*if (tableColumnsInUse is null)
         {
             foreach (var table in tableColumns)
             {
@@ -53,7 +54,7 @@ internal class SelectModel
             {
                 tableService.TableDetails[table.Key].Columns = table.Value;
             }
-        }
+        }*/
 
         var whereStatement = new Where(match.Groups["WhereStatement"].Value);
 
@@ -62,7 +63,8 @@ internal class SelectModel
             WhereStatement = whereStatement,
             JoinStatement = joinStatement,
             Database = databaseName,
-            TableService = tableService
+            TableService = tableService,
+            TableColumnsInUse = tableColumnsInUse,
         };
     }
 
