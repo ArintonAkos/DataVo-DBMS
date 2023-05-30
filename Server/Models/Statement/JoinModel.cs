@@ -27,7 +27,7 @@ public class JoinModel
     public Dictionary<string, TableDetail> JoinTableDetails { get; set; } = new();
     public List<JoinCondition> JoinConditions { get; set; } = new();
 
-    public static JoinModel FromMatchGroup(Group group)
+    public static JoinModel FromMatchGroup(Group group, TableService tableService)
     {
         var model = new JoinModel();
 
@@ -50,14 +50,20 @@ public class JoinModel
                 model.JoinTableDetails.Add(tableDetail.GetTableNameInUse(), tableDetail);
 
                 var conditionParts = joinConditionsRaw[i].Split('=');
-                var leftTableColumn = conditionParts[0].Trim().Split('.');
-                var rightTableColumn = conditionParts[1].Trim().Split('.');
+                
+                if (conditionParts.Length != 2)
+                {
+                    throw new Exception("Invalid join condition");
+                }
+
+                var leftSide = tableService.ParseAndFindTableNameByColumn(conditionParts[0]);
+                var rightSide = tableService.ParseAndFindTableNameByColumn(conditionParts[1]);
 
                 var condition = new JoinCondition(
-                    leftTableColumn[0],
-                    leftTableColumn[1],
-                    rightTableColumn[0],
-                    rightTableColumn[1]
+                    leftSide.Item1,
+                    leftSide.Item2, 
+                    rightSide.Item1, 
+                    rightSide.Item2
                 );
 
                 model.JoinConditions.Add(condition);
