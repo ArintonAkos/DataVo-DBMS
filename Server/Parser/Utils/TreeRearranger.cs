@@ -1,5 +1,5 @@
 ﻿using Server.Enums;
-using Server.Models.Statement;
+using Server.Models.Statement.Utils;
 
 namespace Server.Parser.Utils;
 

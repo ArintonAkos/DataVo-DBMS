@@ -7,16 +7,19 @@ namespace Server.Parser.Statements;
 public class Join
 {
     private readonly bool _isValid;
-    private readonly JoinModel _model;
+    public readonly JoinModel Model;
 
-    public Join(string joinStatement)
+    public Join(Group group)
     {
-        var match = Regex.Match(joinStatement, Patterns.Join, RegexOptions.IgnoreCase);
-
-        if (match.Success)
+        if (group.Success)
         {
-            _model = JoinModel.FromMatch(match);
+            Model = JoinModel.FromMatchGroup(group);
             _isValid = true;
+        }
+        else
+        {
+            _isValid = false;
+            Model = new();
         }
     }
 

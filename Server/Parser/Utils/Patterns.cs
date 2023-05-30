@@ -118,7 +118,7 @@ internal static class Patterns
     public static string Join
     {
         get =>
-            @"(?<Joins>(?:\s+join\s+(?:\w+(\s+as\s+\w+)?)\s+on\s+(?:\w+(\.\w+)?\s*=\s*\w+(\.\w+)?))*)";
+            @"(?<Joins>(?:\s+join\s+(?<JoinTable>\w+(\s+as\s+\w+)?)\s+on\s+(?<JoinCondition>\w+(\.\w+)?\s*=\s*\w+(\.\w+)?))*)";
     }
 
     public static string AddStartLine(this string s) => @"^\s*" + s;

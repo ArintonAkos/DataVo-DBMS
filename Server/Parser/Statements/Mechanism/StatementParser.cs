@@ -1,8 +1,8 @@
 ﻿using Server.Enums;
-using Server.Models.Statement;
+using Server.Models.Statement.Utils;
 using Server.Parser.Utils;
 using Server.Utils;
-using static Server.Models.Statement.Node;
+using static Server.Models.Statement.Utils.Node;
 
 namespace Server.Parser.Statements;
 
@@ -153,22 +153,6 @@ public static class StatementParser
                 }
 
                 operators.Pop();
-
-                //// Handle NOT operator following closing parenthesis
-                //if (operators.Count > 0 && operators.Peek() == "NOT")
-                //{
-                //    string op = operators.Pop();
-                //    Node right = values.Pop();
-
-                //    Node node = new()
-                //    {
-                //        Type = Node.NodeType.Operator,
-                //        Value = op,
-                //        Right = right
-                //    };
-
-                //    values.Push(node);
-                //}
             }
             else if (IsOperator(token))
             {
