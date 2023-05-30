@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DDL;
 
@@ -10,7 +11,7 @@ internal class CreateDatabase : BaseDbAction
 {
     private readonly CreateDatabaseModel _model;
 
-    public CreateDatabase(Match match) => _model = CreateDatabaseModel.FromMatch(match);
+    public CreateDatabase(Match match, ParseRequest request) => _model = CreateDatabaseModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

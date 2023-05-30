@@ -6,6 +6,7 @@ using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DDL;
 
@@ -13,7 +14,7 @@ internal class CreateIndex : BaseDbAction
 {
     private readonly CreateIndexModel _model;
 
-    public CreateIndex(Match match) => _model = CreateIndexModel.FromMatch(match);
+    public CreateIndex(Match match, ParseRequest request) => _model = CreateIndexModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

@@ -15,7 +15,7 @@ public class Join
 
     public Join(Group group, TableService tableService)
     {
-        if (group.Success)
+        if (group.Success && group.Length > 0)
         {
             Model = JoinModel.FromMatchGroup(group, tableService);
             

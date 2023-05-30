@@ -6,6 +6,7 @@ using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DDL;
 
@@ -13,7 +14,7 @@ internal class CreateTable : BaseDbAction
 {
     private readonly CreateTableModel _model;
 
-    public CreateTable(Match match) => _model = CreateTableModel.FromMatch(match);
+    public CreateTable(Match match, ParseRequest request) => _model = CreateTableModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

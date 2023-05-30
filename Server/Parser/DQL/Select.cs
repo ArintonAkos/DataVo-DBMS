@@ -1,9 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using Server.Logging;
-using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
-using Server.Parser.Statements;
 using Server.Server.Cache;
 using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
@@ -14,21 +12,20 @@ using TableRows = List<Dictionary<string, Dictionary<string, dynamic>>>;
 internal class Select : BaseDbAction
 {
     private readonly SelectModel _model;
-    private readonly string _databaseName;
 
     public Select(Match match, ParseRequest request)
     {
-        _databaseName = CacheStorage.Get(request.Session)
-                ?? throw new Exception("No database in use!");
-
-        _model = SelectModel.FromMatch(match, _databaseName);
+        _model = SelectModel.FromMatch(match);
     }
 
     public override void PerformAction(Guid session)
     {
         try
         {
-            bool hasMissingColumns = _model.Validate(_databaseName);
+            string databaseName = CacheStorage.Get(session)
+                ?? throw new Exception("No database in use!");
+
+            bool hasMissingColumns = _model.Validate(databaseName);
 
             if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
             {
@@ -39,7 +36,7 @@ internal class Select : BaseDbAction
 
             if (_model.WhereStatement.IsEvaluatable())
             {
-                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService, _model.JoinStatement);
+                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
             }
             else
             {
@@ -58,7 +55,7 @@ internal class Select : BaseDbAction
 
             Fields = CreateFieldsFromColumns();
 
-            Data = result.ToList();
+            Data = CreateDataFromResult(result);
         }
         catch (Exception ex)
         {
@@ -77,5 +74,27 @@ internal class Select : BaseDbAction
                 FieldName = columnName
             })
             .ToList();
+    }
+
+    private List<List<dynamic>> CreateDataFromResult(List<Dictionary<string, Dictionary<string, dynamic>>> filteredTable)
+    {
+        List<List<dynamic>> result = new();
+
+        foreach (var row in filteredTable)
+        {
+            List<dynamic> data = new();
+            foreach (string nameAssambly in _model.GetSelectedColumns())
+            {
+                string[] splittedAssambly = nameAssambly.Split('.');
+                string tableName = splittedAssambly[0];
+                string columnName = splittedAssambly[1];
+
+                data.Add(row[tableName][columnName]);
+            }
+
+            result.Add(data);
+        }
+
+        return result;
     }
 }

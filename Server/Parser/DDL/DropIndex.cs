@@ -5,6 +5,7 @@ using Server.Models.DDL;
 using Server.Parser.Actions;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
+using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DDL;
 
@@ -12,7 +13,7 @@ internal class DropIndex : BaseDbAction
 {
     private readonly DropIndexModel _model;
 
-    public DropIndex(Match match) => _model = DropIndexModel.FromMatch(match);
+    public DropIndex(Match match, ParseRequest request) => _model = DropIndexModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

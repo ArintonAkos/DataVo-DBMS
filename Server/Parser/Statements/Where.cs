@@ -7,7 +7,12 @@ namespace Server.Parser.Statements;
 internal class Where
 {
     private readonly WhereModel? _model;
-    private readonly TableDetail _fromTable;
+    private TableDetail _fromTable;
+
+    public Where(string match)
+    {
+        _model = WhereModel.FromString(match);
+    }
 
     public Where(string match, TableDetail fromTable)
     {
@@ -21,6 +26,9 @@ internal class Where
         {
             throw new Exception("Cannot evaluate null where statement.");
         }
+
+        _fromTable = new TableDetail(tableName, null);
+        _fromTable.DatabaseName = databaseName;
 
         return new StatementEvaluator(databaseName, tableName, _fromTable).EvaluateWithoutJoin(_model.Statement);
     }

@@ -82,7 +82,7 @@ internal class StatementEvaluator
                 return GetJoinedTableContent(tableRows, table.TableName, table.DatabaseName!);
             }
 
-            // return HandleConstantExpression(root);
+            return HandleConstantExpressionWithJoin(root);
         }
 
         if (root.Type == Node.NodeType.Operator)
@@ -95,11 +95,10 @@ internal class StatementEvaluator
                     .Select(row => row.Value)
                     .ToList();
 
-                var resultTableRows = GetJoinedTableContent(tableRows, table.TableName, table.DatabaseName!);
+                return GetJoinedTableContent(tableRows, table.TableName, table.DatabaseName!);
             }
 
-            var result = GetJoinedTableContent(fromTable!.TableContentValues!, fromTable.TableName, fromTable.DatabaseName!);
-            // return HandleConstantExpression(root);
+            return HandleConstantExpressionWithJoin(root);
         }
 
         var leftResult = Evaluate(root.Left!);
@@ -149,7 +148,7 @@ internal class StatementEvaluator
                 return HandleIndexableStatement(root, fromTable!);
             }
 
-            return HandleConstantExpression(root);
+            
         }
 
         if (root.Type == Node.NodeType.Operator)
@@ -261,6 +260,27 @@ internal class StatementEvaluator
             .ToHashSet();
 
         return isCondTrue ? content : new();
+    }
+
+    private TableRows HandleConstantExpressionWithJoin(Node root)
+    {
+        bool isCondTrue = root.Value.ParsedValue switch
+        {
+            "=" => root.Left!.Value.ParsedValue == root.Right!.Value.ParsedValue,
+            "!=" => root.Left!.Value.ParsedValue != root.Right!.Value.ParsedValue,
+            "<" => root.Left!.Value.ParsedValue < root.Right!.Value.ParsedValue,
+            ">" => root.Left!.Value.ParsedValue > root.Right!.Value.ParsedValue,
+            "<=" => root.Left!.Value.ParsedValue <= root.Right!.Value.ParsedValue,
+            ">=" => root.Left!.Value.ParsedValue >= root.Right!.Value.ParsedValue,
+            _ => throw new SecurityException("Invalid operator")
+        };
+
+        if (isCondTrue)
+        {
+            return GetJoinedTableContent(fromTable!.TableContentValues!, fromTable.TableName, fromTable.DatabaseName!);
+        }
+
+        return new();
     }
 
     private TableRows GetJoinedTableContent(List<Dictionary<string, dynamic>> tableRows, string tableName, string databaseName)
