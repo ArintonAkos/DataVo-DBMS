@@ -1,17 +1,16 @@
-﻿using Microsoft.Extensions.Primitives;
-using Server.Models.Catalog;
-using Server.Models.Statement.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Server.Models.Statement.Utils;
 
 namespace Server.Services
 {
     public class TableService
     {
+        private readonly string _databaseName;
         public Dictionary<string, TableDetail> TableDetails { get; private set; } = new();
+
+        public TableService(string databaseName)
+        {
+            _databaseName = databaseName;
+        }
 
         public TableDetail GetTableDetailByAliasOrName(string aliasOrName)
         {
@@ -26,7 +25,7 @@ namespace Server.Services
             throw new Exception("Table name or alias not found");
         }
 
-        public string GetTableNameByColumn(string column)
+        public TableDetail GetTableDetailByColumn(string column)
         {
             string? tableName = null;
 
@@ -44,14 +43,14 @@ namespace Server.Services
                     throw new Exception("Invalid table name");
                 }
 
-                return TableDetails[tableName].GetTableNameInUse();
+                return TableDetails[tableName];
             }
 
             List<string> tablesWithThisColumnName = new();
 
             foreach (var table in TableDetails)
             {
-                if (table.Value.Columns.Contains(column))
+                if (table.Value.Columns!.Contains(column))
                 {
                     tablesWithThisColumnName.Add(table.Key);
                 }
@@ -68,7 +67,8 @@ namespace Server.Services
             }
 
             tableName = tablesWithThisColumnName[0];
-            return TableDetails[tableName].GetTableNameInUse();
+
+            return TableDetails[tableName];
         }
 
         public string GetRealTableName(string aliasOrName)
@@ -88,19 +88,9 @@ namespace Server.Services
                 throw new Exception("Duplicate table alias found");
             }
 
+            tableDetail.DatabaseName = _databaseName;
+
             TableDetails[tableDetail.GetTableNameInUse()] = tableDetail;
-        }
-
-        public void AddTableColumnsFromCatalog(string aliasOrName, string database)
-        {
-            var selectedTable = TableDetails[aliasOrName];
-
-            if (selectedTable == null)
-            {
-                throw new Exception($"Table {aliasOrName} not found");
-            }
-
-            selectedTable.FetchTableColumns(database);
         }
 
         public Tuple<string, string> ParseAndFindTableNameByColumn(string columnName)

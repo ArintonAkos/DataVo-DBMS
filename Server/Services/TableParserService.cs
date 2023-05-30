@@ -51,7 +51,7 @@ namespace Server.Services
                             throw new Exception($"Invalid column name: {columnName} for table {tableName}");
                         }
 
-                        selectedColumns[tableName].Add(columnName);
+                        selectedColumns[tableName].Add($"{tableName}.{columnName}");
                     }
                     else
                     {
@@ -75,7 +75,8 @@ namespace Server.Services
                             throw new Exception($"Invalid column name: {column}");
                         }
 
-                        selectedColumns[tablesWithThisColumnName[0]].Add(columnName);
+                        tableName = tablesWithThisColumnName[0];
+                        selectedColumns[tableName].Add($"{tableName}.{columnName}");
                     }
                 }
 
