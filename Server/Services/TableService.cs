@@ -1,4 +1,5 @@
-﻿using Server.Models.Catalog;
+﻿using Microsoft.Extensions.Primitives;
+using Server.Models.Catalog;
 using Server.Models.Statement.Utils;
 using System;
 using System.Collections.Generic;
@@ -23,6 +24,51 @@ namespace Server.Services
             }
 
             throw new Exception("Table name or alias not found");
+        }
+
+        public string GetTableNameByColumn(string column)
+        {
+            string? tableName = null;
+
+            if (column.Contains(value: "."))
+            {
+                var splitColumn = column.Split('.');
+
+                tableName = splitColumn[0];
+            }
+
+            if (tableName != null)
+            {
+                if (!TableDetails.ContainsKey(tableName))
+                { 
+                    throw new Exception("Invalid table name");
+                }
+
+                return TableDetails[tableName].GetTableNameInUse();
+            }
+
+            List<string> tablesWithThisColumnName = new();
+
+            foreach (var table in TableDetails)
+            {
+                if (table.Value.Columns.Contains(column))
+                {
+                    tablesWithThisColumnName.Add(table.Key);
+                }
+            }
+
+            if (tablesWithThisColumnName.Count > 1)
+            {
+                throw new Exception($"Ambiguous column name: {column}");
+            }
+
+            if (tablesWithThisColumnName.Count == 0)
+            {
+                throw new Exception($"Invalid column name: {column}");
+            }
+
+            tableName = tablesWithThisColumnName[0];
+            return TableDetails[tableName].GetTableNameInUse();
         }
 
         public string GetRealTableName(string aliasOrName)
