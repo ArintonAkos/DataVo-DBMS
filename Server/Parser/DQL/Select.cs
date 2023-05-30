@@ -3,12 +3,13 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DQL;
 using Server.Parser.Actions;
+using Server.Parser.Statements;
 using Server.Server.Cache;
-using Server.Server.Requests;
 using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
 
 namespace Server.Parser.DQL;
+using TableRows = List<Dictionary<string, Dictionary<string, dynamic>>>;
 
 internal class Select : BaseDbAction
 {
@@ -34,24 +35,30 @@ internal class Select : BaseDbAction
                 throw new Exception("Invalid columns specified'");
             }
 
-            List<string>? selectedIds = null;
+            TableRows result = new();
 
             if (_model.WhereStatement.IsEvaluatable())
             {
-                selectedIds = _model.WhereStatement.Evaluate(_model.TableName, _databaseName).ToList();
+                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService, _model.JoinStatement);
+            }
+            else
+            {
+                result = _model.FromTable!.TableContentValues!
+                    .Select(row => new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row } })
+                    .ToList();
+
+                if (_model.JoinStatement.ContainsJoin())
+                {
+                    result = _model.JoinStatement.Evaluate(result);
+                }
             }
 
-            Dictionary<string, Dictionary<string, dynamic>> data =
-                Context.SelectFromTable(selectedIds, _model.Columns, _model.TableName, _databaseName);
+            Logger.Info($"Rows selected: {result.Count}");
+            Messages.Add($"Rows selected: {result.Count}");
 
-            Logger.Info($"Rows selected: {data.Count}");
-            Messages.Add($"Rows selected: {data.Count}");
+            Fields = CreateFieldsFromColumns();
 
-            Fields = CreateFieldsFromColumns(_databaseName);
-
-            Data = data
-                .Select(row => row.Value.Values.ToList())
-                .ToList();
+            Data = result.ToList();
         }
         catch (Exception ex)
         {
@@ -60,23 +67,12 @@ internal class Select : BaseDbAction
         }
     }
 
-    private List<FieldResponse> CreateFieldsFromColumns(string databaseName)
+    private List<FieldResponse> CreateFieldsFromColumns()
     {
-        if (_model.Columns.Count > 0)
-        {
-            return Catalog.GetTableColumns(_model.TableName, databaseName)
-                .Select(column => column.Name)
-                .Where(column => _model.Columns.Contains(column))
-                .Select(columnName => new FieldResponse()
-                {
-                    FieldName = columnName
-                })
-                .ToList();
-        }
+        var allColumns = _model.GetSelectedColumns();
     
-        return Catalog.GetTableColumns(_model.TableName, databaseName)
-            .Select(col => col.Name)
-            .Select(columnName => new FieldResponse()
+        return allColumns.Select(columnName => 
+            new FieldResponse()
             {
                 FieldName = columnName
             })

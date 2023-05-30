@@ -1,26 +1,32 @@
 ﻿using Server.Models.Statement.Utils;
 using Server.Services;
-using System;
-using System.IO;
 using System.Text.RegularExpressions;
 
 namespace Server.Models.Statement;
 
 public class JoinModel
 {
+    public class JoinColumn
+    {
+        public string TableName { get; set; }
+        public string ColumnName { get; set; }
+
+        public JoinColumn(string tableName, string columnName)
+        {
+            TableName = tableName;
+            ColumnName = columnName;
+        }
+    }
+
     public class JoinCondition
     {
-        public string LeftTableName { get; set; }
-        public string LeftColumnName { get; set; }
-        public string RightTableName { get; set; }
-        public string RightColumnName { get; set; }
+        public JoinColumn LeftColumn { get; set; }
+        public JoinColumn RightColumn { get; set; }
 
         public JoinCondition(string leftTableName, string leftColumnName, string rightTableName, string rightColumnName)
         {
-            LeftTableName = leftTableName;
-            LeftColumnName = leftColumnName;
-            RightTableName = rightTableName;
-            RightColumnName = rightColumnName;
+            LeftColumn = new(leftTableName, leftColumnName);
+            RightColumn = new(rightTableName, rightColumnName);
         }
     }
 

@@ -21,7 +21,7 @@ internal class DeleteFrom : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            List<string> toBeDeleted = _model.WhereStatement.Evaluate(_model.TableName, databaseName).ToList();
+            List<string> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
 
             DbContext.Instance.DeleteFormTable(toBeDeleted, _model.TableName, databaseName);
 
