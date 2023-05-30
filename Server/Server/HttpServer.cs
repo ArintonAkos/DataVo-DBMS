@@ -12,8 +12,8 @@ internal class HttpServer
     public HttpServer()
     {
         _httpListener = new HttpListener();
-        _httpListener.Prefixes.Add("http://+:8001/");
-        //_httpListener.Prefixes.Add("http://localhost:8001/");
+        //_httpListener.Prefixes.Add("http://+:8001/");
+        _httpListener.Prefixes.Add("http://localhost:8001/");
     }
 
     public async Task Start()

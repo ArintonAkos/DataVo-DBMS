@@ -1,16 +1,16 @@
-﻿using Server.Models.Catalog;
-using Server.Models.Statement.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Server.Models.Statement.Utils;
 
 namespace Server.Services
 {
     public class TableService
     {
+        private readonly string _databaseName;
         public Dictionary<string, TableDetail> TableDetails { get; private set; } = new();
+
+        public TableService(string databaseName)
+        {
+            _databaseName = databaseName;
+        }
 
         public TableDetail GetTableDetailByAliasOrName(string aliasOrName)
         {
@@ -42,19 +42,9 @@ namespace Server.Services
                 throw new Exception("Duplicate table alias found");
             }
 
+            tableDetail.DatabaseName = _databaseName;
+
             TableDetails[tableDetail.GetTableNameInUse()] = tableDetail;
-        }
-
-        public void AddTableColumnsFromCatalog(string aliasOrName, string database)
-        {
-            var selectedTable = TableDetails[aliasOrName];
-
-            if (selectedTable == null)
-            {
-                throw new Exception($"Table {aliasOrName} not found");
-            }
-
-            selectedTable.FetchTableColumns(database);
         }
     }
 }
