@@ -1,6 +1,5 @@
 ﻿using System.Text.RegularExpressions;
 using Server.Models.Statement.Utils;
-using Server.Parser.DDL;
 using Server.Parser.Statements;
 using Server.Services;
 
@@ -36,7 +35,6 @@ internal class SelectModel
         };
     }
 
-    // returns column is "tablename.columnname" format
     public List<string> GetSelectedColumns()
     {
         if (TableColumnsInUse is null)
@@ -53,8 +51,7 @@ internal class SelectModel
 
         foreach (var table in TableService!.TableDetails)
         {
-            columns.AddRange(Catalog.Catalog.GetTableColumns(table.Value.TableName, Database!)
-                 .Select(c => $"{table.Value.TableName}.{c.Name}"));
+            columns.AddRange(table.Value.Columns!.Select(c => $"{table.Value.TableName}.{c}"));
         }
 
         return columns;
@@ -67,20 +64,8 @@ internal class SelectModel
         TableService.AddTableDetail(FromTable);
 
         JoinStatement = new Join(RawJoinStatement, TableService);
-        foreach (var tableDetail in JoinStatement.Model.JoinTableDetails)
-        {
-            TableService.AddTableDetail(tableDetail.Value);
-        }
 
-        Dictionary<string, List<string>> tableColumns = new();
-        foreach (var table in TableService.TableDetails)
-        {
-            tableColumns[table.Key] = Catalog.Catalog.GetTableColumns(table.Value.TableName, databaseName)
-                .Select(c => c.Name)
-                .ToList();
-        }
-
-        TableColumnsInUse = TableParserService.ParseColumns(RawColumns, tableColumns);
+        TableColumnsInUse = TableParserService.ParseColumns(RawColumns, TableService);
 
         return false;
     }

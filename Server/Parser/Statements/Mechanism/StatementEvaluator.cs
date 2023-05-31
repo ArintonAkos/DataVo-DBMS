@@ -1,28 +1,16 @@
-﻿using Server.Models.Catalog;
-using Server.Models.Statement.Utils;
+﻿using Server.Models.Statement.Utils;
 using Server.Server.MongoDB;
 using Server.Services;
-using System.Linq;
-using System.Net.WebSockets;
 using System.Security;
-using static Server.Models.Statement.JoinModel;
 
 namespace Server.Parser.Statements;
-using TableRows = List<Dictionary<string, Dictionary<string, dynamic>>>;
+using TableRows = Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>>;
 
 internal class StatementEvaluator
 {
-
     private TableService tableService { get; set; }
     private Join? join { get; set; }
     private TableDetail? fromTable { get; set; } 
-
-    public StatementEvaluator(string databaseName, string tableName, TableDetail fromTable)
-    {
-        tableService = new TableService(databaseName);
-        tableService.AddTableDetail(new TableDetail(tableName, null));
-        this.fromTable = fromTable;
-    }
 
     public StatementEvaluator(TableService tableService, Join joinStatements, TableDetail fromTable)
     {
@@ -36,21 +24,10 @@ internal class StatementEvaluator
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
             && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
         {
-            TableDetail leftTable = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
-            TableDetail rightTable = tableService.GetTableDetailByColumn(root.Right.Value.ParsedValue);
-
-            if (leftTable.TableName != rightTable.TableName)
-            {
-                throw new Exception("Join like statement not permitted in where clause!");
-            }
-
-            // List<Dictionary<string, Dictionary<string, dynamic>>> result
-            List<string> ids = HandleTwoColumnExpression(root, leftTable).ToList();
-            var tableRows = DbContext.Instance.SelectFromTable(ids, new(), leftTable.TableName, leftTable.DatabaseName!)
-                .Select(row => row.Value)
-                .ToList();
-
-            return GetJoinedTableContent(tableRows, leftTable.TableName, leftTable.DatabaseName!);
+            List<string> ids = HandleTwoColumnExpression(root, out TableDetail table).ToList();
+            var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
+            
+            return GetJoinedTableContent(tableRows, table.TableName);
         }
 
         if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq)
@@ -73,32 +50,26 @@ internal class StatementEvaluator
         {
             if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value)
             {
-                TableDetail table = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
-                List<string> ids = HandleNonIndexableStatement(root, table).ToList();
-                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!)
-                    .Select(row => row.Value)
-                    .ToList();
+                List<string> ids = HandleNonIndexableStatement(root, out TableDetail table).ToList();
+                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
 
-                return GetJoinedTableContent(tableRows, table.TableName, table.DatabaseName!);
+                return GetJoinedTableContent(tableRows, table.TableName);
             }
 
-            return HandleConstantExpressionWithJoin(root);
+            return HandleConstantExpression(root);
         }
 
         if (root.Type == Node.NodeType.Operator)
         {
             if (root.Left!.Type == Node.NodeType.Column)
             {
-                TableDetail table = tableService.GetTableDetailByColumn(root.Left.Value.ParsedValue);
-                List<string> ids = HandleNonIndexableStatement(root, table).ToList();
-                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!)
-                    .Select(row => row.Value)
-                    .ToList();
+                List<string> ids = HandleNonIndexableStatement(root, out TableDetail table).ToList();
+                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
 
-                return GetJoinedTableContent(tableRows, table.TableName, table.DatabaseName!);
+                return GetJoinedTableContent(tableRows, table.TableName);
             }
 
-            return HandleConstantExpressionWithJoin(root);
+            return HandleConstantExpression(root);
         }
 
         var leftResult = Evaluate(root.Left!);
@@ -117,69 +88,12 @@ internal class StatementEvaluator
         throw new Exception("Invalid tree node type!");
     }
 
-    public HashSet<string> EvaluateWithoutJoin(Node root)
+    private HashSet<string> HandleIndexableStatement(Node root, out TableDetail table)
     {
-        if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator) 
-            &&  root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
-        {
-            return HandleTwoColumnExpression(root, fromTable!);
-        }
-
-        if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq) 
-            && root.Left!.Type == Node.NodeType.Value
-            && root.Right!.Type == Node.NodeType.Column)
-        {
-            (root.Right, root.Left) = (root.Left, root.Right);
-
-            switch (root.Value.ParsedValue)
-            {
-                case "<": root.Value.Value = ">"; break;
-                case ">": root.Value.Value = "<"; break;
-                case "<=": root.Value.Value = ">="; break;
-                case ">=": root.Value.Value = "<="; break;
-                default: break;
-            }
-        }
-
-        if (root.Type == Node.NodeType.Eq)
-        {
-            if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value) 
-            {
-                return HandleIndexableStatement(root, fromTable!);
-            }
-
-            
-        }
-
-        if (root.Type == Node.NodeType.Operator)
-        {
-            if (root.Left!.Type == Node.NodeType.Column)
-            {
-                return HandleNonIndexableStatement(root, fromTable!);
-            }
-
-            return HandleConstantExpression(root);
-        }
-
-        var leftResult = EvaluateWithoutJoin(root.Left!);
-        var rightResult = EvaluateWithoutJoin(root.Right!);
+        Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        if (root.Type == Node.NodeType.And)
-        {
-            return new HashSet<string>(leftResult.Intersect(rightResult));
-        }
-        
-        if (root.Type == Node.NodeType.Or)
-        {
-            return new HashSet<string>(leftResult.Union(rightResult));
-        }
-
-        throw new Exception("Invalid tree node type!");
-    }
-
-    private HashSet<string> HandleIndexableStatement(Node root, TableDetail table)
-    {
-        string? leftValue = root.Left!.Value.ParsedValue;
+        table = parseResult.Item1;
+        string leftValue = parseResult.Item2;
         string? rightValue = root.Right!.Value.Value!.ToString();
 
         table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
@@ -200,12 +114,16 @@ internal class StatementEvaluator
             .ToHashSet();
     }
 
-    private HashSet<string> HandleNonIndexableStatement(Node root, TableDetail table)
+    private HashSet<string> HandleNonIndexableStatement(Node root, out TableDetail table)
     {
-        string? leftValue = root.Left!.Value.ParsedValue;
+        Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+
+        table = parseResult.Item1;
+        string leftValue = parseResult.Item2;
         
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
         {
+            "=" => entry => entry.Value[leftValue!] == root.Right!.Value.ParsedValue,
             "!=" => entry => entry.Value[leftValue!] != root.Right!.Value.ParsedValue,
             "<" => entry => entry.Value[leftValue!] < root.Right!.Value.ParsedValue,
             ">" => entry => entry.Value[leftValue!] > root.Right!.Value.ParsedValue,
@@ -220,10 +138,21 @@ internal class StatementEvaluator
             .ToHashSet();
     }
 
-    private HashSet<string> HandleTwoColumnExpression(Node root, TableDetail table)
+    private HashSet<string> HandleTwoColumnExpression(Node root, out TableDetail table)
     {
-        string? leftValue = root.Left!.Value.ParsedValue;
-        string? rightValue = root.Right!.Value.ParsedValue;
+        Tuple<TableDetail, string> parseResult1 = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        Tuple<TableDetail, string> parseResult2 = tableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
+
+        table = parseResult1.Item1;
+        TableDetail leftTable = parseResult2.Item1;
+
+        if (table.TableName != leftTable.TableName)
+        {
+            throw new SecurityException("Join like statement not permitted in where clause!");
+        }
+
+        string? leftValue = parseResult1.Item2;
+        string? rightValue = parseResult2.Item2;
         
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
         {
@@ -242,27 +171,7 @@ internal class StatementEvaluator
             .ToHashSet();
     }
 
-    private HashSet<string> HandleConstantExpression(Node root)
-    {
-        bool isCondTrue = root.Value.ParsedValue switch
-        {
-            "=" => root.Left!.Value.ParsedValue == root.Right!.Value.ParsedValue,
-            "!=" => root.Left!.Value.ParsedValue != root.Right!.Value.ParsedValue,
-            "<" => root.Left!.Value.ParsedValue < root.Right!.Value.ParsedValue,
-            ">" => root.Left!.Value.ParsedValue > root.Right!.Value.ParsedValue,
-            "<=" => root.Left!.Value.ParsedValue <= root.Right!.Value.ParsedValue,
-            ">=" => root.Left!.Value.ParsedValue >= root.Right!.Value.ParsedValue,
-            _ => throw new SecurityException("Invalid operator")
-        };
-
-        var content = fromTable!.TableContent!
-            .Select(row => row.Key)
-            .ToHashSet();
-
-        return isCondTrue ? content : new();
-    }
-
-    private TableRows HandleConstantExpressionWithJoin(Node root)
+    private TableRows HandleConstantExpression(Node root)
     {
         bool isCondTrue = root.Value.ParsedValue switch
         {
@@ -277,28 +186,49 @@ internal class StatementEvaluator
 
         if (isCondTrue)
         {
-            return GetJoinedTableContent(fromTable!.TableContentValues!, fromTable.TableName, fromTable.DatabaseName!);
+            return GetJoinedTableContent(fromTable!.TableContent!, fromTable.TableName);
         }
 
         return new();
     }
 
-    private TableRows GetJoinedTableContent(List<Dictionary<string, dynamic>> tableRows, string tableName, string databaseName)
+    private TableRows GetJoinedTableContent(Dictionary<string, Dictionary<string, dynamic>> tableRows, string tableName)
     {
-        var groupedInitialTable = tableRows
-               .Select(row => new Dictionary<string, Dictionary<string, dynamic>> { { tableName, row } })
-               .ToList();
+        TableRows groupedInitialTable = new();
+
+        foreach (var row in tableRows)
+        {
+            groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { tableName, row.Value } });
+        }
 
         return join!.Evaluate(groupedInitialTable);
     }
 
     private static TableRows And(TableRows leftResult, TableRows rightResult)
     {
-        return leftResult.Intersect(rightResult).ToList();
+        return leftResult.Keys.Intersect(rightResult.Keys)
+               .ToDictionary(t => t, t => leftResult[t]);
     }
 
     private static TableRows Or(TableRows leftResult, TableRows rightResult)
     {
-        return leftResult.Union(rightResult).ToList();
+        HashSet<string> leftHashes = leftResult.Keys.ToHashSet();
+        HashSet<string> rightHashes = rightResult.Keys.ToHashSet();
+
+        HashSet<string> unionResult = new(leftHashes.Union(rightHashes));
+
+        TableRows result = new();
+        foreach (string hash in unionResult)
+        {
+            if (leftResult.ContainsKey(hash))
+            {
+                result.Add(hash, leftResult[hash]);
+                continue;
+            }
+
+            result.Add(hash, rightResult[hash]);
+        }
+
+        return result;
     }
 }

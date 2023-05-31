@@ -14,7 +14,7 @@ internal class WhereModel
             return null;
         }
 
-        value = value.Remove(startIndex: 0, count: 5);
+        value = value.Trim().Remove(startIndex: 0, count: 5);
         var statement = StatementParser.Parse(value);
 
         return new WhereModel

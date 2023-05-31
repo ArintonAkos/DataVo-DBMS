@@ -54,22 +54,21 @@ public class JoinModel
             var joinedTableName = joinDetail.Key;
             var tableDetail = joinDetail.Value;
 
-            if (!joinTableNames.ContainsKey(joinedTableName))
-            {
-                model.JoinTableDetails.Add(tableDetail.GetTableNameInUse(), tableDetail);
+            tableService.AddTableDetail(tableDetail);
 
-                var leftSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].LeftColumn.TableName);
-                var rightSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].RightColumn.TableName);
+            model.JoinTableDetails.Add(tableDetail.GetTableNameInUse(), tableDetail);
 
-                var condition = new JoinCondition(
-                    leftSide.Item1,
-                    leftSide.Item2, 
-                    rightSide.Item1, 
-                    rightSide.Item2
-                );
+            var leftSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].Item1);
+            var rightSide = tableService.ParseAndFindTableNameByColumn(joinConditions[i].Item2);
 
-                model.JoinConditions.Add(condition);
-            } 
+            var condition = new JoinCondition(
+                leftSide.Item1,
+                leftSide.Item2,
+                rightSide.Item1,
+                rightSide.Item2
+            );
+
+            model.JoinConditions.Add(condition);
 
             i++;
         }
