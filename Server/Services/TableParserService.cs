@@ -9,10 +9,10 @@ namespace Server.Services
             string tableName = rawString;
             string? tableAlias = null;
 
-            if (rawString.ToLower().Contains("as"))
+            if (rawString.ToLower().Contains(" as "))
             {
                 var splitString = rawString
-                    .Split("as")
+                    .Split(" as ")
                     .Select(r => r.Trim())
                     .ToList();
 
@@ -56,15 +56,28 @@ namespace Server.Services
         public static Tuple<TableDetail, string, string> ParseJoinStatement(string joinStatement)
         {
             var parts = joinStatement.Split(new string[] { " ", "=" }, StringSplitOptions.RemoveEmptyEntries);
-            
-            var tableName = parts[1];
-            var tableAlias = parts[3];
-            var conditionColumn1 = parts[5];
-            var conditionColumn2 = parts[6];
 
-            TableDetail tableDetail = new(tableName, tableAlias);
+            if (parts.Contains("as"))
+            {
+                var tableName = parts[0];
+                var tableAlias = parts[2];
+                var conditionColumn1 = parts[4];
+                var conditionColumn2 = parts[5];
 
-            return Tuple.Create(tableDetail, conditionColumn1, conditionColumn2);
+                TableDetail tableDetail = new(tableName, tableAlias);
+
+                return Tuple.Create(tableDetail, conditionColumn1, conditionColumn2);
+            }
+            else
+            {
+                var tableName = parts[0];
+                var conditionColumn1 = parts[2];
+                var conditionColumn2 = parts[3];
+
+                TableDetail tableDetail = new(tableName, null);
+
+                return Tuple.Create(tableDetail, conditionColumn1, conditionColumn2);
+            }
         }
 
         public static Tuple<Dictionary<string, TableDetail>, List<Tuple<string, string>>> ParseJoinTablesAndConditions(string? joinStatement)
@@ -77,16 +90,11 @@ namespace Server.Services
             Dictionary<string, TableDetail> tableAliases = new();
             List<Tuple<string, string>> conditions = new();
 
-            string[] joins = joinStatement.Split("\n");
+            string[] joins = joinStatement.Trim().Split(new string[] { "JOIN", "join" }, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var join in joins)
             {
-                if (join.Length < 5)
-                {
-                    continue;
-                }
-
-                var result = ParseJoinStatement(join);
+                var result = ParseJoinStatement(join.Trim());
 
                 tableAliases.Add(result.Item1.GetTableNameInUse(), result.Item1);
                 conditions.Add(new(result.Item2, result.Item3));
