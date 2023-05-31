@@ -1,7 +1,5 @@
 ﻿using System.Text.RegularExpressions;
-using Server.Models.Catalog;
 using Server.Models.Statement;
-using Server.Server.MongoDB;
 using Server.Services;
 using static Server.Models.Statement.JoinModel;
 
@@ -32,32 +30,53 @@ public class Join
 
     public bool ContainsJoin() => _isValid;
 
-    public List<Dictionary<string, Dictionary<string, dynamic>>> PerformJoinCondition(List<Dictionary<string, Dictionary<string, dynamic>>> tableRows, JoinCondition joinCondition)
+    public Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> PerformJoinCondition(Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> tableRows, JoinCondition joinCondition)
     {
         var leftTable = joinCondition.LeftColumn.TableName;
         var leftColumn = joinCondition.LeftColumn.ColumnName;
         var rightTable = joinCondition.RightColumn.TableName;
         var rightColumn = joinCondition.RightColumn.ColumnName;
 
-        List<Dictionary<string, dynamic>> rightTableData = _tableService!.GetTableDetailByAliasOrName(rightTable).TableContent!.Select(c => c.Value).ToList();
+        Dictionary<string, Dictionary<string, dynamic>> rightTableData = _tableService!.GetTableDetailByAliasOrName(rightTable).TableContent!;
 
-        List<Dictionary<string, Dictionary<string, dynamic>>> result = new();
+        Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> result = new();
+
+        bool insertHashAfter = false;
+        List<string> joinTables = Model.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
+
+        if (joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable))
+        {
+            insertHashAfter = true;
+        }
 
         foreach (var leftTableRow in tableRows)
         {
-            if (leftTableRow.ContainsKey(leftTable) && leftTableRow[leftTable].ContainsKey(leftColumn))
+            if (leftTableRow.Value.ContainsKey(leftTable) && leftTableRow.Value[leftTable].ContainsKey(leftColumn))
             {
-                var leftValue = leftTableRow[leftTable][leftColumn];
+                var leftValue = leftTableRow.Value[leftTable][leftColumn];
 
                 foreach (var rightTableRow in rightTableData)
                 {
-                    if (rightTableRow.ContainsKey(rightColumn) && rightTableRow[rightColumn] == leftValue)
+                    if (rightTableRow.Value.ContainsKey(rightColumn) && rightTableRow.Value[rightColumn] == leftValue)
                     {
-                        result.Add(new Dictionary<string, Dictionary<string, dynamic>>
+                        if (insertHashAfter)
                         {
-                            { leftTable, leftTableRow[leftTable] },
-                            { rightTable, rightTableRow }
-                        });
+                            result.Add($"{leftTableRow.Key}##{rightTableRow.Key}",
+                                new Dictionary<string, Dictionary<string, dynamic>>
+                                {
+                                    { leftTable, leftTableRow.Value[leftTable] },
+                                    { rightTable, rightTableRow.Value }
+                                });
+                        }
+                        else
+                        {
+                            result.Add($"{rightTableRow.Key}##{leftTableRow.Key}",
+                                new Dictionary<string, Dictionary<string, dynamic>>
+                                {
+                                    { leftTable, leftTableRow.Value[leftTable] },
+                                    { rightTable, rightTableRow.Value }
+                                });
+                        }
 
                         break;
                     }
@@ -72,8 +91,7 @@ public class Join
         return result;
     }
 
-    // Lista<Táblanév, <Oszlopnév, érték>>
-    public List<Dictionary<string, Dictionary<string, dynamic>>> Evaluate(List<Dictionary<string, Dictionary<string, dynamic>>> tableRows)
+    public Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> Evaluate(Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> tableRows)
     {
         // Ha ures a tabla, akkor a JOIN eredmenye ugyis ures marad (Mivel INNER JOIN)
         if (tableRows.Count == 0)
@@ -81,7 +99,7 @@ public class Join
             return new();
         }
 
-        int tableCount = tableRows[0].Keys.Count;
+        int tableCount = tableRows.First().Value.Keys.Count;
 
         if (tableCount == 0)
         {
@@ -107,19 +125,28 @@ public class Join
             .Where(jc => sortedTableNames.IndexOf(jc.LeftColumn.TableName) < sortedTableNames.IndexOf(jc.RightColumn.TableName))
             .ToList();
 
-        string joinFrom = tableRows[0].Keys.First();
+        string joinFrom = tableRows.First().Value.Keys.First();
         List<string> joinedTables = new() { joinFrom };
 
         foreach (var joinCondition in sortedJoinConditions)
         {
-            var currentTable = joinCondition.RightColumn.TableName;
+            var leftTableName = joinCondition.LeftColumn.TableName;
+            var rightTableName = joinCondition.RightColumn.TableName;
 
-            if (!joinedTables.Contains(currentTable))
+            if (!joinedTables.Contains(rightTableName) && joinedTables.Contains(leftTableName))
             {
                 tableRows = PerformJoinCondition(tableRows, joinCondition);
-                joinedTables.Add(currentTable);
-
-                // Na gata
+                joinedTables.Add(rightTableName);
+            }
+            else if(!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
+            {
+                (joinCondition.LeftColumn, joinCondition.RightColumn) = (joinCondition.RightColumn, joinCondition.LeftColumn);
+                tableRows = PerformJoinCondition(tableRows, joinCondition);
+                joinedTables.Add(leftTableName);
+            }
+            else if (!joinedTables.Contains(leftTableName) && !joinedTables.Contains(rightTableName))
+            {
+                throw new Exception("Error while joining tables!");
             }
         }
 

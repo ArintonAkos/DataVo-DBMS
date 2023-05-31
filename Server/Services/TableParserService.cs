@@ -1,5 +1,4 @@
-﻿using Server.Models.Statement;
-using Server.Models.Statement.Utils;
+﻿using Server.Models.Statement.Utils;
 
 namespace Server.Services
 {
@@ -24,92 +23,51 @@ namespace Server.Services
             return Tuple.Create(tableName, tableAlias);
         }
 
-        public static Dictionary<string, List<string>>? ParseColumns(string columns, Dictionary<string, List<string>> tableColumns)
+        public static Dictionary<string, List<string>>? ParseColumns(string rawColumns, TableService tableService)
         {
-            if (!columns.Contains(value: '*'))
+            if (!rawColumns.Contains('*'))
             {
                 Dictionary<string, List<string>> selectedColumns = new();
 
-                var splitColumns = columns.Split(separator: ',');
+                var splitColumns = rawColumns.Split(',');
 
                 foreach (var column in splitColumns)
                 {
                     string trimmedColumn = column.Trim();
-                    string[] splitColumn = trimmedColumn.Split(separator: '.');
+                    
+                    Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
+                    string tableName = parseResult.Item1;
+                    string columnName = parseResult.Item2;
 
-                    string? tableName = splitColumn.Length > 1 ? splitColumn[0] : null;
-                    string columnName = splitColumn.Length > 1 ? splitColumn[1] : trimmedColumn;
-
-                    if (tableName != null)
+                    if (!selectedColumns.ContainsKey(tableName))
                     {
-                        if (!tableColumns.ContainsKey(tableName))
-                        {
-                            throw new Exception($"Invalid table name: {tableName}");
-                        }
-
-                        if (!tableColumns[tableName].Contains(columnName))
-                        {
-                            throw new Exception($"Invalid column name: {columnName} for table {tableName}");
-                        }
-
-                        selectedColumns[tableName].Add($"{tableName}.{columnName}");
+                        selectedColumns[tableName] = new();
                     }
-                    else
-                    {
-                        List<string> tablesWithThisColumnName = new();
 
-                        foreach (var table in tableColumns)
-                        {
-                            if (table.Value.Contains(column))
-                            {
-                                tablesWithThisColumnName.Add(table.Key);
-                            }
-                        }
-
-                        if (tablesWithThisColumnName.Count > 1)
-                        {
-                            throw new Exception($"Ambiguous column name: {column}");
-                        }
-
-                        if (tablesWithThisColumnName.Count == 0)
-                        {
-                            throw new Exception($"Invalid column name: {column}");
-                        }
-
-                        tableName = tablesWithThisColumnName[0];
-                        selectedColumns[tableName].Add($"{tableName}.{columnName}");
-                    }
+                    selectedColumns[tableName].Add($"{tableName}.{columnName}");
                 }
 
                 return selectedColumns;
             }
-            else
-            {
-                return null;
-            }
+
+            return null;
         }
 
-        public static Tuple<TableDetail, JoinModel.JoinColumn, JoinModel.JoinColumn, JoinModel.JoinCondition> ParseJoinStatement(string joinStatement)
+        public static Tuple<TableDetail, string, string> ParseJoinStatement(string joinStatement)
         {
-            // "JOIN {tableName} as {alias} ON {table1}.{column1} = {alias}.{column2}"
-            var parts = joinStatement.Split(new string[] { " ", ".", "=" }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = joinStatement.Split(new string[] { " ", "=" }, StringSplitOptions.RemoveEmptyEntries);
             
             var tableName = parts[1];
             var tableAlias = parts[3];
-            var conditionTable1 = parts[5];
-            var conditionColumn1 = parts[6];
-            var conditionTable2 = parts[7];
-            var conditionColumn2 = parts[8];
+            var conditionColumn1 = parts[5];
+            var conditionColumn2 = parts[6];
 
             TableDetail tableDetail = new(tableName, tableAlias);
-            JoinModel.JoinColumn leftColumn = new(conditionTable1, conditionColumn1);
-            JoinModel.JoinColumn rightColumn = new(conditionTable2, conditionColumn2);
-            JoinModel.JoinCondition joinCondition = new(leftColumn, rightColumn);
 
-            return Tuple.Create(tableDetail, leftColumn, rightColumn, joinCondition);
+            return Tuple.Create(tableDetail, conditionColumn1, conditionColumn2);
         }
 
-        public static Tuple<Dictionary<string, TableDetail>, List<JoinModel.JoinCondition>> ParseJoinTablesAndConditions(string? joinStatement)
+        public static Tuple<Dictionary<string, TableDetail>, List<Tuple<string, string>>> ParseJoinTablesAndConditions(string? joinStatement)
         {
             if (joinStatement is null)
             {
@@ -117,7 +75,7 @@ namespace Server.Services
             }
 
             Dictionary<string, TableDetail> tableAliases = new();
-            List<JoinModel.JoinCondition> conditions = new();
+            List<Tuple<string, string>> conditions = new();
 
             string[] joins = joinStatement.Split("\n");
 
@@ -131,12 +89,10 @@ namespace Server.Services
                 var result = ParseJoinStatement(join);
 
                 tableAliases.Add(result.Item1.GetTableNameInUse(), result.Item1);
-                conditions.Add(result.Item4);
+                conditions.Add(new(result.Item2, result.Item3));
             }
 
             return Tuple.Create(tableAliases, conditions);
         }
-
-
     }
 }

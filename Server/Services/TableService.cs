@@ -16,7 +16,7 @@ namespace Server.Services
         {
             foreach (var tableDetail in TableDetails.Values)
             {
-                if (tableDetail.GetTableNameInUse() == aliasOrName)
+                if (tableDetail.TableName == aliasOrName || tableDetail.TableAlias == aliasOrName)
                 {
                     return tableDetail;
                 }
@@ -93,10 +93,10 @@ namespace Server.Services
             TableDetails[tableDetail.GetTableNameInUse()] = tableDetail;
         }
 
-        public Tuple<string, string> ParseAndFindTableNameByColumn(string columnName)
+        public Tuple<TableDetail, string> ParseAndFindTableDetailByColumn(string columnName)
         {
             string column = columnName;
-            string? table;
+            TableDetail? table;
 
             if (columnName.Contains('.'))
             {
@@ -107,15 +107,22 @@ namespace Server.Services
                     throw new Exception("Column names can only contain one '.' character!");
                 }
 
-                table = splitColumnName[0];
+                table = TableDetails[splitColumnName[0]];
                 column = splitColumnName[1];
             }
             else
             {
-                table = GetTableDetailByColumn(columnName).GetTableNameInUse();
+                table = GetTableDetailByColumn(columnName);
             }
 
             return Tuple.Create(table!, column);
+        }
+
+        public Tuple<string, string> ParseAndFindTableNameByColumn(string columnName)
+        {
+            Tuple<TableDetail, string> parseResult = ParseAndFindTableDetailByColumn(columnName);
+
+            return Tuple.Create(parseResult.Item1.TableName, parseResult.Item2);
         }
     }
 }

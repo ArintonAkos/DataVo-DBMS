@@ -1,5 +1,6 @@
 ﻿using Server.Models.Statement;
 using Server.Models.Statement.Utils;
+using Server.Parser.Statements.Mechanism;
 using Server.Services;
 
 namespace Server.Parser.Statements;
@@ -27,10 +28,7 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        _fromTable = new TableDetail(tableName, null);
-        _fromTable.DatabaseName = databaseName;
-
-        return new StatementEvaluator(databaseName, tableName, _fromTable).EvaluateWithoutJoin(_model.Statement);
+        return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(_model.Statement);
     }
 
     public List<Dictionary<string, Dictionary<string, dynamic>>> EvaluateWithJoin(TableService tableService, Join joinStatements)
@@ -40,7 +38,9 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        return new StatementEvaluator(tableService, joinStatements, _fromTable).Evaluate(_model.Statement);
+        return new StatementEvaluator(tableService, joinStatements, _fromTable).Evaluate(_model.Statement)
+            .Select(row => row.Value)
+            .ToList();
     }
 
     public bool IsEvaluatable() => _model is not null;
