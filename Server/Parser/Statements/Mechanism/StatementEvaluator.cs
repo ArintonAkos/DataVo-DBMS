@@ -24,10 +24,7 @@ internal class StatementEvaluator
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
             && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
         {
-            List<string> ids = HandleTwoColumnExpression(root, out TableDetail table).ToList();
-            var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
-            
-            return GetJoinedTableContent(tableRows, table.TableName);
+            return HandleTwoColumnExpression(root);
         }
 
         if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq)
@@ -50,10 +47,7 @@ internal class StatementEvaluator
         {
             if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value)
             {
-                List<string> ids = HandleNonIndexableStatement(root, out TableDetail table).ToList();
-                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
-
-                return GetJoinedTableContent(tableRows, table.TableName);
+                return HandleIndexableStatement(root);
             }
 
             return HandleConstantExpression(root);
@@ -63,10 +57,7 @@ internal class StatementEvaluator
         {
             if (root.Left!.Type == Node.NodeType.Column)
             {
-                List<string> ids = HandleNonIndexableStatement(root, out TableDetail table).ToList();
-                var tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
-
-                return GetJoinedTableContent(tableRows, table.TableName);
+                return HandleNonIndexableStatement(root);
             }
 
             return HandleConstantExpression(root);
@@ -88,37 +79,48 @@ internal class StatementEvaluator
         throw new Exception("Invalid tree node type!");
     }
 
-    private HashSet<string> HandleIndexableStatement(Node root, out TableDetail table)
+    private TableRows HandleIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        table = parseResult.Item1;
+        TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         string? rightValue = root.Right!.Value.Value!.ToString();
+
+        Dictionary<string, Dictionary<string, dynamic>> tableRows;
 
         table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
         if (indexFile != null)
         {
-            return DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!);
+            List<string> ids = DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!).ToList();
+
+            tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
+
+            return GetJoinedTableContent(tableRows, table.TableName);
         }
 
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue!);
         if (columnIndex > -1)
         {
-            return DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, table.TableName, table.DatabaseName!);
+            List<string> ids = DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, table.TableName, table.DatabaseName!).ToList();
+
+            tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
+
+            return GetJoinedTableContent(tableRows, table.TableName);
         }
 
-        return table.TableContent!
+        tableRows = table.TableContent!
             .Where(entry => entry.Value[root.Left!.Value.ParsedValue] == root.Right!.Value.ParsedValue)
-            .Select(entry => entry.Key)
-            .ToHashSet();
+            .ToDictionary(t => t.Key, t => t.Value);
+
+        return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashSet<string> HandleNonIndexableStatement(Node root, out TableDetail table)
+    private TableRows HandleNonIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
-
-        table = parseResult.Item1;
+        
+        TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
@@ -132,21 +134,22 @@ internal class StatementEvaluator
             _ => throw new SecurityException("Invalid operator")
         };
 
-        return table.TableContent!
+        Dictionary<string, Dictionary<string, dynamic>> tableRows = table.TableContent!
             .Where(pred)
-            .Select(entry => entry.Key)
-            .ToHashSet();
+            .ToDictionary(t => t.Key, t => t.Value);
+
+        return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashSet<string> HandleTwoColumnExpression(Node root, out TableDetail table)
+    private TableRows HandleTwoColumnExpression(Node root)
     {
         Tuple<TableDetail, string> parseResult1 = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         Tuple<TableDetail, string> parseResult2 = tableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
 
-        table = parseResult1.Item1;
-        TableDetail leftTable = parseResult2.Item1;
+        TableDetail table = parseResult1.Item1;
+        TableDetail rightTable = parseResult2.Item1;
 
-        if (table.TableName != leftTable.TableName)
+        if (table.TableName != rightTable.TableName)
         {
             throw new SecurityException("Join like statement not permitted in where clause!");
         }
@@ -165,10 +168,11 @@ internal class StatementEvaluator
             _ => throw new SecurityException("Invalid operator")
         };
 
-        return table.TableContent!
+        Dictionary<string, Dictionary<string, dynamic>> tableRows = table.TableContent!
             .Where(pred)
-            .Select(entry => entry.Key)
-            .ToHashSet();
+            .ToDictionary(t => t.Key, t => t.Value);
+
+        return GetJoinedTableContent(tableRows, table.TableName);
     }
 
     private TableRows HandleConstantExpression(Node root)
