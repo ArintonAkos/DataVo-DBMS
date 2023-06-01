@@ -9,13 +9,14 @@ namespace Server.Parser.Statements;
 public static class StatementParser
 {
     /// <summary>
-    ///     This method parses a raw input string into a Queue of tokens.
-    ///     Than with the token it creates a tree of nodes representing the
-    ///     condition using the polish notation.
-    ///     The tree is than rearranged to be more efficient and the root node is returned.
+    /// Converts a raw SQL-like condition string into a tree-based data structure 
+    /// for easier analysis and processing.
     /// </summary>
-    /// <param name="input">The input string which will be parsed.</param>
-    /// <returns>An object containing the </returns>
+    /// <param name="input">A SQL-like condition string.</param>
+    /// <returns>
+    /// The root node of the tree-based data structure representing the
+    /// input condition.
+    /// </returns>
     public static Node Parse(string input)
     {
         Queue<string> tokens = Tokenize(input);
@@ -27,14 +28,15 @@ public static class StatementParser
     }
 
     /// <summary>
-    ///     This function tokenizes the input string.
-    ///     It splits the input data into different element with the same attribute.
-    ///     For example for an input string "a = 1 and b > 2" it will return a queue of tokens
-    ///     of ["a", "=", "1", "and", "b", ">", "2"]
+    /// Converts the raw SQL-like condition string into a queue of tokens. 
+    /// Tokens can be operators, values, or column identifiers.
     /// </summary>
-    /// <param name="input">The input string that will be tokenized</param>
-    /// <returns>A queue with the tokens</returns>
-    /// <exception cref="ArgumentException">ArgumentException is thrown when an unexpected character is found.</exception>
+    /// <param name="input">A SQL-like condition string.</param>
+    /// <returns>A queue of tokens derived from the input string.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the input contains an 
+    /// unexpected character or sequence.
+    /// </exception>
     private static Queue<string> Tokenize(string input)
     {
         Queue<string> tokens = new();
@@ -119,6 +121,15 @@ public static class StatementParser
         return tokens;
     }
 
+    /// <summary>
+    /// Parses the queue of tokens and constructs a tree-based data structure,
+    /// where each node is an operation (equality, inequality, logical and, logical or)
+    /// or a value (constant, variable).
+    /// </summary>
+    /// <param name="tokens">A queue of tokens.</param>
+    /// <returns>
+    /// The root node of the tree-based data structure representing the input condition.
+    /// </returns>
     private static Node ParseExpression(Queue<string> tokens)
     {
         Stack<Node> values = new();
@@ -216,6 +227,16 @@ public static class StatementParser
         return values.Pop();
     }
 
+    /// <summary>
+    /// Gets the node type of a given operator.
+    /// </summary>
+    /// <param name="op">The operator string.</param>
+    /// <returns>
+    /// The NodeType corresponding to the given operator string.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the operator is invalid.
+    /// </exception>
     private static NodeType GetNodeType(string op)
     {
         string uppercaseOp = op.ToUpper();
@@ -231,6 +252,13 @@ public static class StatementParser
         };
     }
 
+    /// <summary>
+    /// Determines whether a given token is a value.
+    /// </summary>
+    /// <param name="token">The token string.</param>
+    /// <returns>
+    /// True if the token is a value, otherwise false.
+    /// </returns>
     private static bool IsValue(string token)
     {
         if (token.StartsWith("'") && token.EndsWith("'"))
@@ -261,8 +289,22 @@ public static class StatementParser
         return false;
     }
 
+    /// <summary>
+    /// Determines whether a given token is an operator.
+    /// </summary>
+    /// <param name="token">The token string.</param>
+    /// <returns>
+    /// True if the token is an operator, otherwise false.
+    /// </returns>
     private static bool IsOperator(string token) => Operators.Supported().Contains(token);
 
+    /// <summary>
+    /// Gets the precedence of a given operator.
+    /// </summary>
+    /// <param name="op">The operator string.</param>
+    /// <returns>
+    /// The precedence of the operator as an integer. Higher number indicates higher precedence.
+    /// </returns>
     private static int GetPrecedence(string op)
     {
         return op switch
