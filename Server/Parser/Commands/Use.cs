@@ -11,7 +11,7 @@ internal class Use : BaseDbAction
 {
     private readonly UseModel _model;
 
-    public Use(Match match, ParseRequest request) => _model = UseModel.FromMatch(match);
+    public Use(Match match) => _model = UseModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

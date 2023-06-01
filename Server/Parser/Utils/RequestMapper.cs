@@ -40,7 +40,7 @@ internal class RequestMapper
         REPEAT:
         while (!string.IsNullOrEmpty(rawSqlCode.Trim()))
         {
-            if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount, request) != null)
+            if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount) != null)
             {
                 runnables.Add(actions);
                 actions = new Queue<IDbAction>();
@@ -51,7 +51,7 @@ internal class RequestMapper
             {
                 try
                 {
-                    var action = MatchCommand(command, ref rawSqlCode, ref lineCount, request);
+                    var action = MatchCommand(command, ref rawSqlCode, ref lineCount);
 
                     if (action != null)
                     {
@@ -96,16 +96,15 @@ internal class RequestMapper
     }
 
     private static IDbAction? MatchCommand(KeyValuePair<string, Type> command, ref string rawSqlCode,
-        ref int lineCount, ParseRequest request)
+        ref int lineCount)
     {
         var match = Regex.Match(rawSqlCode, command.Key, RegexOptions.IgnoreCase);
 
         if (match.Success)
         {
-            object[] parameters = new object[] { match, request };
-            var action = (IDbAction)Activator.CreateInstance(command.Value, parameters)!;
+            var action = (IDbAction)Activator.CreateInstance(command.Value, match)!;
             lineCount += Regex.Split(match.Value, "\r\n|\r|\n").Length;
-            rawSqlCode = rawSqlCode.Substring(match.Index + match.Length);
+            rawSqlCode = rawSqlCode[(match.Index + match.Length)..];
 
             return action;
         }

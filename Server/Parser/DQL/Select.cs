@@ -13,7 +13,7 @@ internal class Select : BaseDbAction
 {
     private readonly SelectModel _model;
 
-    public Select(Match match, ParseRequest request)
+    public Select(Match match)
     {
         _model = SelectModel.FromMatch(match);
     }

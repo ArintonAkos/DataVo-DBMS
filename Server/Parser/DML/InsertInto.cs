@@ -14,7 +14,7 @@ namespace Server.Parser.DML
     {
         private readonly InsertIntoModel _model;
 
-        public InsertInto(Match match, ParseRequest request)
+        public InsertInto(Match match)
         {
             _model = InsertIntoModel.FromMatch(match);
         }

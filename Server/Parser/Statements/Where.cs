@@ -8,7 +8,7 @@ namespace Server.Parser.Statements;
 internal class Where
 {
     private readonly WhereModel? _model;
-    private TableDetail _fromTable;
+    private readonly TableDetail? _fromTable;
 
     public Where(string match)
     {
@@ -38,7 +38,7 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        return new StatementEvaluator(tableService, joinStatements, _fromTable).Evaluate(_model.Statement)
+        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(_model.Statement)
             .Select(row => row.Value)
             .ToList();
     }

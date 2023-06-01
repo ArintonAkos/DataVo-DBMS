@@ -1,4 +1,5 @@
 ﻿using Server.Models.Statement;
+using Server.Models.Statement.Utils;
 using Server.Parser.Statements;
 using System;
 using System.Collections.Generic;
@@ -11,20 +12,20 @@ namespace Server.Services
 {
     internal class TopologicalSort
     {
-        private Stack<JoinColumn> Stack { get; set; }
-        private Dictionary<JoinColumn, List<JoinColumn>> AdjacencyList { get; set; }
+        private Stack<Column> Stack { get; set; }
+        private Dictionary<Column, List<Column>> AdjacencyList { get; set; }
 
         public TopologicalSort()
         {
-            Stack = new Stack<JoinColumn>();
-            AdjacencyList = new Dictionary<JoinColumn, List<JoinColumn>>();
+            Stack = new Stack<Column>();
+            AdjacencyList = new Dictionary<Column, List<Column>>();
         }
 
-        public void AddEdge(JoinColumn source, JoinColumn destination)
+        public void AddEdge(Column source, Column destination)
         {
             if (!AdjacencyList.ContainsKey(source))
             {
-                AdjacencyList[source] = new List<JoinColumn>();
+                AdjacencyList[source] = new List<Column>();
             }
 
             AdjacencyList[source].Add(destination);
@@ -32,7 +33,7 @@ namespace Server.Services
 
         public void Sort()
         {
-            HashSet<JoinColumn> visited = new HashSet<JoinColumn>();
+            HashSet<Column> visited = new();
 
             foreach (var node in AdjacencyList.Keys)
             {
@@ -40,7 +41,7 @@ namespace Server.Services
             }
         }
 
-        private void SortUtil(JoinColumn node, HashSet<JoinColumn> visited)
+        private void SortUtil(Column node, HashSet<Column> visited)
         {
             if (!visited.Contains(node))
             {
@@ -58,7 +59,7 @@ namespace Server.Services
             }
         }
 
-        public List<JoinColumn> GetSorted()
+        public List<Column> GetSorted()
         {
             return Stack.ToList();
         }

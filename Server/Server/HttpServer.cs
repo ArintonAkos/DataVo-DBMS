@@ -26,18 +26,17 @@ internal class HttpServer
         {
             var context = await _httpListener.GetContextAsync();
 
-            Task.Factory.StartNew(() => ProcessRequest(context));
+            _ = Task.Run(() => ProcessRequest(context));
         }
     }
 
-    private async Task ProcessRequest(HttpListenerContext context)
+    private static async Task ProcessRequest(HttpListenerContext context)
     {
         try
         {
             Logger.Info($"New Request from {context.Request.UserHostName}");
-            //Logger.Info($"{context.Request.UserHostName}: {content}");
 
-            var response = Router.HandleRequest(context);
+            var response = await Task.Run(() => Router.HandleRequest(context));
 
             await WriteResponse(context, response);
         }
@@ -47,7 +46,7 @@ internal class HttpServer
         }
     }
 
-    public async Task WriteResponse(HttpListenerContext context, Response response)
+    public static async Task WriteResponse(HttpListenerContext context, Response response)
     {
         using var sw = new StreamWriter(context.Response.OutputStream);
         await sw.FlushAsync();

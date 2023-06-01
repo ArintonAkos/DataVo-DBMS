@@ -15,7 +15,7 @@ internal abstract class BaseDbAction : IDbAction
 
     public BaseDbAction() => Context = DbContext.Instance;
 
-    public ActionResponse Perform(Guid session, ParseRequest? request = null)
+    public ActionResponse Perform(Guid session)
     {
         PerformAction(session);
 

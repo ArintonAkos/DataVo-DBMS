@@ -13,7 +13,7 @@ internal class DeleteFrom : BaseDbAction
 {
     private readonly DeleteFromModel _model;
 
-    public DeleteFrom(Match match, ParseRequest request) => _model = DeleteFromModel.FromMatch(match);
+    public DeleteFrom(Match match) => _model = DeleteFromModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

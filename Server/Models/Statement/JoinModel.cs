@@ -6,22 +6,10 @@ namespace Server.Models.Statement;
 
 public class JoinModel
 {
-    public class JoinColumn
-    {
-        public string TableName { get; set; }
-        public string ColumnName { get; set; }
-
-        public JoinColumn(string tableName, string columnName)
-        {
-            TableName = tableName;
-            ColumnName = columnName;
-        }
-    }
-
     public class JoinCondition
     {
-        public JoinColumn LeftColumn { get; set; }
-        public JoinColumn RightColumn { get; set; }
+        public Column LeftColumn { get; set; }
+        public Column RightColumn { get; set; }
 
         public JoinCondition(string leftTableName, string leftColumnName, string rightTableName, string rightColumnName)
         {
@@ -29,7 +17,7 @@ public class JoinModel
             RightColumn = new(rightTableName, rightColumnName);
         }
 
-        public JoinCondition(JoinColumn leftColumn, JoinColumn rightColumn)
+        public JoinCondition(Column leftColumn, Column rightColumn)
         {
             LeftColumn = leftColumn;
             RightColumn = rightColumn;
