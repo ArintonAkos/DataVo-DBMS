@@ -109,16 +109,26 @@ internal static class Patterns
             @"\s*where\s+(?<WhereStatement>([''A-Z0-9./]+\s*(=|!=|<>|<|>|<=|>=)\s*[''A-Z0-9./]+(\s+(and|or)\s*[''A-Z0-9./]+\s*(=|!=|<>|<|>|<=|>=)\s*[''A-Z0-9./]+)*))";
     }
 
+    public static string SelectColumns
+    {
+        get => @"(\*|(\w+(\.\w+)?(\s+as\s+\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\(\w+\)(\s+as\s+\w+)?)(,\s*(\w+(\.\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\(\w+\))(\s+as\s+\w+)?)*)";
+    }
+
     public static string Select
     {
         get =>
-            $@"^\s*select\s+(?<Columns>(\*|(\w+(\.\w+)?(\s+as\s+\w+)?)(,\s*\w+(\.\w+)?(\s+as\s+\w+)?)*))\s+from\s+(?<TableName>\w+(\s+as\s+\w+)?)({Join})?(?<WhereStatement>\s+{Where})?\s*";
+            $@"^\s*select\s+(?<Columns>{SelectColumns})\s+from\s+(?<TableName>\w+(\s+as\s+\w+)?)({Join})?(?<WhereStatement>\s+{Where})?(?<GroupByStatement>\s+{GroupBy})?\s*";
     }
 
     public static string Join
     {
         get =>
             @"(?<Joins>(?:\s*join\s+(?<JoinTable>\w+(\s+as\s+\w+)?)(?:\s+on\s+(?<JoinCondition>\w+(\.\w+)?\s*=\s*\w+(\.\w+)?))*)*)";
+    }
+
+    public static string GroupBy
+    {
+        get => @"\s*GROUP BY\s+(?<ColumnNames>(\w+\s*(,\s*\w+\s*)*)?)";
     }
 
     public static string AddStartLine(this string s) => @"^\s*" + s;
