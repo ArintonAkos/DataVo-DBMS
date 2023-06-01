@@ -197,6 +197,11 @@ public class Node
             {
                 throw new Exception("Arithmetic operator can only be used for numeric types!");
             }
+
+            if (!Operators.ArithmeticOperators.Contains(@operator))
+            {
+                throw new Exception("Invalid arithmetic operator: " + @operator);
+            }
         }
 
         private static dynamic? ConvertGenericToType(IComparable? comparable, Type type) =>

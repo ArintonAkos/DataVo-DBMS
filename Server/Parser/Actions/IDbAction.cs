@@ -5,5 +5,5 @@ namespace Server.Parser.Actions;
 
 internal interface IDbAction
 {
-    public ActionResponse Perform(Guid session, ParseRequest? request = null);
+    public ActionResponse Perform(Guid session);
 }

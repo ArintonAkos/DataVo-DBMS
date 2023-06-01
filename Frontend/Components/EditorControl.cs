@@ -20,13 +20,6 @@ namespace Frontend.Components
                 : null;
         }
 
-        private VisualQueryControl? GetEditorVisualQueryControl(int index)
-        {
-            return (tabControl.TabPages[index].Controls[0].Name == "VQueryEditor")
-                ? (VisualQueryControl)tabControl.TabPages[index].Controls[0]
-                : null;
-        }
-
         public async Task<TextQueryControl> CreateTextEditorTab(string filePath)
         {
             TabPage tabPage = new()
@@ -80,7 +73,8 @@ namespace Frontend.Components
         {
             if (tabControl.SelectedIndex >= 0)
             {
-                TextQueryControl textControl = GetEditorTextControl(tabControl.SelectedIndex);
+                TextQueryControl? textControl = GetEditorTextControl(tabControl.SelectedIndex);
+
                 if (textControl != null)
                 {
                     return string.IsNullOrEmpty(textControl.TextBox.SelectedText)
@@ -103,7 +97,8 @@ namespace Frontend.Components
         {
             if (tabControl.SelectedIndex >= 0)
             {
-                TextQueryControl textControl = GetEditorTextControl(tabControl.SelectedIndex);
+                TextQueryControl? textControl = GetEditorTextControl(tabControl.SelectedIndex);
+
                 if (textControl != null)
                 {
                     File.WriteAllText(tabControl.SelectedTab.Name, textControl.TextBox.Text);
@@ -111,7 +106,7 @@ namespace Frontend.Components
             }
         }
 
-        private void tabControl_KeyDown(object sender, KeyEventArgs e)
+        private void TabControl_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Modifiers == Keys.Control && e.KeyCode == Keys.S)
             {
@@ -119,7 +114,7 @@ namespace Frontend.Components
             }
         }
 
-        private void tabControl_MouseClicked(object sender, MouseEventArgs e)
+        private void TabControl_MouseClicked(object sender, MouseEventArgs e)
         {
             var tabControl = sender as TabControl;
             var tabs = tabControl!.TabPages;

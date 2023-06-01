@@ -10,7 +10,7 @@ namespace Server.Parser.Commands;
 
 internal class ShowTables : BaseDbAction
 {
-    public ShowTables(Match match, ParseRequest request)
+    public ShowTables(Match _)
     {
     }
 

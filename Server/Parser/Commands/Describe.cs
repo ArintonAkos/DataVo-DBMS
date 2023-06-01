@@ -13,7 +13,7 @@ internal class Describe : BaseDbAction
 {
     private readonly DescribeModel _model;
 
-    public Describe(Match match, ParseRequest request) => _model = DescribeModel.FromMatch(match);
+    public Describe(Match match) => _model = DescribeModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

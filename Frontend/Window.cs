@@ -8,11 +8,11 @@ namespace Frontend
     {
         public delegate void DataFetchedHandler(object source, EventArgs args);
 
-        public event DataFetchedHandler DataFetched;
+        public event DataFetchedHandler? DataFetched;
 
-        private ExplorerControl _explorerTree;
-        private EditorControl _editorControl;
-        private ResponseControl _responseControl;
+        private readonly ExplorerControl _explorerTree;
+        private readonly EditorControl _editorControl;
+        private readonly ResponseControl _responseControl;
 
         public Window()
         {
@@ -43,9 +43,11 @@ namespace Frontend
 
         private async void MenuNewFileOption_Click(object sender, EventArgs e)
         {
-            SaveFileDialog saveFileDialog = new SaveFileDialog();
-            saveFileDialog.Filter = "SQL files (*.sql)|*.sql";
-            saveFileDialog.RestoreDirectory = true;
+            SaveFileDialog saveFileDialog = new()
+            {
+                Filter = "SQL files (*.sql)|*.sql",
+                RestoreDirectory = true
+            };
 
             if (saveFileDialog.ShowDialog() == DialogResult.OK)
             {
@@ -56,9 +58,11 @@ namespace Frontend
 
         private void MenuOpenFileOption_Click(object sender, EventArgs e)
         {
-            OpenFileDialog openFileDialog = new OpenFileDialog();
-            openFileDialog.Filter = "SQL files (*.sql)|*.sql";
-            openFileDialog.RestoreDirectory = true;
+            OpenFileDialog openFileDialog = new()
+            {
+                Filter = "SQL files (*.sql)|*.sql",
+                RestoreDirectory = true
+            };
 
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {

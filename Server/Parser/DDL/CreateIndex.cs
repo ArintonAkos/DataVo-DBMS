@@ -14,7 +14,7 @@ internal class CreateIndex : BaseDbAction
 {
     private readonly CreateIndexModel _model;
 
-    public CreateIndex(Match match, ParseRequest request) => _model = CreateIndexModel.FromMatch(match);
+    public CreateIndex(Match match) => _model = CreateIndexModel.FromMatch(match);
 
     public override void PerformAction(Guid session)
     {

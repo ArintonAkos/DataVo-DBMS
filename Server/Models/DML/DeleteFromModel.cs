@@ -14,7 +14,7 @@ internal class DeleteFromModel
         string tableName = match.Groups["TableName"].Value;
         var whereStatement = new Where(match.Groups["WhereStatement"].Value);
 
-        return new DeleteFromModel
+        return new DeleteFromModel()
         {
             TableName = tableName,
             WhereStatement = whereStatement,

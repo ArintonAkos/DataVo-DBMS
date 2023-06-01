@@ -20,7 +20,6 @@ namespace Frontend.Components
         private static readonly Regex NumberRegex = new(@"\b\d+\b");
         private static readonly Regex DateRegex = new(@"'(\d{4}-\d{2}-\d{2})'");
         private static readonly Regex BoolRegex = new(@"\b(true|false)\b", RegexOptions.IgnoreCase);
-        private RichTextBox _hiddenRtb = new();
 
         public SqlRichTextBox()
         {

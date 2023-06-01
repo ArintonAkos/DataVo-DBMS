@@ -8,15 +8,15 @@ using TableRows = Dictionary<string, Dictionary<string, Dictionary<string, dynam
 
 internal class StatementEvaluator
 {
-    private TableService tableService { get; set; }
-    private Join? join { get; set; }
-    private TableDetail? fromTable { get; set; } 
+    private TableService TableService { get; set; }
+    private Join? Join { get; set; }
+    private TableDetail? FromTable { get; set; } 
 
     public StatementEvaluator(TableService tableService, Join joinStatements, TableDetail fromTable)
     {
-        this.tableService = tableService;
-        this.join = joinStatements;
-        this.fromTable = fromTable;
+        TableService = tableService;
+        Join = joinStatements;
+        FromTable = fromTable;
     }
 
     public TableRows Evaluate(Node root)
@@ -81,9 +81,9 @@ internal class StatementEvaluator
 
     private TableRows HandleIndexableStatement(Node root)
     {
-        Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        TableDetail table = parseResult.Item1;
+        TableDetail? table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         string? rightValue = root.Right!.Value.Value!.ToString();
 
@@ -118,9 +118,9 @@ internal class StatementEvaluator
 
     private TableRows HandleNonIndexableStatement(Node root)
     {
-        Tuple<TableDetail, string> parseResult = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        TableDetail table = parseResult.Item1;
+        TableDetail? table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
@@ -143,11 +143,11 @@ internal class StatementEvaluator
 
     private TableRows HandleTwoColumnExpression(Node root)
     {
-        Tuple<TableDetail, string> parseResult1 = tableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
-        Tuple<TableDetail, string> parseResult2 = tableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
+        Tuple<TableDetail, string> parseResult1 = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        Tuple<TableDetail, string> parseResult2 = TableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
 
-        TableDetail table = parseResult1.Item1;
-        TableDetail rightTable = parseResult2.Item1;
+        TableDetail? table = parseResult1.Item1;
+        TableDetail? rightTable = parseResult2.Item1;
 
         if (table.TableName != rightTable.TableName)
         {
@@ -190,7 +190,7 @@ internal class StatementEvaluator
 
         if (isCondTrue)
         {
-            return GetJoinedTableContent(fromTable!.TableContent!, fromTable.TableName);
+            return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
         }
 
         return new();
@@ -198,14 +198,14 @@ internal class StatementEvaluator
 
     private TableRows GetJoinedTableContent(Dictionary<string, Dictionary<string, dynamic>> tableRows, string tableName)
     {
-        TableRows groupedInitialTable = new();
+        TableRows? groupedInitialTable = new();
 
         foreach (var row in tableRows)
         {
             groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { tableName, row.Value } });
         }
 
-        return join!.Evaluate(groupedInitialTable);
+        return Join!.Evaluate(groupedInitialTable);
     }
 
     private static TableRows And(TableRows leftResult, TableRows rightResult)
@@ -221,7 +221,7 @@ internal class StatementEvaluator
 
         HashSet<string> unionResult = new(leftHashes.Union(rightHashes));
 
-        TableRows result = new();
+        TableRows? result = new();
         foreach (string hash in unionResult)
         {
             if (leftResult.ContainsKey(hash))

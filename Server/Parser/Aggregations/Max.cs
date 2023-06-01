@@ -12,7 +12,7 @@ namespace Server.Parser.Aggregations
 
         public override dynamic Apply(List<Dictionary<string, dynamic>> rows)
         {
-            return rows.Max(row => row[_field]);
+            return rows.Max(row => row[_field]) ?? 0;
         }
     }
 

@@ -5,7 +5,7 @@ namespace Frontend.Components
 {
     public partial class ExplorerControl : UserControl
     {
-        private EditorControl _editorControl;
+        private readonly EditorControl _editorControl;
 
         public ExplorerControl(EditorControl editorControl)
         {
@@ -22,7 +22,7 @@ namespace Frontend.Components
 
             foreach (string folder in Directory.GetDirectories(folderPath))
             {
-                TreeNode newNode = new TreeNode()
+                TreeNode newNode = new()
                 {
                     ImageIndex = 0,
                     SelectedImageIndex = 0

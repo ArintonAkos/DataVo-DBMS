@@ -26,7 +26,7 @@ internal class Parser
             {
                 try
                 {
-                    scriptResponse.Actions.Add(runnable.Dequeue().Perform(Request.Session, Request));
+                    scriptResponse.Actions.Add(runnable.Dequeue().Perform(Request.Session));
                 }
                 catch (Exception ex)
                 {
