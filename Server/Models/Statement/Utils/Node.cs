@@ -178,8 +178,8 @@ public class Node
         {
             ValidateAlgebraicExpression(@operator, other);
 
-            dynamic typedValue = ConvertGenericToType(Value, ValueType.ToType());
-            dynamic typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
+            dynamic? typedValue = ConvertGenericToType(Value, ValueType.ToType());
+            dynamic? typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
 
             return @operator switch
             {
