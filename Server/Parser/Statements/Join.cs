@@ -1,6 +1,9 @@
 ﻿using System.Text.RegularExpressions;
+using MongoDB.Bson.Serialization.IdGenerators;
 using Server.Models.Statement;
+using Server.Parser.Types;
 using Server.Services;
+using Server.Utils;
 using static Server.Models.Statement.JoinModel;
 
 namespace Server.Parser.Statements;
@@ -30,7 +33,7 @@ public class Join
 
     public bool ContainsJoin() => _isValid;
 
-    public Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> PerformJoinCondition(Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> tableRows, JoinCondition joinCondition)
+    public HashedTable PerformJoinCondition(HashedTable tableRows, JoinCondition joinCondition)
     {
         var leftTable = joinCondition.LeftColumn.TableName;
         var leftColumn = joinCondition.LeftColumn.ColumnName;
@@ -39,7 +42,7 @@ public class Join
 
         Dictionary<string, Dictionary<string, dynamic>> rightTableData = _tableService!.GetTableDetailByAliasOrName(rightTable).TableContent!;
 
-        Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> result = new();
+        HashedTable result = new();
 
         bool insertHashAfter = false;
         List<string> joinTables = Model.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
@@ -59,25 +62,22 @@ public class Join
                 {
                     if (rightTableRow.Value.ContainsKey(rightColumn) && rightTableRow.Value[rightColumn] == leftValue)
                     {
+                        var joinedRow = new JoinedRow();
+                        string hash = string.Empty;
+
                         if (insertHashAfter)
                         {
-                            result.Add($"{leftTableRow.Key}##{rightTableRow.Key}",
-                                new Dictionary<string, Dictionary<string, dynamic>>
-                                {
-                                    { leftTable, leftTableRow.Value[leftTable] },
-                                    { rightTable, rightTableRow.Value }
-                                });
+                            hash = $"{leftTableRow.Key}##{rightTableRow.Key}";
                         }
                         else
                         {
-                            result.Add($"{rightTableRow.Key}##{leftTableRow.Key}",
-                                new Dictionary<string, Dictionary<string, dynamic>>
-                                {
-                                    { leftTable, leftTableRow.Value[leftTable] },
-                                    { rightTable, rightTableRow.Value }
-                                });
+                            hash = $"{rightTableRow.Key}##{leftTableRow.Key}";
                         }
 
+                        joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
+                        joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
+
+                        result.Add(hash, joinedRow);
                         break;
                     }
                 }
@@ -91,7 +91,7 @@ public class Join
         return result;
     }
 
-    public Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> Evaluate(Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> tableRows)
+    public HashedTable Evaluate(HashedTable tableRows)
     {
         // Ha ures a tabla, akkor a JOIN eredmenye ugyis ures marad (Mivel INNER JOIN)
         if (tableRows.Count == 0)
@@ -99,7 +99,7 @@ public class Join
             return new();
         }
 
-        int tableCount = tableRows.First().Value.Keys.Count;
+        int tableCount = tableRows.First().Value.Keys.Count();
 
         if (tableCount == 0)
         {

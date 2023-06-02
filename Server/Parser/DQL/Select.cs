@@ -2,12 +2,12 @@
 using Server.Logging;
 using Server.Models.DQL;
 using Server.Parser.Actions;
+using Server.Parser.Types;
 using Server.Server.Cache;
-using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Parts;
+using Server.Utils;
 
 namespace Server.Parser.DQL;
-using TableRows = List<Dictionary<string, Dictionary<string, dynamic>>>;
 
 internal class Select : BaseDbAction
 {
@@ -29,7 +29,7 @@ internal class Select : BaseDbAction
                 ValidateColumns(database);
             }
 
-            TableRows result = EvaluateStatements();
+            ListedTable result = EvaluateStatements();
 
             if (_model.GroupByStatement.ContainsGroupBy())
             {
@@ -73,9 +73,9 @@ internal class Select : BaseDbAction
         }
     }
 
-    private TableRows EvaluateStatements()
+    private ListedTable EvaluateStatements()
     {
-        TableRows result;
+        ListedTable result;
 
         if (_model.WhereStatement.IsEvaluatable())
         {
@@ -87,24 +87,26 @@ internal class Select : BaseDbAction
         }
         else
         {
-            result = _model.FromTable!.TableContentValues!
-                .Select(row => new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row } })
+            var listResult = _model.FromTable!.TableContentValues!
+                .Select(row => new JoinedRow(_model.FromTable.TableName, row.ToRow()))
                 .ToList();
+
+            result = new ListedTable(listResult);
         }
 
         return result;
     }
 
-    private TableRows EvaluateJoin()
+    private ListedTable EvaluateJoin()
     {
-        Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> groupedInitialTable = new();
+        HashedTable groupedInitialTable = new();
 
         foreach (var row in _model.FromTable.TableContent!)
         {
-            groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row.Value } });
+            groupedInitialTable.Add(row.Key, new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
         }
 
-        return _model.JoinStatement!.Evaluate(groupedInitialTable).Select(row => row.Value).ToList();
+        return _model.JoinStatement!.Evaluate(groupedInitialTable).ToListedTable();
     }
 
 
@@ -130,7 +132,7 @@ internal class Select : BaseDbAction
         return fields;
     }
 
-    private List<List<dynamic>> CreateDataFromResult(List<Dictionary<string, Dictionary<string, dynamic>>> filteredTable)
+    private List<List<dynamic>> CreateDataFromResult(ListedTable filteredTable)
     {
         List<List<dynamic>> result = new();
 
