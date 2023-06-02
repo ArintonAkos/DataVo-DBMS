@@ -1,7 +1,9 @@
 ﻿using Server.Models.Statement;
 using Server.Models.Statement.Utils;
 using Server.Parser.Statements.Mechanism;
+using Server.Parser.Types;
 using Server.Services;
+using Server.Utils;
 
 namespace Server.Parser.Statements;
 
@@ -31,7 +33,7 @@ internal class Where
         return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(_model.Statement);
     }
 
-    public List<Dictionary<string, Dictionary<string, dynamic>>> EvaluateWithJoin(TableService tableService, Join joinStatements)
+    public ListedTable EvaluateWithJoin(TableService tableService, Join joinStatements)
     {
         if (_model is null)
         {
@@ -40,7 +42,7 @@ internal class Where
 
         return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(_model.Statement)
             .Select(row => row.Value)
-            .ToList();
+            .ToListedTable();
     }
 
     public bool IsEvaluatable() => _model is not null;

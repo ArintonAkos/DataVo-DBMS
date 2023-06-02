@@ -1,53 +1,72 @@
 ﻿using Server.Models.Statement;
 using Server.Parser.Commands;
+using Server.Parser.Types;
 using Server.Services;
-using System.Collections.Generic;
 using System.Collections.Generic;
 
 namespace Server.Parser.Statements;
-using TableRows = List<Dictionary<string, Dictionary<string, dynamic>>>;
 
 internal class GroupBy
 {
-    public GroupByModel GroupByModel { get; private set; }
+    public GroupByModel Model { get; private set; }
     public TableService TableService { get; private set; }
 
     public GroupBy(string match, TableService tableService)
     {
-        GroupByModel = GroupByModel.FromString(match, tableService);
+        Model = GroupByModel.FromString(match, tableService);
         TableService = tableService;
     }
         
-    public bool ContainsGroupBy() => GroupByModel.Columns.Count > 0;
+    public bool ContainsGroupBy() => Model.Columns.Count > 0;
 
-    public TableRows Evaluate(TableRows tableData)
+    public ListedTable Evaluate(ListedTable tableData)
     {
         if (!ContainsGroupBy())
         {
             return tableData;
         }
 
-        var groupedTableData = new TableRows();
+        HashedTable groupedTableData = new();
 
-        foreach (var row in tableData)
+        foreach (JoinedRow row in tableData)
         {
-            var groupedRow = new Dictionary<string, Dictionary<string, dynamic>>();
-            foreach (var column in GroupByModel.Columns)
-            {
-                var tableName = column.TableName;
-                var columnName = column.ColumnName;
-                if (!row.ContainsKey(tableName))
-                {
-                    throw new Exception($"Column {columnName} does not exist in table {tableName}.");
-                }
-                if (!groupedRow.ContainsKey(tableName))
-                {
-                    groupedRow[tableName] = new Dictionary<string, dynamic>();
-                }
-                groupedRow[tableName][columnName] = row[tableName][columnName];
-            }
-            groupedTableData.Add(groupedRow);
+            string rowHash = CreateHashForRow(row);
+
+            groupedTableData.Add(rowHash, row);
         }
-        return groupedTableData;
+
+        return groupedTableData.ToListedTable();
+    }
+
+    private string CreateHashForRow(JoinedRow row)
+    {
+        List<string> columnValues = new();
+
+        Model.Columns.ForEach(column =>
+        {
+            if (!row.ContainsKey(column.TableName) || row[column.TableName] == null)
+            {
+                throw new Exception("Trying to join on inexistent table!");
+            }
+
+            if (row[column.TableName].ContainsKey(column.ColumnName)) 
+            {
+                throw new Exception("Trying to join on inexistent column!");
+            }
+
+            if (row[column.TableName][column.ColumnName] == null)
+            {
+                columnValues.Add(string.Empty);
+            }
+            else
+            {
+                var columnValue = (string)row[column.TableName][column.ColumnName];
+                string hashCode = columnValue.GetHashCode().ToString();
+
+                columnValues.Add(hashCode);
+            }
+        });
+
+        return string.Join("##", columnValues);
     }
 }

@@ -1,10 +1,11 @@
 ﻿using Server.Models.Statement.Utils;
+using Server.Parser.Types;
 using Server.Server.MongoDB;
 using Server.Services;
+using Server.Utils;
 using System.Security;
 
 namespace Server.Parser.Statements;
-using TableRows = Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>>;
 
 internal class StatementEvaluator
 {
@@ -19,7 +20,7 @@ internal class StatementEvaluator
         FromTable = fromTable;
     }
 
-    public TableRows Evaluate(Node root)
+    public HashedTable Evaluate(Node root)
     {
         if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
             && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
@@ -79,11 +80,11 @@ internal class StatementEvaluator
         throw new Exception("Invalid tree node type!");
     }
 
-    private TableRows HandleIndexableStatement(Node root)
+    private HashedTable HandleIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        TableDetail? table = parseResult.Item1;
+        TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         string? rightValue = root.Right!.Value.Value!.ToString();
 
@@ -116,11 +117,11 @@ internal class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private TableRows HandleNonIndexableStatement(Node root)
+    private HashedTable HandleNonIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         
-        TableDetail? table = parseResult.Item1;
+        TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
@@ -141,13 +142,13 @@ internal class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private TableRows HandleTwoColumnExpression(Node root)
+    private HashedTable HandleTwoColumnExpression(Node root)
     {
         Tuple<TableDetail, string> parseResult1 = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
         Tuple<TableDetail, string> parseResult2 = TableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
 
-        TableDetail? table = parseResult1.Item1;
-        TableDetail? rightTable = parseResult2.Item1;
+        TableDetail table = parseResult1.Item1;
+        TableDetail rightTable = parseResult2.Item1;
 
         if (table.TableName != rightTable.TableName)
         {
@@ -175,7 +176,7 @@ internal class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private TableRows HandleConstantExpression(Node root)
+    private HashedTable HandleConstantExpression(Node root)
     {
         bool isCondTrue = root.Value.ParsedValue switch
         {
@@ -196,32 +197,34 @@ internal class StatementEvaluator
         return new();
     }
 
-    private TableRows GetJoinedTableContent(Dictionary<string, Dictionary<string, dynamic>> tableRows, string tableName)
+    private HashedTable GetJoinedTableContent(Dictionary<string, Dictionary<string, dynamic>> tableRows, string tableName)
     {
-        TableRows? groupedInitialTable = new();
+        HashedTable groupedInitialTable = new();
 
         foreach (var row in tableRows)
         {
-            groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { tableName, row.Value } });
+            groupedInitialTable.Add(row.Key, new JoinedRow(tableName, row.Value.ToRow()));
         }
 
         return Join!.Evaluate(groupedInitialTable);
     }
 
-    private static TableRows And(TableRows leftResult, TableRows rightResult)
+    private static HashedTable And(HashedTable leftResult, HashedTable rightResult)
     {
-        return leftResult.Keys.Intersect(rightResult.Keys)
+        var result= leftResult.Keys.Intersect(rightResult.Keys)
                .ToDictionary(t => t, t => leftResult[t]);
+
+        return new HashedTable(result);
     }
 
-    private static TableRows Or(TableRows leftResult, TableRows rightResult)
+    private static HashedTable Or(HashedTable leftResult, HashedTable rightResult)
     {
         HashSet<string> leftHashes = leftResult.Keys.ToHashSet();
         HashSet<string> rightHashes = rightResult.Keys.ToHashSet();
 
         HashSet<string> unionResult = new(leftHashes.Union(rightHashes));
 
-        TableRows? result = new();
+        HashedTable result = new();
         foreach (string hash in unionResult)
         {
             if (leftResult.ContainsKey(hash))
