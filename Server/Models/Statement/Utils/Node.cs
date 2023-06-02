@@ -4,6 +4,12 @@ using Server.Utils;
 
 namespace Server.Models.Statement.Utils;
 
+/// <summary>
+/// Represents a single node in a tree structure. 
+/// Each node can represent a value, column, operator 
+/// or one of the logical constructs (And, Or, Eq). 
+/// Each node has a left and a right child node.
+/// </summary>
 public class Node
 {
     public enum NodeType
@@ -27,19 +33,56 @@ public class Node
         Operator,
     }
 
+    /// <summary>
+    /// The left child of the current node.
+    /// </summary>
     public Node? Left { get; set; }
+    
+    /// <summary>
+    /// The right child of the current node.
+    /// </summary>
     public Node? Right { get; set; }
-    public NodeType Type { get; init; }
-    public NodeValue Value { get; init; }
-    public bool UseIndex { get; set; }
 
+    /// <summary>
+    /// The type of the node. Can be any of the enum values in NodeType.
+    /// </summary>
+    public NodeType Type { get; init; }
+
+    /// <summary>
+    /// The value held by the node. It can be an operator, string, int, double, boolean, date or null value.
+    /// </summary>
+    public NodeValue Value { get; init; }
+
+    /// <summary>
+    /// Handles the algebraic expression using the operator and the other Node.
+    /// </summary>
+    /// <param name="operator">The operator used in the algebraic expression.</param>
+    /// <param name="other">The other Node used in the algebraic expression.</param>
+    /// <returns>A new Node that represents the result of the algebraic expression.</returns>
     public Node HandleAlgebraicExpression(string @operator, Node other) => new()
     { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
 
+    /// <summary>
+    /// Represents the value held by a Node instance. 
+    /// Each NodeValue can hold a string, int, double, boolean, date,
+    /// null or operator value. 
+    /// It also contains a ValueType property that describes the type of the value.
+    /// </summary>
     public class NodeValue
     {
+        /// <summary>
+        /// The value held by the NodeValue. It can be an operator, string, int, double, boolean, date or null value.
+        /// </summary>
         public IComparable? Value;
+
+        /// <summary>
+        /// The type of the value held by the NodeValue.
+        /// </summary>
         public NodeValueType ValueType;
+
+        /// <summary>
+        /// Returns the Value property converted to its appropriate type.
+        /// </summary>
         public dynamic? ParsedValue
         {
             get
@@ -48,12 +91,21 @@ public class Node
             }
         }
 
+        /// <summary>
+        /// Initializes a new instance of the NodeValue class with a specified value and value type.
+        /// </summary>
+        /// <param name="value">The IComparable value to initialize the NodeValue instance with.</param>
+        /// <param name="valueType">The NodeValueType to initialize the NodeValue instance with.</param>
         private NodeValue(IComparable value, NodeValueType valueType)
         {
             Value = value;
             ValueType = valueType;
         }
 
+        /// <summary>
+        /// Initializes a new instance of the NodeValue class with a specified value.
+        /// </summary>
+        /// <param name="value">The value to initialize the NodeValue instance with.</param>
         public NodeValue(dynamic value)
         {
             Value = value;
@@ -69,19 +121,15 @@ public class Node
         }
 
         /// <summary>
-        ///     Factory function to create a new instance of NodeValue by parsing the raw value to known primitive types such as
-        ///     string, double, int, bool.
+        /// Attempts to parse a raw value to a known primitive type and returns a new NodeValue 
+        /// instance containing the parsed value.
         /// </summary>
-        /// <param name="rawValue">The raw value to be parsed</param>
-        /// <returns>The parsed NodeValue object</returns>
-        /// <exception cref="Exception">Thrown when the given parameter cannot be parsed as any known primitive type.</exception>
-        /// <remarks>
-        ///     This function first checks if the rawValue is a string enclosed in single quotes (''), then it extracts the string
-        ///     value from the quotes.
-        ///     If the rawValue can be parsed to an integer or a double, the function returns the corresponding NodeValue object.
-        ///     If the rawValue can be parsed to a boolean, the function returns the corresponding NodeValue object.
-        ///     If the rawValue is null, the function returns a NodeValue object with a Null value type and a default value of 0.
-        /// </remarks>
+        /// <param name="rawValue">The raw value to be parsed.</param>
+        /// <returns>The parsed NodeValue instance.</returns>
+        /// <exception cref="Exception">
+        /// Thrown when the given parameter cannot be
+        /// parsed as any known primitive type.
+        /// </exception>
         public static NodeValue Parse(string? rawValue)
         {
             if (rawValue is null)
@@ -118,11 +166,15 @@ public class Node
         }
 
         /// <summary>
-        ///     Factory function to create a new instance of NodeValue representing a logical operator.
+        /// Attempts to parse a raw value as a logical operator and
+        /// returns a new NodeValue instance containing the operator.
         /// </summary>
         /// <param name="rawValue">The raw value to be parsed as a logical operator.</param>
-        /// <returns>The parsed NodeValue object.</returns>
-        /// <exception cref="Exception">Thrown when the given parameter is not a known logical operator.</exception>
+        /// <returns>The parsed NodeValue instance.</returns>
+        /// <exception cref="Exception">
+        /// Thrown when the given parameter 
+        /// is not a known logical operator.
+        /// </exception>
         public static NodeValue Operator(string rawValue)
         {
             if (!Operators.Supported().Contains(rawValue))
@@ -134,18 +186,18 @@ public class Node
         }
 
         /// <summary>
-        ///     Creates a new instance of NodeValue with the provided raw string value.
+        /// Creates a new NodeValue instance containing a raw string value.
         /// </summary>
-        /// <param name="rawValue">The raw string value to be stored in the NodeValue.</param>
-        /// <returns>A new instance of NodeValue with the specified raw string value.</returns>
-        /// <remarks>
-        ///     This method converts the provided raw string value to a generic IComparable object using the ConvertValueToGeneric
-        ///     helper method.
-        ///     The NodeValueType of the returned NodeValue is set to NodeValueType.String, indicating that it stores a string
-        ///     value.
-        /// </remarks>
+        /// <param name="rawValue">The raw string value.</param>
+        /// <returns>The new NodeValue instance containing the raw string value.</returns>
         public static NodeValue RawString(string rawValue) => new(rawValue, NodeValueType.String);
 
+        /// <summary>
+        /// Solves an algebraic expression using the operator and the other NodeValue instance.
+        /// </summary>
+        /// <param name="operator">The operator used in the algebraic expression.</param>
+        /// <param name="other">The other NodeValue used in the algebraic expression.</param>
+        /// <returns>A new NodeValue that represents the result of the algebraic expression.</returns>
         public NodeValue SolveAlgebraicExpression(string @operator, NodeValue other)
         {
             if (ValueType == NodeValueType.Null || other.ValueType == NodeValueType.Null)
@@ -174,6 +226,13 @@ public class Node
             return new NodeValue(derivedValue);
         }
 
+        /// <summary>
+        /// Handles arithmetic operations based on the specified operator and the other NodeValue.
+        /// </summary>
+        /// <param name="operator">The operator used in the arithmetic operation.</param>
+        /// <param name="other">The other NodeValue used in the arithmetic operation.</param>
+        /// <returns>The result of the arithmetic operation as a dynamic object.</returns>
+        /// <exception cref="Exception">Thrown when an invalid operator is used for the types.</exception>
         private dynamic HandleArithmeticOperators(string @operator, NodeValue other)
         {
             ValidateAlgebraicExpression(@operator, other);
@@ -191,6 +250,12 @@ public class Node
             };
         }
 
+        /// <summary>
+        /// Validates the algebraic expression to ensure it can be solved.
+        /// </summary>
+        /// <param name="operator">The operator used in the algebraic expression.</param>
+        /// <param name="other">The other NodeValue used in the algebraic expression.</param>
+        /// <exception cref="Exception">Thrown when an arithmetic operator is used on non-numeric types.</exception>
         private void ValidateAlgebraicExpression(string @operator, NodeValue other)
         {
             if (!ValueType.IsNumeric() || !other.ValueType.IsNumeric())
@@ -204,6 +269,12 @@ public class Node
             }
         }
 
+        /// <summary>
+        /// Converts a generic IComparable to a specific type.
+        /// </summary>
+        /// <param name="comparable">The IComparable to be converted.</param>
+        /// <param name="type">The Type to convert the IComparable to.</param>
+        /// <returns>The converted value as a dynamic object.</returns>
         private static dynamic? ConvertGenericToType(IComparable? comparable, Type type) =>
             Convert.ChangeType(comparable, type);
     }
