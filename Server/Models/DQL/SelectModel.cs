@@ -12,9 +12,11 @@ internal class SelectModel
     public TableService? TableService { get; set; }
     public Where WhereStatement { get; set; }
     public Join JoinStatement { get; set; }
+    public GroupBy GroupByStatement { get; set; }
     public TableDetail FromTable { get; set; }
 
     private Group RawJoinStatement { get; set; }
+    private string RawGroupByStatement { get; set; }
     private string RawColumns { get; set; }
 
     public static SelectModel FromMatch(Match match)
@@ -30,6 +32,7 @@ internal class SelectModel
         {
             WhereStatement = whereStatement,
             RawJoinStatement = match.Groups["Joins"],
+            RawGroupByStatement = match.Groups["GroupBy"].Value,
             RawColumns = match.Groups["Columns"].Value,
             FromTable = fromTable
         };
@@ -64,8 +67,9 @@ internal class SelectModel
         TableService.AddTableDetail(FromTable);
 
         JoinStatement = new Join(RawJoinStatement, TableService);
+        GroupByStatement = new GroupBy(RawGroupByStatement, TableService);
 
-        TableColumnsInUse = TableParserService.ParseColumns(RawColumns, TableService);
+        TableColumnsInUse = TableParserService.ParseSelectColumns(RawColumns, TableService);
 
         return false;
     }

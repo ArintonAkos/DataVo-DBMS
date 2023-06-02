@@ -15,7 +15,7 @@ public class Join
     {
         if (group.Success && group.Length > 0)
         {
-            Model = JoinModel.FromMatchGroup(group, tableService);
+            Model = FromMatchGroup(group, tableService);
             
             _tableService = tableService;
             _isValid = true;

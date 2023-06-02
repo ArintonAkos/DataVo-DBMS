@@ -22,38 +22,18 @@ internal class Select : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string database = ValidateDatabase(session);
 
-            bool hasMissingColumns = _model.Validate(databaseName);
-
-            if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
+            if (!_model.JoinStatement.ContainsJoin())
             {
-                throw new Exception("Invalid columns specified'");
+                ValidateColumns(database);
             }
 
-            TableRows result = new();
+            TableRows result = EvaluateStatements();
 
-            if (_model.WhereStatement.IsEvaluatable())
+            if (_model.GroupByStatement.ContainsGroupBy())
             {
-                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
-            }
-            else if (_model.JoinStatement.ContainsJoin())
-            {
-                Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> groupedInitialTable = new();
-
-                foreach (var row in _model.FromTable.TableContent!)
-                {
-                    groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row.Value } });
-                }
-
-                result = _model.JoinStatement!.Evaluate(groupedInitialTable).Select(row => row.Value).ToList();
-            }
-            else
-            {
-                result = _model.FromTable!.TableContentValues!
-                    .Select(row => new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row } })
-                    .ToList();
+                result = _model.GroupByStatement.Evaluate(result);
             }
 
             Logger.Info($"Rows selected: {result.Count}");
@@ -69,6 +49,64 @@ internal class Select : BaseDbAction
             Messages.Add(ex.Message);
         }
     }
+
+    private string ValidateDatabase(Guid session)
+    {
+        string databaseName = CacheStorage.Get(session)
+            ?? throw new Exception("No database in use!");
+
+        bool hasMissingColumns = _model.Validate(databaseName);
+
+        if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
+        {
+            throw new Exception("Invalid columns specified'");
+        }
+
+        return databaseName;
+    }
+
+    private void ValidateColumns(string databaseName)
+    {
+        if (_model.Validate(databaseName))
+        {
+            throw new Exception("Invalid columns specified'");
+        }
+    }
+
+    private TableRows EvaluateStatements()
+    {
+        TableRows result;
+
+        if (_model.WhereStatement.IsEvaluatable())
+        {
+            result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
+        }
+        else if (_model.JoinStatement.ContainsJoin())
+        {
+            result = EvaluateJoin();
+        }
+        else
+        {
+            result = _model.FromTable!.TableContentValues!
+                .Select(row => new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row } })
+                .ToList();
+        }
+
+        return result;
+    }
+
+    private TableRows EvaluateJoin()
+    {
+        Dictionary<string, Dictionary<string, Dictionary<string, dynamic>>> groupedInitialTable = new();
+
+        foreach (var row in _model.FromTable.TableContent!)
+        {
+            groupedInitialTable.Add(row.Key, new Dictionary<string, Dictionary<string, dynamic>> { { _model.FromTable.TableName, row.Value } });
+        }
+
+        return _model.JoinStatement!.Evaluate(groupedInitialTable).Select(row => row.Value).ToList();
+    }
+
 
     private List<FieldResponse> CreateFieldsFromColumns()
     {

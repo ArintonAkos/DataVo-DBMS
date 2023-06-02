@@ -23,7 +23,7 @@ namespace Server.Services
             return Tuple.Create(tableName, tableAlias);
         }
 
-        public static Dictionary<string, List<string>>? ParseColumns(string rawColumns, TableService tableService)
+        public static Dictionary<string, List<string>>? ParseSelectColumns(string rawColumns, TableService tableService)
         {
             if (!rawColumns.Contains('*'))
             {
@@ -51,6 +51,27 @@ namespace Server.Services
             }
 
             return null;
+        }
+
+        public static List<Column> ParseGroupByColumns(string rawColumns, TableService tableService)
+        {
+            List<Column> columns = new();
+            string[] splitColumns = rawColumns.Split(',');
+
+            foreach (var rawColumn in splitColumns)
+            {
+                string trimmedColumn = rawColumn.Trim();
+                
+                Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
+                Column column = new(parseResult.Item1, parseResult.Item2);
+                
+                if (!columns.Any(c => c.ColumnName == column.ColumnName && c.TableName == column.TableName))
+                {
+                    columns.Add(column);
+                }
+            }
+
+            return columns;
         }
 
         public static Tuple<TableDetail, string, string> ParseJoinStatement(string joinStatement)
