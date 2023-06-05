@@ -208,6 +208,25 @@ internal static class Catalog
             .ToList();
     }
 
+    public static Column GetTableColumn(string tableName, string databaseName, string columnName)
+    {
+        List<Column> columns = GetTableColumns(tableName, databaseName);
+
+        var column = columns.Find(c => c.Name == columnName);
+
+        if (column is null)
+        {
+            throw new Exception($"Column {columnName} doesn't exist in table {tableName}!");
+        }
+
+        return column!;
+    }
+
+    public static string GetTableColumnType(string tableName, string databaseName, string columnName)
+    {
+        return GetTableColumn(tableName, databaseName, columnName).Type;
+    }
+
     public static Dictionary<string, string> GetTableIndexedColumns(string tableName, string databaseName)
     {
         Dictionary<string, string> result = new();

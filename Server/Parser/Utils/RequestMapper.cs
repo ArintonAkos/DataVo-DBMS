@@ -1,5 +1,5 @@
 ﻿using System.Text.RegularExpressions;
-using Server.Parser.Actions;
+using Server.Contracts;
 using Server.Parser.Commands;
 using Server.Parser.DDL;
 using Server.Parser.DML;

@@ -1,18 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Server.Models.Statement.Utils;
+using Server.Parser.Types;
 
 namespace Server.Parser.Aggregations
 {
     internal class Avg : Aggregation
     {
-        public Avg(string field) : base(field) { }
+        public Avg(Column field) : base(field) { }
 
-        public override dynamic Apply(List<Dictionary<string, dynamic>> rows)
+        protected override dynamic? Apply(ListedTable rows)
         {
-            return rows.Average(row => (double)row[_field]);
+            return rows.Average(SelectColumn<double?>);
+        }
+
+        protected override void Validate()
+        {
+            ValidateNumericColumn();
         }
     }
 }

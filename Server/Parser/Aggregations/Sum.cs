@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Server.Models.Statement.Utils;
+using Server.Parser.Types;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,11 +10,16 @@ namespace Server.Parser.Aggregations
 {
     internal class Sum : Aggregation
     {
-        public Sum(string field) : base(field) { }
+        public Sum(Column field) : base(field) { }
 
-        public override dynamic Apply(List<Dictionary<string, dynamic>> rows)
+        protected override dynamic? Apply(ListedTable rows)
         {
-            return rows.Sum(row => (double)row[_field]);
+            return rows.Sum(SelectColumn<double?>);
+        }
+
+        protected override void Validate()
+        {
+            ValidateNumericColumn();
         }
     }
 }
