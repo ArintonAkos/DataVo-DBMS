@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Server.Models.Statement.Utils;
+using Server.Parser.Types;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,11 +10,18 @@ namespace Server.Parser.Aggregations
 {
     internal class Min : Aggregation
     {
-        public Min(string field) : base(field) { }
+        public Min(Column field) : base(field) { }
 
-        public override dynamic Apply(List<Dictionary<string, dynamic>> rows)
+        protected override dynamic? Apply(ListedTable rows)
         {
-            return rows.Min(row => row[_field]) ?? 0;
+            return rows.Min(SelectColumn);
+        }
+
+        protected override void Validate()
+        {
+            ValidateNumericColumn();
+            ValidateStringColumn();
+            ValidateDateColumn();
         }
     }
 }

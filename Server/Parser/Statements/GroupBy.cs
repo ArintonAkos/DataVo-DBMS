@@ -26,14 +26,30 @@ internal class GroupBy
             return tableData;
         }
 
-        HashedTable groupedTableData = new();
+        Dictionary<string, List<JoinedRow>> groupedTableData = new();
 
         foreach (JoinedRow row in tableData)
         {
             string rowHash = CreateHashForRow(row);
 
-            groupedTableData.Add(rowHash, row);
+            if (!groupedTableData.ContainsKey(rowHash))
+            {
+                groupedTableData.Add(rowHash, new List<JoinedRow>());
+            }
+
+            groupedTableData[rowHash].Add(row);
         }
+
+        Model.Aggregations.ForEach(aggregations =>
+        {
+            foreach (var group in groupedTableData)
+            {
+                var aggregatedValue = aggregations.Execute(group.Value);
+
+                // TO-DO: Create a new row containing only the selected and aggregated columns
+                group.Value.ForEach(row => row.Add(aggregations.Alias, aggregatedValue));
+            }
+        });
 
         return groupedTableData.ToListedTable();
     }

@@ -30,8 +30,7 @@ internal class CreateTable : BaseDbAction
             List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
             uniqueKeys.ForEach(key =>
             {
-                DbContext.Instance.CreateIndex(new List<BsonDocument>(), $"_UK_{key}", _model.TableName,
-                    "University");
+                DbContext.Instance.CreateIndex(new List<BsonDocument>(), $"_UK_{key}", _model.TableName, databaseName);
             });
 
             Logger.Info($"New table {_model.TableName} successfully created!");
