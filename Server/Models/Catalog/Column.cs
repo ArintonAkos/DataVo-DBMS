@@ -1,6 +1,8 @@
-﻿namespace Server.Models.Catalog;
+﻿using Server.Contracts;
 
-public class Column
+namespace Server.Models.Catalog;
+
+public class Column : IColumn
 {
     public string Name { get; set; }
     public string Type { get; set; }
@@ -33,5 +35,10 @@ public class Column
                 return null;
             }
         }
+    }
+
+    public string RawType()
+    {
+        return Type;
     }
 }
