@@ -13,8 +13,8 @@ public class JoinModel
 
         public JoinCondition(string leftTableName, string leftColumnName, string rightTableName, string rightColumnName)
         {
-            LeftColumn = new(leftTableName, leftColumnName);
-            RightColumn = new(rightTableName, rightColumnName);
+            LeftColumn = new(string.Empty, leftTableName, leftColumnName);
+            RightColumn = new(string.Empty, rightTableName, rightColumnName);
         }
 
         public JoinCondition(Column leftColumn, Column rightColumn)

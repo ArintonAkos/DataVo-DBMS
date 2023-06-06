@@ -1,11 +1,10 @@
-﻿using Database = Server.Models.Catalog;
-using Server.Models.Statement.Utils;
+﻿using Server.Models.Statement.Utils;
 using Server.Parser.Types;
 using Server.Services;
 
 namespace Server.Parser.Aggregations
 {
-    internal abstract class Aggregation
+    public abstract class Aggregation
     {
         protected readonly Column _field;
 
@@ -27,6 +26,14 @@ namespace Server.Parser.Aggregations
             get
             {
                 return GetType().Name.ToUpper();
+            }
+        }
+
+        public static string HASH_VALUE
+        {
+            get
+            {
+                return string.Empty;
             }
         }
 

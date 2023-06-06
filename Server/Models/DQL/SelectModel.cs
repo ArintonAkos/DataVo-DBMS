@@ -13,6 +13,7 @@ internal class SelectModel
     public Where WhereStatement { get; set; }
     public Join JoinStatement { get; set; }
     public GroupBy GroupByStatement { get; set; }
+    public Aggregate AggregateStatement { get; set; }
     public TableDetail FromTable { get; set; }
 
     private Group RawJoinStatement { get; set; }
@@ -67,7 +68,8 @@ internal class SelectModel
         TableService.AddTableDetail(FromTable);
 
         JoinStatement = new Join(RawJoinStatement, TableService);
-        GroupByStatement = new GroupBy(RawGroupByStatement, TableService);
+        GroupByStatement = new GroupBy(RawGroupByStatement, databaseName, TableService);
+        AggregateStatement = new Aggregate(RawColumns, databaseName, TableService);
 
         TableColumnsInUse = TableParserService.ParseSelectColumns(RawColumns, TableService);
 
