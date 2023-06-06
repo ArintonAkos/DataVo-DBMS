@@ -27,39 +27,37 @@ namespace Server.Services
 
         public static Dictionary<string, List<string>>? ParseSelectColumns(string rawColumns, TableService tableService)
         {
-            string pattern = @"(?<!\()\*(?!\))";
+            Dictionary<string, List<string>> selectedColumns = new();
 
-            if (Regex.IsMatch(rawColumns, pattern))
+            var splitColumns = rawColumns.Split(',');
+
+            foreach (var column in splitColumns)
             {
-                Dictionary<string, List<string>> selectedColumns = new();
+                string trimmedColumn = column.Trim();
 
-                var splitColumns = rawColumns.Split(',');
-
-                foreach (var column in splitColumns)
+                if (trimmedColumn.Contains('(') && trimmedColumn.Contains(')'))
                 {
-                    string trimmedColumn = column.Trim();
-
-                    if (trimmedColumn.Contains('(') && trimmedColumn.Contains(')'))
-                    {
-                        continue;
-                    }
-                    
-                    Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
-                    string tableName = parseResult.Item1;
-                    string columnName = parseResult.Item2;
-
-                    if (!selectedColumns.ContainsKey(tableName))
-                    {
-                        selectedColumns[tableName] = new();
-                    }
-
-                    selectedColumns[tableName].Add($"{tableName}.{columnName}");
+                    continue;
                 }
 
-                return selectedColumns;
+                if (trimmedColumn == "*")
+                {
+                    return null;
+                }
+
+                Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
+                string tableName = parseResult.Item1;
+                string columnName = parseResult.Item2;
+
+                if (!selectedColumns.ContainsKey(tableName))
+                {
+                    selectedColumns[tableName] = new();
+                }
+
+                selectedColumns[tableName].Add($"{tableName}.{columnName}");
             }
 
-            return null;
+            return selectedColumns;
         }
 
         public static List<Column> ParseGroupByColumns(string rawColumns, string databaseName, TableService tableService)
@@ -71,6 +69,11 @@ namespace Server.Services
             {
                 string trimmedColumn = rawColumn.Trim();
                 
+                if (string.IsNullOrEmpty(trimmedColumn))
+                {
+                    continue;
+                }
+
                 Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
                 Column column = new(databaseName, parseResult.Item1, parseResult.Item2);
                 
@@ -91,6 +94,12 @@ namespace Server.Services
             foreach (var rawColumn in splitColumns)
             {
                 string trimmedColumn = rawColumn.Trim();
+
+                if (!trimmedColumn.Contains('(') || !trimmedColumn.Contains(')'))
+                {
+                    continue;
+                }
+
                 string functionName = trimmedColumn.Split('(')[0].Trim();
                 string rawColumnName = trimmedColumn.Split('(')[1].Split(')')[0].Trim();
 

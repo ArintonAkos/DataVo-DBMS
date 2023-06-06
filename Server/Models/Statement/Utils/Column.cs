@@ -18,7 +18,7 @@ namespace Server.Models.Statement.Utils
 
         public string RawType()
         {
-            return Database.Catalog.GetTableColumnType(DatabaseName, TableName, ColumnName);
+            return Database.Catalog.GetTableColumnType(TableName, DatabaseName, ColumnName);
         }
     }
 }

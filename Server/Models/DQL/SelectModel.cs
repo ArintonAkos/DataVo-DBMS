@@ -33,7 +33,7 @@ internal class SelectModel
         {
             WhereStatement = whereStatement,
             RawJoinStatement = match.Groups["Joins"],
-            RawGroupByStatement = match.Groups["GroupBy"].Value,
+            RawGroupByStatement = match.Groups["ColumnNames"].Value,
             RawColumns = match.Groups["Columns"].Value,
             FromTable = fromTable
         };

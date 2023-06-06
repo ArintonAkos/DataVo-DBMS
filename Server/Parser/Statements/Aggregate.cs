@@ -2,11 +2,7 @@
 using Server.Parser.Aggregations;
 using Server.Parser.Types;
 using Server.Services;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Server.Utils;
 
 namespace Server.Parser.Statements
 {
@@ -27,7 +23,14 @@ namespace Server.Parser.Statements
         {
             if (!ContainsAggregate())
             {
-                return tableData[GroupBy.HASH_VALUE];
+                if (tableData.ContainsKey(GroupBy.HASH_VALUE))
+                {
+                    return tableData[GroupBy.HASH_VALUE];
+                }
+
+                return tableData
+                    .Select(g => g.Value.First())
+                    .ToListedTable();
             }
 
             ListedTable resultTable = new();

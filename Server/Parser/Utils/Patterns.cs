@@ -111,7 +111,7 @@ internal static class Patterns
 
     public static string SelectColumns
     {
-        get => @"(\*|(\w+(\.\w+)?(\s+as\s+\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\(\w+\)(\s+as\s+\w+)?)(,\s*(\w+(\.\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\(\w+\))(\s+as\s+\w+)?)*)";
+        get => @"(\*|(\w+(\.\w+)?(\s+as\s+\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\([A-Z0-9.*]+\)(\s+as\s+\w+)?)(,\s*(\w+(\.\w+)?|(\bSUM\b|\bCOUNT\b|\bAVG\b|\bMIN\b|\bMAX\b)\([A-Z0-9.*]+\))(\s+as\s+\w+)?)*)";
     }
 
     public static string Select
@@ -128,7 +128,7 @@ internal static class Patterns
 
     public static string GroupBy
     {
-        get => @"\s*GROUP BY\s+(?<ColumnNames>(\w+\s*(,\s*\w+\s*)*)?)";
+        get => @"\s*GROUP BY\s+(?<ColumnNames>(\w+\s*((,\s*\w+\s*)*)?))";
     }
 
     public static string AddStartLine(this string s) => @"^\s*" + s;

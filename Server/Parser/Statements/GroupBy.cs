@@ -22,7 +22,7 @@ internal class GroupBy
         Model = GroupByModel.FromString(match, databaseName, tableService);
         TableService = tableService;
     }
-        
+
     public bool ContainsGroupBy() => Model.Columns.Count > 0;
 
     public GroupedTable Evaluate(ListedTable tableData)
@@ -57,12 +57,12 @@ internal class GroupBy
         {
             if (!row.ContainsKey(column.TableName) || row[column.TableName] == null)
             {
-                throw new Exception("Trying to join on inexistent table!");
+                throw new Exception("Trying to group by inexistent table!");
             }
 
-            if (row[column.TableName].ContainsKey(column.ColumnName)) 
+            if (!row[column.TableName].ContainsKey(column.ColumnName)) 
             {
-                throw new Exception("Trying to join on inexistent column!");
+                throw new Exception("Trying to group by inexistent column!");
             }
 
             if (row[column.TableName][column.ColumnName] == null)
@@ -71,7 +71,7 @@ internal class GroupBy
             }
             else
             {
-                var columnValue = (string)row[column.TableName][column.ColumnName];
+                var columnValue = row[column.TableName][column.ColumnName].ToString();
                 string hashCode = columnValue.GetHashCode().ToString();
 
                 columnValues.Add(hashCode);
