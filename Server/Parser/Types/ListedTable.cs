@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Server.Parser.Statements;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -37,6 +38,11 @@ namespace Server.Parser.Types
             return _tables[index];
         }
 
+        public void Add(JoinedRow row)
+        {
+            _tables.Add(row);
+        }
+
         public IEnumerator<JoinedRow> GetEnumerator()
         {
             return _tables.GetEnumerator();
@@ -45,6 +51,21 @@ namespace Server.Parser.Types
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
+        }
+
+        public GroupedTable ToGroupedTable()
+        {
+            GroupedTable groupedTable = new()
+            {
+                { GroupBy.HASH_VALUE, new() }
+            };
+
+            foreach (var row in _tables)
+            {
+                groupedTable[GroupBy.HASH_VALUE].Add(row);
+            }
+
+            return groupedTable;
         }
     }
 }

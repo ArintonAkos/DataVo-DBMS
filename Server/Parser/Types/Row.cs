@@ -10,6 +10,11 @@ namespace Server.Parser.Types
     {
         private readonly Dictionary<string, dynamic> _cells = new();
 
+        public Row() 
+        {
+            _cells = new();        
+        }
+
         public Row(Dictionary<string, dynamic> cells)
         {
             _cells = cells;
@@ -34,6 +39,11 @@ namespace Server.Parser.Types
         public dynamic Get(string key)
         {
             return _cells[key];
+        }
+
+        public void Add(string cellName, dynamic value)
+        {
+            _cells.Add(cellName, value);
         }
     }
 }

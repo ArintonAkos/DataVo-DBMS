@@ -1,32 +1,38 @@
 ﻿using Server.Models.Statement;
-using Server.Parser.Commands;
 using Server.Parser.Types;
 using Server.Services;
-using System.Collections.Generic;
 
 namespace Server.Parser.Statements;
 
 internal class GroupBy
 {
+    public static string HASH_VALUE
+    {
+        get
+        {
+            return string.Empty;
+        }
+    }
+
     public GroupByModel Model { get; private set; }
     public TableService TableService { get; private set; }
 
-    public GroupBy(string match, TableService tableService)
+    public GroupBy(string match, string databaseName, TableService tableService)
     {
-        Model = GroupByModel.FromString(match, tableService);
+        Model = GroupByModel.FromString(match, databaseName, tableService);
         TableService = tableService;
     }
         
     public bool ContainsGroupBy() => Model.Columns.Count > 0;
 
-    public ListedTable Evaluate(ListedTable tableData)
+    public GroupedTable Evaluate(ListedTable tableData)
     {
         if (!ContainsGroupBy())
         {
-            return tableData;
+            return tableData.ToGroupedTable();
         }
 
-        Dictionary<string, List<JoinedRow>> groupedTableData = new();
+        GroupedTable groupedTableData = new();
 
         foreach (JoinedRow row in tableData)
         {
@@ -34,24 +40,13 @@ internal class GroupBy
 
             if (!groupedTableData.ContainsKey(rowHash))
             {
-                groupedTableData.Add(rowHash, new List<JoinedRow>());
+                groupedTableData.Add(rowHash, new());
             }
 
             groupedTableData[rowHash].Add(row);
         }
 
-        Model.Aggregations.ForEach(aggregations =>
-        {
-            foreach (var group in groupedTableData)
-            {
-                var aggregatedValue = aggregations.Execute(group.Value);
-
-                // TO-DO: Create a new row containing only the selected and aggregated columns
-                group.Value.ForEach(row => row.Add(aggregations.Alias, aggregatedValue));
-            }
-        });
-
-        return groupedTableData.ToListedTable();
+        return groupedTableData;
     }
 
     private string CreateHashForRow(JoinedRow row)

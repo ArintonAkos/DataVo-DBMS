@@ -1,4 +1,6 @@
 ﻿using Server.Models.Statement.Utils;
+using Server.Parser.Aggregations;
+using System.Text.RegularExpressions;
 
 namespace Server.Services
 {
@@ -25,7 +27,9 @@ namespace Server.Services
 
         public static Dictionary<string, List<string>>? ParseSelectColumns(string rawColumns, TableService tableService)
         {
-            if (!rawColumns.Contains('*'))
+            string pattern = @"(?<!\()\*(?!\))";
+
+            if (Regex.IsMatch(rawColumns, pattern))
             {
                 Dictionary<string, List<string>> selectedColumns = new();
 
@@ -34,6 +38,11 @@ namespace Server.Services
                 foreach (var column in splitColumns)
                 {
                     string trimmedColumn = column.Trim();
+
+                    if (trimmedColumn.Contains('(') && trimmedColumn.Contains(')'))
+                    {
+                        continue;
+                    }
                     
                     Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
                     string tableName = parseResult.Item1;
@@ -53,7 +62,7 @@ namespace Server.Services
             return null;
         }
 
-        public static List<Column> ParseGroupByColumns(string rawColumns, TableService tableService)
+        public static List<Column> ParseGroupByColumns(string rawColumns, string databaseName, TableService tableService)
         {
             List<Column> columns = new();
             string[] splitColumns = rawColumns.Split(',');
@@ -63,7 +72,7 @@ namespace Server.Services
                 string trimmedColumn = rawColumn.Trim();
                 
                 Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
-                Column column = new(parseResult.Item1, parseResult.Item2);
+                Column column = new(databaseName, parseResult.Item1, parseResult.Item2);
                 
                 if (!columns.Any(c => c.ColumnName == column.ColumnName && c.TableName == column.TableName))
                 {
@@ -73,6 +82,36 @@ namespace Server.Services
 
             return columns;
         }
+
+        public static List<Aggregation> ParseAggregationColumns(string rawColumns, string databaseName, TableService tableService)
+        {
+            List<Aggregation> aggregations = new();
+            string[] splitColumns = rawColumns.Split(',');
+
+            foreach (var rawColumn in splitColumns)
+            {
+                string trimmedColumn = rawColumn.Trim();
+                string functionName = trimmedColumn.Split('(')[0].Trim();
+                string rawColumnName = trimmedColumn.Split('(')[1].Split(')')[0].Trim();
+
+                Column column;
+                if (functionName.ToLower() == "count" && rawColumnName == "*")
+                {
+                    column = new(databaseName, "*", "");
+                }
+                else
+                {
+                    Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(rawColumnName);
+                    column = new(databaseName, parseResult.Item1, parseResult.Item2);
+                }
+
+                Aggregation aggregation = AggregationService.CreateInstance(functionName, column);
+                aggregations.Add(aggregation);
+            }
+
+            return aggregations;
+        }
+
 
         public static Tuple<TableDetail, string, string> ParseJoinStatement(string joinStatement)
         {

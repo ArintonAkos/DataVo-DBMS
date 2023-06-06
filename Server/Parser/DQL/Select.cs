@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using MongoDB.Driver;
 using Server.Logging;
 using Server.Models.DQL;
 using Server.Parser.Actions;
@@ -31,10 +32,9 @@ internal class Select : BaseDbAction
 
             ListedTable result = EvaluateStatements();
 
-            if (_model.GroupByStatement.ContainsGroupBy())
-            {
-                result = _model.GroupByStatement.Evaluate(result);
-            }
+            GroupedTable groupedTable = GroupResults(result);
+
+            result = AggregateGroupedTable(groupedTable);
 
             Logger.Info($"Rows selected: {result.Count}");
             Messages.Add($"Rows selected: {result.Count}");
@@ -48,6 +48,16 @@ internal class Select : BaseDbAction
             Logger.Error(ex.Message);
             Messages.Add(ex.Message);
         }
+    }
+
+    private GroupedTable GroupResults(ListedTable tableData)
+    {
+        return _model.GroupByStatement.Evaluate(tableData);
+    }
+
+    private ListedTable AggregateGroupedTable(GroupedTable groupedTable)
+    {
+        return _model.AggregateStatement.Perform(groupedTable);
     }
 
     private string ValidateDatabase(Guid session)
