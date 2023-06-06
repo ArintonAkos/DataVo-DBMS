@@ -3,6 +3,7 @@ using MongoDB.Driver;
 using Server.Logging;
 using Server.Models.DQL;
 using Server.Parser.Actions;
+using Server.Parser.Statements;
 using Server.Parser.Types;
 using Server.Server.Cache;
 using Server.Server.Responses.Parts;
@@ -25,11 +26,6 @@ internal class Select : BaseDbAction
         {
             string database = ValidateDatabase(session);
 
-            if (!_model.JoinStatement.ContainsJoin())
-            {
-                ValidateColumns(database);
-            }
-
             ListedTable result = EvaluateStatements();
 
             GroupedTable groupedTable = GroupResults(result);
@@ -39,7 +35,7 @@ internal class Select : BaseDbAction
             Logger.Info($"Rows selected: {result.Count}");
             Messages.Add($"Rows selected: {result.Count}");
 
-            Fields = CreateFieldsFromColumns();
+            Fields = CreateFieldsFromColumns(result);
 
             Data = CreateDataFromResult(result);
         }
@@ -120,7 +116,7 @@ internal class Select : BaseDbAction
     }
 
 
-    private List<FieldResponse> CreateFieldsFromColumns()
+    private List<FieldResponse> CreateFieldsFromColumns(ListedTable filteredTable)
     {
         List<string> selectedColumns = _model.GetSelectedColumns();
         List<FieldResponse> fields = new();
@@ -137,6 +133,18 @@ internal class Select : BaseDbAction
             {
                 FieldName = $"{inUseNameOfTable}.{columnName}",
             });
+        }
+
+        JoinedRow? firstRow = filteredTable.FirstOrDefault();
+        if (firstRow != null && firstRow.ContainsKey(GroupBy.HASH_VALUE))
+        {
+            foreach (var columnName in firstRow[GroupBy.HASH_VALUE].Keys)
+            {
+                fields.Add(new()
+                {
+                    FieldName = columnName,
+                });
+            }
         }
 
         return fields;
@@ -156,6 +164,14 @@ internal class Select : BaseDbAction
                 string columnName = splittedAssembly[1];
 
                 data.Add(row[tableName][columnName]);
+            }
+
+            if (row.ContainsKey(GroupBy.HASH_VALUE))
+            {
+                foreach (var columnName in row[GroupBy.HASH_VALUE].Keys)
+                {
+                    data.Add(row[GroupBy.HASH_VALUE][columnName]);
+                }
             }
 
             result.Add(data);

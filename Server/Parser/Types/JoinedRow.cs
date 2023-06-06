@@ -1,12 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Collections;
 
 namespace Server.Parser.Types
 {
-    public class JoinedRow
+    public class JoinedRow : IEnumerable<KeyValuePair<string, Row>>
     {
         private readonly Dictionary<string, Row> _row = new();
 
@@ -36,6 +32,16 @@ namespace Server.Parser.Types
         public IEnumerable<string> Keys
         {
             get { return _row.Keys; }
+        }
+
+        public IEnumerator<KeyValuePair<string, Row>> GetEnumerator()
+        {
+            return _row.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
         }
 
         public bool ContainsKey(string tableName)
