@@ -128,7 +128,7 @@ internal static class Patterns
 
     public static string GroupBy
     {
-        get => @"\s*GROUP BY\s+(?<ColumnNames>(\w+\s*((,\s*\w+\s*)*)?))";
+        get => @"\s*GROUP BY\s+(?<ColumnNames>([A-Z0-9.]+\s*((,\s*[A-Z0-9.]+\s*)*)?))";
     }
 
     public static string AddStartLine(this string s) => @"^\s*" + s;
