@@ -62,6 +62,17 @@ public class Node
     public Node HandleAlgebraicExpression(string @operator, Node other) => new()
     { Type = NodeType.Value, Value = Value.SolveAlgebraicExpression(@operator, other.Value), };
 
+    public Node Clone()
+    {
+        return new Node
+        {
+            Left = Left?.Clone(),
+            Right = Right?.Clone(),
+            Type = Type,
+            Value = new NodeValue(Value.Value ?? string.Empty) { ValueType = Value.ValueType }
+        };
+    }
+
     /// <summary>
     /// Represents the value held by a Node instance. 
     /// Each NodeValue can hold a string, int, double, boolean, date,
