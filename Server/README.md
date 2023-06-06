@@ -1,6 +1,10 @@
 ﻿# DataVo Database Server
 
+![img](https://github.com/ArintonAkos/ABKR/assets/43067524/5f90c2f1-71a9-42a5-9bac-5128750fc089)
+
 DataVo is a high-performance, multi-threaded C# server providing robust functionalities for managing and manipulating data with a user-friendly interface. This document offers an in-depth look at the server's architecture, functionality, and usage.
+
+**Image was generated using Bing Image Generator**
 
 ## Table of Contents
 
@@ -129,7 +133,7 @@ In this section, we will describe how to utilize these features to perform advan
 DataVo supports various aggregation functions, such as `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`. 
 These can be used in combination with the `GROUP BY` clause to aggregate data over a specific column. Here is an example:
 
-```text
+```sql
 SELECT AVG(score), subject FROM Exams GROUP BY subject
 ```
 
@@ -140,7 +144,7 @@ This command would return the average score for each subject.
 DataVo supports the JOIN operation, which allows you to combine rows from two or more tables based on a related column. 
 For example, you might want to join a table of employees with a table of departments, like this:
 
-```text
+```sql
 SELECT Employees.name, Departments.departmentName FROM Employees JOIN Departments ON Employees.departmentId = Departments.departmentId
 ```
 
