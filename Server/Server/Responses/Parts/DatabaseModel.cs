@@ -8,6 +8,7 @@ namespace Server.Server.Responses.Parts
         {
             public string Name { get; set; }
             public List<Column> Columns { get;set;}
+            public List<string> PrimaryKeys { get; set; }
             public List<ForeignKey> ForeignKeys { get; set; }
             public List<string> UniqueKeys { get; set; }
             public List<IndexFile> IndexFiles { get; set; }

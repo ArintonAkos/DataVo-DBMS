@@ -32,6 +32,7 @@ public class DatabaseController
             {
                 Name = table,
                 Columns = Catalog.GetTableColumns(table, databaseName),
+                PrimaryKeys = Catalog.GetTablePrimaryKeys(table, databaseName),
                 ForeignKeys = Catalog.GetTableForeignKeys(table, databaseName),
                 UniqueKeys = Catalog.GetTableUniqueKeys(table, databaseName),
                 IndexFiles = Catalog.GetTableIndexes(table, databaseName)

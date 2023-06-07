@@ -1,6 +1,4 @@
-﻿using Frontend.Client.Responses;
-using Frontend.Client.Responses.Controllers.DatabaseListResponse;
-using System.Threading.Tasks;
+﻿using Frontend.Client.Responses.Controllers.DatabaseListResponse;
 
 namespace Frontend.Services
 {

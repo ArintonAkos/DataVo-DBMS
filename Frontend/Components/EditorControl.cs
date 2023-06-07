@@ -41,27 +41,6 @@ namespace Frontend.Components
             return textControl;
         }
 
-        public async Task<VisualQueryControl> CreateVisualQueryEditorTab(string database)
-        {
-            TabPage tabPage = new()
-            {
-                Text = $"VQ: {database}",
-                Name = database,
-                Tag = await AuthService.CreateSession()
-            };
-
-            VisualQueryControl vqueryControl = new()
-            {
-                Dock = DockStyle.Fill
-            };
-
-            tabPage.Controls.Add(vqueryControl);
-
-            tabControl.TabPages.Add(tabPage);
-
-            return vqueryControl;
-        }
-
         public async void CreateTextEditorTabWithContent(string filePath)
         {
             TextQueryControl textControl = await CreateTextEditorTab(filePath);
@@ -95,14 +74,15 @@ namespace Frontend.Components
 
         public void SaveActiveTabContent()
         {
-            if (tabControl.SelectedIndex >= 0)
+            if (tabControl.SelectedIndex < 0)
             {
-                TextQueryControl? textControl = GetEditorTextControl(tabControl.SelectedIndex);
+                return;
+            }
 
-                if (textControl != null)
-                {
-                    File.WriteAllText(tabControl.SelectedTab.Name, textControl.TextBox.Text);
-                }
+            TextQueryControl? textControl = GetEditorTextControl(tabControl.SelectedIndex);
+            if (textControl != null)
+            {
+                File.WriteAllText(tabControl.SelectedTab.Name, textControl.TextBox.Text);
             }
         }
 
