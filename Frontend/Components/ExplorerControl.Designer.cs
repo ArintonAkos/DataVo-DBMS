@@ -28,48 +28,57 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
+            components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ExplorerControl));
-            System.Windows.Forms.TreeNode treeNode1 = new System.Windows.Forms.TreeNode("Open folder");
-            System.Windows.Forms.TreeNode treeNode2 = new System.Windows.Forms.TreeNode("Databases", 2, 2);
-            this.ImageList = new System.Windows.Forms.ImageList(this.components);
-            this.SidebarPanel = new System.Windows.Forms.TableLayoutPanel();
-            this.ExplorerTree = new System.Windows.Forms.TreeView();
-            this.EditorExplorerLabel = new System.Windows.Forms.Label();
-            this.SidebarPanel.SuspendLayout();
-            this.SuspendLayout();
+            TreeNode treeNode1 = new TreeNode("Open folder");
+            TreeNode treeNode2 = new TreeNode("Databases", 2, 2);
+            ImageList = new ImageList(components);
+            SidebarPanel = new TableLayoutPanel();
+            ExplorerTree = new TreeView();
+            EditorExplorerLabel = new Label();
+            SidebarPanel.SuspendLayout();
+            SuspendLayout();
             // 
             // ImageList
             // 
-            this.ImageList.ImageStream = ((System.Windows.Forms.ImageListStreamer)(resources.GetObject("ImageList.ImageStream")));
-            this.ImageList.TransparentColor = System.Drawing.Color.Transparent;
-            this.ImageList.Images.SetKeyName(0, "folder.png");
-            this.ImageList.Images.SetKeyName(1, "file.png");
-            this.ImageList.Images.SetKeyName(2, "database.png");
+            ImageList.ColorDepth = ColorDepth.Depth8Bit;
+            ImageList.ImageStream = (ImageListStreamer)resources.GetObject("ImageList.ImageStream");
+            ImageList.TransparentColor = Color.Transparent;
+            ImageList.Images.SetKeyName(0, "folder.png");
+            ImageList.Images.SetKeyName(1, "file.png");
+            ImageList.Images.SetKeyName(2, "database.png");
+            ImageList.Images.SetKeyName(3, "primaryKey.png");
+            ImageList.Images.SetKeyName(4, "foreignKey.png");
+            ImageList.Images.SetKeyName(5, "uniqueKey.png");
+            ImageList.Images.SetKeyName(6, "indexFile.png");
+            ImageList.Images.SetKeyName(7, "table.png");
+            ImageList.Images.SetKeyName(8, "column.png");
             // 
             // SidebarPanel
             // 
-            this.SidebarPanel.ColumnCount = 1;
-            this.SidebarPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.SidebarPanel.Controls.Add(this.ExplorerTree, 0, 1);
-            this.SidebarPanel.Controls.Add(this.EditorExplorerLabel, 0, 0);
-            this.SidebarPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.SidebarPanel.Location = new System.Drawing.Point(0, 0);
-            this.SidebarPanel.Name = "SidebarPanel";
-            this.SidebarPanel.RowCount = 2;
-            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
-            this.SidebarPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.SidebarPanel.Size = new System.Drawing.Size(164, 367);
-            this.SidebarPanel.TabIndex = 2;
+            SidebarPanel.ColumnCount = 1;
+            SidebarPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            SidebarPanel.Controls.Add(ExplorerTree, 0, 1);
+            SidebarPanel.Controls.Add(EditorExplorerLabel, 0, 0);
+            SidebarPanel.Dock = DockStyle.Fill;
+            SidebarPanel.Location = new Point(0, 0);
+            SidebarPanel.Margin = new Padding(3, 4, 3, 4);
+            SidebarPanel.Name = "SidebarPanel";
+            SidebarPanel.RowCount = 2;
+            SidebarPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+            SidebarPanel.RowStyles.Add(new RowStyle());
+            SidebarPanel.Size = new Size(164, 459);
+            SidebarPanel.TabIndex = 2;
             // 
             // ExplorerTree
             // 
-            this.ExplorerTree.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.ExplorerTree.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.ExplorerTree.ImageIndex = 0;
-            this.ExplorerTree.ImageList = this.ImageList;
-            this.ExplorerTree.Location = new System.Drawing.Point(3, 25);
-            this.ExplorerTree.Name = "ExplorerTree";
+            ExplorerTree.BorderStyle = BorderStyle.None;
+            ExplorerTree.Dock = DockStyle.Fill;
+            ExplorerTree.ImageIndex = 0;
+            ExplorerTree.ImageList = ImageList;
+            ExplorerTree.Location = new Point(3, 32);
+            ExplorerTree.Margin = new Padding(3, 4, 3, 4);
+            ExplorerTree.Name = "ExplorerTree";
             treeNode1.Name = "openFolder";
             treeNode1.Tag = "None";
             treeNode1.Text = "Open folder";
@@ -77,43 +86,41 @@
             treeNode2.Name = "databases";
             treeNode2.SelectedImageIndex = 2;
             treeNode2.Text = "Databases";
-            this.ExplorerTree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
-            treeNode1,
-            treeNode2});
-            this.ExplorerTree.SelectedImageIndex = 0;
-            this.ExplorerTree.Size = new System.Drawing.Size(158, 339);
-            this.ExplorerTree.TabIndex = 0;
-            this.ExplorerTree.NodeMouseDoubleClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.ExplorerTree_NodeMouseDoubleClick);
+            ExplorerTree.Nodes.AddRange(new TreeNode[] { treeNode1, treeNode2 });
+            ExplorerTree.SelectedImageIndex = 0;
+            ExplorerTree.Size = new Size(158, 424);
+            ExplorerTree.TabIndex = 0;
+            ExplorerTree.NodeMouseDoubleClick += ExplorerTree_NodeMouseDoubleClick;
             // 
             // EditorExplorerLabel
             // 
-            this.EditorExplorerLabel.AutoSize = true;
-            this.EditorExplorerLabel.Dock = System.Windows.Forms.DockStyle.Left;
-            this.EditorExplorerLabel.Font = new System.Drawing.Font("Consolas", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.EditorExplorerLabel.Location = new System.Drawing.Point(3, 0);
-            this.EditorExplorerLabel.Name = "EditorExplorerLabel";
-            this.EditorExplorerLabel.Size = new System.Drawing.Size(72, 22);
-            this.EditorExplorerLabel.TabIndex = 1;
-            this.EditorExplorerLabel.Text = "Explorer";
-            this.EditorExplorerLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            EditorExplorerLabel.AutoSize = true;
+            EditorExplorerLabel.Dock = DockStyle.Left;
+            EditorExplorerLabel.Font = new Font("Consolas", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            EditorExplorerLabel.Location = new Point(3, 0);
+            EditorExplorerLabel.Name = "EditorExplorerLabel";
+            EditorExplorerLabel.Size = new Size(72, 28);
+            EditorExplorerLabel.TabIndex = 1;
+            EditorExplorerLabel.Text = "Explorer";
+            EditorExplorerLabel.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // ExplorerControl
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.Controls.Add(this.SidebarPanel);
-            this.Name = "ExplorerControl";
-            this.Size = new System.Drawing.Size(164, 367);
-            this.SidebarPanel.ResumeLayout(false);
-            this.SidebarPanel.PerformLayout();
-            this.ResumeLayout(false);
-
+            AutoScaleDimensions = new SizeF(8F, 20F);
+            AutoScaleMode = AutoScaleMode.Font;
+            Controls.Add(SidebarPanel);
+            Margin = new Padding(3, 4, 3, 4);
+            Name = "ExplorerControl";
+            Size = new Size(164, 459);
+            SidebarPanel.ResumeLayout(false);
+            SidebarPanel.PerformLayout();
+            ResumeLayout(false);
         }
 
         #endregion
-        private System.Windows.Forms.ImageList ImageList;
-        private System.Windows.Forms.TableLayoutPanel SidebarPanel;
-        private System.Windows.Forms.TreeView ExplorerTree;
-        private System.Windows.Forms.Label EditorExplorerLabel;
+        private ImageList ImageList;
+        private TableLayoutPanel SidebarPanel;
+        private TreeView ExplorerTree;
+        private Label EditorExplorerLabel;
     }
 }

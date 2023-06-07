@@ -3,7 +3,7 @@ namespace Frontend.Components
 {
     public partial class TextQueryControl : UserControl
     {
-        public SqlRichTextBox TextBox { get { return sqlRichTextBox1; } }
+        public SqlRichTextBox TextBox { get { return textBox; } }
         public ListBox LineCounter { get { return listBox1; } }
 
         public TextQueryControl()
@@ -11,16 +11,9 @@ namespace Frontend.Components
             InitializeComponent();
 
             Name = "TextEditor";
-
-            TextBox.TextChanged += SqlRichTextBox_TextChanged;
         }
 
         private void SqlRichTextBox_TextChanged(object sender, EventArgs e)
-        {
-            UpdateLineNumbers();
-        }
-
-        private void UpdateLineNumbers()
         {
             LineCounter.Items.Clear();
 
@@ -29,11 +22,6 @@ namespace Frontend.Components
             {
                 LineCounter.Items.Add(i.ToString());
             }
-        }
-
-        private void ListBox1_SelectedIndexChanged(object sender, EventArgs e)
-        {
-
         }
     }
 }
