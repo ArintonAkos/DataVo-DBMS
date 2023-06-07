@@ -46,6 +46,8 @@ namespace Frontend.Components
             TextQueryControl textControl = await CreateTextEditorTab(filePath);
 
             textControl.TextBox.Text = File.ReadAllText(filePath);
+            textControl.TextBox.ApplyHighlighting();
+            textControl.AddLineNumbers();
         }
 
         public string GetActiveTabContent()
