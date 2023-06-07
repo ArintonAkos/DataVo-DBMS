@@ -15,33 +15,31 @@ public class TreeRearranger
         root.Left = Rearrange(root.Left);
         root.Right = Rearrange(root.Right);
 
-        if (root.Type != Node.NodeType.Or)
+        if (root.Type == Node.NodeType.And && root.Left != null && root.Right != null)
         {
-            return root;
-        }
+            if (root.Left.Type == Node.NodeType.Or)
+            {
+                var A = root.Right;
+                var B = root.Left.Left;
+                var C = root.Left.Right;
 
-        if (root.Left != null && root.Left.Type == Node.NodeType.And)
-        {
-            var leftChild = root.Left;
-            var leftLeftChild = leftChild.Left;
-            var leftRightChild = leftChild.Right;
+                var newLeft = new Node { Left = A.Clone(), Right = B, Type = Node.NodeType.And };
+                var newRight = new Node { Left = A.Clone(), Right = C, Type = Node.NodeType.And };
 
-            leftChild.Left = root;
-            leftChild.Right = leftRightChild;
-            root.Left = leftLeftChild;
-            root = leftChild;
-        }
+                root = new Node { Left = newLeft, Right = newRight, Type = Node.NodeType.Or };
+            }
 
-        if (root.Right != null && root.Right.Type == Node.NodeType.And)
-        {
-            var rightChild = root.Right;
-            var rightLeftChild = rightChild.Left;
-            var rightRightChild = rightChild.Right;
+            if (root.Right.Type == Node.NodeType.Or)
+            {
+                var A = root.Left;
+                var B = root.Right.Left;
+                var C = root.Right.Right;
 
-            rightChild.Left = root;
-            rightChild.Right = rightLeftChild;
-            root.Right = rightRightChild;
-            root = rightChild;
+                var newLeft = new Node { Left = A.Clone(), Right = B, Type = Node.NodeType.And };
+                var newRight = new Node { Left = C.Clone(), Right = A.Clone(), Type = Node.NodeType.And };
+
+                root = new Node { Left = newLeft, Right = newRight, Type = Node.NodeType.Or };
+            }
         }
 
         return root;
