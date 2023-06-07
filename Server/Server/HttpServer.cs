@@ -51,7 +51,5 @@ internal class HttpServer
         using var sw = new StreamWriter(context.Response.OutputStream);
         await sw.FlushAsync();
         await sw.WriteAsync(response.ToJson());
-
-        Logger.Info($"Sent Response to {context.Request.UserHostName}: {response.ToJson()}");
     }
 }
