@@ -30,7 +30,7 @@
         {
             tableLayoutPanel1 = new TableLayoutPanel();
             textBox = new SqlRichTextBox();
-            listBox1 = new ListBox();
+            lineNumberTextBox = new RichTextBox();
             tableLayoutPanel1.SuspendLayout();
             SuspendLayout();
             // 
@@ -40,7 +40,7 @@
             tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 57F));
             tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tableLayoutPanel1.Controls.Add(textBox, 1, 0);
-            tableLayoutPanel1.Controls.Add(listBox1, 0, 0);
+            tableLayoutPanel1.Controls.Add(lineNumberTextBox, 0, 0);
             tableLayoutPanel1.Dock = DockStyle.Fill;
             tableLayoutPanel1.Location = new Point(0, 0);
             tableLayoutPanel1.Margin = new Padding(3, 4, 3, 4);
@@ -60,18 +60,22 @@
             textBox.Size = new Size(776, 525);
             textBox.TabIndex = 0;
             textBox.Text = "";
-            textBox.TextChanged += SqlRichTextBox_TextChanged;
+            textBox.SelectionChanged += SqlRichTextBox_SelectionChanged;
+            textBox.VScroll += SqlRichTextBox_VScroll;
+            textBox.KeyDown += SqlRichTextBox_KeyDown;
             // 
-            // listBox1
+            // lineNumberTextBox
             // 
-            listBox1.Dock = DockStyle.Fill;
-            listBox1.FormattingEnabled = true;
-            listBox1.ItemHeight = 20;
-            listBox1.Location = new Point(3, 4);
-            listBox1.Margin = new Padding(3, 4, 3, 4);
-            listBox1.Name = "listBox1";
-            listBox1.Size = new Size(51, 525);
-            listBox1.TabIndex = 1;
+            lineNumberTextBox.BorderStyle = BorderStyle.None;
+            lineNumberTextBox.Dock = DockStyle.Fill;
+            lineNumberTextBox.Location = new Point(3, 3);
+            lineNumberTextBox.Name = "lineNumberTextBox";
+            lineNumberTextBox.ReadOnly = true;
+            lineNumberTextBox.ScrollBars = RichTextBoxScrollBars.None;
+            lineNumberTextBox.Size = new Size(51, 527);
+            lineNumberTextBox.TabIndex = 1;
+            lineNumberTextBox.Text = "";
+            lineNumberTextBox.MouseDown += LineNumberTextBox_MouseDown;
             // 
             // TextQueryControl
             // 
@@ -82,6 +86,7 @@
             Name = "TextQueryControl";
             Size = new Size(839, 533);
             Tag = "TextBox";
+            Resize += TextQueryControl_Resize;
             tableLayoutPanel1.ResumeLayout(false);
             ResumeLayout(false);
         }
@@ -90,6 +95,6 @@
 
         private TableLayoutPanel tableLayoutPanel1;
         private SqlRichTextBox textBox;
-        private ListBox listBox1;
+        private RichTextBox lineNumberTextBox;
     }
 }
