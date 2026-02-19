@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DML;
 using Server.Parser.Actions;
+using Server.Server.BTree;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
 using Server.Server.Requests.Controllers.Parser;
@@ -31,7 +32,7 @@ internal class DeleteFrom : BaseDbAction
                 .ToList()
                 .ForEach(indexFile =>
                 {
-                    DbContext.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, databaseName);
+                    IndexManager.Instance.DeleteFromIndex(toBeDeleted, indexFile, _model.TableName, databaseName);
                 });
 
             Logger.Info($"Rows affected: {toBeDeleted.Count}");

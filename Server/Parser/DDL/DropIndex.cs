@@ -3,8 +3,8 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.BTree;
 using Server.Server.Cache;
-using Server.Server.MongoDB;
 using Server.Server.Requests.Controllers.Parser;
 
 namespace Server.Parser.DDL;
@@ -26,7 +26,7 @@ internal class DropIndex : BaseDbAction
 
             Catalog.DropIndex(_model.IndexName, _model.TableName, databaseName);
 
-            DbContext.Instance.DropIndex(_model.IndexName, _model.TableName, databaseName);
+            IndexManager.Instance.DropIndex(_model.IndexName, _model.TableName, databaseName);
 
             Logger.Info($"Index file {_model.IndexName} successfully dropped!");
             Messages.Add($"Index file {_model.IndexName} successfully dropped!");
