@@ -1,4 +1,5 @@
 ﻿using Server.Models.Statement.Utils;
+using Server.Server.BTree;
 using Server.Server.MongoDB;
 using System.Security;
 
@@ -82,7 +83,7 @@ namespace Server.Parser.Statements.Mechanism
             _table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
             if (indexFile != null)
             {
-                return DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, _table.TableName, _table.DatabaseName!);
+                return IndexManager.Instance.FilterUsingIndex(rightValue!, indexFile, _table.TableName, _table.DatabaseName!);
             }
 
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue!);

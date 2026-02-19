@@ -1,9 +1,9 @@
 ﻿using System.Text.RegularExpressions;
-using MongoDB.Bson;
 using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.BTree;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
 using Server.Server.Requests.Controllers.Parser;
@@ -30,7 +30,7 @@ internal class CreateTable : BaseDbAction
             List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
             uniqueKeys.ForEach(key =>
             {
-                DbContext.Instance.CreateIndex(new List<BsonDocument>(), $"_UK_{key}", _model.TableName, databaseName);
+                IndexManager.Instance.CreateIndex(new Dictionary<string, List<string>>(), $"_UK_{key}", _model.TableName, databaseName);
             });
 
             Logger.Info($"New table {_model.TableName} successfully created!");

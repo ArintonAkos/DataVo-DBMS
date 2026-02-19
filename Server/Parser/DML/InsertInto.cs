@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DML;
 using Server.Parser.Actions;
+using Server.Server.BTree;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
 using Server.Server.Requests.Controllers.Parser;
@@ -80,7 +81,7 @@ namespace Server.Parser.DML
                     }
 
                     if (uniqueKeys.Contains(tableColumn.Name) && 
-                        DbContext.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
+                        IndexManager.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
                     )
                     {
                         invalidRow = true;
@@ -156,7 +157,7 @@ namespace Server.Parser.DML
                 }
                 indexValue = indexValue.Remove(indexValue.Length - 2, 2);
 
-                DbContext.Instance.InsertIntoIndex(indexValue, id, index.IndexFileName, _model.TableName, databaseName);
+                IndexManager.Instance.InsertIntoIndex(indexValue, id, index.IndexFileName, _model.TableName, databaseName);
             }
         }
 
