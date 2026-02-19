@@ -3,6 +3,7 @@ using Server.Logging;
 using Server.Models.Catalog;
 using Server.Models.DDL;
 using Server.Parser.Actions;
+using Server.Server.BTree;
 using Server.Server.Cache;
 using Server.Server.MongoDB;
 using Server.Server.Requests.Controllers.Parser;
@@ -25,7 +26,7 @@ internal class DropTable : BaseDbAction
             Catalog.GetTableIndexes(_model.TableName, databaseName)
                 .Select(e => e.IndexFileName)
                 .ToList()
-                .ForEach(indexFile => { DbContext.Instance.DropIndex(indexFile, _model.TableName, databaseName); });
+                .ForEach(indexFile => { IndexManager.Instance.DropIndex(indexFile, _model.TableName, databaseName); });
 
             Catalog.DropTable(_model.TableName, databaseName);
 

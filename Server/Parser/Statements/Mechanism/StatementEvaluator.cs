@@ -1,5 +1,6 @@
 ﻿using Server.Models.Statement.Utils;
 using Server.Parser.Types;
+using Server.Server.BTree;
 using Server.Server.MongoDB;
 using Server.Services;
 using Server.Utils;
@@ -93,7 +94,7 @@ internal class StatementEvaluator
         table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
         if (indexFile != null)
         {
-            List<string> ids = DbContext.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!).ToList();
+            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!).ToList();
 
             tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
 
