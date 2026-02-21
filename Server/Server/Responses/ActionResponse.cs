@@ -1,28 +1,29 @@
-﻿using Newtonsoft.Json;
-using Server.Server.Responses.Parts;
+using Newtonsoft.Json;
+using DataVo.Core.Contracts.Results;
 
 namespace Server.Server.Responses;
 
 public class ActionResponse
 {
-    [JsonProperty] public List<List<dynamic>> Data { get; set; }
+    [JsonProperty] public List<Dictionary<string, dynamic>> Data { get; set; } = new();
 
-    [JsonProperty] public List<FieldResponse> Fields { get; set; }
+    [JsonProperty] public List<string> Fields { get; set; } = new();
 
     [JsonProperty] public List<string> Messages { get; set; } = new();
+    
+    [JsonProperty] public bool IsError { get; set; }
 
-    public static ActionResponse FromRaw(List<string> messages, List<List<dynamic>> data,
-        List<FieldResponse> fields) =>
+    public static ActionResponse FromQueryResult(QueryResult result) =>
         new()
         {
-            Messages = messages,
-            Data = data,
-            Fields = fields,
+            Messages = result.Messages,
+            Data = result.Data,
+            Fields = result.Fields,
+            IsError = result.IsError
         };
 
     public static ActionResponse Default() =>
-        FromRaw(new(), new(), new());
+        new();
 
-    public static ActionResponse Error(Exception ex) => FromRaw(new List<string> { ex.Message, },
-        new(), new());
+    public static ActionResponse Error(Exception ex) => new() { Messages = new List<string> { ex.Message }, IsError = true };
 }

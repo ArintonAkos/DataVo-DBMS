@@ -1,5 +1,5 @@
 using BenchmarkDotNet.Attributes;
-using Server.Server.BTree.Core;
+using DataVo.Core.BTree.Core;
 using System.Collections.Generic;
 
 using System.IO;
@@ -41,13 +41,13 @@ public class QueryBenchmarker
         string binaryIndexFile = "benchmark_binary_age.btree";
         if (File.Exists(binaryIndexFile)) File.Delete(binaryIndexFile);
         
-        var binIndex = new global::Server.Server.BTree.Binary.BinaryBTreeIndex();
+        var binIndex = new global::DataVo.Core.BTree.Binary.BinaryBTreeIndex();
         binIndex.Load(binaryIndexFile);
         
         string bplusIndexFile = "benchmark_bplus_age.btree";
         if (File.Exists(bplusIndexFile)) File.Delete(bplusIndexFile);
         
-        var bplusIndex = new global::Server.Server.BTree.BPlus.BinaryBPlusTreeIndex();
+        var bplusIndex = new global::DataVo.Core.BTree.BPlus.BinaryBPlusTreeIndex();
         bplusIndex.Load(bplusIndexFile);
 
         foreach (var kvp in _tableContent)
@@ -65,8 +65,8 @@ public class QueryBenchmarker
         bplusIndex.Dispose();
         
         // Re-load representing a cold start but memory mapped
-        _binaryIndex = global::Server.Server.BTree.Binary.BinaryBTreeIndex.LoadFile(binaryIndexFile);
-        _bplusIndex = global::Server.Server.BTree.BPlus.BinaryBPlusTreeIndex.LoadFile(bplusIndexFile);
+        _binaryIndex = global::DataVo.Core.BTree.Binary.BinaryBTreeIndex.LoadFile(binaryIndexFile);
+        _bplusIndex = global::DataVo.Core.BTree.BPlus.BinaryBPlusTreeIndex.LoadFile(bplusIndexFile);
     }
 
     // [Benchmark(Baseline = true)]

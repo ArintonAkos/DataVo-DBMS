@@ -1,5 +1,5 @@
 ﻿using System.Net;
-using Server.Logging;
+using DataVo.Core.Logging;
 using Server.Server.Http;
 using Server.Server.Responses;
 
