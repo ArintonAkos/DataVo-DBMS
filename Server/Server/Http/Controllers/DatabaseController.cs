@@ -1,4 +1,4 @@
-﻿using Server.Models.Catalog;
+﻿using DataVo.Core.Models.Catalog;
 using Server.Server.Http.Attributes;
 using Server.Server.Responses.Controllers.Database;
 using Server.Server.Responses.Parts;

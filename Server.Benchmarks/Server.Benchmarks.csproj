@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Server\Server.csproj" />
+    <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
   </ItemGroup>
 
 </Project>

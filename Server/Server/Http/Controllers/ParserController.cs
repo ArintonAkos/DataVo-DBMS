@@ -1,4 +1,6 @@
 ﻿using Server.Server.Http.Attributes;
+using DataVo.Core.Parser;
+using Server.Server.Responses;
 using Server.Server.Requests.Controllers.Parser;
 using Server.Server.Responses.Controllers.Parser;
 
@@ -16,8 +18,22 @@ internal class ParserController
             throw new Exception("Error while parsing data!");
         }
 
-        var parser = new Parser.Parser(request);
+        var parser = new DataVo.Core.Parser.Parser(request.Data, request.Session);
+        
+        var response = new ParseResponse();
+        var scriptResponse = new ScriptResponse();
+        
+        foreach (var queryResult in parser.Parse())
+        {
+            scriptResponse.Actions.Add(ActionResponse.FromQueryResult(queryResult));
+            if (queryResult.IsError)
+            {
+                scriptResponse.IsSuccess = false;
+            }
+        }
+        
+        response.Data.Add(scriptResponse);
 
-        return parser.Parse();
+        return response;
     }
 }
