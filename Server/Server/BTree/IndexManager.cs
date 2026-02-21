@@ -1,3 +1,6 @@
+using Server.Server.BTree.Core;
+using Server.Server.BTree.Binary;
+
 namespace Server.Server.BTree;
 
 /// <summary>
@@ -13,7 +16,7 @@ public class IndexManager
     /// <summary>
     /// In-memory cache of loaded indexes, keyed by "{dbName}/{tableName}_{indexName}".
     /// </summary>
-    private readonly Dictionary<string, BTreeIndex> _cache = new();
+    private readonly Dictionary<string, IIndex> _cache = new();
 
     private IndexManager() { }
 
@@ -45,11 +48,11 @@ public class IndexManager
     /// <summary>
     /// Get or lazily load an index from disk.
     /// </summary>
-    private BTreeIndex GetOrLoad(string indexName, string tableName, string databaseName)
+    private IIndex GetOrLoad(string indexName, string tableName, string databaseName)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
 
-        if (_cache.TryGetValue(cacheKey, out BTreeIndex? cached))
+        if (_cache.TryGetValue(cacheKey, out IIndex? cached))
         {
             return cached;
         }
@@ -57,7 +60,18 @@ public class IndexManager
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
         if (File.Exists(filePath))
         {
-            var index = BTreeIndex.Load(filePath);
+            IIndex index;
+            // Hacky detection for benchmark vs standard to keep tests passing.
+            // A real engine would persist metadata for table's `IndexType`.
+            if (File.ReadAllText(filePath).StartsWith("{")) 
+            {
+                index = JsonBTreeIndex.Load(filePath);
+            }
+            else 
+            {
+                index = BinaryBTreeIndex.LoadFile(filePath);
+            }
+
             _cache[cacheKey] = index;
             return index;
         }
@@ -69,12 +83,20 @@ public class IndexManager
     /// Create a new index and bulk-insert initial values.
     /// values is a dictionary mapping index key → list of row IDs.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<string>> values, string indexName, string tableName, string databaseName)
+    public void CreateIndex(Dictionary<string, List<string>> values, string indexName, string tableName, string databaseName, IndexType indexType = IndexType.JsonBTree)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
 
-        var index = new BTreeIndex();
+        IIndex index = indexType == IndexType.BinaryBTree 
+            ? new BinaryBTreeIndex() 
+            : new JsonBTreeIndex();
+            
+        // Initial setup for binary pagers required before inserting
+        if (index is BinaryBTreeIndex binIndex)
+        {
+            binIndex.Load(filePath);
+        }
 
         foreach (var kvp in values)
         {

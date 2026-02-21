@@ -17,14 +17,14 @@ public class BTreePersistenceTests
         string filePath = GetTempFilePath();
         try
         {
-            var index = new BTreeIndex(3);
+            var index = new JsonBTreeIndex(3);
             index.Insert("alice", "row1");
             index.Insert("bob", "row2");
             index.Insert("alice", "row3"); // duplicate key
 
             index.Save(filePath);
 
-            var loaded = BTreeIndex.Load(filePath);
+            var loaded = JsonBTreeIndex.Load(filePath);
 
             Assert.Equal(2, loaded.Search("alice").Count);
             Assert.Contains("row1", loaded.Search("alice"));
@@ -44,14 +44,14 @@ public class BTreePersistenceTests
         string filePath = GetTempFilePath();
         try
         {
-            var index = new BTreeIndex(2); // small degree forces many nodes
+            var index = new JsonBTreeIndex(2); // small degree forces many nodes
             for (int i = 0; i < 200; i++)
             {
                 index.Insert($"key_{i:D4}", $"row_{i}");
             }
 
             index.Save(filePath);
-            var loaded = BTreeIndex.Load(filePath);
+            var loaded = JsonBTreeIndex.Load(filePath);
 
             for (int i = 0; i < 200; i++)
             {
@@ -71,7 +71,7 @@ public class BTreePersistenceTests
     {
         Assert.Throws<FileNotFoundException>(() =>
         {
-            BTreeIndex.Load("/tmp/does_not_exist.btree");
+            JsonBTreeIndex.Load("/tmp/does_not_exist.btree");
         });
     }
 
@@ -82,13 +82,13 @@ public class BTreePersistenceTests
         string filePath = Path.Combine(dir, "test.btree");
         try
         {
-            var index = new BTreeIndex(3);
+            var index = new JsonBTreeIndex(3);
             index.Insert("test", "value");
             index.Save(filePath);
 
             Assert.True(File.Exists(filePath));
 
-            var loaded = BTreeIndex.Load(filePath);
+            var loaded = JsonBTreeIndex.Load(filePath);
             Assert.Single(loaded.Search("test"));
         }
         finally
@@ -103,10 +103,10 @@ public class BTreePersistenceTests
         string filePath = GetTempFilePath();
         try
         {
-            var index = new BTreeIndex(3);
+            var index = new JsonBTreeIndex(3);
             index.Save(filePath);
 
-            var loaded = BTreeIndex.Load(filePath);
+            var loaded = JsonBTreeIndex.Load(filePath);
             Assert.Empty(loaded.Search("anything"));
         }
         finally
