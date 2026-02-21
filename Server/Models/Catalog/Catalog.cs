@@ -4,7 +4,7 @@ using Server.Logging;
 
 namespace Server.Models.Catalog;
 
-internal static class Catalog
+public static class Catalog
 {
     private const string DIR_NAME = "databases";
     private const string FILE_NAME = "Catalog.xml";

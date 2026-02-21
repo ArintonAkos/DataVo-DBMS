@@ -8,7 +8,7 @@ using System.Security;
 
 namespace Server.Parser.Statements;
 
-internal class StatementEvaluator
+public class StatementEvaluator
 {
     private TableService TableService { get; set; }
     private Join? Join { get; set; }
