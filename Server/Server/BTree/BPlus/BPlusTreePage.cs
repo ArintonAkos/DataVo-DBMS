@@ -26,8 +26,27 @@ public class BPlusTreePage
     
     // Arrays representing contiguous memory blocks inside the Node
     public int[] Keys { get; set; } = new int[MaxKeys];
-    public string[] Values { get; set; } = new string[MaxKeys];
+    private string?[] _values = new string?[MaxKeys];
+    private byte[]? _rawValuesData;
     public int[] Children { get; set; } = new int[MaxKeys + 1];
+
+    public string GetValue(int index)
+    {
+        if (_values[index] != null) return _values[index]!;
+        if (_rawValuesData != null)
+        {
+            byte[] subset = new byte[32];
+            Array.Copy(_rawValuesData, index * 32, subset, 0, 32);
+            _values[index] = GetStringFromFixedBytes(subset);
+            return _values[index]!;
+        }
+        return string.Empty;
+    }
+
+    public void SetValue(int index, string value)
+    {
+        _values[index] = value;
+    }
 
     public byte[] Serialize()
     {
@@ -52,7 +71,7 @@ public class BPlusTreePage
         {
             for (int i = 0; i < MaxKeys; i++)
             {
-                writer.Write(GetFixedStringBytes(Values[i], 32));
+                writer.Write(GetFixedStringBytes(GetValue(i), 32));
             }
         }
         else
@@ -86,10 +105,7 @@ public class BPlusTreePage
 
         if (page.IsLeaf)
         {
-            for (int i = 0; i < MaxKeys; i++)
-            {
-                page.Values[i] = GetStringFromFixedBytes(reader.ReadBytes(32));
-            }
+            page._rawValuesData = reader.ReadBytes(MaxKeys * 32);
         }
         else
         {

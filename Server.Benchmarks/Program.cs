@@ -6,6 +6,6 @@ public class Program
 {
     public static void Main(string[] args)
     {
-        var summary = BenchmarkRunner.Run<QueryBenchmarker>();
+        var summary = BenchmarkRunner.Run<SqlExecutionBenchmarker>();
     }
 }

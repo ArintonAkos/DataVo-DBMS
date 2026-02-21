@@ -21,7 +21,7 @@ public class BinaryBPlusTreeIndex : IIndex
             root.IsLeaf = true;
             root.NextPageId = -1;
             root.Keys[0] = intKey;
-            root.Values[0] = rowId;
+            root.SetValue(0, rowId);
             root.NumKeys = 1;
             
             _pager.RootPageId = root.PageId;
@@ -61,11 +61,11 @@ public class BinaryBPlusTreeIndex : IIndex
             while (i >= 0 && key < node.Keys[i])
             {
                 node.Keys[i + 1] = node.Keys[i];
-                node.Values[i + 1] = node.Values[i];
+                node.SetValue(i + 1, node.GetValue(i));
                 i--;
             }
             node.Keys[i + 1] = key;
-            node.Values[i + 1] = value;
+            node.SetValue(i + 1, value);
             node.NumKeys++;
             _pager.WritePage(node);
         }
@@ -108,7 +108,7 @@ public class BinaryBPlusTreeIndex : IIndex
             for (int j = 0; j < newNode.NumKeys; j++)
             {
                 newNode.Keys[j] = child.Keys[j + t];
-                newNode.Values[j] = child.Values[j + t];
+                newNode.SetValue(j, child.GetValue(j + t));
             }
             
             newNode.NextPageId = child.NextPageId;
@@ -185,7 +185,7 @@ public class BinaryBPlusTreeIndex : IIndex
             {
                 if (current.Keys[i] == intKey)
                 {
-                    results.Add(current.Values[i]);
+                    results.Add(current.GetValue(i));
                 }
                 else if (current.Keys[i] > intKey)
                 {
