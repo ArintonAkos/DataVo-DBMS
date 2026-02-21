@@ -2,12 +2,12 @@ using Server.Server.BTree;
 
 namespace Server.Tests;
 
-public class BTreeIndexTests
+public class JsonBTreeIndexTests
 {
     [Fact]
     public void Insert_SingleEntry_CanBeSearched()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("alice", "row1");
 
         var result = index.Search("alice");
@@ -18,7 +18,7 @@ public class BTreeIndexTests
     [Fact]
     public void Search_NonExistentKey_ReturnsEmpty()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("alice", "row1");
 
         var result = index.Search("bob");
@@ -28,7 +28,7 @@ public class BTreeIndexTests
     [Fact]
     public void Insert_DuplicateKeys_AccumulatesValues()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("color", "red_row");
         index.Insert("color", "blue_row");
         index.Insert("color", "green_row");
@@ -43,7 +43,7 @@ public class BTreeIndexTests
     [Fact]
     public void ContainsValue_WorksCorrectly()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("alice", "row1");
 
         Assert.True(index.ContainsValue("alice"));
@@ -53,7 +53,7 @@ public class BTreeIndexTests
     [Fact]
     public void Delete_RemovesSpecificValue()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("alice", "row1");
         index.Insert("alice", "row2");
 
@@ -67,7 +67,7 @@ public class BTreeIndexTests
     [Fact]
     public void Delete_LastValue_RemovesKey()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("alice", "row1");
 
         index.Delete("alice", "row1");
@@ -79,7 +79,7 @@ public class BTreeIndexTests
     [Fact]
     public void DeleteValues_RemovesMultipleRowIds()
     {
-        var index = new BTreeIndex(3);
+        var index = new JsonBTreeIndex(3);
         index.Insert("key1", "row1");
         index.Insert("key1", "row2");
         index.Insert("key2", "row3");
@@ -103,7 +103,7 @@ public class BTreeIndexTests
     public void Insert_ManyEntries_CausesSplitsAndSearchWorks()
     {
         // Use small degree to force many splits
-        var index = new BTreeIndex(2);
+        var index = new JsonBTreeIndex(2);
 
         for (int i = 0; i < 100; i++)
         {
@@ -122,7 +122,7 @@ public class BTreeIndexTests
     [Fact]
     public void Insert_ManyDuplicateKeys_AllValuesRetrieved()
     {
-        var index = new BTreeIndex(2);
+        var index = new JsonBTreeIndex(2);
         int count = 50;
 
         for (int i = 0; i < count; i++)

@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Server.Server.BTree.Core;
 
 namespace Server.Server.BTree;
 
@@ -7,7 +8,7 @@ namespace Server.Server.BTree;
 /// Keys are index column values, values are row IDs.
 /// Supports JSON persistence to .btree files.
 /// </summary>
-public class BTreeIndex
+public class JsonBTreeIndex : IIndex
 {
     private const int DefaultMinDegree = 50;
 
@@ -17,9 +18,9 @@ public class BTreeIndex
     [JsonProperty("minDegree")]
     public int MinDegree { get; set; }
 
-    public BTreeIndex() : this(DefaultMinDegree) { }
+    public JsonBTreeIndex() : this(DefaultMinDegree) { }
 
-    public BTreeIndex(int minDegree)
+    public JsonBTreeIndex(int minDegree)
     {
         MinDegree = minDegree;
         Root = new BTreeNode<string, string>(minDegree, isLeaf: true);
@@ -167,7 +168,7 @@ public class BTreeIndex
     /// <summary>
     /// Deserialize an index from a JSON file on disk.
     /// </summary>
-    public static BTreeIndex Load(string filePath)
+    public static JsonBTreeIndex Load(string filePath)
     {
         if (!File.Exists(filePath))
         {
@@ -175,7 +176,7 @@ public class BTreeIndex
         }
 
         string json = File.ReadAllText(filePath);
-        return JsonConvert.DeserializeObject<BTreeIndex>(json)
+        return JsonConvert.DeserializeObject<JsonBTreeIndex>(json)
                ?? throw new Exception($"Failed to deserialize B-Tree index from: {filePath}");
     }
 }
