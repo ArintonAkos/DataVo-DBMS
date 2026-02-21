@@ -1,4 +1,4 @@
-﻿using Server.Models.Catalog;
+﻿using DataVo.Core.Models.Catalog;
 
 namespace Server.Server.Responses.Parts
 {
