@@ -97,28 +97,15 @@ public class StorageContext(DataVoConfig config)
     public Dictionary<long, Dictionary<string, dynamic>> SelectFromTable(List<long>? ids, List<string> requestedColumns,
         string tableName, string databaseName)
     {
-        // 1. Fetch raw rows
-        Dictionary<long, Dictionary<string, dynamic>> allSelectedData = GetTableContents(ids, tableName, databaseName);
-
-        // 2. Filter down to only requested columns (Projection)
+        HashSet<string>? normalizedColumns = null;
         if (requestedColumns.Count != 0)
         {
-            var normalizedColumns = requestedColumns
+            normalizedColumns = requestedColumns
                 .Select(c => c.Contains('.') ? c.Substring(c.LastIndexOf('.') + 1) : c)
-                .ToList();
-
-            foreach (var rowEntry in allSelectedData)
-            {
-                var row = rowEntry.Value;
-                var keysToRemove = row.Keys.Except(normalizedColumns).ToList();
-                foreach (string keyToRemove in keysToRemove)
-                {
-                    row.Remove(keyToRemove);
-                }
-            }
+                .ToHashSet();
         }
 
-        return allSelectedData;
+        return GetTableContents(ids, tableName, databaseName, normalizedColumns);
     }
 
     /// <summary>
@@ -126,7 +113,7 @@ public class StorageContext(DataVoConfig config)
     /// </summary>
     public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
     {
-        return GetTableContents(null, tableName, databaseName);
+        return GetTableContents(null, tableName, databaseName, null);
     }
 
     /// <summary>
@@ -134,6 +121,12 @@ public class StorageContext(DataVoConfig config)
     /// Used heavily by Index-driven querying (B+Tree).
     /// </summary>
     public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(List<long>? rowIds, string tableName, string databaseName)
+    {
+        return GetTableContents(rowIds, tableName, databaseName, null);
+    }
+
+    public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(List<long>? rowIds, string tableName, string databaseName,
+        HashSet<string>? selectedColumns)
     {
         var parsedTableData = new Dictionary<long, Dictionary<string, dynamic>>();
 
@@ -145,7 +138,7 @@ public class StorageContext(DataVoConfig config)
             foreach (long rowId in rowIds)
             {
                 byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
-                parsedTableData[rowId] = RowSerializer.Deserialize(databaseName, tableName, rawRow);
+                parsedTableData[rowId] = RowSerializer.Deserialize(databaseName, tableName, rawRow, selectedColumns);
             }
         }
         else
@@ -153,7 +146,7 @@ public class StorageContext(DataVoConfig config)
             // Full Table Scan (Fetch all active rows on Disk)
             foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
             {
-                parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(databaseName, tableName, rowTuple.RawRow);
+                parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(databaseName, tableName, rowTuple.RawRow, selectedColumns);
             }
         }
 
