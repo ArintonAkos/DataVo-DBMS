@@ -51,20 +51,32 @@ namespace DataVo.Core.Parser.DML
             List<IndexFile> indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
             List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
 
-            _model.Columns.ForEach(name =>
-            {
-                if (!tableColumns.Any(column => column.Name == name))
-                {
-                    throw new Exception($"Column {name} doesn't exist in table {_model.TableName}!");
-                }
-            });
-
-            List<Dictionary<string, dynamic>> insertData = [];
+            var tableColumnNameSet = tableColumns
+                .Select(column => column.Name)
+                .ToHashSet();
+            var primaryKeySet = primaryKeys.ToHashSet();
+            var uniqueKeySet = uniqueKeys.ToHashSet();
+            var foreignKeysByAttribute = foreignKeys
+                .GroupBy(foreignKey => foreignKey.AttributeName)
+                .ToDictionary(group => group.Key, group => group.First());
 
             int rowNumber = 0;
             int rowsAffected = 0;
 
             bool hasColumns = _model.Columns.Count > 0;
+            var insertColumnToIndex = hasColumns
+                ? _model.Columns
+                    .Select((columnName, index) => new { columnName, index })
+                    .ToDictionary(entry => entry.columnName, entry => entry.index)
+                : null;
+
+            foreach (var columnName in _model.Columns)
+            {
+                if (!tableColumnNameSet.Contains(columnName))
+                {
+                    throw new Exception($"Column {columnName} doesn't exist in table {_model.TableName}!");
+                }
+            }
 
             foreach (var rawRow in _model.RawRows)
             {
@@ -74,8 +86,14 @@ namespace DataVo.Core.Parser.DML
                                         "the number of columns in the table when columns are not specified.");
                 }
 
+                if (hasColumns && rawRow.Count != _model.Columns.Count)
+                {
+                    throw new Exception("The number of values provided in a row must be the same as " +
+                                        "the number of columns provided inside the paranthesis after the table name attribute.");
+                }
+
                 bool invalidRow = false;
-                string id = string.Empty;
+                var idParts = new List<string>(primaryKeys.Count);
                 var rowDict = new Dictionary<string, dynamic>();
 
                 rowNumber++;
@@ -87,15 +105,13 @@ namespace DataVo.Core.Parser.DML
                     string rawValue;
                     if (hasColumns)
                     {
-                        int colIndex = _model.Columns.IndexOf(tableColumn.Name);
-                        if (colIndex == -1)
+                        if (insertColumnToIndex!.TryGetValue(tableColumn.Name, out int colIndex))
                         {
-                            // Column not specified in INSERT, use null or default
-                            rawValue = "null";
+                            rawValue = rawRow[colIndex];
                         }
                         else
                         {
-                            rawValue = rawRow[colIndex];
+                            rawValue = "null";
                         }
                     }
                     else
@@ -104,8 +120,9 @@ namespace DataVo.Core.Parser.DML
                     }
 
                     tableColumn.Value = rawValue.Replace("'", "");
+                    dynamic? parsedValue = tableColumn.ParsedValue;
 
-                    if (tableColumn.ParsedValue == null && rawValue.ToLowerInvariant() != "null")
+                    if (parsedValue == null && rawValue.ToLowerInvariant() != "null")
                     {
                         invalidRow = true;
                         Messages.Add($"Type of argument doesn't match with column type in row {rowNumber}!");
@@ -113,9 +130,9 @@ namespace DataVo.Core.Parser.DML
                         break;
                     }
 
-                    rowDict[tableColumn.Name] = tableColumn.ParsedValue;
+                    rowDict[tableColumn.Name] = parsedValue!;
 
-                    if (uniqueKeys.Contains(tableColumn.Name) &&
+                    if (uniqueKeySet.Contains(tableColumn.Name) &&
                         IndexManager.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
                     )
                     {
@@ -125,12 +142,8 @@ namespace DataVo.Core.Parser.DML
                         break;
                     }
 
-                    if (foreignKeys.Select(e => e.AttributeName).ToList().Contains(tableColumn.Name))
+                    if (foreignKeysByAttribute.TryGetValue(tableColumn.Name, out ForeignKey? foreignKey))
                     {
-                        ForeignKey foreignKey = foreignKeys
-                            .Where(e => e.AttributeName == tableColumn.Name)
-                            .First();
-
                         if (!CheckForeignKeyConstraint(foreignKey, tableColumn.Value, databaseName))
                         {
                             invalidRow = true;
@@ -140,15 +153,15 @@ namespace DataVo.Core.Parser.DML
                         }
                     }
 
-                    if (primaryKeys.Contains(tableColumn.Name))
+                    if (primaryKeySet.Contains(tableColumn.Name))
                     {
-                        id += tableColumn.ParsedValue + "#";
+                        idParts.Add(parsedValue?.ToString() ?? string.Empty);
                     }
                 }
 
                 if (!invalidRow)
                 {
-                    if (!string.IsNullOrEmpty(id)) id = id.Remove(id.Length - 1);
+                    string id = string.Join("#", idParts);
 
                     if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsRow(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
@@ -157,7 +170,7 @@ namespace DataVo.Core.Parser.DML
                         continue;
                     }
 
-                    MakeInsertion(rowDict, indexFiles, tableColumns, databaseName);
+                    MakeInsertion(rowDict, indexFiles, databaseName);
 
                     rowsAffected++;
                 }
@@ -166,7 +179,7 @@ namespace DataVo.Core.Parser.DML
             return rowsAffected;
         }
 
-        private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, List<Column> tableColumns, string databaseName)
+        private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, string databaseName)
         {
             long assignedRowId = StorageContext.Instance.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
 
