@@ -135,20 +135,39 @@ public class BPlusTreePage
         {
             fixed (int* ptr = Keys)
             {
+                int* laneMask = stackalloc int[8];
+
                 for (; i <= NumKeys - 8; i += 8)
                 {
                     Vector256<int> vector = Avx2.LoadVector256(ptr + i);
-                    // CompareGreaterThan or CompareEqual
-                    // We want to find the first element >= targetKey
-                    // Wait, AVX2 only has CompareGreaterThan and CompareEqual for Int32.
-                    // Let's use standard for simplicity in this exact node routing.
-                    // Or we just scan linearly since 112 is tiny in L1 cache.
+
+                    // target > key  => key < target (lane = -1)
+                    Vector256<int> lessThanTargetMask = Avx2.CompareGreaterThan(targetVector, vector);
+
+                    if (Avx2.MoveMask(lessThanTargetMask.AsByte()) == -1)
+                    {
+                        continue;
+                    }
+
+                    Avx.Store(laneMask, lessThanTargetMask);
+
+                    for (int lane = 0; lane < 8; lane++)
+                    {
+                        if (laneMask[lane] == 0)
+                        {
+                            return i + lane;
+                        }
+                    }
                 }
             }
         }
 
-        // To keep logic 100% bug-free for B+Tree routing, standard while loop is extremely fast on 112 Ints
-        return FindIndexStandard(targetKey);
+        while (i < NumKeys && targetKey > Keys[i])
+        {
+            i++;
+        }
+
+        return i;
     }
 
     public int FindIndexStandard(int targetKey)
