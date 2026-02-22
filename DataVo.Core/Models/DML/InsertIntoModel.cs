@@ -4,20 +4,20 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DML;
 
-internal class InsertIntoModel(string tableName, List<Dictionary<string, string>> rows, List<string> columns)
+internal class InsertIntoModel(string tableName, List<List<string>> rawRows, List<string> columns)
 {
     public string TableName { get; set; } = tableName;
-    public List<Dictionary<string, string>> Rows { get; set; } = rows;
+    public List<List<string>> RawRows { get; set; } = rawRows;
     public List<string> Columns { get; set; } = columns;
 
     public static InsertIntoModel FromMatch(Match match)
     {
         var columns = match.Groups["Columns"].Value
             .RemoveWhiteSpaces()
-            .Split(",")
+            .Split(",", StringSplitOptions.RemoveEmptyEntries)
             .ToList();
 
-        List<Dictionary<string, string>> rows = [];
+        List<List<string>> rows = [];
         foreach (Capture rowCapture in match.Groups["Values"].Captures)
         {
             var row = rowCapture.Value
@@ -25,19 +25,13 @@ internal class InsertIntoModel(string tableName, List<Dictionary<string, string>
                 .Split(",")
                 .ToList();
 
-            if (row.Count != columns.Count)
+            if (columns.Count > 0 && row.Count != columns.Count)
             {
                 throw new Exception("The number of values provided in a row must be the same as " +
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
             }
 
-            Dictionary<string, string> rowDict = [];
-            for (int i = 0; i < row.Count; ++i)
-            {
-                rowDict.Add(columns[i], row[i]);
-            }
-
-            rows.Add(rowDict);
+            rows.Add(row);
         }
 
         return new InsertIntoModel(match.Groups["TableName"].Value, rows, columns);
@@ -46,22 +40,22 @@ internal class InsertIntoModel(string tableName, List<Dictionary<string, string>
     public static InsertIntoModel FromAst(InsertIntoStatement ast)
     {
         var columns = ast.Columns.Select(c => c.Name).ToList();
-        List<Dictionary<string, string>> rows = [];
+        List<List<string>> rows = [];
 
         foreach (var rowAst in ast.ValuesLists)
         {
-            if (rowAst.Count != columns.Count)
+            if (columns.Count > 0 && rowAst.Count != columns.Count)
             {
                 throw new Exception("The number of values provided in a row must be the same as " +
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
             }
 
-            Dictionary<string, string> rowDict = [];
+            List<string> rowList = [];
             for (int i = 0; i < rowAst.Count; ++i)
             {
-                rowDict.Add(columns[i], ((IdentifierNode)rowAst[i]).Name);
+                rowList.Add(((IdentifierNode)rowAst[i]).Name);
             }
-            rows.Add(rowDict);
+            rows.Add(rowList);
         }
 
         return new InsertIntoModel(ast.TableName.Name, rows, columns);
