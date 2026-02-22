@@ -1,6 +1,4 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
-using MongoDB.Bson.Serialization.IdGenerators;
 using DataVo.Core.Models.Statement;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
@@ -20,7 +18,7 @@ public class Join
         if (group.Success && group.Length > 0)
         {
             Model = FromMatchGroup(group, tableService);
-            
+
             _tableService = tableService;
             _isValid = true;
         }
@@ -43,7 +41,7 @@ public class Join
 
         Dictionary<string, Dictionary<string, dynamic>> rightTableData = _tableService!.GetTableDetailByAliasOrName(rightTable).TableContent!;
 
-        HashedTable result = new();
+        HashedTable result = [];
 
         bool insertHashAfter = false;
         List<string> joinTables = Model.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
@@ -97,7 +95,7 @@ public class Join
         // Ha ures a tabla, akkor a JOIN eredmenye ugyis ures marad (Mivel INNER JOIN)
         if (tableRows.Count == 0)
         {
-            return new();
+            return [];
         }
 
         int tableCount = tableRows.First().Value.Keys.Count();
@@ -127,7 +125,7 @@ public class Join
             .ToList();
 
         string joinFrom = tableRows.First().Value.Keys.First();
-        List<string> joinedTables = new() { joinFrom };
+        List<string> joinedTables = [joinFrom];
 
         foreach (var joinCondition in sortedJoinConditions)
         {
@@ -139,7 +137,7 @@ public class Join
                 tableRows = PerformJoinCondition(tableRows, joinCondition);
                 joinedTables.Add(rightTableName);
             }
-            else if(!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
+            else if (!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
             {
                 (joinCondition.LeftColumn, joinCondition.RightColumn) = (joinCondition.RightColumn, joinCondition.LeftColumn);
                 tableRows = PerformJoinCondition(tableRows, joinCondition);

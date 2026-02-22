@@ -17,7 +17,7 @@ public static class Catalog
 
     private static string FilePath
     {
-        get => DIR_NAME + "\\" + FILE_NAME;
+        get => Path.Combine(DIR_NAME, FILE_NAME);
     }
 
     public static void CreateDatabase(Database database)
@@ -136,10 +136,11 @@ public static class Catalog
         var table = GetTableElement(databaseName, tableName);
         if (table == null)
         {
-            return new List<string>();
+            return [];
         }
 
         return table.Elements("PrimaryKeys")
+            .Elements("PkAttribute")
             .Select(e => e.Value)
             .ToList();
     }
@@ -149,7 +150,7 @@ public static class Catalog
         var table = GetTableElement(databaseName, tableName);
         if (table == null)
         {
-            return new List<ForeignKey>();
+            return [];
         }
 
         return table.Elements("ForeignKeys")
@@ -163,10 +164,11 @@ public static class Catalog
         var table = GetTableElement(databaseName, tableName);
         if (table == null)
         {
-            return new List<string>();
+            return [];
         }
 
         return table.Elements("UniqueKeys")
+            .Elements("UniqueAttribute")
             .Select(e => e.Value)
             .ToList();
     }
@@ -177,7 +179,7 @@ public static class Catalog
 
         if (table == null)
         {
-            return new List<IndexFile>();
+            return [];
         }
 
         return table.Elements("IndexFiles")
@@ -229,7 +231,7 @@ public static class Catalog
 
     public static Dictionary<string, string> GetTableIndexedColumns(string tableName, string databaseName)
     {
-        Dictionary<string, string> result = new();
+        Dictionary<string, string> result = [];
         List<IndexFile> indexFiles = GetTableIndexes(tableName, databaseName);
 
         foreach (var index in indexFiles)
@@ -311,22 +313,22 @@ public static class Catalog
     private static void ValidateForeignKeys(Table table, string databaseName)
     {
         foreach (var foreignKey in table.ForeignKeys)
-        foreach (var reference in foreignKey.References)
-        {
-            var refTable = GetTableElement(databaseName, reference.ReferenceTableName);
-
-            if (refTable == null)
+            foreach (var reference in foreignKey.References)
             {
-                throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
-            }
+                var refTable = GetTableElement(databaseName, reference.ReferenceTableName);
 
-            var refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
+                if (refTable == null)
+                {
+                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                }
 
-            if (refAttribute == null)
-            {
-                throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                var refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
+
+                if (refAttribute == null)
+                {
+                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                }
             }
-        }
     }
 
     private static void CreateCatalogIfDoesntExist()

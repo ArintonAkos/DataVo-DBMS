@@ -1,13 +1,11 @@
-﻿using MongoDB.Bson;
-using DataVo.Core.Logging;
+﻿using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
-using DataVo.Core.MongoDB;
+using DataVo.Core.StorageEngine;
 using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DML
@@ -36,7 +34,7 @@ namespace DataVo.Core.Parser.DML
                 int rowsAffected = ProcessAndInsertTableRows(databaseName);
 
                 Messages.Add($"Rows affected: {rowsAffected}");
-                Logger.Info($"Rows affected: {rowsAffected}");
+                // Logger.Info($"Rows affected: {rowsAffected}");
             }
             catch (Exception e)
             {
@@ -52,7 +50,7 @@ namespace DataVo.Core.Parser.DML
             List<ForeignKey> foreignKeys = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
             List<IndexFile> indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
             List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
-            
+
             _model.Columns.ForEach(name =>
             {
                 if (!tableColumns.Any(column => column.Name == name))
@@ -61,7 +59,7 @@ namespace DataVo.Core.Parser.DML
                 }
             });
 
-            List<BsonDocument> bsonData = new();
+            List<Dictionary<string, dynamic>> insertData = [];
 
             int rowNumber = 0;
             int rowsAffected = 0;
@@ -71,7 +69,7 @@ namespace DataVo.Core.Parser.DML
                 bool invalidRow = false;
                 string id = string.Empty;
                 string data = string.Empty;
-                
+
                 rowNumber++;
 
                 foreach (Column tableColumn in tableColumns)
@@ -86,7 +84,7 @@ namespace DataVo.Core.Parser.DML
                         break;
                     }
 
-                    if (uniqueKeys.Contains(tableColumn.Name) && 
+                    if (uniqueKeys.Contains(tableColumn.Name) &&
                         IndexManager.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
                     )
                     {
@@ -125,7 +123,10 @@ namespace DataVo.Core.Parser.DML
                     if (!string.IsNullOrEmpty(id)) id = id.Remove(id.Length - 1);
                     if (!string.IsNullOrEmpty(data)) data = data.Remove(data.Length - 1);
 
-                    if (DbContext.Instance.TableContainsRow(id, _model.TableName, databaseName))
+                    // BTree check is sufficient here now.
+                    // if (StorageContext.Instance.TableContainsRow(mappedRowId, _model.TableName, databaseName)) ...
+
+                    if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsRow(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
                         Messages.Add($"Primary key violation in row {rowNumber}!");
                         Logger.Error($"Primary key violation in row {rowNumber}!");
@@ -143,13 +144,28 @@ namespace DataVo.Core.Parser.DML
 
         private void MakeInsertion(string id, string data, List<IndexFile> indexFiles, List<Column> tableColumns, string databaseName)
         {
-            BsonDocument bsonDoc = new()
-            {
-                new BsonElement("_id", id),
-                new BsonElement("columns", data)
-            };
+            var rowDict = new Dictionary<string, dynamic>();
+            // Split up legacy string tracking back into dictionary for serializer
+            var primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
+            var idParts = id.Split('#');
+            var dataParts = data.Split('#');
 
-            DbContext.Instance.InsertOneIntoTable(bsonDoc, _model.TableName, databaseName);
+            int pkIdx = 0, dataIdx = 0;
+            foreach (var col in tableColumns)
+            {
+                if (primaryKeys.Contains(col.Name))
+                {
+                    col.Value = idParts[pkIdx++];
+                    rowDict[col.Name] = col.ParsedValue!;
+                }
+                else
+                {
+                    col.Value = dataParts[dataIdx++];
+                    rowDict[col.Name] = col.ParsedValue!;
+                }
+            }
+
+            long assignedRowId = StorageContext.Instance.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
 
             foreach (var index in indexFiles)
             {
@@ -163,7 +179,7 @@ namespace DataVo.Core.Parser.DML
                 }
                 indexValue = indexValue.Remove(indexValue.Length - 2, 2);
 
-                IndexManager.Instance.InsertIntoIndex(indexValue, id, index.IndexFileName, _model.TableName, databaseName);
+                IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId.ToString(), index.IndexFileName, _model.TableName, databaseName);
             }
         }
 
@@ -171,7 +187,7 @@ namespace DataVo.Core.Parser.DML
         {
             foreach (var reference in foreignKey.References)
             {
-                if (!DbContext.Instance.TableContainsRow(columnValue, reference.ReferenceTableName, databaseName))
+                if (!IndexManager.Instance.IndexContainsRow(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
                 {
                     return false;
                 }

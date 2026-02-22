@@ -1,6 +1,6 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.BTree;
-using DataVo.Core.MongoDB;
+using DataVo.Core.StorageEngine;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism
@@ -9,7 +9,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
     {
         private readonly TableDetail _table;
 
-        public StatementEvaluatorWOJoin(string databaseName, string tableName) 
+        public StatementEvaluatorWOJoin(string databaseName, string tableName)
         {
             _table = new TableDetail(tableName, null);
             _table.DatabaseName = databaseName;
@@ -89,7 +89,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue!);
             if (columnIndex > -1)
             {
-                return DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, _table.TableName, _table.DatabaseName!);
+                // Previously relied on MongoDB Regex, but the PK is now managed precisely by the IndexManager
+                return IndexManager.Instance.FilterUsingIndex(rightValue!, $"_PK_{_table.TableName}", _table.TableName, _table.DatabaseName!);
             }
 
             return _table.TableContent!
@@ -154,7 +155,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 _ => throw new SecurityException("Invalid operator")
             };
 
-            return isCondTrue 
+            return isCondTrue
                 ? _table.TableContent!.Select(row => row.Key).ToHashSet()
                 : new();
         }

@@ -6,29 +6,17 @@ using DataVo.Core.Enums;
 
 namespace DataVo.Core.Models.DDL;
 
-public class CreateTableModel
+public class CreateTableModel(string tableName, List<Field> fields)
 {
-    private CreateTableModel()
-    {
-    }
+    public string TableName { get; set; } = tableName;
 
-    public CreateTableModel(string tableName, List<Field> fields)
-    {
-        TableName = tableName;
-        Fields = fields;
-    }
-
-    public string TableName { get; set; }
-
-    public List<Field> Fields { get; set; }
+    public List<Field> Fields { get; set; } = fields;
 
     public List<string> PrimaryKeys
     {
         get
         {
-            return Fields.FindAll(f => f.IsPrimaryKey == true)
-                .Select(f => f.Name)
-                .ToList();
+            return [.. Fields.FindAll(f => f.IsPrimaryKey == true).Select(f => f.Name)];
         }
     }
 
@@ -56,7 +44,7 @@ public class CreateTableModel
     public static CreateTableModel FromMatch(Match match)
     {
         string tableName = match.Groups["TableName"].Value;
-        List<Field> fields = new();
+        List<Field> fields = [];
 
         string pattern = Patterns.Column;
         var columns = Regex.Match(match.Groups["Columns"].Value, pattern,
@@ -85,7 +73,7 @@ public class CreateTableModel
             IsPrimaryKey = c.IsPrimaryKey,
             IsUnique = c.IsUnique,
             IsNull = -1,
-            ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = new List<Reference> { new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name } } } : null
+            ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = [new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name }] } : null
         }).ToList();
         return new CreateTableModel(tableName, fields);
     }
@@ -116,6 +104,6 @@ public class CreateTableModel
             PrimaryKeys = PrimaryKeys,
             UniqueAttributes = UniqueAttributes,
             ForeignKeys = ForeignKeys,
-            IndexFiles = new List<IndexFile>(),
+            IndexFiles = [],
         };
 }

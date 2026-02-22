@@ -1,6 +1,6 @@
 using DataVo.Core.BTree;
 
-namespace Server.Tests;
+namespace DataVo.Tests.BTree;
 
 public class BTreeNodeTests
 {

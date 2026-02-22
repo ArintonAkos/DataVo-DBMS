@@ -4,11 +4,11 @@ namespace DataVo.Core.Parser.Types
 {
     public class HashedTable : IEnumerable<KeyValuePair<string, JoinedRow>>
     {
-        private readonly Dictionary<string, JoinedRow> _rows = new();
+        private readonly Dictionary<string, JoinedRow> _rows;
 
         public HashedTable()
         {
-            _rows = new Dictionary<string, JoinedRow>();
+            _rows = [];
         }
 
         public HashedTable(Dictionary<string, JoinedRow> rows)

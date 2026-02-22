@@ -3,18 +3,11 @@ using Database = DataVo.Core.Models.Catalog;
 
 namespace DataVo.Core.Models.Statement.Utils
 {
-    public class Column : IColumn
+    public class Column(string databaseName, string tableName, string columnName) : IColumn
     {
-        public string DatabaseName { get; set; }
-        public string TableName { get; set; }
-        public string ColumnName { get; set; }
-
-        public Column(string databaseName, string tableName, string columnName)
-        {
-            DatabaseName = databaseName;
-            TableName = tableName;
-            ColumnName = columnName;
-        }
+        public string DatabaseName { get; set; } = databaseName;
+        public string TableName { get; set; } = tableName;
+        public string ColumnName { get; set; } = columnName;
 
         public string RawType()
         {

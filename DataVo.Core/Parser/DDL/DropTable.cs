@@ -1,12 +1,10 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
-using DataVo.Core.MongoDB;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -32,7 +30,7 @@ internal class DropTable : BaseDbAction
 
             Catalog.DropTable(_model.TableName, databaseName);
 
-            DbContext.Instance.DropTable(_model.TableName, databaseName);
+            Context.DropTable(_model.TableName, databaseName);
 
             Logger.Info($"Table {_model.TableName} successfully dropped!");
             Messages.Add($"Table {_model.TableName} successfully dropped!");

@@ -1,12 +1,4 @@
-﻿using DataVo.Core.Models.Statement;
-using DataVo.Core.Models.Statement.Utils;
-using DataVo.Core.Parser.Statements;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using static DataVo.Core.Models.Statement.JoinModel;
+﻿using DataVo.Core.Models.Statement.Utils;
 
 namespace DataVo.Core.Services
 {
@@ -18,14 +10,14 @@ namespace DataVo.Core.Services
         public TopologicalSort()
         {
             Stack = new Stack<Column>();
-            AdjacencyList = new Dictionary<Column, List<Column>>();
+            AdjacencyList = [];
         }
 
         public void AddEdge(Column source, Column destination)
         {
             if (!AdjacencyList.ContainsKey(source))
             {
-                AdjacencyList[source] = new List<Column>();
+                AdjacencyList[source] = [];
             }
 
             AdjacencyList[source].Add(destination);
@@ -33,7 +25,7 @@ namespace DataVo.Core.Services
 
         public void Sort()
         {
-            HashSet<Column> visited = new();
+            HashSet<Column> visited = [];
 
             foreach (var node in AdjacencyList.Keys)
             {

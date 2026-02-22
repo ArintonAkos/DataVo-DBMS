@@ -8,23 +8,17 @@ namespace DataVo.Core.BTree;
 /// Keys are index column values, values are row IDs.
 /// Supports JSON persistence to .btree files.
 /// </summary>
-public class JsonBTreeIndex : IIndex
+public class JsonBTreeIndex(int minDegree) : IIndex
 {
     private const int DefaultMinDegree = 50;
 
     [JsonProperty("root")]
-    public BTreeNode<string, string> Root { get; set; }
+    public BTreeNode<string, string> Root { get; set; } = new BTreeNode<string, string>(minDegree, isLeaf: true);
 
     [JsonProperty("minDegree")]
-    public int MinDegree { get; set; }
+    public int MinDegree { get; set; } = minDegree;
 
     public JsonBTreeIndex() : this(DefaultMinDegree) { }
-
-    public JsonBTreeIndex(int minDegree)
-    {
-        MinDegree = minDegree;
-        Root = new BTreeNode<string, string>(minDegree, isLeaf: true);
-    }
 
     /// <summary>
     /// Insert a key-value pair into the index.

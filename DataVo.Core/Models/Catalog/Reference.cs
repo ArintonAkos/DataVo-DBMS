@@ -7,9 +7,9 @@ namespace DataVo.Core.Models.Catalog
     public class Reference
     {
         [XmlElement("RefTable")]
-        public string ReferenceTableName { get; set; }
+        public required string ReferenceTableName { get; set; }
 
         [XmlElement("RefAttribute")]
-        public string ReferenceAttributeName { get; set; }
+        public required string ReferenceAttributeName { get; set; }
     }
 }

@@ -14,7 +14,7 @@ public abstract class SqlStatement : SqlNode
 
 public class IdentifierNode(string name) : SqlNode
 {
-  public string Name { get; set; } = name;
+    public string Name { get; set; } = name;
 }
 
 public class JoinConditionNode : SqlNode
@@ -100,7 +100,7 @@ public class ColumnDefinitionNode : SqlNode
 public class CreateTableStatement : SqlStatement
 {
     public IdentifierNode TableName { get; set; } = null!;
-    public List<ColumnDefinitionNode> Columns { get; set; } = new();
+    public List<ColumnDefinitionNode> Columns { get; set; } = [];
 }
 
 public class DropTableStatement : SqlStatement

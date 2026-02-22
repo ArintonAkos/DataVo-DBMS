@@ -5,7 +5,7 @@ namespace DataVo.Core.Parser.Types
 {
     public class GroupedTable : IEnumerable<KeyValuePair<string, ListedTable>>
     {
-        private readonly Dictionary<string, ListedTable> _tables = new();
+        private readonly Dictionary<string, ListedTable> _tables = [];
 
         public IEnumerator<KeyValuePair<string, ListedTable>> GetEnumerator()
         {
@@ -35,7 +35,7 @@ namespace DataVo.Core.Parser.Types
 
         public ListedTable ApplyAggregations(List<Aggregation> aggregations)
         {
-            ListedTable result = new();
+            ListedTable result = [];
 
             foreach (var group in _tables)
             {

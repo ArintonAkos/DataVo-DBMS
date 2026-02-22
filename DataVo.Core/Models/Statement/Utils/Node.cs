@@ -1,5 +1,4 @@
 ﻿using DataVo.Core.Enums;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Models.Statement.Utils;
@@ -37,7 +36,7 @@ public class Node
     /// The left child of the current node.
     /// </summary>
     public Node? Left { get; set; }
-    
+
     /// <summary>
     /// The right child of the current node.
     /// </summary>
@@ -51,7 +50,7 @@ public class Node
     /// <summary>
     /// The value held by the node. It can be an operator, string, int, double, boolean, date or null value.
     /// </summary>
-    public NodeValue Value { get; init; }
+    public NodeValue Value { get; init; } = null!;
 
     /// <summary>
     /// Handles the algebraic expression using the operator and the other Node.

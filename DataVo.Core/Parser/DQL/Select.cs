@@ -1,6 +1,4 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
-using MongoDB.Driver;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
@@ -110,7 +108,7 @@ internal class Select : BaseDbAction
 
     private ListedTable EvaluateJoin()
     {
-        HashedTable groupedInitialTable = new();
+        HashedTable groupedInitialTable = [];
 
         foreach (var row in _model.FromTable.TableContent!)
         {
@@ -124,17 +122,23 @@ internal class Select : BaseDbAction
     private List<string> CreateFieldsFromColumns(ListedTable filteredTable)
     {
         List<string> selectedColumns = _model.GetSelectedColumns();
-        List<string> fields = new();
-        
+        List<string> fields = [];
+
         foreach (string column in selectedColumns)
         {
             string[] splittedColumn = column.Split('.');
             string tableName = splittedColumn[0];
             string columnName = splittedColumn[1];
 
-            string inUseNameOfTable = _model.TableService!.GetTableDetailByAliasOrName(tableName).GetTableNameInUse();
-
-            fields.Add($"{inUseNameOfTable}.{columnName}");
+            if (_model.JoinStatement.ContainsJoin())
+            {
+                string inUseNameOfTable = _model.TableService!.GetTableDetailByAliasOrName(tableName).GetTableNameInUse();
+                fields.Add($"{inUseNameOfTable}.{columnName}");
+            }
+            else
+            {
+                fields.Add(columnName);
+            }
         }
 
         JoinedRow? firstRow = filteredTable.FirstOrDefault();
@@ -157,7 +161,7 @@ internal class Select : BaseDbAction
         {
             Dictionary<string, dynamic> data = new();
             int fieldIndex = 0;
-            
+
             foreach (string nameAssembly in _model.GetSelectedColumns())
             {
                 string[] splittedAssembly = nameAssembly.Split('.');

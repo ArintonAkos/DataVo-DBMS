@@ -11,15 +11,15 @@ internal class SelectModel
     public Dictionary<string, List<string>>? TableColumnsInUse { get; set; }
     public string? Database { get; set; }
     public TableService? TableService { get; set; }
-    public Where WhereStatement { get; set; }
-    public Join JoinStatement { get; set; }
-    public GroupBy GroupByStatement { get; set; }
-    public Aggregate AggregateStatement { get; set; }
-    public TableDetail FromTable { get; set; }
+    public Where WhereStatement { get; set; } = null!;
+    public Join JoinStatement { get; set; } = null!;
+    public GroupBy GroupByStatement { get; set; } = null!;
+    public Aggregate AggregateStatement { get; set; } = null!;
+    public TableDetail FromTable { get; set; } = null!;
 
-    private Group RawJoinStatement { get; set; }
-    private string RawGroupByStatement { get; set; }
-    private string RawColumns { get; set; }
+    private Group RawJoinStatement { get; set; } = null!;
+    private string RawGroupByStatement { get; set; } = null!;
+    private string RawColumns { get; set; } = null!;
     public string? RawHavingStatement { get; set; }
     public string? RawOrderByStatement { get; set; }
 
@@ -64,9 +64,9 @@ internal class SelectModel
 
         // Reconstruct RawJoinStatement for legacy backend compatibility
         string rawJoinString = string.Empty;
-        if (ast.Joins.Any())
+        if (ast.Joins.Count != 0)
         {
-            var joinParts = ast.Joins.Select(j => 
+            var joinParts = ast.Joins.Select(j =>
             {
                 string aliasPart = j.Alias != null ? $" AS {j.Alias.Name}" : "";
                 string onPart = j.Condition != null ? $" ON {j.Condition.LeftTable.Name}.{j.Condition.LeftColumn.Name} = {j.Condition.RightTable.Name}.{j.Condition.RightColumn.Name}" : "";
@@ -77,7 +77,7 @@ internal class SelectModel
 
         // Reconstruct RawGroupByStatement for legacy backend compatibility
         string rawGroupByString = string.Empty;
-        if (ast.GroupByExpression != null && ast.GroupByExpression.Columns.Any())
+        if (ast.GroupByExpression != null && ast.GroupByExpression.Columns.Count != 0)
         {
             rawGroupByString = string.Join(", ", ast.GroupByExpression.Columns.Select(c => c.Name));
         }
@@ -89,7 +89,7 @@ internal class SelectModel
         }
 
         string rawOrderByString = string.Empty;
-        if (ast.OrderByExpression != null && ast.OrderByExpression.Columns.Any())
+        if (ast.OrderByExpression != null && ast.OrderByExpression.Columns.Count != 0)
         {
             rawOrderByString = string.Join(", ", ast.OrderByExpression.Columns.Select(c => $"{c.Column.Name}{(c.IsAscending ? "" : " DESC")}"));
         }
@@ -118,7 +118,7 @@ internal class SelectModel
 
     private List<string> GetAllColumns()
     {
-        List<string> columns = new();
+        List<string> columns = [];
 
         foreach (var table in TableService!.TableDetails)
         {

@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using DataVo.Core.BTree.Core;
 
 namespace DataVo.Core.BTree.Binary;
@@ -72,7 +69,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     public List<string> Search(string key)
     {
         if (_pager == null) throw new Exception("Index not loaded");
-        
+
         var results = new List<string>();
         SearchInternal(_pager.RootPageId, key, results);
         return results;
@@ -95,7 +92,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
             {
                 results.Add(node.Values[matchIdx]);
             }
-            
+
             if (!node.IsLeaf)
             {
                 SearchInternal(node.Children[matchIdx], key, results);
@@ -119,7 +116,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         {
             var page = _pager.ReadPage(i);
             bool pageChanged = false;
-            
+
             for (int k = 0; k < page.NumKeys; k++)
             {
                 if (idsSet.Contains(page.Values[k]))

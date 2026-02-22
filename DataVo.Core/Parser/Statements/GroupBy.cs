@@ -4,7 +4,7 @@ using DataVo.Core.Services;
 
 namespace DataVo.Core.Parser.Statements;
 
-internal class GroupBy
+internal class GroupBy(string match, string databaseName, TableService tableService)
 {
     public static string HASH_VALUE
     {
@@ -14,14 +14,8 @@ internal class GroupBy
         }
     }
 
-    public GroupByModel Model { get; private set; }
-    public TableService TableService { get; private set; }
-
-    public GroupBy(string match, string databaseName, TableService tableService)
-    {
-        Model = GroupByModel.FromString(match, databaseName, tableService);
-        TableService = tableService;
-    }
+    public GroupByModel Model { get; private set; } = GroupByModel.FromString(match, databaseName, tableService);
+    public TableService TableService { get; private set; } = tableService;
 
     public bool ContainsGroupBy() => Model.Columns.Count > 0;
 
@@ -32,7 +26,7 @@ internal class GroupBy
             return tableData.ToGroupedTable();
         }
 
-        GroupedTable groupedTableData = new();
+        GroupedTable groupedTableData = [];
 
         foreach (JoinedRow row in tableData)
         {
@@ -40,7 +34,7 @@ internal class GroupBy
 
             if (!groupedTableData.ContainsKey(rowHash))
             {
-                groupedTableData.Add(rowHash, new());
+                groupedTableData.Add(rowHash, []);
             }
 
             groupedTableData[rowHash].Add(row);
@@ -51,7 +45,7 @@ internal class GroupBy
 
     private string CreateHashForRow(JoinedRow row)
     {
-        List<string> columnValues = new();
+        List<string> columnValues = [];
 
         Model.Columns.ForEach(column =>
         {
@@ -60,7 +54,7 @@ internal class GroupBy
                 throw new Exception("Trying to group by inexistent table!");
             }
 
-            if (!row[column.TableName].ContainsKey(column.ColumnName)) 
+            if (!row[column.TableName].ContainsKey(column.ColumnName))
             {
                 throw new Exception("Trying to group by inexistent column!");
             }

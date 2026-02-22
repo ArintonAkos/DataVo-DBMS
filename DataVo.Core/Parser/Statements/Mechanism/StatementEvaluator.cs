@@ -1,7 +1,7 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.BTree;
-using DataVo.Core.MongoDB;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
 using System.Security;
@@ -12,7 +12,7 @@ public class StatementEvaluator
 {
     private TableService TableService { get; set; }
     private Join? Join { get; set; }
-    private TableDetail? FromTable { get; set; } 
+    private TableDetail? FromTable { get; set; }
 
     public StatementEvaluator(TableService tableService, Join joinStatements, TableDetail fromTable)
     {
@@ -84,7 +84,7 @@ public class StatementEvaluator
     private HashedTable HandleIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
-        
+
         TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
         string? rightValue = root.Right!.Value.Value!.ToString();
@@ -95,8 +95,15 @@ public class StatementEvaluator
         if (indexFile != null)
         {
             List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!).ToList();
+            List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
 
-            tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
+            var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
+
+            tableRows = new Dictionary<string, Dictionary<string, dynamic>>();
+            foreach (var kvp in internalRows)
+            {
+                tableRows[kvp.Key.ToString()] = kvp.Value;
+            }
 
             return GetJoinedTableContent(tableRows, table.TableName);
         }
@@ -104,9 +111,16 @@ public class StatementEvaluator
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue!);
         if (columnIndex > -1)
         {
-            List<string> ids = DbContext.Instance.FilterUsingPrimaryKey(rightValue!, columnIndex, table.TableName, table.DatabaseName!).ToList();
+            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue!, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!).ToList();
+            List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
 
-            tableRows = DbContext.Instance.SelectFromTable(ids, new(), table.TableName, table.DatabaseName!);
+            var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
+
+            tableRows = new Dictionary<string, Dictionary<string, dynamic>>();
+            foreach (var kvp in internalRows)
+            {
+                tableRows[kvp.Key.ToString()] = kvp.Value;
+            }
 
             return GetJoinedTableContent(tableRows, table.TableName);
         }
@@ -121,10 +135,10 @@ public class StatementEvaluator
     private HashedTable HandleNonIndexableStatement(Node root)
     {
         Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
-        
+
         TableDetail table = parseResult.Item1;
         string leftValue = parseResult.Item2;
-        
+
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
         {
             "=" => entry => entry.Value[leftValue!] == root.Right!.Value.ParsedValue,
@@ -158,7 +172,7 @@ public class StatementEvaluator
 
         string? leftValue = parseResult1.Item2;
         string? rightValue = parseResult2.Item2;
-        
+
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
         {
             "=" => entry => entry.Value[leftValue!] == entry.Value[rightValue!],
@@ -212,7 +226,7 @@ public class StatementEvaluator
 
     private static HashedTable And(HashedTable leftResult, HashedTable rightResult)
     {
-        var result= leftResult.Keys.Intersect(rightResult.Keys)
+        var result = leftResult.Keys.Intersect(rightResult.Keys)
                .ToDictionary(t => t, t => leftResult[t]);
 
         return new HashedTable(result);

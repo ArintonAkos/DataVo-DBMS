@@ -3,7 +3,7 @@
 internal static class CacheStorage
 {
     //                          <SessionKey, DatabaseName>
-    private static readonly Dictionary<Guid, string> Cache = new();
+    private static readonly Dictionary<Guid, string> Cache = [];
 
     public static string? Get(Guid key)
     {

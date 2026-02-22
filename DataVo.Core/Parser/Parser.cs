@@ -1,29 +1,21 @@
-using DataVo.Core.Enums;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using static DataVo.Core.Models.Statement.Utils.Node;
 
 namespace DataVo.Core.Parser;
 
-public class Parser
+public class Parser(List<Token> tokens)
 {
-    private readonly List<Token> _tokens;
-    private int _position;
+    private int _position = 0;
 
-    public Parser(List<Token> tokens)
-    {
-        _tokens = tokens;
-        _position = 0;
-    }
-
-    private Token Current => _position < _tokens.Count ? _tokens[_position] : _tokens.Last();
-    private Token Advance() => _position < _tokens.Count ? _tokens[_position++] : _tokens.Last();
+    private Token Current => _position < tokens.Count ? tokens[_position] : tokens.Last();
+    private Token Advance() => _position < tokens.Count ? tokens[_position++] : tokens.Last();
     private bool IsEof() => Current.Type == TokenType.EOF;
 
     private bool Match(TokenType type, string? value = null)
     {
         if (IsEof()) return false;
-        
+
         // Value check is case-insensitive for keywords
         if (Current.Type == type && (value == null || Current.Value.Equals(value, StringComparison.OrdinalIgnoreCase)))
         {
@@ -88,7 +80,7 @@ public class Parser
             return new ShowDatabasesStatement();
         else if (Match(TokenType.Keyword, "TABLES"))
             return new ShowTablesStatement();
-        
+
         throw new Exception("Parser Error: Expected DATABASES or TABLES after SHOW.");
     }
 
@@ -110,13 +102,13 @@ public class Parser
             var stmt = new CreateTableStatement();
             var tableNameToken = Consume(TokenType.Identifier, "table name");
             stmt.TableName = new IdentifierNode(tableNameToken.Value);
-            
+
             Consume(TokenType.Punctuation, "(");
             while (!IsEof() && !Match(TokenType.Punctuation, ")"))
             {
                 var colDef = new ColumnDefinitionNode();
                 colDef.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
-                
+
                 Token typeToken = Advance();
                 string typeStr = typeToken.Value;
                 if (Match(TokenType.Punctuation, "("))
@@ -149,9 +141,9 @@ public class Parser
                         break;
                     }
                 }
-                
+
                 stmt.Columns.Add(colDef);
-                
+
                 if (Current.Type == TokenType.Punctuation && Current.Value == ",") Advance();
             }
             return stmt;
@@ -174,14 +166,14 @@ public class Parser
     {
         Consume(TokenType.Keyword, "TABLE");
         var tableNameToken = Consume(TokenType.Identifier, "table name");
-        
+
         if (Match(TokenType.Keyword, "ADD"))
         {
             var stmt = new AlterTableAddColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
-            
+
             var colDef = new ColumnDefinitionNode();
             colDef.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
-            
+
             Token typeToken = Advance();
             string typeStr = typeToken.Value;
             if (Match(TokenType.Punctuation, "("))
@@ -220,16 +212,16 @@ public class Parser
         else if (Match(TokenType.Keyword, "DROP"))
         {
             if (Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == "COLUMN") Advance();
-            
+
             var stmt = new AlterTableDropColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
             stmt.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
             return stmt;
         }
         else if (Match(TokenType.Keyword, "MODIFY"))
         {
-             return new AlterTableStatement { TableName = new IdentifierNode(tableNameToken.Value) };
+            return new AlterTableStatement { TableName = new IdentifierNode(tableNameToken.Value) };
         }
-        
+
         throw new Exception("Parser Error: Unknown ALTER TABLE operation.");
     }
 
@@ -288,7 +280,7 @@ public class Parser
         }
 
         Consume(TokenType.Keyword, "VALUES");
-        
+
         while (!IsEof())
         {
             if (Match(TokenType.Punctuation, "("))
@@ -297,13 +289,13 @@ public class Parser
                 while (!IsEof() && !Match(TokenType.Punctuation, ")"))
                 {
                     Token valToken = Advance();
-                    valuesList.Add(new IdentifierNode(valToken.Value)); 
-                    
+                    valuesList.Add(new IdentifierNode(valToken.Value));
+
                     if (Current.Type == TokenType.Punctuation && Current.Value == ",") Advance();
                 }
                 stmt.ValuesLists.Add(valuesList);
             }
-            
+
             if (Match(TokenType.Punctuation, ","))
                 continue;
             else
@@ -389,7 +381,7 @@ public class Parser
         {
             joinType += Advance().Value.ToUpperInvariant() + " ";
         }
-        
+
         Consume(TokenType.Keyword, "JOIN");
         joinNode.JoinType = (joinType + "JOIN").Trim();
 
@@ -399,7 +391,7 @@ public class Parser
         // Optional table alias (e.g., JOIN Users u OR JOIN Users AS u)
         if (Current.Type == TokenType.Identifier || (Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == "AS"))
         {
-            if (Match(TokenType.Keyword, "AS")) 
+            if (Match(TokenType.Keyword, "AS"))
             {
                 // Consumed AS, next is identifier
             }
@@ -413,7 +405,7 @@ public class Parser
         if (Match(TokenType.Keyword, "ON"))
         {
             var condition = new JoinConditionNode();
-            
+
             // Left Side: Table.Column
             condition.LeftTable = new IdentifierNode(Consume(TokenType.Identifier, "left table name").Value);
             Consume(TokenType.Punctuation, ".");
@@ -434,9 +426,9 @@ public class Parser
 
     private bool IsGroupByKeyword()
     {
-        if (_position + 1 >= _tokens.Count) return false;
+        if (_position + 1 >= tokens.Count) return false;
         return Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == "GROUP" &&
-               _tokens[_position + 1].Type == TokenType.Keyword && _tokens[_position + 1].Value.ToUpperInvariant() == "BY";
+               tokens[_position + 1].Type == TokenType.Keyword && tokens[_position + 1].Value.ToUpperInvariant() == "BY";
     }
 
     private GroupByNode ParseGroupBy()
@@ -462,9 +454,9 @@ public class Parser
 
     private bool IsOrderByKeyword()
     {
-        if (_position + 1 >= _tokens.Count) return false;
+        if (_position + 1 >= tokens.Count) return false;
         return Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == "ORDER" &&
-               _tokens[_position + 1].Type == TokenType.Keyword && _tokens[_position + 1].Value.ToUpperInvariant() == "BY";
+               tokens[_position + 1].Type == TokenType.Keyword && tokens[_position + 1].Value.ToUpperInvariant() == "BY";
     }
 
     private OrderByNode ParseOrderBy()
@@ -510,10 +502,9 @@ public class Parser
     {
         var columns = new List<SqlNode>();
 
-        while (!IsEof() && !Match(TokenType.Keyword, "FROM"))
+        while (!IsEof())
         {
-            // The Match("FROM") inside the condition will consume FROM if true, meaning the next call is table.
-            // But we actually want to Peek "FROM". Let's revert that and just Peak.
+            // We just Peek "FROM", avoiding greedy consumption.
             if (Current.Type == TokenType.Keyword && Current.Value.Equals("FROM", StringComparison.OrdinalIgnoreCase))
             {
                 break;
@@ -549,7 +540,7 @@ public class Parser
         Stack<Node> values = new();
         Stack<Token> operators = new();
 
-        while (tokens.Any())
+        while (tokens.Count != 0)
         {
             Token token = tokens.Dequeue();
 
@@ -567,7 +558,7 @@ public class Parser
             }
             else if (token.Type == TokenType.Operator)
             {
-                while (operators.Count > 0 && 
+                while (operators.Count > 0 &&
                       !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == "(") &&
                       GetPrecedence(token.Value) <= GetPrecedence(operators.Peek().Value))
                 {
@@ -604,7 +595,7 @@ public class Parser
             EvaluateTopOperator(values, operators);
         }
 
-        return values.Any() ? values.Pop() : new Node { Type = NodeType.Column, Value = NodeValue.RawString("1=1") };
+        return values.Count != 0 ? values.Pop() : new Node { Type = NodeType.Column, Value = NodeValue.RawString("1=1") };
     }
 
     private void EvaluateTopOperator(Stack<Node> values, Stack<Token> operators)

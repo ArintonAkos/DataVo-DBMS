@@ -12,15 +12,15 @@ public class Field
 {
     [XmlIgnore]
     [Required(ErrorMessage = "Field must belong to a table!")]
-    public string Table { get; set; }
+    public required string Table { get; set; }
 
     [XmlAttribute]
     [Required(ErrorMessage = "Field must have a type!")]
-    public DataTypes Type { get; set; }
+    public required DataTypes Type { get; set; }
 
     [XmlAttribute]
     [Required(ErrorMessage = "Field must have a name!")]
-    public string Name { get; set; }
+    public required string Name { get; set; }
 
     [XmlAttribute]
     [DefaultValue(value: -1)]
@@ -61,7 +61,7 @@ public class Field
             var refTables = match.Groups["ForeignTable"].Captures;
             var refAttributes = match.Groups["ForeignColumn"].Captures;
 
-            List<Reference> references = new();
+            List<Reference> references = [];
 
             for (int i = 0; i < refTables.Count && i < refAttributes.Count; ++i)
             {

@@ -1,21 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace DataVo.Core.Models.Statement.Utils
+﻿namespace DataVo.Core.Models.Statement.Utils
 {
-    public class TableColumnIdentifier
+    public class TableColumnIdentifier(string tableName, string columnName)
     {
-        public string TableName { get; set; }
-        public string ColumnName { get; set; }
-
-        public TableColumnIdentifier(string tableName, string columnName)
-        {
-            TableName = tableName;
-            ColumnName = columnName;
-        }
+        public string TableName { get; set; } = tableName;
+        public string ColumnName { get; set; } = columnName;
 
         public string GetFullyQualifiedName()
         {

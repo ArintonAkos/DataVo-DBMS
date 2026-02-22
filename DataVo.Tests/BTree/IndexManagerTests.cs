@@ -1,6 +1,6 @@
 using DataVo.Core.BTree;
 
-namespace Server.Tests;
+namespace DataVo.Tests.BTree;
 
 public class IndexManagerTests : IDisposable
 {
@@ -54,7 +54,7 @@ public class IndexManagerTests : IDisposable
     public void InsertIntoIndex_AddsEntryToExistingIndex()
     {
         var manager = IndexManager.Instance;
-        manager.CreateIndex(new Dictionary<string, List<string>>(), "insert_idx", TestTable, TestDb);
+        manager.CreateIndex([], "insert_idx", TestTable, TestDb);
 
         manager.InsertIntoIndex("keyA", "rowX", "insert_idx", TestTable, TestDb);
 
@@ -88,7 +88,7 @@ public class IndexManagerTests : IDisposable
         };
         manager.CreateIndex(data, "delete_idx", TestTable, TestDb);
 
-        manager.DeleteFromIndex(new List<string> { "row1", "row3" }, "delete_idx", TestTable, TestDb);
+        manager.DeleteFromIndex(["row1", "row3"], "delete_idx", TestTable, TestDb);
 
         var resultA = manager.FilterUsingIndex("keyA", "delete_idx", TestTable, TestDb);
         Assert.Single(resultA);

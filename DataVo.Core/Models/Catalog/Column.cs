@@ -4,8 +4,8 @@ namespace DataVo.Core.Models.Catalog;
 
 public class Column : IColumn
 {
-    public string Name { get; set; }
-    public string Type { get; set; }
+    public string Name { get; set; } = null!;
+    public string Type { get; set; } = null!;
     public int Length { get; set; }
     public string? Value { get; set; }
 
@@ -20,14 +20,14 @@ public class Column : IColumn
 
             try
             {
-                return Type switch
+                return Type.ToUpperInvariant() switch
                 {
-                    "Varchar" => Length < Value.Length ? Value[..Length] : Value,
-                    "Date" => DateOnly.Parse(Value),
-                    "Bit" => bool.Parse(Value),
-                    "Int" => int.Parse(Value),
-                    "Float" => float.Parse(Value),
-                    _ => null,
+                    "VARCHAR" => (Length > 0 && Length < Value.Length) ? Value[..Length] : Value,
+                    "DATE" => DateOnly.Parse(Value),
+                    "BIT" => bool.Parse(Value),
+                    "INT" => int.Parse(Value),
+                    "FLOAT" => float.Parse(Value, System.Globalization.CultureInfo.InvariantCulture),
+                    _ => Value,
                 };
             }
             catch (Exception)

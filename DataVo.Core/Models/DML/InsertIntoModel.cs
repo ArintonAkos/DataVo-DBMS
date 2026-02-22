@@ -4,18 +4,11 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DML;
 
-internal class InsertIntoModel
+internal class InsertIntoModel(string tableName, List<Dictionary<string, string>> rows, List<string> columns)
 {
-    public InsertIntoModel(string tableName, List<Dictionary<string, string>> rows, List<string> columns)
-    {
-        TableName = tableName;
-        Rows = rows;
-        Columns = columns;
-    }
-
-    public string TableName { get; set; }
-    public List<Dictionary<string, string>> Rows { get; set; }
-    public List<string> Columns { get; set; }
+    public string TableName { get; set; } = tableName;
+    public List<Dictionary<string, string>> Rows { get; set; } = rows;
+    public List<string> Columns { get; set; } = columns;
 
     public static InsertIntoModel FromMatch(Match match)
     {
@@ -24,7 +17,7 @@ internal class InsertIntoModel
             .Split(",")
             .ToList();
 
-        List<Dictionary<string, string>> rows = new();
+        List<Dictionary<string, string>> rows = [];
         foreach (Capture rowCapture in match.Groups["Values"].Captures)
         {
             var row = rowCapture.Value
@@ -38,7 +31,7 @@ internal class InsertIntoModel
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
             }
 
-            Dictionary<string, string> rowDict = new();
+            Dictionary<string, string> rowDict = [];
             for (int i = 0; i < row.Count; ++i)
             {
                 rowDict.Add(columns[i], row[i]);
@@ -53,7 +46,7 @@ internal class InsertIntoModel
     public static InsertIntoModel FromAst(InsertIntoStatement ast)
     {
         var columns = ast.Columns.Select(c => c.Name).ToList();
-        List<Dictionary<string, string>> rows = new();
+        List<Dictionary<string, string>> rows = [];
 
         foreach (var rowAst in ast.ValuesLists)
         {
@@ -63,7 +56,7 @@ internal class InsertIntoModel
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
             }
 
-            Dictionary<string, string> rowDict = new();
+            Dictionary<string, string> rowDict = [];
             for (int i = 0; i < rowAst.Count; ++i)
             {
                 rowDict.Add(columns[i], ((IdentifierNode)rowAst[i]).Name);

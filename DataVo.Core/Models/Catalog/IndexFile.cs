@@ -6,9 +6,9 @@ namespace DataVo.Core.Models.Catalog;
 [XmlRoot("IndexFile")]
 public class IndexFile
 {
-    [XmlAttribute("IndexName")] public string IndexFileName { get; set; }
+    [XmlAttribute("IndexName")] public required string IndexFileName { get; set; }
 
     [XmlArray("IndexAttributes")]
     [XmlArrayItem("IAttribute")]
-    public List<string> AttributeNames { get; set; }
+    public required List<string> AttributeNames { get; set; }
 }

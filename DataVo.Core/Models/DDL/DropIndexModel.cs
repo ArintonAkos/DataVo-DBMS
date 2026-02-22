@@ -4,16 +4,10 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DDL;
 
-public class DropIndexModel
+public class DropIndexModel(string indexName, string tableName)
 {
-    public DropIndexModel(string indexName, string tableName)
-    {
-        TableName = tableName;
-        IndexName = indexName;
-    }
-
-    public string TableName { get; set; }
-    public string IndexName { get; set; }
+    public string TableName { get; set; } = tableName;
+    public string IndexName { get; set; } = indexName;
 
     public static DropIndexModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value, match.NthGroup(n: 2).Value);
     public static DropIndexModel FromAst(DropIndexStatement ast) => new(ast.IndexName.Name, ast.TableName.Name);
