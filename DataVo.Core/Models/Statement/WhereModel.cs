@@ -22,4 +22,12 @@ internal class WhereModel
             Statement = statement,
         };
     }
+
+    public static WhereModel FromNode(Node node)
+    {
+        return new WhereModel
+        {
+            Statement = node
+        };
+    }
 }

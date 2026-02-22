@@ -1,5 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Services;
 
@@ -19,6 +20,8 @@ internal class SelectModel
     private Group RawJoinStatement { get; set; }
     private string RawGroupByStatement { get; set; }
     private string RawColumns { get; set; }
+    public string? RawHavingStatement { get; set; }
+    public string? RawOrderByStatement { get; set; }
 
     public static SelectModel FromMatch(Match match)
     {
@@ -35,6 +38,70 @@ internal class SelectModel
             RawJoinStatement = match.Groups["Joins"],
             RawGroupByStatement = match.Groups["ColumnNames"].Value,
             RawColumns = match.Groups["Columns"].Value,
+            FromTable = fromTable
+        };
+    }
+
+    public static SelectModel FromAst(SelectStatement ast)
+    {
+        string rawTableName = ast.FromTable?.Name ?? string.Empty;
+        var tableNameWithAlias = TableParserService.ParseTableWithAlias(rawTableName);
+        string tableName = tableNameWithAlias.Item1;
+        string? tableAlias = tableNameWithAlias.Item2;
+        TableDetail fromTable = new(tableName, tableAlias);
+
+        Where whereStatement;
+        if (ast.WhereExpression != null)
+        {
+            whereStatement = new Where(ast.WhereExpression, fromTable);
+        }
+        else
+        {
+            whereStatement = new Where(string.Empty, fromTable);
+        }
+
+        string rawColumns = string.Join(", ", ast.Columns.Cast<IdentifierNode>().Select(c => c.Name));
+
+        // Reconstruct RawJoinStatement for legacy backend compatibility
+        string rawJoinString = string.Empty;
+        if (ast.Joins.Any())
+        {
+            var joinParts = ast.Joins.Select(j => 
+            {
+                string aliasPart = j.Alias != null ? $" AS {j.Alias.Name}" : "";
+                string onPart = j.Condition != null ? $" ON {j.Condition.LeftTable.Name}.{j.Condition.LeftColumn.Name} = {j.Condition.RightTable.Name}.{j.Condition.RightColumn.Name}" : "";
+                return $"{j.JoinType} {j.TableName.Name}{aliasPart}{onPart}";
+            });
+            rawJoinString = string.Join(" ", joinParts);
+        }
+
+        // Reconstruct RawGroupByStatement for legacy backend compatibility
+        string rawGroupByString = string.Empty;
+        if (ast.GroupByExpression != null && ast.GroupByExpression.Columns.Any())
+        {
+            rawGroupByString = string.Join(", ", ast.GroupByExpression.Columns.Select(c => c.Name));
+        }
+
+        string rawHavingString = string.Empty;
+        if (ast.HavingExpression != null)
+        {
+            rawHavingString = "True"; // Placeholder, as full expression reconstruction is complex and not yet supported by backend.
+        }
+
+        string rawOrderByString = string.Empty;
+        if (ast.OrderByExpression != null && ast.OrderByExpression.Columns.Any())
+        {
+            rawOrderByString = string.Join(", ", ast.OrderByExpression.Columns.Select(c => $"{c.Column.Name}{(c.IsAscending ? "" : " DESC")}"));
+        }
+
+        return new SelectModel
+        {
+            WhereStatement = whereStatement,
+            RawJoinStatement = Regex.Match(rawJoinString, rawJoinString == string.Empty ? "" : ".*").Groups[0],
+            RawGroupByStatement = rawGroupByString,
+            RawHavingStatement = rawHavingString,
+            RawOrderByStatement = rawOrderByString,
+            RawColumns = rawColumns,
             FromTable = fromTable
         };
     }

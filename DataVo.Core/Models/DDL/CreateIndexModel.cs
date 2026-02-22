@@ -1,5 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DDL;
 
@@ -29,6 +30,8 @@ public class CreateIndexModel
 
         return new CreateIndexModel(indexName, tableName, attributes);
     }
+
+    public static CreateIndexModel FromAst(CreateIndexStatement ast) => new(ast.IndexName.Name, ast.TableName.Name, new List<string> { ast.ColumnName.Name });
 
     public IndexFile ToIndexFile() =>
         new()

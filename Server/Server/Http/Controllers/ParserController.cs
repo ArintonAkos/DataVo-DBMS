@@ -18,12 +18,12 @@ internal class ParserController
             throw new Exception("Error while parsing data!");
         }
 
-        var parser = new DataVo.Core.Parser.Parser(request.Data, request.Session);
+        var engine = new DataVo.Core.Parser.QueryEngine(request.Data, request.Session);
         
         var response = new ParseResponse();
         var scriptResponse = new ScriptResponse();
         
-        foreach (var queryResult in parser.Parse())
+        foreach (var queryResult in engine.Parse())
         {
             scriptResponse.Actions.Add(ActionResponse.FromQueryResult(queryResult));
             if (queryResult.IsError)

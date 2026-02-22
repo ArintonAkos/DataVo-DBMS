@@ -23,6 +23,12 @@ internal class Where
         _fromTable = fromTable;
     }
 
+    public Where(Node node, TableDetail fromTable)
+    {
+        _model = WhereModel.FromNode(node);
+        _fromTable = fromTable;
+    }
+
     public HashSet<string> EvaluateWithoutJoin(string tableName, string databaseName)
     {
         if (_model is null)

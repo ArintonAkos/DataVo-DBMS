@@ -4,6 +4,7 @@ using MongoDB.Driver;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Cache;
@@ -18,6 +19,11 @@ internal class Select : BaseDbAction
     public Select(Match match)
     {
         _model = SelectModel.FromMatch(match);
+    }
+
+    public Select(SelectStatement ast)
+    {
+        _model = SelectModel.FromAst(ast);
     }
 
     public override void PerformAction(Guid session)

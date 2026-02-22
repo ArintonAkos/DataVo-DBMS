@@ -1,0 +1,152 @@
+using DataVo.Core.Models.Statement.Utils;
+
+namespace DataVo.Core.Parser.AST;
+
+public abstract class SqlNode
+{
+    // Base class for all AST nodes
+}
+
+public abstract class SqlStatement : SqlNode
+{
+    // Base class for top-level statements (SELECT, INSERT, CREATE)
+}
+
+public class IdentifierNode(string name) : SqlNode
+{
+  public string Name { get; set; } = name;
+}
+
+public class JoinConditionNode : SqlNode
+{
+    public IdentifierNode LeftTable { get; set; } = null!;
+    public IdentifierNode LeftColumn { get; set; } = null!;
+    public IdentifierNode RightTable { get; set; } = null!;
+    public IdentifierNode RightColumn { get; set; } = null!;
+}
+
+public class JoinDetailNode : SqlNode
+{
+    public string JoinType { get; set; } = "INNER"; // INNER, LEFT, RIGHT, etc.
+    public IdentifierNode TableName { get; set; } = null!;
+    public IdentifierNode? Alias { get; set; }
+    public JoinConditionNode? Condition { get; set; }
+}
+
+public class GroupByNode : SqlNode
+{
+    public List<IdentifierNode> Columns { get; set; } = [];
+}
+
+public class OrderByColumnNode : SqlNode
+{
+    public IdentifierNode Column { get; set; } = null!;
+    public bool IsAscending { get; set; } = true;
+}
+
+public class OrderByNode : SqlNode
+{
+    public List<OrderByColumnNode> Columns { get; set; } = [];
+}
+
+public class SelectStatement : SqlStatement
+{
+    public List<SqlNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
+    public IdentifierNode? FromTable { get; set; }
+    public List<JoinDetailNode> Joins { get; set; } = [];
+    public Node? WhereExpression { get; set; } // Reusing the old Node for mathematical/logical expressions
+    public GroupByNode? GroupByExpression { get; set; }
+    public Node? HavingExpression { get; set; }
+    public OrderByNode? OrderByExpression { get; set; }
+}
+
+// --- Commands ---
+public class UseStatement : SqlStatement
+{
+    public IdentifierNode DatabaseName { get; set; } = null!;
+}
+
+public class ShowDatabasesStatement : SqlStatement { }
+public class ShowTablesStatement : SqlStatement { }
+
+public class DescribeStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+}
+
+public class GoStatement : SqlStatement { }
+
+// --- DDL ---
+public class CreateDatabaseStatement : SqlStatement
+{
+    public IdentifierNode DatabaseName { get; set; } = null!;
+}
+
+public class DropDatabaseStatement : SqlStatement
+{
+    public IdentifierNode DatabaseName { get; set; } = null!;
+}
+
+public class ColumnDefinitionNode : SqlNode
+{
+    public IdentifierNode ColumnName { get; set; } = null!;
+    public string DataType { get; set; } = null!; // INT, VARCHAR(255), etc.
+    public bool IsPrimaryKey { get; set; }
+    public bool IsUnique { get; set; }
+    public IdentifierNode? ReferencesTable { get; set; }
+    public IdentifierNode? ReferencesColumn { get; set; }
+}
+
+public class CreateTableStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+    public List<ColumnDefinitionNode> Columns { get; set; } = new();
+}
+
+public class DropTableStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+}
+
+public class AlterTableStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+    // Sub-operations will be defined here (Add, Drop, Modify etc)
+}
+
+public class AlterTableAddColumnStatement : AlterTableStatement
+{
+    public ColumnDefinitionNode Column { get; set; } = null!;
+}
+
+public class AlterTableDropColumnStatement : AlterTableStatement
+{
+    public IdentifierNode ColumnName { get; set; } = null!;
+}
+
+public class CreateIndexStatement : SqlStatement
+{
+    public IdentifierNode IndexName { get; set; } = null!;
+    public IdentifierNode TableName { get; set; } = null!;
+    public IdentifierNode ColumnName { get; set; } = null!;
+}
+
+public class DropIndexStatement : SqlStatement
+{
+    public IdentifierNode IndexName { get; set; } = null!;
+    public IdentifierNode TableName { get; set; } = null!;
+}
+
+// --- DML ---
+public class DeleteFromStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+    public Node? WhereExpression { get; set; }
+}
+
+public class InsertIntoStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+    public List<IdentifierNode> Columns { get; set; } = [];
+    public List<List<SqlNode>> ValuesLists { get; set; } = []; // Supports multiple rows of values
+}
