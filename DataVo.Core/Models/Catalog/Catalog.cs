@@ -1,5 +1,6 @@
 ﻿using System.Xml.Linq;
 using System.Xml.Serialization;
+using System.Collections.Concurrent;
 using DataVo.Core.Logging;
 
 namespace DataVo.Core.Models.Catalog;
@@ -9,6 +10,7 @@ public static class Catalog
     private const string DIR_NAME = "databases";
     private const string FILE_NAME = "Catalog.xml";
     private static XDocument _doc = new();
+    private static readonly ConcurrentDictionary<string, int> _tableSchemaVersions = new();
 
     static Catalog()
     {
@@ -58,6 +60,7 @@ public static class Catalog
             .First();
 
         InsertIntoXml(table, root);
+        TouchTableSchemaVersion(databaseName, table.TableName);
     }
 
     public static void DropDatabase(string databaseName)
@@ -66,6 +69,7 @@ public static class Catalog
                        ?? throw new Exception($"Database {databaseName} does not exist!");
 
         RemoveFromXml(database);
+        InvalidateDatabaseSchemaVersions(databaseName);
     }
 
     public static void DropTable(string tableName, string databaseName)
@@ -74,6 +78,13 @@ public static class Catalog
                     ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
 
         RemoveFromXml(table);
+        InvalidateTableSchemaVersion(databaseName, tableName);
+    }
+
+    public static int GetTableSchemaVersion(string tableName, string databaseName)
+    {
+        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
+        return _tableSchemaVersions.GetOrAdd(tableKey, 0);
     }
 
     public static void CreateIndex(IndexFile indexFile, string tableName, string databaseName)
@@ -398,5 +409,34 @@ public static class Catalog
         }
 
         return null;
+    }
+
+    private static string GetTableSchemaVersionKey(string databaseName, string tableName)
+    {
+        return $"{databaseName}::{tableName}";
+    }
+
+    private static void TouchTableSchemaVersion(string databaseName, string tableName)
+    {
+        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
+        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
+    }
+
+    private static void InvalidateTableSchemaVersion(string databaseName, string tableName)
+    {
+        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
+        _tableSchemaVersions.TryRemove(tableKey, out _);
+    }
+
+    private static void InvalidateDatabaseSchemaVersions(string databaseName)
+    {
+        string prefix = $"{databaseName}::";
+        foreach (string key in _tableSchemaVersions.Keys)
+        {
+            if (key.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                _tableSchemaVersions.TryRemove(key, out _);
+            }
+        }
     }
 }
