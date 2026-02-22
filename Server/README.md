@@ -169,6 +169,9 @@ We're constantly working to improve the DataVo server and add new features. Some
 - More advanced query capabilities, such as subqueries and complex join operations.
 - A graphical interface for managing the server queries and viewing database schema and design.
 - More comprehensive performance metrics and tuning options.
+- `INSERT INTO table VALUES (...)` support that reliably maps to catalog column order when no column list is provided.
+- Partial-column INSERT support with catalog-backed defaults for omitted columns.
+- Auto-increment/identity column support so generated keys do not need to be explicitly provided on INSERT.
 
 ## In-Depth Project Structure
 
