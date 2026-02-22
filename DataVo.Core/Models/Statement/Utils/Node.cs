@@ -1,5 +1,6 @@
 ﻿using DataVo.Core.Enums;
 using DataVo.Core.Utils;
+using System.Globalization;
 
 namespace DataVo.Core.Models.Statement.Utils;
 
@@ -97,7 +98,7 @@ public class Node
         {
             get
             {
-                return ConvertGenericToType(Value, ValueType.ToType());
+                return ConvertGenericToType(Value, ValueType);
             }
         }
 
@@ -119,13 +120,23 @@ public class Node
         public NodeValue(dynamic value)
         {
             Value = value;
-            ValueType = value.GetType().Name switch
+
+            if (value is null)
             {
-                "String" => NodeValueType.String,
-                "Int32" => NodeValueType.Int,
-                "Double" => NodeValueType.Double,
-                "Boolean" => NodeValueType.Boolean,
-                "DateOnly" => NodeValueType.Date,
+                ValueType = NodeValueType.Null;
+                return;
+            }
+
+            ValueType = value switch
+            {
+                string => NodeValueType.String,
+                int => NodeValueType.Int,
+                double => NodeValueType.Double,
+                float => NodeValueType.Double,
+                decimal => NodeValueType.Double,
+                bool => NodeValueType.Boolean,
+                DateOnly => NodeValueType.Date,
+                DateTime => NodeValueType.Date,
                 _ => NodeValueType.Null,
             };
         }
@@ -247,8 +258,8 @@ public class Node
         {
             ValidateAlgebraicExpression(@operator, other);
 
-            dynamic? typedValue = ConvertGenericToType(Value, ValueType.ToType());
-            dynamic? typedOtherValue = ConvertGenericToType(other.Value, other.ValueType.ToType());
+            dynamic? typedValue = ConvertGenericToType(Value, ValueType);
+            dynamic? typedOtherValue = ConvertGenericToType(other.Value, other.ValueType);
 
             return @operator switch
             {
@@ -280,12 +291,48 @@ public class Node
         }
 
         /// <summary>
-        /// Converts a generic IComparable to a specific type.
+        /// Converts a generic IComparable to the concrete runtime value represented by NodeValueType.
         /// </summary>
         /// <param name="comparable">The IComparable to be converted.</param>
-        /// <param name="type">The Type to convert the IComparable to.</param>
+        /// <param name="valueType">The logical node value type describing the target conversion.</param>
         /// <returns>The converted value as a dynamic object.</returns>
-        private static dynamic? ConvertGenericToType(IComparable? comparable, Type type) =>
-            Convert.ChangeType(comparable, type);
+        private static dynamic? ConvertGenericToType(IComparable? comparable, NodeValueType valueType)
+        {
+            if (valueType == NodeValueType.Null)
+            {
+                return null;
+            }
+
+            if (comparable == null)
+            {
+                return null;
+            }
+
+            return valueType switch
+            {
+                NodeValueType.String => comparable.ToString(),
+                NodeValueType.Operator => comparable.ToString(),
+                NodeValueType.Int => comparable is int intValue
+                    ? intValue
+                    : int.Parse(comparable.ToString()!, CultureInfo.InvariantCulture),
+                NodeValueType.Double => comparable switch
+                {
+                    double doubleValue => doubleValue,
+                    float floatValue => (double)floatValue,
+                    decimal decimalValue => (double)decimalValue,
+                    _ => double.Parse(comparable.ToString()!, CultureInfo.InvariantCulture)
+                },
+                NodeValueType.Boolean => comparable is bool boolValue
+                    ? boolValue
+                    : bool.Parse(comparable.ToString()!),
+                NodeValueType.Date => comparable switch
+                {
+                    DateOnly dateOnlyValue => dateOnlyValue,
+                    DateTime dateTimeValue => DateOnly.FromDateTime(dateTimeValue),
+                    _ => DateOnly.Parse(comparable.ToString()!, CultureInfo.InvariantCulture)
+                },
+                _ => throw new Exception("Unknown NodeValueType!")
+            };
+        }
     }
 }
