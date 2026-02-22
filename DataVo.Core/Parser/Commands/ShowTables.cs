@@ -4,12 +4,17 @@ using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Cache;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.Commands;
 
 internal class ShowTables : BaseDbAction
 {
     public ShowTables(Match _)
+    {
+    }
+
+    public ShowTables(ShowTablesStatement ast)
     {
     }
 

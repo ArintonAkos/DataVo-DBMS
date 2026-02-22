@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
 using DataVo.Core.MongoDB;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
@@ -15,6 +16,7 @@ internal class CreateTable : BaseDbAction
     private readonly CreateTableModel _model;
 
     public CreateTable(Match match) => _model = CreateTableModel.FromMatch(match);
+    public CreateTable(CreateTableStatement ast) => _model = CreateTableModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

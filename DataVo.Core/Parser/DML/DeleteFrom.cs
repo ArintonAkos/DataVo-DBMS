@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
 using DataVo.Core.MongoDB;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -15,6 +16,7 @@ internal class DeleteFrom : BaseDbAction
     private readonly DeleteFromModel _model;
 
     public DeleteFrom(Match match) => _model = DeleteFromModel.FromMatch(match);
+    public DeleteFrom(DeleteFromStatement ast) => _model = DeleteFromModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

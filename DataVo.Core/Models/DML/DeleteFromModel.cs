@@ -1,6 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Statements;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DML;
 
@@ -18,6 +19,15 @@ internal class DeleteFromModel
         {
             TableName = tableName,
             WhereStatement = whereStatement,
+        };
+    }
+
+    public static DeleteFromModel FromAst(DeleteFromStatement ast)
+    {
+        return new DeleteFromModel()
+        {
+            TableName = ast.TableName.Name,
+            WhereStatement = ast.WhereExpression != null ? new Where(ast.WhereExpression, null!) : new Where("")
         };
     }
 }

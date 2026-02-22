@@ -35,8 +35,8 @@ public class TreeRearranger
                 var B = root.Right.Left;
                 var C = root.Right.Right;
 
-                var newLeft = new Node { Left = A.Clone(), Right = B, Type = Node.NodeType.And };
-                var newRight = new Node { Left = C.Clone(), Right = A.Clone(), Type = Node.NodeType.And };
+                var newLeft = new Node { Left = A?.Clone(), Right = B, Type = Node.NodeType.And };
+                var newRight = new Node { Left = C?.Clone(), Right = A?.Clone(), Type = Node.NodeType.And };
 
                 root = new Node { Left = newLeft, Right = newRight, Type = Node.NodeType.Or };
             }

@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
 using DataVo.Core.MongoDB;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
@@ -15,6 +16,7 @@ internal class CreateIndex : BaseDbAction
     private readonly CreateIndexModel _model;
 
     public CreateIndex(Match match) => _model = CreateIndexModel.FromMatch(match);
+    public CreateIndex(CreateIndexStatement ast) => _model = CreateIndexModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {
