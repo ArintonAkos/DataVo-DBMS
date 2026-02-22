@@ -1,14 +1,12 @@
-﻿using System.Collections;
-
-namespace DataVo.Core.Parser.Types
+﻿namespace DataVo.Core.Parser.Types
 {
     public class Row
     {
-        private readonly Dictionary<string, dynamic> _cells = new();
+        private readonly Dictionary<string, dynamic> _cells = [];
 
-        public Row() 
+        public Row()
         {
-            _cells = new();        
+            _cells = [];
         }
 
         public Row(Dictionary<string, dynamic> cells)

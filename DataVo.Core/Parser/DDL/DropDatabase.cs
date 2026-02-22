@@ -1,10 +1,8 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
-using DataVo.Core.MongoDB;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -22,7 +20,7 @@ internal class DropDatabase : BaseDbAction
         {
             Catalog.DropDatabase(_model.DatabaseName);
 
-            DbContext.Instance.DropDatabase(_model.DatabaseName);
+            Context.DropDatabase(_model.DatabaseName);
 
             Logger.Info($"Database {_model.DatabaseName} successfully dropped!");
             Messages.Add($"Database {_model.DatabaseName} successfully dropped!");

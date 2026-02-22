@@ -1,9 +1,5 @@
 ﻿namespace DataVo.Core.Exceptions;
 
-internal class FileExtensionNotSupported : Exception
+internal class FileExtensionNotSupported(string extension) : Exception($"File extension not supported! Only *.{extension} files can be compiled!")
 {
-    public FileExtensionNotSupported(string extension)
-        : base($"File extension not supported! Only *.{extension} files can be compiled!")
-    {
-    }
 }

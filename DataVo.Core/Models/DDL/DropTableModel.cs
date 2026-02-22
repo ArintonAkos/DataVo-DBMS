@@ -4,11 +4,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DDL;
 
-internal class DropTableModel
+internal class DropTableModel(string databaseName)
 {
-    public DropTableModel(string databaseName) => TableName = databaseName;
-
-    public string TableName { get; set; }
+    public string TableName { get; set; } = databaseName;
 
     public static DropTableModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value);
     public static DropTableModel FromAst(DropTableStatement ast) => new(ast.TableName.Name);

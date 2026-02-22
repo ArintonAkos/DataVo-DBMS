@@ -1,12 +1,11 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
-using DataVo.Core.MongoDB;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -27,8 +26,12 @@ internal class CreateIndex : BaseDbAction
 
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
-            Dictionary<string, Dictionary<string, dynamic>> tableData =
-                DbContext.Instance.GetTableContents(_model.TableName, databaseName);
+            var tableDataRows = StorageContext.Instance.GetTableContents(_model.TableName, databaseName);
+            Dictionary<string, Dictionary<string, dynamic>> tableData = [];
+            foreach (var r in tableDataRows)
+            {
+                tableData[r.Key.ToString()] = r.Value;
+            }
 
             Dictionary<string, List<string>> indexValues = CreateIndexContents(tableData);
 
@@ -46,7 +49,7 @@ internal class CreateIndex : BaseDbAction
 
     private Dictionary<string, List<string>> CreateIndexContents(Dictionary<string, Dictionary<string, dynamic>> tableData)
     {
-        Dictionary<string, List<string>> indexContentDict = new();
+        Dictionary<string, List<string>> indexContentDict = [];
 
         foreach (KeyValuePair<string, Dictionary<string, dynamic>> row in tableData)
         {
@@ -68,7 +71,7 @@ internal class CreateIndex : BaseDbAction
             }
             else
             {
-                indexContentDict.Add(key, new List<string> { row.Key });
+                indexContentDict.Add(key, [row.Key]);
             }
         }
 

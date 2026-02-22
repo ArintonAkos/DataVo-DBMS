@@ -1,20 +1,15 @@
 ﻿using DataVo.Core.Parser.Statements;
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DataVo.Core.Parser.Types
 {
     public class ListedTable : IEnumerable<JoinedRow>
     {
-        private readonly List<JoinedRow> _tables = new();
+        private readonly List<JoinedRow> _tables = [];
 
         public ListedTable()
         {
-            _tables = new List<JoinedRow>();
+            _tables = [];
         }
 
         public ListedTable(List<JoinedRow> tables)

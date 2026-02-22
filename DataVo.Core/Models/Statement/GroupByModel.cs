@@ -3,14 +3,9 @@ using DataVo.Core.Services;
 
 namespace DataVo.Core.Models.Statement
 {
-    internal class GroupByModel
+    internal class GroupByModel(List<Column> columns)
     {
-        public List<Column> Columns { get; set; }
-
-        public GroupByModel(List<Column> columns)
-        {
-            Columns = columns;
-        }
+        public List<Column> Columns { get; set; } = columns;
 
         public static GroupByModel FromString(string columnNamesString, string databaseName, TableService tableService)
         {

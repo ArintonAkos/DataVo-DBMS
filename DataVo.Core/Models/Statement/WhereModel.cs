@@ -5,7 +5,7 @@ namespace DataVo.Core.Models.Statement;
 
 internal class WhereModel
 {
-    public Node Statement { get; set; }
+    public required Node Statement { get; set; }
 
     public static WhereModel? FromString(string value)
     {

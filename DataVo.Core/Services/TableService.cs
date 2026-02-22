@@ -2,15 +2,9 @@
 
 namespace DataVo.Core.Services
 {
-    public class TableService
+    public class TableService(string databaseName)
     {
-        private readonly string _databaseName;
-        public Dictionary<string, TableDetail> TableDetails { get; private set; } = new();
-
-        public TableService(string databaseName)
-        {
-            _databaseName = databaseName;
-        }
+        public Dictionary<string, TableDetail> TableDetails { get; private set; } = [];
 
         public TableDetail GetTableDetailByAliasOrName(string aliasOrName)
         {
@@ -39,14 +33,14 @@ namespace DataVo.Core.Services
             if (tableName != null)
             {
                 if (!TableDetails.ContainsKey(tableName))
-                { 
+                {
                     throw new Exception("Invalid table name");
                 }
 
                 return TableDetails[tableName];
             }
 
-            List<string> tablesWithThisColumnName = new();
+            List<string> tablesWithThisColumnName = [];
 
             foreach (var table in TableDetails)
             {
@@ -88,7 +82,7 @@ namespace DataVo.Core.Services
                 throw new Exception("Duplicate table alias found");
             }
 
-            tableDetail.DatabaseName = _databaseName;
+            tableDetail.DatabaseName = databaseName;
 
             TableDetails[tableDetail.GetTableNameInUse()] = tableDetail;
         }

@@ -1,5 +1,4 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.AST;
 
@@ -7,8 +6,8 @@ namespace DataVo.Core.Models.DML;
 
 internal class DeleteFromModel
 {
-    public string TableName { get; set; }
-    public Where WhereStatement { get; set; }
+    public string TableName { get; set; } = null!;
+    public Where WhereStatement { get; set; } = null!;
 
     public static DeleteFromModel FromMatch(Match match)
     {

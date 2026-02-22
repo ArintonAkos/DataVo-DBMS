@@ -6,7 +6,7 @@ namespace DataVo.Core.Models.Catalog;
 [XmlRoot("ForeignKey")]
 public class ForeignKey
 {
-    [XmlElement("FkAttribute")] public string AttributeName { get; set; }
+    [XmlElement("FkAttribute")] public required string AttributeName { get; set; }
 
-    [XmlArray("References")] public List<Reference> References { get; set; }
+    [XmlArray("References")] public List<Reference> References { get; set; } = [];
 }

@@ -1,16 +1,15 @@
-﻿
-using DataVo.Core.MongoDB;
+﻿using DataVo.Core.StorageEngine;
 
 namespace DataVo.Core.Models.Statement.Utils
 {
-    public class TableDetail
+    public class TableDetail(string tableName, string? tableAlias)
     {
         public string? DatabaseName { get; set; }
-        public string TableName { get; set; }
-        public string? TableAlias { get; set; }
+        public string TableName { get; set; } = tableName;
+        public string? TableAlias { get; set; } = tableAlias;
 
         private List<string>? _columns { get; set; }
-        public List<string>? Columns 
+        public List<string>? Columns
         {
             get
             {
@@ -66,7 +65,17 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                tableContent ??= DbContext.Instance.GetTableContents(TableName, DatabaseName);
+                if (tableContent == null)
+                {
+                    // Map the internal numeric RowIds up to strings for the legacy expression evaluators (Select.cs/Join.cs)
+                    tableContent = [];
+                    var internalRows = StorageContext.Instance.GetTableContents(TableName, DatabaseName);
+                    foreach (var row in internalRows)
+                    {
+                        tableContent[row.Key.ToString()] = row.Value;
+                    }
+                }
+
                 return tableContent;
             }
         }
@@ -84,12 +93,6 @@ namespace DataVo.Core.Models.Statement.Utils
                 tableContentValues ??= TableContent!.Select(row => row.Value).ToList();
                 return tableContentValues;
             }
-        }
-
-        public TableDetail(string tableName, string? tableAlias)
-        {
-            TableName = tableName;
-            TableAlias = tableAlias;
         }
 
         public string GetTableNameInUse()

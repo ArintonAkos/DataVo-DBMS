@@ -3,10 +3,8 @@ using DataVo.Core.Parser.Types;
 
 namespace DataVo.Core.Parser.Aggregations
 {
-    internal class Avg : Aggregation
+    internal class Avg(Column field) : Aggregation(field)
     {
-        public Avg(Column field) : base(field) { }
-
         protected override dynamic? Apply(ListedTable rows)
         {
             return rows.Average(SelectColumn<double?>);

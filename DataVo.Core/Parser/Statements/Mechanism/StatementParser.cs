@@ -135,7 +135,7 @@ public static class StatementParser
         Stack<Node> values = new();
         Stack<string> operators = new();
 
-        while (tokens.Any())
+        while (tokens.Count != 0)
         {
             string token = tokens.Dequeue();
 

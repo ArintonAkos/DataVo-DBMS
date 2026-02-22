@@ -1,30 +1,20 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
-using DataVo.Core.Parser.Utils;
 
 namespace DataVo.Core.Parser;
 
-public class QueryEngine
+public class QueryEngine(string query, Guid session)
 {
-    public QueryEngine(string query, Guid session)
-    {
-        Query = query;
-        Session = session;
-    }
-
-    private string Query { get; }
-    private Guid Session { get; }
-
     public List<QueryResult> Parse()
     {
-        List<QueryResult> response = new();
+        List<QueryResult> response = [];
 
-        List<Queue<IDbAction>> runnables = new();
+        List<Queue<IDbAction>> runnables;
         try
         {
-            var lexer = new Lexer(Query);
+            var lexer = new Lexer(query);
             var tokens = lexer.Tokenize();
-            var parser = new DataVo.Core.Parser.Parser(tokens);
+            var parser = new Parser(tokens);
             var statements = parser.Parse();
             var evaluator = new Evaluator(statements);
             runnables = evaluator.ToRunnables();
@@ -37,11 +27,11 @@ public class QueryEngine
 
         foreach (Queue<IDbAction> runnable in runnables)
         {
-            while (runnable.Any())
+            while (runnable.Count != 0)
             {
                 try
                 {
-                    response.Add(runnable.Dequeue().Perform(Session));
+                    response.Add(runnable.Dequeue().Perform(session));
                 }
                 catch (Exception ex)
                 {

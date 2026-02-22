@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using System.Text;
 
 namespace DataVo.Core.BTree.Binary;
@@ -14,7 +12,7 @@ public class BTreePage
     public int PageId { get; set; }
     public bool IsLeaf { get; set; }
     public int NumKeys { get; set; }
-    
+
     public string[] Keys { get; set; } = new string[MaxKeys];
     public string[] Values { get; set; } = new string[MaxKeys];
     public int[] Children { get; set; } = new int[MaxKeys + 1];
@@ -28,9 +26,9 @@ public class BTreePage
         writer.Write(PageId);
         writer.Write(IsLeaf);
         writer.Write(NumKeys);
-        
+
         // Pad header to exactly 16 bytes. (4 + 1 + 4 = 9 bytes). We write 7 extra zeros.
-        for(int i=0; i<7; i++) writer.Write((byte)0);
+        for (int i = 0; i < 7; i++) writer.Write((byte)0);
 
         for (int i = 0; i < MaxKeys; i++)
         {
@@ -55,7 +53,7 @@ public class BTreePage
         page.PageId = reader.ReadInt32();
         page.IsLeaf = reader.ReadBoolean();
         page.NumKeys = reader.ReadInt32();
-        
+
         reader.ReadBytes(7); // Skip header padding
 
         for (int i = 0; i < MaxKeys; i++)
@@ -110,7 +108,7 @@ public class BTreePage
                     i++;
                 }
             }
-            
+
             // Re-read child if it was split and we need the new correct target
             child = pager.ReadPage(Children[i]);
             child.InsertNonFull(key, value, pager);
