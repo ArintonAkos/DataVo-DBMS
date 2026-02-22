@@ -4,21 +4,14 @@ using DataVo.Core.Parser.DQL;
 
 namespace DataVo.Core.Parser;
 
-internal class Evaluator
+internal class Evaluator(List<SqlStatement> statements)
 {
-    private readonly List<SqlStatement> _statements;
-
-    public Evaluator(List<SqlStatement> statements)
-    {
-        _statements = statements;
-    }
-
     public List<Queue<IDbAction>> ToRunnables()
     {
-        List<Queue<IDbAction>> runnables = new();
+        List<Queue<IDbAction>> runnables = [];
         Queue<IDbAction> currentQueue = new();
 
-        foreach (var statement in _statements)
+        foreach (var statement in statements)
         {
             if (statement is SelectStatement selectAst)
             {

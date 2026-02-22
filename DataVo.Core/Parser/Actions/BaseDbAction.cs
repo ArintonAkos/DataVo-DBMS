@@ -1,25 +1,32 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
-using DataVo.Core.MongoDB;
+using DataVo.Core.StorageEngine;
 
 namespace DataVo.Core.Parser.Actions;
 
 internal abstract class BaseDbAction : IDbAction
 {
-    protected DbContext Context;
-    protected List<Dictionary<string, dynamic>> Data = new();
-    protected List<string> Fields = new();
+    protected StorageContext Context;
+    protected List<Dictionary<string, dynamic>> Data = [];
+    protected List<string> Fields = [];
 
-    protected List<string> Messages = new();
+    protected List<string> Messages = [];
 
-    public BaseDbAction() => Context = DbContext.Instance;
+    public BaseDbAction() => Context = StorageContext.Instance;
 
     public QueryResult Perform(Guid session)
     {
-        try {
+        try
+        {
             PerformAction(session);
+            if (Messages.Count > 0 && Messages.Any(m => m.ToLower().Contains("error") || m.ToLower().Contains("exception")))
+            {
+                return new QueryResult { Messages = Messages, IsError = true, Data = Data, Fields = Fields };
+            }
             return QueryResult.Success(Messages, Data, Fields);
-        } catch (Exception ex) {
+        }
+        catch (Exception ex)
+        {
             return QueryResult.Error(ex.Message);
         }
     }

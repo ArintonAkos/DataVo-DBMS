@@ -3,11 +3,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DQL;
 
-internal class UseModel
+internal class UseModel(string databaseName)
 {
-    public UseModel(string databaseName) => DatabaseName = databaseName;
-
-    public string DatabaseName { get; set; }
+    public string DatabaseName { get; set; } = databaseName;
 
     public static UseModel FromMatch(Match match) => new(match.Groups["DatabaseName"].Value);
     public static UseModel FromAst(UseStatement ast) => new(ast.DatabaseName.Name);

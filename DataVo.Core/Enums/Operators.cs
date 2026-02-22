@@ -25,36 +25,36 @@ public class Operators
 
     public const string NEGATE = "NOT";
 
-    public static List<string> ConditionOperators = new()
-    {
+    public static List<string> ConditionOperators =
+    [
         AND,
         OR,
-    };
+    ];
 
-    public static List<string> LogicalOperators = new()
-    {
+    public static List<string> LogicalOperators =
+    [
         EQUALS,
         NOT_EQUALS,
         GREATER_THAN,
         LESS_THAN,
         GREATER_THAN_OR_EQUAL_TO,
         LESS_THAN_OR_EQUAL_TO,
-    };
+    ];
 
-    public static List<string> ArithmeticOperators = new()
-    {
+    public static List<string> ArithmeticOperators =
+    [
         ADD,
         SUBTRACT,
         MUL,
         DIVIDE,
-    };
+    ];
 
-    public static List<string> FunctionOperators = new()
-    {
+    public static List<string> FunctionOperators =
+    [
         LEN,
         UPPER,
         LOWER,
-    };
+    ];
 
     public static List<string> Supported()
     {

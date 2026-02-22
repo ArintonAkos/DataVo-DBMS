@@ -30,13 +30,13 @@ internal class RequestMapper
 
     public static List<Queue<IDbAction>> ToRunnables(string query)
     {
-        List<Queue<IDbAction>> runnables = new();
+        List<Queue<IDbAction>> runnables = [];
         Queue<IDbAction> actions = new();
 
         string rawSqlCode = HandleRequestData(query);
         int lineCount = 0;
 
-        REPEAT:
+    REPEAT:
         while (!string.IsNullOrEmpty(rawSqlCode.Trim()))
         {
             if (MatchCommand(_goCommand, ref rawSqlCode, ref lineCount) != null)

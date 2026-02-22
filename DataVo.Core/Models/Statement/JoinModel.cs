@@ -24,15 +24,15 @@ public class JoinModel
         }
     }
 
-    public Dictionary<string, TableDetail> JoinTableDetails { get; set; } = new();
-    public List<JoinCondition> JoinConditions { get; set; } = new();
+    public Dictionary<string, TableDetail> JoinTableDetails { get; set; } = [];
+    public List<JoinCondition> JoinConditions { get; set; } = [];
 
     public static JoinModel FromMatchGroup(Group group, TableService tableService)
     {
         var model = new JoinModel();
 
         var joinDetails = TableParserService.ParseJoinTablesAndConditions(group.Value);
-        
+
         var joinTableNames = joinDetails.Item1;
         var joinConditions = joinDetails.Item2;
 

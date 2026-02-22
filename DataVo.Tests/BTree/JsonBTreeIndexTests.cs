@@ -1,6 +1,6 @@
 using DataVo.Core.BTree;
 
-namespace Server.Tests;
+namespace DataVo.Tests.BTree;
 
 public class JsonBTreeIndexTests
 {
@@ -85,7 +85,7 @@ public class JsonBTreeIndexTests
         index.Insert("key2", "row3");
         index.Insert("key3", "row1"); // row1 is also under key3
 
-        index.DeleteValues(new List<string> { "row1", "row3" });
+        index.DeleteValues(["row1", "row3"]);
 
         // key1 should only have row2
         var result1 = index.Search("key1");

@@ -1,6 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Aggregations;
-using System.Text.RegularExpressions;
 
 namespace DataVo.Core.Services
 {
@@ -27,7 +26,7 @@ namespace DataVo.Core.Services
 
         public static Dictionary<string, List<string>>? ParseSelectColumns(string rawColumns, TableService tableService)
         {
-            Dictionary<string, List<string>> selectedColumns = new();
+            Dictionary<string, List<string>> selectedColumns = [];
 
             var splitColumns = rawColumns.Split(',');
 
@@ -51,7 +50,7 @@ namespace DataVo.Core.Services
 
                 if (!selectedColumns.ContainsKey(tableName))
                 {
-                    selectedColumns[tableName] = new();
+                    selectedColumns[tableName] = [];
                 }
 
                 selectedColumns[tableName].Add($"{tableName}.{columnName}");
@@ -62,13 +61,13 @@ namespace DataVo.Core.Services
 
         public static List<Column> ParseGroupByColumns(string rawColumns, string databaseName, TableService tableService)
         {
-            List<Column> columns = new();
+            List<Column> columns = [];
             string[] splitColumns = rawColumns.Split(',');
 
             foreach (var rawColumn in splitColumns)
             {
                 string trimmedColumn = rawColumn.Trim();
-                
+
                 if (string.IsNullOrEmpty(trimmedColumn))
                 {
                     continue;
@@ -76,7 +75,7 @@ namespace DataVo.Core.Services
 
                 Tuple<string, string> parseResult = tableService.ParseAndFindTableNameByColumn(trimmedColumn);
                 Column column = new(databaseName, parseResult.Item1, parseResult.Item2);
-                
+
                 if (!columns.Any(c => c.ColumnName == column.ColumnName && c.TableName == column.TableName))
                 {
                     columns.Add(column);
@@ -88,7 +87,7 @@ namespace DataVo.Core.Services
 
         public static List<Aggregation> ParseAggregationColumns(string rawColumns, string databaseName, TableService tableService)
         {
-            List<Aggregation> aggregations = new();
+            List<Aggregation> aggregations = [];
             string[] splitColumns = rawColumns.Split(',');
 
             foreach (var rawColumn in splitColumns)
@@ -153,11 +152,11 @@ namespace DataVo.Core.Services
         {
             if (joinStatement is null)
             {
-                return new(new(), new());
+                return new([], []);
             }
 
-            Dictionary<string, TableDetail> tableAliases = new();
-            List<Tuple<string, string>> conditions = new();
+            Dictionary<string, TableDetail> tableAliases = [];
+            List<Tuple<string, string>> conditions = [];
 
             string[] joins = joinStatement.Trim().Split(new string[] { "JOIN", "join" }, StringSplitOptions.RemoveEmptyEntries);
 

@@ -31,18 +31,18 @@ public class Lexer
 {
     private readonly string _input;
     private int _position;
-    
+
     // Explicit list of SQL keywords we care about right now
     private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
     {
-        "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", 
-        "CREATE", "TABLE", "DROP", "INDEX", "ON", "SHOW", "DATABASES", 
+        "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES",
+        "CREATE", "TABLE", "DROP", "INDEX", "ON", "SHOW", "DATABASES",
         "TABLES", "DESCRIBE", "DELETE", "UPDATE", "SET", "USE", "GO",
-        "DATABASE", "PRIMARY", "KEY", "UNIQUE", "REFERENCES", 
+        "DATABASE", "PRIMARY", "KEY", "UNIQUE", "REFERENCES",
         "INT", "FLOAT", "BIT", "DATE", "VARCHAR", "AS", "BY", "GROUP", "ORDER",
         "AND", "OR", "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY" // Can be classified as Keyword or Operator depending on AST usage. We'll emit as Operator for Shunting Yard compatibility.
     };
-    
+
     // Multi-character logical operators
     private static readonly string[] MultiCharOperators = { ">=", "<=", "!=", "<>" };
 
@@ -121,7 +121,7 @@ public class Lexer
     {
         _position++; // Skip opening quote
         int start = _position;
-        
+
         while (_position < _input.Length && _input[_position] != quoteChar)
         {
             // Handle escaped quotes (e.g. '') 
@@ -134,16 +134,16 @@ public class Lexer
 
         string value = _input.Substring(start, _position - start);
         _position++; // Skip closing quote
-        
+
         // Re-wrap in single quotes so NodeValue.Parse natively handles it as String
-        return new Token(TokenType.StringLiteral, $"'{value}'"); 
+        return new Token(TokenType.StringLiteral, $"'{value}'");
     }
 
     private Token ReadNumberLiteral()
     {
         int start = _position;
         bool hasDecimal = false;
-        
+
         // Advance past potential negative sign
         if (_input[_position] == '-') _position++;
 

@@ -4,11 +4,11 @@ namespace DataVo.Core.Parser.Types
 {
     public class JoinedRow : IEnumerable<KeyValuePair<string, Row>>
     {
-        private readonly Dictionary<string, Row> _row = new();
+        private readonly Dictionary<string, Row> _row = [];
 
         public JoinedRow()
         {
-            _row = new Dictionary<string, Row>();
+            _row = [];
         }
 
         public JoinedRow(Dictionary<string, Row> rows)

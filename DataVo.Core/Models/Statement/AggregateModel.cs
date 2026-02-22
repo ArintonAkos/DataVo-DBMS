@@ -3,14 +3,9 @@ using DataVo.Core.Services;
 
 namespace DataVo.Core.Models.Statement
 {
-    internal class AggregateModel
+    internal class AggregateModel(List<Aggregation> aggregations)
     {
-        public List<Aggregation> Functions { get; set; } = new();
-
-        public AggregateModel(List<Aggregation> aggregations)
-        {
-            Functions = aggregations;
-        }
+        public List<Aggregation> Functions { get; set; } = aggregations;
 
         public static AggregateModel FromString(string match, string databaseName, TableService tableService)
         {

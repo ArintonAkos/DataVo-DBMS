@@ -4,14 +4,9 @@ using DataVo.Core.Services;
 
 namespace DataVo.Core.Parser.Aggregations
 {
-    public abstract class Aggregation
+    public abstract class Aggregation(Column field)
     {
-        protected readonly Column _field;
-
-        protected Aggregation(Column field)
-        {
-            _field = field;
-        }
+        protected readonly Column _field = field;
 
         public string ColumnName
         {

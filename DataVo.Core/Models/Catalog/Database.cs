@@ -6,9 +6,9 @@ namespace DataVo.Core.Models.Catalog;
 [XmlRoot("Database")]
 public class Database
 {
-    [XmlAttribute] public string DatabaseName { get; set; }
+    [XmlAttribute] public string DatabaseName { get; set; } = null!;
 
     [XmlArray("Tables")]
     [XmlArrayItem("Table")]
-    public List<Table> Tables { get; set; }
+    public List<Table> Tables { get; set; } = null!;
 }

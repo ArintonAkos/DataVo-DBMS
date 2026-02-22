@@ -16,7 +16,7 @@ public class IndexManager
     /// <summary>
     /// In-memory cache of loaded indexes, keyed by "{dbName}/{tableName}_{indexName}".
     /// </summary>
-    private readonly Dictionary<string, IIndex> _cache = new();
+    private readonly Dictionary<string, IIndex> _cache = [];
 
     private IndexManager() { }
 
@@ -63,11 +63,11 @@ public class IndexManager
             IIndex index;
             // Hacky detection for benchmark vs standard to keep tests passing.
             // A real engine would persist metadata for table's `IndexType`.
-            if (File.ReadAllText(filePath).StartsWith("{")) 
+            if (File.ReadAllText(filePath).StartsWith("{"))
             {
                 index = JsonBTreeIndex.Load(filePath);
             }
-            else 
+            else
             {
                 index = BinaryBTreeIndex.LoadFile(filePath);
             }
@@ -88,10 +88,10 @@ public class IndexManager
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
 
-        IIndex index = indexType == IndexType.BinaryBTree 
-            ? new BinaryBTreeIndex() 
+        IIndex index = indexType == IndexType.BinaryBTree
+            ? new BinaryBTreeIndex()
             : new JsonBTreeIndex();
-            
+
         // Initial setup for binary pagers required before inserting
         if (index is BinaryBTreeIndex binIndex)
         {

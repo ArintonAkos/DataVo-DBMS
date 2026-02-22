@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using DataVo.Core.BTree.Core;
 
 namespace DataVo.Core.BTree.BPlus;
@@ -13,8 +10,8 @@ public class BinaryBPlusTreeIndex : IIndex
 
     public void Insert(string key, string rowId)
     {
-        if (!int.TryParse(key, out int intKey)) return; 
-        
+        if (!int.TryParse(key, out int intKey)) return;
+
         if (_pager.RootPageId == -1)
         {
             var root = _pager.AllocatePage();
@@ -23,7 +20,7 @@ public class BinaryBPlusTreeIndex : IIndex
             root.Keys[0] = intKey;
             root.SetValue(0, rowId);
             root.NumKeys = 1;
-            
+
             _pager.RootPageId = root.PageId;
             _pager.WritePage(root);
             _pager.WriteMetadata();
@@ -36,13 +33,13 @@ public class BinaryBPlusTreeIndex : IIndex
             var newRoot = _pager.AllocatePage();
             newRoot.IsLeaf = false;
             newRoot.Children[0] = rootPage.PageId;
-            
+
             SplitChild(newRoot, 0, rootPage);
-            
+
             _pager.RootPageId = newRoot.PageId;
             _pager.WritePage(newRoot);
             _pager.WriteMetadata();
-            
+
             InsertNonFull(newRoot, intKey, rowId);
         }
         else
@@ -97,8 +94,8 @@ public class BinaryBPlusTreeIndex : IIndex
     {
         var newNode = _pager.AllocatePage();
         newNode.IsLeaf = child.IsLeaf;
-        
-        int t = BPlusTreePage.T; 
+
+        int t = BPlusTreePage.T;
 
         if (child.IsLeaf)
         {
@@ -110,14 +107,14 @@ public class BinaryBPlusTreeIndex : IIndex
                 newNode.Keys[j] = child.Keys[j + t];
                 newNode.SetValue(j, child.GetValue(j + t));
             }
-            
+
             newNode.NextPageId = child.NextPageId;
             child.NextPageId = newNode.PageId; // Linked Array connection! Fast sequential scans!
             child.NumKeys = t;
-            
+
             // Push up the lowest key of newNode as the routing key
             int routingKey = newNode.Keys[0];
-            
+
             for (int j = parent.NumKeys - 1; j >= i; j--)
             {
                 parent.Keys[j + 1] = parent.Keys[j];
@@ -139,10 +136,10 @@ public class BinaryBPlusTreeIndex : IIndex
             {
                 newNode.Children[j] = child.Children[j + t + 1];
             }
-            
+
             int medianKey = child.Keys[t];
             child.NumKeys = t;
-            
+
             for (int j = parent.NumKeys - 1; j >= i; j--)
             {
                 parent.Keys[j + 1] = parent.Keys[j];
@@ -152,7 +149,7 @@ public class BinaryBPlusTreeIndex : IIndex
             parent.Children[i + 1] = newNode.PageId;
             parent.NumKeys++;
         }
-        
+
         _pager.WritePage(child);
         _pager.WritePage(newNode);
         _pager.WritePage(parent);
@@ -164,7 +161,7 @@ public class BinaryBPlusTreeIndex : IIndex
         if (_pager.RootPageId == -1 || !int.TryParse(key, out int intKey)) return results;
 
         var current = _pager.ReadPage(_pager.RootPageId);
-        
+
         // Traverse to the FIRST LEAF where key COULD exist
         while (!current.IsLeaf)
         {
@@ -195,7 +192,7 @@ public class BinaryBPlusTreeIndex : IIndex
                     break;
                 }
             }
-            
+
             if (!stop && current.NextPageId != -1)
             {
                 current = _pager.ReadPage(current.NextPageId);
@@ -211,7 +208,7 @@ public class BinaryBPlusTreeIndex : IIndex
 
     public bool ContainsValue(string key)
     {
-         return Search(key).Count > 0;
+        return Search(key).Count > 0;
     }
 
     public void Delete(string key, string value) { }

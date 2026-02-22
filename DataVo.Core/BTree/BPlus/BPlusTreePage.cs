@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
@@ -15,7 +13,7 @@ namespace DataVo.Core.BTree.BPlus;
 public class BPlusTreePage
 {
     public const int PageSize = 4096;
-    public const int MaxKeys = 112; 
+    public const int MaxKeys = 112;
     public const int MinKeys = 55; // T-1, where T=56
     public const int T = 56;
 
@@ -23,7 +21,7 @@ public class BPlusTreePage
     public bool IsLeaf { get; set; }
     public int NumKeys { get; set; }
     public int NextPageId { get; set; } = -1; // Specific to B+Tree Leaves
-    
+
     // Arrays representing contiguous memory blocks inside the Node
     public int[] Keys { get; set; } = new int[MaxKeys];
     private string?[] _values = new string?[MaxKeys];
@@ -58,7 +56,7 @@ public class BPlusTreePage
         writer.Write(IsLeaf);
         writer.Write(NumKeys);
         writer.Write(NextPageId);
-        
+
         // Header exactly 16 bytes. (4 + 1 + 4 + 4 = 13 bytes). Add 3 zero bytes.
         writer.Write((byte)0); writer.Write((byte)0); writer.Write((byte)0);
 
@@ -95,7 +93,7 @@ public class BPlusTreePage
         page.IsLeaf = reader.ReadBoolean();
         page.NumKeys = reader.ReadInt32();
         page.NextPageId = reader.ReadInt32();
-        
+
         reader.ReadBytes(3); // Skip padding
 
         for (int i = 0; i < MaxKeys; i++)
@@ -179,6 +177,6 @@ public class BPlusTreePage
         string str = Encoding.UTF8.GetString(bytes);
         int nullIdx = str.IndexOf('\0');
         if (nullIdx >= 0) return str.Substring(0, nullIdx);
-        return str.TrimEnd('\0'); 
+        return str.TrimEnd('\0');
     }
 }

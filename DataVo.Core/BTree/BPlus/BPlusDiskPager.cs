@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using System.IO.MemoryMappedFiles;
 
 namespace DataVo.Core.BTree.BPlus;
@@ -14,7 +12,7 @@ public class BPlusDiskPager : IDisposable
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
     private const long InitialCapacity = 10L * 1024 * 1024; // 10MB init map
-    
+
     public int RootPageId { get; set; }
     public int NumPages { get; private set; }
 
@@ -64,14 +62,14 @@ public class BPlusDiskPager : IDisposable
     public BPlusTreePage AllocatePage()
     {
         int pageId = NumPages++;
-        
+
         long requiredOffset = (long)NumPages * BPlusTreePage.PageSize;
         if (requiredOffset >= _accessor!.Capacity)
         {
             // Expand mapping by 10MB
             GrowMap(requiredOffset + InitialCapacity);
         }
-        
+
         var page = new BPlusTreePage { PageId = pageId };
         WritePage(page);
         WriteMetadata();
@@ -83,7 +81,7 @@ public class BPlusDiskPager : IDisposable
         _accessor?.Flush();
         _accessor?.Dispose();
         _mmf?.Dispose();
-        
+
         _fs.SetLength(newCapacity);
         _mmf = MemoryMappedFile.CreateFromFile(_fs, null, 0, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, leaveOpen: true);
         _accessor = _mmf.CreateViewAccessor();
