@@ -3,6 +3,12 @@ using DataVo.Core.BTree.Binary;
 
 namespace DataVo.Core.BTree;
 
+public enum IndexPersistenceMode
+{
+    Immediate,
+    Buffered,
+}
+
 /// <summary>
 /// Singleton manager for all active B-Tree indexes.
 /// Provides the same interface previously offered by DbContext's index methods.
@@ -17,6 +23,13 @@ public class IndexManager
     /// In-memory cache of loaded indexes, keyed by "{dbName}/{tableName}_{indexName}".
     /// </summary>
     private readonly Dictionary<string, IIndex> _cache = [];
+    private readonly Dictionary<string, string> _cacheFilePaths = [];
+    private readonly HashSet<string> _dirtyIndexes = [];
+    private readonly Dictionary<string, int> _pendingMutationCounts = [];
+    private readonly object _persistenceLock = new();
+
+    private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
+    private int _flushMutationThreshold = 256;
 
     private IndexManager() { }
 
@@ -26,6 +39,56 @@ public class IndexManager
         {
             _instance ??= new IndexManager();
             return _instance;
+        }
+    }
+
+    public void ConfigurePersistence(IndexPersistenceMode mode, int flushMutationThreshold = 256)
+    {
+        if (flushMutationThreshold <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(flushMutationThreshold), "Flush threshold must be greater than zero.");
+        }
+
+        lock (_persistenceLock)
+        {
+            _persistenceMode = mode;
+            _flushMutationThreshold = flushMutationThreshold;
+        }
+
+        if (mode == IndexPersistenceMode.Immediate)
+        {
+            FlushDirtyIndexes();
+        }
+    }
+
+    public void FlushDirtyIndexes()
+    {
+        List<string> dirtyKeys;
+
+        lock (_persistenceLock)
+        {
+            dirtyKeys = _dirtyIndexes.ToList();
+        }
+
+        foreach (var cacheKey in dirtyKeys)
+        {
+            if (!_cache.TryGetValue(cacheKey, out var index))
+            {
+                continue;
+            }
+
+            if (!_cacheFilePaths.TryGetValue(cacheKey, out string? filePath))
+            {
+                continue;
+            }
+
+            index.Save(filePath);
+
+            lock (_persistenceLock)
+            {
+                _dirtyIndexes.Remove(cacheKey);
+                _pendingMutationCounts.Remove(cacheKey);
+            }
         }
     }
 
@@ -73,6 +136,7 @@ public class IndexManager
             }
 
             _cache[cacheKey] = index;
+            _cacheFilePaths[cacheKey] = filePath;
             return index;
         }
 
@@ -108,6 +172,7 @@ public class IndexManager
 
         index.Save(filePath);
         _cache[cacheKey] = index;
+        _cacheFilePaths[cacheKey] = filePath;
     }
 
     /// <summary>
@@ -119,6 +184,13 @@ public class IndexManager
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
 
         _cache.Remove(cacheKey);
+        _cacheFilePaths.Remove(cacheKey);
+
+        lock (_persistenceLock)
+        {
+            _dirtyIndexes.Remove(cacheKey);
+            _pendingMutationCounts.Remove(cacheKey);
+        }
 
         if (File.Exists(filePath))
         {
@@ -133,7 +205,7 @@ public class IndexManager
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.Insert(value, rowId);
-        index.Save(GetIndexFilePath(indexName, tableName, databaseName));
+        PersistAfterMutation(index, indexName, tableName, databaseName);
     }
 
     /// <summary>
@@ -144,7 +216,7 @@ public class IndexManager
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.DeleteValues(toBeDeletedIds);
-        index.Save(GetIndexFilePath(indexName, tableName, databaseName));
+        PersistAfterMutation(index, indexName, tableName, databaseName);
     }
 
     /// <summary>
@@ -164,4 +236,42 @@ public class IndexManager
         var index = GetOrLoad(indexName, tableName, databaseName);
         return index.ContainsValue(rowId);
     }
+
+    private void PersistAfterMutation(IIndex index, string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+
+        if (_persistenceMode == IndexPersistenceMode.Immediate)
+        {
+            index.Save(filePath);
+            return;
+        }
+
+        bool shouldFlush = false;
+        lock (_persistenceLock)
+        {
+            _dirtyIndexes.Add(cacheKey);
+
+            if (!_pendingMutationCounts.TryGetValue(cacheKey, out int pendingMutations))
+            {
+                pendingMutations = 0;
+            }
+
+            pendingMutations++;
+            _pendingMutationCounts[cacheKey] = pendingMutations;
+            shouldFlush = pendingMutations >= _flushMutationThreshold;
+        }
+
+        if (shouldFlush)
+        {
+            index.Save(filePath);
+            lock (_persistenceLock)
+            {
+                _dirtyIndexes.Remove(cacheKey);
+                _pendingMutationCounts.Remove(cacheKey);
+            }
+        }
+    }
+
 }
