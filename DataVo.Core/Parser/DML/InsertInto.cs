@@ -64,25 +64,56 @@ namespace DataVo.Core.Parser.DML
             int rowNumber = 0;
             int rowsAffected = 0;
 
-            foreach (var row in _model.Rows)
+            bool hasColumns = _model.Columns.Count > 0;
+
+            foreach (var rawRow in _model.RawRows)
             {
+                if (!hasColumns && rawRow.Count != tableColumns.Count)
+                {
+                    throw new Exception("The number of values provided in a row must be the same as " +
+                                        "the number of columns in the table when columns are not specified.");
+                }
+
                 bool invalidRow = false;
                 string id = string.Empty;
-                string data = string.Empty;
+                var rowDict = new Dictionary<string, dynamic>();
 
                 rowNumber++;
 
-                foreach (Column tableColumn in tableColumns)
+                for (int i = 0; i < tableColumns.Count; i++)
                 {
-                    tableColumn.Value = row[tableColumn.Name].Replace("'", "");
+                    Column tableColumn = tableColumns[i];
 
-                    if (tableColumn.ParsedValue == null)
+                    string rawValue;
+                    if (hasColumns)
+                    {
+                        int colIndex = _model.Columns.IndexOf(tableColumn.Name);
+                        if (colIndex == -1)
+                        {
+                            // Column not specified in INSERT, use null or default
+                            rawValue = "null";
+                        }
+                        else
+                        {
+                            rawValue = rawRow[colIndex];
+                        }
+                    }
+                    else
+                    {
+                        rawValue = rawRow[i];
+                    }
+
+                    tableColumn.Value = rawValue.Replace("'", "");
+
+                    if (tableColumn.ParsedValue == null && rawValue.ToLowerInvariant() != "null")
                     {
                         invalidRow = true;
                         Messages.Add($"Type of argument doesn't match with column type in row {rowNumber}!");
                         Logger.Error($"Type of argument doesn't match with column type in row {rowNumber}!");
                         break;
                     }
+
+                    rowDict[tableColumn.Name] = tableColumn.ParsedValue;
 
                     if (uniqueKeys.Contains(tableColumn.Name) &&
                         IndexManager.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
@@ -112,19 +143,12 @@ namespace DataVo.Core.Parser.DML
                     if (primaryKeys.Contains(tableColumn.Name))
                     {
                         id += tableColumn.ParsedValue + "#";
-                        continue;
                     }
-
-                    data += tableColumn.ParsedValue + "#";
                 }
 
                 if (!invalidRow)
                 {
                     if (!string.IsNullOrEmpty(id)) id = id.Remove(id.Length - 1);
-                    if (!string.IsNullOrEmpty(data)) data = data.Remove(data.Length - 1);
-
-                    // BTree check is sufficient here now.
-                    // if (StorageContext.Instance.TableContainsRow(mappedRowId, _model.TableName, databaseName)) ...
 
                     if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsRow(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
@@ -133,7 +157,7 @@ namespace DataVo.Core.Parser.DML
                         continue;
                     }
 
-                    MakeInsertion(id, data, indexFiles, tableColumns, databaseName);
+                    MakeInsertion(rowDict, indexFiles, tableColumns, databaseName);
 
                     rowsAffected++;
                 }
@@ -142,29 +166,8 @@ namespace DataVo.Core.Parser.DML
             return rowsAffected;
         }
 
-        private void MakeInsertion(string id, string data, List<IndexFile> indexFiles, List<Column> tableColumns, string databaseName)
+        private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, List<Column> tableColumns, string databaseName)
         {
-            var rowDict = new Dictionary<string, dynamic>();
-            // Split up legacy string tracking back into dictionary for serializer
-            var primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
-            var idParts = id.Split('#');
-            var dataParts = data.Split('#');
-
-            int pkIdx = 0, dataIdx = 0;
-            foreach (var col in tableColumns)
-            {
-                if (primaryKeys.Contains(col.Name))
-                {
-                    col.Value = idParts[pkIdx++];
-                    rowDict[col.Name] = col.ParsedValue!;
-                }
-                else
-                {
-                    col.Value = dataParts[dataIdx++];
-                    rowDict[col.Name] = col.ParsedValue!;
-                }
-            }
-
             long assignedRowId = StorageContext.Instance.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
 
             foreach (var index in indexFiles)
@@ -172,10 +175,7 @@ namespace DataVo.Core.Parser.DML
                 string indexValue = string.Empty;
                 foreach (var indexAttribute in index.AttributeNames)
                 {
-                    indexValue += tableColumns
-                        .Where(col => col.Name == indexAttribute)
-                        .First()
-                        .ParsedValue + "##";
+                    indexValue += rowDict[indexAttribute] + "##";
                 }
                 indexValue = indexValue.Remove(indexValue.Length - 2, 2);
 

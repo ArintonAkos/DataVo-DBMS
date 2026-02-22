@@ -25,7 +25,7 @@ public static class RowSerializer
                 writer.Write(true);
                 continue;
             }
-            
+
             writer.Write(false); // Not null flag
 
             string type = column.Type.ToUpperInvariant();
@@ -43,7 +43,18 @@ public static class RowSerializer
             }
             else if (type == "DATE" || type == "DATETIME")
             {
-                writer.Write(((DateTime)value).ToBinary());
+                if (value is DateOnly dateOnly)
+                {
+                    writer.Write(dateOnly.ToDateTime(TimeOnly.MinValue).ToBinary());
+                }
+                else if (value is DateTime dateTime)
+                {
+                    writer.Write(dateTime.ToBinary());
+                }
+                else
+                {
+                    writer.Write(Convert.ToDateTime(value).ToBinary());
+                }
             }
             else // VARCHAR etc
             {
@@ -89,7 +100,11 @@ public static class RowSerializer
             {
                 row[column.Name] = reader.ReadBoolean();
             }
-            else if (type == "DATE" || type == "DATETIME")
+            else if (type == "DATE")
+            {
+                row[column.Name] = DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
+            }
+            else if (type == "DATETIME")
             {
                 row[column.Name] = DateTime.FromBinary(reader.ReadInt64());
             }
