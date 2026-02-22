@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
 using DataVo.Core.Cache;
 using DataVo.Core.MongoDB;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
@@ -15,6 +16,7 @@ internal class DropTable : BaseDbAction
     private readonly DropTableModel _model;
 
     public DropTable(Match match) => _model = DropTableModel.FromMatch(match);
+    public DropTable(DropTableStatement ast) => _model = DropTableModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

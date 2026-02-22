@@ -5,6 +5,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Cache;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.Commands;
 
@@ -13,6 +14,7 @@ internal class Describe : BaseDbAction
     private readonly DescribeModel _model;
 
     public Describe(Match match) => _model = DescribeModel.FromMatch(match);
+    public Describe(DescribeStatement ast) => _model = DescribeModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

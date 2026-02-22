@@ -8,6 +8,7 @@ using DataVo.Core.Cache;
 using DataVo.Core.MongoDB;
 using System.Text.RegularExpressions;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DML
 {
@@ -18,6 +19,11 @@ namespace DataVo.Core.Parser.DML
         public InsertInto(Match match)
         {
             _model = InsertIntoModel.FromMatch(match);
+        }
+
+        public InsertInto(InsertIntoStatement ast)
+        {
+            _model = InsertIntoModel.FromAst(ast);
         }
 
         public override void PerformAction(Guid session)

@@ -1,7 +1,5 @@
 ﻿using System.Text.RegularExpressions;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Contracts;
-using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser.Commands;
 using DataVo.Core.Parser.DDL;
 using DataVo.Core.Parser.DML;
