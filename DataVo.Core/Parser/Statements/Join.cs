@@ -51,43 +51,90 @@ public class Join
             insertHashAfter = true;
         }
 
-        foreach (var leftTableRow in tableRows)
+        if (rightTableData.Count >= 32)
         {
-            if (leftTableRow.Value.ContainsKey(leftTable) && leftTableRow.Value[leftTable].ContainsKey(leftColumn))
+            var rightLookup = BuildRightLookup(rightTableData, rightColumn);
+
+            foreach (var leftTableRow in tableRows)
             {
-                var leftValue = leftTableRow.Value[leftTable][leftColumn];
-
-                foreach (var rightTableRow in rightTableData)
+                if (!leftTableRow.Value.ContainsKey(leftTable) || !leftTableRow.Value[leftTable].ContainsKey(leftColumn))
                 {
-                    if (rightTableRow.Value.ContainsKey(rightColumn) && rightTableRow.Value[rightColumn] == leftValue)
+                    throw new Exception("Easter egg ha ide bejon!");
+                }
+
+                var leftValue = leftTableRow.Value[leftTable][leftColumn];
+                if (!rightLookup.TryGetValue(leftValue, out KeyValuePair<string, Dictionary<string, dynamic>> rightTableRow))
+                {
+                    continue;
+                }
+
+                var joinedRow = new JoinedRow();
+                string hash = insertHashAfter
+                    ? $"{leftTableRow.Key}##{rightTableRow.Key}"
+                    : $"{rightTableRow.Key}##{leftTableRow.Key}";
+
+                joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
+                joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
+
+                result.Add(hash, joinedRow);
+            }
+        }
+        else
+        {
+            foreach (var leftTableRow in tableRows)
+            {
+                if (leftTableRow.Value.ContainsKey(leftTable) && leftTableRow.Value[leftTable].ContainsKey(leftColumn))
+                {
+                    var leftValue = leftTableRow.Value[leftTable][leftColumn];
+
+                    foreach (var rightTableRow in rightTableData)
                     {
-                        var joinedRow = new JoinedRow();
-                        string hash = string.Empty;
-
-                        if (insertHashAfter)
+                        if (rightTableRow.Value.ContainsKey(rightColumn) && rightTableRow.Value[rightColumn] == leftValue)
                         {
-                            hash = $"{leftTableRow.Key}##{rightTableRow.Key}";
-                        }
-                        else
-                        {
-                            hash = $"{rightTableRow.Key}##{leftTableRow.Key}";
-                        }
+                            var joinedRow = new JoinedRow();
+                            string hash = insertHashAfter
+                                ? $"{leftTableRow.Key}##{rightTableRow.Key}"
+                                : $"{rightTableRow.Key}##{leftTableRow.Key}";
 
-                        joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
-                        joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
+                            joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
+                            joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
 
-                        result.Add(hash, joinedRow);
-                        break;
+                            result.Add(hash, joinedRow);
+                            break;
+                        }
                     }
                 }
-            }
-            else
-            {
-                throw new Exception("Easter egg ha ide bejon!");
+                else
+                {
+                    throw new Exception("Easter egg ha ide bejon!");
+                }
             }
         }
 
         return result;
+    }
+
+    private static Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> BuildRightLookup(
+        Dictionary<string, Dictionary<string, dynamic>> rightTableData,
+        string rightColumn)
+    {
+        Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> lookup = [];
+
+        foreach (var rightTableRow in rightTableData)
+        {
+            if (!rightTableRow.Value.ContainsKey(rightColumn))
+            {
+                continue;
+            }
+
+            dynamic key = rightTableRow.Value[rightColumn];
+            if (!lookup.ContainsKey(key))
+            {
+                lookup[key] = rightTableRow;
+            }
+        }
+
+        return lookup;
     }
 
     public HashedTable Evaluate(HashedTable tableRows)
