@@ -1,17 +1,30 @@
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Exceptions;
 using static DataVo.Core.Models.Statement.Utils.Node;
 
 namespace DataVo.Core.Parser;
 
 public class Parser(List<Token> tokens)
 {
+    // The position of the current token being parsed. Initialized to 0, meaning we start parsing from the first token in the list.
     private int _position = 0;
 
+    // Pointer to the current token being parsed. If _position is at the end of the list, Current will return an EOF token.
     private Token Current => _position < tokens.Count ? tokens[_position] : tokens.Last();
+    // Peek at the next token without advancing the position. Returns an EOF token if peeking beyond the end of the list.
     private Token Advance() => _position < tokens.Count ? tokens[_position++] : tokens.Last();
+    // Helper method to check if we've reached the end of the token list
     private bool IsEof() => Current.Type == TokenType.EOF;
 
+    /// <summary>
+    /// Helper method to match the current token against an expected type and optional value. 
+    /// If the token matches, it advances the position and returns true. Otherwise, 
+    /// it returns false without advancing.
+    /// </summary> 
+    /// <param name="type">The expected token type to match.</param>
+    /// <param name="value">An optional expected token value to match (case-insensitive). If null, only the type is checked.</param>
+    /// <returns>True if the current token matches the expected type and value (if provided), false otherwise.</returns>
     private bool Match(TokenType type, string? value = null)
     {
         if (IsEof()) return false;
@@ -29,7 +42,7 @@ public class Parser(List<Token> tokens)
     private Token Consume(TokenType type, string expectedMessage)
     {
         if (Current.Type == type) return Advance();
-        throw new Exception($"Parser Error: Expected {expectedMessage} but found {Current}.");
+        throw new ParserException($"Parser Error: Expected {expectedMessage} but found {Current}.");
     }
 
     public List<SqlStatement> Parse()
@@ -81,7 +94,7 @@ public class Parser(List<Token> tokens)
         else if (Match(TokenType.Keyword, "TABLES"))
             return new ShowTablesStatement();
 
-        throw new Exception("Parser Error: Expected DATABASES or TABLES after SHOW.");
+        throw new ParserException("Parser Error: Expected DATABASES or TABLES after SHOW.");
     }
 
     private DescribeStatement ParseDescribeStatement()
@@ -159,7 +172,7 @@ public class Parser(List<Token> tokens)
             Consume(TokenType.Punctuation, ")");
             return stmt;
         }
-        throw new Exception("Parser Error: Unknown CREATE statement type.");
+        throw new ParserException("Parser Error: Unknown CREATE statement type.");
     }
 
     private SqlStatement ParseAlterStatement()
@@ -222,7 +235,7 @@ public class Parser(List<Token> tokens)
             return new AlterTableStatement { TableName = new IdentifierNode(tableNameToken.Value) };
         }
 
-        throw new Exception("Parser Error: Unknown ALTER TABLE operation.");
+        throw new ParserException("Parser Error: Unknown ALTER TABLE operation.");
     }
 
     private SqlStatement ParseDropStatement()
@@ -239,7 +252,7 @@ public class Parser(List<Token> tokens)
             stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
             return stmt;
         }
-        throw new Exception("Parser Error: Unknown DROP statement type.");
+        throw new ParserException("Parser Error: Unknown DROP statement type.");
     }
 
     private SqlStatement ParseDeleteStatement()
@@ -368,7 +381,7 @@ public class Parser(List<Token> tokens)
     {
         if (IsEof()) return false;
         string val = Current.Value.ToUpperInvariant();
-        return val == "JOIN" || val == "INNER" || val == "LEFT" || val == "RIGHT" || val == "OUTER" || val == "CROSS";
+        return val == "JOIN" || val == "INNER" || val == "LEFT" || val == "RIGHT" || val == "OUTER" || val == "CROSS" || val == "FULL";
     }
 
     private JoinDetailNode ParseJoinDetail()
