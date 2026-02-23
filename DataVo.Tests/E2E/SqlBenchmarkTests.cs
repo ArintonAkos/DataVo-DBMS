@@ -101,6 +101,62 @@ public class SqlBenchmarkTests : IDisposable
         Assert.Equal(iterations, diskResults?.Count ?? 0);
     }
 
+    [Fact]
+    public void E2E_Benchmark_WhereFilter_InMemory_vs_Disk()
+    {
+        int employees = 5_000;
+
+        var inMemoryConfig = new DataVoConfig { StorageMode = StorageMode.InMemory };
+        StorageContext.Initialize(inMemoryConfig);
+
+        Execute($"CREATE DATABASE {_testDb}");
+        Execute($"USE {_testDb}");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT, Salary FLOAT)");
+
+        for (int i = 0; i < employees; i++)
+        {
+            int deptId = (i % 2) + 1;
+            float salary = deptId == 1 ? 100000f + i : 50000f + i;
+            Execute($"INSERT INTO Employees (EmpId, Name, DeptId, Salary) VALUES ({i}, 'Emp{i}', {deptId}, {salary.ToString(System.Globalization.CultureInfo.InvariantCulture)})");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var inMemoryResult = ExecuteAndReturn("SELECT * FROM Employees WHERE Employees.Salary > 100500");
+        stopwatch.Stop();
+        var inMemoryQueryTime = stopwatch.ElapsedMilliseconds;
+
+        Catalog.DropDatabase(_testDb);
+
+        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _diskPath };
+        StorageContext.Initialize(diskConfig);
+
+        Execute($"CREATE DATABASE {_testDb}");
+        Execute($"USE {_testDb}");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT, Salary FLOAT)");
+
+        for (int i = 0; i < employees; i++)
+        {
+            int deptId = (i % 2) + 1;
+            float salary = deptId == 1 ? 100000f + i : 50000f + i;
+            Execute($"INSERT INTO Employees (EmpId, Name, DeptId, Salary) VALUES ({i}, 'Emp{i}', {deptId}, {salary.ToString(System.Globalization.CultureInfo.InvariantCulture)})");
+        }
+
+        stopwatch.Restart();
+        var diskResult = ExecuteAndReturn("SELECT * FROM Employees WHERE Employees.Salary > 100500");
+        stopwatch.Stop();
+        var diskQueryTime = stopwatch.ElapsedMilliseconds;
+
+        _output.WriteLine("[WHERE Filter E2E Benchmark]");
+        _output.WriteLine($"Rows in Employees: {employees}");
+        _output.WriteLine($"InMemory query time: {inMemoryQueryTime} ms");
+        _output.WriteLine($"Disk query time:     {diskQueryTime} ms");
+
+        Assert.False(inMemoryResult.IsError);
+        Assert.False(diskResult.IsError);
+        Assert.NotEmpty(inMemoryResult.Data ?? []);
+        Assert.NotEmpty(diskResult.Data ?? []);
+    }
+
     private void Execute(string sql)
     {
         var engine = new QueryEngine(sql, _session);
