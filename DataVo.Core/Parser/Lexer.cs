@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.Parser;
 
@@ -40,7 +41,9 @@ public class Lexer
         "TABLES", "DESCRIBE", "DELETE", "UPDATE", "SET", "USE", "GO",
         "DATABASE", "PRIMARY", "KEY", "UNIQUE", "REFERENCES",
         "INT", "FLOAT", "BIT", "DATE", "VARCHAR", "AS", "BY", "GROUP", "ORDER",
-        "AND", "OR", "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY" // Can be classified as Keyword or Operator depending on AST usage. We'll emit as Operator for Shunting Yard compatibility.
+        "AND", "OR", "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY",
+        "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS"
+         // Can be classified as Keyword or Operator depending on AST usage. We'll emit as Operator for Shunting Yard compatibility.
     };
 
     // Multi-character logical operators
@@ -110,7 +113,7 @@ public class Lexer
                 continue;
             }
 
-            throw new Exception($"Lexer Error: Unrecognized character '{current}' at position {_position}");
+            throw new LexerException($"Lexer Error: Unrecognized character '{current}' at position {_position}");
         }
 
         tokens.Add(new Token(TokenType.EOF, ""));
@@ -130,7 +133,7 @@ public class Lexer
         }
 
         if (_position >= _input.Length)
-            throw new Exception("Lexer Error: Unterminated string literal.");
+            throw new LexerException("Lexer Error: Unterminated string literal.");
 
         string value = _input.Substring(start, _position - start);
         _position++; // Skip closing quote
@@ -151,7 +154,7 @@ public class Lexer
         {
             if (_input[_position] == '.')
             {
-                if (hasDecimal) throw new Exception("Lexer Error: Malformed number literal with multiple decimals.");
+                if (hasDecimal) throw new LexerException("Lexer Error: Malformed number literal with multiple decimals.");
                 hasDecimal = true;
             }
             _position++;
