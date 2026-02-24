@@ -8,13 +8,6 @@ namespace DataVo.Core.Models.Statement
     {
         public List<Column> Columns { get; set; } = columns;
 
-        public static GroupByModel FromString(string columnNamesString, string databaseName, TableService tableService)
-        {
-            List<Column> columns = TableParserService.ParseGroupByColumns(columnNamesString, databaseName, tableService);
-
-            return new GroupByModel(columns);
-        }
-
         public static GroupByModel FromAst(GroupByNode? groupByNode, string databaseName, TableService tableService)
         {
             if (groupByNode == null || groupByNode.Columns.Count == 0)
