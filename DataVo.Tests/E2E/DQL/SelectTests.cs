@@ -20,6 +20,42 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    public void Select_WithQualifiedStar_ReturnsOnlyThatTableColumns()
+    {
+        Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT)");
+
+        Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
+
+        var result = ExecuteAndReturn("SELECT Employees.* FROM Employees JOIN Departments ON Employees.DeptId = Departments.DeptId");
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.True(result.Data[0].ContainsKey("Employees.EmpId") || result.Data[0].ContainsKey("EmpId"));
+        Assert.True(result.Data[0].ContainsKey("Employees.Name") || result.Data[0].ContainsKey("Name"));
+        Assert.False(result.Data[0].ContainsKey("Departments.DeptName"));
+        Assert.False(result.Data[0].ContainsKey("DeptName"));
+    }
+
+    [Fact]
+    public void Select_WithGlobalStar_OnJoin_ReturnsColumnsFromAllTables()
+    {
+        Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT)");
+
+        Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
+
+        var result = ExecuteAndReturn("SELECT * FROM Employees JOIN Departments ON Employees.DeptId = Departments.DeptId");
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.True(result.Data[0].ContainsKey("Departments.DeptName"));
+        Assert.True(result.Data[0].ContainsKey("Employees.Name"));
+    }
+
+    [Fact]
     public void Select_WithWhereClause_FiltersCorrectly()
     {
         Execute("CREATE TABLE Employees (EmpId INT, Department VARCHAR, Salary FLOAT)");

@@ -9,12 +9,6 @@ namespace DataVo.Core.Models.Statement
     {
         public List<Aggregation> Functions { get; set; } = aggregations;
 
-        public static AggregateModel FromString(string match, string databaseName, TableService tableService)
-        {
-            var aggregations = TableParserService.ParseAggregationColumns(match, databaseName, tableService);
-            return new AggregateModel(aggregations);
-        }
-
         public static AggregateModel FromAstColumns(List<SqlNode> columns, string databaseName, TableService tableService)
         {
             List<Aggregation> aggregations = [];
