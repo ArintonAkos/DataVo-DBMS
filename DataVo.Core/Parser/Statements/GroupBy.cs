@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 
@@ -16,6 +17,13 @@ internal class GroupBy(string match, string databaseName, TableService tableServ
 
     public GroupByModel Model { get; private set; } = GroupByModel.FromString(match, databaseName, tableService);
     public TableService TableService { get; private set; } = tableService;
+
+    public GroupBy(GroupByNode? groupByNode, string databaseName, TableService tableService)
+        : this(string.Empty, databaseName, tableService)
+    {
+        Model = GroupByModel.FromAst(groupByNode, databaseName, tableService);
+        TableService = tableService;
+    }
 
     public bool ContainsGroupBy() => Model.Columns.Count > 0;
 

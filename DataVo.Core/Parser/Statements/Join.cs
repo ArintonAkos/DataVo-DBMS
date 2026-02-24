@@ -30,6 +30,13 @@ public class Join
         }
     }
 
+    public Join(JoinModel model, TableService tableService)
+    {
+        Model = model;
+        _tableService = tableService;
+        _isValid = model.JoinConditions.Count > 0 || model.JoinTableDetails.Count > 0;
+    }
+
     public bool ContainsJoin() => _isValid;
 
     public HashedTable PerformJoinCondition(HashedTable tableRows, JoinCondition joinCondition)

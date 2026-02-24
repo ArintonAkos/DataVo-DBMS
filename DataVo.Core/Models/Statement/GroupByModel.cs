@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Services;
 
 namespace DataVo.Core.Models.Statement
@@ -10,6 +11,29 @@ namespace DataVo.Core.Models.Statement
         public static GroupByModel FromString(string columnNamesString, string databaseName, TableService tableService)
         {
             List<Column> columns = TableParserService.ParseGroupByColumns(columnNamesString, databaseName, tableService);
+
+            return new GroupByModel(columns);
+        }
+
+        public static GroupByModel FromAst(GroupByNode? groupByNode, string databaseName, TableService tableService)
+        {
+            if (groupByNode == null || groupByNode.Columns.Count == 0)
+            {
+                return new GroupByModel([]);
+            }
+
+            List<Column> columns = [];
+
+            foreach (var colNode in groupByNode.Columns)
+            {
+                var parseResult = tableService.ParseAndFindTableNameByColumn(colNode.Name);
+                Column column = new(databaseName, parseResult.Item1, parseResult.Item2);
+
+                if (!columns.Any(c => c.ColumnName == column.ColumnName && c.TableName == column.TableName))
+                {
+                    columns.Add(column);
+                }
+            }
 
             return new GroupByModel(columns);
         }
