@@ -118,7 +118,7 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         Assert.Equal(2, result.Data.Count);
     }
 
-    [Fact(Skip = "HAVING execution is not fully wired in SelectModel/Evaluator yet.")]
+    [Fact]
     public void Select_WithGroupByAndHaving_FiltersGroups()
     {
         Execute("CREATE TABLE Employees (EmpId INT, Department VARCHAR, Salary FLOAT)");
@@ -132,7 +132,7 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         Assert.Single(result.Data);
     }
 
-    [Fact(Skip = "ORDER BY parsing exists, but execution ordering is not fully wired in Select pipeline yet.")]
+    [Fact]
     public void Select_WithOrderBy_SortsRows()
     {
         Execute("CREATE TABLE Scores (Id INT, Name VARCHAR, Points INT)");
