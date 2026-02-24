@@ -1,5 +1,4 @@
-﻿using System.Text.RegularExpressions;
-using DataVo.Core.Logging;
+﻿using DataVo.Core.Logging;
 using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
@@ -13,11 +12,6 @@ namespace DataVo.Core.Parser.DQL;
 internal class Select : BaseDbAction
 {
     private readonly SelectModel _model;
-
-    public Select(Match match)
-    {
-        _model = SelectModel.FromMatch(match);
-    }
 
     public Select(SelectStatement ast)
     {

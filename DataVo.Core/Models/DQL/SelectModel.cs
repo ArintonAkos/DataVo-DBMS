@@ -1,6 +1,6 @@
-﻿using System.Text.RegularExpressions;
-using DataVo.Core.Models.Statement.Utils;
+﻿using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Parser.Binding;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Services;
 
@@ -17,30 +17,7 @@ internal class SelectModel
     public Aggregate AggregateStatement { get; set; } = null!;
     public TableDetail FromTable { get; set; } = null!;
 
-    private Group RawJoinStatement { get; set; } = null!;
-    private string RawGroupByStatement { get; set; } = null!;
-    private string RawColumns { get; set; } = null!;
-    public string? RawHavingStatement { get; set; }
-    public string? RawOrderByStatement { get; set; }
-
-    public static SelectModel FromMatch(Match match)
-    {
-        var tableNameWithAlias = TableParserService.ParseTableWithAlias(match.Groups["TableName"].Value);
-        string tableName = tableNameWithAlias.Item1;
-        string? tableAlias = tableNameWithAlias.Item2;
-        TableDetail fromTable = new(tableName, tableAlias);
-
-        var whereStatement = new Where(match.Groups["WhereStatement"].Value, fromTable);
-
-        return new SelectModel
-        {
-            WhereStatement = whereStatement,
-            RawJoinStatement = match.Groups["Joins"],
-            RawGroupByStatement = match.Groups["ColumnNames"].Value,
-            RawColumns = match.Groups["Columns"].Value,
-            FromTable = fromTable
-        };
-    }
+    private SelectStatement Ast { get; set; } = null!;
 
     public static SelectModel FromAst(SelectStatement ast)
     {
@@ -50,7 +27,7 @@ internal class SelectModel
         string? tableAlias = tableNameWithAlias.Item2;
         TableDetail fromTable = new(tableName, tableAlias);
 
-        Where whereStatement;
+        Where whereStatement = new Where(string.Empty, fromTable);
         if (ast.WhereExpression != null)
         {
             whereStatement = new Where(ast.WhereExpression, fromTable);
@@ -60,49 +37,11 @@ internal class SelectModel
             whereStatement = new Where(string.Empty, fromTable);
         }
 
-        string rawColumns = string.Join(", ", ast.Columns.Cast<IdentifierNode>().Select(c => c.Name));
-
-        // Reconstruct RawJoinStatement for legacy backend compatibility
-        string rawJoinString = string.Empty;
-        if (ast.Joins.Count != 0)
-        {
-            var joinParts = ast.Joins.Select(j =>
-            {
-                string aliasPart = j.Alias != null ? $" AS {j.Alias.Name}" : "";
-                string onPart = j.Condition != null ? $" ON {j.Condition.LeftTable.Name}.{j.Condition.LeftColumn.Name} = {j.Condition.RightTable.Name}.{j.Condition.RightColumn.Name}" : "";
-                return $"{j.JoinType} {j.TableName.Name}{aliasPart}{onPart}";
-            });
-            rawJoinString = string.Join(" ", joinParts);
-        }
-
-        // Reconstruct RawGroupByStatement for legacy backend compatibility
-        string rawGroupByString = string.Empty;
-        if (ast.GroupByExpression != null && ast.GroupByExpression.Columns.Count != 0)
-        {
-            rawGroupByString = string.Join(", ", ast.GroupByExpression.Columns.Select(c => c.Name));
-        }
-
-        string rawHavingString = string.Empty;
-        if (ast.HavingExpression != null)
-        {
-            rawHavingString = "True"; // Placeholder, as full expression reconstruction is complex and not yet supported by backend.
-        }
-
-        string rawOrderByString = string.Empty;
-        if (ast.OrderByExpression != null && ast.OrderByExpression.Columns.Count != 0)
-        {
-            rawOrderByString = string.Join(", ", ast.OrderByExpression.Columns.Select(c => $"{c.Column.Name}{(c.IsAscending ? "" : " DESC")}"));
-        }
-
         return new SelectModel
         {
             WhereStatement = whereStatement,
-            RawJoinStatement = Regex.Match(rawJoinString, rawJoinString == string.Empty ? "" : ".*").Groups[0],
-            RawGroupByStatement = rawGroupByString,
-            RawHavingStatement = rawHavingString,
-            RawOrderByStatement = rawOrderByString,
-            RawColumns = rawColumns,
-            FromTable = fromTable
+            FromTable = fromTable,
+            Ast = ast
         };
     }
 
@@ -134,12 +73,78 @@ internal class SelectModel
         TableService = new TableService(databaseName);
         TableService.AddTableDetail(FromTable);
 
-        JoinStatement = new Join(RawJoinStatement, TableService);
-        GroupByStatement = new GroupBy(RawGroupByStatement, databaseName, TableService);
-        AggregateStatement = new Aggregate(RawColumns, databaseName, TableService);
+        var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
+        JoinStatement = new Join(boundJoinModel, TableService);
+        GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
+        AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
 
-        TableColumnsInUse = TableParserService.ParseSelectColumns(RawColumns, TableService);
+        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
 
         return false;
+    }
+
+    private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SqlNode> columns, TableService tableService)
+    {
+        Dictionary<string, List<string>> selectedColumns = [];
+
+        foreach (var node in columns)
+        {
+            if (node is not IdentifierNode identifierNode)
+            {
+                continue;
+            }
+
+            string name = identifierNode.Name.Trim();
+
+            if (name == "*")
+            {
+                return null;
+            }
+
+            if (name.EndsWith(".*", StringComparison.Ordinal))
+            {
+                string tableOrAlias = name[..^2];
+                var tableDetail = tableService.GetTableDetailByAliasOrName(tableOrAlias);
+                string tableName = tableDetail.TableName;
+
+                if (!selectedColumns.ContainsKey(tableName))
+                {
+                    selectedColumns[tableName] = [];
+                }
+
+                foreach (var col in tableDetail.Columns ?? [])
+                {
+                    string qualified = $"{tableName}.{col}";
+                    if (!selectedColumns[tableName].Contains(qualified))
+                    {
+                        selectedColumns[tableName].Add(qualified);
+                    }
+                }
+
+                continue;
+            }
+
+            if (name.Contains('(') && name.Contains(')'))
+            {
+                continue;
+            }
+
+            var parseResult = tableService.ParseAndFindTableNameByColumn(name);
+            string resolvedTableName = parseResult.Item1;
+            string resolvedColumnName = parseResult.Item2;
+
+            if (!selectedColumns.ContainsKey(resolvedTableName))
+            {
+                selectedColumns[resolvedTableName] = [];
+            }
+
+            string resolvedQualified = $"{resolvedTableName}.{resolvedColumnName}";
+            if (!selectedColumns[resolvedTableName].Contains(resolvedQualified))
+            {
+                selectedColumns[resolvedTableName].Add(resolvedQualified);
+            }
+        }
+
+        return selectedColumns;
     }
 }
