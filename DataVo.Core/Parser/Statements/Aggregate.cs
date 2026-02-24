@@ -7,13 +7,12 @@ using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.Statements
 {
-    internal class Aggregate(string match, string databaseName, TableService tableService)
+    internal class Aggregate
     {
-        public AggregateModel Model { get; private set; } = AggregateModel.FromString(match, databaseName, tableService);
-        public TableService TableService { get; private set; } = tableService;
+        public AggregateModel Model { get; private set; }
+        public TableService TableService { get; private set; }
 
         public Aggregate(List<SqlNode> columns, string databaseName, TableService tableService)
-            : this(string.Empty, databaseName, tableService)
         {
             Model = AggregateModel.FromAstColumns(columns, databaseName, tableService);
             TableService = tableService;

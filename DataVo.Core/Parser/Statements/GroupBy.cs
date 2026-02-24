@@ -5,7 +5,7 @@ using DataVo.Core.Services;
 
 namespace DataVo.Core.Parser.Statements;
 
-internal class GroupBy(string match, string databaseName, TableService tableService)
+internal class GroupBy
 {
     public static string HASH_VALUE
     {
@@ -15,11 +15,10 @@ internal class GroupBy(string match, string databaseName, TableService tableServ
         }
     }
 
-    public GroupByModel Model { get; private set; } = GroupByModel.FromString(match, databaseName, tableService);
-    public TableService TableService { get; private set; } = tableService;
+    public GroupByModel Model { get; private set; }
+    public TableService TableService { get; private set; }
 
     public GroupBy(GroupByNode? groupByNode, string databaseName, TableService tableService)
-        : this(string.Empty, databaseName, tableService)
     {
         Model = GroupByModel.FromAst(groupByNode, databaseName, tableService);
         TableService = tableService;
