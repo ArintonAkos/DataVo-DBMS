@@ -1,5 +1,4 @@
-﻿using System.Text.RegularExpressions;
-using DataVo.Core.Models.Statement;
+﻿using DataVo.Core.Models.Statement;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
@@ -12,23 +11,6 @@ public class Join
     private readonly bool _isValid;
     private readonly TableService? _tableService;
     public readonly JoinModel Model;
-
-    public Join(Group group, TableService tableService)
-    {
-        if (group.Success && group.Length > 0)
-        {
-            Model = FromMatchGroup(group, tableService);
-
-            _tableService = tableService;
-            _isValid = true;
-        }
-        else
-        {
-            _isValid = false;
-            _tableService = null;
-            Model = new();
-        }
-    }
 
     public Join(JoinModel model, TableService tableService)
     {
