@@ -4,6 +4,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.Types;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Cache;
 using DataVo.Core.Utils;
 
@@ -29,6 +30,8 @@ internal class Select : BaseDbAction
             GroupedTable groupedTable = GroupResults(result);
 
             result = AggregateGroupedTable(groupedTable);
+            result = ApplyHaving(result);
+            result = ApplyOrderBy(result);
 
             Logger.Info($"Rows selected: {result.Count}");
             Messages.Add($"Rows selected: {result.Count}");
@@ -51,6 +54,52 @@ internal class Select : BaseDbAction
     private ListedTable AggregateGroupedTable(GroupedTable groupedTable)
     {
         return _model.AggregateStatement.Perform(groupedTable);
+    }
+
+    private ListedTable ApplyHaving(ListedTable tableData)
+    {
+        var havingExpression = _model.GetHavingExpression();
+        if (havingExpression == null)
+        {
+            return tableData;
+        }
+
+        var filtered = tableData
+            .Where(row => EvaluatePredicate(havingExpression, row))
+            .ToList();
+
+        return new ListedTable(filtered);
+    }
+
+    private ListedTable ApplyOrderBy(ListedTable tableData)
+    {
+        var orderByExpression = _model.GetOrderByExpression();
+        if (orderByExpression == null || orderByExpression.Columns.Count == 0)
+        {
+            return tableData;
+        }
+
+        IOrderedEnumerable<JoinedRow>? ordered = null;
+
+        foreach (var orderCol in orderByExpression.Columns)
+        {
+            Func<JoinedRow, object?> keySelector = row => ResolveColumnValue(row, orderCol.Column.Name);
+
+            if (ordered == null)
+            {
+                ordered = orderCol.IsAscending
+                    ? tableData.OrderBy(keySelector, DynamicObjectComparer.Instance)
+                    : tableData.OrderByDescending(keySelector, DynamicObjectComparer.Instance);
+            }
+            else
+            {
+                ordered = orderCol.IsAscending
+                    ? ordered.ThenBy(keySelector, DynamicObjectComparer.Instance)
+                    : ordered.ThenByDescending(keySelector, DynamicObjectComparer.Instance);
+            }
+        }
+
+        return ordered == null ? tableData : new ListedTable(ordered.ToList());
     }
 
     private string ValidateDatabase(Guid session)
@@ -179,5 +228,89 @@ internal class Select : BaseDbAction
         }
 
         return result;
+    }
+
+    private bool EvaluatePredicate(Node node, JoinedRow row)
+    {
+        if (node.Type == Node.NodeType.And)
+        {
+            return EvaluatePredicate(node.Left!, row) && EvaluatePredicate(node.Right!, row);
+        }
+
+        if (node.Type == Node.NodeType.Or)
+        {
+            return EvaluatePredicate(node.Left!, row) || EvaluatePredicate(node.Right!, row);
+        }
+
+        if (node.Type != Node.NodeType.Eq && node.Type != Node.NodeType.Operator)
+        {
+            throw new Exception($"Unsupported HAVING predicate node type: {node.Type}");
+        }
+
+        object? leftValue = ResolveNodeValue(node.Left!, row);
+        object? rightValue = ResolveNodeValue(node.Right!, row);
+        string op = node.Value.ParsedValue;
+
+        int comparison = DynamicObjectComparer.Instance.Compare(leftValue, rightValue);
+
+        return op switch
+        {
+            "=" => comparison == 0,
+            "!=" => comparison != 0,
+            "<" => comparison < 0,
+            ">" => comparison > 0,
+            "<=" => comparison <= 0,
+            ">=" => comparison >= 0,
+            _ => throw new Exception($"Unsupported HAVING operator: {op}")
+        };
+    }
+
+    private object? ResolveNodeValue(Node node, JoinedRow row)
+    {
+        return node.Type switch
+        {
+            Node.NodeType.Value => node.Value.ParsedValue,
+            Node.NodeType.Column => ResolveColumnValue(row, node.Value.ParsedValue),
+            _ => throw new Exception($"Unsupported HAVING value node type: {node.Type}")
+        };
+    }
+
+    private object? ResolveColumnValue(JoinedRow row, string columnReference)
+    {
+        var parseResult = _model.TableService!.ParseAndFindTableNameByColumn(columnReference);
+        string tableName = parseResult.Item1;
+        string columnName = parseResult.Item2;
+
+        if (!row.ContainsKey(tableName) || !row[tableName].ContainsKey(columnName))
+        {
+            throw new Exception($"Column '{columnReference}' not found in row scope.");
+        }
+
+        return row[tableName][columnName];
+    }
+
+    private sealed class DynamicObjectComparer : IComparer<object?>
+    {
+        public static readonly DynamicObjectComparer Instance = new();
+
+        public int Compare(object? x, object? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+
+            if (x is IComparable comparableX)
+            {
+                try
+                {
+                    return comparableX.CompareTo(y);
+                }
+                catch
+                {
+                }
+            }
+
+            return string.CompareOrdinal(x.ToString(), y.ToString());
+        }
     }
 }

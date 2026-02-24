@@ -55,6 +55,10 @@ internal class SelectModel
         return TableColumnsInUse.SelectMany(c => c.Value).ToList();
     }
 
+    public Node? GetHavingExpression() => Ast.HavingExpression;
+
+    public OrderByNode? GetOrderByExpression() => Ast.OrderByExpression;
+
     private List<string> GetAllColumns()
     {
         List<string> columns = [];
