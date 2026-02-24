@@ -425,7 +425,7 @@ public static class Catalog
     private static void InvalidateTableSchemaVersion(string databaseName, string tableName)
     {
         string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        _tableSchemaVersions.TryRemove(tableKey, out _);
+        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
     }
 
     private static void InvalidateDatabaseSchemaVersions(string databaseName)
@@ -435,7 +435,7 @@ public static class Catalog
         {
             if (key.StartsWith(prefix, StringComparison.Ordinal))
             {
-                _tableSchemaVersions.TryRemove(key, out _);
+                _tableSchemaVersions.AddOrUpdate(key, 1, (_, currentVersion) => currentVersion + 1);
             }
         }
     }

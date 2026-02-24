@@ -68,7 +68,7 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         Assert.Equal(3, result.Data.Count);
     }
 
-    [Fact(Skip = "GROUP BY execution from AST path is not fully wired for non-aggregate projection semantics yet.")]
+    [Fact]
     public void Select_WithGroupBy_ReturnsGroupedRows()
     {
         Execute("CREATE TABLE Employees (EmpId INT, Department VARCHAR, Salary FLOAT)");

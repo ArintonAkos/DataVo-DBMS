@@ -17,12 +17,22 @@ public class IdentifierNode(string name) : SqlNode
     public string Name { get; set; } = name;
 }
 
+public class ColumnRefNode : SqlNode
+{
+    public string? TableOrAlias { get; set; } // Optional table name or alias for disambiguation
+    public string Column { get; set; } = string.Empty;
+}
+
+public class ResolvedColumnRefNode : SqlNode
+{
+    public string TableName { get; set; } = string.Empty; // After resolution, the actual table name
+    public string Column { get; set; } = string.Empty; // After resolution, the actual column name
+}
+
 public class JoinConditionNode : SqlNode
 {
-    public IdentifierNode LeftTable { get; set; } = null!;
-    public IdentifierNode LeftColumn { get; set; } = null!;
-    public IdentifierNode RightTable { get; set; } = null!;
-    public IdentifierNode RightColumn { get; set; } = null!;
+    public ColumnRefNode Left { get; set; } = null!;
+    public ColumnRefNode Right { get; set; } = null!;
 }
 
 public class JoinDetailNode : SqlNode

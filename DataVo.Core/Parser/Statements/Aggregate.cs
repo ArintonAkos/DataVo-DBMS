@@ -1,5 +1,6 @@
 ﻿using DataVo.Core.Models.Statement;
 using DataVo.Core.Parser.Aggregations;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
@@ -10,6 +11,13 @@ namespace DataVo.Core.Parser.Statements
     {
         public AggregateModel Model { get; private set; } = AggregateModel.FromString(match, databaseName, tableService);
         public TableService TableService { get; private set; } = tableService;
+
+        public Aggregate(List<SqlNode> columns, string databaseName, TableService tableService)
+            : this(string.Empty, databaseName, tableService)
+        {
+            Model = AggregateModel.FromAstColumns(columns, databaseName, tableService);
+            TableService = tableService;
+        }
 
         public bool ContainsAggregate() => Model.Functions.Count > 0;
 

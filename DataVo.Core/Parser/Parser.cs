@@ -417,19 +417,17 @@ public class Parser(List<Token> tokens)
         // Parse ON condition
         if (Match(TokenType.Keyword, "ON"))
         {
-            var condition = new JoinConditionNode();
+            var condition = new JoinConditionNode
+            {
+                // Left Side: Table.Column or Alias.Column or Column
+                Left = ParseColumnRef("left")
+            };
 
-            // Left Side: Table.Column
-            condition.LeftTable = new IdentifierNode(Consume(TokenType.Identifier, "left table name").Value);
-            Consume(TokenType.Punctuation, ".");
-            condition.LeftColumn = new IdentifierNode(Consume(TokenType.Identifier, "left column name").Value);
-
+            // Expect an operator, currently only supports "=" for JOIN conditions
             Consume(TokenType.Operator, "=");
 
             // Right Side: Table.Column
-            condition.RightTable = new IdentifierNode(Consume(TokenType.Identifier, "right table name").Value);
-            Consume(TokenType.Punctuation, ".");
-            condition.RightColumn = new IdentifierNode(Consume(TokenType.Identifier, "right column name").Value);
+            condition.Right = ParseColumnRef("right");
 
             joinNode.Condition = condition;
         }
@@ -511,6 +509,23 @@ public class Parser(List<Token> tokens)
         return orderByNode;
     }
 
+    private ColumnRefNode ParseColumnRef(string sideLabel)
+    {
+        var token = Consume(TokenType.Identifier, $"{sideLabel} column reference (e.g., Table.Column or Alias.Column or Column)");
+        var parts = token.Value.Split('.');
+
+        if (parts.Length == 1)
+        {
+            return new ColumnRefNode { TableOrAlias = null, Column = parts[0] };
+        }
+        else if (parts.Length == 2)
+        {
+            return new ColumnRefNode { TableOrAlias = parts[0], Column = parts[1] };
+        }
+
+        throw new ParserException($"Parser Error: Invalid {sideLabel} column reference '{token.Value}'. Expected 'column' or 'table.column'.");
+    }
+
     private List<SqlNode> ParseColumnList()
     {
         var columns = new List<SqlNode>();
@@ -531,7 +546,18 @@ public class Parser(List<Token> tokens)
             else if (Current.Type == TokenType.Identifier)
             {
                 var identifier = Advance();
-                columns.Add(new IdentifierNode(identifier.Value));
+
+                if (identifier.Value.EndsWith(".", StringComparison.Ordinal) &&
+                    Current.Type == TokenType.Punctuation &&
+                    Current.Value == "*")
+                {
+                    Advance(); // consume '*'
+                    columns.Add(new IdentifierNode($"{identifier.Value}*"));
+                }
+                else
+                {
+                    columns.Add(new IdentifierNode(identifier.Value));
+                }
             }
             else
             {
