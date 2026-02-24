@@ -105,6 +105,36 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    public void Select_WithJoin_AmbiguousUnqualifiedOnColumn_Throws()
+    {
+        Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT)");
+
+        Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
+
+        var ex = Assert.Throws<Exception>(() =>
+            ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON DeptId = DeptId"));
+
+        Assert.Contains("Binding Error", ex.Message);
+    }
+
+    [Fact]
+    public void Select_WithJoin_UnknownAliasInOnColumn_Throws()
+    {
+        Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
+        Execute("CREATE TABLE Employees (EmpId INT, Name VARCHAR, DeptId INT)");
+
+        Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
+
+        var ex = Assert.Throws<Exception>(() =>
+            ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON UnknownAlias.DeptId = Departments.DeptId"));
+
+        Assert.Contains("Binding Error", ex.Message);
+    }
+
+    [Fact]
     public void Select_WithGroupBy_ReturnsGroupedRows()
     {
         Execute("CREATE TABLE Employees (EmpId INT, Department VARCHAR, Salary FLOAT)");
