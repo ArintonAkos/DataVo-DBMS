@@ -6,6 +6,7 @@ using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Cache;
+using DataVo.Core.Parser.Utils;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
@@ -274,51 +275,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private static bool EvaluateEquality(object? val1, object? val2)
     {
-        if (val1 is string s1 && val2 is string s2)
-        {
-            s1 = s1.Trim('\'');
-            s2 = s2.Trim('\'');
-            return s1 == s2;
-        }
-
-        if (val1 == null && val2 == null) return true;
-        if (val1 == null || val2 == null) return false;
-
-        if (val1 is IConvertible c1 && val2 is IConvertible c2)
-        {
-            try
-            {
-                double d1 = c1.ToDouble(null);
-                double d2 = c2.ToDouble(null);
-                return Math.Abs(d1 - d2) < 0.0001; // float tolerance
-            }
-            catch { }
-        }
-
-        return val1.Equals(val2);
+        return ExpressionValueComparer.AreEqual(val1, val2, trimQuotedStrings: true, useNumericTolerance: true);
     }
 
     private static int CompareDynamics(object? leftVal, object? rightVal)
     {
-        if (leftVal is string s1 && rightVal is string s2)
-        {
-            s1 = s1.Trim('\'');
-            s2 = s2.Trim('\'');
-            return string.Compare(s1, s2, StringComparison.Ordinal);
-        }
-
-        if (leftVal is IConvertible c1 && rightVal is IConvertible c2)
-        {
-            try
-            {
-                double d1 = c1.ToDouble(null);
-                double d2 = c2.ToDouble(null);
-                return d1.CompareTo(d2);
-            }
-            catch { }
-        }
-
-        return Comparer<object?>.Default.Compare(leftVal, rightVal);
+        return ExpressionValueComparer.Compare(leftVal, rightVal, trimQuotedStrings: true);
     }
 
     private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
