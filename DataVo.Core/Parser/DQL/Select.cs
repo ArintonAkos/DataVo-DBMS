@@ -14,7 +14,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 {
     private readonly SelectModel _model = SelectModel.FromAst(ast);
 
-  public override void PerformAction(Guid session)
+    public override void PerformAction(Guid session)
     {
         try
         {
@@ -124,17 +124,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     {
         ListedTable result;
 
-        if (_model.WhereStatement.IsEvaluatable() && !(_model.WhereStatement.GetExpression() is LiteralNode literal && literal.Value is string s && s == "1=1"))
+        if (_model.WhereStatement.IsEvaluatable())
         {
             result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
         }
         else if (_model.JoinStatement.ContainsJoin())
         {
             result = EvaluateJoin();
-        }
-        else if (_model.WhereStatement.IsEvaluatable())
-        {
-             result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
         }
         else
         {
@@ -339,7 +335,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             return ResolveColumnValue(row, string.IsNullOrEmpty(colNode.TableOrAlias) ? colNode.Column : $"{colNode.TableOrAlias}.{colNode.Column}");
         }
-        
+
         throw new Exception($"Unsupported HAVING value node type: {node.GetType().Name}");
     }
 
