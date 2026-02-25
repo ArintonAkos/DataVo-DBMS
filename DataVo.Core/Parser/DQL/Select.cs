@@ -8,6 +8,7 @@ using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Cache;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Enums;
+using DataVo.Core.Constants;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
@@ -239,7 +240,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (node is LiteralNode literalNode)
         {
             if (literalNode.Value is bool b) return b;
-            if (literalNode.Value is string s && s == "1=1") return true;
+            if (literalNode.Value is string s && s == SqlLiterals.TrueExpression) return true;
             return false;
         }
 
