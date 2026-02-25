@@ -84,12 +84,6 @@ internal class SelectModel
 
         TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
 
-        if (WhereStatement.GetExpression() != null)
-        {
-            var boundWhere = SelectBinder.BindWhere(WhereStatement.GetExpression(), TableService);
-            WhereStatement = new Where(boundWhere!, FromTable);
-        }
-
         return false;
     }
 
@@ -104,11 +98,11 @@ internal class SelectModel
                 // Fallback for aggregate nodes if they still use IdentifierNode
                 if (node is IdentifierNode idNode)
                 {
-                   colNode = new SelectColumnNode { Expression = idNode.Name };
+                    colNode = new SelectColumnNode { Expression = idNode.Name };
                 }
-                else 
+                else
                 {
-                   continue;
+                    continue;
                 }
             }
 
@@ -157,7 +151,7 @@ internal class SelectModel
             }
 
             string resolvedQualified = $"{resolvedTableName}.{resolvedColumnName}";
-            
+
             // Map the resolved column to its alias if one exists
             string finalColumnName = colNode.Alias != null ? $"{resolvedQualified} AS {colNode.Alias}" : resolvedQualified;
 

@@ -1,6 +1,7 @@
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Enums;
 
 namespace DataVo.Core.Parser;
 
@@ -259,7 +260,7 @@ public class Parser(List<Token> tokens)
         Consume(TokenType.Keyword, "FROM");
         var stmt = new DeleteFromStatement
         {
-        TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value)
+            TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value)
         };
 
         if (Match(TokenType.Keyword, "WHERE"))
@@ -424,8 +425,8 @@ public class Parser(List<Token> tokens)
                 Left = ParseColumnRef("left")
             };
 
-            // Expect an operator, currently only supports "=" for JOIN conditions
-            Consume(TokenType.Operator, "=");
+            // Expect an operator, currently only supports equals for JOIN conditions
+            Consume(TokenType.Operator, Operators.EQUALS);
 
             // Right Side: Table.Column
             condition.Right = ParseColumnRef("right");
@@ -543,13 +544,13 @@ public class Parser(List<Token> tokens)
             {
                 var colNode = new SelectColumnNode { Expression = "*" };
                 Advance();
-                
+
                 if (Match(TokenType.Keyword, "AS"))
                 {
                     var aliasToken = Consume(TokenType.Identifier, "column alias");
                     colNode.Alias = aliasToken.Value;
                 }
-                
+
                 columns.Add(colNode);
             }
             else if (Current.Type == TokenType.Identifier)
@@ -649,7 +650,7 @@ public class Parser(List<Token> tokens)
                 if (int.TryParse(token.Value, out int i)) numValue = i;
                 else if (long.TryParse(token.Value, out long l)) numValue = l;
                 else if (double.TryParse(token.Value, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
-                
+
                 values.Push(new LiteralNode { Value = numValue });
             }
             else
@@ -687,11 +688,11 @@ public class Parser(List<Token> tokens)
     {
         return op.ToUpperInvariant() switch
         {
-            "OR" => 1,
-            "AND" => 2,
-            "=" or "!=" or ">" or "<" or ">=" or "<=" => 3,
-            "+" or "-" => 4,
-            "*" or "/" => 5,
+            Operators.OR => 1,
+            Operators.AND => 2,
+            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO => 3,
+            Operators.ADD or Operators.SUBTRACT => 4,
+            Operators.MUL or Operators.DIVIDE => 5,
             _ => -1,
         };
     }
