@@ -14,8 +14,10 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
         public StatementEvaluatorWOJoin(string databaseName, string tableName)
         {
-            _table = new TableDetail(tableName, null);
-            _table.DatabaseName = databaseName;
+            _table = new TableDetail(tableName, null)
+            {
+                DatabaseName = databaseName
+            };
         }
 
         protected override HashSet<string> EvaluateTrueLiteral()

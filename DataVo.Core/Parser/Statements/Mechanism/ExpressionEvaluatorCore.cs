@@ -2,6 +2,7 @@ using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Constants;
 
 namespace DataVo.Core.Parser.Statements.Mechanism;
 
@@ -81,7 +82,7 @@ public abstract class ExpressionEvaluatorCore<TResult>
 
         if (literalNode.Value is string s)
         {
-            return s == "1=1";
+            return s == SqlLiterals.TrueExpression;
         }
 
         return false;

@@ -3,6 +3,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Binding;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Services;
+using DataVo.Core.Constants;
 
 namespace DataVo.Core.Models.DQL;
 
@@ -34,7 +35,7 @@ internal class SelectModel
         }
         else
         {
-            whereStatement = new Where(new LiteralNode { Value = "1=1" }, fromTable);
+            whereStatement = new Where(new LiteralNode { Value = SqlLiterals.TrueExpression }, fromTable);
         }
 
         return new SelectModel
