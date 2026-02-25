@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Types;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Cache;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Enums;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
@@ -247,12 +248,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
             throw new Exception($"Unsupported HAVING predicate node type: {node.GetType().Name}");
         }
 
-        if (binNode.Operator == "AND")
+        if (binNode.Operator == Operators.AND)
         {
             return EvaluatePredicate(binNode.Left, row) && EvaluatePredicate(binNode.Right, row);
         }
 
-        if (binNode.Operator == "OR")
+        if (binNode.Operator == Operators.OR)
         {
             return EvaluatePredicate(binNode.Left, row) || EvaluatePredicate(binNode.Right, row);
         }
@@ -263,12 +264,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         return op switch
         {
-            "=" => EvaluateEquality(leftValue, rightValue),
-            "!=" => !EvaluateEquality(leftValue, rightValue),
-            "<" => CompareDynamics(leftValue, rightValue) < 0,
-            ">" => CompareDynamics(leftValue, rightValue) > 0,
-            "<=" => CompareDynamics(leftValue, rightValue) <= 0,
-            ">=" => CompareDynamics(leftValue, rightValue) >= 0,
+            Operators.EQUALS => EvaluateEquality(leftValue, rightValue),
+            Operators.NOT_EQUALS => !EvaluateEquality(leftValue, rightValue),
+            Operators.LESS_THAN => CompareDynamics(leftValue, rightValue) < 0,
+            Operators.GREATER_THAN => CompareDynamics(leftValue, rightValue) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) >= 0,
             _ => throw new Exception($"Unsupported HAVING operator: {op}")
         };
     }

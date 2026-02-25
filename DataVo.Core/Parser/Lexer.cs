@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Enums;
 
 namespace DataVo.Core.Parser;
 
@@ -41,13 +42,13 @@ public class Lexer
         "TABLES", "DESCRIBE", "DELETE", "UPDATE", "SET", "USE", "GO",
         "DATABASE", "PRIMARY", "KEY", "UNIQUE", "REFERENCES",
         "INT", "FLOAT", "BIT", "DATE", "VARCHAR", "AS", "BY", "GROUP", "ORDER",
-        "AND", "OR", "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY",
+        Operators.AND, Operators.OR, "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY",
         "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS"
          // Can be classified as Keyword or Operator depending on AST usage. We'll emit as Operator for Shunting Yard compatibility.
     };
 
     // Multi-character logical operators
-    private static readonly string[] MultiCharOperators = { ">=", "<=", "!=", "<>" };
+    private static readonly string[] MultiCharOperators = { Operators.GREATER_THAN_OR_EQUAL_TO, Operators.LESS_THAN_OR_EQUAL_TO, Operators.NOT_EQUALS, "<>" };
 
     public Lexer(string input)
     {
@@ -179,7 +180,7 @@ public class Lexer
         if (Keywords.Contains(upper))
         {
             // SQL syntax uses AND / OR as boolean operators. To keep Node tree compatible, emit as Operators
-            if (upper == "AND" || upper == "OR")
+            if (upper == Operators.AND || upper == Operators.OR)
             {
                 return new Token(TokenType.Operator, upper);
             }
@@ -207,7 +208,12 @@ public class Lexer
 
     private bool IsSingleCharOperator(char c)
     {
-        return c == '=' || c == '<' || c == '>' || c == '+' || c == '-' || c == '/';
+        return c == Operators.EQUALS[0]
+            || c == Operators.LESS_THAN[0]
+            || c == Operators.GREATER_THAN[0]
+            || c == Operators.ADD[0]
+            || c == Operators.SUBTRACT[0]
+            || c == Operators.DIVIDE[0];
     }
 
     private bool IsPunctuation(char c)
