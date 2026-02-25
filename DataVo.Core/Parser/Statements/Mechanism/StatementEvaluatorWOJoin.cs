@@ -43,7 +43,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
             if (!isLogical)
             {
-                var comparisonNode = NormalizeComparisonNode(binNode);
+                var comparisonNode = ExpressionNodeNormalizer.NormalizeComparisonNode(binNode);
 
                 if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is ResolvedColumnRefNode)
                 {
@@ -88,30 +88,6 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             }
 
             throw new EvaluationException($"Invalid expression operator: {binNode.Operator}");
-        }
-
-        private static BinaryExpressionNode NormalizeComparisonNode(BinaryExpressionNode node)
-        {
-            if (node.Left is LiteralNode && node.Right is ResolvedColumnRefNode)
-            {
-                string normalizedOperator = node.Operator switch
-                {
-                    "<" => ">",
-                    ">" => "<",
-                    "<=" => ">=",
-                    ">=" => "<=",
-                    _ => node.Operator
-                };
-
-                return new BinaryExpressionNode
-                {
-                    Operator = normalizedOperator,
-                    Left = node.Right,
-                    Right = node.Left
-                };
-            }
-
-            return node;
         }
 
         private HashSet<string> HandleIndexableStatement(BinaryExpressionNode root)
