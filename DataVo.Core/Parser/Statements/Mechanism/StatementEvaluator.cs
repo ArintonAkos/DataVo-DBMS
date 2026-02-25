@@ -49,7 +49,7 @@ public class StatementEvaluator
 
         if (!isLogical)
         {
-            var comparisonNode = NormalizeComparisonNode(binNode);
+            var comparisonNode = ExpressionNodeNormalizer.NormalizeComparisonNode(binNode);
 
             // Operator is = != < > <= >=
             if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is ResolvedColumnRefNode)
@@ -96,30 +96,6 @@ public class StatementEvaluator
         }
 
         throw new EvaluationException($"Invalid expression operator: {binNode.Operator}");
-    }
-
-    private static BinaryExpressionNode NormalizeComparisonNode(BinaryExpressionNode node)
-    {
-        if (node.Left is LiteralNode && node.Right is ResolvedColumnRefNode)
-        {
-            string normalizedOperator = node.Operator switch
-            {
-                "<" => ">",
-                ">" => "<",
-                "<=" => ">=",
-                ">=" => "<=",
-                _ => node.Operator
-            };
-
-            return new BinaryExpressionNode
-            {
-                Operator = normalizedOperator,
-                Left = node.Right,
-                Right = node.Left
-            };
-        }
-
-        return node;
     }
 
     private HashedTable HandleIndexableStatement(BinaryExpressionNode root)
