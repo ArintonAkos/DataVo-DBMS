@@ -9,12 +9,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class DropIndex : BaseDbAction
+internal class DropIndex(DropIndexStatement ast) : BaseDbAction
 {
-    private readonly DropIndexModel _model;
-
-    public DropIndex(Match match, string query) => _model = DropIndexModel.FromMatch(match);
-    public DropIndex(DropIndexStatement ast) => _model = DropIndexModel.FromAst(ast);
+    private readonly DropIndexModel _model = DropIndexModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

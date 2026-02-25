@@ -41,26 +41,6 @@ public class CreateTableModel(string tableName, List<Field> fields)
         }
     }
 
-    public static CreateTableModel FromMatch(Match match)
-    {
-        string tableName = match.Groups["TableName"].Value;
-        List<Field> fields = [];
-
-        string pattern = Patterns.Column;
-        var columns = Regex.Match(match.Groups["Columns"].Value, pattern,
-            RegexOptions.IgnoreCase | RegexOptions.Multiline);
-
-        while (columns.Success)
-        {
-            fields.Add(Field.FromMatch(columns, tableName));
-
-            columns = columns.NextMatch();
-        }
-
-
-        return new CreateTableModel(tableName, fields);
-    }
-
     public static CreateTableModel FromAst(CreateTableStatement ast)
     {
         string tableName = ast.TableName.Name;

@@ -10,19 +10,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DML
 {
-    internal class InsertInto : BaseDbAction
+    internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     {
-        private readonly InsertIntoModel _model;
-
-        public InsertInto(Match match)
-        {
-            _model = InsertIntoModel.FromMatch(match);
-        }
-
-        public InsertInto(InsertIntoStatement ast)
-        {
-            _model = InsertIntoModel.FromAst(ast);
-        }
+        private readonly InsertIntoModel _model = InsertIntoModel.FromAst(ast);
 
         public override void PerformAction(Guid session)
         {
