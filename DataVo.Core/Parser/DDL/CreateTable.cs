@@ -39,7 +39,7 @@ internal class CreateTable : BaseDbAction
         catch (Exception e)
         {
             Logger.Error(e.Message);
-            Messages.Add(e.Message);
+            Messages.Add($"Error: {e.Message}");
         }
     }
 }

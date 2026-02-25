@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
@@ -21,80 +22,110 @@ public class StatementEvaluator
         FromTable = fromTable;
     }
 
-    public HashedTable Evaluate(Node root)
+    public HashedTable Evaluate(ExpressionNode root)
     {
-        if ((root.Type == Node.NodeType.Eq || root.Type == Node.NodeType.Operator)
-            && root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Column)
+        if (root is LiteralNode literalNode)
         {
-            return HandleTwoColumnExpression(root);
+            if (literalNode.Value is string s && s == "1=1")
+            {
+                return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
+            }
+            if (literalNode.Value is bool b && b)
+            {
+                return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
+            }
+
+            return new();
         }
 
-        if ((root.Type == Node.NodeType.Operator || root.Type == Node.NodeType.Eq)
-            && root.Left!.Type == Node.NodeType.Value
-            && root.Right!.Type == Node.NodeType.Column)
+        if (root is not BinaryExpressionNode binNode)
         {
-            (root.Right, root.Left) = (root.Left, root.Right);
+            throw new Exception("Invalid tree node type: expected BinaryExpressionNode or LiteralNode for condition.");
+        }
 
-            switch (root.Value.ParsedValue)
+        bool isLogical = binNode.Operator == "AND" || binNode.Operator == "OR";
+
+        if (!isLogical)
+        {
+            // Operator is = != < > <= >=
+            if (binNode.Left is ResolvedColumnRefNode && binNode.Right is ResolvedColumnRefNode)
             {
-                case "<": root.Value.Value = ">"; break;
-                case ">": root.Value.Value = "<"; break;
-                case "<=": root.Value.Value = ">="; break;
-                case ">=": root.Value.Value = "<="; break;
-                default: break;
+                return HandleTwoColumnExpression(binNode);
+            }
+
+            if (binNode.Left is LiteralNode && binNode.Right is ResolvedColumnRefNode)
+            {
+                // Swap left and right
+                (binNode.Right, binNode.Left) = (binNode.Left, binNode.Right);
+
+                switch (binNode.Operator)
+                {
+                    case "<": binNode.Operator = ">"; break;
+                    case ">": binNode.Operator = "<"; break;
+                    case "<=": binNode.Operator = ">="; break;
+                    case ">=": binNode.Operator = "<="; break;
+                    default: break;
+                }
+            }
+
+            if (binNode.Operator == "=")
+            {
+                if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
+                {
+                    return HandleIndexableStatement(binNode);
+                }
+
+                if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
+                {
+                    return HandleConstantExpression(binNode);
+                }
+            }
+
+            // Other operators
+            if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
+            {
+                return HandleNonIndexableStatement(binNode);
+            }
+
+            if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
+            {
+                return HandleConstantExpression(binNode);
             }
         }
 
-        if (root.Type == Node.NodeType.Eq)
-        {
-            if (root.Left!.Type == Node.NodeType.Column && root.Right!.Type == Node.NodeType.Value)
-            {
-                return HandleIndexableStatement(root);
-            }
+        var leftResult = Evaluate(binNode.Left);
+        var rightResult = Evaluate(binNode.Right);
 
-            return HandleConstantExpression(root);
-        }
-
-        if (root.Type == Node.NodeType.Operator)
-        {
-            if (root.Left!.Type == Node.NodeType.Column)
-            {
-                return HandleNonIndexableStatement(root);
-            }
-
-            return HandleConstantExpression(root);
-        }
-
-        var leftResult = Evaluate(root.Left!);
-        var rightResult = Evaluate(root.Right!);
-
-        if (root.Type == Node.NodeType.And)
+        if (binNode.Operator == "AND")
         {
             return And(leftResult, rightResult);
         }
 
-        if (root.Type == Node.NodeType.Or)
+        if (binNode.Operator == "OR")
         {
             return Or(leftResult, rightResult);
         }
 
-        throw new Exception("Invalid tree node type!");
+        throw new Exception($"Invalid tree node operator: {binNode.Operator}");
     }
 
-    private HashedTable HandleIndexableStatement(Node root)
+    private HashedTable HandleIndexableStatement(BinaryExpressionNode root)
     {
-        Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        var leftCol = (ResolvedColumnRefNode)root.Left;
+        var rightLit = (LiteralNode)root.Right;
 
-        TableDetail table = parseResult.Item1;
-        string leftValue = parseResult.Item2;
-        string? rightValue = root.Right!.Value.Value!.ToString();
+        string tableName = leftCol.TableName;
+        string leftValue = leftCol.Column;
+        string rightValue = rightLit.Value?.ToString() ?? string.Empty;
+
+        var table = TableService.TableDetails[tableName];
 
         Dictionary<string, Dictionary<string, dynamic>> tableRows;
 
-        table.IndexedColumns!.TryGetValue(leftValue!, out string? indexFile);
+        table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile);
         if (indexFile != null)
         {
-            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue!, indexFile, table.TableName, table.DatabaseName!).ToList();
+            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!).ToList();
             List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
 
             var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
@@ -108,10 +139,10 @@ public class StatementEvaluator
             return GetJoinedTableContent(tableRows, table.TableName);
         }
 
-        int columnIndex = table.PrimaryKeys!.IndexOf(leftValue!);
+        int columnIndex = table.PrimaryKeys!.IndexOf(leftValue);
         if (columnIndex > -1)
         {
-            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue!, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!).ToList();
+            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!).ToList();
             List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
 
             var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
@@ -126,27 +157,32 @@ public class StatementEvaluator
         }
 
         tableRows = table.TableContent!
-            .Where(entry => entry.Value[root.Left!.Value.ParsedValue] == root.Right!.Value.ParsedValue)
+            .Where(entry => entry.Value[leftValue].ToString() == rightValue) // Compare string reps just in case
             .ToDictionary(t => t.Key, t => t.Value);
 
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleNonIndexableStatement(Node root)
+    private HashedTable HandleNonIndexableStatement(BinaryExpressionNode root)
     {
-        Tuple<TableDetail, string> parseResult = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
+        var leftCol = (ResolvedColumnRefNode)root.Left;
+        var rightLit = (LiteralNode)root.Right;
 
-        TableDetail table = parseResult.Item1;
-        string leftValue = parseResult.Item2;
+        string tableName = leftCol.TableName;
+        string leftValue = leftCol.Column;
+        var rightVal = rightLit.Value;
 
-        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
+        var table = TableService.TableDetails[tableName];
+
+        // Ensure dynamic comparisons can be made
+        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
         {
-            "=" => entry => entry.Value[leftValue!] == root.Right!.Value.ParsedValue,
-            "!=" => entry => entry.Value[leftValue!] != root.Right!.Value.ParsedValue,
-            "<" => entry => entry.Value[leftValue!] < root.Right!.Value.ParsedValue,
-            ">" => entry => entry.Value[leftValue!] > root.Right!.Value.ParsedValue,
-            "<=" => entry => entry.Value[leftValue!] <= root.Right!.Value.ParsedValue,
-            ">=" => entry => entry.Value[leftValue!] >= root.Right!.Value.ParsedValue,
+            "=" => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
+            "!=" => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
+            "<" => entry => CompareDynamics(entry.Value[leftValue], rightVal) < 0,
+            ">" => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
+            "<=" => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
+            ">=" => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -157,30 +193,32 @@ public class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleTwoColumnExpression(Node root)
+    private HashedTable HandleTwoColumnExpression(BinaryExpressionNode root)
     {
-        Tuple<TableDetail, string> parseResult1 = TableService.ParseAndFindTableDetailByColumn(root.Left!.Value.ParsedValue);
-        Tuple<TableDetail, string> parseResult2 = TableService.ParseAndFindTableDetailByColumn(root.Right!.Value.ParsedValue);
+        var leftCol = (ResolvedColumnRefNode)root.Left;
+        var rightCol = (ResolvedColumnRefNode)root.Right;
 
-        TableDetail table = parseResult1.Item1;
-        TableDetail rightTable = parseResult2.Item1;
+        string tableName = leftCol.TableName;
+        string rightTableName = rightCol.TableName;
 
-        if (table.TableName != rightTable.TableName)
+        if (tableName != rightTableName)
         {
             throw new SecurityException("Join like statement not permitted in where clause!");
         }
 
-        string? leftValue = parseResult1.Item2;
-        string? rightValue = parseResult2.Item2;
+        string leftValue = leftCol.Column;
+        string rightValue = rightCol.Column;
 
-        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Value.ParsedValue switch
+        var table = TableService.TableDetails[tableName];
+
+        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
         {
-            "=" => entry => entry.Value[leftValue!] == entry.Value[rightValue!],
-            "!=" => entry => entry.Value[leftValue!] != entry.Value[rightValue!],
-            "<" => entry => entry.Value[leftValue!] < entry.Value[rightValue!],
-            ">" => entry => entry.Value[leftValue!] > entry.Value[rightValue!],
-            "<=" => entry => entry.Value[leftValue!] <= entry.Value[rightValue!],
-            ">=" => entry => entry.Value[leftValue!] >= entry.Value[rightValue!],
+            "=" => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
+            "!=" => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
+            "<" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) < 0,
+            ">" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
+            "<=" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
+            ">=" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -191,16 +229,22 @@ public class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleConstantExpression(Node root)
+    private HashedTable HandleConstantExpression(BinaryExpressionNode root)
     {
-        bool isCondTrue = root.Value.ParsedValue switch
+        var leftLit = (LiteralNode)root.Left;
+        var rightLit = (LiteralNode)root.Right;
+
+        object? leftVal = leftLit.Value;
+        object? rightVal = rightLit.Value;
+
+        bool isCondTrue = root.Operator switch
         {
-            "=" => root.Left!.Value.ParsedValue == root.Right!.Value.ParsedValue,
-            "!=" => root.Left!.Value.ParsedValue != root.Right!.Value.ParsedValue,
-            "<" => root.Left!.Value.ParsedValue < root.Right!.Value.ParsedValue,
-            ">" => root.Left!.Value.ParsedValue > root.Right!.Value.ParsedValue,
-            "<=" => root.Left!.Value.ParsedValue <= root.Right!.Value.ParsedValue,
-            ">=" => root.Left!.Value.ParsedValue >= root.Right!.Value.ParsedValue,
+            "=" => EvaluateEquality(leftVal, rightVal),
+            "!=" => !EvaluateEquality(leftVal, rightVal),
+            "<" => CompareDynamics(leftVal, rightVal) < 0,
+            ">" => CompareDynamics(leftVal, rightVal) > 0,
+            "<=" => CompareDynamics(leftVal, rightVal) <= 0,
+            ">=" => CompareDynamics(leftVal, rightVal) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -234,12 +278,12 @@ public class StatementEvaluator
 
     private static HashedTable Or(HashedTable leftResult, HashedTable rightResult)
     {
-        HashSet<string> leftHashes = leftResult.Keys.ToHashSet();
-        HashSet<string> rightHashes = rightResult.Keys.ToHashSet();
+        HashSet<string> leftHashes = [.. leftResult.Keys];
+        HashSet<string> rightHashes = [.. rightResult.Keys];
 
-        HashSet<string> unionResult = new(leftHashes.Union(rightHashes));
+        HashSet<string> unionResult = [.. leftHashes.Union(rightHashes)];
 
-        HashedTable result = new();
+        HashedTable result = [];
         foreach (string hash in unionResult)
         {
             if (leftResult.ContainsKey(hash))
@@ -252,5 +296,59 @@ public class StatementEvaluator
         }
 
         return result;
+    }
+    
+    private bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
+    {
+        if (leftVal == null && rightVal == null) return true;
+        if (leftVal == null || rightVal == null) return false;
+
+        if (leftVal is IConvertible lConv && rightVal is IConvertible rConv)
+        {
+            try
+            {
+                if (Convert.ToString(leftVal) == Convert.ToString(rightVal)) return true;
+                
+                double lNum = lConv.ToDouble(null);
+                double rNum = rConv.ToDouble(null);
+                return lNum == rNum;
+            }
+            catch (Exception)
+            {
+                // Fallback
+            }
+        }
+
+        return Convert.ToString(leftVal) == Convert.ToString(rightVal);
+    }
+
+    private int CompareDynamics(dynamic? left, dynamic? right)
+    {
+        if (left == null && right == null) return 0;
+        if (left == null) return -1;
+        if (right == null) return 1;
+
+        if (left is IConvertible lConv && right is IConvertible rConv)
+        {
+            try
+            {
+                double lNum = lConv.ToDouble(null);
+                double rNum = rConv.ToDouble(null);
+                return lNum.CompareTo(rNum);
+            }
+            catch (Exception)
+            {
+                // Fallback handled below
+            }
+        }
+
+        try 
+        {
+            return Comparer<dynamic>.Default.Compare(left, right);
+        }
+        catch 
+        {
+            return string.Compare(Convert.ToString(left), Convert.ToString(right), StringComparison.Ordinal);
+        }
     }
 }

@@ -10,12 +10,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DML;
 
-internal class DeleteFrom : BaseDbAction
+internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 {
-    private readonly DeleteFromModel _model;
-
-    public DeleteFrom(Match match) => _model = DeleteFromModel.FromMatch(match);
-    public DeleteFrom(DeleteFromStatement ast) => _model = DeleteFromModel.FromAst(ast);
+    private readonly DeleteFromModel _model = DeleteFromModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

@@ -9,24 +9,14 @@ internal class DeleteFromModel
     public string TableName { get; set; } = null!;
     public Where WhereStatement { get; set; } = null!;
 
-    public static DeleteFromModel FromMatch(Match match)
-    {
-        string tableName = match.Groups["TableName"].Value;
-        var whereStatement = new Where(match.Groups["WhereStatement"].Value);
-
-        return new DeleteFromModel()
-        {
-            TableName = tableName,
-            WhereStatement = whereStatement,
-        };
-    }
-
     public static DeleteFromModel FromAst(DeleteFromStatement ast)
     {
+        ExpressionNode whereNode = ast.WhereExpression ?? new LiteralNode { Value = "1=1" };
+
         return new DeleteFromModel()
         {
             TableName = ast.TableName.Name,
-            WhereStatement = ast.WhereExpression != null ? new Where(ast.WhereExpression, null!) : new Where("")
+            WhereStatement = new Where(whereNode)
         };
     }
 }
