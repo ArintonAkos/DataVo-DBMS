@@ -13,6 +13,7 @@ internal class Where
 {
     private readonly WhereModel? _model;
     private readonly TableDetail? _fromTable;
+    private ExpressionNode? _boundStatement;
 
     public Where(ExpressionNode node)
     {
@@ -34,9 +35,9 @@ internal class Where
 
         var tableService = new TableService(databaseName);
         tableService.AddTableDetail(new TableDetail(tableName, null));
-        var boundStatement = SelectBinder.BindWhere(_model.Statement, tableService);
+        var boundStatement = BindStatement(tableService);
 
-        return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(boundStatement!);
+        return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(boundStatement);
     }
 
     public ListedTable EvaluateWithJoin(TableService tableService, Join joinStatements)
@@ -46,11 +47,29 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        var boundStatement = SelectBinder.BindWhere(_model.Statement, tableService);
+        var boundStatement = BindStatement(tableService);
 
-        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(boundStatement!)
+        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(boundStatement)
             .Select(row => row.Value)
             .ToListedTable();
+    }
+
+    private ExpressionNode BindStatement(TableService tableService)
+    {
+        if (_boundStatement is not null)
+        {
+            return _boundStatement;
+        }
+
+        if (_model is null)
+        {
+            throw new Exception("Cannot bind null where statement.");
+        }
+
+        _boundStatement = SelectBinder.BindWhere(_model.Statement, tableService)
+            ?? throw new Exception("Failed to bind where statement.");
+
+        return _boundStatement;
     }
 
     public bool IsEvaluatable() => _model is not null;

@@ -5,6 +5,8 @@ using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
+using DataVo.Core.Exceptions;
+using DataVo.Core.Parser.Utils;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements;
@@ -40,56 +42,43 @@ public class StatementEvaluator
 
         if (root is not BinaryExpressionNode binNode)
         {
-            throw new Exception("Invalid tree node type: expected BinaryExpressionNode or LiteralNode for condition.");
+            throw new EvaluationException("Invalid expression tree node type: expected BinaryExpressionNode or LiteralNode.");
         }
 
         bool isLogical = binNode.Operator == "AND" || binNode.Operator == "OR";
 
         if (!isLogical)
         {
+            var comparisonNode = NormalizeComparisonNode(binNode);
+
             // Operator is = != < > <= >=
-            if (binNode.Left is ResolvedColumnRefNode && binNode.Right is ResolvedColumnRefNode)
+            if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is ResolvedColumnRefNode)
             {
-                return HandleTwoColumnExpression(binNode);
+                return HandleTwoColumnExpression(comparisonNode);
             }
 
-            if (binNode.Left is LiteralNode && binNode.Right is ResolvedColumnRefNode)
+            if (comparisonNode.Operator == "=")
             {
-                // Swap left and right
-                (binNode.Right, binNode.Left) = (binNode.Left, binNode.Right);
-
-                switch (binNode.Operator)
+                if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
                 {
-                    case "<": binNode.Operator = ">"; break;
-                    case ">": binNode.Operator = "<"; break;
-                    case "<=": binNode.Operator = ">="; break;
-                    case ">=": binNode.Operator = "<="; break;
-                    default: break;
-                }
-            }
-
-            if (binNode.Operator == "=")
-            {
-                if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
-                {
-                    return HandleIndexableStatement(binNode);
+                    return HandleIndexableStatement(comparisonNode);
                 }
 
-                if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
+                if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
                 {
-                    return HandleConstantExpression(binNode);
+                    return HandleConstantExpression(comparisonNode);
                 }
             }
 
             // Other operators
-            if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
+            if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
             {
-                return HandleNonIndexableStatement(binNode);
+                return HandleNonIndexableStatement(comparisonNode);
             }
 
-            if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
+            if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
             {
-                return HandleConstantExpression(binNode);
+                return HandleConstantExpression(comparisonNode);
             }
         }
 
@@ -106,7 +95,31 @@ public class StatementEvaluator
             return Or(leftResult, rightResult);
         }
 
-        throw new Exception($"Invalid tree node operator: {binNode.Operator}");
+        throw new EvaluationException($"Invalid expression operator: {binNode.Operator}");
+    }
+
+    private static BinaryExpressionNode NormalizeComparisonNode(BinaryExpressionNode node)
+    {
+        if (node.Left is LiteralNode && node.Right is ResolvedColumnRefNode)
+        {
+            string normalizedOperator = node.Operator switch
+            {
+                "<" => ">",
+                ">" => "<",
+                "<=" => ">=",
+                ">=" => "<=",
+                _ => node.Operator
+            };
+
+            return new BinaryExpressionNode
+            {
+                Operator = normalizedOperator,
+                Left = node.Right,
+                Right = node.Left
+            };
+        }
+
+        return node;
     }
 
     private HashedTable HandleIndexableStatement(BinaryExpressionNode root)
@@ -297,58 +310,14 @@ public class StatementEvaluator
 
         return result;
     }
-    
+
     private bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
     {
-        if (leftVal == null && rightVal == null) return true;
-        if (leftVal == null || rightVal == null) return false;
-
-        if (leftVal is IConvertible lConv && rightVal is IConvertible rConv)
-        {
-            try
-            {
-                if (Convert.ToString(leftVal) == Convert.ToString(rightVal)) return true;
-                
-                double lNum = lConv.ToDouble(null);
-                double rNum = rConv.ToDouble(null);
-                return lNum == rNum;
-            }
-            catch (Exception)
-            {
-                // Fallback
-            }
-        }
-
-        return Convert.ToString(leftVal) == Convert.ToString(rightVal);
+        return ExpressionValueComparer.AreEqual(leftVal, rightVal);
     }
 
     private int CompareDynamics(dynamic? left, dynamic? right)
     {
-        if (left == null && right == null) return 0;
-        if (left == null) return -1;
-        if (right == null) return 1;
-
-        if (left is IConvertible lConv && right is IConvertible rConv)
-        {
-            try
-            {
-                double lNum = lConv.ToDouble(null);
-                double rNum = rConv.ToDouble(null);
-                return lNum.CompareTo(rNum);
-            }
-            catch (Exception)
-            {
-                // Fallback handled below
-            }
-        }
-
-        try 
-        {
-            return Comparer<dynamic>.Default.Compare(left, right);
-        }
-        catch 
-        {
-            return string.Compare(Convert.ToString(left), Convert.ToString(right), StringComparison.Ordinal);
-        }
+        return ExpressionValueComparer.Compare(left, right);
     }
 }

@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
@@ -48,7 +49,7 @@ public class Join
             {
                 if (!leftTableRow.Value.ContainsKey(leftTable) || !leftTableRow.Value[leftTable].ContainsKey(leftColumn))
                 {
-                    throw new Exception("Easter egg ha ide bejon!");
+                    throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
                 }
 
                 var leftValue = leftTableRow.Value[leftTable][leftColumn];
@@ -95,7 +96,7 @@ public class Join
                 }
                 else
                 {
-                    throw new Exception("Easter egg ha ide bejon!");
+                    throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
                 }
             }
         }
