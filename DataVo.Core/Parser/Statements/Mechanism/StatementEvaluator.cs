@@ -1,17 +1,18 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Enums;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
-using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Parser.Statements.Mechanism;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements;
 
-public class StatementEvaluator
+public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 {
     private TableService TableService { get; set; }
     private Join? Join { get; set; }
@@ -24,81 +25,14 @@ public class StatementEvaluator
         FromTable = fromTable;
     }
 
-    public HashedTable Evaluate(ExpressionNode root)
+    protected override HashedTable EvaluateTrueLiteral()
     {
-        if (root is LiteralNode literalNode)
-        {
-            if (literalNode.Value is string s && s == "1=1")
-            {
-                return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
-            }
-            if (literalNode.Value is bool b && b)
-            {
-                return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
-            }
-
-            return new();
-        }
-
-        if (root is not BinaryExpressionNode binNode)
-        {
-            throw new EvaluationException("Invalid expression tree node type: expected BinaryExpressionNode or LiteralNode.");
-        }
-
-        bool isLogical = binNode.Operator == "AND" || binNode.Operator == "OR";
-
-        if (!isLogical)
-        {
-            var comparisonNode = ExpressionNodeNormalizer.NormalizeComparisonNode(binNode);
-
-            // Operator is = != < > <= >=
-            if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is ResolvedColumnRefNode)
-            {
-                return HandleTwoColumnExpression(comparisonNode);
-            }
-
-            if (comparisonNode.Operator == "=")
-            {
-                if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
-                {
-                    return HandleIndexableStatement(comparisonNode);
-                }
-
-                if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
-                {
-                    return HandleConstantExpression(comparisonNode);
-                }
-            }
-
-            // Other operators
-            if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
-            {
-                return HandleNonIndexableStatement(comparisonNode);
-            }
-
-            if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
-            {
-                return HandleConstantExpression(comparisonNode);
-            }
-        }
-
-        var leftResult = Evaluate(binNode.Left);
-        var rightResult = Evaluate(binNode.Right);
-
-        if (binNode.Operator == "AND")
-        {
-            return And(leftResult, rightResult);
-        }
-
-        if (binNode.Operator == "OR")
-        {
-            return Or(leftResult, rightResult);
-        }
-
-        throw new EvaluationException($"Invalid expression operator: {binNode.Operator}");
+        return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
     }
 
-    private HashedTable HandleIndexableStatement(BinaryExpressionNode root)
+    protected override HashedTable EvaluateFalseLiteral() => new();
+
+    protected override HashedTable HandleIndexableStatement(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
         var rightLit = (LiteralNode)root.Right;
@@ -152,7 +86,7 @@ public class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleNonIndexableStatement(BinaryExpressionNode root)
+    protected override HashedTable HandleNonIndexableStatement(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
         var rightLit = (LiteralNode)root.Right;
@@ -166,12 +100,12 @@ public class StatementEvaluator
         // Ensure dynamic comparisons can be made
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
         {
-            "=" => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
-            "!=" => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
-            "<" => entry => CompareDynamics(entry.Value[leftValue], rightVal) < 0,
-            ">" => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
-            "<=" => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
-            ">=" => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
+            Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
+            Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
+            Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) < 0,
+            Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -182,7 +116,7 @@ public class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleTwoColumnExpression(BinaryExpressionNode root)
+    protected override HashedTable HandleTwoColumnExpression(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
         var rightCol = (ResolvedColumnRefNode)root.Right;
@@ -202,12 +136,12 @@ public class StatementEvaluator
 
         Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
         {
-            "=" => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
-            "!=" => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
-            "<" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) < 0,
-            ">" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
-            "<=" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
-            ">=" => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) >= 0,
+            Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
+            Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
+            Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) < 0,
+            Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -218,7 +152,7 @@ public class StatementEvaluator
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
-    private HashedTable HandleConstantExpression(BinaryExpressionNode root)
+    protected override HashedTable HandleConstantExpression(BinaryExpressionNode root)
     {
         var leftLit = (LiteralNode)root.Left;
         var rightLit = (LiteralNode)root.Right;
@@ -228,12 +162,12 @@ public class StatementEvaluator
 
         bool isCondTrue = root.Operator switch
         {
-            "=" => EvaluateEquality(leftVal, rightVal),
-            "!=" => !EvaluateEquality(leftVal, rightVal),
-            "<" => CompareDynamics(leftVal, rightVal) < 0,
-            ">" => CompareDynamics(leftVal, rightVal) > 0,
-            "<=" => CompareDynamics(leftVal, rightVal) <= 0,
-            ">=" => CompareDynamics(leftVal, rightVal) >= 0,
+            Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
+            Operators.NOT_EQUALS => !EvaluateEquality(leftVal, rightVal),
+            Operators.LESS_THAN => CompareDynamics(leftVal, rightVal) < 0,
+            Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
             _ => throw new SecurityException("Invalid operator")
         };
 
@@ -257,7 +191,7 @@ public class StatementEvaluator
         return Join!.Evaluate(groupedInitialTable);
     }
 
-    private static HashedTable And(HashedTable leftResult, HashedTable rightResult)
+    protected override HashedTable And(HashedTable leftResult, HashedTable rightResult)
     {
         var result = leftResult.Keys.Intersect(rightResult.Keys)
                .ToDictionary(t => t, t => leftResult[t]);
@@ -265,7 +199,7 @@ public class StatementEvaluator
         return new HashedTable(result);
     }
 
-    private static HashedTable Or(HashedTable leftResult, HashedTable rightResult)
+    protected override HashedTable Or(HashedTable leftResult, HashedTable rightResult)
     {
         HashSet<string> leftHashes = [.. leftResult.Keys];
         HashSet<string> rightHashes = [.. rightResult.Keys];
