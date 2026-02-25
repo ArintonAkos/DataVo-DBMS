@@ -39,7 +39,7 @@ namespace DataVo.Core.Parser.DML
             catch (Exception e)
             {
                 Messages.Add(e.Message);
-                Logger.Error(e.Message);
+                Logger.Error(e.ToString());
             }
         }
 

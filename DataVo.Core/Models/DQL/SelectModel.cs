@@ -27,14 +27,14 @@ internal class SelectModel
         string? tableAlias = tableNameWithAlias.Item2;
         TableDetail fromTable = new(tableName, tableAlias);
 
-        Where whereStatement = new Where(string.Empty, fromTable);
+        Where whereStatement;
         if (ast.WhereExpression != null)
         {
             whereStatement = new Where(ast.WhereExpression, fromTable);
         }
         else
         {
-            whereStatement = new Where(string.Empty, fromTable);
+            whereStatement = new Where(new LiteralNode { Value = "1=1" }, fromTable);
         }
 
         return new SelectModel
@@ -55,7 +55,7 @@ internal class SelectModel
         return TableColumnsInUse.SelectMany(c => c.Value).ToList();
     }
 
-    public Node? GetHavingExpression() => Ast.HavingExpression;
+    public ExpressionNode? GetHavingExpression() => Ast.HavingExpression;
 
     public OrderByNode? GetOrderByExpression() => Ast.OrderByExpression;
 
@@ -84,6 +84,12 @@ internal class SelectModel
 
         TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
 
+        if (WhereStatement.GetExpression() != null)
+        {
+            var boundWhere = SelectBinder.BindWhere(WhereStatement.GetExpression(), TableService);
+            WhereStatement = new Where(boundWhere!, FromTable);
+        }
+
         return false;
     }
 
@@ -93,12 +99,20 @@ internal class SelectModel
 
         foreach (var node in columns)
         {
-            if (node is not IdentifierNode identifierNode)
+            if (node is not SelectColumnNode colNode)
             {
-                continue;
+                // Fallback for aggregate nodes if they still use IdentifierNode
+                if (node is IdentifierNode idNode)
+                {
+                   colNode = new SelectColumnNode { Expression = idNode.Name };
+                }
+                else 
+                {
+                   continue;
+                }
             }
 
-            string name = identifierNode.Name.Trim();
+            string name = colNode.Expression.Trim();
 
             if (name == "*")
             {
@@ -143,9 +157,13 @@ internal class SelectModel
             }
 
             string resolvedQualified = $"{resolvedTableName}.{resolvedColumnName}";
-            if (!selectedColumns[resolvedTableName].Contains(resolvedQualified))
+            
+            // Map the resolved column to its alias if one exists
+            string finalColumnName = colNode.Alias != null ? $"{resolvedQualified} AS {colNode.Alias}" : resolvedQualified;
+
+            if (!selectedColumns[resolvedTableName].Contains(finalColumnName))
             {
-                selectedColumns[resolvedTableName].Add(resolvedQualified);
+                selectedColumns[resolvedTableName].Add(finalColumnName);
             }
         }
 
