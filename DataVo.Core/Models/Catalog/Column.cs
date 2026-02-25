@@ -26,7 +26,7 @@ public class Column : IColumn
                     "DATE" => DateOnly.Parse(Value),
                     "BIT" => bool.Parse(Value),
                     "INT" => int.Parse(Value),
-                    "FLOAT" => float.Parse(Value, System.Globalization.CultureInfo.InvariantCulture),
+                    "FLOAT" => double.Parse(Value, System.Globalization.CultureInfo.InvariantCulture),
                     _ => Value,
                 };
             }

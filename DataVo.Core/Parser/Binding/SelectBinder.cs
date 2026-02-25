@@ -96,4 +96,51 @@ internal static class SelectBinder
             throw new BindingException($"Binding Error: cannot resolve column '{reference.Column}'. {ex.Message}");
         }
     }
+
+    public static ExpressionNode? BindWhere(ExpressionNode? node, TableService tableService)
+    {
+        if (node == null) return null;
+
+        if (node is BinaryExpressionNode binary)
+        {
+            binary.Left = BindWhere(binary.Left, tableService)!;
+            binary.Right = BindWhere(binary.Right, tableService)!;
+            return binary;
+        }
+
+        if (node is ColumnRefNode columnRef)
+        {
+            if (string.IsNullOrWhiteSpace(columnRef.Column))
+            {
+                throw new BindingException("Binding Error: empty column reference in WHERE clause.");
+            }
+
+            try
+            {
+                string rawColumn = columnRef.Column;
+                if (!string.IsNullOrWhiteSpace(columnRef.TableOrAlias))
+                {
+                    rawColumn = $"{columnRef.TableOrAlias}.{rawColumn}";
+                }
+
+                var resolved = tableService.ParseAndFindTableNameByColumn(rawColumn);
+                return new ResolvedColumnRefNode
+                {
+                    TableName = resolved.Item1,
+                    Column = resolved.Item2
+                };
+            }
+            catch (Exception ex)
+            {
+                var refName = string.IsNullOrWhiteSpace(columnRef.TableOrAlias) 
+                    ? columnRef.Column 
+                    : $"{columnRef.TableOrAlias}.{columnRef.Column}";
+                    
+                throw new BindingException($"Binding Error: cannot resolve column '{refName}'. {ex.Message}");
+            }
+        }
+
+        // Return LiteralNode as is
+        return node;
+    }
 }

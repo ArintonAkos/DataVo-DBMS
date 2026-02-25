@@ -19,7 +19,7 @@ internal abstract class BaseDbAction : IDbAction
         try
         {
             PerformAction(session);
-            if (Messages.Count > 0 && Messages.Any(m => m.ToLower().Contains("error") || m.ToLower().Contains("exception")))
+            if (Messages.Count > 0 && Messages.Any(m => m.Contains("error", StringComparison.CurrentCultureIgnoreCase) || m.Contains("exception", StringComparison.CurrentCultureIgnoreCase)))
             {
                 return new QueryResult { Messages = Messages, IsError = true, Data = Data, Fields = Fields };
             }

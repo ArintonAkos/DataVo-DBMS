@@ -10,16 +10,11 @@ using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
 
-internal class Select : BaseDbAction
+internal class Select(SelectStatement ast) : BaseDbAction
 {
-    private readonly SelectModel _model;
+    private readonly SelectModel _model = SelectModel.FromAst(ast);
 
-    public Select(SelectStatement ast)
-    {
-        _model = SelectModel.FromAst(ast);
-    }
-
-    public override void PerformAction(Guid session)
+  public override void PerformAction(Guid session)
     {
         try
         {
@@ -41,8 +36,8 @@ internal class Select : BaseDbAction
         }
         catch (Exception ex)
         {
-            Logger.Error(ex.Message);
-            Messages.Add(ex.Message);
+            Messages.Add(ex.ToString());
+            Logger.Error(ex.ToString());
         }
     }
 
@@ -129,13 +124,17 @@ internal class Select : BaseDbAction
     {
         ListedTable result;
 
-        if (_model.WhereStatement.IsEvaluatable())
+        if (_model.WhereStatement.IsEvaluatable() && !(_model.WhereStatement.GetExpression() is LiteralNode literal && literal.Value is string s && s == "1=1"))
         {
             result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
         }
         else if (_model.JoinStatement.ContainsJoin())
         {
             result = EvaluateJoin();
+        }
+        else if (_model.WhereStatement.IsEvaluatable())
+        {
+             result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
         }
         else
         {
@@ -207,7 +206,14 @@ internal class Select : BaseDbAction
 
             foreach (string nameAssembly in _model.GetSelectedColumns())
             {
-                string[] splittedAssembly = nameAssembly.Split('.');
+                // Format could be "TableName.ColumnName" or "TableName.ColumnName AS AliasName"
+                string extractedOriginalName = nameAssembly;
+                if (extractedOriginalName.Contains(" AS "))
+                {
+                    extractedOriginalName = extractedOriginalName.Split(" AS ")[0];
+                }
+
+                string[] splittedAssembly = extractedOriginalName.Split('.');
                 string tableName = splittedAssembly[0];
                 string columnName = splittedAssembly[1];
 
@@ -230,49 +236,111 @@ internal class Select : BaseDbAction
         return result;
     }
 
-    private bool EvaluatePredicate(Node node, JoinedRow row)
+    private bool EvaluatePredicate(ExpressionNode node, JoinedRow row)
     {
-        if (node.Type == Node.NodeType.And)
+        if (node is LiteralNode literalNode)
         {
-            return EvaluatePredicate(node.Left!, row) && EvaluatePredicate(node.Right!, row);
+            if (literalNode.Value is bool b) return b;
+            if (literalNode.Value is string s && s == "1=1") return true;
+            return false;
         }
 
-        if (node.Type == Node.NodeType.Or)
+        if (node is not BinaryExpressionNode binNode)
         {
-            return EvaluatePredicate(node.Left!, row) || EvaluatePredicate(node.Right!, row);
+            throw new Exception($"Unsupported HAVING predicate node type: {node.GetType().Name}");
         }
 
-        if (node.Type != Node.NodeType.Eq && node.Type != Node.NodeType.Operator)
+        if (binNode.Operator == "AND")
         {
-            throw new Exception($"Unsupported HAVING predicate node type: {node.Type}");
+            return EvaluatePredicate(binNode.Left, row) && EvaluatePredicate(binNode.Right, row);
         }
 
-        object? leftValue = ResolveNodeValue(node.Left!, row);
-        object? rightValue = ResolveNodeValue(node.Right!, row);
-        string op = node.Value.ParsedValue;
+        if (binNode.Operator == "OR")
+        {
+            return EvaluatePredicate(binNode.Left, row) || EvaluatePredicate(binNode.Right, row);
+        }
 
-        int comparison = DynamicObjectComparer.Instance.Compare(leftValue, rightValue);
+        object? leftValue = ResolveNodeValue(binNode.Left, row);
+        object? rightValue = ResolveNodeValue(binNode.Right, row);
+        string op = binNode.Operator;
 
         return op switch
         {
-            "=" => comparison == 0,
-            "!=" => comparison != 0,
-            "<" => comparison < 0,
-            ">" => comparison > 0,
-            "<=" => comparison <= 0,
-            ">=" => comparison >= 0,
+            "=" => EvaluateEquality(leftValue, rightValue),
+            "!=" => !EvaluateEquality(leftValue, rightValue),
+            "<" => CompareDynamics(leftValue, rightValue) < 0,
+            ">" => CompareDynamics(leftValue, rightValue) > 0,
+            "<=" => CompareDynamics(leftValue, rightValue) <= 0,
+            ">=" => CompareDynamics(leftValue, rightValue) >= 0,
             _ => throw new Exception($"Unsupported HAVING operator: {op}")
         };
     }
 
-    private object? ResolveNodeValue(Node node, JoinedRow row)
+    private static bool EvaluateEquality(object? val1, object? val2)
     {
-        return node.Type switch
+        if (val1 is string s1 && val2 is string s2)
         {
-            Node.NodeType.Value => node.Value.ParsedValue,
-            Node.NodeType.Column => ResolveColumnValue(row, node.Value.ParsedValue),
-            _ => throw new Exception($"Unsupported HAVING value node type: {node.Type}")
-        };
+            s1 = s1.Trim('\'');
+            s2 = s2.Trim('\'');
+            return s1 == s2;
+        }
+
+        if (val1 == null && val2 == null) return true;
+        if (val1 == null || val2 == null) return false;
+
+        if (val1 is IConvertible c1 && val2 is IConvertible c2)
+        {
+            try
+            {
+                double d1 = c1.ToDouble(null);
+                double d2 = c2.ToDouble(null);
+                return Math.Abs(d1 - d2) < 0.0001; // float tolerance
+            }
+            catch { }
+        }
+
+        return val1.Equals(val2);
+    }
+
+    private static int CompareDynamics(object? leftVal, object? rightVal)
+    {
+        if (leftVal is string s1 && rightVal is string s2)
+        {
+            s1 = s1.Trim('\'');
+            s2 = s2.Trim('\'');
+            return string.Compare(s1, s2, StringComparison.Ordinal);
+        }
+
+        if (leftVal is IConvertible c1 && rightVal is IConvertible c2)
+        {
+            try
+            {
+                double d1 = c1.ToDouble(null);
+                double d2 = c2.ToDouble(null);
+                return d1.CompareTo(d2);
+            }
+            catch { }
+        }
+
+        return Comparer<object?>.Default.Compare(leftVal, rightVal);
+    }
+
+    private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
+    {
+        if (node is LiteralNode literalNode)
+        {
+            return literalNode.Value;
+        }
+        else if (node is ResolvedColumnRefNode resolvedColNode)
+        {
+            return ResolveColumnValue(row, $"{resolvedColNode.TableName}.{resolvedColNode.Column}");
+        }
+        else if (node is ColumnRefNode colNode)
+        {
+            return ResolveColumnValue(row, string.IsNullOrEmpty(colNode.TableOrAlias) ? colNode.Column : $"{colNode.TableOrAlias}.{colNode.Column}");
+        }
+        
+        throw new Exception($"Unsupported HAVING value node type: {node.GetType().Name}");
     }
 
     private object? ResolveColumnValue(JoinedRow row, string columnReference)

@@ -60,25 +60,16 @@ public abstract class SqlExecutionTestsBase : IDisposable
                     string xml = System.IO.File.ReadAllText(System.IO.Path.Combine("databases", "Catalog.xml"));
                     throw new Exception($"XML STATE: {xml}");
                 }
-                throw new Exception($"SQL Execution Failed: {errors}");
+                throw new Exception($"SQL Execution Failed:\n{errors}");
             }
         }
     }
 
-    /// <summary>
-    /// Executes a raw SQL string and returns the QueryResult object directly for inspection.
-    /// </summary>
     protected Core.Contracts.Results.QueryResult ExecuteAndReturn(string sql)
     {
         var engine = new QueryEngine(sql, _session);
         var results = engine.Parse();
         var last = results.LastOrDefault();
-
-        if (last != null && last.IsError)
-        {
-            var errors = string.Join(", ", last.Messages);
-            throw new Exception($"SQL Execution Failed: {errors}");
-        }
 
         return last!;
     }

@@ -1,9 +1,11 @@
 ﻿using DataVo.Core.Models.Statement;
-using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Statements.Mechanism;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
+using DataVo.Core.Parser.Binding;
+using DataVo.Core.Models.Statement.Utils;
 
 namespace DataVo.Core.Parser.Statements;
 
@@ -12,20 +14,14 @@ internal class Where
     private readonly WhereModel? _model;
     private readonly TableDetail? _fromTable;
 
-    public Where(string match)
+    public Where(ExpressionNode node)
     {
-        _model = WhereModel.FromString(match);
+        _model = WhereModel.FromExpression(node);
     }
 
-    public Where(string match, TableDetail fromTable)
+    public Where(ExpressionNode node, TableDetail fromTable)
     {
-        _model = WhereModel.FromString(match);
-        _fromTable = fromTable;
-    }
-
-    public Where(Node node, TableDetail fromTable)
-    {
-        _model = WhereModel.FromNode(node);
+        _model = WhereModel.FromExpression(node);
         _fromTable = fromTable;
     }
 
@@ -36,7 +32,11 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(_model.Statement);
+        var tableService = new TableService(databaseName);
+        tableService.AddTableDetail(new TableDetail(tableName, null));
+        var boundStatement = SelectBinder.BindWhere(_model.Statement, tableService);
+
+        return new StatementEvaluatorWOJoin(databaseName, tableName).Evaluate(boundStatement!);
     }
 
     public ListedTable EvaluateWithJoin(TableService tableService, Join joinStatements)
@@ -52,4 +52,6 @@ internal class Where
     }
 
     public bool IsEvaluatable() => _model is not null;
+
+    public ExpressionNode? GetExpression() => _model?.Statement;
 }

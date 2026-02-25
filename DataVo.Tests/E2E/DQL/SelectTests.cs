@@ -113,10 +113,10 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
         Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
 
-        var ex = Assert.Throws<Exception>(() =>
-            ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON DeptId = DeptId"));
+        var result = ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON DeptId = DeptId");
 
-        Assert.Contains("Binding Error", ex.Message);
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
     }
 
     [Fact]
@@ -128,10 +128,10 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
         Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
 
-        var ex = Assert.Throws<Exception>(() =>
-            ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON UnknownAlias.DeptId = Departments.DeptId"));
+        var result = ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON UnknownAlias.DeptId = Departments.DeptId");
 
-        Assert.Contains("Binding Error", ex.Message);
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
     }
 
     [Fact]

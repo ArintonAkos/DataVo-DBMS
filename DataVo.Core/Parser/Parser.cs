@@ -258,8 +258,10 @@ public class Parser(List<Token> tokens)
     private SqlStatement ParseDeleteStatement()
     {
         Consume(TokenType.Keyword, "FROM");
-        var stmt = new DeleteFromStatement();
-        stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
+        var stmt = new DeleteFromStatement
+        {
+        TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value)
+        };
 
         if (Match(TokenType.Keyword, "WHERE"))
         {
@@ -272,7 +274,7 @@ public class Parser(List<Token> tokens)
         }
         else
         {
-            stmt.WhereExpression = new Node { Type = NodeType.Column, Value = NodeValue.RawString("1=1") };
+            stmt.WhereExpression = new LiteralNode { Value = "1=1" };
         }
         return stmt;
     }
@@ -540,24 +542,41 @@ public class Parser(List<Token> tokens)
 
             if (Current.Type == TokenType.Punctuation && Current.Value == "*")
             {
-                columns.Add(new IdentifierNode("*"));
+                var colNode = new SelectColumnNode { Expression = "*" };
                 Advance();
+                
+                if (Match(TokenType.Keyword, "AS"))
+                {
+                    var aliasToken = Consume(TokenType.Identifier, "column alias");
+                    colNode.Alias = aliasToken.Value;
+                }
+                
+                columns.Add(colNode);
             }
             else if (Current.Type == TokenType.Identifier)
             {
                 var identifier = Advance();
+                var colNode = new SelectColumnNode();
 
                 if (identifier.Value.EndsWith(".", StringComparison.Ordinal) &&
                     Current.Type == TokenType.Punctuation &&
                     Current.Value == "*")
                 {
                     Advance(); // consume '*'
-                    columns.Add(new IdentifierNode($"{identifier.Value}*"));
+                    colNode.Expression = $"{identifier.Value}*";
                 }
                 else
                 {
-                    columns.Add(new IdentifierNode(identifier.Value));
+                    colNode.Expression = identifier.Value;
                 }
+
+                if (Match(TokenType.Keyword, "AS"))
+                {
+                    var aliasToken = Consume(TokenType.Identifier, "column alias");
+                    colNode.Alias = aliasToken.Value;
+                }
+
+                columns.Add(colNode);
             }
             else
             {
@@ -574,9 +593,11 @@ public class Parser(List<Token> tokens)
     }
 
     // This adapts the existing Shunting-Yard from StatementParser to use the Lexer's Tokens directly
-    private Node ParseWhereExpression(Queue<Token> tokens)
+    private ExpressionNode? ParseWhereExpression(Queue<Token> tokens)
     {
-        Stack<Node> values = new();
+        if (tokens.Count == 0) return null;
+
+        Stack<ExpressionNode> values = new();
         Stack<Token> operators = new();
 
         while (tokens.Count != 0)
@@ -607,21 +628,30 @@ public class Parser(List<Token> tokens)
             }
             else if (token.Type == TokenType.Identifier)
             {
-                values.Push(new Node
+                string columnName = token.Value;
+                string? tableOrAlias = null;
+
+                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == ".")
                 {
-                    Type = NodeType.Column,
-                    Value = NodeValue.RawString(token.Value)
-                });
+                    tokens.Dequeue(); // .
+                    tableOrAlias = columnName;
+                    columnName = tokens.Dequeue().Value;
+                }
+
+                values.Push(new ColumnRefNode { TableOrAlias = tableOrAlias, Column = columnName });
             }
-            else if (token.Type == TokenType.StringLiteral || token.Type == TokenType.NumberLiteral)
+            else if (token.Type == TokenType.StringLiteral)
             {
-                // NumberLiteral might not be parsed correctly if NodeValue.Parse expects it, but NodeValue.Parse handles ints
-                // Lexer returns strings like "'John'" or "42", which NodeValue.Parse naturally handles.
-                values.Push(new Node
-                {
-                    Type = NodeType.Value,
-                    Value = NodeValue.Parse(token.Value)
-                });
+                values.Push(new LiteralNode { Value = token.Value });
+            }
+            else if (token.Type == TokenType.NumberLiteral)
+            {
+                object numValue = token.Value;
+                if (int.TryParse(token.Value, out int i)) numValue = i;
+                else if (long.TryParse(token.Value, out long l)) numValue = l;
+                else if (double.TryParse(token.Value, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
+                
+                values.Push(new LiteralNode { Value = numValue });
             }
             else
             {
@@ -634,10 +664,10 @@ public class Parser(List<Token> tokens)
             EvaluateTopOperator(values, operators);
         }
 
-        return values.Count != 0 ? values.Pop() : new Node { Type = NodeType.Column, Value = NodeValue.RawString("1=1") };
+        return values.Count != 0 ? values.Pop() : new LiteralNode { Value = "1=1" };
     }
 
-    private void EvaluateTopOperator(Stack<Node> values, Stack<Token> operators)
+    private void EvaluateTopOperator(Stack<ExpressionNode> values, Stack<Token> operators)
     {
         var opToken = operators.Pop();
         string op = opToken.Value.ToUpperInvariant();
@@ -646,30 +676,12 @@ public class Parser(List<Token> tokens)
         var right = values.Count > 0 ? values.Pop() : null;
         var left = values.Count > 0 ? values.Pop() : null;
 
-        var type = GetNodeType(op);
-
-        Node node = new()
+        values.Push(new BinaryExpressionNode
         {
-            Type = type,
-            Value = NodeValue.Operator(opToken.Value),
-            Left = left,
-            Right = right,
-        };
-
-        values.Push(node);
-    }
-
-    private static NodeType GetNodeType(string op)
-    {
-        return op switch
-        {
-            "AND" => NodeType.And,
-            "OR" => NodeType.Or,
-            "=" => NodeType.Eq,
-            "!=" or ">" or "<" or ">=" or "<=" => NodeType.Operator,
-            "+" or "-" or "*" or "/" => NodeType.Operator,
-            _ => throw new Exception($"Invalid AST operator: {op}"),
-        };
+            Operator = op,
+            Left = left!,
+            Right = right!
+        });
     }
 
     private static int GetPrecedence(string op)

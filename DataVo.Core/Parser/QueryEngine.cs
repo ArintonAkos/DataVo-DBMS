@@ -62,7 +62,7 @@ public class QueryEngine(string query, Guid session)
                 }
                 catch (Exception ex)
                 {
-                    response.Add(QueryResult.Error(ex.Message));
+                    response.Add(QueryResult.Error(ex.ToString()));
                     break;
                 }
             }

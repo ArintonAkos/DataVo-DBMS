@@ -17,13 +17,37 @@ public class IdentifierNode(string name) : SqlNode
     public string Name { get; set; } = name;
 }
 
-public class ColumnRefNode : SqlNode
+public class SelectColumnNode : SqlNode
+{
+    public string Expression { get; set; } = string.Empty; // e.g. "A.Id" or "*"
+    public string? Alias { get; set; } // e.g. "AId"
+}
+
+// --- Expressions ---
+public abstract class ExpressionNode : SqlNode
+{
+    // Base class for expressions (used in WHERE, HAVING, etc.)
+}
+
+public class BinaryExpressionNode : ExpressionNode
+{
+    public string Operator { get; set; } = string.Empty;
+    public ExpressionNode Left { get; set; } = null!;
+    public ExpressionNode Right { get; set; } = null!;
+}
+
+public class LiteralNode : ExpressionNode
+{
+    public object? Value { get; set; } // Can be string, int, double, bool, DateOnly, etc.
+}
+
+public class ColumnRefNode : ExpressionNode
 {
     public string? TableOrAlias { get; set; } // Optional table name or alias for disambiguation
     public string Column { get; set; } = string.Empty;
 }
 
-public class ResolvedColumnRefNode : SqlNode
+public class ResolvedColumnRefNode : ExpressionNode
 {
     public string TableName { get; set; } = string.Empty; // After resolution, the actual table name
     public string Column { get; set; } = string.Empty; // After resolution, the actual column name
@@ -64,9 +88,9 @@ public class SelectStatement : SqlStatement
     public List<SqlNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
     public IdentifierNode? FromTable { get; set; }
     public List<JoinDetailNode> Joins { get; set; } = [];
-    public Node? WhereExpression { get; set; } // Reusing the old Node for mathematical/logical expressions
+    public ExpressionNode? WhereExpression { get; set; }
     public GroupByNode? GroupByExpression { get; set; }
-    public Node? HavingExpression { get; set; }
+    public ExpressionNode? HavingExpression { get; set; }
     public OrderByNode? OrderByExpression { get; set; }
 }
 
@@ -151,7 +175,7 @@ public class DropIndexStatement : SqlStatement
 public class DeleteFromStatement : SqlStatement
 {
     public IdentifierNode TableName { get; set; } = null!;
-    public Node? WhereExpression { get; set; }
+    public ExpressionNode? WhereExpression { get; set; }
 }
 
 public class InsertIntoStatement : SqlStatement
