@@ -9,6 +9,5 @@ public class DropIndexModel(string indexName, string tableName)
     public string TableName { get; set; } = tableName;
     public string IndexName { get; set; } = indexName;
 
-    public static DropIndexModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value, match.NthGroup(n: 2).Value);
     public static DropIndexModel FromAst(DropIndexStatement ast) => new(ast.IndexName.Name, ast.TableName.Name);
 }

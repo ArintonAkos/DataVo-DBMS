@@ -1,5 +1,4 @@
-﻿using System.Text.RegularExpressions;
-using DataVo.Core.Logging;
+﻿using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Cache;
@@ -9,14 +8,7 @@ namespace DataVo.Core.Parser.Commands;
 
 internal class ShowTables : BaseDbAction
 {
-    public ShowTables(Match _)
-    {
-    }
-
-    public ShowTables(ShowTablesStatement ast)
-    {
-    }
-
+    public ShowTables(ShowTablesStatement _) { }
     public override void PerformAction(Guid session)
     {
         try
@@ -25,7 +17,7 @@ internal class ShowTables : BaseDbAction
                 ?? throw new Exception("No database in use!");
 
             Catalog.GetTables(databaseName)
-            .ForEach(tableName => Fields.Add(tableName));
+                .ForEach(Fields.Add);
         }
         catch (Exception ex)
         {

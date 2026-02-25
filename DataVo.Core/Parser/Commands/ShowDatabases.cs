@@ -1,5 +1,4 @@
-﻿using System.Text.RegularExpressions;
-using DataVo.Core.Logging;
+﻿using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
@@ -8,18 +7,13 @@ namespace DataVo.Core.Parser.Commands;
 
 internal class ShowDatabases : BaseDbAction
 {
-    public ShowDatabases(Match match, string query)
-    { }
-
-    public ShowDatabases(ShowDatabasesStatement ast)
-    { }
-
+    public ShowDatabases(ShowDatabasesStatement _) { }
     public override void PerformAction(Guid session)
     {
         try
         {
             Catalog.GetDatabases()
-            .ForEach(databaseName => Fields.Add(databaseName));
+                .ForEach(Fields.Add);
         }
         catch (Exception ex)
         {

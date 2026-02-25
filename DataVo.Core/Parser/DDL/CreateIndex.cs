@@ -10,12 +10,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class CreateIndex : BaseDbAction
+internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
 {
-    private readonly CreateIndexModel _model;
-
-    public CreateIndex(Match match) => _model = CreateIndexModel.FromMatch(match);
-    public CreateIndex(CreateIndexStatement ast) => _model = CreateIndexModel.FromAst(ast);
+    private readonly CreateIndexModel _model = CreateIndexModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

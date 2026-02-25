@@ -7,12 +7,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class CreateDatabase : BaseDbAction
+internal class CreateDatabase(CreateDatabaseStatement ast) : BaseDbAction
 {
-    private readonly CreateDatabaseModel _model;
-
-    public CreateDatabase(Match match) => _model = CreateDatabaseModel.FromMatch(match);
-    public CreateDatabase(CreateDatabaseStatement ast) => _model = CreateDatabaseModel.FromAst(ast);
+    private readonly CreateDatabaseModel _model = CreateDatabaseModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

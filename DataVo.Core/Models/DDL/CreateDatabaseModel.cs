@@ -9,7 +9,6 @@ public class CreateDatabaseModel(string databaseName)
 {
     public string DatabaseName { get; set; } = databaseName;
 
-    public static CreateDatabaseModel FromMatch(Match match) => new(match.NthGroup(n: 1).Value);
     public static CreateDatabaseModel FromAst(CreateDatabaseStatement ast) => new(ast.DatabaseName.Name);
 
     public Database ToDatabase() =>

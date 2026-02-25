@@ -9,12 +9,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class DropTable : BaseDbAction
+internal class DropTable(DropTableStatement ast) : BaseDbAction
 {
-    private readonly DropTableModel _model;
-
-    public DropTable(Match match) => _model = DropTableModel.FromMatch(match);
-    public DropTable(DropTableStatement ast) => _model = DropTableModel.FromAst(ast);
+    private readonly DropTableModel _model = DropTableModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

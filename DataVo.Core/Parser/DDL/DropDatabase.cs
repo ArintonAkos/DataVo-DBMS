@@ -7,12 +7,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class DropDatabase : BaseDbAction
+internal class DropDatabase(DropDatabaseStatement ast) : BaseDbAction
 {
-    private readonly DropDatabaseModel _model;
-
-    public DropDatabase(Match match) => _model = DropDatabaseModel.FromMatch(match);
-    public DropDatabase(DropDatabaseStatement ast) => _model = DropDatabaseModel.FromAst(ast);
+    private readonly DropDatabaseModel _model = DropDatabaseModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {
