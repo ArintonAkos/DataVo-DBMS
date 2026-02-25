@@ -8,12 +8,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.Commands;
 
-internal class Describe : BaseDbAction
+internal class Describe(DescribeStatement ast) : BaseDbAction
 {
-    private readonly DescribeModel _model;
-
-    public Describe(Match match) => _model = DescribeModel.FromMatch(match);
-    public Describe(DescribeStatement ast) => _model = DescribeModel.FromAst(ast);
+    private readonly DescribeModel _model = DescribeModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

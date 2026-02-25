@@ -1,7 +1,6 @@
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Exceptions;
-using static DataVo.Core.Models.Statement.Utils.Node;
 
 namespace DataVo.Core.Parser;
 

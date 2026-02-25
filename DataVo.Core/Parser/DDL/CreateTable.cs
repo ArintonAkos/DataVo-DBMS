@@ -9,12 +9,9 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
 
-internal class CreateTable : BaseDbAction
+internal class CreateTable(CreateTableStatement ast) : BaseDbAction
 {
-    private readonly CreateTableModel _model;
-
-    public CreateTable(Match match) => _model = CreateTableModel.FromMatch(match);
-    public CreateTable(CreateTableStatement ast) => _model = CreateTableModel.FromAst(ast);
+    private readonly CreateTableModel _model = CreateTableModel.FromAst(ast);
 
     public override void PerformAction(Guid session)
     {

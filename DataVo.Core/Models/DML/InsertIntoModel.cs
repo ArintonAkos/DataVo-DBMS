@@ -10,32 +10,7 @@ internal class InsertIntoModel(string tableName, List<List<string>> rawRows, Lis
     public List<List<string>> RawRows { get; set; } = rawRows;
     public List<string> Columns { get; set; } = columns;
 
-    public static InsertIntoModel FromMatch(Match match)
-    {
-        var columns = match.Groups["Columns"].Value
-            .RemoveWhiteSpaces()
-            .Split(",", StringSplitOptions.RemoveEmptyEntries)
-            .ToList();
 
-        List<List<string>> rows = [];
-        foreach (Capture rowCapture in match.Groups["Values"].Captures)
-        {
-            var row = rowCapture.Value
-                .RemoveWhiteSpaces()
-                .Split(",")
-                .ToList();
-
-            if (columns.Count > 0 && row.Count != columns.Count)
-            {
-                throw new Exception("The number of values provided in a row must be the same as " +
-                                    "the number of columns provided inside the paranthesis after the table name attribute.");
-            }
-
-            rows.Add(row);
-        }
-
-        return new InsertIntoModel(match.Groups["TableName"].Value, rows, columns);
-    }
 
     public static InsertIntoModel FromAst(InsertIntoStatement ast)
     {
