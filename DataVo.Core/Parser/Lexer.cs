@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Enums;
+using DataVo.Core.Constants;
 
 namespace DataVo.Core.Parser;
 
@@ -35,17 +36,8 @@ public class Lexer
     private int _position;
 
     // Explicit list of SQL keywords we care about right now
-    private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES",
-        "CREATE", "TABLE", "DROP", "INDEX", "ON", "SHOW", "DATABASES",
-        "TABLES", "DESCRIBE", "DELETE", "UPDATE", "SET", "USE", "GO",
-        "DATABASE", "PRIMARY", "KEY", "UNIQUE", "REFERENCES",
-        "INT", "FLOAT", "BIT", "DATE", "VARCHAR", "AS", "BY", "GROUP", "ORDER",
-        Operators.AND, Operators.OR, "HAVING", "ASC", "DESC", "ALTER", "ADD", "MODIFY",
-        "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS"
-         // Can be classified as Keyword or Operator depending on AST usage. We'll emit as Operator for Shunting Yard compatibility.
-    };
+    private static readonly HashSet<string> Keywords =
+        new([.. SqlKeywords.All, Operators.AND, Operators.OR], StringComparer.OrdinalIgnoreCase);
 
     // Multi-character logical operators
     private static readonly string[] MultiCharOperators = { Operators.GREATER_THAN_OR_EQUAL_TO, Operators.LESS_THAN_OR_EQUAL_TO, Operators.NOT_EQUALS, "<>" };
@@ -218,7 +210,10 @@ public class Lexer
 
     private bool IsPunctuation(char c)
     {
-        return c == '(' || c == ')' || c == ',' || c == '*';
+        return c == SqlPunctuation.OpenParen
+            || c == SqlPunctuation.CloseParen
+            || c == SqlPunctuation.Comma
+            || c == SqlPunctuation.Star;
     }
 
     private static string RemoveSqlComments(string input)
