@@ -28,7 +28,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 {
                     return _table.TableContent!.Select(row => row.Key).ToHashSet();
                 }
-                
+
                 return new();
             }
 
@@ -121,7 +121,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             }
 
             return _table.TableContent!
-                .Where(entry => {
+                .Where(entry =>
+                {
                     return EvaluateEquality(entry.Value[leftValue], rightLit.Value);
                 })
                 .Select(entry => entry.Key)
@@ -139,16 +140,13 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 {
                     // Attempt string equality first, if not equal, try numeric
                     if (Convert.ToString(leftVal) == Convert.ToString(rightVal)) return true;
-                    
+
                     double lNum = lConv.ToDouble(null);
                     double rNum = rConv.ToDouble(null);
-                    bool match = lNum == rNum;
-                    Console.WriteLine($"Numeric Eq: {lNum} == {rNum} => {match}");
-                    return match;
+                    return lNum == rNum;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.WriteLine($"Exception in EvaluateEquality: {ex.Message} comparing {leftVal?.GetType()} to {rightVal?.GetType()}");
                 }
             }
 
@@ -243,17 +241,16 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                     double rNum = rConv.ToDouble(null);
                     return lNum.CompareTo(rNum);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.WriteLine($"EVAL CompareDynamics Fallback: {ex.Message} comparing {left?.GetType()} to {right?.GetType()}");
                 }
             }
 
-            try 
+            try
             {
                 return Comparer<dynamic>.Default.Compare(left, right);
             }
-            catch 
+            catch
             {
                 return string.Compare(Convert.ToString(left), Convert.ToString(right), StringComparison.Ordinal);
             }

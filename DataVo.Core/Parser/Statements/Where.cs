@@ -46,7 +46,9 @@ internal class Where
             throw new Exception("Cannot evaluate null where statement.");
         }
 
-        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(_model.Statement)
+        var boundStatement = SelectBinder.BindWhere(_model.Statement, tableService);
+
+        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(boundStatement!)
             .Select(row => row.Value)
             .ToListedTable();
     }
