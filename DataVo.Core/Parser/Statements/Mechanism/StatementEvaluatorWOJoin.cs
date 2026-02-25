@@ -2,6 +2,8 @@
 using DataVo.Core.Parser.AST;
 using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
+using DataVo.Core.Exceptions;
+using DataVo.Core.Parser.Utils;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism
@@ -34,53 +36,41 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
             if (root is not BinaryExpressionNode binNode)
             {
-                throw new Exception("Invalid tree node type: expected BinaryExpressionNode or LiteralNode for condition.");
+                throw new EvaluationException("Invalid expression tree node type: expected BinaryExpressionNode or LiteralNode.");
             }
 
             bool isLogical = binNode.Operator == "AND" || binNode.Operator == "OR";
 
             if (!isLogical)
             {
-                if (binNode.Left is ResolvedColumnRefNode && binNode.Right is ResolvedColumnRefNode)
+                var comparisonNode = NormalizeComparisonNode(binNode);
+
+                if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is ResolvedColumnRefNode)
                 {
-                    return HandleTwoColumnExpression(binNode);
+                    return HandleTwoColumnExpression(comparisonNode);
                 }
 
-                if (binNode.Left is LiteralNode && binNode.Right is ResolvedColumnRefNode)
+                if (comparisonNode.Operator == "=")
                 {
-                    (binNode.Right, binNode.Left) = (binNode.Left, binNode.Right);
-
-                    switch (binNode.Operator)
+                    if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
                     {
-                        case "<": binNode.Operator = ">"; break;
-                        case ">": binNode.Operator = "<"; break;
-                        case "<=": binNode.Operator = ">="; break;
-                        case ">=": binNode.Operator = "<="; break;
-                        default: break;
+                        return HandleIndexableStatement(comparisonNode);
+                    }
+
+                    if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
+                    {
+                        return HandleConstantExpression(comparisonNode);
                     }
                 }
 
-                if (binNode.Operator == "=")
+                if (comparisonNode.Left is ResolvedColumnRefNode && comparisonNode.Right is LiteralNode)
                 {
-                    if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
-                    {
-                        return HandleIndexableStatement(binNode);
-                    }
-
-                    if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
-                    {
-                        return HandleConstantExpression(binNode);
-                    }
+                    return HandleNonIndexableStatement(comparisonNode);
                 }
 
-                if (binNode.Left is ResolvedColumnRefNode && binNode.Right is LiteralNode)
+                if (comparisonNode.Left is LiteralNode && comparisonNode.Right is LiteralNode)
                 {
-                    return HandleNonIndexableStatement(binNode);
-                }
-
-                if (binNode.Left is LiteralNode && binNode.Right is LiteralNode)
-                {
-                    return HandleConstantExpression(binNode);
+                    return HandleConstantExpression(comparisonNode);
                 }
             }
 
@@ -97,7 +87,31 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 return new HashSet<string>(leftResult.Union(rightResult));
             }
 
-            throw new Exception($"Invalid tree node operator: {binNode.Operator}");
+            throw new EvaluationException($"Invalid expression operator: {binNode.Operator}");
+        }
+
+        private static BinaryExpressionNode NormalizeComparisonNode(BinaryExpressionNode node)
+        {
+            if (node.Left is LiteralNode && node.Right is ResolvedColumnRefNode)
+            {
+                string normalizedOperator = node.Operator switch
+                {
+                    "<" => ">",
+                    ">" => "<",
+                    "<=" => ">=",
+                    ">=" => "<=",
+                    _ => node.Operator
+                };
+
+                return new BinaryExpressionNode
+                {
+                    Operator = normalizedOperator,
+                    Left = node.Right,
+                    Right = node.Left
+                };
+            }
+
+            return node;
         }
 
         private HashSet<string> HandleIndexableStatement(BinaryExpressionNode root)
@@ -131,26 +145,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
         private bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
         {
-            if (leftVal == null && rightVal == null) return true;
-            if (leftVal == null || rightVal == null) return false;
-
-            if (leftVal is IConvertible lConv && rightVal is IConvertible rConv)
-            {
-                try
-                {
-                    // Attempt string equality first, if not equal, try numeric
-                    if (Convert.ToString(leftVal) == Convert.ToString(rightVal)) return true;
-
-                    double lNum = lConv.ToDouble(null);
-                    double rNum = rConv.ToDouble(null);
-                    return lNum == rNum;
-                }
-                catch (Exception)
-                {
-                }
-            }
-
-            return Convert.ToString(leftVal) == Convert.ToString(rightVal);
+            return ExpressionValueComparer.AreEqual(leftVal, rightVal);
         }
 
         private HashSet<string> HandleNonIndexableStatement(BinaryExpressionNode root)
@@ -229,31 +224,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
         private int CompareDynamics(dynamic? left, dynamic? right)
         {
-            if (left == null && right == null) return 0;
-            if (left == null) return -1;
-            if (right == null) return 1;
-
-            if (left is IConvertible lConv && right is IConvertible rConv)
-            {
-                try
-                {
-                    double lNum = lConv.ToDouble(null);
-                    double rNum = rConv.ToDouble(null);
-                    return lNum.CompareTo(rNum);
-                }
-                catch (Exception)
-                {
-                }
-            }
-
-            try
-            {
-                return Comparer<dynamic>.Default.Compare(left, right);
-            }
-            catch
-            {
-                return string.Compare(Convert.ToString(left), Convert.ToString(right), StringComparison.Ordinal);
-            }
+            return ExpressionValueComparer.Compare(left, right);
         }
     }
 }
