@@ -3,6 +3,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Enums;
 using DataVo.Core.Constants;
+using DataVo.Core.Parser.Utils;
 
 namespace DataVo.Core.Parser;
 
@@ -225,7 +226,7 @@ public class Parser(List<Token> tokens)
         }
         else if (Match(TokenType.Keyword, SqlKeywords.DROP))
         {
-            if (Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == SqlKeywords.COLUMN) Advance();
+            if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.COLUMN)) Advance();
 
             var stmt = new AlterTableDropColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
             stmt.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
@@ -382,9 +383,7 @@ public class Parser(List<Token> tokens)
 
     private bool IsJoinKeyword()
     {
-        if (IsEof()) return false;
-        string val = Current.Value.ToUpperInvariant();
-        return val == SqlKeywords.JOIN || val == SqlKeywords.INNER || val == SqlKeywords.LEFT || val == SqlKeywords.RIGHT || val == SqlKeywords.OUTER || val == SqlKeywords.CROSS || val == SqlKeywords.FULL;
+        return !IsEof() && ParserSyntaxHelper.IsJoinKeyword(Current);
     }
 
     private JoinDetailNode ParseJoinDetail()
@@ -393,7 +392,7 @@ public class Parser(List<Token> tokens)
         string joinType = "";
 
         // Collect prefixes like LEFT, RIGHT, INNER, OUTER
-        while (!IsEof() && Current.Value.ToUpperInvariant() != SqlKeywords.JOIN)
+        while (!IsEof() && !ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.JOIN))
         {
             joinType += Advance().Value.ToUpperInvariant() + " ";
         }
@@ -405,7 +404,7 @@ public class Parser(List<Token> tokens)
         joinNode.TableName = new IdentifierNode(tableToken.Value);
 
         // Optional table alias (e.g., JOIN Users u OR JOIN Users AS u)
-        if (Current.Type == TokenType.Identifier || (Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == SqlKeywords.AS))
+        if (Current.Type == TokenType.Identifier || ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.AS))
         {
             if (Match(TokenType.Keyword, SqlKeywords.AS))
             {
@@ -440,9 +439,7 @@ public class Parser(List<Token> tokens)
 
     private bool IsGroupByKeyword()
     {
-        if (_position + 1 >= tokens.Count) return false;
-        return Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == SqlKeywords.GROUP &&
-            tokens[_position + 1].Type == TokenType.Keyword && tokens[_position + 1].Value.ToUpperInvariant() == SqlKeywords.BY;
+        return ParserSyntaxHelper.IsGroupByAt(tokens, _position);
     }
 
     private GroupByNode ParseGroupBy()
@@ -468,9 +465,7 @@ public class Parser(List<Token> tokens)
 
     private bool IsOrderByKeyword()
     {
-        if (_position + 1 >= tokens.Count) return false;
-        return Current.Type == TokenType.Keyword && Current.Value.ToUpperInvariant() == SqlKeywords.ORDER &&
-            tokens[_position + 1].Type == TokenType.Keyword && tokens[_position + 1].Value.ToUpperInvariant() == SqlKeywords.BY;
+        return ParserSyntaxHelper.IsOrderByAt(tokens, _position);
     }
 
     private OrderByNode ParseOrderBy()
@@ -488,13 +483,12 @@ public class Parser(List<Token> tokens)
             // Optional ASC or DESC
             if (Current.Type == TokenType.Keyword)
             {
-                string kw = Current.Value.ToUpperInvariant();
-                if (kw == SqlKeywords.ASC)
+                if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.ASC))
                 {
                     colNode.IsAscending = true;
                     Advance();
                 }
-                else if (kw == SqlKeywords.DESC)
+                else if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.DESC))
                 {
                     colNode.IsAscending = false;
                     Advance();
@@ -536,7 +530,7 @@ public class Parser(List<Token> tokens)
         while (!IsEof())
         {
             // We just Peek "FROM", avoiding greedy consumption.
-            if (Current.Type == TokenType.Keyword && Current.Value.Equals(SqlKeywords.FROM, StringComparison.OrdinalIgnoreCase))
+            if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.FROM))
             {
                 break;
             }
