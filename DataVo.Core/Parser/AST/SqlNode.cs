@@ -1,4 +1,5 @@
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Enums;
 
 namespace DataVo.Core.Parser.AST;
 
@@ -61,7 +62,7 @@ public class JoinConditionNode : SqlNode
 
 public class JoinDetailNode : SqlNode
 {
-    public string JoinType { get; set; } = "INNER"; // INNER, LEFT, RIGHT, etc.
+    public string JoinType { get; set; } = JoinTypes.INNER; // Canonical type: INNER, LEFT, RIGHT, FULL, CROSS
     public IdentifierNode TableName { get; set; } = null!;
     public IdentifierNode? Alias { get; set; }
     public JoinConditionNode? Condition { get; set; }
@@ -87,6 +88,7 @@ public class SelectStatement : SqlStatement
 {
     public List<SqlNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
     public IdentifierNode? FromTable { get; set; }
+    public IdentifierNode? FromAlias { get; set; }
     public List<JoinDetailNode> Joins { get; set; } = [];
     public ExpressionNode? WhereExpression { get; set; }
     public GroupByNode? GroupByExpression { get; set; }

@@ -1,5 +1,5 @@
 namespace DataVo.Core.Exceptions;
 
-internal class LexerException(string message) : Exception(message)
+public class LexerException(string message) : Exception(message)
 {
 }
