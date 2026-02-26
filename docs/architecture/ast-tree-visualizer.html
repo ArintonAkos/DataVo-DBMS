@@ -3,157 +3,374 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AST Tree Visualizer</title>
+  <title>DataVo AST Visualizer</title>
   <style>
-    body { font-family: Inter, system-ui, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-    .wrap { display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
-    .panel { padding: 16px; border-right: 1px solid #1e293b; background: #111827; }
-    textarea { width: 100%; height: 58vh; background: #0b1220; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    button { margin-top: 10px; background: #2563eb; color: white; border: none; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
-    .hint { font-size: 12px; color: #94a3b8; line-height: 1.4; margin-top: 10px; }
-    .canvas-wrap { overflow: auto; padding: 20px; }
-    svg text { fill: #e2e8f0; font-size: 12px; }
-    .node { fill: #1e293b; stroke: #60a5fa; stroke-width: 1.2; }
-    .edge { stroke: #94a3b8; stroke-width: 1.2; }
-    .error { color: #f87171; margin-top: 10px; white-space: pre-wrap; }
+    body {
+      font-family: Inter, system-ui, Arial, sans-serif;
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .header {
+      padding: 16px 24px;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      font-size: 20px;
+      font-weight: bold;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .wrap {
+      display: grid;
+      grid-template-columns: 450px 1fr;
+      flex: 1;
+      overflow: hidden;
+    }
+    .panel {
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      border-right: 1px solid #1e293b;
+      background: #111827;
+      overflow-y: auto;
+    }
+    textarea {
+      width: 100%;
+      height: 250px;
+      background: #0b1220;
+      color: #7dd3fc;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      resize: vertical;
+      box-sizing: border-box;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: #3b82f6; }
+    .hint { font-size: 13px; color: #94a3b8; line-height: 1.5; margin-top: 12px; }
+    .error { color: #f87171; margin-top: 12px; font-size: 14px; white-space: pre-wrap; font-family: monospace; background: #451a1a; padding: 10px; border-radius: 6px; display: none; }
+    .canvas-wrap { flex: 1; position: relative; background: #0f172a; }
+    #mynetwork { position: absolute; top: 0; left: 0; right: 0; bottom: 0; outline: none; }
+    .status { font-size: 12px; padding: 4px 8px; border-radius: 4px; background: #334155; }
+    .status.success { background: #065f46; color: #6ee7b7; }
+    .status.error { background: #7f1d1d; color: #fca5a5; }
+    .raw-json { margin-top: 20px; flex: 1; min-height: 200px; background: #0b1220; color: #a5b4fc; border: 1px solid #334155; border-radius: 8px; padding: 16px; font-family: ui-monospace, monospace; font-size: 12px; overflow: auto; white-space: pre-wrap; display: none; }
+    .zoom-controls { position: absolute; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+    .zoom-btn { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 8px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; font-weight: bold; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+    .zoom-btn:hover { background: #334155; color: white; border-color: #475569; transform: translateY(-1px); }
   </style>
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
+  <div class="header">
+    DataVo Interactive AST Visualizer
+    <span id="statusIndicator" class="status">Waiting...</span>
+  </div>
   <div class="wrap">
     <div class="panel">
-      <h2>AST JSON</h2>
-      <textarea id="jsonInput">{
-  "type": "BinaryExpressionNode",
-  "operator": "AND",
-  "left": {
-    "type": "BinaryExpressionNode",
-    "operator": ">=",
-    "left": { "type": "ResolvedColumnRefNode", "tableName": "Employees", "column": "Salary" },
-    "right": { "type": "LiteralNode", "value": 90000 }
-  },
-  "right": {
-    "type": "BinaryExpressionNode",
-    "operator": "=",
-    "left": { "type": "ResolvedColumnRefNode", "tableName": "Employees", "column": "DeptId" },
-    "right": { "type": "LiteralNode", "value": 1 }
-  }
-}</textarea>
-      <button id="renderBtn">Render Tree</button>
+      <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 16px; color: #cbd5e1;">Live SQL Input</h3>
+      <textarea id="sqlInput" spellcheck="false">SELECT id, name FROM Users u JOIN Orders o ON u.id = o.user_id WHERE age > 20 GROUP BY id ORDER BY name DESC</textarea>
+      
+      <div id="errorBox" class="error"></div>
+      
       <div class="hint">
-        Supported keys: <b>type</b>, <b>operator</b>, <b>left</b>, <b>right</b>, <b>value</b>, <b>tableName</b>, <b>column</b>, <b>tableOrAlias</b>.
+        <b>Instructions:</b> Type standard SQL. It will automatically be sent to <code>http://localhost:8001/Ast/Parse</code> and rendered as a draggable hierarchy. Make sure the DataVo Server is running locally!
       </div>
-      <div id="error" class="error"></div>
+      
+      <div style="margin-top: 24px; display: flex; align-items: center; justify-content: space-between;">
+        <h3 style="margin: 0; font-size: 16px; color: #cbd5e1;">Raw AST Output</h3>
+        <button id="toggleJsonBtn" style="background: transparent; border: 1px solid #334155; color: #94a3b8; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">Toggle JSON</button>
+      </div>
+      <pre id="rawJsonBox" class="raw-json"></pre>
     </div>
     <div class="canvas-wrap">
-      <svg id="svg" width="1600" height="1000"></svg>
+      <div id="mynetwork"></div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" id="zoomInBtn" title="Zoom In">+</button>
+        <button class="zoom-btn" id="zoomOutBtn" title="Zoom Out">−</button>
+        <button class="zoom-btn" id="zoomCenterBtn" title="Center & Reset Zoom">⛶</button>
+      </div>
     </div>
   </div>
 
   <script>
-    const svg = document.getElementById('svg');
-    const input = document.getElementById('jsonInput');
-    const error = document.getElementById('error');
+    const sqlInput = document.getElementById('sqlInput');
+    const errorBox = document.getElementById('errorBox');
+    const rawJsonBox = document.getElementById('rawJsonBox');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const toggleJsonBtn = document.getElementById('toggleJsonBtn');
+    
+    let debounceTimer;
+    let network = null;
+    let nodesDataset = new vis.DataSet();
+    let edgesDataset = new vis.DataSet();
+    let nodeIdCounter = 1;
 
-    function labelOf(node) {
-      if (!node) return 'null';
-      const t = node.type || 'Node';
-      if (t === 'BinaryExpressionNode') return `${t}\n${node.operator || '?'}`;
-      if (t === 'LiteralNode') return `${t}\n${JSON.stringify(node.value)}`;
-      if (t === 'ResolvedColumnRefNode') return `${t}\n${node.tableName}.${node.column}`;
-      if (t === 'ColumnRefNode') return `${t}\n${node.tableOrAlias ? node.tableOrAlias + '.' : ''}${node.column || ''}`;
-      return t;
+    // Toggle Raw JSON
+    toggleJsonBtn.addEventListener('click', () => {
+      rawJsonBox.style.display = rawJsonBox.style.display === 'block' ? 'none' : 'block';
+    });
+
+    // Initialize Network
+    function initNetwork() {
+      const container = document.getElementById('mynetwork');
+      const data = { nodes: nodesDataset, edges: edgesDataset };
+      const options = {
+        layout: {
+          hierarchical: {
+            enabled: true,
+            direction: 'UD',
+            sortMethod: 'directed',
+            nodeSpacing: 180,
+            levelSeparation: 120,
+            treeSpacing: 250
+          }
+        },
+        physics: {
+          enabled: false // Disable physics for stability
+        },
+        nodes: {
+          shape: 'box',
+          margin: 12,
+          font: { color: '#e2e8f0', face: 'Inter, system-ui', size: 14 },
+          color: {
+            background: '#1e293b',
+            border: '#3b82f6',
+            highlight: { background: '#334155', border: '#60a5fa' },
+            hover: { background: '#27354f', border: '#93c5fd' }
+          },
+          borderWidth: 2,
+          shadow: { enabled: true, color: 'rgba(0,0,0,0.4)', size: 8 }
+        },
+        edges: {
+          color: { color: '#64748b', highlight: '#94a3b8' },
+          width: 2,
+          smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 },
+          arrows: { to: { enabled: true, scaleFactor: 0.6 } }
+        },
+        interaction: { hover: true, tooltipDelay: 200 }
+      };
+      network = new vis.Network(container, data, options);
     }
 
-    function buildTree(node) {
-      if (!node) return null;
-      const n = { node, left: null, right: null, x: 0, y: 0 };
-      if (node.left) n.left = buildTree(node.left);
-      if (node.right) n.right = buildTree(node.right);
-      return n;
+    function setStatus(text, type) {
+      statusIndicator.textContent = text;
+      statusIndicator.className = 'status ' + type;
     }
 
-    function layout(root) {
-      let nextX = 40;
-      const levelH = 110;
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.style.display = 'block';
+    }
 
-      function walk(n, depth) {
-        if (!n) return;
-        walk(n.left, depth + 1);
-        n.x = nextX;
-        n.y = 60 + depth * levelH;
-        nextX += 220;
-        walk(n.right, depth + 1);
+    function hideError() {
+      errorBox.style.display = 'none';
+      errorBox.textContent = '';
+    }
 
-        if (n.left && n.right) {
-          n.x = (n.left.x + n.right.x) / 2;
+    function formatNodeLabel(nodeObj, keyHint) {
+        if (!nodeObj) return 'null';
+        let type = nodeObj.type || nodeObj.$type;
+        if (type) {
+            let parts = type.split(',');
+            type = parts[0].split('.').pop(); 
+        } else {
+            // Infer type from properties or key if JSON.net omitted $type
+            if (nodeObj.JoinType) type = 'JoinDetailNode';
+            else if (nodeObj.Left && nodeObj.Right && nodeObj.Operator) type = 'BinaryExpressionNode';
+            else if (nodeObj.Left && nodeObj.Right) type = 'JoinConditionNode';
+            else if (nodeObj.Value !== undefined) type = 'LiteralNode';
+            else if (nodeObj.TableName !== undefined && nodeObj.Column !== undefined) type = 'ResolvedColumnRefNode';
+            else if (nodeObj.Column !== undefined && nodeObj.IsAscending !== undefined) type = 'OrderByColumnNode';
+            else if (nodeObj.Column !== undefined) type = 'ColumnRefNode';
+            else if (nodeObj.Columns !== undefined && Array.isArray(nodeObj.Columns)) type = 'GroupByNode';
+            else if (nodeObj.Expression !== undefined) type = 'SelectColumnNode';
+            else if (nodeObj.Name !== undefined) type = 'IdentifierNode';
+            else if (keyHint === 'FromTable' || keyHint === 'FromAlias') type = 'IdentifierNode';
+            else type = 'Node';
+        }
+
+        let label = `${type}`;
+
+        if (nodeObj.JoinType) label += `\nJoin: ${nodeObj.JoinType}`;
+        if (nodeObj.Operator) label += `\nOp: ${nodeObj.Operator}`;
+        if (nodeObj.IsAscending !== undefined) label += `\nAsc: ${nodeObj.IsAscending}`;
+        if (nodeObj.Value !== undefined) label += `\nVal: ${JSON.stringify(nodeObj.Value)}`;
+        
+        // Table/Column parsing specifics
+        if (nodeObj.TableName) {
+            let tname = typeof nodeObj.TableName === 'object' ? nodeObj.TableName.Value || nodeObj.TableName.Name : nodeObj.TableName;
+            if (tname) label += `\nT: ${tname}`;
+        }
+        if (nodeObj.Column) {
+            let cname = typeof nodeObj.Column === 'object' ? nodeObj.Column.Value || nodeObj.Column.Name : nodeObj.Column;
+            if (cname) label += `\nC: ${cname}`;
+        }
+        if (nodeObj.Expression) label += `\nExpr: ${nodeObj.Expression}`;
+        if (nodeObj.Alias) {
+            let aname = typeof nodeObj.Alias === 'object' ? nodeObj.Alias.Value || nodeObj.Alias.Name : nodeObj.Alias;
+            if (aname) label += `\nAS ${aname}`;
+        }
+        if (nodeObj.Name && type === 'IdentifierNode') {
+            label += `\n"${nodeObj.Name}"`;
+        }
+
+        return label;
+    }
+
+    function traverseAST(obj, parentId = null, edgeLabel = '') {
+      if (!obj || typeof obj !== 'object') return;
+
+      const id = nodeIdCounter++;
+      
+      let fillType = '#1e293b';
+      let borderType = '#3b82f6';
+      
+      const typeStr = obj.type || obj.$type || '';
+      if (typeStr.includes('SelectStatement')) { fillType = '#1e1b4b'; borderType = '#818cf8'; }
+      if (typeStr.includes('Expression')) { fillType = '#312e81'; borderType = '#a5b4fc'; }
+      if (typeStr.includes('Literal')) { fillType = '#451a03'; borderType = '#fcd34d'; }
+      if (typeStr.includes('Join')) { fillType = '#064e3b'; borderType = '#34d399'; }
+
+      nodesDataset.add({
+        id: id,
+        label: formatNodeLabel(obj, edgeLabel),
+        color: { background: fillType, border: borderType },
+        title: JSON.stringify(obj, null, 2) // Tooltip
+      });
+
+      if (parentId !== null) {
+        edgesDataset.add({
+          from: parentId,
+          to: id,
+          label: edgeLabel,
+          font: { color: '#94a3b8', size: 10, align: 'middle', background: '#0f172a' }
+        });
+      }
+
+      // Recursively add children
+      for (const key in obj) {
+        if (key === 'type' || key === '$type' || key === 'Operator' || key === 'Value' || key === 'Expression' || key === 'Alias' || key === 'TableName' || key === 'Column' || key === 'Name' || key === 'JoinType' || key === 'IsAscending') continue;
+        
+        const child = obj[key];
+        
+        // Handle Newtonsoft.Json TypeNameHandling.Auto lists ($values)
+        let actualChild = child;
+        if (child && typeof child === 'object' && child.$values) {
+            actualChild = child.$values;
+        }
+
+        if (Array.isArray(actualChild)) {
+          if (actualChild.length > 0) {
+            // Add a grouping node for arrays
+            const arrId = nodeIdCounter++;
+            nodesDataset.add({
+              id: arrId,
+              label: `[${key}]`,
+              color: { background: '#0f172a', border: '#475569' },
+              shape: 'ellipse'
+            });
+            edgesDataset.add({ from: id, to: arrId, arrows: { to: { enabled: false } }, dashes: true });
+            
+            actualChild.forEach((c, i) => traverseAST(c, arrId, `[${i}]`));
+          }
+        } else if (actualChild && typeof actualChild === 'object') {
+            traverseAST(actualChild, id, key);
         }
       }
-
-      walk(root, 0);
     }
 
-    function draw(root) {
-      while (svg.firstChild) svg.removeChild(svg.firstChild);
-
-      function edge(x1, y1, x2, y2) {
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-        line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-        line.setAttribute('class', 'edge');
-        svg.appendChild(line);
+    async function parseSql() {
+      const sql = sqlInput.value.trim();
+      if (!sql) {
+        nodesDataset.clear();
+        edgesDataset.clear();
+        hideError();
+        rawJsonBox.textContent = '';
+        setStatus('Empty', '');
+        return;
       }
 
-      function nodeBox(n) {
-        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', n.x - 90);
-        rect.setAttribute('y', n.y - 28);
-        rect.setAttribute('rx', 8);
-        rect.setAttribute('width', 180);
-        rect.setAttribute('height', 56);
-        rect.setAttribute('class', 'node');
-        g.appendChild(rect);
+      setStatus('Parsing...', '');
 
-        const label = labelOf(n.node).split('\n');
-        label.forEach((line, i) => {
-          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          text.setAttribute('x', n.x);
-          text.setAttribute('y', n.y - 4 + i * 16);
-          text.setAttribute('text-anchor', 'middle');
-          text.textContent = line;
-          g.appendChild(text);
+      try {
+        const res = await fetch('http://localhost:8001/Ast/Parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: sql })
         });
 
-        svg.appendChild(g);
-      }
+        const data = await res.json();
+        const payload = data.data || data;
 
-      function walk(n) {
-        if (!n) return;
-        if (n.left) edge(n.x, n.y + 28, n.left.x, n.left.y - 28);
-        if (n.right) edge(n.x, n.y + 28, n.right.x, n.right.y - 28);
-        walk(n.left);
-        walk(n.right);
-        nodeBox(n);
-      }
+        if (res.ok && !payload.Message) { 
+          hideError();
+          setStatus('Success', 'success');
+          rawJsonBox.textContent = JSON.stringify(payload, null, 2);
 
-      walk(root);
+          // Build graph
+          nodesDataset.clear();
+          edgesDataset.clear();
+          nodeIdCounter = 1;
+          
+          let actualPayload = payload;
+          if (payload && payload.$values) {
+             actualPayload = payload.$values;
+          }
+
+          if (Array.isArray(actualPayload)) {
+             actualPayload.forEach((stmt, i) => traverseAST(stmt, null));
+          } else {
+             traverseAST(actualPayload, null);
+          }
+          
+          if (network) network.stabilize();
+
+        } else {
+          showError(payload.Message || JSON.stringify(payload, null, 2));
+          setStatus('Parse Error', 'error');
+        }
+
+      } catch (err) {
+        showError('Network Error: Make sure DataVo Server is running on http://localhost:8001.\n\n' + err.message);
+        setStatus('Connection Error', 'error');
+      }
     }
 
-    function render() {
-      error.textContent = '';
-      try {
-        const json = JSON.parse(input.value);
-        const root = buildTree(json);
-        layout(root);
-        draw(root);
-      } catch (e) {
-        error.textContent = e.message;
-      }
-    }
+    sqlInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(parseSql, 400);
+    });
 
-    document.getElementById('renderBtn').addEventListener('click', render);
-    render();
+    document.getElementById('zoomInBtn').addEventListener('click', () => {
+      if (network) {
+        const scale = network.getScale();
+        network.moveTo({ scale: scale * 1.3, animation: { duration: 300, easingFunction: 'easeInOutQuad' } });
+      }
+    });
+
+    document.getElementById('zoomOutBtn').addEventListener('click', () => {
+      if (network) {
+        const scale = network.getScale();
+        network.moveTo({ scale: scale / 1.3, animation: { duration: 300, easingFunction: 'easeInOutQuad' } });
+      }
+    });
+
+    document.getElementById('zoomCenterBtn').addEventListener('click', () => {
+      if (network) {
+        network.fit({ animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+      }
+    });
+
+    initNetwork();
+    parseSql(); // Initial parse
   </script>
 </body>
 </html>
