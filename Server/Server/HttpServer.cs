@@ -36,6 +36,18 @@ internal class HttpServer
         {
             Logger.Info($"New Request from {context.Request.UserHostName}");
 
+            // Handle CORS headers
+            context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+            context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept");
+
+            if (context.Request.HttpMethod == "OPTIONS")
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.Close();
+                return;
+            }
+
             var response = await Task.Run(() => Router.HandleRequest(context));
 
             await WriteResponse(context, response);
