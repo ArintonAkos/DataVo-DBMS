@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.Types;
 
 namespace DataVo.Core.Services
 {
@@ -63,6 +64,22 @@ namespace DataVo.Core.Services
             tableName = tablesWithThisColumnName[0];
 
             return TableDetails[tableName];
+        }
+
+        public Row GetNullRowForTable(string aliasOrName)
+        {
+            var tableDetail = GetTableDetailByAliasOrName(aliasOrName);
+            Row nullRow = new Row();
+            
+            if (tableDetail.Columns != null)
+            {
+                foreach (var col in tableDetail.Columns)
+                {
+                    nullRow.Add(col, null!);
+                }
+            }
+            
+            return nullRow;
         }
 
         public string GetRealTableName(string aliasOrName)

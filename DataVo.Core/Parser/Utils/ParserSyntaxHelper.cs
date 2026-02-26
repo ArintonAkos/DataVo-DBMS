@@ -1,4 +1,6 @@
 using DataVo.Core.Constants;
+using DataVo.Core.Enums;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.Parser.Utils;
 
@@ -35,6 +37,40 @@ internal static class ParserSyntaxHelper
     {
         return IsKeywordAt(tokens, index, SqlKeywords.ORDER) &&
                IsKeywordAt(tokens, index + 1, SqlKeywords.BY);
+    }
+
+    public static string ResolveJoinType(IReadOnlyList<string> prefixTokens)
+    {
+        if (prefixTokens.Count == 0)
+        {
+            return JoinTypes.INNER;
+        }
+
+        if (prefixTokens.Count == 1)
+        {
+            return prefixTokens[0] switch
+            {
+                SqlKeywords.INNER => JoinTypes.INNER,
+                SqlKeywords.LEFT => JoinTypes.LEFT,
+                SqlKeywords.RIGHT => JoinTypes.RIGHT,
+                SqlKeywords.FULL => JoinTypes.FULL,
+                SqlKeywords.CROSS => JoinTypes.CROSS,
+                _ => throw new ParserException($"Parser Error: Unsupported JOIN type '{prefixTokens[0]} JOIN'.")
+            };
+        }
+
+        if (prefixTokens.Count == 2 && prefixTokens[1] == SqlKeywords.OUTER)
+        {
+            return prefixTokens[0] switch
+            {
+                SqlKeywords.LEFT => JoinTypes.LEFT,
+                SqlKeywords.RIGHT => JoinTypes.RIGHT,
+                SqlKeywords.FULL => JoinTypes.FULL,
+                _ => throw new ParserException($"Parser Error: Unsupported JOIN type '{string.Join(" ", prefixTokens)} JOIN'.")
+            };
+        }
+
+        throw new ParserException($"Parser Error: Unsupported JOIN type '{string.Join(" ", prefixTokens)} JOIN'.");
     }
 
     private static bool IsKeywordAt(IReadOnlyList<Token> tokens, int index, string keyword)

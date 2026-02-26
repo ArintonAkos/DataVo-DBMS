@@ -188,7 +188,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             groupedInitialTable.Add(row.Key, new JoinedRow(tableName, row.Value.ToRow()));
         }
 
-        return Join!.Evaluate(groupedInitialTable);
+        return Join!.Evaluate(groupedInitialTable, tableName);
     }
 
     protected override HashedTable And(HashedTable leftResult, HashedTable rightResult)

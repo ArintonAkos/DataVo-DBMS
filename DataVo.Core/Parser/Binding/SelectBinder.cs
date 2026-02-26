@@ -1,4 +1,5 @@
 using DataVo.Core.Exceptions;
+using DataVo.Core.Enums;
 using DataVo.Core.Models.Statement;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
@@ -14,6 +15,8 @@ internal static class SelectBinder
 
         foreach (var join in ast.Joins)
         {
+            ValidateJoinShape(join);
+
             var tableName = join.TableName.Name;
             var alias = join.Alias?.Name;
 
@@ -32,6 +35,18 @@ internal static class SelectBinder
 
             if (join.Condition == null)
             {
+                if (join.JoinType.Equals(JoinTypes.CROSS, StringComparison.OrdinalIgnoreCase))
+                {
+                    string leftTableName = ast.FromAlias?.Name ?? ast.FromTable?.Name ?? string.Empty;
+                    
+                    model.JoinConditions.Add(new JoinModel.JoinCondition(
+                        leftTableName,
+                        "__dummy__",
+                        tableDetail.GetTableNameInUse(),
+                        "__dummy__",
+                        join.JoinType
+                    ));
+                }
                 continue;
             }
 
@@ -42,11 +57,35 @@ internal static class SelectBinder
                 left.TableName,
                 left.Column,
                 right.TableName,
-                right.Column
+                right.Column,
+                join.JoinType
             ));
         }
 
         return model;
+    }
+
+    private static void ValidateJoinShape(JoinDetailNode join)
+    {
+        if (!JoinTypes.All.Contains(join.JoinType))
+        {
+            throw new BindingException($"Binding Error: unsupported JOIN type '{join.JoinType}'.");
+        }
+
+        if (join.JoinType.Equals(JoinTypes.CROSS, StringComparison.OrdinalIgnoreCase))
+        {
+            if (join.Condition != null)
+            {
+                throw new BindingException("Binding Error: CROSS JOIN must not have an ON condition.");
+            }
+
+            return;
+        }
+
+        if (join.Condition == null)
+        {
+            throw new BindingException($"Binding Error: {join.JoinType} JOIN requires an ON condition.");
+        }
     }
 
     private static ResolvedColumnRefNode ResolveColumnRef(ColumnRefNode reference, TableService tableService)
@@ -132,10 +171,10 @@ internal static class SelectBinder
             }
             catch (Exception ex)
             {
-                var refName = string.IsNullOrWhiteSpace(columnRef.TableOrAlias) 
-                    ? columnRef.Column 
+                var refName = string.IsNullOrWhiteSpace(columnRef.TableOrAlias)
+                    ? columnRef.Column
                     : $"{columnRef.TableOrAlias}.{columnRef.Column}";
-                    
+
                 throw new BindingException($"Binding Error: cannot resolve column '{refName}'. {ex.Message}");
             }
         }

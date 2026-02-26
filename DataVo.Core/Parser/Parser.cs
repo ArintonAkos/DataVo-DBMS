@@ -334,6 +334,15 @@ public class Parser(List<Token> tokens)
         var tableNameToken = Consume(TokenType.Identifier, "table name");
         selectStmt.FromTable = new IdentifierNode(tableNameToken.Value);
 
+        // Optional table alias (e.g., FROM Users u OR FROM Users AS u)
+        if (Current.Type == TokenType.Identifier || Match(TokenType.Keyword, SqlKeywords.AS))
+        {
+            if (Current.Type == TokenType.Identifier)
+            {
+                selectStmt.FromAlias = new IdentifierNode(Advance().Value);
+            }
+        }
+
         // 3. Parse optional JOINs
         while (IsJoinKeyword())
         {
@@ -389,16 +398,16 @@ public class Parser(List<Token> tokens)
     private JoinDetailNode ParseJoinDetail()
     {
         var joinNode = new JoinDetailNode();
-        string joinType = "";
+        List<string> joinTypePrefixTokens = [];
 
         // Collect prefixes like LEFT, RIGHT, INNER, OUTER
         while (!IsEof() && !ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.JOIN))
         {
-            joinType += Advance().Value.ToUpperInvariant() + " ";
+            joinTypePrefixTokens.Add(Advance().Value.ToUpperInvariant());
         }
 
         Consume(TokenType.Keyword, SqlKeywords.JOIN);
-        joinNode.JoinType = (joinType + SqlKeywords.JOIN).Trim();
+        joinNode.JoinType = ParserSyntaxHelper.ResolveJoinType(joinTypePrefixTokens);
 
         var tableToken = Consume(TokenType.Identifier, "join table name");
         joinNode.TableName = new IdentifierNode(tableToken.Value);
