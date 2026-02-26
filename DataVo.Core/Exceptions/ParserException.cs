@@ -1,5 +1,5 @@
 namespace DataVo.Core.Exceptions;
 
-internal class ParserException(string message) : Exception(message)
+public class ParserException(string message) : Exception(message)
 {
 }

@@ -27,7 +27,7 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.Contains(result.Data, row => row["Employees.Name"].ToString() == "Charlie" && row["Departments.DeptName"].ToString() == "HR");
     }
 
-    [Fact(Skip = "Not implemented yet")]
+    [Fact]
     public void JoinTests_LeftJoin_ReturnsCorrectData()
     {
         Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");

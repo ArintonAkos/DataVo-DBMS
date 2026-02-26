@@ -4,7 +4,6 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.Types;
-using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Cache;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Enums;
@@ -115,14 +114,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return databaseName;
     }
 
-    private void ValidateColumns(string databaseName)
-    {
-        if (_model.Validate(databaseName))
-        {
-            throw new Exception("Invalid columns specified'");
-        }
-    }
-
     private ListedTable EvaluateStatements()
     {
         ListedTable result;
@@ -156,7 +147,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             groupedInitialTable.Add(row.Key, new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
         }
 
-        return _model.JoinStatement!.Evaluate(groupedInitialTable).ToListedTable();
+        return _model.JoinStatement!.Evaluate(groupedInitialTable, _model.FromTable.TableName).ToListedTable();
     }
 
 

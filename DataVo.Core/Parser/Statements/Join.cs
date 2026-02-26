@@ -1,148 +1,80 @@
 ﻿using DataVo.Core.Models.Statement;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
+using DataVo.Core.Parser.Statements.JoinStrategies;
 using DataVo.Core.Services;
-using DataVo.Core.Utils;
+using DataVo.Core.Enums;
 using static DataVo.Core.Models.Statement.JoinModel;
 
 namespace DataVo.Core.Parser.Statements;
 
 public class Join
 {
-    private readonly bool _isValid;
-    private readonly TableService? _tableService;
+    private readonly bool _containsJoin;
+    private readonly JoinStrategyContext _strategyContext;
+    private readonly Dictionary<string, IJoinStrategy> _strategies;
     public readonly JoinModel Model;
 
     public Join(JoinModel model, TableService tableService)
     {
         Model = model;
-        _tableService = tableService;
-        _isValid = model.JoinConditions.Count > 0 || model.JoinTableDetails.Count > 0;
+        _strategyContext = new JoinStrategyContext
+        {
+            TableService = tableService,
+            JoinModel = model
+        };
+
+        _strategies = new Dictionary<string, IJoinStrategy>(StringComparer.OrdinalIgnoreCase)
+        {
+            [JoinTypes.INNER] = new InnerJoinStrategy(),
+            [JoinTypes.LEFT] = new LeftJoinStrategy(),
+            [JoinTypes.RIGHT] = new RightJoinStrategy(),
+            [JoinTypes.FULL] = new FullJoinStrategy(),
+            [JoinTypes.CROSS] = new CrossJoinStrategy()
+        };
+
+        // Canonical signal for JOIN presence is joined table registration.
+        // This also correctly covers CROSS JOIN (no ON condition -> no JoinConditions).
+        _containsJoin = model.JoinTableDetails.Count > 0;
     }
 
-    public bool ContainsJoin() => _isValid;
+    public bool ContainsJoin() => _containsJoin;
 
     public HashedTable PerformJoinCondition(HashedTable tableRows, JoinCondition joinCondition)
     {
-        var leftTable = joinCondition.LeftColumn.TableName;
-        var leftColumn = joinCondition.LeftColumn.ColumnName;
-        var rightTable = joinCondition.RightColumn.TableName;
-        var rightColumn = joinCondition.RightColumn.ColumnName;
+        IJoinStrategy strategy = ResolveStrategy(joinCondition.JoinType);
+        return strategy.Execute(tableRows, joinCondition, _strategyContext);
+    }
 
-        Dictionary<string, Dictionary<string, dynamic>> rightTableData = _tableService!.GetTableDetailByAliasOrName(rightTable).TableContent!;
-
-        HashedTable result = [];
-
-        bool insertHashAfter = false;
-        List<string> joinTables = Model.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
-
-        if (joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable))
+    private IJoinStrategy ResolveStrategy(string joinType)
+    {
+        if (_strategies.TryGetValue(joinType, out IJoinStrategy? strategy))
         {
-            insertHashAfter = true;
+            return strategy;
         }
 
-        if (rightTableData.Count >= 32)
+        throw new EvaluationException($"Unsupported JOIN type '{joinType}'.");
+    }
+
+    public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "")
+    {
+        int tableCount;
+        
+        if (tableRows.Count > 0)
         {
-            var rightLookup = BuildRightLookup(rightTableData, rightColumn);
-
-            foreach (var leftTableRow in tableRows)
-            {
-                if (!leftTableRow.Value.ContainsKey(leftTable) || !leftTableRow.Value[leftTable].ContainsKey(leftColumn))
-                {
-                    throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
-                }
-
-                var leftValue = leftTableRow.Value[leftTable][leftColumn];
-                if (!rightLookup.TryGetValue(leftValue, out KeyValuePair<string, Dictionary<string, dynamic>> rightTableRow))
-                {
-                    continue;
-                }
-
-                var joinedRow = new JoinedRow();
-                string hash = insertHashAfter
-                    ? $"{leftTableRow.Key}##{rightTableRow.Key}"
-                    : $"{rightTableRow.Key}##{leftTableRow.Key}";
-
-                joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
-                joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
-
-                result.Add(hash, joinedRow);
-            }
+            tableCount = tableRows.First().Value.Keys.Count();
         }
         else
         {
-            foreach (var leftTableRow in tableRows)
-            {
-                if (leftTableRow.Value.ContainsKey(leftTable) && leftTableRow.Value[leftTable].ContainsKey(leftColumn))
-                {
-                    var leftValue = leftTableRow.Value[leftTable][leftColumn];
-
-                    foreach (var rightTableRow in rightTableData)
-                    {
-                        if (rightTableRow.Value.ContainsKey(rightColumn) && rightTableRow.Value[rightColumn] == leftValue)
-                        {
-                            var joinedRow = new JoinedRow();
-                            string hash = insertHashAfter
-                                ? $"{leftTableRow.Key}##{rightTableRow.Key}"
-                                : $"{rightTableRow.Key}##{leftTableRow.Key}";
-
-                            joinedRow.Add(leftTable, leftTableRow.Value[leftTable]);
-                            joinedRow.Add(rightTable, rightTableRow.Value.ToRow());
-
-                            result.Add(hash, joinedRow);
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
-                }
-            }
+            tableCount = string.IsNullOrEmpty(baseTableName) ? 0 : 1;
         }
-
-        return result;
-    }
-
-    private static Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> BuildRightLookup(
-        Dictionary<string, Dictionary<string, dynamic>> rightTableData,
-        string rightColumn)
-    {
-        Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> lookup = [];
-
-        foreach (var rightTableRow in rightTableData)
-        {
-            if (!rightTableRow.Value.ContainsKey(rightColumn))
-            {
-                continue;
-            }
-
-            dynamic key = rightTableRow.Value[rightColumn];
-            if (!lookup.ContainsKey(key))
-            {
-                lookup[key] = rightTableRow;
-            }
-        }
-
-        return lookup;
-    }
-
-    public HashedTable Evaluate(HashedTable tableRows)
-    {
-        // Ha ures a tabla, akkor a JOIN eredmenye ugyis ures marad (Mivel INNER JOIN)
-        if (tableRows.Count == 0)
-        {
-            return [];
-        }
-
-        int tableCount = tableRows.First().Value.Keys.Count();
 
         if (tableCount == 0)
         {
-            throw new Exception("JOIN expression must contain at least one table!");
+            throw new Exception("JOIN expression must contain at least one table! Cannot deduce table origin.");
         }
 
-        if (tableCount != 1)
+        if (tableCount > 1)
         {
             throw new Exception("Couldn't JOIN already joined tables!");
         }
@@ -155,13 +87,11 @@ public class Join
         }
 
         sorter.Sort();
-        List<string> sortedTableNames = sorter.GetSorted().Select(jc => jc.TableName).ToList();
+        List<string> sortedTableNames = [.. sorter.GetSorted().Select(jc => jc.TableName)];
 
-        List<JoinCondition> sortedJoinConditions = Model.JoinConditions
-            .Where(jc => sortedTableNames.IndexOf(jc.LeftColumn.TableName) < sortedTableNames.IndexOf(jc.RightColumn.TableName))
-            .ToList();
+        List<JoinCondition> sortedJoinConditions = [.. Model.JoinConditions.Where(jc => sortedTableNames.IndexOf(jc.LeftColumn.TableName) < sortedTableNames.IndexOf(jc.RightColumn.TableName))];
 
-        string joinFrom = tableRows.First().Value.Keys.First();
+        string joinFrom = string.IsNullOrEmpty(baseTableName) ? tableRows.First().Value.Keys.First() : baseTableName;
         List<string> joinedTables = [joinFrom];
 
         foreach (var joinCondition in sortedJoinConditions)
