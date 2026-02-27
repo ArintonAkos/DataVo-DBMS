@@ -47,7 +47,7 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.Equal(4, result.Data.Count);
     }
 
-    [Fact(Skip = "Not implemented yet")]
+    [Fact]
     public void JoinTests_RightJoin_ReturnsCorrectData()
     {
         Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
@@ -86,7 +86,7 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.Equal(4, result.Data.Count);
     }
 
-    [Fact(Skip = "Not implemented yet")]
+    [Fact]
     public void JoinTests_CrossJoin_ReturnsCartesianProduct()
     {
         Execute("CREATE TABLE A (Id INT)");
@@ -97,15 +97,15 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Execute("INSERT INTO B (Id) VALUES (10)");
         Execute("INSERT INTO B (Id) VALUES (20)");
 
-        var result = ExecuteAndReturn("SELECT A.Id AS AId, B.Id AS BId FROM A CROSS JOIN B");
+        var result = ExecuteAndReturn("SELECT A.Id, B.Id FROM A CROSS JOIN B");
 
         Assert.False(result.IsError);
         Assert.NotNull(result.Data);
         Assert.Equal(4, result.Data.Count);
-        Assert.Contains(result.Data, row => row["AId"].ToString() == "1" && row["BId"].ToString() == "10");
-        Assert.Contains(result.Data, row => row["AId"].ToString() == "1" && row["BId"].ToString() == "20");
-        Assert.Contains(result.Data, row => row["AId"].ToString() == "2" && row["BId"].ToString() == "10");
-        Assert.Contains(result.Data, row => row["AId"].ToString() == "2" && row["BId"].ToString() == "20");
+        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "1" && row["B.Id"].ToString() == "10");
+        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "1" && row["B.Id"].ToString() == "20");
+        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "2" && row["B.Id"].ToString() == "10");
+        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "2" && row["B.Id"].ToString() == "20");
     }
 
     [Fact]
