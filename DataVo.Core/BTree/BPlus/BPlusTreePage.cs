@@ -120,7 +120,7 @@ public class BPlusTreePage
     /// Intra-Node SIMD Search: Processes 8 keys at once using AVX2.
     /// Finds the first index where Key >= targetKey.
     /// </summary>
-    public int FindIndexSimd(int targetKey)
+    public int FindIndex(int targetKey)
     {
         // Fallback or small arrays
         if (!Avx2.IsSupported || NumKeys < 8)
