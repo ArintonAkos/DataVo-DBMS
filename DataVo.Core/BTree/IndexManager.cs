@@ -1,5 +1,6 @@
 using DataVo.Core.BTree.Core;
 using DataVo.Core.BTree.Binary;
+using DataVo.Core.BTree.BPlus;
 
 namespace DataVo.Core.BTree;
 
@@ -26,7 +27,7 @@ public class IndexManager
     private readonly Dictionary<string, string> _cacheFilePaths = [];
     private readonly HashSet<string> _dirtyIndexes = [];
     private readonly Dictionary<string, int> _pendingMutationCounts = [];
-    private readonly object _persistenceLock = new();
+    private readonly Lock _persistenceLock = new();
 
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
@@ -132,7 +133,8 @@ public class IndexManager
             }
             else
             {
-                index = BinaryBTreeIndex.LoadFile(filePath);
+                // Hacky detection: if we assume B+Tree is the default binary engine now
+                index = BinaryBPlusTreeIndex.LoadFile(filePath);
             }
 
             _cache[cacheKey] = index;
@@ -144,22 +146,37 @@ public class IndexManager
     }
 
     /// <summary>
+    /// The default index type to use when a specific type is not provided.
+    /// Defaults to JsonBTree for backward compatibility with E2E tests.
+    /// </summary>
+    public IndexType DefaultIndexType { get; set; } = IndexType.JsonBTree;
+
+    /// <summary>
     /// Create a new index and bulk-insert initial values.
     /// values is a dictionary mapping index key → list of row IDs.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<string>> values, string indexName, string tableName, string databaseName, IndexType indexType = IndexType.JsonBTree)
+    public void CreateIndex(Dictionary<string, List<string>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
 
-        IIndex index = indexType == IndexType.BinaryBTree
-            ? new BinaryBTreeIndex()
-            : new JsonBTreeIndex();
+        IndexType typeToUse = indexType ?? DefaultIndexType;
+
+        IIndex index = typeToUse switch
+        {
+            IndexType.BinaryBPlusTree => new BinaryBPlusTreeIndex(),
+            IndexType.BinaryBTree => new BinaryBTreeIndex(),
+            _ => new JsonBTreeIndex()
+        };
 
         // Initial setup for binary pagers required before inserting
         if (index is BinaryBTreeIndex binIndex)
         {
             binIndex.Load(filePath);
+        }
+        else if (index is BinaryBPlusTreeIndex bplusIndex)
+        {
+            bplusIndex.Load(filePath);
         }
 
         foreach (var kvp in values)

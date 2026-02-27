@@ -50,30 +50,27 @@ public class BinaryBPlusTreeIndex : IIndex
 
     private void InsertNonFull(BPlusTreePage node, int key, string value)
     {
-        int i = node.NumKeys - 1;
-
         if (node.IsLeaf)
         {
-            // Find location and shift right
-            while (i >= 0 && key < node.Keys[i])
+            int insertIdx = node.FindIndex(key);
+            // Shift right to make room
+            for (int j = node.NumKeys - 1; j >= insertIdx; j--)
             {
-                node.Keys[i + 1] = node.Keys[i];
-                node.SetValue(i + 1, node.GetValue(i));
-                i--;
+                node.Keys[j + 1] = node.Keys[j];
+                node.SetValue(j + 1, node.GetValue(j));
             }
-            node.Keys[i + 1] = key;
-            node.SetValue(i + 1, value);
+            node.Keys[insertIdx] = key;
+            node.SetValue(insertIdx, value);
             node.NumKeys++;
             _pager.WritePage(node);
         }
         else
         {
-            // Find child
-            while (i >= 0 && key < node.Keys[i])
+            int i = node.FindIndex(key);
+            if (i < node.NumKeys && node.Keys[i] == key)
             {
-                i--;
+                i++; // For B+Tree, internal node keys are <= right child's min
             }
-            i++;
 
             var child = _pager.ReadPage(node.Children[i]);
 
@@ -165,12 +162,7 @@ public class BinaryBPlusTreeIndex : IIndex
         // Traverse to the FIRST LEAF where key COULD exist
         while (!current.IsLeaf)
         {
-            int i = 0;
-            // Go to the left child if intKey == current.Keys[i] to ensure we find the very first duplicate occurrence
-            while (i < current.NumKeys && intKey > current.Keys[i])
-            {
-                i++;
-            }
+            int i = current.FindIndex(intKey);
             current = _pager.ReadPage(current.Children[i]);
         }
 
