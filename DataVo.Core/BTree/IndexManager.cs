@@ -30,6 +30,7 @@ public class IndexManager
     private readonly Lock _persistenceLock = new();
 
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
+    // Specifies the number of mutations that must occur before an index is flushed to disk.
     private int _flushMutationThreshold = 256;
 
     private IndexManager() { }
@@ -147,9 +148,9 @@ public class IndexManager
 
     /// <summary>
     /// The default index type to use when a specific type is not provided.
-    /// Defaults to JsonBTree for backward compatibility with E2E tests.
+    /// Defaults to B+Tree if not specified.
     /// </summary>
-    public IndexType DefaultIndexType { get; set; } = IndexType.JsonBTree;
+    public IndexType DefaultIndexType { get; set; } = IndexType.BinaryBPlusTree;
 
     /// <summary>
     /// Create a new index and bulk-insert initial values.
@@ -265,7 +266,7 @@ public class IndexManager
             return;
         }
 
-        bool shouldFlush = false;
+        bool shouldFlush;
         lock (_persistenceLock)
         {
             _dirtyIndexes.Add(cacheKey);
