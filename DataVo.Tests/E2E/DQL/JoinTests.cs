@@ -56,17 +56,17 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (1, 'Engineering')");
         Execute("INSERT INTO Departments (DeptId, DeptName) VALUES (2, 'HR')");
         Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (10, 'Alice', 1)");
-        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (11, 'Bob', 1)");
-        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (12, 'Charlie', 2)");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (11, 'Bob', 2)");
+        Execute("INSERT INTO Employees (EmpId, Name, DeptId) VALUES (12, 'Charlie', 3)");
 
-        var result = ExecuteAndReturn("SELECT Employees.Name, Departments.DeptName FROM Employees RIGHT JOIN Departments ON Employees.DeptId = Departments.DeptId");
+        var result = ExecuteAndReturn("SELECT Employees.Name, Departments.DeptName FROM Departments RIGHT JOIN Employees ON Departments.DeptId = Employees.DeptId");
 
         Assert.False(result.IsError);
         Assert.NotNull(result.Data);
-        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(3, result.Data.Count);
     }
 
-    [Fact(Skip = "Not implemented yet")]
+    [Fact]
     public void JoinTests_FullJoin_ReturnsCorrectData()
     {
         Execute("CREATE TABLE Departments (DeptId INT, DeptName VARCHAR)");
