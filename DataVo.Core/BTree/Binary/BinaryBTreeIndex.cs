@@ -41,7 +41,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         }
     }
 
-    public void Insert(string key, string rowId)
+    public void Insert(string key, long rowId)
     {
         if (_pager == null) throw new Exception("Index not loaded");
 
@@ -66,16 +66,16 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         }
     }
 
-    public List<string> Search(string key)
+    public List<long> Search(string key)
     {
         if (_pager == null) throw new Exception("Index not loaded");
 
-        var results = new List<string>();
+        var results = new List<long>();
         SearchInternal(_pager.RootPageId, key, results);
         return results;
     }
 
-    private void SearchInternal(int pageId, string key, List<string> results)
+    private void SearchInternal(int pageId, string key, List<long> results)
     {
         BTreePage node = _pager.ReadPage(pageId);
         int i = 0;
@@ -88,7 +88,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         int matchIdx = i;
         while (matchIdx < node.NumKeys && string.Compare(key, node.Keys[matchIdx], StringComparison.Ordinal) == 0)
         {
-            if (!string.IsNullOrEmpty(node.Values[matchIdx]))
+            if (node.Values[matchIdx] != 0)
             {
                 results.Add(node.Values[matchIdx]);
             }
@@ -106,10 +106,10 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         }
     }
 
-    public void DeleteValues(List<string> rowIds)
+    public void DeleteValues(List<long> rowIds)
     {
         if (_pager == null) throw new Exception("Index not loaded");
-        var idsSet = new HashSet<string>(rowIds);
+        var idsSet = new HashSet<long>(rowIds);
 
         // Tombstone deletion algorithm for performance and simplicity in advanced disk I/O
         for (int i = 1; i < _pager.NumPages; i++)
@@ -121,7 +121,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
             {
                 if (idsSet.Contains(page.Values[k]))
                 {
-                    page.Values[k] = ""; // Tombstone
+                    page.Values[k] = 0; // Tombstone
                     pageChanged = true;
                 }
             }
@@ -132,7 +132,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
         }
     }
 
-    public bool ContainsValue(string rowId)
+    public bool ContainsValue(long rowId)
     {
         if (_pager == null) throw new Exception("Index not loaded");
 

@@ -18,19 +18,19 @@ public class BTreePersistenceTests
         try
         {
             var index = new JsonBTreeIndex(3);
-            index.Insert("alice", "row1");
-            index.Insert("bob", "row2");
-            index.Insert("alice", "row3"); // duplicate key
+            index.Insert("alice", 1L);
+            index.Insert("bob", 2L);
+            index.Insert("alice", 3L); // duplicate key
 
             index.Save(filePath);
 
             var loaded = JsonBTreeIndex.Load(filePath);
 
             Assert.Equal(2, loaded.Search("alice").Count);
-            Assert.Contains("row1", loaded.Search("alice"));
-            Assert.Contains("row3", loaded.Search("alice"));
+            Assert.Contains(1L, loaded.Search("alice"));
+            Assert.Contains(3L, loaded.Search("alice"));
             Assert.Single(loaded.Search("bob"));
-            Assert.Equal("row2", loaded.Search("bob")[0]);
+            Assert.Equal(2L, loaded.Search("bob")[0]);
         }
         finally
         {
@@ -47,7 +47,7 @@ public class BTreePersistenceTests
             var index = new JsonBTreeIndex(2); // small degree forces many nodes
             for (int i = 0; i < 200; i++)
             {
-                index.Insert($"key_{i:D4}", $"row_{i}");
+                index.Insert($"key_{i:D4}", i);
             }
 
             index.Save(filePath);
@@ -57,7 +57,7 @@ public class BTreePersistenceTests
             {
                 var result = loaded.Search($"key_{i:D4}");
                 Assert.Single(result);
-                Assert.Equal($"row_{i}", result[0]);
+                Assert.Equal(i, result[0]);
             }
         }
         finally
@@ -83,7 +83,7 @@ public class BTreePersistenceTests
         try
         {
             var index = new JsonBTreeIndex(3);
-            index.Insert("test", "value");
+            index.Insert("test", 99L);
             index.Save(filePath);
 
             Assert.True(File.Exists(filePath));

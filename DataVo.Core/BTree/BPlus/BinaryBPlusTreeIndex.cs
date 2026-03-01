@@ -8,7 +8,7 @@ public class BinaryBPlusTreeIndex : IIndex
 
     public BinaryBPlusTreeIndex() { }
 
-    public void Insert(string key, string rowId)
+    public void Insert(string key, long rowId)
     {
         if (!int.TryParse(key, out int intKey)) return;
 
@@ -48,7 +48,7 @@ public class BinaryBPlusTreeIndex : IIndex
         }
     }
 
-    private void InsertNonFull(BPlusTreePage node, int key, string value)
+    private void InsertNonFull(BPlusTreePage node, int key, long value)
     {
         if (node.IsLeaf)
         {
@@ -152,9 +152,9 @@ public class BinaryBPlusTreeIndex : IIndex
         _pager.WritePage(parent);
     }
 
-    public List<string> Search(string key)
+    public List<long> Search(string key)
     {
-        var results = new List<string>();
+        var results = new List<long>();
         if (_pager.RootPageId == -1 || !int.TryParse(key, out int intKey)) return results;
 
         var current = _pager.ReadPage(_pager.RootPageId);
@@ -174,7 +174,12 @@ public class BinaryBPlusTreeIndex : IIndex
             {
                 if (current.Keys[i] == intKey)
                 {
-                    results.Add(current.GetValue(i));
+                    long val = current.GetValue(i);
+                    // 0 is default long value. Not perfect but assuming IDs > 0.
+                    if (val != 0) 
+                    {
+                        results.Add(val);
+                    }
                 }
                 else if (current.Keys[i] > intKey)
                 {
@@ -198,18 +203,62 @@ public class BinaryBPlusTreeIndex : IIndex
         return results;
     }
 
-    public bool ContainsValue(string key)
+    public bool ContainsValue(long key)
     {
-        return Search(key).Count > 0;
+        // A hacky check by scanning the entire tree since ContainsValue is rarely used for BPlusTree keys
+        // or we could just implement linear leaf scan.
+        for (int i = 1; i < _pager.NumPages; i++)
+        {
+            var page = _pager.ReadPage(i);
+            if (!page.IsLeaf) continue;
+
+            for (int k = 0; k < page.NumKeys; k++)
+            {
+                if (page.GetValue(k) == key) return true;
+            }
+        }
+        return false;
     }
 
-    public void Delete(string key, string value) { }
-    public void DeleteValues(List<string> valuesToDelete) { }
+    public void Delete(string key, long value) { }
+    
+    public void DeleteValues(List<long> valuesToDelete) 
+    { 
+        if (_pager == null) return;
+        var idsSet = new HashSet<long>(valuesToDelete);
+
+        // Scan leaves for the row IDs to tombstone
+        for (int i = 1; i < _pager.NumPages; i++)
+        {
+            var page = _pager.ReadPage(i);
+            if (!page.IsLeaf) continue;
+            
+            bool pageChanged = false;
+            for (int k = 0; k < page.NumKeys; k++)
+            {
+                if (idsSet.Contains(page.GetValue(k)))
+                {
+                    page.SetValue(k, 0); // Tombstone 0 for long
+                    pageChanged = true;
+                }
+            }
+            if (pageChanged)
+            {
+                _pager.WritePage(page);
+            }
+        }
+    }
 
     public void Save(string filePath)
     {
-        _pager?.Dispose();
-        _pager = null!;
+        if (_pager == null)
+        {
+            Load(filePath);
+        }
+        else
+        {
+            _pager.WriteMetadata();
+        }
     }
 
     public void Load(string filePath)

@@ -27,9 +27,10 @@ public class DiskPager : IDisposable
         bool isNew = !File.Exists(filePath);
         _fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
-        if (isNew)
+        if (isNew || _fs.Length < BTreePage.PageSize)
         {
-            _fs.SetLength(InitialCapacity);
+            _fs.SetLength(Math.Max(_fs.Length, InitialCapacity));
+            isNew = true;
         }
 
         // leaveOpen = true ensures MMF.Dispose doesn't close our _fs

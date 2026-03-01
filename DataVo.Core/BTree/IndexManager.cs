@@ -69,7 +69,7 @@ public class IndexManager
 
         lock (_persistenceLock)
         {
-            dirtyKeys = _dirtyIndexes.ToList();
+            dirtyKeys = [.. _dirtyIndexes];
         }
 
         foreach (var cacheKey in dirtyKeys)
@@ -128,7 +128,7 @@ public class IndexManager
             IIndex index;
             // Hacky detection for benchmark vs standard to keep tests passing.
             // A real engine would persist metadata for table's `IndexType`.
-            if (File.ReadAllText(filePath).StartsWith("{"))
+            if (File.ReadAllText(filePath).StartsWith('{'))
             {
                 index = JsonBTreeIndex.Load(filePath);
             }
@@ -156,10 +156,15 @@ public class IndexManager
     /// Create a new index and bulk-insert initial values.
     /// values is a dictionary mapping index key → list of row IDs.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<string>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
 
         IndexType typeToUse = indexType ?? DefaultIndexType;
 
@@ -182,7 +187,7 @@ public class IndexManager
 
         foreach (var kvp in values)
         {
-            foreach (string rowId in kvp.Value)
+            foreach (long rowId in kvp.Value)
             {
                 index.Insert(kvp.Key, rowId);
             }
@@ -219,7 +224,7 @@ public class IndexManager
     /// <summary>
     /// Insert a single key-value pair into an existing index.
     /// </summary>
-    public void InsertIntoIndex(string value, string rowId, string indexName, string tableName, string databaseName)
+    public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.Insert(value, rowId);
@@ -230,7 +235,7 @@ public class IndexManager
     /// Delete row IDs from an index.
     /// Removes all entries containing any of the specified row IDs.
     /// </summary>
-    public void DeleteFromIndex(List<string> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.DeleteValues(toBeDeletedIds);
@@ -240,16 +245,25 @@ public class IndexManager
     /// <summary>
     /// Look up row IDs by index key value. Returns matching row IDs as a HashSet.
     /// </summary>
-    public HashSet<string> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
+    public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
-        return index.Search(columnValue).ToHashSet();
+        return [.. index.Search(columnValue)];
     }
 
     /// <summary>
     /// Check if the index contains any entry for the given key value.
     /// </summary>
-    public bool IndexContainsRow(string rowId, string indexName, string tableName, string databaseName)
+    public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
+    {
+        var index = GetOrLoad(indexName, tableName, databaseName);
+        return index.Search(key).Count > 0;
+    }
+
+    /// <summary>
+    /// Check if the index contains any entry for the given row ID.
+    /// </summary>
+    public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
         return index.ContainsValue(rowId);

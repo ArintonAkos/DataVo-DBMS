@@ -43,20 +43,19 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.TableDetails[tableName];
 
-        Dictionary<string, Dictionary<string, dynamic>> tableRows;
+        TableData tableRows;
 
         table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile);
         if (indexFile != null)
         {
-            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!).ToList();
-            List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
+            List<long> ids = IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!).ToList();
 
-            var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
+            var internalRows = StorageContext.Instance.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
 
-            tableRows = new Dictionary<string, Dictionary<string, dynamic>>();
+            tableRows = new TableData();
             foreach (var kvp in internalRows)
             {
-                tableRows[kvp.Key.ToString()] = kvp.Value;
+                tableRows[kvp.Key] = new Record(kvp.Key, kvp.Value);
             }
 
             return GetJoinedTableContent(tableRows, table.TableName);
@@ -65,23 +64,24 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue);
         if (columnIndex > -1)
         {
-            List<string> ids = IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!).ToList();
-            List<long> longIds = ids.Select(id => long.Parse(id)).ToList();
+            List<long> ids = IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!).ToList();
 
-            var internalRows = StorageContext.Instance.SelectFromTable(longIds, new(), table.TableName, table.DatabaseName!);
+            var internalRows = StorageContext.Instance.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
 
-            tableRows = new Dictionary<string, Dictionary<string, dynamic>>();
+            tableRows = new TableData();
             foreach (var kvp in internalRows)
             {
-                tableRows[kvp.Key.ToString()] = kvp.Value;
+                tableRows[kvp.Key] = new Record(kvp.Key, kvp.Value);
             }
 
             return GetJoinedTableContent(tableRows, table.TableName);
         }
 
-        tableRows = table.TableContent!
-            .Where(entry => entry.Value[leftValue].ToString() == rightValue) // Compare string reps just in case
-            .ToDictionary(t => t.Key, t => t.Value);
+        tableRows = new TableData();
+        foreach (var entry in table.TableContent!.Where(entry => entry.Value[leftValue].ToString() == rightValue))
+        {
+            tableRows.Add(entry.Key, entry.Value);
+        }
 
         return GetJoinedTableContent(tableRows, table.TableName);
     }
@@ -98,7 +98,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         var table = TableService.TableDetails[tableName];
 
         // Ensure dynamic comparisons can be made
-        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
+        Func<KeyValuePair<long, Record>, bool> pred = root.Operator switch
         {
             Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
             Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
@@ -109,9 +109,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             _ => throw new SecurityException("Invalid operator")
         };
 
-        Dictionary<string, Dictionary<string, dynamic>> tableRows = table.TableContent!
-            .Where(pred)
-            .ToDictionary(t => t.Key, t => t.Value);
+        TableData tableRows = [];
+        foreach (var t in table.TableContent!.Where(pred))
+        {
+            tableRows.Add(t.Key, t.Value);
+        }
 
         return GetJoinedTableContent(tableRows, table.TableName);
     }
@@ -134,7 +136,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.TableDetails[tableName];
 
-        Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
+        Func<KeyValuePair<long, Record>, bool> pred = root.Operator switch
         {
             Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
             Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
@@ -145,9 +147,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             _ => throw new SecurityException("Invalid operator")
         };
 
-        Dictionary<string, Dictionary<string, dynamic>> tableRows = table.TableContent!
-            .Where(pred)
-            .ToDictionary(t => t.Key, t => t.Value);
+        TableData tableRows = new TableData();
+        foreach (var t in table.TableContent!.Where(pred))
+        {
+            tableRows.Add(t.Key, t.Value);
+        }
 
         return GetJoinedTableContent(tableRows, table.TableName);
     }
@@ -179,13 +183,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return new();
     }
 
-    private HashedTable GetJoinedTableContent(Dictionary<string, Dictionary<string, dynamic>> tableRows, string tableName)
+    private HashedTable GetJoinedTableContent(TableData tableRows, string tableName)
     {
         HashedTable groupedInitialTable = new();
 
         foreach (var row in tableRows)
         {
-            groupedInitialTable.Add(row.Key, new JoinedRow(tableName, row.Value.ToRow()));
+            groupedInitialTable.Add(new JoinedRowId(row.Key), new JoinedRow(tableName, row.Value.ToRow()));
         }
 
         return Join!.Evaluate(groupedInitialTable, tableName);
@@ -201,13 +205,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
     protected override HashedTable Or(HashedTable leftResult, HashedTable rightResult)
     {
-        HashSet<string> leftHashes = [.. leftResult.Keys];
-        HashSet<string> rightHashes = [.. rightResult.Keys];
+        HashSet<JoinedRowId> leftHashes = [.. leftResult.Keys];
+        HashSet<JoinedRowId> rightHashes = [.. rightResult.Keys];
 
-        HashSet<string> unionResult = [.. leftHashes.Union(rightHashes)];
+        HashSet<JoinedRowId> unionResult = [.. leftHashes.Union(rightHashes)];
 
         HashedTable result = [];
-        foreach (string hash in unionResult)
+        foreach (JoinedRowId hash in unionResult)
         {
             if (leftResult.ContainsKey(hash))
             {
@@ -221,12 +225,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return result;
     }
 
-    private bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
+    private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
     {
         return ExpressionValueComparer.AreEqual(leftVal, rightVal);
     }
 
-    private int CompareDynamics(dynamic? left, dynamic? right)
+    private static int CompareDynamics(dynamic? left, dynamic? right)
     {
         return ExpressionValueComparer.Compare(left, right);
     }
