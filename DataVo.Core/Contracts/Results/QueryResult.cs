@@ -8,7 +8,7 @@ public class QueryResult
     public TimeSpan ExecutionTime { get; set; }
     public bool IsError { get; set; }
 
-    public static QueryResult Error(string message) => new QueryResult { Messages = [message], IsError = true };
-    public static QueryResult Success(List<string> msg, List<Dictionary<string, dynamic>> data, List<string> fields) => new QueryResult { Messages = msg, Data = data, Fields = fields };
-    public static QueryResult Default() => new QueryResult();
+    public static QueryResult Error(string message) => new() { Messages = [message], IsError = true };
+    public static QueryResult Success(List<string> msg, List<Dictionary<string, dynamic>> data, List<string> fields) => new() { Messages = msg, Data = data, Fields = fields };
+    public static QueryResult Default() => new();
 }

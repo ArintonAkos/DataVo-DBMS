@@ -8,7 +8,7 @@ namespace DataVo.Core.Models.Statement.Utils
         public string TableName { get; set; } = tableName;
         public string? TableAlias { get; set; } = tableAlias;
 
-        private List<string>? _columns { get; set; }
+        private List<string>? _columnsCache;
         public List<string>? Columns
         {
             get
@@ -18,14 +18,14 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _columns ??= Catalog.Catalog.GetTableColumns(TableName, DatabaseName)
+                _columnsCache ??= Catalog.Catalog.GetTableColumns(TableName, DatabaseName)
                     .Select(c => c.Name)
                     .ToList();
-                return _columns;
+                return _columnsCache;
             }
         }
 
-        private List<string>? _primaryKeys { get; set; }
+        private List<string>? _primaryKeysCache;
         public List<string>? PrimaryKeys
         {
             get
@@ -35,12 +35,12 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _primaryKeys ??= Catalog.Catalog.GetTablePrimaryKeys(TableName, DatabaseName);
-                return _primaryKeys;
+                _primaryKeysCache ??= Catalog.Catalog.GetTablePrimaryKeys(TableName, DatabaseName);
+                return _primaryKeysCache;
             }
         }
 
-        private Dictionary<string, string>? _indexedColumns { get; set; }
+        private Dictionary<string, string>? _indexedColumnsCache;
         public Dictionary<string, string>? IndexedColumns
         {
             get
@@ -50,13 +50,15 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _indexedColumns ??= Catalog.Catalog.GetTableIndexedColumns(TableName, DatabaseName);
-                return _indexedColumns;
+                _indexedColumnsCache ??= Catalog.Catalog.GetTableIndexedColumns(TableName, DatabaseName);
+                return _indexedColumnsCache;
             }
         }
 
-        private Dictionary<string, Dictionary<string, dynamic>>? tableContent { get; set; }
-        public Dictionary<string, Dictionary<string, dynamic>>? TableContent
+
+        // Stores the table content in the <RowId, Record> format
+        private TableData? _tableContentCache;
+        public TableData? TableContent
         {
             get
             {
@@ -65,23 +67,22 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                if (tableContent == null)
+                if (_tableContentCache == null)
                 {
-                    // Map the internal numeric RowIds up to strings for the legacy expression evaluators (Select.cs/Join.cs)
-                    tableContent = [];
+                    _tableContentCache = [];
                     var internalRows = StorageContext.Instance.GetTableContents(TableName, DatabaseName);
                     foreach (var row in internalRows)
                     {
-                        tableContent[row.Key.ToString()] = row.Value;
+                        _tableContentCache[row.Key] = new Record(row.Key, row.Value);
                     }
                 }
 
-                return tableContent;
+                return _tableContentCache;
             }
         }
 
-        private List<Dictionary<string, dynamic>>? tableContentValues { get; set; }
-        public List<Dictionary<string, dynamic>>? TableContentValues
+        private List<Record>? _tableContentValuesCache;
+        public List<Record>? TableContentValues
         {
             get
             {
@@ -90,8 +91,8 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                tableContentValues ??= TableContent!.Select(row => row.Value).ToList();
-                return tableContentValues;
+                _tableContentValuesCache ??= TableContent!.Select(row => row.Value).ToList();
+                return _tableContentValuesCache;
             }
         }
 
