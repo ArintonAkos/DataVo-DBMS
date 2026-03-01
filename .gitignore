@@ -365,3 +365,5 @@ FodyWeavers.xsd
 # B-Tree Binary files
 *.btree
 .history
+
+local-docs/
