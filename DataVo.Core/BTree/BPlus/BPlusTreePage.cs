@@ -7,7 +7,6 @@ namespace DataVo.Core.BTree.BPlus;
 /// <summary>
 /// B+Tree Page. Represents a 4KB Disk Block.
 /// MaxKeys = 112 (multiple of 8 for Vector256<int>).
-/// Leaves store 112 Ints (Keys) + 112 Strings (Values) + NextPageId.
 /// Internal nodes store 112 Ints (Keys) + 113 Ints (Children).
 /// </summary>
 public class BPlusTreePage
@@ -24,26 +23,17 @@ public class BPlusTreePage
 
     // Arrays representing contiguous memory blocks inside the Node
     public int[] Keys { get; set; } = new int[MaxKeys];
-    private string?[] _values = new string?[MaxKeys];
-    private byte[]? _rawValuesData;
+    public long[] Values { get; set; } = new long[MaxKeys];
     public int[] Children { get; set; } = new int[MaxKeys + 1];
 
-    public string GetValue(int index)
+    public long GetValue(int index)
     {
-        if (_values[index] != null) return _values[index]!;
-        if (_rawValuesData != null)
-        {
-            byte[] subset = new byte[32];
-            Array.Copy(_rawValuesData, index * 32, subset, 0, 32);
-            _values[index] = GetStringFromFixedBytes(subset);
-            return _values[index]!;
-        }
-        return string.Empty;
+        return Values[index];
     }
 
-    public void SetValue(int index, string value)
+    public void SetValue(int index, long value)
     {
-        _values[index] = value;
+        Values[index] = value;
     }
 
     public byte[] Serialize()
@@ -69,7 +59,7 @@ public class BPlusTreePage
         {
             for (int i = 0; i < MaxKeys; i++)
             {
-                writer.Write(GetFixedStringBytes(GetValue(i), 32));
+                writer.Write(Values[i]);
             }
         }
         else
@@ -103,7 +93,10 @@ public class BPlusTreePage
 
         if (page.IsLeaf)
         {
-            page._rawValuesData = reader.ReadBytes(MaxKeys * 32);
+            for (int i = 0; i < MaxKeys; i++)
+            {
+                page.Values[i] = reader.ReadInt64();
+            }
         }
         else
         {
@@ -180,22 +173,5 @@ public class BPlusTreePage
         return i;
     }
 
-    private static byte[] GetFixedStringBytes(string? str, int length)
-    {
-        byte[] result = new byte[length];
-        if (!string.IsNullOrEmpty(str))
-        {
-            byte[] strBytes = Encoding.UTF8.GetBytes(str);
-            Array.Copy(strBytes, 0, result, 0, Math.Min(strBytes.Length, length));
-        }
-        return result;
-    }
 
-    private static string GetStringFromFixedBytes(byte[] bytes)
-    {
-        string str = Encoding.UTF8.GetString(bytes);
-        int nullIdx = str.IndexOf('\0');
-        if (nullIdx >= 0) return str.Substring(0, nullIdx);
-        return str.TrimEnd('\0');
-    }
 }

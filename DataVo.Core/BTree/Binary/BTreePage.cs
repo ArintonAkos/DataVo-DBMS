@@ -14,7 +14,7 @@ public class BTreePage
     public int NumKeys { get; set; }
 
     public string[] Keys { get; set; } = new string[MaxKeys];
-    public string[] Values { get; set; } = new string[MaxKeys];
+    public long[] Values { get; set; } = new long[MaxKeys];
     public int[] Children { get; set; } = new int[MaxKeys + 1];
 
     public byte[] Serialize()
@@ -33,7 +33,7 @@ public class BTreePage
         for (int i = 0; i < MaxKeys; i++)
         {
             writer.Write(GetFixedStringBytes(Keys[i], 32));
-            writer.Write(GetFixedStringBytes(Values[i], 32));
+            writer.Write(Values[i]);
         }
 
         for (int i = 0; i < MaxKeys + 1; i++)
@@ -59,7 +59,7 @@ public class BTreePage
         for (int i = 0; i < MaxKeys; i++)
         {
             page.Keys[i] = GetStringFromFixedBytes(reader.ReadBytes(32));
-            page.Values[i] = GetStringFromFixedBytes(reader.ReadBytes(32));
+            page.Values[i] = reader.ReadInt64();
         }
 
         for (int i = 0; i < MaxKeys + 1; i++)
@@ -70,7 +70,7 @@ public class BTreePage
         return page;
     }
 
-    public void InsertNonFull(string key, string value, DiskPager pager)
+    public void InsertNonFull(string key, long value, DiskPager pager)
     {
         int i = NumKeys - 1;
 

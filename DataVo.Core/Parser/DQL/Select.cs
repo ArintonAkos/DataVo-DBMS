@@ -144,7 +144,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         foreach (var row in _model.FromTable.TableContent!)
         {
-            groupedInitialTable.Add(row.Key, new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
+            groupedInitialTable.Add(new JoinedRowId(row.Key), new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
         }
 
         return _model.JoinStatement!.Evaluate(groupedInitialTable, _model.FromTable.TableName).ToListedTable();

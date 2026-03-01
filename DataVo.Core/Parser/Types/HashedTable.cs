@@ -2,36 +2,36 @@
 
 namespace DataVo.Core.Parser.Types
 {
-    public class HashedTable : IEnumerable<KeyValuePair<string, JoinedRow>>
+    public class HashedTable : IEnumerable<KeyValuePair<JoinedRowId, JoinedRow>>
     {
-        private readonly Dictionary<string, JoinedRow> _rows;
+        private readonly Dictionary<JoinedRowId, JoinedRow> _rows;
 
         public HashedTable()
         {
             _rows = [];
         }
 
-        public HashedTable(Dictionary<string, JoinedRow> rows)
+        public HashedTable(Dictionary<JoinedRowId, JoinedRow> rows)
         {
             _rows = rows;
         }
 
-        public void Add(string hash, JoinedRow row)
+        public void Add(JoinedRowId hash, JoinedRow row)
         {
             _rows.Add(hash, row);
         }
 
-        public bool ContainsKey(string hash)
+        public bool ContainsKey(JoinedRowId hash)
         {
             return _rows.ContainsKey(hash);
         }
 
-        public IEnumerable<string> Keys
+        public IEnumerable<JoinedRowId> Keys
         {
             get { return _rows.Keys; }
         }
 
-        public JoinedRow this[string hash]
+        public JoinedRow this[JoinedRowId hash]
         {
             get { return _rows[hash]; }
             set { _rows[hash] = value; }
@@ -42,12 +42,12 @@ namespace DataVo.Core.Parser.Types
             get { return _rows.Count; }
         }
 
-        public KeyValuePair<string, JoinedRow> First()
+        public KeyValuePair<JoinedRowId, JoinedRow> First()
         {
             return _rows.First();
         }
 
-        public JoinedRow Get(string hash)
+        public JoinedRow Get(JoinedRowId hash)
         {
             return _rows[hash];
         }
@@ -57,7 +57,7 @@ namespace DataVo.Core.Parser.Types
             return new ListedTable(_rows.Select(row => row.Value).ToList());
         }
 
-        public IEnumerator<KeyValuePair<string, JoinedRow>> GetEnumerator()
+        public IEnumerator<KeyValuePair<JoinedRowId, JoinedRow>> GetEnumerator()
         {
             return _rows.GetEnumerator();
         }

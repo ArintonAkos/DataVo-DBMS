@@ -21,13 +21,12 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            List<string> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+            List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+            
+            // Delete entries from the main table
+            StorageContext.Instance.DeleteFromTable(toBeDeleted, _model.TableName, databaseName);
 
-            // Needs explicit long casting since Evaluator currently returns string identifiers (legacy string PKs)
-            List<long> toBeDeletedIds = toBeDeleted.Select(id => long.Parse(id)).ToList();
-
-            StorageContext.Instance.DeleteFromTable(toBeDeletedIds, _model.TableName, databaseName);
-
+            // Delete entries from all indexes
             Catalog.GetTableIndexes(_model.TableName, databaseName)
                 .Select(e => e.IndexFileName)
                 .ToList()

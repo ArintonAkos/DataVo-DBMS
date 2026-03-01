@@ -8,18 +8,18 @@ public class JsonBTreeIndexTests
     public void Insert_SingleEntry_CanBeSearched()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("alice", "row1");
+        index.Insert("alice", 1L);
 
         var result = index.Search("alice");
         Assert.Single(result);
-        Assert.Equal("row1", result[0]);
+        Assert.Equal(1L, result[0]);
     }
 
     [Fact]
     public void Search_NonExistentKey_ReturnsEmpty()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("alice", "row1");
+        index.Insert("alice", 1L);
 
         var result = index.Search("bob");
         Assert.Empty(result);
@@ -29,50 +29,50 @@ public class JsonBTreeIndexTests
     public void Insert_DuplicateKeys_AccumulatesValues()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("color", "red_row");
-        index.Insert("color", "blue_row");
-        index.Insert("color", "green_row");
+        index.Insert("color", 1L);
+        index.Insert("color", 2L);
+        index.Insert("color", 3L);
 
         var result = index.Search("color");
         Assert.Equal(3, result.Count);
-        Assert.Contains("red_row", result);
-        Assert.Contains("blue_row", result);
-        Assert.Contains("green_row", result);
+        Assert.Contains(1L, result);
+        Assert.Contains(2L, result);
+        Assert.Contains(3L, result);
     }
 
     [Fact]
     public void ContainsValue_WorksCorrectly()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("alice", "row1");
+        index.Insert("alice", 1L);
 
-        Assert.True(index.ContainsValue("alice"));
-        Assert.False(index.ContainsValue("bob"));
+        Assert.True(index.ContainsValue(1L));
+        Assert.False(index.ContainsValue(99L));
     }
 
     [Fact]
     public void Delete_RemovesSpecificValue()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("alice", "row1");
-        index.Insert("alice", "row2");
+        index.Insert("alice", 1L);
+        index.Insert("alice", 2L);
 
-        index.Delete("alice", "row1");
+        index.Delete("alice", 1L);
 
         var result = index.Search("alice");
         Assert.Single(result);
-        Assert.Equal("row2", result[0]);
+        Assert.Equal(2L, result[0]);
     }
 
     [Fact]
     public void Delete_LastValue_RemovesKey()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("alice", "row1");
+        index.Insert("alice", 1L);
 
-        index.Delete("alice", "row1");
+        index.Delete("alice", 1L);
 
-        Assert.False(index.ContainsValue("alice"));
+        Assert.False(index.ContainsValue(1L));
         Assert.Empty(index.Search("alice"));
     }
 
@@ -80,22 +80,22 @@ public class JsonBTreeIndexTests
     public void DeleteValues_RemovesMultipleRowIds()
     {
         var index = new JsonBTreeIndex(3);
-        index.Insert("key1", "row1");
-        index.Insert("key1", "row2");
-        index.Insert("key2", "row3");
-        index.Insert("key3", "row1"); // row1 is also under key3
+        index.Insert("key1", 1L);
+        index.Insert("key1", 2L);
+        index.Insert("key2", 3L);
+        index.Insert("key3", 1L); // 1L is also under key3
 
-        index.DeleteValues(["row1", "row3"]);
+        index.DeleteValues([1L, 3L]);
 
-        // key1 should only have row2
+        // key1 should only have 2L
         var result1 = index.Search("key1");
         Assert.Single(result1);
-        Assert.Equal("row2", result1[0]);
+        Assert.Equal(2L, result1[0]);
 
-        // key2 should be gone (only had row3)
+        // key2 should be gone (only had 3L)
         Assert.Empty(index.Search("key2"));
 
-        // key3 should be gone (only had row1)
+        // key3 should be gone (only had 1L)
         Assert.Empty(index.Search("key3"));
     }
 
@@ -107,7 +107,7 @@ public class JsonBTreeIndexTests
 
         for (int i = 0; i < 100; i++)
         {
-            index.Insert($"key_{i:D4}", $"row_{i}");
+            index.Insert($"key_{i:D4}", i);
         }
 
         // Verify all entries can be found
@@ -115,7 +115,7 @@ public class JsonBTreeIndexTests
         {
             var result = index.Search($"key_{i:D4}");
             Assert.Single(result);
-            Assert.Equal($"row_{i}", result[0]);
+            Assert.Equal(i, result[0]);
         }
     }
 
@@ -127,7 +127,7 @@ public class JsonBTreeIndexTests
 
         for (int i = 0; i < count; i++)
         {
-            index.Insert("same_key", $"row_{i}");
+            index.Insert("same_key", i);
         }
 
         var result = index.Search("same_key");
@@ -135,7 +135,7 @@ public class JsonBTreeIndexTests
 
         for (int i = 0; i < count; i++)
         {
-            Assert.Contains($"row_{i}", result);
+            Assert.Contains(i, result);
         }
     }
 }

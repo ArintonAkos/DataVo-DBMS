@@ -18,12 +18,19 @@ public class BPlusDiskPager : IDisposable
 
     public BPlusDiskPager(string filePath)
     {
+        string? directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         bool isNew = !File.Exists(filePath);
         _fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
-        if (isNew)
+        if (isNew || _fs.Length < BPlusTreePage.PageSize)
         {
-            _fs.SetLength(InitialCapacity);
+            _fs.SetLength(Math.Max(_fs.Length, InitialCapacity));
+            isNew = true;
         }
 
         _mmf = MemoryMappedFile.CreateFromFile(_fs, null, 0, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, leaveOpen: true);

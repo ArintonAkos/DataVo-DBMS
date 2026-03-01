@@ -8,7 +8,7 @@ using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism
 {
-    internal class StatementEvaluatorWOJoin : ExpressionEvaluatorCore<HashSet<string>>
+    internal class StatementEvaluatorWOJoin : ExpressionEvaluatorCore<HashSet<long>>
     {
         private readonly TableDetail _table;
 
@@ -20,14 +20,14 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             };
         }
 
-        protected override HashSet<string> EvaluateTrueLiteral()
+        protected override HashSet<long> EvaluateTrueLiteral()
         {
             return _table.TableContent!.Select(row => row.Key).ToHashSet();
         }
 
-        protected override HashSet<string> EvaluateFalseLiteral() => new();
+        protected override HashSet<long> EvaluateFalseLiteral() => [];
 
-        protected override HashSet<string> HandleIndexableStatement(BinaryExpressionNode root)
+        protected override HashSet<long> HandleIndexableStatement(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -47,21 +47,20 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 return IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{_table.TableName}", _table.TableName, _table.DatabaseName!);
             }
 
-            return _table.TableContent!
+            return [.. _table.TableContent!
                 .Where(entry =>
                 {
                     return EvaluateEquality(entry.Value[leftValue], rightLit.Value);
                 })
-                .Select(entry => entry.Key)
-                .ToHashSet();
+                .Select(entry => entry.Key)];
         }
 
-        private bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
+        private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
         {
             return ExpressionValueComparer.AreEqual(leftVal, rightVal);
         }
 
-        protected override HashSet<string> HandleNonIndexableStatement(BinaryExpressionNode root)
+        protected override HashSet<long> HandleNonIndexableStatement(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -69,7 +68,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             string leftValue = leftCol.Column;
             var rightVal = rightLit.Value;
 
-            Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
+            Func<KeyValuePair<long, Record>, bool> pred = root.Operator switch
             {
                 Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
                 Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
@@ -86,7 +85,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 .ToHashSet();
         }
 
-        protected override HashSet<string> HandleTwoColumnExpression(BinaryExpressionNode root)
+        protected override HashSet<long> HandleTwoColumnExpression(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightCol = (ResolvedColumnRefNode)root.Right;
@@ -94,7 +93,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             string leftValue = leftCol.Column;
             string rightValue = rightCol.Column;
 
-            Func<KeyValuePair<string, Dictionary<string, dynamic>>, bool> pred = root.Operator switch
+            Func<KeyValuePair<long, Record>, bool> pred = root.Operator switch
             {
                 Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
                 Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
@@ -111,7 +110,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 .ToHashSet();
         }
 
-        protected override HashSet<string> HandleConstantExpression(BinaryExpressionNode root)
+        protected override HashSet<long> HandleConstantExpression(BinaryExpressionNode root)
         {
             var leftLit = (LiteralNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -135,17 +134,17 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 : new();
         }
 
-        protected override HashSet<string> And(HashSet<string> leftResult, HashSet<string> rightResult)
+        protected override HashSet<long> And(HashSet<long> leftResult, HashSet<long> rightResult)
         {
-            return new HashSet<string>(leftResult.Intersect(rightResult));
+            return [.. leftResult.Intersect(rightResult)];
         }
 
-        protected override HashSet<string> Or(HashSet<string> leftResult, HashSet<string> rightResult)
+        protected override HashSet<long> Or(HashSet<long> leftResult, HashSet<long> rightResult)
         {
-            return new HashSet<string>(leftResult.Union(rightResult));
+            return [.. leftResult.Union(rightResult)];
         }
 
-        private int CompareDynamics(dynamic? left, dynamic? right)
+        private static int CompareDynamics(dynamic? left, dynamic? right)
         {
             return ExpressionValueComparer.Compare(left, right);
         }

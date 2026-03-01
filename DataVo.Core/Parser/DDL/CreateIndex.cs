@@ -7,6 +7,7 @@ using DataVo.Core.BTree;
 using DataVo.Core.Cache;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Models.Statement.Utils;
 
 namespace DataVo.Core.Parser.DDL;
 
@@ -24,13 +25,8 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
             var tableDataRows = StorageContext.Instance.GetTableContents(_model.TableName, databaseName);
-            Dictionary<string, Dictionary<string, dynamic>> tableData = [];
-            foreach (var r in tableDataRows)
-            {
-                tableData[r.Key.ToString()] = r.Value;
-            }
 
-            Dictionary<string, List<string>> indexValues = CreateIndexContents(tableData);
+            Dictionary<string, List<long>> indexValues = CreateIndexContents(tableDataRows);
 
             IndexManager.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
 
@@ -44,13 +40,13 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         }
     }
 
-    private Dictionary<string, List<string>> CreateIndexContents(Dictionary<string, Dictionary<string, dynamic>> tableData)
+    private Dictionary<string, List<long>> CreateIndexContents(Dictionary<long, Dictionary<string, dynamic>> tableData)
     {
-        Dictionary<string, List<string>> indexContentDict = [];
+        Dictionary<string, List<long>> indexContentDict = [];
 
-        foreach (KeyValuePair<string, Dictionary<string, dynamic>> row in tableData)
+        foreach (KeyValuePair<long, Dictionary<string, dynamic>> row in tableData)
         {
-            string? key = string.Empty;
+            string key = string.Empty;
 
             foreach (KeyValuePair<string, dynamic> col in row.Value)
             {
@@ -60,7 +56,10 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                 }
             }
 
-            key = key.Remove(key.Length - 2, count: 2);
+            if (key.Length > 0)
+            {
+                key = key.Remove(key.Length - 2, count: 2);
+            }
 
             if (indexContentDict.ContainsKey(key))
             {
