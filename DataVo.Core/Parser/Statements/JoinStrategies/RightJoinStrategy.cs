@@ -1,6 +1,7 @@
 using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Types;
 
 using DataVo.Core.Utils;
@@ -20,16 +21,16 @@ internal class RightJoinStrategy : IJoinStrategy
         string rightTable = condition.RightColumn.TableName;
         string rightColumn = condition.RightColumn.ColumnName;
 
-        Dictionary<string, Dictionary<string, dynamic>> rightTableData = context.GetTableData(rightTable);
+        TableData rightTableData = context.GetTableData(rightTable);
         HashedTable result = [];
         bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
 
         // Keep track of which right table rows successfully matched at least one left row
-        HashSet<string> matchedRightKeys = [];
+        HashSet<long> matchedRightKeys = [];
 
         if (rightTableData.Count >= IJoinStrategy.HashLookupThreshold)
         {
-            var rightLookup = BuildRightLookup(rightTableData, rightColumn);
+            JoinLookupTable rightLookup = BuildRightGroupedLookup(rightTableData, rightColumn);
 
             foreach (var leftRowEntry in leftRows)
             {
@@ -40,17 +41,20 @@ internal class RightJoinStrategy : IJoinStrategy
 
                 var leftValue = leftRowEntry.Value[leftTable][leftColumn];
 
-                if (rightLookup.TryGetValue(leftValue, out KeyValuePair<string, Dictionary<string, dynamic>> rightTableRow))
+                if (rightLookup.TryGetValue(leftValue, out List<Record>? rightTableRecords) && rightTableRecords != null)
                 {
-                    matchedRightKeys.Add(rightTableRow.Key);
+                    foreach (var rightRecord in rightTableRecords!)
+                    {
+                        matchedRightKeys.Add(rightRecord.RowId);
 
-                    string hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
-                    JoinedRow joinedRow = context.CreateJoinedRow(
-                        leftRowEntry.Value,
-                        rightTable,
-                        rightTableRow.Value.ToRow());
+                        JoinedRowId hash = context.BuildHash(leftRowEntry.Key, rightRecord.RowId, insertHashAfter);
+                        JoinedRow joinedRow = context.CreateJoinedRow(
+                            leftRowEntry.Value,
+                            rightTable,
+                            rightRecord.ToRow());
 
-                    result.Add(hash, joinedRow);
+                        result.Add(hash, joinedRow);
+                    }
                 }
             }
         }
@@ -74,7 +78,7 @@ internal class RightJoinStrategy : IJoinStrategy
 
                     matchedRightKeys.Add(rightTableRow.Key);
 
-                    string hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                    JoinedRowId hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
                     JoinedRow joinedRow = context.CreateJoinedRow(
                         leftRowEntry.Value,
                         rightTable,
@@ -116,9 +120,9 @@ internal class RightJoinStrategy : IJoinStrategy
                     }
 
                     dict[rightTable] = rightTableRow.Value.ToRow();
-                    JoinedRow nullPaddedRow = new JoinedRow(dict);
+                    JoinedRow nullPaddedRow = new(dict);
 
-                    string hash = context.BuildHash("NULL", rightTableRow.Key, insertHashAfter);
+                    JoinedRowId hash = context.BuildHash(null, rightTableRow.Key, insertHashAfter);
                     result.Add(hash, nullPaddedRow);
                 }
             }
@@ -129,28 +133,25 @@ internal class RightJoinStrategy : IJoinStrategy
 
     private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
     {
-        List<string> joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
+        var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
         return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 
-    private static Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> BuildRightLookup(
-        Dictionary<string, Dictionary<string, dynamic>> rightTableData,
+    private static JoinLookupTable BuildRightGroupedLookup(
+        TableData rightTableData,
         string rightColumn)
     {
-        Dictionary<dynamic, KeyValuePair<string, Dictionary<string, dynamic>>> lookup = [];
+        JoinLookupTable lookup = [];
 
-        foreach (var rightTableRow in rightTableData)
+        foreach (var rightRowEntry in rightTableData)
         {
-            if (!rightTableRow.Value.ContainsKey(rightColumn))
+            if (!rightRowEntry.Value.ContainsKey(rightColumn))
             {
                 continue;
             }
 
-            dynamic key = rightTableRow.Value[rightColumn];
-            if (!lookup.ContainsKey(key))
-            {
-                lookup[key] = rightTableRow;
-            }
+            dynamic key = rightRowEntry.Value[rightColumn];
+            lookup.AddRecord(key, rightRowEntry.Value);
         }
 
         return lookup;
