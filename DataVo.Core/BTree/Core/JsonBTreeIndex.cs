@@ -13,7 +13,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     private const int DefaultMinDegree = 50;
 
     [JsonProperty("root")]
-    public BTreeNode<string, string> Root { get; set; } = new BTreeNode<string, string>(minDegree, isLeaf: true);
+    public BTreeNode<string, long> Root { get; set; } = new BTreeNode<string, long>(minDegree, isLeaf: true);
 
     [JsonProperty("minDegree")]
     public int MinDegree { get; set; } = minDegree;
@@ -24,11 +24,11 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// Insert a key-value pair into the index.
     /// Handles root split when the root is full.
     /// </summary>
-    public void Insert(string key, string value)
+    public void Insert(string key, long value)
     {
         if (Root.IsFull)
         {
-            var newRoot = new BTreeNode<string, string>(MinDegree, isLeaf: false);
+            var newRoot = new BTreeNode<string, long>(MinDegree, isLeaf: false);
             newRoot.Children!.Add(Root);
             newRoot.SplitChild(0, Root);
 
@@ -58,7 +58,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <summary>
     /// Search for all row IDs associated with the given key.
     /// </summary>
-    public List<string> Search(string key)
+    public List<long> Search(string key)
     {
         return Root.Search(key);
     }
@@ -66,18 +66,18 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <summary>
     /// Check if any value exists for the given key.
     /// </summary>
-    public bool ContainsValue(string key)
+    public bool ContainsValue(long rowId)
     {
-        return Root.ContainsKey(key);
+        return Root.ContainsValue(rowId);
     }
 
     /// <summary>
     /// Delete a specific (key, value) pair from the index.
     /// Uses a lazy rebuild approach: collects all entries, removes matching, and rebuilds.
     /// </summary>
-    public void Delete(string key, string value)
+    public void Delete(string key, long value)
     {
-        var allEntries = new List<KeyValuePair<string, List<string>>>();
+        var allEntries = new List<KeyValuePair<string, List<long>>>();
         Root.CollectAll(allEntries);
 
         // Remove the specific value from the matching key
@@ -98,10 +98,10 @@ public class JsonBTreeIndex(int minDegree) : IIndex
         }
 
         // Rebuild the tree from the remaining entries
-        Root = new BTreeNode<string, string>(MinDegree, isLeaf: true);
+        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
         foreach (var entry in allEntries)
         {
-            foreach (string val in entry.Value)
+            foreach (long val in entry.Value)
             {
                 Insert(entry.Key, val);
             }
@@ -112,29 +112,29 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// Delete all entries matching any of the given values, regardless of key.
     /// Used when deleting rows from a table — removes those row IDs from all index entries.
     /// </summary>
-    public void DeleteValues(List<string> valuesToDelete)
+    public void DeleteValues(List<long> valuesToDelete)
     {
-        var allEntries = new List<KeyValuePair<string, List<string>>>();
+        var allEntries = new List<KeyValuePair<string, List<long>>>();
         Root.CollectAll(allEntries);
 
-        var toDeleteSet = new HashSet<string>(valuesToDelete);
+        var toDeleteSet = new HashSet<long>(valuesToDelete);
 
         // Filter out the values to delete
-        var filtered = new List<KeyValuePair<string, List<string>>>();
+        var filtered = new List<KeyValuePair<string, List<long>>>();
         foreach (var entry in allEntries)
         {
             var remaining = entry.Value.Where(v => !toDeleteSet.Contains(v)).ToList();
             if (remaining.Count > 0)
             {
-                filtered.Add(new KeyValuePair<string, List<string>>(entry.Key, remaining));
+                filtered.Add(new KeyValuePair<string, List<long>>(entry.Key, remaining));
             }
         }
 
         // Rebuild
-        Root = new BTreeNode<string, string>(MinDegree, isLeaf: true);
+        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
         foreach (var entry in filtered)
         {
-            foreach (string val in entry.Value)
+            foreach (long val in entry.Value)
             {
                 Insert(entry.Key, val);
             }

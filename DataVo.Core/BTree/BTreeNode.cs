@@ -106,6 +106,30 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
     }
 
     /// <summary>
+    /// Check if any key maps to the given value in the entire subtree.
+    /// This requires a full traversal since values are not sorted.
+    /// </summary>
+    public bool ContainsValue(TValue value)
+    {
+        foreach (var valueList in Values)
+        {
+            if (valueList.Contains(value)) return true;
+        }
+
+        if (IsLeaf)
+        {
+            return false;
+        }
+
+        for (int i = 0; i <= Keys.Count; i++)
+        {
+            if (Children![i].ContainsValue(value)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Insert a key-value pair into a non-full node.
     /// If a child is full, split it before descending.
     /// </summary>

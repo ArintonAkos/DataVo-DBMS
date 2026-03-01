@@ -123,7 +123,7 @@ namespace DataVo.Core.Parser.DML
                     rowDict[tableColumn.Name] = parsedValue!;
 
                     if (uniqueKeySet.Contains(tableColumn.Name) &&
-                        IndexManager.Instance.IndexContainsRow(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
+                        IndexManager.Instance.IndexContainsKey(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
                     )
                     {
                         invalidRow = true;
@@ -153,7 +153,7 @@ namespace DataVo.Core.Parser.DML
                 {
                     string id = string.Join("#", idParts);
 
-                    if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsRow(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
+                    if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
                         Messages.Add($"Primary key violation in row {rowNumber}!");
                         Logger.Error($"Primary key violation in row {rowNumber}!");
@@ -182,7 +182,7 @@ namespace DataVo.Core.Parser.DML
                 }
                 indexValue = indexValue.Remove(indexValue.Length - 2, 2);
 
-                IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId.ToString(), index.IndexFileName, _model.TableName, databaseName);
+                IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
             }
         }
 
@@ -190,7 +190,7 @@ namespace DataVo.Core.Parser.DML
         {
             foreach (var reference in foreignKey.References)
             {
-                if (!IndexManager.Instance.IndexContainsRow(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
+                if (!IndexManager.Instance.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
                 {
                     return false;
                 }
