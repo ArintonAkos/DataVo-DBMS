@@ -3,6 +3,8 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 
+using DataVo.Core.Models.Statement.Utils;
+
 namespace DataVo.Core.Parser.Statements.JoinStrategies;
 
 public class JoinStrategyContext
@@ -10,7 +12,7 @@ public class JoinStrategyContext
     public TableService TableService { get; set; } = null!;
     public JoinModel JoinModel { get; set; } = null!;
 
-    public Dictionary<string, Dictionary<string, dynamic>> GetTableData(string tableAliasOrName)
+    public TableData GetTableData(string tableAliasOrName)
     {
         var tableDetail = TableService.GetTableDetailByAliasOrName(tableAliasOrName);
 
@@ -22,11 +24,20 @@ public class JoinStrategyContext
         return tableDetail.TableContent;
     }
 
-    public string BuildHash(string leftRowKey, string rightRowKey, bool insertHashAfter)
+    public JoinedRowId BuildHash(JoinedRowId? leftRowKey, long? rightRowKey, bool insertHashAfter)
     {
+        long rKey = rightRowKey ?? long.MinValue;
+        
+        if (leftRowKey == null)
+        {
+            return insertHashAfter 
+                ? new JoinedRowId(long.MinValue, rKey) 
+                : new JoinedRowId(rKey, long.MinValue);
+        }
+        
         return insertHashAfter
-            ? $"{leftRowKey}##{rightRowKey}"
-            : $"{rightRowKey}##{leftRowKey}";
+            ? leftRowKey.Append(rKey)
+            : leftRowKey.Prepend(rKey);
     }
 
     public JoinedRow CreateJoinedRow(JoinedRow existingLeftRow, string rightTable, Row rightRow)

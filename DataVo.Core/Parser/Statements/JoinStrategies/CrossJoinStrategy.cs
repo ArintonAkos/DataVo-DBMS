@@ -1,6 +1,7 @@
 using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Utils;
 using System.Collections.Generic;
@@ -17,7 +18,7 @@ internal class CrossJoinStrategy : IJoinStrategy
         string leftTable = condition!.LeftColumn.TableName;
         string rightTable = condition.RightColumn.TableName;
 
-        Dictionary<string, Dictionary<string, dynamic>> rightTableData = context.GetTableData(rightTable);
+        TableData rightTableData = context.GetTableData(rightTable);
         HashedTable result = [];
 
         bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
@@ -33,7 +34,7 @@ internal class CrossJoinStrategy : IJoinStrategy
         {
             foreach (var rightTableRow in rightTableData)
             {
-                string hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                JoinedRowId hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
                 JoinedRow joinedRow = context.CreateJoinedRow(
                     leftRowEntry.Value,
                     rightTable,
@@ -48,7 +49,7 @@ internal class CrossJoinStrategy : IJoinStrategy
 
     private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
     {
-        List<string> joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
+        var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
         return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 }
