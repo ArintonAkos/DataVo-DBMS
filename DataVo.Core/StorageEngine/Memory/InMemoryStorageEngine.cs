@@ -103,5 +103,31 @@ public class InMemoryStorageEngine : IStorageEngine
             _databases.TryRemove(key, out _);
         }
     }
+
+    public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
+    {
+        var table = GetOrAddTable(databaseName, tableName);
+        var compacted = new List<(long, byte[])>();
+        var newTable = new List<byte[]>();
+
+        lock (table)
+        {
+            for (int i = 0; i < table.Count; i++)
+            {
+                if (table[i] != null && table[i].Length > 0)
+                {
+                    newTable.Add(table[i]);
+                    long newRowId = newTable.Count; // 1-based
+                    compacted.Add((newRowId, table[i]));
+                }
+            }
+        }
+
+        // Replace the table with the compacted version
+        string key = GetKey(databaseName, tableName);
+        _databases[key] = newTable;
+
+        return compacted;
+    }
 }
 

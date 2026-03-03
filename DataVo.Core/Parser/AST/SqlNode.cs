@@ -186,3 +186,8 @@ public class InsertIntoStatement : SqlStatement
     public List<IdentifierNode> Columns { get; set; } = [];
     public List<List<SqlNode>> ValuesLists { get; set; } = []; // Supports multiple rows of values
 }
+
+public class VacuumStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+}
