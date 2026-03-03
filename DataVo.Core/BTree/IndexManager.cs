@@ -222,6 +222,56 @@ public class IndexManager
     }
 
     /// <summary>
+    /// Drop all cached indexes belonging to a database.
+    /// Evicts cache entries and deletes .btree files from disk.
+    /// </summary>
+    public void DropDatabaseIndexes(string databaseName)
+    {
+        string cachePrefix = $"{databaseName}/";
+
+        var keysToRemove = _cache.Keys
+            .Where(k => k.StartsWith(cachePrefix, StringComparison.Ordinal))
+            .ToList();
+
+        foreach (var cacheKey in keysToRemove)
+        {
+            // Dispose the index if it implements IDisposable (releases mmapped files)
+            if (_cache.TryGetValue(cacheKey, out var index) && index is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+
+            _cache.Remove(cacheKey);
+
+            if (_cacheFilePaths.TryGetValue(cacheKey, out var filePath))
+            {
+                _cacheFilePaths.Remove(cacheKey);
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+
+            lock (_persistenceLock)
+            {
+                _dirtyIndexes.Remove(cacheKey);
+                _pendingMutationCounts.Remove(cacheKey);
+            }
+        }
+
+        // Also clean up the database index directory on disk
+        string dbIndexDir = Path.Combine(DatabasesDir, databaseName);
+        if (Directory.Exists(dbIndexDir))
+        {
+            var btreeFiles = Directory.GetFiles(dbIndexDir, "*_index.btree");
+            foreach (var file in btreeFiles)
+            {
+                File.Delete(file);
+            }
+        }
+    }
+
+    /// <summary>
     /// Insert a single key-value pair into an existing index.
     /// </summary>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
