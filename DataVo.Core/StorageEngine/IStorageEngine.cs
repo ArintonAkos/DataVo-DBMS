@@ -42,4 +42,10 @@ public interface IStorageEngine
     /// Drops all data belonging to a database from storage.
     /// </summary>
     void DropDatabase(string databaseName);
+
+    /// <summary>
+    /// Compacts the table by removing tombstoned/deleted rows and rewriting data contiguously.
+    /// Returns the list of (newRowId, rawRow) for all surviving rows.
+    /// </summary>
+    List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName);
 }

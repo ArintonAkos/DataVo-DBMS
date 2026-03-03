@@ -69,6 +69,10 @@ internal class Evaluator(List<SqlStatement> statements)
             {
                 currentQueue.Enqueue(new Commands.Go(goAst));
             }
+            else if (statement is VacuumStatement vacuumAst)
+            {
+                currentQueue.Enqueue(new DML.Vacuum(vacuumAst));
+            }
             else
             {
                 throw new Exception($"Evaluator Error: Unsupported AST Node type '{statement.GetType().Name}'.");

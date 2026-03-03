@@ -157,4 +157,9 @@ public class StorageContext(DataVoConfig config)
     {
         _storageEngine.DropDatabase(databaseName);
     }
+
+    public List<(long NewRowId, byte[] RawRow)> CompactTable(string tableName, string databaseName)
+    {
+        return _storageEngine.CompactTable(databaseName, tableName);
+    }
 }
