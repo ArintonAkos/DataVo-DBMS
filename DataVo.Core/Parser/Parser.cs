@@ -73,6 +73,8 @@ public class Parser(List<Token> tokens)
                 statements.Add(ParseDeleteStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.INSERT))
                 statements.Add(ParseInsertStatement());
+            else if (Match(TokenType.Keyword, SqlKeywords.VACUUM))
+                statements.Add(ParseVacuumStatement());
             else
             {
                 // Advance unknown tokens to avoid infinite loops
@@ -320,6 +322,12 @@ public class Parser(List<Token> tokens)
         }
 
         return stmt;
+    }
+
+    private VacuumStatement ParseVacuumStatement()
+    {
+        var tableNameToken = Consume(TokenType.Identifier, "table name");
+        return new VacuumStatement { TableName = new IdentifierNode(tableNameToken.Value) };
     }
 
     private SelectStatement ParseSelectStatement()

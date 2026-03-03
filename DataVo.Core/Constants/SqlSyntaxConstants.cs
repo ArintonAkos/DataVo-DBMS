@@ -50,6 +50,7 @@ public static class SqlKeywords
     public const string OUTER = "OUTER";
     public const string CROSS = "CROSS";
     public const string COLUMN = "COLUMN";
+    public const string VACUUM = "VACUUM";
 
     public static readonly string[] All =
     [
@@ -59,7 +60,8 @@ public static class SqlKeywords
         DATABASE, PRIMARY, KEY, UNIQUE, REFERENCES,
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
-        JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS
+        JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS,
+        VACUUM
     ];
 }
 
