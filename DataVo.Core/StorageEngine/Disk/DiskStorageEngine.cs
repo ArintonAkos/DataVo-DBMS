@@ -112,8 +112,8 @@ public class DiskStorageEngine : IStorageEngine
             
             int length = reader.ReadInt32();
             
-            // Tombstone check: A length of -1 means this row was deleted
-            if (length == -1) 
+            // Tombstone check: A negative length means this row was deleted
+            if (length < 0) 
                 throw new Exception($"DiskStorageEngine: RowId {rowId} was marked as deleted.");
                 
             return reader.ReadBytes(length);
@@ -140,8 +140,10 @@ public class DiskStorageEngine : IStorageEngine
             {
                 long rowId = fileStream.Position;
                 int length = reader.ReadInt32();
-                if (length == -1)
+                if (length < 0)
                 {
+                    // Tombstone: length stores -(originalLength), skip past the data
+                    fileStream.Seek(-length, SeekOrigin.Current);
                     continue;
                 }
                 
@@ -157,15 +159,21 @@ public class DiskStorageEngine : IStorageEngine
         
         lock (GetFileLock(filePath))
         {
-            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Write, FileShare.None);
+            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var reader = new BinaryReader(fileStream);
             using var writer = new BinaryWriter(fileStream);
             
-            // O(1) instant jump
+            // O(1) instant jump to the row's length prefix
             fileStream.Seek(rowId, SeekOrigin.Begin);
-            
-            // Write a Tombstone signature (-1 length) to instantly invalidate the row
-            // without actually shifting any bytes on the physical disk which would corrupt later RowIds.
-            writer.Write(-1); 
+
+            // Read the original length so we know the data size
+            int originalLength = reader.ReadInt32();
+            if (originalLength < 0) return; // Already deleted
+
+            // Rewrite the length as its negation: -(originalLength)
+            // This lets ReadAllRows know how many bytes to skip when scanning
+            fileStream.Seek(rowId, SeekOrigin.Begin);
+            writer.Write(-originalLength); 
         }
     }
 
@@ -199,6 +207,59 @@ public class DiskStorageEngine : IStorageEngine
         {
             Directory.Delete(dbPath, recursive: true);
         }
+    }
+
+    public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
+    {
+        string filePath = GetFilePath(databaseName, tableName);
+        var compacted = new List<(long, byte[])>();
+
+        if (!File.Exists(filePath)) return compacted;
+
+        lock (GetFileLock(filePath))
+        {
+            // 1. Read all surviving rows directly (no call to ReadAllRows to avoid re-entrant lock)
+            var survivors = new List<byte[]>();
+            using (var readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new BinaryReader(readStream))
+            {
+                if (readStream.Length >= FileHeaderSize)
+                    readStream.Seek(FileHeaderSize, SeekOrigin.Begin);
+
+                while (readStream.Position < readStream.Length)
+                {
+                    int length = reader.ReadInt32();
+                    if (length < 0)
+                    {
+                        // Tombstone: length stores -(originalLength), skip past the data
+                        int dataSize = -length;
+                        readStream.Seek(dataSize, SeekOrigin.Current);
+                        continue;
+                    }
+                    byte[] data = reader.ReadBytes(length);
+                    survivors.Add(data);
+                }
+            }
+
+            // 2. Rewrite the file with only surviving rows
+            using (var writeStream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+            using (var writer = new BinaryWriter(writeStream))
+            {
+                // File header
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("DaVo"));
+                writer.Write(1); // version
+
+                foreach (var row in survivors)
+                {
+                    long newRowId = writeStream.Position;
+                    writer.Write(row.Length);
+                    writer.Write(row);
+                    compacted.Add((newRowId, row));
+                }
+            }
+        }
+
+        return compacted;
     }
 }
 
