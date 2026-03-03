@@ -180,5 +180,25 @@ public class DiskStorageEngine : IStorageEngine
             }
         }
     }
+
+    public void DropDatabase(string databaseName)
+    {
+        string dbPath = Path.Combine(_storageDirectory, databaseName);
+
+        // Remove file locks for this database
+        var locksToRemove = _fileLocks.Keys
+            .Where(k => k.StartsWith(dbPath, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var key in locksToRemove)
+        {
+            _fileLocks.TryRemove(key, out _);
+        }
+
+        // Delete the entire database directory
+        if (Directory.Exists(dbPath))
+        {
+            Directory.Delete(dbPath, recursive: true);
+        }
+    }
 }
 

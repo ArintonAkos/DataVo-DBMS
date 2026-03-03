@@ -93,5 +93,15 @@ public class InMemoryStorageEngine : IStorageEngine
     {
         _databases.TryRemove(GetKey(databaseName, tableName), out _);
     }
+
+    public void DropDatabase(string databaseName)
+    {
+        string prefix = $"{databaseName}.";
+        var keysToRemove = _databases.Keys.Where(k => k.StartsWith(prefix)).ToList();
+        foreach (var key in keysToRemove)
+        {
+            _databases.TryRemove(key, out _);
+        }
+    }
 }
 
