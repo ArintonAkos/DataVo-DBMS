@@ -19,7 +19,7 @@ public static class BTreeDumpUtility
     public static string DumpIndex(string indexName, string tableName, string databaseName)
     {
         var sb = new StringBuilder();
-        
+
         try
         {
             bool hasKey = IndexManager.Instance.IndexContainsKey("__probe__", indexName, tableName, databaseName);
@@ -49,7 +49,7 @@ public static class BTreeDumpUtility
 
     /// <summary>
     /// Dumps the raw contents of a B+Tree .btree file.
-    /// Shows page layout, keys, values (row IDs), and linked-list structure.
+    /// Shows page layout, keys (hex + decoded), values (row IDs), and linked-list structure.
     /// </summary>
     public static string DumpBPlusTreeFile(string filePath)
     {
@@ -75,15 +75,17 @@ public static class BTreeDumpUtility
 
             for (int i = 0; i < page.NumKeys; i++)
             {
+                string keyDisplay = FormatKey(page.Keys[i]);
+
                 if (page.IsLeaf)
                 {
                     long val = page.GetValue(i);
-                    string flag = val == 0 ? " ZERO (sentinel/empty)" : "";
-                    sb.AppendLine($"    [{i}] Key={page.Keys[i]}  → RowId={val}{flag}");
+                    string flag = val == 0 ? " ⚠️ ZERO (sentinel/empty)" : "";
+                    sb.AppendLine($"    [{i}] Key={keyDisplay}  → RowId={val}{flag}");
                 }
                 else
                 {
-                    sb.AppendLine($"    [{i}] Key={page.Keys[i]}  Child[{i}]={page.Children[i]}");
+                    sb.AppendLine($"    [{i}] Key={keyDisplay}  Child[{i}]={page.Children[i]}");
                 }
             }
 
@@ -96,5 +98,38 @@ public static class BTreeDumpUtility
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a byte[32] key for display, showing both decoded value and hex prefix.
+    /// </summary>
+    private static string FormatKey(byte[] key)
+    {
+        if (IndexKeyEncoder.IsEmptyKey(key))
+            return "[empty]";
+
+        // Try to decode as a sign-flipped int (first 4 bytes)
+        if (key.Length >= 4)
+        {
+            uint raw = (uint)(key[0] << 24 | key[1] << 16 | key[2] << 8 | key[3]);
+            int intVal = (int)(raw ^ unchecked((uint)int.MinValue)); // reverse sign-flip
+
+            // Check if remaining bytes are zero (pure int key)
+            bool isSimpleInt = true;
+            for (int i = 4; i < key.Length; i++)
+            {
+                if (key[i] != 0) { isSimpleInt = false; break; }
+            }
+
+            if (isSimpleInt)
+                return $"INT({intVal})";
+        }
+
+        // Show hex of non-zero bytes
+        int lastNonZero = key.Length - 1;
+        while (lastNonZero >= 0 && key[lastNonZero] == 0) lastNonZero--;
+
+        string hex = BitConverter.ToString(key, 0, lastNonZero + 1).Replace("-", " ");
+        return $"[{hex}]";
     }
 }

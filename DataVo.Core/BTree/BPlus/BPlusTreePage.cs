@@ -1,39 +1,62 @@
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
-using System.Text;
-
 namespace DataVo.Core.BTree.BPlus;
 
 /// <summary>
 /// B+Tree Page. Represents a 4KB Disk Block.
-/// MaxKeys = 112 (multiple of 8 for Vector256<int>).
-/// Internal nodes store 112 Ints (Keys) + 113 Ints (Children).
+///
+/// Page layout (4096 bytes):
+///   Header:   16 bytes (PageId, IsLeaf, NumKeys, NextPageId, padding)
+///   Keys:     96 × 32 bytes = 3072 bytes (fixed-size byte[32] per slot)
+///   Leaf:     96 × 8 bytes = 768 bytes (long row IDs) → total = 3856 bytes
+///   Internal: 97 × 4 bytes = 388 bytes (int child page IDs) → total = 3476 bytes
+///
+/// Key encoding is handled by <see cref="IndexKeyEncoder"/>.
 /// </summary>
 public class BPlusTreePage
 {
     public const int PageSize = 4096;
-    public const int MaxKeys = 112;
-    public const int MinKeys = 55; // T-1, where T=56
-    public const int T = 56;
+    public const int MaxKeys = 96;
+    public const int MinKeys = 47; // T-1
+    public const int T = 48;       // MaxKeys / 2
 
     public int PageId { get; set; }
     public bool IsLeaf { get; set; }
     public int NumKeys { get; set; }
-    public int NextPageId { get; set; } = -1; // Specific to B+Tree Leaves
+    public int NextPageId { get; set; } = -1; // Linked list for leaf sequential scans
 
-    // Arrays representing contiguous memory blocks inside the Node
-    public int[] Keys { get; set; } = new int[MaxKeys];
-    public long[] Values { get; set; } = new long[MaxKeys];
-    public int[] Children { get; set; } = new int[MaxKeys + 1];
+    // Fixed-size byte[32] key slots — all types, correct ordering via IndexKeyEncoder
+    public byte[][] Keys { get; set; }
 
-    public long GetValue(int index)
+    // Leaf: row IDs that each key points to. Value 0 = empty/tombstone sentinel.
+    public long[] Values { get; set; }
+
+    // Internal: child page IDs. Children[i] points to subtree with keys < Keys[i].
+    public int[] Children { get; set; }
+
+    public BPlusTreePage()
     {
-        return Values[index];
+        Keys = new byte[MaxKeys][];
+        for (int i = 0; i < MaxKeys; i++)
+            Keys[i] = new byte[IndexKeyEncoder.KeySize];
+
+        Values = new long[MaxKeys];
+        Children = new int[MaxKeys + 1];
     }
 
-    public void SetValue(int index, long value)
+    public long GetValue(int index) => Values[index];
+
+    public void SetValue(int index, long value) => Values[index] = value;
+
+    /// <summary>
+    /// Finds the first index where Keys[i] >= targetKey using byte comparison.
+    /// </summary>
+    public int FindIndex(byte[] targetKey)
     {
-        Values[index] = value;
+        int i = 0;
+        while (i < NumKeys && IndexKeyEncoder.CompareKeys(targetKey, Keys[i]) > 0)
+        {
+            i++;
+        }
+        return i;
     }
 
     public byte[] Serialize()
@@ -42,14 +65,14 @@ public class BPlusTreePage
         using var ms = new MemoryStream(buffer);
         using var writer = new BinaryWriter(ms);
 
+        // Header (16 bytes)
         writer.Write(PageId);
         writer.Write(IsLeaf);
         writer.Write(NumKeys);
         writer.Write(NextPageId);
+        writer.Write((byte)0); writer.Write((byte)0); writer.Write((byte)0); // padding
 
-        // Header exactly 16 bytes. (4 + 1 + 4 + 4 = 13 bytes). Add 3 zero bytes.
-        writer.Write((byte)0); writer.Write((byte)0); writer.Write((byte)0);
-
+        // Keys: MaxKeys × KeySize bytes
         for (int i = 0; i < MaxKeys; i++)
         {
             writer.Write(Keys[i]);
@@ -57,6 +80,7 @@ public class BPlusTreePage
 
         if (IsLeaf)
         {
+            // Values: MaxKeys × 8 bytes
             for (int i = 0; i < MaxKeys; i++)
             {
                 writer.Write(Values[i]);
@@ -64,6 +88,7 @@ public class BPlusTreePage
         }
         else
         {
+            // Children: (MaxKeys + 1) × 4 bytes
             for (int i = 0; i < MaxKeys + 1; i++)
             {
                 writer.Write(Children[i]);
@@ -79,16 +104,17 @@ public class BPlusTreePage
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
 
+        // Header
         page.PageId = reader.ReadInt32();
         page.IsLeaf = reader.ReadBoolean();
         page.NumKeys = reader.ReadInt32();
         page.NextPageId = reader.ReadInt32();
-
         reader.ReadBytes(3); // Skip padding
 
+        // Keys
         for (int i = 0; i < MaxKeys; i++)
         {
-            page.Keys[i] = reader.ReadInt32();
+            page.Keys[i] = reader.ReadBytes(IndexKeyEncoder.KeySize);
         }
 
         if (page.IsLeaf)
@@ -108,70 +134,4 @@ public class BPlusTreePage
 
         return page;
     }
-
-    /// <summary>
-    /// Intra-Node SIMD Search: Processes 8 keys at once using AVX2.
-    /// Finds the first index where Key >= targetKey.
-    /// </summary>
-    public int FindIndex(int targetKey)
-    {
-        // Fallback or small arrays
-        if (!Avx2.IsSupported || NumKeys < 8)
-        {
-            return FindIndexStandard(targetKey);
-        }
-
-        Vector256<int> targetVector = Vector256.Create(targetKey);
-        int i = 0;
-
-        unsafe
-        {
-            fixed (int* ptr = Keys)
-            {
-                int* laneMask = stackalloc int[8];
-
-                for (; i <= NumKeys - 8; i += 8)
-                {
-                    Vector256<int> vector = Avx2.LoadVector256(ptr + i);
-
-                    // target > key  => key < target (lane = -1)
-                    Vector256<int> lessThanTargetMask = Avx2.CompareGreaterThan(targetVector, vector);
-
-                    if (Avx2.MoveMask(lessThanTargetMask.AsByte()) == -1)
-                    {
-                        continue;
-                    }
-
-                    Avx.Store(laneMask, lessThanTargetMask);
-
-                    for (int lane = 0; lane < 8; lane++)
-                    {
-                        if (laneMask[lane] == 0)
-                        {
-                            return i + lane;
-                        }
-                    }
-                }
-            }
-        }
-
-        while (i < NumKeys && targetKey > Keys[i])
-        {
-            i++;
-        }
-
-        return i;
-    }
-
-    public int FindIndexStandard(int targetKey)
-    {
-        int i = 0;
-        while (i < NumKeys && targetKey > Keys[i])
-        {
-            i++;
-        }
-        return i;
-    }
-
-
 }
