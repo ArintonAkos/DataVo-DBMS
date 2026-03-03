@@ -151,7 +151,7 @@ namespace DataVo.Core.Parser.DML
 
                 if (!invalidRow)
                 {
-                    string id = string.Join("##", idParts);
+                    string id = IndexKeyEncoder.BuildKeyString(rowDict, primaryKeys);
 
                     if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
@@ -175,12 +175,7 @@ namespace DataVo.Core.Parser.DML
 
             foreach (var index in indexFiles)
             {
-                string indexValue = string.Empty;
-                foreach (var indexAttribute in index.AttributeNames)
-                {
-                    indexValue += rowDict[indexAttribute] + "##";
-                }
-                indexValue = indexValue.Remove(indexValue.Length - 2, 2);
+                string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
 
                 IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
             }
