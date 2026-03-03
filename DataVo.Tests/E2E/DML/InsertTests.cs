@@ -73,6 +73,68 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
         var ex = Assert.Throws<Exception>(() => Execute("INSERT INTO Products (Id, Name) VALUES (1, 'Chair', 89.99)"));
         Assert.Contains("The number of values provided in a row must be the same as the number of columns", ex.Message);
     }
+
+    [Fact]
+    public void Insert_DuplicatePK_IsRejected()
+    {
+        Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR)");
+        Execute("INSERT INTO Users VALUES (1, 'Alice')");
+
+        // Second insert with same PK should report violation, not throw
+        var result = ExecuteAndReturn("INSERT INTO Users VALUES (1, 'Bob')");
+        Assert.Contains(result.Messages, m => m.Contains("Primary key violation"));
+
+        // Only Alice should be in the table
+        var selectResult = ExecuteAndReturn("SELECT * FROM Users");
+        Assert.Single(selectResult.Data);
+        Assert.Equal("Alice", selectResult.Data.First()["Name"]);
+    }
+
+    [Fact(Skip = "B+Tree currently only supports int keys (int.TryParse). Composite keys like '1##101' are silently dropped. Fix planned in Task 0.3 (byte-encoded keys).")]
+    public void Insert_DuplicateCompositePK_IsRejected()
+    {
+        Execute("CREATE TABLE Enrollments (StudentId INT PRIMARY KEY, CourseId INT PRIMARY KEY, Grade VARCHAR)");
+        Execute("INSERT INTO Enrollments VALUES (1, 101, 'A')");
+
+        // Same composite key should be rejected
+        var result = ExecuteAndReturn("INSERT INTO Enrollments VALUES (1, 101, 'B')");
+        Assert.Contains(result.Messages, m => m.Contains("Primary key violation"));
+
+        // Different composite key should succeed
+        Execute("INSERT INTO Enrollments VALUES (1, 102, 'B')");
+
+        var selectResult = ExecuteAndReturn("SELECT * FROM Enrollments");
+        Assert.Equal(2, selectResult.Data.Count);
+    }
+
+    [Fact]
+    public void Insert_FKConstraint_ValidReference_Succeeds()
+    {
+        Execute("CREATE TABLE Departments (Id INT PRIMARY KEY, Name VARCHAR)");
+        Execute("INSERT INTO Departments VALUES (1, 'Engineering')");
+
+        Execute("CREATE TABLE Employees (Id INT PRIMARY KEY, Name VARCHAR, DeptId INT REFERENCES Departments(Id))");
+        // FK references existing department — should succeed
+        Execute("INSERT INTO Employees VALUES (1, 'Alice', 1)");
+
+        var result = ExecuteAndReturn("SELECT * FROM Employees");
+        Assert.Single(result.Data);
+    }
+
+    [Fact]
+    public void Insert_FKConstraint_InvalidReference_IsRejected()
+    {
+        Execute("CREATE TABLE Departments (Id INT PRIMARY KEY, Name VARCHAR)");
+        Execute("INSERT INTO Departments VALUES (1, 'Engineering')");
+
+        Execute("CREATE TABLE Employees (Id INT PRIMARY KEY, Name VARCHAR, DeptId INT REFERENCES Departments(Id))");
+        // FK references non-existent department — should be rejected
+        var result = ExecuteAndReturn("INSERT INTO Employees VALUES (1, 'Bob', 999)");
+        Assert.Contains(result.Messages, m => m.Contains("Foreign key violation"));
+
+        var selectResult = ExecuteAndReturn("SELECT * FROM Employees");
+        Assert.Empty(selectResult.Data);
+    }
 }
 // --- Multiplexed XUnit Executions ---
 

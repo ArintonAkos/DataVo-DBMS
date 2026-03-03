@@ -55,11 +55,6 @@ public abstract class SqlExecutionTestsBase : IDisposable
             if (result.IsError || result.Messages.Any(m => !m.Contains("Rows affected") && !m.Contains("Rows selected") && !m.Contains("Database") && !m.Contains("Table")))
             {
                 var errors = string.Join(", ", result.Messages);
-                if (errors.Contains("_PK_"))
-                {
-                    string xml = System.IO.File.ReadAllText(System.IO.Path.Combine("databases", "Catalog.xml"));
-                    throw new Exception($"XML STATE: {xml}");
-                }
                 throw new Exception($"SQL Execution Failed:\n{errors}");
             }
         }
