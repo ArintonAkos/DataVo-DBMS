@@ -151,7 +151,7 @@ namespace DataVo.Core.Parser.DML
 
                 if (!invalidRow)
                 {
-                    string id = string.Join("#", idParts);
+                    string id = string.Join("##", idParts);
 
                     if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
