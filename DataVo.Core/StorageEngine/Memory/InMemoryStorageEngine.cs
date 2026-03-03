@@ -18,11 +18,12 @@ public class InMemoryStorageEngine : IStorageEngine
     {
         var table = GetOrAddTable(databaseName, tableName);
 
-        // Lock to ensure sequential RowId (Count becomes the RowId)
+        // Lock to ensure sequential RowId.
+        // Row IDs are 1-based to avoid collision with B+Tree's 0 sentinel value.
         lock (table)
         {
             table.Add(rowBytes);
-            return table.Count - 1;
+            return table.Count; // 1-based: first row = 1
         }
     }
 
@@ -36,7 +37,7 @@ public class InMemoryStorageEngine : IStorageEngine
             foreach (var rowBytes in rowsBytes)
             {
                 table.Add(rowBytes);
-                rowIds.Add(table.Count - 1);
+                rowIds.Add(table.Count); // 1-based
             }
         }
 
@@ -47,10 +48,11 @@ public class InMemoryStorageEngine : IStorageEngine
     {
         if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
         {
-            // O(1) Array indexing using the integer RowId
-            if (rowId >= 0 && rowId < table.Count)
+            // O(1) Array indexing — convert 1-based RowId to 0-based index
+            int index = (int)(rowId - 1);
+            if (index >= 0 && index < table.Count)
             {
-                var bytes = table[(int)rowId];
+                var bytes = table[index];
                 if (bytes != null) return bytes;
             }
         }
@@ -65,7 +67,7 @@ public class InMemoryStorageEngine : IStorageEngine
             {
                 if (table[i] != null)
                 {
-                    yield return (i, table[i]);
+                    yield return (i + 1, table[i]); // 1-based RowId
                 }
             }
         }
@@ -77,11 +79,11 @@ public class InMemoryStorageEngine : IStorageEngine
         {
             lock (table)
             {
-                if (rowId >= 0 && rowId < table.Count)
+                int index = (int)(rowId - 1);
+                if (index >= 0 && index < table.Count)
                 {
-                    // "Tombstone" physical deletion, we leave a null gap so standard RowIds don't shift.
-                    // This perfectly simulates slotted page gap deletion on disk.
-                    table[(int)rowId] = null!;
+                    // "Tombstone" deletion — leave a null gap so RowIds don't shift.
+                    table[index] = null!;
                 }
             }
         }
@@ -92,3 +94,4 @@ public class InMemoryStorageEngine : IStorageEngine
         _databases.TryRemove(GetKey(databaseName, tableName), out _);
     }
 }
+

@@ -7,6 +7,13 @@ public class DiskStorageEngine : IStorageEngine
     private readonly string _storageDirectory;
     private readonly ConcurrentDictionary<string, object> _fileLocks = new();
 
+    // 8-byte file header: [4 bytes magic "DaVo"] + [4 bytes version].
+    // This ensures the first row's byte offset is >= 8, never 0.
+    // Row ID 0 is reserved as the B+Tree empty-slot sentinel.
+    private static readonly byte[] FileHeaderMagic = "DaVo"u8.ToArray();
+    private const int FileHeaderVersion = 1;
+    private const int FileHeaderSize = 8; // 4 magic + 4 version
+
     public DiskStorageEngine(string storageDirectory)
     {
         _storageDirectory = storageDirectory;
@@ -28,15 +35,32 @@ public class DiskStorageEngine : IStorageEngine
         return _fileLocks.GetOrAdd(filePath, _ => new object());
     }
 
+    /// <summary>
+    /// Ensures the .dat file has the required header. Writes it if the file is new/empty.
+    /// </summary>
+    private void EnsureFileHeader(string filePath)
+    {
+        if (!File.Exists(filePath) || new FileInfo(filePath).Length < FileHeaderSize)
+        {
+            using var fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+            using var writer = new BinaryWriter(fs);
+            writer.Write(FileHeaderMagic);
+            writer.Write(FileHeaderVersion);
+        }
+    }
+
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         string filePath = GetFilePath(databaseName, tableName);
         
         lock (GetFileLock(filePath))
         {
+            EnsureFileHeader(filePath);
+
             using var fileStream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None);
             
-            // The RowId is the exact byte offset into the physical file
+            // The RowId is the exact byte offset into the physical file.
+            // With header, first row starts at offset 8 (never 0).
             long rawByteOffsetRowId = fileStream.Position;
             
             // Write length prefix (4 bytes) and then the payload
@@ -55,6 +79,8 @@ public class DiskStorageEngine : IStorageEngine
         
         lock (GetFileLock(filePath))
         {
+            EnsureFileHeader(filePath);
+
             using var fileStream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None);
             using var writer = new BinaryWriter(fileStream);
             
@@ -104,6 +130,12 @@ public class DiskStorageEngine : IStorageEngine
             using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var reader = new BinaryReader(fileStream);
 
+            // Skip file header
+            if (fileStream.Length >= FileHeaderSize)
+            {
+                fileStream.Seek(FileHeaderSize, SeekOrigin.Begin);
+            }
+
             while (fileStream.Position < fileStream.Length)
             {
                 long rowId = fileStream.Position;
@@ -149,3 +181,4 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 }
+
