@@ -155,7 +155,6 @@ public class StorageContext(DataVoConfig config)
 
     public void DropDatabase(string databaseName)
     {
-        // The simple generic implementation doesn't specifically manage dropping an entire DB folder yet.
-        // Needs a Directory.Delete on DiskStorage if enabled, or sweeping the MemoryStorage maps.
+        _storageEngine.DropDatabase(databaseName);
     }
 }

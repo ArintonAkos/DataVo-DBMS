@@ -37,4 +37,9 @@ public interface IStorageEngine
     /// Clears an entire table from storage.
     /// </summary>
     void DropTable(string databaseName, string tableName);
+
+    /// <summary>
+    /// Drops all data belonging to a database from storage.
+    /// </summary>
+    void DropDatabase(string databaseName);
 }
