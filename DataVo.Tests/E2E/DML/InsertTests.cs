@@ -90,7 +90,7 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
         Assert.Equal("Alice", selectResult.Data.First()["Name"]);
     }
 
-    [Fact(Skip = "B+Tree currently only supports int keys (int.TryParse). Composite keys like '1##101' are silently dropped. Fix planned in Task 0.3 (byte-encoded keys).")]
+    [Fact]
     public void Insert_DuplicateCompositePK_IsRejected()
     {
         Execute("CREATE TABLE Enrollments (StudentId INT PRIMARY KEY, CourseId INT PRIMARY KEY, Grade VARCHAR)");
