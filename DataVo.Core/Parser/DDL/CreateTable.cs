@@ -24,10 +24,26 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
 
             Context.CreateTable(_model.TableName, databaseName);
 
+            // Create PK index (catalog + B-Tree) so INSERT can enforce uniqueness
+            // and FK validation on referencing tables works correctly
+            List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
+            if (primaryKeys.Count != 0)
+            {
+                string pkIndexName = $"_PK_{_model.TableName}";
+                var pkIndexFile = new IndexFile { IndexFileName = pkIndexName, AttributeNames = primaryKeys };
+                Catalog.CreateIndex(pkIndexFile, _model.TableName, databaseName);
+                IndexManager.Instance.CreateIndex([], pkIndexName, _model.TableName, databaseName);
+            }
+
+            // Create UK indexes (catalog + B-Tree) so INSERT can enforce uniqueness
+            // and MakeInsertion populates them on every insert
             List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
             uniqueKeys.ForEach(key =>
             {
-                IndexManager.Instance.CreateIndex([], $"_UK_{key}", _model.TableName, databaseName);
+                string ukIndexName = $"_UK_{key}";
+                var ukIndexFile = new IndexFile { IndexFileName = ukIndexName, AttributeNames = [key] };
+                Catalog.CreateIndex(ukIndexFile, _model.TableName, databaseName);
+                IndexManager.Instance.CreateIndex([], ukIndexName, _model.TableName, databaseName);
             });
 
             Logger.Info($"New table {_model.TableName} successfully created!");
