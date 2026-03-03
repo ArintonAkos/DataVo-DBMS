@@ -10,14 +10,14 @@ public class BinaryBPlusTreeIndex : IIndex
 
     public void Insert(string key, long rowId)
     {
-        if (!int.TryParse(key, out int intKey)) return;
+        byte[] encodedKey = IndexKeyEncoder.Encode(key);
 
         if (_pager.RootPageId == -1)
         {
             var root = _pager.AllocatePage();
             root.IsLeaf = true;
             root.NextPageId = -1;
-            root.Keys[0] = intKey;
+            root.Keys[0] = encodedKey;
             root.SetValue(0, rowId);
             root.NumKeys = 1;
 
@@ -40,15 +40,15 @@ public class BinaryBPlusTreeIndex : IIndex
             _pager.WritePage(newRoot);
             _pager.WriteMetadata();
 
-            InsertNonFull(newRoot, intKey, rowId);
+            InsertNonFull(newRoot, encodedKey, rowId);
         }
         else
         {
-            InsertNonFull(rootPage, intKey, rowId);
+            InsertNonFull(rootPage, encodedKey, rowId);
         }
     }
 
-    private void InsertNonFull(BPlusTreePage node, int key, long value)
+    private void InsertNonFull(BPlusTreePage node, byte[] key, long value)
     {
         if (node.IsLeaf)
         {
@@ -67,7 +67,7 @@ public class BinaryBPlusTreeIndex : IIndex
         else
         {
             int i = node.FindIndex(key);
-            if (i < node.NumKeys && node.Keys[i] == key)
+            if (i < node.NumKeys && IndexKeyEncoder.CompareKeys(node.Keys[i], key) == 0)
             {
                 i++; // For B+Tree, internal node keys are <= right child's min
             }
@@ -77,7 +77,7 @@ public class BinaryBPlusTreeIndex : IIndex
             if (child.NumKeys == BPlusTreePage.MaxKeys)
             {
                 SplitChild(node, i, child);
-                if (key >= node.Keys[i]) // For B+Tree, internal node keys are <= right child's min
+                if (IndexKeyEncoder.CompareKeys(key, node.Keys[i]) >= 0)
                 {
                     i++;
                 }
@@ -96,9 +96,8 @@ public class BinaryBPlusTreeIndex : IIndex
 
         if (child.IsLeaf)
         {
-            // Leaf Split: newNode gets the upper half, including the median key (it acts as routing key up above)
-            // child will keep the lower half. 
-            newNode.NumKeys = BPlusTreePage.MaxKeys - t; // 112 - 56 = 56
+            // Leaf Split: newNode gets the upper half, including the median key
+            newNode.NumKeys = BPlusTreePage.MaxKeys - t;
             for (int j = 0; j < newNode.NumKeys; j++)
             {
                 newNode.Keys[j] = child.Keys[j + t];
@@ -106,11 +105,11 @@ public class BinaryBPlusTreeIndex : IIndex
             }
 
             newNode.NextPageId = child.NextPageId;
-            child.NextPageId = newNode.PageId; // Linked Array connection! Fast sequential scans!
+            child.NextPageId = newNode.PageId; // Linked list for sequential scans
             child.NumKeys = t;
 
             // Push up the lowest key of newNode as the routing key
-            int routingKey = newNode.Keys[0];
+            byte[] routingKey = newNode.Keys[0];
 
             for (int j = parent.NumKeys - 1; j >= i; j--)
             {
@@ -123,8 +122,8 @@ public class BinaryBPlusTreeIndex : IIndex
         }
         else
         {
-            // Internal Split: Similar to standard B-Tree. Median key is pushed UP and NOT to new right node.
-            newNode.NumKeys = BPlusTreePage.MaxKeys - t - 1; // 112 - 56 - 1 = 55
+            // Internal Split: Median key pushed UP, not to new right node
+            newNode.NumKeys = BPlusTreePage.MaxKeys - t - 1;
             for (int j = 0; j < newNode.NumKeys; j++)
             {
                 newNode.Keys[j] = child.Keys[j + t + 1];
@@ -134,7 +133,7 @@ public class BinaryBPlusTreeIndex : IIndex
                 newNode.Children[j] = child.Children[j + t + 1];
             }
 
-            int medianKey = child.Keys[t];
+            byte[] medianKey = child.Keys[t];
             child.NumKeys = t;
 
             for (int j = parent.NumKeys - 1; j >= i; j--)
@@ -155,36 +154,36 @@ public class BinaryBPlusTreeIndex : IIndex
     public List<long> Search(string key)
     {
         var results = new List<long>();
-        if (_pager.RootPageId == -1 || !int.TryParse(key, out int intKey)) return results;
+        if (_pager.RootPageId == -1) return results;
 
+        byte[] encodedKey = IndexKeyEncoder.Encode(key);
         var current = _pager.ReadPage(_pager.RootPageId);
 
         // Traverse to the FIRST LEAF where key COULD exist
         while (!current.IsLeaf)
         {
-            int i = current.FindIndex(intKey);
+            int i = current.FindIndex(encodedKey);
             current = _pager.ReadPage(current.Children[i]);
         }
 
-        // We are at a leaf. Now scan linearly using the highly optimized contiguous Linked Arrays.
+        // Scan linearly across linked leaves
         bool stop = false;
         while (current != null && !stop)
         {
             for (int i = 0; i < current.NumKeys; i++)
             {
-                if (current.Keys[i] == intKey)
+                int cmp = IndexKeyEncoder.CompareKeys(current.Keys[i], encodedKey);
+                if (cmp == 0)
                 {
                     long val = current.GetValue(i);
-                    // 0 is default long value. Not perfect but assuming IDs > 0.
-                    if (val != 0) 
+                    if (val != 0) // 0 = empty/tombstone sentinel
                     {
                         results.Add(val);
                     }
                 }
-                else if (current.Keys[i] > intKey)
+                else if (cmp > 0)
                 {
-                    // Since it's sorted, any key > target means we are completely done.
-                    // This avoids fetching more pages.
+                    // Sorted: any key > target means we're done
                     stop = true;
                     break;
                 }
@@ -205,8 +204,6 @@ public class BinaryBPlusTreeIndex : IIndex
 
     public bool ContainsValue(long key)
     {
-        // A hacky check by scanning the entire tree since ContainsValue is rarely used for BPlusTree keys
-        // or we could just implement linear leaf scan.
         for (int i = 1; i < _pager.NumPages; i++)
         {
             var page = _pager.ReadPage(i);
@@ -221,24 +218,23 @@ public class BinaryBPlusTreeIndex : IIndex
     }
 
     public void Delete(string key, long value) { }
-    
-    public void DeleteValues(List<long> valuesToDelete) 
-    { 
+
+    public void DeleteValues(List<long> valuesToDelete)
+    {
         if (_pager == null) return;
         var idsSet = new HashSet<long>(valuesToDelete);
 
-        // Scan leaves for the row IDs to tombstone
         for (int i = 1; i < _pager.NumPages; i++)
         {
             var page = _pager.ReadPage(i);
             if (!page.IsLeaf) continue;
-            
+
             bool pageChanged = false;
             for (int k = 0; k < page.NumKeys; k++)
             {
                 if (idsSet.Contains(page.GetValue(k)))
                 {
-                    page.SetValue(k, 0); // Tombstone 0 for long
+                    page.SetValue(k, 0); // Tombstone with sentinel 0
                     pageChanged = true;
                 }
             }
