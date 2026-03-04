@@ -170,6 +170,43 @@ public static class Catalog
             .ToList();
     }
 
+    /// <summary>
+    /// Reverse FK lookup: finds all child tables that reference the given parent table.
+    /// Returns (childTableName, childColumnName, parentColumnName, onDeleteAction).
+    /// </summary>
+    public static List<(string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)>
+        GetChildForeignKeys(string parentTableName, string databaseName)
+    {
+        var result = new List<(string, string, string, string)>();
+        var database = GetDatabaseElement(databaseName);
+        if (database == null) return result;
+
+        var tableElements = database.Descendants("Table").ToList();
+
+        foreach (var tableEl in tableElements)
+        {
+            string? childTableName = tableEl.Attribute("TableName")?.Value;
+            if (childTableName == null) continue;
+
+            var fks = tableEl.Descendants("ForeignKey")
+                .Select(e => ConvertFromXml<ForeignKey>(e)!)
+                .ToList();
+
+            foreach (var fk in fks)
+            {
+                foreach (var reference in fk.References)
+                {
+                    if (reference.ReferenceTableName == parentTableName)
+                    {
+                        result.Add((childTableName, fk.AttributeName, reference.ReferenceAttributeName, fk.OnDeleteAction));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
     public static List<string> GetTableUniqueKeys(string tableName, string databaseName)
     {
         var table = GetTableElement(databaseName, tableName);

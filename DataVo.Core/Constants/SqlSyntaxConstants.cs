@@ -51,6 +51,8 @@ public static class SqlKeywords
     public const string CROSS = "CROSS";
     public const string COLUMN = "COLUMN";
     public const string VACUUM = "VACUUM";
+    public const string CASCADE = "CASCADE";
+    public const string RESTRICT = "RESTRICT";
 
     public static readonly string[] All =
     [
@@ -61,7 +63,7 @@ public static class SqlKeywords
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS,
-        VACUUM
+        VACUUM, CASCADE, RESTRICT
     ];
 }
 
