@@ -9,4 +9,6 @@ public class ForeignKey
     [XmlElement("FkAttribute")] public required string AttributeName { get; set; }
 
     [XmlArray("References")] public List<Reference> References { get; set; } = [];
+
+    [XmlElement("OnDeleteAction")] public string OnDeleteAction { get; set; } = "RESTRICT";
 }

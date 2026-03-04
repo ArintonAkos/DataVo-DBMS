@@ -131,6 +131,7 @@ public class ColumnDefinitionNode : SqlNode
     public bool IsUnique { get; set; }
     public IdentifierNode? ReferencesTable { get; set; }
     public IdentifierNode? ReferencesColumn { get; set; }
+    public string OnDeleteAction { get; set; } = "RESTRICT"; // RESTRICT | CASCADE
 }
 
 public class CreateTableStatement : SqlStatement

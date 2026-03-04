@@ -152,6 +152,18 @@ public class Parser(List<Token> tokens)
                         Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
                         colDef.ReferencesColumn = new IdentifierNode(Consume(TokenType.Identifier, "reference column name").Value);
                         Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+
+                        // Optional: ON DELETE CASCADE|RESTRICT
+                        if (Match(TokenType.Keyword, SqlKeywords.ON))
+                        {
+                            Consume(TokenType.Keyword, SqlKeywords.DELETE);
+                            if (Match(TokenType.Keyword, SqlKeywords.CASCADE))
+                                colDef.OnDeleteAction = "CASCADE";
+                            else if (Match(TokenType.Keyword, SqlKeywords.RESTRICT))
+                                colDef.OnDeleteAction = "RESTRICT";
+                            else
+                                throw new ParserException("Parser Error: Expected CASCADE or RESTRICT after ON DELETE.");
+                        }
                     }
                     else
                     {
