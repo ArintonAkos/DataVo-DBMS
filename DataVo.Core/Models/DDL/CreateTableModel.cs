@@ -53,7 +53,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
             IsPrimaryKey = c.IsPrimaryKey,
             IsUnique = c.IsUnique,
             IsNull = -1,
-            ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = [new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name }] } : null
+            ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = [new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name }], OnDeleteAction = c.OnDeleteAction } : null
         }).ToList();
         return new CreateTableModel(tableName, fields);
     }
