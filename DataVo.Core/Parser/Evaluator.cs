@@ -25,6 +25,10 @@ internal class Evaluator(List<SqlStatement> statements)
             {
                 currentQueue.Enqueue(new DML.DeleteFrom(deleteAst));
             }
+            else if (statement is UpdateStatement updateAst)
+            {
+                currentQueue.Enqueue(new DML.Update(updateAst));
+            }
             else if (statement is CreateTableStatement createTableAst)
             {
                 currentQueue.Enqueue(new DDL.CreateTable(createTableAst));
