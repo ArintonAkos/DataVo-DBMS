@@ -61,6 +61,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
         private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
         {
+            if (leftVal == null || rightVal == null) return false;
             return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
         }
 
@@ -80,6 +81,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
                 Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
                 Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
+                Operators.IS_NULL => entry => entry.Value[leftValue] == null,
+                Operators.IS_NOT_NULL => entry => entry.Value[leftValue] != null,
                 _ => throw new SecurityException("Invalid operator")
             };
 
@@ -130,6 +133,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
                 Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
                 Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
+                Operators.IS_NULL => leftVal == null,
+                Operators.IS_NOT_NULL => leftVal != null,
                 _ => throw new SecurityException("Invalid operator")
             };
 
@@ -148,8 +153,9 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             return [.. leftResult.Union(rightResult)];
         }
 
-        private static int CompareDynamics(dynamic? left, dynamic? right)
+        private static int? CompareDynamics(dynamic? left, dynamic? right)
         {
+            if (left == null || right == null) return null;
             return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
         }
     }

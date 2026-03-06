@@ -42,6 +42,14 @@ public class LiteralNode : ExpressionNode
     public object? Value { get; set; } // Can be string, int, double, bool, DateOnly, etc.
 }
 
+public class NullLiteralNode : LiteralNode
+{
+    public NullLiteralNode()
+    {
+        Value = null;
+    }
+}
+
 public class ColumnRefNode : ExpressionNode
 {
     public string? TableOrAlias { get; set; } // Optional table name or alias for disambiguation

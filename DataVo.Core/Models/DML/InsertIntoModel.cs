@@ -28,7 +28,14 @@ internal class InsertIntoModel(string tableName, List<List<string>> rawRows, Lis
             List<string> rowList = [];
             for (int i = 0; i < rowAst.Count; ++i)
             {
-                rowList.Add(((IdentifierNode)rowAst[i]).Name);
+                if (rowAst[i] is IdentifierNode idNode)
+                {
+                    rowList.Add(idNode.Name);
+                }
+                else if (rowAst[i] is LiteralNode literalNode)
+                {
+                    rowList.Add(literalNode.Value?.ToString() ?? "NULL");
+                }
             }
             rows.Add(rowList);
         }
