@@ -367,3 +367,6 @@ FodyWeavers.xsd
 .history
 
 local-docs/
+
+# Ignore .agents
+.agents/
