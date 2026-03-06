@@ -13,7 +13,7 @@ public class Column : IColumn
     {
         get
         {
-            if (Value == null)
+            if (Value == null || Value.Equals("NULL", StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }

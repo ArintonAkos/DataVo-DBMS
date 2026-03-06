@@ -54,6 +54,11 @@ public static class SqlKeywords
     public const string CASCADE = "CASCADE";
     public const string RESTRICT = "RESTRICT";
 
+    // NULL support
+    public const string IS = "IS";
+    public const string NOT_KEYWORD = "NOT";
+    public const string NULL = "NULL";
+
     public static readonly string[] All =
     [
         SELECT, FROM, WHERE, INSERT, INTO, VALUES,
@@ -63,7 +68,7 @@ public static class SqlKeywords
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS,
-        VACUUM, CASCADE, RESTRICT
+        VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL
     ];
 }
 

@@ -389,7 +389,18 @@ public class Parser(List<Token> tokens)
                 while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
                 {
                     Token valToken = Advance();
-                    valuesList.Add(new IdentifierNode(valToken.Value));
+                    if (valToken.Type == TokenType.Keyword && valToken.Value == SqlKeywords.NULL)
+                    {
+                        valuesList.Add(new NullLiteralNode());
+                    }
+                    else if (valToken.Type == TokenType.StringLiteral || valToken.Type == TokenType.NumberLiteral)
+                    {
+                        valuesList.Add(new LiteralNode { Value = valToken.Value });
+                    }
+                    else
+                    {
+                        valuesList.Add(new IdentifierNode(valToken.Value));
+                    }
 
                     if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken) Advance();
                 }
@@ -746,6 +757,40 @@ public class Parser(List<Token> tokens)
 
                 values.Push(new LiteralNode { Value = numValue });
             }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.NULL)
+            {
+                values.Push(new NullLiteralNode());
+            }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.IS)
+            {
+                bool isNot = false;
+                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.NOT_KEYWORD)
+                {
+                    isNot = true;
+                    tokens.Dequeue(); // consume NOT
+                }
+
+                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.NULL)
+                {
+                    tokens.Dequeue(); // consume NULL
+
+                    string opStr = isNot ? Operators.IS_NOT_NULL : Operators.IS_NULL;
+                    var opToken = new Token(TokenType.Operator, opStr);
+
+                    while (operators.Count > 0 &&
+                          !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == SqlPunctuation.OpenParenToken) &&
+                          GetPrecedence(opToken.Value) <= GetPrecedence(operators.Peek().Value))
+                    {
+                        EvaluateTopOperator(values, operators);
+                    }
+                    operators.Push(opToken);
+                    values.Push(new NullLiteralNode());
+                }
+                else
+                {
+                    throw new ParserException("Parser Error: Expected NULL after IS [NOT]");
+                }
+            }
             else
             {
                 // Skip unrecognized tokens in expression
@@ -783,7 +828,7 @@ public class Parser(List<Token> tokens)
         {
             Operators.OR => 1,
             Operators.AND => 2,
-            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO => 3,
+            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.IS_NULL or Operators.IS_NOT_NULL => 3,
             Operators.ADD or Operators.SUBTRACT => 4,
             Operators.MUL or Operators.DIVIDE => 5,
             _ => -1,
