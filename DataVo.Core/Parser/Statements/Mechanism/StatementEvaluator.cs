@@ -40,6 +40,10 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         string tableName = leftCol.TableName;
         string leftValue = leftCol.Column;
         string rightValue = rightLit.Value?.ToString() ?? string.Empty;
+        if (rightValue.StartsWith("'") && rightValue.EndsWith("'"))
+        {
+            rightValue = rightValue.Trim('\'');
+        }
 
         var table = TableService.TableDetails[tableName];
 
@@ -227,11 +231,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
     private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
     {
-        return ExpressionValueComparer.AreEqual(leftVal, rightVal);
+        return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
     }
 
     private static int CompareDynamics(dynamic? left, dynamic? right)
     {
-        return ExpressionValueComparer.Compare(left, right);
+        return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
     }
 }
