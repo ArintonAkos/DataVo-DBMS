@@ -100,9 +100,7 @@ public class StorageContext(DataVoConfig config)
         HashSet<string>? normalizedColumns = null;
         if (requestedColumns.Count != 0)
         {
-            normalizedColumns = requestedColumns
-                .Select(c => c.Contains('.') ? c.Substring(c.LastIndexOf('.') + 1) : c)
-                .ToHashSet();
+            normalizedColumns = [.. requestedColumns.Select(c => c.Contains('.') ? c[(c.LastIndexOf('.') + 1)..] : c)];
         }
 
         return GetTableContents(ids, tableName, databaseName, normalizedColumns);
