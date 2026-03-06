@@ -370,3 +370,6 @@ local-docs/
 
 # Ignore .agents
 .agents/
+
+# Ignore vitepress cache
+docs/.vitepress/cache/
