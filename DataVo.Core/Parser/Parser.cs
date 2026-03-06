@@ -75,6 +75,8 @@ public class Parser(List<Token> tokens)
                 statements.Add(ParseInsertStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.VACUUM))
                 statements.Add(ParseVacuumStatement());
+            else if (Match(TokenType.Keyword, SqlKeywords.UPDATE))
+                statements.Add(ParseUpdateStatement());
             else
             {
                 // Advance unknown tokens to avoid infinite loops
@@ -292,6 +294,73 @@ public class Parser(List<Token> tokens)
         {
             stmt.WhereExpression = new LiteralNode { Value = SqlLiterals.TrueExpression };
         }
+        return stmt;
+    }
+
+    private SqlStatement ParseUpdateStatement()
+    {
+        var stmt = new UpdateStatement
+        {
+            TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value)
+        };
+
+        Consume(TokenType.Keyword, SqlKeywords.SET);
+
+        bool parsingSetClauses = true;
+        while (parsingSetClauses && !IsEof())
+        {
+            var setClause = new SetClauseNode
+            {
+                ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
+            };
+
+            Consume(TokenType.Operator, "=");
+            
+            // Read tokens for the expression until we hit a comma, WHERE, or EOF
+            var expressionTokens = new Queue<Token>();
+            while (!IsEof())
+            {
+                if (Current.Type == TokenType.Keyword && Current.Value == SqlKeywords.WHERE)
+                {
+                    parsingSetClauses = false;
+                    break;
+                }
+                
+                if (Current.Type == TokenType.Punctuation && Current.Value == ",")
+                {
+                    Consume(TokenType.Punctuation, ","); // consume the comma
+                    break; // break the inner loop to parse the next SET clause
+                }
+
+                expressionTokens.Enqueue(Advance());
+            }
+
+            if (expressionTokens.Count == 0)
+            {
+                throw new ParserException($"Parser error: Missing expression in SET clause for column {setClause.ColumnName.Name}");
+            }
+
+            setClause.Value = ParseWhereExpression(expressionTokens) ?? new LiteralNode { Value = "null" };
+            stmt.SetClauses.Add(setClause);
+
+            // If we broke because of WHERE, the next token is WHERE.
+            // If we hit EOF, then there's no WHERE clause.
+        }
+
+        if (Match(TokenType.Keyword, SqlKeywords.WHERE))
+        {
+            var expressionTokens = new Queue<Token>();
+            while (!IsEof())
+            {
+                expressionTokens.Enqueue(Advance());
+            }
+            stmt.WhereClause = ParseWhereExpression(expressionTokens);
+        }
+        else
+        {
+            stmt.WhereClause = new LiteralNode { Value = SqlLiterals.TrueExpression };
+        }
+
         return stmt;
     }
 

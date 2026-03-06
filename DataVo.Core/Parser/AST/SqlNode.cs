@@ -181,6 +181,19 @@ public class DeleteFromStatement : SqlStatement
     public ExpressionNode? WhereExpression { get; set; }
 }
 
+public class SetClauseNode : SqlNode
+{
+    public IdentifierNode ColumnName { get; set; } = null!;
+    public ExpressionNode Value { get; set; } = null!;
+}
+
+public class UpdateStatement : SqlStatement
+{
+    public IdentifierNode TableName { get; set; } = null!;
+    public List<SetClauseNode> SetClauses { get; set; } = [];
+    public ExpressionNode? WhereClause { get; set; }
+}
+
 public class InsertIntoStatement : SqlStatement
 {
     public IdentifierNode TableName { get; set; } = null!;
