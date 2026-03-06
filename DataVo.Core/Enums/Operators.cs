@@ -14,6 +14,9 @@ public class Operators
     public const string GREATER_THAN_OR_EQUAL_TO = ">=";
     public const string LESS_THAN_OR_EQUAL_TO = "<=";
 
+    public const string IS_NULL = "IS NULL";
+    public const string IS_NOT_NULL = "IS NOT NULL";
+
     public const string ADD = "+";
     public const string SUBTRACT = "-";
     public const string MUL = "*";
@@ -39,6 +42,8 @@ public class Operators
         LESS_THAN,
         GREATER_THAN_OR_EQUAL_TO,
         LESS_THAN_OR_EQUAL_TO,
+        IS_NULL,
+        IS_NOT_NULL
     ];
 
     public static List<string> ArithmeticOperators =

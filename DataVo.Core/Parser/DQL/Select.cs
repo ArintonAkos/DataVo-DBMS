@@ -268,11 +268,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private static bool EvaluateEquality(object? val1, object? val2)
     {
+        if (val1 == null || val2 == null) return false;
         return ExpressionValueComparer.AreEqual(val1, val2, trimQuotedStrings: true, useNumericTolerance: true);
     }
 
-    private static int CompareDynamics(object? leftVal, object? rightVal)
+    private static int? CompareDynamics(object? leftVal, object? rightVal)
     {
+        if (leftVal == null || rightVal == null) return null;
         return ExpressionValueComparer.Compare(leftVal, rightVal, trimQuotedStrings: true);
     }
 

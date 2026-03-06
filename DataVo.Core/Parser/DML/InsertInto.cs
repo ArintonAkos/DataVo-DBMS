@@ -122,7 +122,7 @@ namespace DataVo.Core.Parser.DML
 
                     rowDict[tableColumn.Name] = parsedValue!;
 
-                    if (uniqueKeySet.Contains(tableColumn.Name) &&
+                    if (parsedValue != null && uniqueKeySet.Contains(tableColumn.Name) &&
                         IndexManager.Instance.IndexContainsKey(tableColumn.Value, $"_UK_{tableColumn.Name}", _model.TableName, databaseName)
                     )
                     {
@@ -153,6 +153,13 @@ namespace DataVo.Core.Parser.DML
                 {
                     string id = IndexKeyEncoder.BuildKeyString(rowDict, primaryKeys);
 
+                    if (primaryKeys.Count != 0 && primaryKeys.Any(pk => rowDict[pk] == null))
+                    {
+                        Messages.Add($"Primary key cannot be null in row {rowNumber}!");
+                        Logger.Error($"Primary key cannot be null in row {rowNumber}!");
+                        continue;
+                    }
+
                     if (primaryKeys.Count != 0 && IndexManager.Instance.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
                     {
                         Messages.Add($"Primary key violation in row {rowNumber}!");
@@ -175,6 +182,8 @@ namespace DataVo.Core.Parser.DML
 
             foreach (var index in indexFiles)
             {
+                if (index.AttributeNames.Any(attr => rowDict[attr] == null)) continue;
+                
                 string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
 
                 IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);

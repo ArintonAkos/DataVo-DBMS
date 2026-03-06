@@ -71,10 +71,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                         newValue = s.Trim('\'');
                     }
 
-                    if (newValue == null)
-                        newRow[colName] = "null"; // TODO: True null support in Phase 1.2
-                    else
-                        newRow[colName] = newValue;
+                    newRow[colName] = newValue!;
                 }
 
                 newRows.Add(newRow);
@@ -86,10 +83,17 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 {
                     if (newRow.TryGetValue(col, out var val))
                     {
-                        string valStr = val?.ToString() ?? "null";
+                        if (val == null && primaryKeys.Contains(col))
+                        {
+                            throw new Exception($"Constraint violation: Primary key column {col} cannot be null in row {rowNumber}.");
+                        }
+
+                        if (val == null) continue; // Unique keys can be null
+
+                        string valStr = val.ToString()!;
 
                         // If the value didn't change, it's fine
-                        string oldValStr = oldRow.TryGetValue(col, out var oldVal) ? (oldVal?.ToString() ?? "null") : "null";
+                        string oldValStr = oldRow.TryGetValue(col, out var oldVal) ? (oldVal?.ToString() ?? "null_val") : "null_val";
                         if (valStr == oldValStr) continue;
 
                         // Check within this batch
@@ -179,6 +183,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 foreach (var index in indexFiles)
                 {
+                    if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
+                    
                     string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
                     IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
                 }
