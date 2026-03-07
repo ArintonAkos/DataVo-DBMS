@@ -254,6 +254,7 @@ public static class Catalog
                 Length = string.IsNullOrEmpty(e.Attribute("Length")?.Value)
                     ? 0
                     : int.Parse(e.Attribute("Length")!.Value),
+                DefaultValue = e.Attribute("DefaultValue")?.Value,
             })
             .ToList();
     }
