@@ -9,18 +9,13 @@ namespace DataVo.Core.Models.Statement
     {
         public List<Aggregation> Functions { get; set; } = aggregations;
 
-        public static AggregateModel FromAstColumns(List<SqlNode> columns, string databaseName, TableService tableService)
+        public static AggregateModel FromAstColumns(List<SelectColumnNode> columns, string databaseName, TableService tableService)
         {
             List<Aggregation> aggregations = [];
 
             foreach (var node in columns)
             {
-                if (node is not IdentifierNode identifierNode)
-                {
-                    continue;
-                }
-
-                string token = identifierNode.Name.Trim();
+                string token = node.Expression.Trim();
                 int openParen = token.IndexOf('(');
                 int closeParen = token.LastIndexOf(')');
 

@@ -94,7 +94,8 @@ public class OrderByNode : SqlNode
 
 public class SelectStatement : SqlStatement
 {
-    public List<SqlNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
+    public bool IsDistinct { get; set; } = false;
+    public List<SelectColumnNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
     public IdentifierNode? FromTable { get; set; }
     public IdentifierNode? FromAlias { get; set; }
     public List<JoinDetailNode> Joins { get; set; } = [];

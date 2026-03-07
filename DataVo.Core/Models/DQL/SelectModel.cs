@@ -17,6 +17,7 @@ internal class SelectModel
     public GroupBy GroupByStatement { get; set; } = null!;
     public Aggregate AggregateStatement { get; set; } = null!;
     public TableDetail FromTable { get; set; } = null!;
+    public bool IsDistinct { get; set; } = false;
 
     private SelectStatement Ast { get; set; } = null!;
 
@@ -42,6 +43,7 @@ internal class SelectModel
         {
             WhereStatement = whereStatement,
             FromTable = fromTable,
+            IsDistinct = ast.IsDistinct,
             Ast = ast
         };
     }
@@ -88,24 +90,12 @@ internal class SelectModel
         return false;
     }
 
-    private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SqlNode> columns, TableService tableService)
+    private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SelectColumnNode> columns, TableService tableService)
     {
         Dictionary<string, List<string>> selectedColumns = [];
 
-        foreach (var node in columns)
+        foreach (var colNode in columns)
         {
-            if (node is not SelectColumnNode colNode)
-            {
-                // Fallback for aggregate nodes if they still use IdentifierNode
-                if (node is IdentifierNode idNode)
-                {
-                    colNode = new SelectColumnNode { Expression = idNode.Name };
-                }
-                else
-                {
-                    continue;
-                }
-            }
 
             string name = colNode.Expression.Trim();
 
