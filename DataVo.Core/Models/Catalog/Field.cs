@@ -36,4 +36,6 @@ public class Field
 
     [XmlIgnore] public bool? IsUnique { get; set; }
 
+    [XmlAttribute] public string? DefaultValue { get; set; }
+
 }

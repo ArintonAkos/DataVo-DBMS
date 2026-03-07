@@ -1,4 +1,3 @@
-using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Enums;
@@ -139,7 +138,11 @@ public class Parser(List<Token> tokens)
 
                 while (!IsEof() && Current.Type != TokenType.Punctuation)
                 {
-                    if (Match(TokenType.Keyword, SqlKeywords.PRIMARY))
+                    if (Match(TokenType.Keyword, SqlKeywords.DEFAULT))
+                    {
+                        colDef.DefaultExpression = ParseDefaultExpression();
+                    }
+                    else if (Match(TokenType.Keyword, SqlKeywords.PRIMARY))
                     {
                         Consume(TokenType.Keyword, SqlKeywords.KEY);
                         colDef.IsPrimaryKey = true;
@@ -216,7 +219,11 @@ public class Parser(List<Token> tokens)
 
             while (!IsEof() && Current.Type != TokenType.Punctuation && Current.Type != TokenType.EOF)
             {
-                if (Match(TokenType.Keyword, SqlKeywords.PRIMARY))
+                if (Match(TokenType.Keyword, SqlKeywords.DEFAULT))
+                {
+                    colDef.DefaultExpression = ParseDefaultExpression();
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.PRIMARY))
                 {
                     Consume(TokenType.Keyword, SqlKeywords.KEY);
                     colDef.IsPrimaryKey = true;
@@ -694,6 +701,23 @@ public class Parser(List<Token> tokens)
         }
 
         return columns;
+    }
+
+    private ExpressionNode ParseDefaultExpression()
+    {
+        // For DEFAULT, we usually expect a single literal value or simple expression.
+        // E.g., DEFAULT 'Pending', DEFAULT 10, DEFAULT NULL.
+        // We'll capture tokens until we hit a comma, a closing parenthesis, or the next constraint keyword.
+        Queue<Token> tokens = new();
+        while (!IsEof() && 
+               Current.Type != TokenType.Punctuation && 
+               !(Current.Type == TokenType.Keyword && (Current.Value == SqlKeywords.PRIMARY || Current.Value == SqlKeywords.UNIQUE || Current.Value == SqlKeywords.REFERENCES)))
+        {
+            tokens.Enqueue(Advance());
+        }
+
+        ExpressionNode? expr = ParseWhereExpression(tokens);
+        return expr ?? throw new ParserException("Expected a valid expression after DEFAULT.");
     }
 
     // This adapts the existing Shunting-Yard from StatementParser to use the Lexer's Tokens directly

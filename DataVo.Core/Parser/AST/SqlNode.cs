@@ -140,6 +140,7 @@ public class ColumnDefinitionNode : SqlNode
     public IdentifierNode? ReferencesTable { get; set; }
     public IdentifierNode? ReferencesColumn { get; set; }
     public string OnDeleteAction { get; set; } = "RESTRICT"; // RESTRICT | CASCADE
+    public ExpressionNode? DefaultExpression { get; set; } // e.g. DEFAULT 10, DEFAULT 'active'
 }
 
 public class CreateTableStatement : SqlStatement
