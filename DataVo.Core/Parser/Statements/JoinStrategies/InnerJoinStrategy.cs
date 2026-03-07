@@ -7,10 +7,25 @@ using DataVo.Core.Models.Statement.Utils;
 
 namespace DataVo.Core.Parser.Statements.JoinStrategies;
 
+/// <summary>
+/// Implements the INNER JOIN evaluation strategy.
+/// Computes the intersection of two data sets based on matching condition values.
+/// </summary>
 internal class InnerJoinStrategy : IJoinStrategy
 {
+    /// <summary>
+    /// Gets the target string representing an Inner Join.
+    /// </summary>
     public string JoinType => JoinTypes.INNER;
 
+    /// <summary>
+    /// Executes the INNER JOIN matching logic sequentially or optimally via Hash maps.
+    /// </summary>
+    /// <param name="leftRows">The initial logical dataset explicitly collected earlier in the plan.</param>
+    /// <param name="condition">The functional bound specifying exact mappings.</param>
+    /// <param name="context">The state defining limits perfectly across boundaries.</param>
+    /// <returns>A dictionary containing unique hashed outputs structurally mapping joined sequences.</returns>
+    /// <exception cref="EvaluationException">Thrown if the required condition is missing.</exception>
     public HashedTable Execute(HashedTable leftRows, JoinModel.JoinCondition? condition, JoinStrategyContext context)
     {
         if (condition == null)
@@ -24,39 +39,71 @@ internal class InnerJoinStrategy : IJoinStrategy
         string rightColumn = condition.RightColumn.ColumnName;
 
         TableData rightTableData = context.GetTableData(rightTable);
-        HashedTable result = [];
-
         bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
+
         if (rightTableData.Count >= IJoinStrategy.HashLookupThreshold)
         {
-            JoinLookupTable rightLookup = BuildRightLookup(rightTableData, rightColumn);
+            return ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter);
+        }
 
-            foreach (var leftRowEntry in leftRows)
+        return ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter);
+    }
+
+    /// <summary>
+    /// Performs an optimized Hash-based Join lookup avoiding sequential iterations.
+    /// </summary>
+    private static HashedTable ExecuteHashJoin(
+        HashedTable leftRows, 
+        TableData rightTableData, 
+        string leftTable, 
+        string leftColumn, 
+        string rightTable, 
+        string rightColumn, 
+        bool insertHashAfter)
+    {
+        HashedTable result = [];
+        JoinLookupTable rightLookup = BuildRightLookup(rightTableData, rightColumn);
+
+        foreach (var leftRowEntry in leftRows)
+        {
+            if (!leftRowEntry.Value.ContainsKey(leftTable) || !leftRowEntry.Value[leftTable].ContainsKey(leftColumn))
             {
-                if (!leftRowEntry.Value.ContainsKey(leftTable) || !leftRowEntry.Value[leftTable].ContainsKey(leftColumn))
-                {
-                    throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
-                }
-
-                var leftValue = leftRowEntry.Value[leftTable][leftColumn];
-
-                if (rightLookup.TryGetValue(leftValue, out List<Record>? rightTableRows) && rightTableRows != null)
-                {
-                    foreach (var rightRecord in rightTableRows!)
-                    {
-                        JoinedRowId hash = context.BuildHash(leftRowEntry.Key, rightRecord.RowId, insertHashAfter);
-                        JoinedRow joinedRow = context.CreateJoinedRow(
-                            leftRowEntry.Value,
-                            rightTable,
-                            rightRecord.ToRow());
-
-                        result.Add(hash, joinedRow);
-                    }
-                }
+                throw new EvaluationException($"JOIN execution error: left row is missing column '{leftTable}.{leftColumn}'.");
             }
 
-            return result;
+            var leftValue = leftRowEntry.Value[leftTable][leftColumn];
+
+            if (rightLookup.TryGetValue(leftValue, out List<Record>? rightTableRows) && rightTableRows != null)
+            {
+                foreach (var rightRecord in rightTableRows!)
+                {
+                    JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightRecord.RowId, insertHashAfter);
+                    JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
+                        leftRowEntry.Value,
+                        rightTable,
+                        rightRecord.ToRow());
+
+                    result.Add(hash, joinedRow);
+                }
+            }
         }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Performs a simple structured Nested Loop sequential evaluation.
+    /// </summary>
+    private static HashedTable ExecuteNestedLoopJoin(
+        HashedTable leftRows, 
+        TableData rightTableData, 
+        string leftTable, 
+        string leftColumn, 
+        string rightTable, 
+        string rightColumn, 
+        bool insertHashAfter)
+    {
+        HashedTable result = [];
 
         foreach (var leftRowEntry in leftRows)
         {
@@ -74,8 +121,8 @@ internal class InnerJoinStrategy : IJoinStrategy
                     continue;
                 }
 
-                JoinedRowId hash = context.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
-                JoinedRow joinedRow = context.CreateJoinedRow(
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                     leftRowEntry.Value,
                     rightTable,
                     rightTableRow.Value.ToRow());
@@ -87,12 +134,18 @@ internal class InnerJoinStrategy : IJoinStrategy
         return result;
     }
 
+    /// <summary>
+    /// Determines the structural direction to append memory identifiers logically securely preserving order.
+    /// </summary>
     private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
     {
         var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
         return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 
+    /// <summary>
+    /// Pre-processes the target table into an optimized memory map explicitly matching target values cleanly.
+    /// </summary>
     private static JoinLookupTable BuildRightLookup(TableData rightTableData, string rightColumn)
     {
         JoinLookupTable lookup = [];
