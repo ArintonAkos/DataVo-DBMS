@@ -53,9 +53,37 @@ public class CreateTableModel(string tableName, List<Field> fields)
             IsPrimaryKey = c.IsPrimaryKey,
             IsUnique = c.IsUnique,
             IsNull = -1,
+            DefaultValue = c.DefaultExpression != null ? EvaluateDefaultExpression(c.DefaultExpression) : null,
             ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = [new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name }], OnDeleteAction = c.OnDeleteAction } : null
         }).ToList();
         return new CreateTableModel(tableName, fields);
+    }
+
+    private static string EvaluateDefaultExpression(ExpressionNode expr)
+    {
+        // Default values must be static literals when creating the table
+        if (expr is NullLiteralNode) return "NULL";
+        
+        if (expr is LiteralNode literal)
+        {
+            string value = literal.Value?.ToString() ?? "NULL";
+            if (value.StartsWith("'") && value.EndsWith("'"))
+            {
+                value = value.Substring(1, value.Length - 2);
+            }
+            return value;
+        }
+        else if (expr is ColumnRefNode colRef)
+        {
+            // For booleans, true/false are parsed as identifiers (ColumnRefNode)
+            if (colRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase) || 
+                colRef.Column.Equals("false", StringComparison.OrdinalIgnoreCase))
+            {
+                return colRef.Column.ToLowerInvariant();
+            }
+        }
+        
+        throw new Exception($"DEFAULT expression must be a constant literal value. Actual type: {expr.GetType()}");
     }
 
     private static DataTypes ParseType(string typeStr)
