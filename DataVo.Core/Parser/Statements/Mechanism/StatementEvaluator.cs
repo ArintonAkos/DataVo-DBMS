@@ -7,10 +7,9 @@ using DataVo.Core.StorageEngine;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
 using DataVo.Core.Parser.Utils;
-using DataVo.Core.Parser.Statements.Mechanism;
 using System.Security;
 
-namespace DataVo.Core.Parser.Statements;
+namespace DataVo.Core.Parser.Statements.Mechanism;
 
 public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 {
