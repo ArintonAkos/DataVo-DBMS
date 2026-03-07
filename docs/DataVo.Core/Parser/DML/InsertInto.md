@@ -11,6 +11,7 @@ The `InsertInto.cs` action physically validates and writes new records executing
 | **Data Type Validation** | Yes | Checks literals verifying parameter structures match the schema (e.g. attempting to insert "text" into an Integer column throws safely). |
 | **Primary Key Checking** | Yes | Traps `null` values natively analyzing `IndexManager` instances explicitly bouncing duplicates preventing IO overhead directly. |
 | **Foreign Key Enforcement** | Yes | Looks up remote references executing indexed scans enforcing relational data boundaries continuously defining limits natively rejecting orphans elegantly. |
+| **DEFAULT Values Mapping** | Yes | Resolves optional attributes gracefully bypassing absent values with native Schema defaults mapping primitives seamlessly while retaining explicit user `NULL` override protections accurately. |
 | **Batch Insertion** | No | Currently iterates raw values linearly, executing physical writes per row. Bulk sequential disk streaming is not presently supported. |
 
 ### Execution Flow Algorithm
