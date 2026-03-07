@@ -433,6 +433,12 @@ public class Parser(List<Token> tokens)
     {
         var selectStmt = new SelectStatement();
 
+        // Check for DISTINCT modifier
+        if (Match(TokenType.Keyword, SqlKeywords.DISTINCT))
+        {
+            selectStmt.IsDistinct = true;
+        }
+
         // 1. Parse Columns (SELECT already matched)
         selectStmt.Columns = ParseColumnList();
 
@@ -639,9 +645,9 @@ public class Parser(List<Token> tokens)
         throw new ParserException($"Parser Error: Invalid {sideLabel} column reference '{token.Value}'. Expected 'column' or 'table.column'.");
     }
 
-    private List<SqlNode> ParseColumnList()
+    private List<SelectColumnNode> ParseColumnList()
     {
-        var columns = new List<SqlNode>();
+        var columns = new List<SelectColumnNode>();
 
         while (!IsEof())
         {

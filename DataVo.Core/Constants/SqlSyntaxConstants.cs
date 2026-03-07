@@ -50,6 +50,7 @@ public static class SqlKeywords
     public const string FULL = "FULL";
     public const string OUTER = "OUTER";
     public const string CROSS = "CROSS";
+    public const string DISTINCT = "DISTINCT";
     public const string COLUMN = "COLUMN";
     public const string VACUUM = "VACUUM";
     public const string CASCADE = "CASCADE";
@@ -68,7 +69,7 @@ public static class SqlKeywords
         DATABASE, DEFAULT, PRIMARY, KEY, UNIQUE, REFERENCES,
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
-        JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS,
+        JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL
     ];
 }

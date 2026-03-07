@@ -35,11 +35,58 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
             Fields = CreateFieldsFromColumns(result);
             Data = CreateDataFromResult(result, Fields);
+
+            if (_model.IsDistinct)
+            {
+                var distinctData = Data.Select(d => d.ToDictionary(k => k.Key, v => (object?)v.Value))
+                                       .Distinct(new DictionaryComparer())
+                                       .Select(d => d.ToDictionary(k => k.Key, v => (dynamic)v.Value!))
+                                       .ToList();
+                Data = distinctData;
+            }
         }
         catch (Exception ex)
         {
             Messages.Add(ex.ToString());
             Logger.Error(ex.ToString());
+        }
+    }
+
+    internal sealed class DictionaryComparer : IEqualityComparer<Dictionary<string, object?>>
+    {
+        public bool Equals(Dictionary<string, object?>? x, Dictionary<string, object?>? y)
+        {
+            if (x == null || y == null) return x == y;
+            if (x.Count != y.Count) return false;
+
+            foreach (var kvp in x)
+            {
+                if (!y.TryGetValue(kvp.Key, out var yVal)) return false;
+                
+                if (kvp.Value == null || kvp.Value.ToString() == "null")
+                {
+                    if (yVal != null && yVal.ToString() != "null") return false;
+                }
+                else if (!kvp.Value.Equals(yVal))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public int GetHashCode(Dictionary<string, object?> obj)
+        {
+            int hash = 17;
+            foreach (var kvp in obj.OrderBy(k => k.Key))
+            {
+                hash = hash * 31 + kvp.Key.GetHashCode();
+                if (kvp.Value != null && kvp.Value.ToString() != "null")
+                {
+                    hash = hash * 31 + kvp.Value.GetHashCode();
+                }
+            }
+            return hash;
         }
     }
 
@@ -298,16 +345,29 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private object? ResolveColumnValue(JoinedRow row, string columnReference)
     {
-        var parseResult = _model.TableService!.ParseAndFindTableNameByColumn(columnReference);
-        string tableName = parseResult.Item1;
-        string columnName = parseResult.Item2;
-
-        if (!row.ContainsKey(tableName) || !row[tableName].ContainsKey(columnName))
+        string[] referenceParts = columnReference.Split('.');
+        
+        if (referenceParts.Length == 1)
         {
-            throw new Exception($"Column '{columnReference}' not found in row scope.");
+            var matchedTables = row.Keys.Where(t => row[t].ContainsKey(columnReference)).ToList();
+            
+            if (matchedTables.Count == 0) throw new Exception($"Column '{columnReference}' not found.");
+            if (matchedTables.Count > 1) throw new Exception($"Column '{columnReference}' is ambiguous.");
+            
+            return row[matchedTables.First()][columnReference];
         }
 
-        return row[tableName][columnName];
+        string tableOrAlias = referenceParts[0];
+        string colName = referenceParts[1];
+
+        string resolvedTableName = _model.TableService!.GetTableDetailByAliasOrName(tableOrAlias).TableName;
+
+        if (row.ContainsKey(resolvedTableName) && row[resolvedTableName].ContainsKey(colName))
+        {
+            return row[resolvedTableName][colName];
+        }
+
+        throw new Exception($"Column '{columnReference}' not found in the currently resolved JOIN results.");
     }
 
     private sealed class DynamicObjectComparer : IComparer<object?>
