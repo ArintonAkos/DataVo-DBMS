@@ -12,7 +12,7 @@ namespace DataVo.Core.Parser.Statements
         public AggregateModel Model { get; private set; }
         public TableService TableService { get; private set; }
 
-        public Aggregate(List<SqlNode> columns, string databaseName, TableService tableService)
+        public Aggregate(List<SelectColumnNode> columns, string databaseName, TableService tableService)
         {
             Model = AggregateModel.FromAstColumns(columns, databaseName, tableService);
             TableService = tableService;
