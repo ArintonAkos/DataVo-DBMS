@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
@@ -54,6 +54,13 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
         {
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
+
+            if (ast.IfNotExists && Catalog.TableExists(_model.TableName, databaseName))
+            {
+                Logger.Info($"Table {_model.TableName} already exists. Skipping creation.");
+                Messages.Add($"Table {_model.TableName} already exists. Skipping creation.");
+                return;
+            }
 
             Catalog.CreateTable(_model.ToTable(), databaseName);
             Context.CreateTable(_model.TableName, databaseName);

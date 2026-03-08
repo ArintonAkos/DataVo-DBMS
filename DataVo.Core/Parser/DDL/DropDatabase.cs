@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
@@ -33,6 +33,13 @@ internal class DropDatabase(DropDatabaseStatement ast) : BaseDbAction
     {
         try
         {
+            if (ast.IfExists && !Catalog.DatabaseExists(_model.DatabaseName))
+            {
+                Logger.Info($"Database {_model.DatabaseName} does not exist. Skipping drop.");
+                Messages.Add($"Database {_model.DatabaseName} does not exist. Skipping drop.");
+                return;
+            }
+
             Catalog.DropDatabase(_model.DatabaseName);
             Context.DropDatabase(_model.DatabaseName);
 
