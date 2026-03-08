@@ -179,13 +179,11 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemorySelectTests : SelectTestsBase
 {
     public InMemorySelectTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "SelectDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskSelectTests : SelectTestsBase
 {
     public DiskSelectTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_select" }, "SelectDB_Disk") { }

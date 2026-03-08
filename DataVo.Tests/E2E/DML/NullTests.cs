@@ -82,7 +82,7 @@ public abstract class NullTestsBase(DataVoConfig config, string testDbName) : Sq
     public void PrimaryKey_CannotBeNull_Rejected()
     {
         Execute("CREATE TABLE PKNulls (Id INT PRIMARY KEY)");
-        
+
         var res1 = ExecuteAndReturn("INSERT INTO PKNulls VALUES (NULL)");
         Assert.Contains(res1.Messages, m => m.Contains("Primary key cannot be null"));
 
@@ -92,13 +92,11 @@ public abstract class NullTestsBase(DataVoConfig config, string testDbName) : Sq
     }
 }
 
-[Collection("SequentialStorageTests")]
 public class InMemoryNullTests : NullTestsBase
 {
     public InMemoryNullTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "NullDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskNullTests : NullTestsBase
 {
     public DiskNullTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_null" }, "NullDB_Disk") { }

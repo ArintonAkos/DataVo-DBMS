@@ -4,7 +4,6 @@ using DataVo.Core.Transactions;
 
 namespace DataVo.Tests.E2E;
 
-[Collection("SequentialStorageTests")]
 public class DiskWalTests : SqlExecutionTestsBase
 {
     public DiskWalTests()
@@ -70,7 +69,7 @@ public class DiskWalTests : SqlExecutionTestsBase
         var beforeRecovery = ExecuteAndReturn($"SELECT * FROM {table};");
         Assert.Empty(beforeRecovery.Data);
 
-        StorageContext.Initialize(Config);
+        ReinitializeEngine(Config);
         Execute($"USE {TestDb};");
 
         var afterRecovery = ExecuteAndReturn($"SELECT * FROM {table};");
@@ -90,7 +89,7 @@ public class DiskWalTests : SqlExecutionTestsBase
             WalCheckpointThreshold = 2,
         };
 
-        StorageContext.Initialize(thresholdConfig);
+        ReinitializeEngine(thresholdConfig);
         Execute($"USE {TestDb};");
 
         string table = $"WalThreshold_{Guid.NewGuid():N}";
@@ -109,7 +108,6 @@ public class DiskWalTests : SqlExecutionTestsBase
     }
 }
 
-[Collection("SequentialStorageTests")]
 public class InMemoryWalTests : SqlExecutionTestsBase
 {
     public InMemoryWalTests()

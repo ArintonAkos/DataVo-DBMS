@@ -7,7 +7,6 @@ namespace DataVo.Tests.ADO;
 /// <summary>
 /// Integration tests verifying the DataVo ADO.NET provider surface (connection, command, reader, transaction, parameters).
 /// </summary>
-[Collection("SequentialStorageTests")]
 public class AdoNetTests : IDisposable
 {
     private readonly DataVoConnection _connection;
@@ -15,7 +14,6 @@ public class AdoNetTests : IDisposable
 
     public AdoNetTests()
     {
-        TestEngineLock.Instance.Wait();
         _connection = new DataVoConnection($"StorageMode=InMemory;DataSource={_databaseName}");
         _connection.Open();
     }
@@ -24,7 +22,6 @@ public class AdoNetTests : IDisposable
     {
         _connection.Close();
         _connection.Dispose();
-        TestEngineLock.Instance.Release();
     }
 
     [Fact]
