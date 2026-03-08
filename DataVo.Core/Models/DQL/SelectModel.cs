@@ -1,4 +1,4 @@
-﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Binding;
 using DataVo.Core.Parser.Statements;
@@ -18,6 +18,8 @@ internal class SelectModel
     public Aggregate AggregateStatement { get; set; } = null!;
     public TableDetail FromTable { get; set; } = null!;
     public bool IsDistinct { get; set; } = false;
+    public int? LimitTake { get; set; }
+    public int? LimitSkip { get; set; }
 
     private SelectStatement Ast { get; set; } = null!;
 
@@ -44,6 +46,8 @@ internal class SelectModel
             WhereStatement = whereStatement,
             FromTable = fromTable,
             IsDistinct = ast.IsDistinct,
+            LimitTake = ast.LimitExpression?.TakeTarget,
+            LimitSkip = ast.LimitExpression?.SkipTarget,
             Ast = ast
         };
     }
