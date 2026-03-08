@@ -10,11 +10,11 @@ The `Parser/Transactions` actions execute SQL transaction commands such as `BEGI
 
 ## Command Behavior
 
-| Command | Behavior |
-| :--- | :--- |
-| `BEGIN` / `BEGIN TRANSACTION` | Creates a new session-scoped `TransactionContext`. |
-| `COMMIT` | Acquires write locks for all affected tables, writes a WAL entry in disk mode, flushes buffered changes, then checkpoints the WAL entry. |
-| `ROLLBACK` | Discards buffered operations without touching base storage files. |
+| Command                       | Behavior                                                                                                                                 |
+| :---------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| `BEGIN` / `BEGIN TRANSACTION` | Creates a new session-scoped `TransactionContext`.                                                                                       |
+| `COMMIT`                      | Acquires write locks for all affected tables, writes a WAL entry in disk mode, flushes buffered changes, then checkpoints the WAL entry. |
+| `ROLLBACK`                    | Discards buffered operations without touching base storage files.                                                                        |
 
 ## Commit Lifecycle
 
