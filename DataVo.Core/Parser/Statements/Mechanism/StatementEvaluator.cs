@@ -12,9 +12,19 @@ using System.Security;
 namespace DataVo.Core.Parser.Statements.Mechanism;
 
 /// <summary>
-/// Evaluates WHERE conditions against table records.
-/// Dynamically resolves predicates considering cross-table joins and indexing strategies.
+/// Evaluates WHERE clause expressions against table records in the context of a JOIN operation.
+/// <para>
+/// This evaluator resolves predicates by choosing the most efficient access path available:
+/// secondary B-Tree index lookup, primary key index lookup, or a full table scan.
+/// After filtering from the base table, results are automatically passed through the
+/// configured <see cref="Join"/> strategy to produce a fully joined <see cref="HashedTable"/>.
+/// </para>
 /// </summary>
+/// <remarks>
+/// Inherits from <see cref="ExpressionEvaluatorCore{TResult}"/> with <c>TResult</c> = <see cref="HashedTable"/>.
+/// Logical operators (<c>AND</c>, <c>OR</c>) are handled by the base class, which delegates
+/// leaf-node evaluation to the overridden methods in this class.
+/// </remarks>
 public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 {
     private TableService TableService { get; set; }
@@ -24,9 +34,9 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <summary>
     /// Initializes a new instance of the <see cref="StatementEvaluator"/> class.
     /// </summary>
-    /// <param name="tableService">The service maintaining active catalog table details.</param>
-    /// <param name="joinStatements">The JOIN clause contexts managing cross-table relations.</param>
-    /// <param name="fromTable">The base table being logically evaluated initially.</param>
+    /// <param name="tableService">The service that provides access to <see cref="TableDetail"/> metadata for all tables involved in the query.</param>
+    /// <param name="joinStatements">The <see cref="Join"/> instance encapsulating the JOIN strategy (INNER, LEFT, etc.) used to combine table results.</param>
+    /// <param name="fromTable">The primary (FROM) table whose rows are evaluated first before being joined with other tables.</param>
     public StatementEvaluator(TableService tableService, Join joinStatements, TableDetail fromTable)
     {
         TableService = tableService;
@@ -35,26 +45,32 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Resolves unconditional true statements, fetching all records natively.
+    /// Returns all rows from the base table when the WHERE clause resolves to an unconditional <c>TRUE</c>.
+    /// All rows are passed through the configured JOIN strategy before being returned.
     /// </summary>
-    /// <returns>A hashed table containing all records of the core table.</returns>
+    /// <returns>A <see cref="HashedTable"/> containing every row from the base table, fully joined.</returns>
     protected override HashedTable EvaluateTrueLiteral()
     {
         return GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
     }
 
     /// <summary>
-    /// Resolves unconditional false constraints.
+    /// Returns an empty result set when the WHERE clause resolves to an unconditional <c>FALSE</c>.
     /// </summary>
-    /// <returns>An empty hashed result set.</returns>
+    /// <returns>An empty <see cref="HashedTable"/>.</returns>
     protected override HashedTable EvaluateFalseLiteral() => [];
 
     /// <summary>
-    /// Evaluates direct equality constraints for indexable optimizations.
-    /// Routes the execution into secondary indexing, primary indexing, or full table scans based on existing schemas.
+    /// Handles an equality comparison (<c>column = literal</c>) by selecting the fastest available access path:
+    /// <list type="number">
+    ///   <item><description>Secondary index lookup — if the column has a B-Tree index defined.</description></item>
+    ///   <item><description>Primary key index lookup — if the column is part of the table's primary key.</description></item>
+    ///   <item><description>Full table scan — as a fallback when no index covers the column.</description></item>
+    /// </list>
+    /// String literal values are trimmed of surrounding single quotes before comparison.
     /// </summary>
-    /// <param name="root">The conditional operation comparing a column to a literal.</param>
-    /// <returns>A <see cref="HashedTable"/> holding the results.</returns>
+    /// <param name="root">A <see cref="BinaryExpressionNode"/> whose left operand is a <see cref="ResolvedColumnRefNode"/> and right operand is a <see cref="LiteralNode"/>.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the matching rows, fully joined via the configured JOIN strategy.</returns>
     protected override HashedTable HandleIndexableStatement(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
@@ -63,7 +79,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         string tableName = leftCol.TableName;
         string leftValue = leftCol.Column;
         string rightValue = rightLit.Value?.ToString() ?? string.Empty;
-        
+
         if (rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
         {
             rightValue = rightValue.Trim('\'');
@@ -86,12 +102,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Queries the storage engine optimally utilizing a pre-built secondary B-Tree structure.
+    /// Retrieves matching rows by performing a B-Tree lookup against a secondary index.
+    /// Row IDs returned by the index are then loaded from the storage engine and joined.
     /// </summary>
-    /// <param name="table">The context table evaluated.</param>
-    /// <param name="rightValue">The limit determining matching rows.</param>
-    /// <param name="indexFile">The specific index filename targeting this column.</param>
-    /// <returns>A hashed table containing rows filtered by the index.</returns>
+    /// <param name="table">The <see cref="TableDetail"/> describing the table to query.</param>
+    /// <param name="rightValue">The value to search for in the secondary index.</param>
+    /// <param name="indexFile">The filename of the secondary index B-Tree file.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingSecondaryIndex(TableDetail table, string rightValue, string indexFile)
     {
         List<long> ids = [.. IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!)];
@@ -99,11 +116,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Queries the storage engine via underlying explicit primary key records.
+    /// Retrieves matching rows by performing a B-Tree lookup against the table's primary key index (<c>_PK_{TableName}</c>).
+    /// Row IDs returned by the index are then loaded from the storage engine and joined.
     /// </summary>
-    /// <param name="table">The structural context to filter.</param>
-    /// <param name="rightValue">The equality bound testing matching variables.</param>
-    /// <returns>The aggregated target rows.</returns>
+    /// <param name="table">The <see cref="TableDetail"/> describing the table to query.</param>
+    /// <param name="rightValue">The primary key value to search for.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingPrimaryKey(TableDetail table, string rightValue)
     {
         List<long> ids = [.. IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!)];
@@ -111,11 +129,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Materializes logical rows efficiently mapping internal records to dictionary representation natively.
+    /// Loads the specified rows from the storage engine and passes them through the
+    /// configured JOIN strategy to produce a <see cref="HashedTable"/>.
     /// </summary>
-    /// <param name="table">The definition configuring record creation logic.</param>
-    /// <param name="ids">Identifiers extracted directly from the engine.</param>
-    /// <returns>An explicitly joined <see cref="HashedTable"/> format mapping values successfully.</returns>
+    /// <param name="table">The <see cref="TableDetail"/> identifying the source table and database.</param>
+    /// <param name="ids">The list of row IDs to retrieve from the storage engine.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the loaded rows, fully joined.</returns>
     private HashedTable LoadJoinedRowsFromContext(TableDetail table, List<long> ids)
     {
         var internalRows = StorageContext.Instance.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
@@ -130,12 +149,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Initiates a full table scan conditionally inspecting specific columns without indexing.
+    /// Falls back to a full table scan, iterating over every row and comparing the specified
+    /// column value to the expected value using string equality. Matching rows are then joined.
     /// </summary>
-    /// <param name="table">The source table instance iterating limits.</param>
-    /// <param name="leftValue">The field logically mapping strings.</param>
-    /// <param name="rightValue">The conditional requirement string logically matching sequences.</param>
-    /// <returns>Resolved sequences executing gracefully mapping joins linearly.</returns>
+    /// <param name="table">The <see cref="TableDetail"/> containing the in-memory table content to scan.</param>
+    /// <param name="leftValue">The name of the column to evaluate.</param>
+    /// <param name="rightValue">The expected value to match against (string comparison).</param>
+    /// <returns>A <see cref="HashedTable"/> containing all matching rows, fully joined.</returns>
     private HashedTable EvaluateUsingFullScan(TableDetail table, string leftValue, string rightValue)
     {
         TableData tableRows = [];
@@ -148,10 +168,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Evaluates expressions that compare a column to a raw literal explicitly utilizing a distinct operational operator natively mapped logically.
+    /// Handles a non-equality comparison between a column and a literal (e.g., <c>&gt;</c>, <c>&lt;</c>, <c>!=</c>, <c>IS NULL</c>).
+    /// Because these operators cannot leverage B-Tree index lookups, a full table scan is performed
+    /// and each row is tested with the appropriate predicate. Matching rows are then joined.
     /// </summary>
-    /// <param name="root">The conditional block carrying operational parameters securely interpreting logic.</param>
-    /// <returns>The filtered outcome resulting structurally natively parsing logically executing explicitly elegantly mapping cleanly implicitly naturally properly structurally dynamically flawlessly efficiently.</returns>
+    /// <param name="root">A <see cref="BinaryExpressionNode"/> whose left operand is a <see cref="ResolvedColumnRefNode"/> and right operand is a <see cref="LiteralNode"/>.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the filtered and joined rows.</returns>
     protected override HashedTable HandleNonIndexableStatement(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
@@ -175,12 +197,14 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Selects the conditional operation predicate mapping dynamic equality correctly securely comparing structurally effectively elegantly reliably exactly cleanly flawlessly gracefully explicitly effortlessly accurately natively mapping testing uniquely cleanly checking implicitly exactly reliably. 
+    /// Builds a row-filtering predicate based on the specified relational operator.
+    /// The predicate reads the value of <paramref name="leftValue"/> from each row and compares it to <paramref name="rightVal"/>.
     /// </summary>
-    /// <param name="op">The specific relational comparison safely successfully optimally precisely smoothly natively extracting checking reliably dependably testing naturally.</param>
-    /// <param name="leftValue">The column being safely dependably smoothly optimally dependably mapped intelligently seamlessly efficiently fluently dependably correctly safely correctly exactly perfectly reliably flawlessly securely.</param>
-    /// <param name="rightVal">The conditional bound natively explicitly confidently smoothly accurately beautifully functionally seamlessly dependably testing smoothly safely checking naturally directly cleanly implicitly appropriately successfully.</param>
-    /// <returns>A generic evaluation checking expressions optimally.</returns>
+    /// <param name="op">The relational operator (e.g., <c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>, <c>IS NULL</c>).</param>
+    /// <param name="leftValue">The column name whose value is extracted from each row for comparison.</param>
+    /// <param name="rightVal">The literal value to compare against.</param>
+    /// <returns>A predicate function that returns <c>true</c> for rows satisfying the condition.</returns>
+    /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
     private Func<KeyValuePair<long, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
     {
         return op switch
@@ -198,10 +222,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Compares columns from two distinct tables applying join logic or verifying limits natively accurately explicitly flawlessly nicely successfully testing gracefully cleanly smartly functionally seamlessly predictably gracefully expertly precisely cleanly reliably nicely correctly dynamically optimally seamlessly smoothly effortlessly fluently beautifully natively efficiently seamlessly explicitly exactly dependably intelligently flawlessly gracefully safely exactly testing perfectly effectively implicitly checking optimally implicitly correctly safely natively accurately beautifully confidently cleanly smoothly intelligently smoothly organically safely exactly cleanly structurally implicitly securely reliably. 
+    /// Handles a comparison between two column references within the same table (e.g., <c>col_a = col_b</c>).
+    /// Both columns must belong to the same table; cross-table column comparisons in the WHERE clause
+    /// are not supported and will throw an exception.
     /// </summary>
-    /// <param name="root">The mapping limits reliably checking smoothly safely elegantly perfectly perfectly dependably gracefully.</param>
-    /// <returns>A joined hashed sequence cleanly optimizing logically checking gracefully cleanly gracefully functionally securely validating seamlessly safely correctly efficiently nicely safely explicitly explicitly dependably smoothly structurally seamlessly seamlessly fluently smoothly testing cleanly uniquely implicitly successfully.</returns>
+    /// <param name="root">A <see cref="BinaryExpressionNode"/> whose left and right operands are both <see cref="ResolvedColumnRefNode"/> instances.</param>
+    /// <returns>A <see cref="HashedTable"/> containing the matching and joined rows.</returns>
+    /// <exception cref="SecurityException">Thrown when the two columns reference different tables.</exception>
     protected override HashedTable HandleTwoColumnExpression(BinaryExpressionNode root)
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
@@ -232,11 +259,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Interprets limits mapping operations against a pair safely predictably properly structurally successfully natively fluently safely smoothly correctly safely specifically effectively validating securely natively beautifully properly explicitly gracefully optimally safely precisely optimizing cleanly confidently dependably naturally expertly correctly gracefully explicitly correctly flawlessly seamlessly successfully dependably elegantly cleanly reliably dependably.</summary>
-    /// <param name="op">The specific relational comparison.</param>
-    /// <param name="leftValue">The first table value mapping accurately cleverly effortlessly cleanly flawlessly safely expertly exactly efficiently beautifully specifically smoothly securely smartly validating flawlessly elegantly nicely testing naturally cleanly successfully intelligently dependably safely optimizing fluently smartly cleanly smoothly natively safely accurately fluently securely seamlessly organically confidently perfectly smoothly exactly naturally cleanly checking smoothly correctly perfectly cleanly intelligently securely organically securely seamlessly natively properly structurally dependably reliably properly uniquely safely properly safely.</param>
-    /// <param name="rightValue">The second limit checking seamlessly dependably seamlessly flawlessly fluently securely natively elegantly accurately securely testing correctly natively dependably.</param>
-    /// <returns>A conditionally generic operation safely smartly smoothly dependably dependably natively exactly fluently testing effectively gracefully beautifully natively effectively beautifully securely explicitly seamlessly elegantly cleanly successfully checking implicitly securely fluently flawlessly seamlessly successfully checking natively cleanly dependably checking fluently explicitly explicitly confidently seamlessly functionally.</returns>
+    /// Builds a row-filtering predicate that compares two column values within the same row.
+    /// </summary>
+    /// <param name="op">The relational operator (e.g., <c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>).</param>
+    /// <param name="leftValue">The name of the first column.</param>
+    /// <param name="rightValue">The name of the second column.</param>
+    /// <returns>A predicate function that returns <c>true</c> for rows where the two column values satisfy the operator.</returns>
+    /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
     private Func<KeyValuePair<long, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
     {
         return op switch
@@ -252,9 +281,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Identifies constant logical literal equality gracefully properly testing securely checking seamlessly effortlessly effectively explicitly formatting fluently securely elegantly correctly structurally optimally flawlessly cleanly correctly explicitly safely natively beautifully dependably natively safely expertly optimizing naturally safely expertly perfectly smartly cleanly uniquely gracefully natively.</summary>
-    /// <param name="root">The node defining constants effectively nicely safely securely safely cleanly smoothly successfully testing implicitly securely expertly optimizing implicitly uniquely validating dependably explicitly seamlessly successfully cleanly fluently flawlessly naturally properly efficiently seamlessly smartly smoothly gracefully securely gracefully organically.</param>
-    /// <returns>A hashed record cleanly fluently intelligently exactly dependably properly optimally optimally flawlessly perfectly nicely dependably gracefully securely successfully seamlessly accurately dependably fluently uniquely exactly gracefully effectively gracefully perfectly easily expertly accurately efficiently testing organically cleanly easily testing cleanly gracefully explicitly cleanly reliably cleanly correctly dependably smoothly implicitly seamlessly expertly natively expertly cleanly natively dependably smoothly confidently safely safely smoothly.</returns>
+    /// Evaluates constant expressions that do not depend on any column values, 
+    /// returning either the full table or an empty set based on the condition's truth value.
+    /// </summary>
+    /// <param name="root">The binary expression node containing two literals and an operator.</param>
+    /// <returns><see cref="HashedTable"/> containing all rows if the condition is true, or empty if false.</returns>
     protected override HashedTable HandleConstantExpression(BinaryExpressionNode root)
     {
         var leftLit = (LiteralNode)root.Left;
@@ -274,14 +305,20 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Validates raw constants optimally uniquely securely flawlessly confidently checking elegantly natively properly properly testing fluently flawlessly functionally naturally smoothly properly parsing natively smartly explicitly testing explicitly parsing beautifully seamlessly reliably safely gracefully safely beautifully dynamically optimally accurately safely elegantly properly accurately dependably fluently securely testing naturally securely explicitly confidently seamlessly successfully securely smoothly smoothly checking seamlessly seamlessly smoothly testing beautifully natively smartly effectively properly validating seamlessly smartly smartly elegantly cleanly natively correctly dependably.</summary>
-    /// <param name="op">The specific relational comparison testing safely directly flawlessly correctly safely flawlessly dependably naturally securely optimally testing securely intelligently uniquely dependably correctly.</param>
-    /// <param name="leftVal">The initial constant intelligently successfully securely smartly cleanly smoothly flawlessly cleanly seamlessly dependably checking dependably elegantly securely successfully cleanly smoothly dependably safely directly flawlessly smoothly properly fluently nicely predictably cleanly fluently correctly cleanly smoothly.</param>
-    /// <param name="rightVal">The checking bound correctly flawlessly correctly natively successfully cleanly seamlessly safely successfully testing expertly organically cleanly expertly specifically comfortably dynamically perfectly naturally dependably natively seamlessly fluently testing naturally checking accurately structurally dependably properly exactly nicely perfectly gracefully fluently natively exactly dependably dependably seamlessly exactly gracefully securely perfectly nicely effectively.</param>
-    /// <returns>Success explicitly fluently checking clearly smartly parsing seamlessly cleanly flawlessly safely testing gracefully natively dependably.</returns>
+    /// Determines the truth value of a constant condition by evaluating the operator against the literal values.
+    /// </summary>
+    /// <param name="op">The specific relational operator to evaluate.</param>
+    /// <param name="leftVal">The left literal value to compare.</param>
+    /// <param name="rightVal">The right literal value to compare.</param>
+    /// <returns>>True if the condition holds based on the operator and values; otherwise, false.</returns>
+    /// <example>
+    /// For example, for the expression '5 > 3', this method would evaluate the
+    /// operator '>' against the left value '5' and the right value '3', returning true.
+    /// </example>
+    /// <exception cref="SecurityException">Thrown when an invalid operator is provided.</exception>
     private static bool DetermineConstantCondition(string op, object? leftVal, object? rightVal)
     {
-         return op switch
+        return op switch
         {
             Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
             Operators.NOT_EQUALS => !EvaluateEquality(leftVal, rightVal),
@@ -296,10 +333,13 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Unites arrays smoothly passing arrays formatting natively checking sequences formatting smartly testing properly structurally cleanly fluently dependably parsing seamlessly mapping natively accurately structurally elegantly beautifully optimally predictably accurately confidently tracking seamlessly safely elegantly securely testing beautifully fluently cleanly seamlessly testing seamlessly elegantly checking gracefully stably cleanly optimally securely smoothly cleanly safely expertly fluently tracking structurally safely parsing dynamically dynamically naturally fluently uniquely gracefully stably seamlessly naturally securely dependably safely effortlessly successfully smoothly natively parsing nicely functionally natively.</summary>
-    /// <param name="tableRows">The mapping constraints cleanly.</param>
-    /// <param name="tableName">The identifier naturally cleanly beautifully functionally efficiently successfully smoothly checking seamlessly safely smoothly naturally.</param>
-    /// <returns>A logical evaluation smartly effortlessly structurally naturally dependably beautifully fluently flawlessly dependably cleanly properly effectively.</returns>
+    /// Wraps the given table rows into a <see cref="HashedTable"/> keyed by <see cref="JoinedRowId"/>,
+    /// then passes them through the configured <see cref="Join"/> strategy to incorporate data from
+    /// any joined tables.
+    /// </summary>
+    /// <param name="tableRows">The filtered rows from the source table.</param>
+    /// <param name="tableName">The name of the source table (used as the key in each <see cref="JoinedRow"/>).</param>
+    /// <returns>A <see cref="HashedTable"/> containing the fully joined result set.</returns>
     private HashedTable GetJoinedTableContent(TableData tableRows, string tableName)
     {
         HashedTable groupedInitialTable = [];
@@ -312,11 +352,14 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return Join!.Evaluate(groupedInitialTable, tableName);
     }
 
+
     /// <summary>
-    /// Executes sequential logic cleanly seamlessly intersecting smoothly seamlessly optimally mapping fluently safely nicely carefully reliably explicitly effortlessly dynamically testing safely stably specifically natively properly seamlessly securely flawlessly smartly dependably naturally organically naturally.</summary>
-    /// <param name="leftResult">The limits beautifully cleanly smartly correctly fluently fluently cleanly natively reliably securely cleanly effectively structurally expertly naturally beautifully seamlessly safely.</param>
-    /// <param name="rightResult">The arrays dynamically predictably dependably flawlessly correctly safely.</param>
-    /// <returns>The aggregated securely seamlessly reliably successfully seamlessly checking optimally correctly dependably safely cleanly dependably confidently effortlessly naturally effortlessly smartly safely securely cleanly safely smartly.</returns>
+    /// Combines two result sets using logical AND by intersecting their keys.
+    /// Only rows present in both <paramref name="leftResult"/> and <paramref name="rightResult"/> are retained.
+    /// </summary>
+    /// <param name="leftResult">The result set from the left sub-expression.</param>
+    /// <param name="rightResult">The result set from the right sub-expression.</param>
+    /// <returns>A <see cref="HashedTable"/> containing only the rows that appear in both inputs.</returns>
     protected override HashedTable And(HashedTable leftResult, HashedTable rightResult)
     {
         var result = leftResult.Keys.Intersect(rightResult.Keys)
@@ -325,11 +368,14 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return new HashedTable(result);
     }
 
+
     /// <summary>
-    /// Aggregates distinct logic cleanly mapping securely effortlessly parsing functionally cleanly natively dependably formatting smartly explicitly easily beautifully dependably evaluating uniquely smoothly implicitly structurally natively gracefully securely fluently dependably parsing neatly effortlessly naturally dependably seamlessly safely dependably naturally effortlessly explicitly safely safely safely perfectly dependably effortlessly elegantly comfortably safely naturally elegantly smartly securely optimizing flawlessly fluently fluently elegantly smoothly successfully checking accurately naturally correctly natively confidently cleanly cleanly properly dependably efficiently smoothly.</summary>
-    /// <param name="leftResult">The limits beautifully predictably successfully perfectly safely naturally exactly smartly parsing correctly naturally expertly gracefully tracking naturally optimally.</param>
-    /// <param name="rightResult">The checking safely smoothly perfectly parsing perfectly perfectly.</param>
-    /// <returns>A mapped securely mapping safely smoothly checking effectively structurally dependably uniquely naturally smartly safely safely.</returns>
+    /// Combines two result sets using logical OR by computing their union.
+    /// If a row exists in both sets, the entry from <paramref name="leftResult"/> takes precedence.
+    /// </summary>
+    /// <param name="leftResult">The result set from the left sub-expression.</param>
+    /// <param name="rightResult">The result set from the right sub-expression.</param>
+    /// <returns>A <see cref="HashedTable"/> containing all rows from either input.</returns>
     protected override HashedTable Or(HashedTable leftResult, HashedTable rightResult)
     {
         HashSet<JoinedRowId> leftHashes = [.. leftResult.Keys];
@@ -352,11 +398,14 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return result;
     }
 
+
     /// <summary>
-    /// Handles strict equality evaluation comparing properly successfully smoothly dependably elegantly gracefully parsing natively exactly cleanly dependably smoothly smartly cleanly creatively flawlessly effectively mapping fluently evaluating flawlessly smoothly testing seamlessly dependably carefully gracefully securely cleanly perfectly dependably successfully effectively dynamically dependably safely checking efficiently flawlessly securely successfully elegantly organically uniquely.</summary>
-    /// <param name="leftVal">The initial limit nicely smoothly neatly seamlessly smartly seamlessly effectively mapping dependably gracefully testing cleanly easily structurally natively properly smartly intelligently dependably smoothly.</param>
-    /// <param name="rightVal">The conditional bound dependably securely safely tracking smartly cleanly exactly cleanly naturally natively exactly dependably safely flawlessly natively explicitly.</param>
-    /// <returns>Success confidently fluently cleanly explicitly natively correctly organically cleanly parsing directly testing expertly securely.</returns>
+    /// Compares two dynamically typed values for equality. Quoted strings are trimmed before comparison.
+    /// Returns <c>false</c> if either value is <c>null</c>.
+    /// </summary>
+    /// <param name="leftVal">The left-hand value.</param>
+    /// <param name="rightVal">The right-hand value.</param>
+    /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
     private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
     {
         if (leftVal == null || rightVal == null) return false;
@@ -364,10 +413,16 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Parses comparisons testing natively properly perfectly reliably checking smoothly successfully securely dependably parsing mapping natively perfectly accurately organically securely elegantly checking optimally flawlessly exactly smoothly smartly effectively smoothly successfully explicitly cleanly dependably seamlessly elegantly checking successfully safely dependably elegantly dependably naturally dependably accurately perfectly successfully.</summary>
-    /// <param name="left">The limits safely smoothly dependably seamlessly correctly strictly perfectly effectively smoothly flawlessly dependably naturally securely elegantly natively.</param>
-    /// <param name="right">The conditional successfully parsing beautifully smartly cleanly properly securely smoothly efficiently fluently perfectly exactly check elegantly safely naturally parsing confidently seamlessly smartly elegantly smoothly perfectly elegantly flawlessly naturally predictably.</param>
-    /// <returns>Successfully safely fluently smartly reliably securely logically efficiently exactly flawlessly cleanly nicely correctly seamlessly dependably beautifully flawlessly naturally natively.</returns>
+    /// Performs an ordered comparison between two dynamically typed values.
+    /// Quoted strings are trimmed before comparison. Returns <c>null</c> if either value is <c>null</c>.
+    /// </summary>
+    /// <param name="left">The left-hand value.</param>
+    /// <param name="right">The right-hand value.</param>
+    /// <returns>
+    /// A negative integer if <paramref name="left"/> is less than <paramref name="right"/>,
+    /// zero if they are equal, a positive integer if <paramref name="left"/> is greater,
+    /// or <c>null</c> if either operand is <c>null</c>.
+    /// </returns>
     private static int? CompareDynamics(dynamic? left, dynamic? right)
     {
         if (left == null || right == null) return null;

@@ -1,17 +1,42 @@
 # Mechanism Overview
-The `Mechanism` sub-package is the brutal computational engine powering raw evaluation bounds translating filtering constraints (e.g., `WHERE` clauses) cleanly onto multi-gigabyte collections mapped physically into the active execution cache.
+
+The `Mechanism` sub-package contains the core expression evaluation engine that powers WHERE clause filtering. It translates parsed expression trees into filtered result sets by choosing optimal access paths (B-Tree index lookups vs. full table scans).
 
 ## Core Responsibilities
-* **Logical Filtering:** Evaluates tree definitions isolating row conditions validating strings natively bypassing redundant physical disk traversals intelligently.
-* **Loop Iteration:** Tracks the primary iterator processing records seamlessly resolving column identifiers mapping aliases distinctly across complex join overlaps.
 
-## Component Breakdown
+- **Expression Evaluation**: Recursively walks binary expression trees, evaluating leaf conditions and combining results with `AND` (intersection) and `OR` (union) operators.
+- **Index Optimization**: Automatically detects when an equality condition targets an indexed column and routes the lookup through the B-Tree `IndexManager` instead of scanning all rows.
+- **Predicate Building**: Constructs per-row filter predicates for range comparisons (`>`, `<`, `>=`, `<=`), inequality (`!=`), and null checks (`IS NULL`, `IS NOT NULL`).
 
-| Component (File) | Architectural Role |
-|------------------|--------------------|
-| `ExpressionEvaluatorCore.cs` | The standalone binary logic evaluation solver aggressively analyzing arbitrary math, logic statements (`> 15 AND Name = 'A'`), mapping variables independently across nested data sources reliably. |
-| `StatementEvaluator.cs` | The primary iteration loop orchestrating the entire database result calculation integrating active joins, filtering where trees bounding outputs natively. |
-| `StatementEvaluatorWOJoin.cs` | Optimized, streamlined execution loop completely eschewing relational algebra contexts prioritizing raw speed analyzing singular table outputs exclusively. |
+## Components
 
-## Dependencies & Interactions
-Executed aggressively by `Select`, `DeleteFrom`, and `Update` operations to identify exact record bounds mapping output sets dynamically extracting row identities passed subsequently referencing targeted disk locations mapped natively across the memory pool limits internally.
+| Component | Purpose |
+| :--- | :--- |
+| `ExpressionEvaluatorCore<T>` | Abstract base class that implements the recursive evaluation algorithm. Handles node type dispatch, normalization, and logical operator combination. Subclasses define what "a result set" looks like and how leaf conditions are evaluated. |
+| `StatementEvaluator` | Concrete evaluator for queries with JOINs. Returns `HashedTable` (keyed by `JoinedRowId`). After filtering base table rows, automatically passes them through the configured `Join` strategy. Used by `Select` queries with JOIN clauses. |
+| `StatementEvaluatorWOJoin` | Lightweight evaluator for single-table operations. Returns `HashSet<long>` (row IDs only). Used by `DELETE`, `UPDATE`, and single-table `SELECT` queries where no JOIN is needed. |
+
+## How It Works
+
+1. The `Evaluate(ExpressionNode)` method in `ExpressionEvaluatorCore` receives the root of a WHERE clause expression tree.
+2. **Literal nodes** (`TRUE` / `FALSE`) short-circuit to returning all rows or an empty set.
+3. **Comparison nodes** are normalized (column on the left, literal on the right) and dispatched:
+   - `column = literal` → `HandleIndexableStatement` (tries index, then scan)
+   - `column <op> literal` → `HandleNonIndexableStatement` (full scan)
+   - `column <op> column` → `HandleTwoColumnExpression` (full scan)
+   - `literal <op> literal` → `HandleConstantExpression` (evaluate once)
+4. **Logical nodes** (`AND` / `OR`) recursively evaluate both children and combine with intersection or union.
+
+## Dependencies
+
+- **`IndexManager`** — for B-Tree index lookups (`FilterUsingIndex`).
+- **`StorageContext`** — for loading rows from disk by row ID.
+- **`ExpressionValueComparer`** — for type-aware equality and ordering comparisons.
+- **`ExpressionNodeNormalizer`** — for ensuring column references are on the left side of comparisons.
+
+## Consumers
+
+This package is used by:
+- `Select` (DQL) — via `StatementEvaluator` (with JOIN) or `StatementEvaluatorWOJoin`.
+- `DeleteFrom` (DML) — via `StatementEvaluatorWOJoin` to identify rows for deletion.
+- `Update` (DML) — via `StatementEvaluatorWOJoin` to identify rows for modification.
