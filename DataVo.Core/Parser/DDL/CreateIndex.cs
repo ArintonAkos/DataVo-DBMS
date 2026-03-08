@@ -1,10 +1,8 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Models.Statement.Utils;
@@ -57,15 +55,14 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
-            var tableDataRows = StorageContext.Instance.GetTableContents(_model.TableName, databaseName);
+            var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
             Dictionary<string, List<long>> indexValues = CreateIndexContents(tableDataRows);
 
-            IndexManager.Instance.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
+            Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
 
             Logger.Info($"New index file {_model.IndexName} successfully created!");
             Messages.Add($"New index file {_model.IndexName} successfully created!");

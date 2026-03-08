@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
@@ -42,8 +41,9 @@ internal class DropDatabase(DropDatabaseStatement ast) : BaseDbAction
 
             Catalog.DropDatabase(_model.DatabaseName);
             Context.DropDatabase(_model.DatabaseName);
+            Sessions.Clear();
 
-            IndexManager.Instance.DropDatabaseIndexes(_model.DatabaseName);
+            Indexes.DropDatabaseIndexes(_model.DatabaseName);
 
             Logger.Info($"Database {_model.DatabaseName} successfully dropped!");
             Messages.Add($"Database {_model.DatabaseName} successfully dropped!");

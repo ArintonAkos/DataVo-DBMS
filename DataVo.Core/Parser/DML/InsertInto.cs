@@ -3,7 +3,6 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.StorageEngine;
 using System.Text.RegularExpressions;
 using DataVo.Core.Parser.AST;
@@ -35,10 +34,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
-            var txContext = TransactionManager.Instance.GetContext(session);
+            var txContext = Transactions.GetContext(session);
             int rowsAffected;
 
             if (txContext != null)
@@ -47,7 +45,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             }
             else
             {
-                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
+                Locks.AcquireWriteLock(databaseName, _model.TableName);
 
                 try
                 {
@@ -55,7 +53,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 }
                 finally
                 {
-                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
                 }
             }
 
@@ -241,7 +239,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
     private bool VerifyUniqueConstraint(Column tableColumn, string databaseName)
     {
-        return IndexManager.Instance.IndexContainsKey(
+        return Indexes.IndexContainsKey(
             tableColumn.Value!,
             $"_UK_{tableColumn.Name}",
             _model.TableName,
@@ -266,7 +264,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
 
         string id = IndexKeyEncoder.BuildKeyString(rowDict, primaryKeys);
-        if (IndexManager.Instance.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
+        if (Indexes.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
         {
             LogInsertError($"Primary key violation in row {rowNumber}!");
             return false;
@@ -286,7 +284,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// </summary>
     private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, string databaseName)
     {
-        long assignedRowId = StorageContext.Instance.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
+        long assignedRowId = Context.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
 
         foreach (var index in indexFiles)
         {
@@ -294,7 +292,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
             string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
 
-            IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+            Indexes.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
         }
     }
 
@@ -305,7 +303,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     {
         foreach (var reference in foreignKey.References)
         {
-            if (!IndexManager.Instance.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
+            if (!Indexes.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
             {
                 return false;
             }

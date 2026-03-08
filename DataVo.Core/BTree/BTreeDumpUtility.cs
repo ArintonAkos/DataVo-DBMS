@@ -43,7 +43,7 @@ public static class BTreeDumpUtility
 
         try
         {
-            bool hasKey = IndexManager.Instance.IndexContainsKey("__probe__", indexName, tableName, databaseName);
+            bool hasKey = Runtime.DataVoEngine.Current().IndexManager.IndexContainsKey("__probe__", indexName, tableName, databaseName);
             sb.AppendLine($"=== Index: {indexName} on {tableName} (db: {databaseName}) ===");
             sb.AppendLine($"  Index loaded: YES (probe returned {hasKey})");
         }

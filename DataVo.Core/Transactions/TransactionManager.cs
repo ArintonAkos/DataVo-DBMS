@@ -29,7 +29,14 @@ public sealed class TransactionManager
 
     private readonly ConcurrentDictionary<Guid, TransactionContext> _activeTransactions = new();
 
-    private TransactionManager() { }
+    /// <summary>
+    /// Creates a transaction manager instance.
+    /// </summary>
+    /// <remarks>
+    /// The legacy process-wide singleton remains available through <see cref="Instance"/>,
+    /// while engine-scoped runtimes can create dedicated instances directly.
+    /// </remarks>
+    public TransactionManager() { }
 
     /// <summary>
     /// Opens a new explicit transaction for the given session.

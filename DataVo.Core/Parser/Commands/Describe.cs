@@ -1,9 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.Commands;
@@ -16,8 +14,7 @@ internal class Describe(DescribeStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             Catalog.GetTableColumns(_model.TableName, databaseName)
             .ForEach(column => Fields.Add(column.Name));

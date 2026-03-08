@@ -19,7 +19,7 @@ internal class Rollback : BaseDbAction
     {
         try
         {
-            TransactionManager.Instance.Rollback(session);
+            Transactions.Rollback(session);
             Messages.Add("Transaction rolled back.");
         }
         catch (Exception ex)

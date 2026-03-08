@@ -4,7 +4,6 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Parser.Types;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Enums;
 using DataVo.Core.Constants;
@@ -100,17 +99,17 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         foreach (string tableName in tableNames)
         {
-            LockManager.Instance.AcquireReadLock(databaseName, tableName);
+            Locks.AcquireReadLock(databaseName, tableName);
         }
 
         return tableNames;
     }
 
-    private static void ReleaseReadLocks(string databaseName, List<string> tableNames)
+    private void ReleaseReadLocks(string databaseName, List<string> tableNames)
     {
         for (int i = tableNames.Count - 1; i >= 0; i--)
         {
-            LockManager.Instance.ReleaseReadLock(databaseName, tableNames[i]);
+            Locks.ReleaseReadLock(databaseName, tableNames[i]);
         }
     }
 
@@ -247,8 +246,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// </exception>
     private string ValidateDatabase(Guid session)
     {
-        string databaseName = CacheStorage.Get(session)
-            ?? throw new Exception("No database in use!");
+        string databaseName = GetDatabaseName(session);
 
         bool hasMissingColumns = _model.Validate(databaseName);
 

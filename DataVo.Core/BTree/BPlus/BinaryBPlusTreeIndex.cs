@@ -9,7 +9,7 @@ namespace DataVo.Core.BTree.BPlus;
 /// All row IDs are stored in leaf pages, and leaf pages are linked through <see cref="BPlusTreePage.NextPageId"/>.
 /// This layout supports efficient exact-match lookups and sequential/range-style leaf scanning.
 /// </remarks>
-public class BinaryBPlusTreeIndex : IIndex
+public class BinaryBPlusTreeIndex : IIndex, IDisposable
 {
     private BPlusDiskPager _pager = null!;
 

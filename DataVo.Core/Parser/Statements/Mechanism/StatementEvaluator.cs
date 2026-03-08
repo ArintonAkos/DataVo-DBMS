@@ -111,7 +111,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingSecondaryIndex(TableDetail table, string rightValue, string indexFile)
     {
-        List<long> ids = [.. IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!)];
+        List<long> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!)];
         return LoadJoinedRowsFromContext(table, ids);
     }
 
@@ -124,7 +124,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingPrimaryKey(TableDetail table, string rightValue)
     {
-        List<long> ids = [.. IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!)];
+        List<long> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!)];
         return LoadJoinedRowsFromContext(table, ids);
     }
 
@@ -137,7 +137,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <returns>A <see cref="HashedTable"/> containing the loaded rows, fully joined.</returns>
     private HashedTable LoadJoinedRowsFromContext(TableDetail table, List<long> ids)
     {
-        var internalRows = StorageContext.Instance.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
+        var internalRows = Runtime.DataVoEngine.Current().StorageContext.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
 
         TableData tableRows = [];
         foreach (var kvp in internalRows)

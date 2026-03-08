@@ -4,7 +4,6 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -52,8 +51,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             if (ast.IfNotExists && Catalog.TableExists(_model.TableName, databaseName))
             {
@@ -95,7 +93,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
         var pkIndexFile = new IndexFile { IndexFileName = pkIndexName, AttributeNames = primaryKeys };
 
         Catalog.CreateIndex(pkIndexFile, _model.TableName, databaseName);
-        IndexManager.Instance.CreateIndex([], pkIndexName, _model.TableName, databaseName);
+        Indexes.CreateIndex([], pkIndexName, _model.TableName, databaseName);
     }
 
     /// <summary>
@@ -116,7 +114,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
             var ukIndexFile = new IndexFile { IndexFileName = ukIndexName, AttributeNames = [key] };
 
             Catalog.CreateIndex(ukIndexFile, _model.TableName, databaseName);
-            IndexManager.Instance.CreateIndex([], ukIndexName, _model.TableName, databaseName);
+            Indexes.CreateIndex([], ukIndexName, _model.TableName, databaseName);
         });
     }
 }

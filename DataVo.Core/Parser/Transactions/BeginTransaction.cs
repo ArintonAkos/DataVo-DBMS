@@ -19,7 +19,7 @@ internal class BeginTransaction : BaseDbAction
     {
         try
         {
-            TransactionManager.Instance.Begin(session);
+            Transactions.Begin(session);
             Messages.Add("Transaction started.");
         }
         catch (Exception ex)
