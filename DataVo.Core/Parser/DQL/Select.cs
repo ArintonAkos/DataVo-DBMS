@@ -56,9 +56,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             result = ApplyHaving(result);
             result = ApplyOrderBy(result);
 
-            Logger.Info($"Rows selected: {result.Count}");
-            Messages.Add($"Rows selected: {result.Count}");
-
             Fields = CreateFieldsFromColumns(result);
             Data = CreateDataFromResult(result, Fields);
 
@@ -66,6 +63,19 @@ internal class Select(SelectStatement ast) : BaseDbAction
             {
                 Data = ApplyDistinct(Data);
             }
+
+            if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+            {
+                Data = Data.Skip(_model.LimitSkip.Value).ToList();
+            }
+
+            if (_model.LimitTake.HasValue)
+            {
+                Data = Data.Take(_model.LimitTake.Value).ToList();
+            }
+
+            Logger.Info($"Rows selected: {Data.Count}");
+            Messages.Add($"Rows selected: {Data.Count}");
         }
         catch (Exception ex)
         {

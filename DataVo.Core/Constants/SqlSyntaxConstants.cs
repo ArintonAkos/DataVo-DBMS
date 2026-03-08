@@ -51,6 +51,8 @@ public static class SqlKeywords
     public const string OUTER = "OUTER";
     public const string CROSS = "CROSS";
     public const string DISTINCT = "DISTINCT";
+    public const string LIMIT = "LIMIT";
+    public const string OFFSET = "OFFSET";
     public const string COLUMN = "COLUMN";
     public const string VACUUM = "VACUUM";
     public const string CASCADE = "CASCADE";
@@ -70,6 +72,7 @@ public static class SqlKeywords
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
+        LIMIT, OFFSET,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL
     ];
 }

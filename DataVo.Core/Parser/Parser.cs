@@ -500,6 +500,26 @@ public class Parser(List<Token> tokens)
             selectStmt.OrderByExpression = ParseOrderBy();
         }
 
+        // 8. Parse optional LIMIT
+        if (Match(TokenType.Keyword, SqlKeywords.LIMIT))
+        {
+            var limitToken = Consume(TokenType.NumberLiteral, "limit value");
+            int take = int.Parse(limitToken.Value);
+            int skip = 0;
+
+            if (Match(TokenType.Keyword, SqlKeywords.OFFSET))
+            {
+                var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
+                skip = int.Parse(offsetToken.Value);
+            }
+
+            selectStmt.LimitExpression = new LimitNode
+            {
+                TakeTarget = take,
+                SkipTarget = skip
+            };
+        }
+
         return selectStmt;
     }
 
