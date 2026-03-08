@@ -131,11 +131,13 @@ public class GoStatement : SqlStatement { }
 // --- DDL ---
 public class CreateDatabaseStatement : SqlStatement
 {
+    public bool IfNotExists { get; set; } = false;
     public IdentifierNode DatabaseName { get; set; } = null!;
 }
 
 public class DropDatabaseStatement : SqlStatement
 {
+    public bool IfExists { get; set; } = false;
     public IdentifierNode DatabaseName { get; set; } = null!;
 }
 
@@ -153,12 +155,14 @@ public class ColumnDefinitionNode : SqlNode
 
 public class CreateTableStatement : SqlStatement
 {
+    public bool IfNotExists { get; set; } = false;
     public IdentifierNode TableName { get; set; } = null!;
     public List<ColumnDefinitionNode> Columns { get; set; } = [];
 }
 
 public class DropTableStatement : SqlStatement
 {
+    public bool IfExists { get; set; } = false;
     public IdentifierNode TableName { get; set; } = null!;
 }
 

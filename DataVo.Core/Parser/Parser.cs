@@ -112,12 +112,27 @@ public class Parser(List<Token> tokens)
     {
         if (Match(TokenType.Keyword, SqlKeywords.DATABASE))
         {
+            var stmt = new CreateDatabaseStatement();
+            if (Match(TokenType.Keyword, SqlKeywords.IF))
+            {
+                Consume(TokenType.Keyword, SqlKeywords.NOT_KEYWORD);
+                Consume(TokenType.Keyword, SqlKeywords.EXISTS);
+                stmt.IfNotExists = true;
+            }
             var dbNameToken = Consume(TokenType.Identifier, "database name");
-            return new CreateDatabaseStatement { DatabaseName = new IdentifierNode(dbNameToken.Value) };
+            stmt.DatabaseName = new IdentifierNode(dbNameToken.Value);
+            return stmt;
         }
         else if (Match(TokenType.Keyword, SqlKeywords.TABLE))
         {
             var stmt = new CreateTableStatement();
+            if (Match(TokenType.Keyword, SqlKeywords.IF))
+            {
+                Consume(TokenType.Keyword, SqlKeywords.NOT_KEYWORD);
+                Consume(TokenType.Keyword, SqlKeywords.EXISTS);
+                stmt.IfNotExists = true;
+            }
+            
             var tableNameToken = Consume(TokenType.Identifier, "table name");
             stmt.TableName = new IdentifierNode(tableNameToken.Value);
 
@@ -266,9 +281,27 @@ public class Parser(List<Token> tokens)
     private SqlStatement ParseDropStatement()
     {
         if (Match(TokenType.Keyword, SqlKeywords.DATABASE))
-            return new DropDatabaseStatement { DatabaseName = new IdentifierNode(Consume(TokenType.Identifier, "database name").Value) };
+        {
+            var stmt = new DropDatabaseStatement();
+            if (Match(TokenType.Keyword, SqlKeywords.IF))
+            {
+                Consume(TokenType.Keyword, SqlKeywords.EXISTS);
+                stmt.IfExists = true;
+            }
+            stmt.DatabaseName = new IdentifierNode(Consume(TokenType.Identifier, "database name").Value);
+            return stmt;
+        }
         else if (Match(TokenType.Keyword, SqlKeywords.TABLE))
-            return new DropTableStatement { TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value) };
+        {
+            var stmt = new DropTableStatement();
+            if (Match(TokenType.Keyword, SqlKeywords.IF))
+            {
+                Consume(TokenType.Keyword, SqlKeywords.EXISTS);
+                stmt.IfExists = true;
+            }
+            stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
+            return stmt;
+        }
         else if (Match(TokenType.Keyword, SqlKeywords.INDEX))
         {
             var stmt = new DropIndexStatement();

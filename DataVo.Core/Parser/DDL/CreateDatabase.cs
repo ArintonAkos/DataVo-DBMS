@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
@@ -31,6 +31,13 @@ internal class CreateDatabase(CreateDatabaseStatement ast) : BaseDbAction
     {
         try
         {
+            if (ast.IfNotExists && Catalog.DatabaseExists(_model.DatabaseName))
+            {
+                Logger.Info($"Database {_model.DatabaseName} already exists. Skipping creation.");
+                Messages.Add($"Database {_model.DatabaseName} already exists. Skipping creation.");
+                return;
+            }
+
             Catalog.CreateDatabase(_model.ToDatabase());
 
             Logger.Info($"New database {_model.DatabaseName} successfully created!");
