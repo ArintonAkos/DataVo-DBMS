@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
+    <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
   </ItemGroup>
 
 </Project>
