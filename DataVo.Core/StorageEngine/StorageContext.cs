@@ -2,6 +2,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.StorageEngine;
 
@@ -11,6 +12,8 @@ namespace DataVo.Core.StorageEngine;
 /// </summary>
 public class StorageContext(DataVoConfig config)
 {
+    public DataVoConfig Config { get; } = config;
+
     private readonly IStorageEngine _storageEngine = config.StorageMode switch
     {
         StorageMode.InMemory => new InMemoryStorageEngine(),
@@ -37,6 +40,11 @@ public class StorageContext(DataVoConfig config)
     public static void Initialize(DataVoConfig config)
     {
         _instance = new StorageContext(config);
+
+        if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
+        {
+            new RecoveryManager(config).Recover();
+        }
     }
 
     public void CreateTable(string tableName, string databaseName)

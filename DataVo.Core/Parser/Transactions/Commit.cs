@@ -4,6 +4,7 @@ using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.StorageEngine;
+using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.Transactions;
@@ -34,12 +35,24 @@ internal class Commit : BaseDbAction
                 ?? throw new Exception("No database in use!");
 
             var lockedTables = AcquireWriteLocks(databaseName, context);
+            DataVoConfig config = StorageContext.Instance.Config;
+            bool walEnabled = config.StorageMode == StorageMode.Disk && config.WalEnabled;
+            WalEntry? walEntry = walEnabled ? WalEntry.FromTransactionContext(databaseName, context) : null;
+            WalWriter? walWriter = walEnabled ? new WalWriter(config) : null;
 
             try
             {
-                FlushInserts(context, databaseName);
-                FlushDeletes(context, databaseName);
-                FlushUpdates(context, databaseName);
+                if (walWriter != null && walEntry != null)
+                {
+                    walWriter.Append(walEntry);
+                }
+
+                FlushContext(context, databaseName);
+
+                if (walWriter != null && walEntry != null)
+                {
+                    walWriter.MarkCheckpointed(walEntry.TransactionId);
+                }
             }
             finally
             {
@@ -53,6 +66,13 @@ internal class Commit : BaseDbAction
             Logger.Error(ex.Message);
             Messages.Add($"Error: {ex.Message}");
         }
+    }
+
+    internal static void FlushContext(TransactionContext context, string databaseName)
+    {
+        FlushInserts(context, databaseName);
+        FlushDeletes(context, databaseName);
+        FlushUpdates(context, databaseName);
     }
 
     private static List<string> AcquireWriteLocks(string databaseName, TransactionContext context)
@@ -129,7 +149,7 @@ internal class Commit : BaseDbAction
     /// Replays all buffered UPDATE operations using an out-of-place strategy (delete old + insert new),
     /// consistent with the standard <see cref="DML.Update"/> executor approach.
     /// </summary>
-    private void FlushUpdates(TransactionContext context, string databaseName)
+    private static void FlushUpdates(TransactionContext context, string databaseName)
     {
         foreach (var (tableName, updates) in context.UpdatedRows)
         {
