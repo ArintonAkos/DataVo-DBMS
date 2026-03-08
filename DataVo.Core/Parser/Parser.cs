@@ -76,6 +76,16 @@ public class Parser(List<Token> tokens)
                 statements.Add(ParseVacuumStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.UPDATE))
                 statements.Add(ParseUpdateStatement());
+            else if (Match(TokenType.Keyword, SqlKeywords.BEGIN))
+            {
+                // Optional TRANSACTION keyword after BEGIN
+                Match(TokenType.Keyword, SqlKeywords.TRANSACTION);
+                statements.Add(new BeginTransactionStatement());
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.COMMIT))
+                statements.Add(new CommitStatement());
+            else if (Match(TokenType.Keyword, SqlKeywords.ROLLBACK))
+                statements.Add(new RollbackStatement());
             else
             {
                 // Advance unknown tokens to avoid infinite loops

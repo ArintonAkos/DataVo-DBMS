@@ -52,7 +52,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
 
         foreach (var result in results)
         {
-            if (result.IsError || result.Messages.Any(m => !m.Contains("Rows affected") && !m.Contains("Rows selected") && !m.Contains("Database") && !m.Contains("Table") && !m.Contains("VACUUM")))
+            if (result.IsError || result.Messages.Any(m => !m.Contains("Rows affected") && !m.Contains("Rows selected") && !m.Contains("Database") && !m.Contains("Table") && !m.Contains("VACUUM") && !m.Contains("Transaction")))
             {
                 var errors = string.Join(", ", result.Messages);
                 throw new Exception($"SQL Execution Failed:\n{errors}");

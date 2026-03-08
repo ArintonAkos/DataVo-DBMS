@@ -65,6 +65,12 @@ public static class SqlKeywords
     public const string NOT_KEYWORD = "NOT";
     public const string NULL = "NULL";
 
+    // Transaction support
+    public const string BEGIN = "BEGIN";
+    public const string TRANSACTION = "TRANSACTION";
+    public const string COMMIT = "COMMIT";
+    public const string ROLLBACK = "ROLLBACK";
+
     public static readonly string[] All =
     [
         SELECT, FROM, WHERE, INSERT, INTO, VALUES,
@@ -75,7 +81,8 @@ public static class SqlKeywords
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
         LIMIT, OFFSET, IF, EXISTS,
-        VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL
+        VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL,
+        BEGIN, TRANSACTION, COMMIT, ROLLBACK
     ];
 }
 
