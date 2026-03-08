@@ -1,4 +1,4 @@
-﻿using DataVo.Core.Logging;
+using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
@@ -7,6 +7,7 @@ using DataVo.Core.Cache;
 using DataVo.Core.StorageEngine;
 using System.Text.RegularExpressions;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -37,7 +38,8 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            int rowsAffected = ProcessAndInsertTableRows(databaseName);
+            var txContext = TransactionManager.Instance.GetContext(session);
+            int rowsAffected = ProcessAndInsertTableRows(databaseName, txContext);
 
             Messages.Add($"Rows affected: {rowsAffected}");
         }
@@ -54,7 +56,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// </summary>
     /// <param name="databaseName">The current active context database name.</param>
     /// <returns>The total number of rows securely pushed to the database.</returns>
-    private int ProcessAndInsertTableRows(string databaseName)
+    private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext)
     {
         List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
         List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
@@ -98,7 +100,14 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             {
                 if (VerifyPrimaryKeys(rowDict, primaryKeys, rowNumber, databaseName))
                 {
-                    MakeInsertion(rowDict, indexFiles, databaseName);
+                    if (txContext != null)
+                    {
+                        txContext.BufferInsert(_model.TableName, rowDict);
+                    }
+                    else
+                    {
+                        MakeInsertion(rowDict, indexFiles, databaseName);
+                    }
                     rowsAffected++;
                 }
             }

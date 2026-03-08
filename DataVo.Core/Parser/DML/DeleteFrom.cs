@@ -1,4 +1,4 @@
-﻿using DataVo.Core.Logging;
+using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
@@ -7,6 +7,7 @@ using DataVo.Core.Cache;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -29,7 +30,18 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 return;
             }
 
-            ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+            var txContext = TransactionManager.Instance.GetContext(session);
+            if (txContext != null)
+            {
+                foreach (long rowId in toBeDeleted)
+                {
+                    txContext.BufferDelete(_model.TableName, rowId);
+                }
+            }
+            else
+            {
+                ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+            }
 
             Messages.Add($"Rows affected: {toBeDeleted.Count}");
         }
