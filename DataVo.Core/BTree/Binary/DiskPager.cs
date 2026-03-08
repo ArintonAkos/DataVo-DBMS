@@ -3,9 +3,12 @@ using System.IO.MemoryMappedFiles;
 namespace DataVo.Core.BTree.Binary;
 
 /// <summary>
-/// Handles translation between contiguous 4KB Blocks and BTreePage models.
-/// Upgraded to MemoryMappedFile for Zero-Copy OS level Page Caching and False-Sharing mitigation.
+/// Provides low-level page allocation and page I/O for binary B-Tree index files.
 /// </summary>
+/// <remarks>
+/// Page <c>0</c> is reserved for metadata. All tree pages begin at page <c>1</c>.
+/// A memory-mapped file is used so the operating system can manage page caching efficiently.
+/// </remarks>
 public class DiskPager : IDisposable
 {
     private readonly FileStream _fs;
@@ -13,9 +16,20 @@ public class DiskPager : IDisposable
     private MemoryMappedViewAccessor? _accessor;
     private const long InitialCapacity = 10L * 1024 * 1024; // 10MB init map
 
+    /// <summary>
+    /// Gets or sets the page ID of the tree root.
+    /// </summary>
     public int RootPageId { get; set; }
+
+    /// <summary>
+    /// Gets the total number of allocated pages, including the metadata page.
+    /// </summary>
     public int NumPages { get; private set; }
 
+    /// <summary>
+    /// Initializes a pager for the specified B-Tree file.
+    /// </summary>
+    /// <param name="filePath">The path to the backing index file.</param>
     public DiskPager(string filePath)
     {
         string? directory = Path.GetDirectoryName(filePath);
@@ -49,6 +63,9 @@ public class DiskPager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reads pager metadata from page <c>0</c>.
+    /// </summary>
     public void ReadMetadata()
     {
         byte[] meta = new byte[BTreePage.PageSize];
@@ -57,6 +74,9 @@ public class DiskPager : IDisposable
         NumPages = BitConverter.ToInt32(meta, 4);
     }
 
+    /// <summary>
+    /// Writes pager metadata to page <c>0</c>.
+    /// </summary>
     public void WriteMetadata()
     {
         byte[] meta = new byte[BTreePage.PageSize];
@@ -67,6 +87,10 @@ public class DiskPager : IDisposable
         _accessor!.WriteArray(0, meta, 0, BTreePage.PageSize);
     }
 
+    /// <summary>
+    /// Allocates a new empty page, writes it to disk, and updates metadata.
+    /// </summary>
+    /// <returns>The newly allocated page.</returns>
     public BTreePage AllocatePage()
     {
         int pageId = NumPages++;
@@ -84,6 +108,10 @@ public class DiskPager : IDisposable
         return page;
     }
 
+    /// <summary>
+    /// Expands the memory-mapped file to the specified capacity.
+    /// </summary>
+    /// <param name="newCapacity">The desired file capacity in bytes.</param>
     private void GrowMap(long newCapacity)
     {
         _accessor?.Flush();
@@ -95,12 +123,21 @@ public class DiskPager : IDisposable
         _accessor = _mmf.CreateViewAccessor();
     }
 
+    /// <summary>
+    /// Serializes and writes a page to its fixed page slot.
+    /// </summary>
+    /// <param name="page">The page to write.</param>
     public void WritePage(BTreePage page)
     {
         long offset = (long)page.PageId * BTreePage.PageSize;
         _accessor!.WriteArray(offset, page.Serialize(), 0, BTreePage.PageSize);
     }
 
+    /// <summary>
+    /// Reads and deserializes a page from the specified page ID.
+    /// </summary>
+    /// <param name="pageId">The page ID to read.</param>
+    /// <returns>The deserialized <see cref="BTreePage"/>.</returns>
     public BTreePage ReadPage(int pageId)
     {
         long offset = (long)pageId * BTreePage.PageSize;
@@ -109,6 +146,9 @@ public class DiskPager : IDisposable
         return BTreePage.Deserialize(data);
     }
 
+    /// <summary>
+    /// Flushes metadata and releases all memory-mapped resources.
+    /// </summary>
     public void Dispose()
     {
         WriteMetadata();

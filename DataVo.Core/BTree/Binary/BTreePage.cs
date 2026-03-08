@@ -2,21 +2,70 @@ using System.Text;
 
 namespace DataVo.Core.BTree.Binary;
 
+/// <summary>
+/// Represents a fixed-size on-disk page used by the binary B-Tree implementation.
+/// </summary>
+/// <remarks>
+/// Each page stores header data, a fixed number of string keys, their row ID values,
+/// and child page pointers. The page layout is designed to fit within 4 KB.
+/// </remarks>
 public class BTreePage
 {
+    /// <summary>
+    /// The size, in bytes, of a serialized page.
+    /// </summary>
     public const int PageSize = 4096;
+
+    /// <summary>
+    /// The maximum number of keys that can be stored in one page.
+    /// </summary>
     public const int MaxKeys = 59; // Calculated based on 4KB page and 64-byte entries. T = 30.
+
+    /// <summary>
+    /// The minimum number of keys an internal non-root page may contain after a split.
+    /// </summary>
     public const int MinKeys = 29; // T - 1
+
+    /// <summary>
+    /// The minimum degree of the binary B-Tree page layout.
+    /// </summary>
     public const int T = 30;
 
+    /// <summary>
+    /// Gets or sets the page identifier.
+    /// </summary>
     public int PageId { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this page is a leaf page.
+    /// </summary>
     public bool IsLeaf { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of populated key slots.
+    /// </summary>
     public int NumKeys { get; set; }
 
+    /// <summary>
+    /// Gets or sets the fixed-size key array.
+    /// Only the first <see cref="NumKeys"/> entries are considered populated.
+    /// </summary>
     public string[] Keys { get; set; } = new string[MaxKeys];
+
+    /// <summary>
+    /// Gets or sets the row ID values aligned with <see cref="Keys"/>.
+    /// </summary>
     public long[] Values { get; set; } = new long[MaxKeys];
+
+    /// <summary>
+    /// Gets or sets the child page pointers.
+    /// </summary>
     public int[] Children { get; set; } = new int[MaxKeys + 1];
 
+    /// <summary>
+    /// Serializes the page into its fixed 4 KB binary representation.
+    /// </summary>
+    /// <returns>The serialized page buffer.</returns>
     public byte[] Serialize()
     {
         byte[] buffer = new byte[PageSize];
@@ -44,6 +93,11 @@ public class BTreePage
         return buffer;
     }
 
+    /// <summary>
+    /// Deserializes a page from its fixed-size binary representation.
+    /// </summary>
+    /// <param name="data">The serialized page bytes.</param>
+    /// <returns>The deserialized <see cref="BTreePage"/> instance.</returns>
     public static BTreePage Deserialize(byte[] data)
     {
         var page = new BTreePage();
@@ -70,6 +124,12 @@ public class BTreePage
         return page;
     }
 
+    /// <summary>
+    /// Inserts a key/value pair into a page that is known not to be full.
+    /// </summary>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="value">The row ID associated with the key.</param>
+    /// <param name="pager">The pager used to read and write child pages.</param>
     public void InsertNonFull(string key, long value, DiskPager pager)
     {
         int i = NumKeys - 1;
@@ -115,6 +175,12 @@ public class BTreePage
         }
     }
 
+    /// <summary>
+    /// Splits a full child page and promotes its median key into the current page.
+    /// </summary>
+    /// <param name="i">The child slot to split.</param>
+    /// <param name="child">The full child page.</param>
+    /// <param name="pager">The pager used for page allocation and persistence.</param>
     public void SplitChild(int i, BTreePage child, DiskPager pager)
     {
         BTreePage z = pager.AllocatePage();
@@ -162,6 +228,12 @@ public class BTreePage
         pager.WritePage(this);
     }
 
+    /// <summary>
+    /// Encodes a string into a fixed-length UTF-8 byte array.
+    /// </summary>
+    /// <param name="str">The source string.</param>
+    /// <param name="length">The fixed byte length to produce.</param>
+    /// <returns>A byte array of exactly <paramref name="length"/> bytes.</returns>
     private static byte[] GetFixedStringBytes(string? str, int length)
     {
         byte[] result = new byte[length];
@@ -173,6 +245,11 @@ public class BTreePage
         return result;
     }
 
+    /// <summary>
+    /// Decodes a fixed-length UTF-8 byte array back into a managed string.
+    /// </summary>
+    /// <param name="bytes">The fixed-length string bytes.</param>
+    /// <returns>The decoded string with trailing null padding removed.</returns>
     private static string GetStringFromFixedBytes(byte[] bytes)
     {
         string str = Encoding.UTF8.GetString(bytes);

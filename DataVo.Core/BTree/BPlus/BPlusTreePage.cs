@@ -1,37 +1,79 @@
 namespace DataVo.Core.BTree.BPlus;
 
 /// <summary>
-/// B+Tree Page. Represents a 4KB Disk Block.
-///
-/// Page layout (4096 bytes):
-///   Header:   16 bytes (PageId, IsLeaf, NumKeys, NextPageId, padding)
-///   Keys:     96 × 32 bytes = 3072 bytes (fixed-size byte[32] per slot)
-///   Leaf:     96 × 8 bytes = 768 bytes (long row IDs) → total = 3856 bytes
-///   Internal: 97 × 4 bytes = 388 bytes (int child page IDs) → total = 3476 bytes
-///
-/// Key encoding is handled by <see cref="IndexKeyEncoder"/>.
+/// Represents a fixed-size 4 KB page used by the binary B+Tree implementation.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Leaf pages store encoded keys plus row IDs and are linked together through <see cref="NextPageId"/>
+/// to support efficient sequential scans.
+/// </para>
+/// <para>
+/// Internal pages store encoded keys plus child pointers used for routing.
+/// Key encoding is delegated to <see cref="IndexKeyEncoder"/>.
+/// </para>
+/// </remarks>
 public class BPlusTreePage
 {
+    /// <summary>
+    /// The size, in bytes, of a serialized page.
+    /// </summary>
     public const int PageSize = 4096;
+
+    /// <summary>
+    /// The maximum number of keys that can be stored in a page.
+    /// </summary>
     public const int MaxKeys = 96;
+
+    /// <summary>
+    /// The minimum number of keys a non-root page should contain after a split.
+    /// </summary>
     public const int MinKeys = 47; // T-1
+
+    /// <summary>
+    /// The minimum degree implied by the page layout.
+    /// </summary>
     public const int T = 48;       // MaxKeys / 2
 
+    /// <summary>
+    /// Gets or sets the page identifier.
+    /// </summary>
     public int PageId { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this page is a leaf page.
+    /// </summary>
     public bool IsLeaf { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of populated key slots.
+    /// </summary>
     public int NumKeys { get; set; }
+
+    /// <summary>
+    /// Gets or sets the next leaf page ID, or <c>-1</c> when there is no next leaf.
+    /// </summary>
     public int NextPageId { get; set; } = -1; // Linked list for leaf sequential scans
 
-    // Fixed-size byte[32] key slots — all types, correct ordering via IndexKeyEncoder
+    /// <summary>
+    /// Gets or sets the fixed-size encoded key slots.
+    /// </summary>
     public byte[][] Keys { get; set; }
 
-    // Leaf: row IDs that each key points to. Value 0 = empty/tombstone sentinel.
+    /// <summary>
+    /// Gets or sets the row ID values stored in leaf pages.
+    /// A value of <c>0</c> represents an empty or tombstoned slot.
+    /// </summary>
     public long[] Values { get; set; }
 
-    // Internal: child page IDs. Children[i] points to subtree with keys < Keys[i].
+    /// <summary>
+    /// Gets or sets the child page IDs stored in internal pages.
+    /// </summary>
     public int[] Children { get; set; }
 
+    /// <summary>
+    /// Initializes a new empty page instance.
+    /// </summary>
     public BPlusTreePage()
     {
         Keys = new byte[MaxKeys][];
@@ -42,13 +84,25 @@ public class BPlusTreePage
         Children = new int[MaxKeys + 1];
     }
 
+    /// <summary>
+    /// Returns the row ID stored at the specified slot.
+    /// </summary>
+    /// <param name="index">The value slot index.</param>
+    /// <returns>The stored row ID.</returns>
     public long GetValue(int index) => Values[index];
 
+    /// <summary>
+    /// Stores a row ID at the specified value slot.
+    /// </summary>
+    /// <param name="index">The value slot index.</param>
+    /// <param name="value">The row ID to store.</param>
     public void SetValue(int index, long value) => Values[index] = value;
 
     /// <summary>
-    /// Finds the first index where Keys[i] >= targetKey using byte comparison.
+    /// Finds the first slot whose key is greater than or equal to the specified encoded target key.
     /// </summary>
+    /// <param name="targetKey">The encoded key to locate.</param>
+    /// <returns>The insertion or routing index for the target key.</returns>
     public int FindIndex(byte[] targetKey)
     {
         int i = 0;
@@ -59,6 +113,10 @@ public class BPlusTreePage
         return i;
     }
 
+    /// <summary>
+    /// Serializes the page to its fixed-size binary representation.
+    /// </summary>
+    /// <returns>The serialized page buffer.</returns>
     public byte[] Serialize()
     {
         byte[] buffer = new byte[PageSize];
@@ -98,6 +156,11 @@ public class BPlusTreePage
         return buffer;
     }
 
+    /// <summary>
+    /// Deserializes a page from its fixed-size binary representation.
+    /// </summary>
+    /// <param name="data">The serialized page bytes.</param>
+    /// <returns>The deserialized <see cref="BPlusTreePage"/>.</returns>
     public static BPlusTreePage Deserialize(byte[] data)
     {
         var page = new BPlusTreePage();

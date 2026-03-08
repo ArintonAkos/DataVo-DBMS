@@ -5,17 +5,38 @@ using DataVo.Core.BTree.Core;
 namespace DataVo.Core.BTree;
 
 /// <summary>
-/// Debug utility for inspecting B-Tree / B+Tree index contents.
-/// Call from the VS Code debug watch window or Immediate Window:
-///   BTreeDumpUtility.DumpIndex("_PK_Users", "Users", "MyDB")
-///   BTreeDumpUtility.DumpBPlusTreeFile("databases/MyDB/Users__PK_Users_index.btree")
+/// Provides debugger-oriented helpers for inspecting the on-disk contents of B-Tree and B+Tree indexes.
 /// </summary>
+/// <remarks>
+/// <para>
+/// This type is intended for diagnostics and troubleshooting rather than normal query execution.
+/// The output is formatted as plain text so it can be copied directly from a debugger watch window,
+/// Immediate Window, or log output.
+/// </para>
+/// <para>
+/// Typical usage:
+/// <code>
+/// BTreeDumpUtility.DumpIndex("_PK_Users", "Users", "MyDB");
+/// BTreeDumpUtility.DumpBPlusTreeFile("databases/MyDB/Users__PK_Users_index.btree");
+/// </code>
+/// </para>
+/// </remarks>
 public static class BTreeDumpUtility
 {
     /// <summary>
-    /// Dumps a B+Tree index via the IndexManager singleton (must be loaded/cached).
-    /// Returns a formatted string you can inspect in the debugger.
+    /// Loads an index through <see cref="IndexManager"/> and returns a formatted textual dump of its backing B+Tree file.
     /// </summary>
+    /// <param name="indexName">The logical index name, such as <c>_PK_Users</c> or a user-defined index name.</param>
+    /// <param name="tableName">The table that owns the index.</param>
+    /// <param name="databaseName">The database containing the table and index file.</param>
+    /// <returns>
+    /// A human-readable dump containing the header information and, when the file is available,
+    /// the page-by-page contents of the associated B+Tree file.
+    /// </returns>
+    /// <remarks>
+    /// This method intentionally traps index-loading failures and returns the error message inside
+    /// the formatted output instead of throwing, which makes it more convenient to use while debugging.
+    /// </remarks>
     public static string DumpIndex(string indexName, string tableName, string databaseName)
     {
         var sb = new StringBuilder();
@@ -48,9 +69,16 @@ public static class BTreeDumpUtility
     }
 
     /// <summary>
-    /// Dumps the raw contents of a B+Tree .btree file.
-    /// Shows page layout, keys (hex + decoded), values (row IDs), and linked-list structure.
+    /// Reads a raw <c>.btree</c> file and produces a page-by-page textual representation of its contents.
     /// </summary>
+    /// <param name="filePath">The path to the B+Tree file to inspect.</param>
+    /// <returns>
+    /// A formatted string that includes file metadata, each page's type, keys, row IDs,
+    /// child pointers, and the leaf-page linked-list information.
+    /// </returns>
+    /// <remarks>
+    /// Missing files are reported in the returned text instead of causing an exception.
+    /// </remarks>
     public static string DumpBPlusTreeFile(string filePath)
     {
         var sb = new StringBuilder();
@@ -101,8 +129,13 @@ public static class BTreeDumpUtility
     }
 
     /// <summary>
-    /// Formats a byte[32] key for display, showing both decoded value and hex prefix.
+    /// Formats an encoded key for display by attempting to decode simple integer keys first,
+    /// then falling back to a hexadecimal representation.
     /// </summary>
+    /// <param name="key">The encoded key bytes read from a B+Tree page.</param>
+    /// <returns>
+    /// A readable representation such as <c>INT(42)</c>, <c>[empty]</c>, or a hex byte sequence.
+    /// </returns>
     private static string FormatKey(byte[] key)
     {
         if (IndexKeyEncoder.IsEmptyKey(key))
