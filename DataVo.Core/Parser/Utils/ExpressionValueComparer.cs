@@ -2,6 +2,15 @@ namespace DataVo.Core.Parser.Utils;
 
 internal static class ExpressionValueComparer
 {
+    /// <summary>
+    /// Compares two expression values for equality with optional trimming of quoted strings and numeric tolerance. Handles nulls, numeric types, and string comparisons.
+    /// </summary>
+    /// <param name="leftValue">The left value to compare.</param>
+    /// <param name="rightValue">The right value to compare.</param>
+    /// <param name="trimQuotedStrings">Whether to trim single quotes from string values before comparison.</param>
+    /// <param name="useNumericTolerance">Whether to use numeric tolerance for floating-point comparisons.</param>
+    /// <param name="numericTolerance">The tolerance for numeric comparisons.</param>
+    /// <returns>True if the values are considered equal, false otherwise.</returns>
     public static bool AreEqual(object? leftValue, object? rightValue, bool trimQuotedStrings = false, bool useNumericTolerance = false, double numericTolerance = 0.0001)
     {
         if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
@@ -37,6 +46,13 @@ internal static class ExpressionValueComparer
         return Convert.ToString(leftValue) == Convert.ToString(rightValue);
     }
 
+    /// <summary>
+    /// Compares two expression values with optional trimming of quoted strings and numeric tolerance. Returns -1 if left < right, 0 if equal, and 1 if left > right.
+    /// </summary>
+    /// <param name="leftValue">The left value to compare.</param>
+    /// <param name="rightValue">The right value to compare.</param>
+    /// <param name="trimQuotedStrings">Whether to trim single quotes from string values before comparison.</param>
+    /// <returns>-1 if leftValue is less than rightValue, 0 if they are equal, and 1 if leftValue is greater than rightValue.</returns>
     public static int Compare(object? leftValue, object? rightValue, bool trimQuotedStrings = false)
     {
         if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
