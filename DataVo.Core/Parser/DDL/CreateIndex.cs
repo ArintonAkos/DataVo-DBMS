@@ -12,26 +12,47 @@ using DataVo.Core.Models.Statement.Utils;
 namespace DataVo.Core.Parser.DDL;
 
 /// <summary>
-/// Represents an index creation action.
-/// Derived from <see cref="BaseDbAction"/>.
+/// Handles the <c>CREATE INDEX</c> DDL statement.
+/// <para>
+/// Registers a new index in the system catalog and populates it with data from
+/// all existing rows in the target table. The index is backed by a B-Tree structure
+/// managed by <see cref="IndexManager"/>.
+/// </para>
+/// <para>
+/// For composite indexes (multiple columns), the key is formed by concatenating
+/// column values with <c>"##"</c> as a delimiter.
+/// </para>
 /// </summary>
-/// <param name="ast">The AST representing the CREATE INDEX statement.</param>
+/// <param name="ast">The parsed <see cref="CreateIndexStatement"/> AST node.</param>
 /// <example>
 /// <code>
 /// var ast = new CreateIndexStatement { IndexName = "Idx_LastName", TableName = "Users" };
 /// var action = new CreateIndex(ast);
-/// action.PerformAction(Guid.NewGuid());
+/// action.PerformAction(sessionId);
+/// // Output message: "New index file Idx_LastName successfully created!"
 /// </code>
 /// </example>
 internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
 {
+    /// <summary>
+    /// The parsed model containing the index name, target table, and indexed column names.
+    /// </summary>
     private readonly CreateIndexModel _model = CreateIndexModel.FromAst(ast);
 
     /// <summary>
-    /// Executes the creation of a new index within the database catalog 
-    /// and populates it with existing table data.
+    /// Executes the index creation pipeline:
+    /// <list type="number">
+    ///   <item><description>Resolves the active database from the session cache.</description></item>
+    ///   <item><description>Registers the index definition in the system catalog.</description></item>
+    ///   <item><description>Reads all existing rows from the target table via the storage engine.</description></item>
+    ///   <item><description>Builds the index key-to-rowID mapping from the existing data.</description></item>
+    ///   <item><description>Creates the B-Tree index file via <see cref="IndexManager"/>.</description></item>
+    /// </list>
     /// </summary>
-    /// <param name="session">The unique identifier of the user session executing the action.</param>
+    /// <param name="session">The session identifier used to resolve the active database from the cache.</param>
+    /// <remarks>
+    /// On failure, the error message is logged and appended to <see cref="BaseDbAction.Messages"/>.
+    /// </remarks>
     public override void PerformAction(Guid session)
     {
         try
@@ -57,11 +78,14 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Scans the currently existing rows in the table to dynamically build the index dictionary.
-    /// Extracts column data relevant to the index and concatenates it to serve as the dictionary key.
+    /// Iterates over all existing rows in the table and builds a dictionary mapping
+    /// composite index keys to their corresponding row IDs.
     /// </summary>
-    /// <param name="tableData">The physical table row contents mapped by their primary 64-bit bounds.</param>
-    /// <returns>A dictionary mapping the generated index keys to row IDs.</returns>
+    /// <param name="tableData">All rows in the table, keyed by row ID with column name/value dictionaries as values.</param>
+    /// <returns>
+    /// A dictionary where each key is a composite index string (column values joined by <c>"##"</c>)
+    /// and each value is a list of row IDs that share that key.
+    /// </returns>
     private Dictionary<string, List<long>> CreateIndexContents(Dictionary<long, Dictionary<string, dynamic>> tableData)
     {
         Dictionary<string, List<long>> indexContentDict = [];
@@ -84,11 +108,14 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Extracts the composite index string key from the target columns within a single row.
-    /// Columns are separated by '##'.
+    /// Extracts the values of the indexed columns from a single row and concatenates them
+    /// into a composite key string, using <c>"##"</c> as the delimiter between values.
     /// </summary>
-    /// <param name="rowColumns">The dictionary containing all attribute names and values for a distinct row.</param>
-    /// <returns>A formatted index key string reflecting the target attributes.</returns>
+    /// <param name="rowColumns">A dictionary of all column name/value pairs for a single row.</param>
+    /// <returns>
+    /// The composite index key string (e.g., <c>"Smith##John"</c> for a composite index on LastName and FirstName).
+    /// Returns an empty string if none of the indexed columns are found in the row.
+    /// </returns>
     private string ExtractIndexKeyFromRow(Dictionary<string, dynamic> rowColumns)
     {
         string key = string.Empty;

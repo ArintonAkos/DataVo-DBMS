@@ -13,11 +13,18 @@ using DataVo.Core.Utils;
 namespace DataVo.Core.Parser.DQL;
 
 /// <summary>
-/// Represents the execution logic for a SQL SELECT statement.
-/// Handles evaluating tables, joins, applying filtering (WHERE, HAVING), 
-/// grouping, aggregation, ordering, and selecting distinct results.
+/// Executes a SQL <c>SELECT</c> statement against the currently active database.
+/// <para>
+/// Orchestrates the full query pipeline: table resolution, WHERE filtering,
+/// JOIN evaluation, GROUP BY grouping, aggregate computation, HAVING filtering,
+/// ORDER BY sorting, and DISTINCT de-duplication.
+/// </para>
+/// <para>
+/// On successful execution, the <see cref="BaseDbAction.Fields"/> and
+/// <see cref="BaseDbAction.Data"/> properties are populated with the query result.
+/// </para>
 /// </summary>
-/// <param name="ast">The AST node representing the SELECT statement.</param>
+/// <param name="ast">The parsed <see cref="SelectStatement"/> AST node representing the SELECT query.</param>
 internal class Select(SelectStatement ast) : BaseDbAction
 {
     /// <summary>
@@ -26,10 +33,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private readonly SelectModel _model = SelectModel.FromAst(ast);
 
     /// <summary>
-    /// Executes the SELECT query against the currently active database for the given session.
-    /// Sets the <see cref="BaseDbAction.Fields"/> and <see cref="BaseDbAction.Data"/> properties upon success.
+    /// Executes the SELECT query end-to-end.
+    /// <para>
+    /// Pipeline: validate database → evaluate WHERE / JOIN → GROUP BY → aggregate → HAVING → ORDER BY → project columns → DISTINCT.
+    /// </para>
     /// </summary>
-    /// <param name="session">The unique identifier of the user's session.</param>
+    /// <param name="session">The session identifier used to resolve the active database from the cache.</param>
+    /// <exception cref="Exception">
+    /// Caught internally. Error details are appended to <see cref="BaseDbAction.Messages"/> and logged via <see cref="Logger"/>.
+    /// </exception>
     public override void PerformAction(Guid session)
     {
         try
@@ -63,43 +75,46 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Filters the result data to include only distinct rows based on column values.
+    /// Removes duplicate rows from the result set by comparing all column values.
+    /// Uses <see cref="DictionaryComparer"/> for structural equality across row dictionaries.
     /// </summary>
-    /// <param name="data">The raw row data to filter.</param>
-    /// <returns>A new list of unique rows.</returns>
-    private List<Dictionary<string, dynamic>> ApplyDistinct(List<Dictionary<string, dynamic>> data)
+    /// <param name="data">The unfiltered result rows that may contain duplicates.</param>
+    /// <returns>A new list containing only distinct rows.</returns>
+    private static List<Dictionary<string, dynamic>> ApplyDistinct(List<Dictionary<string, dynamic>> data)
     {
-        return data.Select(d => d.ToDictionary(k => k.Key, v => (object?)v.Value))
+        return [.. data.Select(d => d.ToDictionary(k => k.Key, v => (object?)v.Value))
                    .Distinct(new DictionaryComparer())
-                   .Select(d => d.ToDictionary(k => k.Key, v => (dynamic)v.Value!))
-                   .ToList();
+                   .Select(d => d.ToDictionary(k => k.Key, v => (dynamic)v.Value!))];
     }
 
     /// <summary>
-    /// Evaluates the GROUP BY clause to group the rows based on specified criteria.
+    /// Delegates to the model's <c>GroupByStatement</c> to partition the result rows into groups.
+    /// If no GROUP BY clause is present, the entire result set is treated as a single group.
     /// </summary>
-    /// <param name="tableData">The current listed table data.</param>
-    /// <returns>A collection of grouped records.</returns>
+    /// <param name="tableData">The flat result rows prior to grouping.</param>
+    /// <returns>A <see cref="GroupedTable"/> containing the partitioned row groups.</returns>
     private GroupedTable GroupResults(ListedTable tableData)
     {
         return _model.GroupByStatement.Evaluate(tableData);
     }
 
     /// <summary>
-    /// Evaluates aggregate functions on the previously grouped table data.
+    /// Applies aggregate functions (e.g., <c>COUNT</c>, <c>SUM</c>, <c>AVG</c>) to the grouped table data
+    /// and flattens the result back into a <see cref="ListedTable"/>.
     /// </summary>
-    /// <param name="groupedTable">The grouped result table.</param>
-    /// <returns>The aggregated list table.</returns>
+    /// <param name="groupedTable">The grouped result table produced by <see cref="GroupResults"/>.</param>
+    /// <returns>A <see cref="ListedTable"/> with aggregated values appended to each group's representative row.</returns>
     private ListedTable AggregateGroupedTable(GroupedTable groupedTable)
     {
         return _model.AggregateStatement.Perform(groupedTable);
     }
 
     /// <summary>
-    /// Filters the aggregated results based on the HAVING clause, if present.
+    /// Filters the result set using the HAVING clause expression, if one was specified.
+    /// Each row is tested against the HAVING predicate; rows that do not satisfy the condition are removed.
     /// </summary>
-    /// <param name="tableData">The table data containing aggregated metrics.</param>
-    /// <returns>The filtered result set.</returns>
+    /// <param name="tableData">The aggregated result set to filter.</param>
+    /// <returns>The filtered <see cref="ListedTable"/>, or the original data if no HAVING clause exists.</returns>
     private ListedTable ApplyHaving(ListedTable tableData)
     {
         var havingExpression = _model.GetHavingExpression();
@@ -116,10 +131,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Sorts the result set based on the ORDER BY clause, if present.
+    /// Sorts the result set according to the ORDER BY clause, if one was specified.
+    /// Multiple sort columns are applied in order, with each subsequent column acting as a tiebreaker.
     /// </summary>
-    /// <param name="tableData">The table data to sort.</param>
-    /// <returns>The sorted result set.</returns>
+    /// <param name="tableData">The result set to sort.</param>
+    /// <returns>The sorted <see cref="ListedTable"/>, or the original data if no ORDER BY clause exists.</returns>
     private ListedTable ApplyOrderBy(ListedTable tableData)
     {
         var orderByExpression = _model.GetOrderByExpression();
@@ -135,16 +151,18 @@ internal class Select(SelectStatement ast) : BaseDbAction
             ordered = ApplyOrderToColumn(tableData, ordered, orderCol);
         }
 
-        return ordered == null ? tableData : new ListedTable(ordered.ToList());
+        return ordered == null ? tableData : [.. ordered.ToList()];
     }
 
     /// <summary>
-    /// Applies sorting for a specific column to an optionally already-sorted set.
+    /// Applies a single ORDER BY column directive to the result set.
+    /// If <paramref name="ordered"/> is <c>null</c>, establishes the primary sort;
+    /// otherwise, appends a secondary (tiebreaker) sort via <c>ThenBy</c> / <c>ThenByDescending</c>.
     /// </summary>
-    /// <param name="tableData">The initial table data.</param>
-    /// <param name="ordered">The currently ordered enumeration, if any.</param>
-    /// <param name="orderCol">The ordering instruction for a specific column.</param>
-    /// <returns>An ordered enumeration including the new sort criteria.</returns>
+    /// <param name="tableData">The initial (unsorted) table data — used only for the first sort column.</param>
+    /// <param name="ordered">The existing ordered enumeration from previous sort columns, or <c>null</c> if this is the first.</param>
+    /// <param name="orderCol">The ORDER BY directive specifying the column name and sort direction (<c>ASC</c> / <c>DESC</c>).</param>
+    /// <returns>An <see cref="IOrderedEnumerable{T}"/> incorporating the new sort criterion.</returns>
     private IOrderedEnumerable<JoinedRow> ApplyOrderToColumn(ListedTable tableData, IOrderedEnumerable<JoinedRow>? ordered, OrderByColumnNode orderCol)
     {
         Func<JoinedRow, object?> keySelector = row => ResolveColumnValue(row, orderCol.Column.Name);
@@ -162,10 +180,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Validates that a database is currently selected in the session.
+    /// Validates that a database is currently selected for the session and that
+    /// all referenced columns exist in the catalog schema.
     /// </summary>
-    /// <param name="session">The unique identifier of the user's session.</param>
-    /// <returns>The name of the connected database.</returns>
+    /// <param name="session">The session identifier used to look up the active database.</param>
+    /// <returns>The name of the active database.</returns>
+    /// <exception cref="Exception">
+    /// Thrown when no database is in use or when invalid columns are referenced
+    /// outside of a JOIN context.
+    /// </exception>
     private string ValidateDatabase(Guid session)
     {
         string databaseName = CacheStorage.Get(session)
@@ -182,9 +205,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Determines the execution source of the main query (e.g. from a WHERE condition, JOIN evaluation, or full table scan).
+    /// Determines the initial row source for the query based on the clauses present:
+    /// <list type="bullet">
+    ///   <item><description>If a WHERE clause exists, evaluates it (with JOIN support).</description></item>
+    ///   <item><description>If only a JOIN is present (no WHERE), evaluates the JOIN directly.</description></item>
+    ///   <item><description>Otherwise, performs a full table scan on the FROM table.</description></item>
+    /// </list>
     /// </summary>
-    /// <returns>A ListedTable populated with the initial matched rows.</returns>
+    /// <returns>A <see cref="ListedTable"/> containing the initial matched rows.</returns>
     private ListedTable EvaluateStatements()
     {
         ListedTable result;
@@ -210,9 +238,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Materializes the table row dictionaries and performs the JOIN evaluations across tables.
+    /// Converts the FROM table's content into a <see cref="HashedTable"/> and passes it through
+    /// the configured JOIN strategy to produce the joined result set.
+    /// Called when the query contains a JOIN clause but no WHERE clause.
     /// </summary>
-    /// <returns>A ListedTable containing joined rows.</returns>
+    /// <returns>A <see cref="ListedTable"/> containing the joined rows.</returns>
     private ListedTable EvaluateJoin()
     {
         HashedTable groupedInitialTable = [];
@@ -226,10 +256,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Determines the correct output schema (fields list) based on select statements, considering aliases and table sources.
+    /// Constructs the output field list based on the columns specified in the SELECT clause.
+    /// In a JOIN context, field names are prefixed with the table name or alias (e.g., <c>Users.Name</c>).
+    /// If aggregation results are present (identified by <see cref="GroupBy.HASH_VALUE"/>),
+    /// the aggregated column names are appended to the field list.
     /// </summary>
-    /// <param name="filteredTable">The fully evaluated table data.</param>
-    /// <returns>A list of qualified field names.</returns>
+    /// <param name="filteredTable">The fully evaluated result set, used to inspect aggregation metadata.</param>
+    /// <returns>A list of qualified field names representing the output schema.</returns>
     private List<string> CreateFieldsFromColumns(ListedTable filteredTable)
     {
         List<string> selectedColumns = _model.GetSelectedColumns();
@@ -265,11 +298,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Maps the evaluated result rows to standard dictionary-based data sets matching the requested fields.
+    /// Projects each result row into a dictionary keyed by field name, matching the output schema.
     /// </summary>
     /// <param name="filteredTable">The fully evaluated and filtered result set.</param>
-    /// <param name="fieldsList">The list of target field names.</param>
-    /// <returns>A list of data rows represented as dictionaries.</returns>
+    /// <param name="fieldsList">The ordered list of output field names.</param>
+    /// <returns>A list of dictionaries, each representing one output row mapped by field name to its value.</returns>
     private List<Dictionary<string, dynamic>> CreateDataFromResult(ListedTable filteredTable, List<string> fieldsList)
     {
         List<Dictionary<string, dynamic>> result = new();
@@ -283,11 +316,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Extracts data for a single row matched to the requested view layout.
+    /// Extracts column values from a single <see cref="JoinedRow"/> according to the output field list.
+    /// Handles column aliases (split on <c>" AS "</c>) and includes aggregation results when present.
     /// </summary>
-    /// <param name="row">The joined row containing the retrieved data.</param>
-    /// <param name="fieldsList">The layout sequence of mapping field names.</param>
-    /// <returns>A dictionary map tying property names to parsed dynamic row data.</returns>
+    /// <param name="row">The joined row containing per-table column dictionaries.</param>
+    /// <param name="fieldsList">The ordered list of output field names.</param>
+    /// <returns>A dictionary mapping each field name to its value for this row.</returns>
     private Dictionary<string, dynamic> ExtractRowData(JoinedRow row, List<string> fieldsList)
     {
         Dictionary<string, dynamic> data = new();
@@ -322,11 +356,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Evaluates a HAVING clause predicate against a specific retrieved row.
+    /// Recursively evaluates a HAVING clause predicate against a specific row.
+    /// Delegates to <see cref="EvaluateLiteralNode"/> for simple literals and
+    /// <see cref="EvaluateBinaryNode"/> for binary expressions.
     /// </summary>
-    /// <param name="node">The expression node constraint.</param>
-    /// <param name="row">The specific database row representation.</param>
-    /// <returns>True if the condition succeeds, false otherwise.</returns>
+    /// <param name="node">The root expression node of the HAVING predicate (or a sub-node during recursion).</param>
+    /// <param name="row">The row to test against the predicate.</param>
+    /// <returns><c>true</c> if the row satisfies the condition; otherwise, <c>false</c>.</returns>
+    /// <exception cref="Exception">Thrown when the node type is not a <see cref="LiteralNode"/> or <see cref="BinaryExpressionNode"/>.</exception>
     private bool EvaluatePredicate(ExpressionNode node, JoinedRow row)
     {
         if (node is LiteralNode literalNode)
@@ -343,10 +380,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Interprets basic direct literal statements natively passed to a query constraint condition.
+    /// Evaluates a standalone literal node as a boolean.
+    /// Returns <c>true</c> for boolean <c>true</c> or the SQL literal <c>TRUE</c> string; <c>false</c> otherwise.
     /// </summary>
-    /// <param name="literalNode">The literal constraint to check.</param>
-    /// <returns>The boolean equivalent result of the literal.</returns>
+    /// <param name="literalNode">The literal node to evaluate.</param>
+    /// <returns>The boolean interpretation of the literal value.</returns>
     private bool EvaluateLiteralNode(LiteralNode literalNode)
     {
         if (literalNode.Value is bool b) return b;
@@ -355,11 +393,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Parses a binary operand and delegates execution recursively left to right to solve conditionals natively.
+    /// Evaluates a binary expression node within a HAVING predicate.
+    /// For logical operators (<c>AND</c>, <c>OR</c>), recursively evaluates the left and right sub-trees.
+    /// For comparison operators, delegates to <see cref="EvaluateComparisonOperator"/>.
     /// </summary>
-    /// <param name="binNode">The binary comparison condition segment.</param>
-    /// <param name="row">The joined row properties representing current evaluation context.</param>
-    /// <returns>The result condition matching behavior of evaluated conditions constraint.</returns>
+    /// <param name="binNode">The binary expression node containing the operator and operands.</param>
+    /// <param name="row">The row to test against the condition.</param>
+    /// <returns><c>true</c> if the row satisfies the binary condition; otherwise, <c>false</c>.</returns>
     private bool EvaluateBinaryNode(BinaryExpressionNode binNode, JoinedRow row)
     {
         if (binNode.Operator == Operators.AND)
@@ -376,11 +416,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Tests the inequality properties of distinct node values dynamically fetched for evaluation limits.
+    /// Evaluates a comparison operator (<c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>, <c>&lt;=</c>, <c>&gt;=</c>)
+    /// by resolving both operand values from the row and applying the operator.
     /// </summary>
-    /// <param name="binNode">The binary statement context holding standard variables logic.</param>
-    /// <param name="row">Context-specific row iteration value representation mapping properties requested.</param>
-    /// <returns>Result representing whether dynamic comparisons yield success execution expectations logically.</returns>
+    /// <param name="binNode">The binary expression containing the comparison operator and operands.</param>
+    /// <param name="row">The row from which operand values are resolved.</param>
+    /// <returns><c>true</c> if the comparison holds; otherwise, <c>false</c>.</returns>
+    /// <exception cref="Exception">Thrown when the operator is not supported in a HAVING context.</exception>
     private bool EvaluateComparisonOperator(BinaryExpressionNode binNode, JoinedRow row)
     {
         object? leftValue = ResolveNodeValue(binNode.Left, row);
@@ -400,11 +442,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Handles strict equality evaluation comparing mixed internal primitive variables properly formatted natively.
+    /// Compares two values for equality. Quoted strings are trimmed before comparison.
+    /// Applies numeric tolerance for floating-point values.
+    /// Returns <c>false</c> if either value is <c>null</c>.
     /// </summary>
-    /// <param name="val1">The left-hand comparative standard component natively referenced representation.</param>
-    /// <param name="val2">The right-hand comparative standard component natively referenced representation.</param>
-    /// <returns>Significance context specifying strict native comparison equivalence evaluation natively.</returns>
+    /// <param name="val1">The left-hand value.</param>
+    /// <param name="val2">The right-hand value.</param>
+    /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
     private static bool EvaluateEquality(object? val1, object? val2)
     {
         if (val1 == null || val2 == null) return false;
@@ -412,11 +456,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Compares values correctly distinguishing and factoring null or numeric scaling issues.
+    /// Performs an ordered comparison between two values.
+    /// Quoted strings are trimmed before comparison. Returns <c>null</c> if either value is <c>null</c>.
     /// </summary>
-    /// <param name="leftVal">The initial numeric/string sequence context to execute dynamically natively formatted logic over conditionally securely effectively resolving standard operations successfully sequentially iteratively strictly universally validating accurately evaluating directly implicitly explicit behavior specifically evaluating logically executing predictably checking accurately validating correctly resolving optimally strictly processing efficiently precisely explicitly validating inherently appropriately efficiently mapping correctly properly securely checking natively accurately testing natively explicitly precisely parsing precisely matching functionally successfully naturally validating correctly reliably directly logically validating explicitly efficiently optimally efficiently functionally efficiently effectively inherently securely functionally natively structurally correctly accurately evaluating precisely logically successfully validating checking parsing efficiently accurately formatting predictably properly parsing correctly logically appropriately securely natively optimizing effectively executing.</param>
-    /// <param name="rightVal">The evaluating object corresponding sequence context successfully dynamically naturally evaluated native standard checking functionally correctly properly reliably efficiently.</param>
-    /// <returns>Integer comparative equivalent defining precedence behavior directly logically matching natively successfully.</returns>
+    /// <param name="leftVal">The left-hand value.</param>
+    /// <param name="rightVal">The right-hand value.</param>
+    /// <returns>
+    /// A negative integer if <paramref name="leftVal"/> is less than <paramref name="rightVal"/>,
+    /// zero if equal, a positive integer if greater, or <c>null</c> if either operand is <c>null</c>.
+    /// </returns>
     private static int? CompareDynamics(object? leftVal, object? rightVal)
     {
         if (leftVal == null || rightVal == null) return null;
@@ -424,11 +472,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Transforms the abstract syntax node parameter into standard evaluable constants querying underlying tables directly.
+    /// Resolves an expression node to its runtime value. Handles <see cref="LiteralNode"/>,
+    /// <see cref="ResolvedColumnRefNode"/>, and <see cref="ColumnRefNode"/>.
     /// </summary>
-    /// <param name="node">The expression component directly requesting specific mapped parameters correctly natively sequentially executing logic natively mapped safely securely appropriately sequentially precisely directly reliably mapped strictly implicitly validating formatting explicitly accurately checking effectively validating checking efficiently correctly validating conditionally effectively structurally checking natively parsing explicitly securely evaluating directly extracting optimizing optimally validating reliably correctly checking naturally properly validating dynamically efficiently correctly accurately parsing logically evaluating precisely mapping matching extracting structurally natively natively explicitly accurately securely securely processing sequentially generating reliably correctly sequentially correctly optimally natively validating implicitly appropriately optimally native implicitly checking successfully effectively checking naturally testing checking functionally efficiently mapped securely mapped directly mapped properly mapped correctly uniquely efficiently logically successfully explicitly securely accurately sequentially safely securely mapping recursively correctly successfully explicitly securely explicitly mapped appropriately inherently correctly structurally accurately functionally sequentially cleanly safely dependably dynamically reliably safely structurally confidently accurately natively successfully safely securely efficiently properly carefully consistently structurally recursively implicitly functionally strictly effectively accurately optimizing specifically perfectly natively properly matching specifically robustly validating reliably explicitly structurally reliably precisely checking effectively securely safely naturally properly mapping recursively correctly parsing efficiently parsing correctly securely functionally accurately securely successfully reliably natively efficiently matching correctly.</param>
-    /// <param name="row">The joined iterating collection context object specifically mapping natively natively explicitly optimally predictably implicitly efficiently mapping functionally safely checking efficiently efficiently uniquely confidently securely accurately sequentially natively optimizing natively reliably explicitly testing evaluating structurally confidently inherently recursively efficiently checking safely verifying logically appropriately properly matching predictably dynamically checking optimally successfully cleanly reliably confidently carefully securely natively safely correctly matching structurally dependably accurately uniquely optimally efficiently confidently validating recursively mapping natively parsing accurately cleanly dependably extracting safely thoroughly cleanly logically cleanly safely optimally securely checking flawlessly reliably mapping optimizing cleanly reliably accurately successfully reliably flawlessly optimally matching successfully testing properly consistently efficiently flawlessly matching dependably carefully successfully validating accurately gracefully mapping dependably formatting dependably securely validating exactly accurately effectively safely properly dynamically natively testing logically mapping accurately safely cleanly.</param>
-    /// <returns>A generic evaluation result mapping logically safely effectively.</returns>
+    /// <param name="node">The expression node to resolve.</param>
+    /// <param name="row">The current row from which column values are extracted.</param>
+    /// <returns>The resolved value, or the literal value directly.</returns>
+    /// <exception cref="Exception">Thrown when the node type is not supported in a HAVING context.</exception>
     private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
     {
         if (node is LiteralNode literalNode)
@@ -448,22 +498,26 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Retrieves row data explicitly targeted via the column identifier mapping the table layout properties precisely.
+    /// Retrieves the value of a column from a <see cref="JoinedRow"/> by its reference string.
+    /// Supports both unqualified column names (e.g., <c>"Name"</c>) and qualified references
+    /// (e.g., <c>"Users.Name"</c>). For unqualified names, the column must exist in exactly one
+    /// table to avoid ambiguity.
     /// </summary>
-    /// <param name="row">The currently evaluated logical sequence iteration.</param>
-    /// <param name="columnReference">The textual standard field identifier indicating required retrieval coordinates implicitly.</param>
-    /// <returns>The data element directly resolving natively securely strictly.</returns>
+    /// <param name="row">The joined row containing per-table column dictionaries.</param>
+    /// <param name="columnReference">The column reference, optionally prefixed with a table name or alias separated by <c>'.'</c>.</param>
+    /// <returns>The column value from the matched table, or <c>null</c> if the value is null.</returns>
+    /// <exception cref="Exception">Thrown when the column is not found or is ambiguous across multiple tables.</exception>
     private object? ResolveColumnValue(JoinedRow row, string columnReference)
     {
         string[] referenceParts = columnReference.Split('.');
-        
+
         if (referenceParts.Length == 1)
         {
             var matchedTables = row.Keys.Where(t => row[t].ContainsKey(columnReference)).ToList();
-            
+
             if (matchedTables.Count == 0) throw new Exception($"Column '{columnReference}' not found.");
             if (matchedTables.Count > 1) throw new Exception($"Column '{columnReference}' is ambiguous.");
-            
+
             return row[matchedTables.First()][columnReference];
         }
 

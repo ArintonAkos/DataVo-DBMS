@@ -1,48 +1,91 @@
-# Select.cs
+# Select
 
-The `Select.cs` module is the primary orchestrator that processes Data Query Language (DQL) queries. Unlike DML operators that target specific storage structures implicitly, the `Select` action dynamically defines abstract query structures combining `WHERE` bounds, outer/inner `JOIN` strategies, and sorting `ORDER BY` layers into a single coherent output array natively formatting structs smoothly tracking variables clearly.
+`Select` executes a SQL `SELECT` statement against the currently active database. It orchestrates the full query pipeline from table resolution through to final output projection.
 
-## Implementation Details & Methodologies
+## Overview
 
-| Feature | Supported | Description |
-| :--- | :---: | :--- |
-| **WHERE Filtering** | Yes | Identifies target rows matching specific expressions completely tracking options proactively resolving bounds smartly setting variables elegantly mapping blocks clearly storing limits. |
-| **JOIN Statements** | Yes | Translates targeted tables natively joining records utilizing `Left`, `Inner`, `Cross`, `Full`, etc., leveraging `HashLookupTables` logically separating iteration states securely organizing components correctly handling processes cleanly formatting sizes effortlessly setting structures nicely generating trees efficiently replacing values appropriately tracking sizes automatically processing links robustly extracting logic organically mapping variables fluently parsing matrices effectively checking outputs gracefully. |
-| **GROUP BY & Aggregations** | Yes | Successfully groups variables processing mathematical arrays natively converting numbers efficiently setting attributes naturally processing floats perfectly extracting doubles smartly representing strings cleanly isolating methods effectively structuring bytes completely recording limits fluidly formatting parameters natively setting buffers explicitly determining boundaries accurately representing lists explicitly mapping sizes perfectly executing metrics specifically wrapping metrics. |
-| **HAVING Clauses** | Yes | Safely determines logic natively verifying structures cleanly isolating outputs efficiently passing sizes optimally evaluating expressions after grouping and aggregation have occurred. |
-| **ORDER BY Clauses** | Yes | Sorts projections natively ordering outputs efficiently checking parameters securely recording outputs intelligently evaluating `ASC` or `DESC` tracking bytes fluidly verifying boundaries optimally standardizing logic efficiently storing elements logically maintaining sizes creatively extracting bytes successfully capturing arrays elegantly mapping bytes properly validating limits. |
-| **DISTINCT Selection**  | Yes | Extrapolates strictly distinct values tracking sets actively iterating bounds mapping features cleanly isolating logic naturally formatting outputs securely grouping hashes seamlessly mapping matrices fluidly reducing matrices organically extracting variables seamlessly establishing matrices gracefully wrapping parameters optimally capturing trees correctly comparing lists effectively checking maps strictly setting sets intelligently standardizing metrics nicely interpreting arrays smartly configuring metrics. |
-| **Complex Subqueries** | No | Nested SQL string resolutions mapping vectors elegantly storing states clearly testing instances smoothly checking boundaries appropriately storing sizes intelligently determining options dynamically wrapping trees naturally setting boundaries naturally defining arrays explicitly updating numbers natively writing loops gracefully executing paths cleanly updating types organically tracking sequences efficiently handling numbers functionally replacing data smoothly converting sizes explicitly loading data predictably analyzing sizes fluidly parsing structures securely saving arrays creatively capturing paths functionally formatting logic fluently formatting limits neatly extracting files proactively testing paths. |
+The `Select` action processes a query through the following pipeline stages:
 
-### DQL Evaluation Algorithm
+1. **Validate** — resolves the active database and validates that all referenced columns exist.
+2. **Evaluate Statements** — determines the row source (WHERE filter, JOIN, or full table scan).
+3. **GROUP BY** — partitions the rows into groups if a GROUP BY clause is present.
+4. **Aggregate** — applies aggregate functions (COUNT, SUM, AVG, etc.) to grouped data.
+5. **HAVING** — filters grouped/aggregated rows based on the HAVING predicate.
+6. **ORDER BY** — sorts the result set by one or more columns (ASC/DESC).
+7. **Project** — maps the internal `JoinedRow` structures to output dictionaries keyed by field name.
+8. **DISTINCT** — removes duplicate rows if `SELECT DISTINCT` was specified.
 
-The DQL resolution cleanly tracks variables creatively loading strings safely defining arrays fluidly maintaining sizes nicely loading properties accurately describing structures elegantly parsing variables properly creating links intelligently replacing limits smartly defining networks robustly formatting paths gracefully checking states natively defining boundaries naturally wrapping parameters seamlessly isolating sizes actively wrapping features practically structuring logic elegantly replacing files.
+## Supported Features
+
+| Feature | Description |
+| :--- | :--- |
+| **WHERE Filtering** | Delegates to `StatementEvaluator` (with JOIN) or the WHERE statement evaluator to filter rows using index lookups or full scans. |
+| **JOIN** | Supports INNER, LEFT, RIGHT, CROSS, and FULL joins via the `Join` strategy class. |
+| **GROUP BY** | Groups rows by one or more columns using `GroupByStatement.Evaluate`. |
+| **Aggregations** | Applies aggregate functions (COUNT, SUM, AVG, MIN, MAX) via `AggregateStatement.Perform`. |
+| **HAVING** | Filters grouped results by recursively evaluating the HAVING expression tree against each row. Supports nested AND/OR conditions. |
+| **ORDER BY** | Multi-column sorting with ASC/DESC per column. Uses `DynamicObjectComparer` for type-aware ordering. |
+| **DISTINCT** | De-duplicates result rows using structural equality via `DictionaryComparer`. |
+
+## Execution Flow
 
 ```mermaid
 flowchart TD
-    Start[Execute SELECT] --> Fetch[Validating Table & Columns from Catalog]
-    
-    Fetch --> CheckJoin{Has JOIN?}
-    CheckJoin -- Yes --> ParseJoin[Construct JoinedRowId utilizing configured Strategy]
-    CheckJoin -- No --> BaseFrom[Fetch complete Base Table from StorageContext]
-    
-    ParseJoin --> ApplyWhere[Evaluate Statements Where Condition]
-    BaseFrom --> ApplyWhere
-    
-    ApplyWhere --> Grouping{Has GROUP BY?}
-    Grouping -- Yes --> ExecuteGroup[Execute GroupByStatement.Evaluate]
-    Grouping -- No --> ExecuteGroup
-    
-    ExecuteGroup --> Aggregating[Execute AggregateStatement.Perform]
-    
-    Aggregating --> Having{Has HAVING?}
-    Having -- Yes --> ApplyHaving[Filter grouped records matching Predicate]
-    Having -- No --> ApplyHaving
-    
-    ApplyHaving --> ApplyOrder[Apply ORDER BY sorting columns]
-    ApplyOrder --> Result[Format Final DataVo QueryResult]
+    Start[PerformAction] --> Validate[Validate database and columns]
+    Validate --> Source{Row Source}
+    Source -- "WHERE clause" --> Where[Evaluate WHERE with JOIN support]
+    Source -- "JOIN only" --> Join[Evaluate JOIN directly]
+    Source -- "Neither" --> Scan[Full table scan on FROM table]
+
+    Where --> Group[GROUP BY]
+    Join --> Group
+    Scan --> Group
+
+    Group --> Agg[Apply Aggregate Functions]
+    Agg --> Having{Has HAVING?}
+    Having -- Yes --> Filter[Filter with HAVING predicate]
+    Having -- No --> Order
+    Filter --> Order[ORDER BY sorting]
+    Order --> Project[Project columns to output schema]
+    Project --> Distinct{Is DISTINCT?}
+    Distinct -- Yes --> Dedup[Remove duplicate rows]
+    Distinct -- No --> Done[Return Fields + Data]
+    Dedup --> Done
 ```
 
-### Critical Implementation specifics
-- **Mathematical Threshold Evaluation:** For conditions defined inside `HAVING` or standard `WHERE`, expressions are broken down natively wrapping links intuitively mapping limits securely operating structs nicely maintaining states intuitively writing bytes accurately writing parameters correctly setting attributes intelligently standardizing trees creatively recording paths fluently formatting addresses effectively verifying bounds smartly establishing properties effectively utilizing `ExpressionValueComparer.cs` validating operators correctly checking integers properly analyzing lists fluently analyzing properties smoothly. 
-- **Hash Join Optimization:** The algorithm deliberately attempts to cache the smaller relational matrix securely optimizing arrays perfectly executing boundaries elegantly creating networks explicitly tracking arrays smartly writing trees functionally mapping sizes creatively extracting values explicitly pushing operations effectively manipulating limits safely loading lists fluidly creating paths accurately updating features transparently manipulating parameters physically formatting sequences smoothly configuring variables effectively resolving types safely defining arrays appropriately reading lists successfully validating properties perfectly caching limits securely optimizing components successfully updating lists fully tracking numbers natively maintaining bytes successfully configuring components smoothly utilizing `JoinLookupTable.cs`.
+## Key Implementation Details
+
+- **`EvaluateStatements`**: Chooses between three strategies based on the query clauses present. When both WHERE and JOIN exist, the WHERE evaluator handles JOIN integration internally.
+- **`ApplyOrderToColumn`**: Supports multi-column ORDER BY by chaining `OrderBy`/`ThenBy` calls. The first column uses `OrderBy`; subsequent columns use `ThenBy`.
+- **`EvaluatePredicate`**: Recursively evaluates HAVING expressions. Supports AND/OR logical operators and all comparison operators (`=`, `!=`, `<`, `>`, `<=`, `>=`).
+- **`ResolveColumnValue`**: Resolves column values from `JoinedRow` structures, supporting both qualified (`Table.Column`) and unqualified (`Column`) references. Throws if an unqualified reference is ambiguous across multiple tables.
+- **`CreateFieldsFromColumns`**: In a JOIN context, field names are prefixed with the table name or alias. Aggregation result columns (stored under `GroupBy.HASH_VALUE`) are appended at the end.
+
+## Error Handling
+
+All exceptions are caught internally. On failure:
+- The full exception (including stack trace) is logged and appended to `Messages`.
+
+Common failure causes:
+- No database is currently selected (`"No database in use!"`).
+- Invalid or ambiguous column references.
+- Unsupported HAVING predicate node types.
+
+## Example
+
+```sql
+SELECT u.Name, COUNT(*) AS OrderCount
+FROM Users u
+INNER JOIN Orders o ON u.Id = o.UserId
+WHERE u.Active = 1
+GROUP BY u.Name
+HAVING COUNT(*) > 5
+ORDER BY OrderCount DESC;
+```
+
+This query:
+1. Joins `Users` and `Orders` on `Id = UserId`.
+2. Filters to active users only.
+3. Groups by user name.
+4. Counts orders per user and filters groups with more than 5.
+5. Sorts by order count descending.
