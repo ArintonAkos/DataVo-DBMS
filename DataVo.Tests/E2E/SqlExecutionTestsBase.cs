@@ -1,5 +1,5 @@
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 
@@ -13,29 +13,26 @@ namespace DataVo.Tests.E2E;
 public abstract class SqlExecutionTestsBase : IDisposable
 {
     protected readonly string TestDb;
-    protected readonly DataVoConfig Config;
+    protected DataVoConfig Config;
+    protected DataVoEngine Engine;
     private readonly Guid _session = Guid.NewGuid();
 
     protected SqlExecutionTestsBase(DataVoConfig config, string testDbName)
     {
-        Config = config;
-        TestDb = testDbName;
-
-        TestEngineLock.Instance.Wait();
-
-        // Initialize the global engine instance to use the test's config
-        StorageContext.Initialize(Config);
-
-        // Wipe and recreate catalog slate
-        try { Catalog.DropDatabase(TestDb); } catch { }
-        if (Config.StorageMode == StorageMode.Disk && Directory.Exists(Config.DiskStoragePath))
-        {
-            try { Directory.Delete(Config.DiskStoragePath, true); } catch { }
-        }
+        Config = CreateIsolatedConfig(config);
+        TestDb = $"{testDbName}_{Guid.NewGuid():N}";
+        Engine = DataVoEngine.Initialize(Config);
 
         // Boot Database via raw SQL
         Execute($"CREATE DATABASE {TestDb}");
         Execute($"USE {TestDb}");
+    }
+
+    protected void ReinitializeEngine(DataVoConfig config)
+    {
+        Engine.Dispose();
+        Config = CloneConfig(config);
+        Engine = DataVoEngine.Initialize(Config);
     }
 
     /// <summary>
@@ -44,7 +41,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
     /// </summary>
     protected void Execute(string sql)
     {
-        var engine = new QueryEngine(sql, _session);
+        var engine = new QueryEngine(sql, _session, Engine);
         var results = engine.Parse();
 
         foreach (var result in results)
@@ -59,7 +56,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
 
     protected Core.Contracts.Results.QueryResult ExecuteAndReturn(string sql)
     {
-        var engine = new QueryEngine(sql, _session);
+        var engine = new QueryEngine(sql, _session, Engine);
         var results = engine.Parse();
         var last = results.LastOrDefault();
 
@@ -68,12 +65,52 @@ public abstract class SqlExecutionTestsBase : IDisposable
 
     public void Dispose()
     {
-        try { Catalog.DropDatabase(TestDb); } catch { }
-        if (Config.StorageMode == StorageMode.Disk && Directory.Exists(Config.DiskStoragePath))
+        CleanupResources();
+    }
+
+    private void CleanupResources()
+    {
+        try { Engine.Catalog.DropDatabase(TestDb); } catch { }
+        try { Engine.IndexManager.DropDatabaseIndexes(TestDb); } catch { }
+        try { Engine.Dispose(); } catch { }
+
+        if (Config.StorageMode == StorageMode.Disk && !string.IsNullOrWhiteSpace(Config.DiskStoragePath) && Directory.Exists(Config.DiskStoragePath))
         {
             try { Directory.Delete(Config.DiskStoragePath, true); } catch { }
         }
 
-        TestEngineLock.Instance.Release();
+        string walPath = Config.ResolveWalFilePath();
+        if (File.Exists(walPath))
+        {
+            try { File.Delete(walPath); } catch { }
+        }
+    }
+
+    private static DataVoConfig CreateIsolatedConfig(DataVoConfig config)
+    {
+        string? diskPath = config.StorageMode == StorageMode.Disk
+            ? Path.Combine(config.DiskStoragePath ?? Path.Combine(Path.GetTempPath(), "datavo_tests"), Guid.NewGuid().ToString("N"))
+            : null;
+
+        return new DataVoConfig
+        {
+            StorageMode = config.StorageMode,
+            DiskStoragePath = diskPath,
+            WalEnabled = config.WalEnabled,
+            WalFilePath = config.WalFilePath,
+            WalCheckpointThreshold = config.WalCheckpointThreshold,
+        };
+    }
+
+    private static DataVoConfig CloneConfig(DataVoConfig config)
+    {
+        return new DataVoConfig
+        {
+            StorageMode = config.StorageMode,
+            DiskStoragePath = config.DiskStoragePath,
+            WalEnabled = config.WalEnabled,
+            WalFilePath = config.WalFilePath,
+            WalCheckpointThreshold = config.WalCheckpointThreshold,
+        };
     }
 }

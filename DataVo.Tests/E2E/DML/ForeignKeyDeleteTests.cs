@@ -118,13 +118,11 @@ public abstract class ForeignKeyDeleteTestsBase(DataVoConfig config, string test
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryForeignKeyDeleteTests : ForeignKeyDeleteTestsBase
 {
     public InMemoryForeignKeyDeleteTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "FKDeleteDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskForeignKeyDeleteTests : ForeignKeyDeleteTestsBase
 {
     public DiskForeignKeyDeleteTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_fkdelete" }, "FKDeleteDB_Disk") { }

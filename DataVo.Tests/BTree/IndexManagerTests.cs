@@ -1,17 +1,20 @@
 using DataVo.Core.BTree;
+using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.BTree;
 
 public class IndexManagerTests : IDisposable
 {
     private readonly string _testDir;
-    private const string TestDb = "test_db";
+    private readonly string _testDb = $"test_db_{Guid.NewGuid():N}";
     private const string TestTable = "test_table";
+    private readonly IndexManager _manager;
 
     public IndexManagerTests()
     {
         _testDir = Path.Combine(Path.GetTempPath(), $"datavo_im_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDir);
+        _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
     }
 
     public void Dispose()
@@ -25,26 +28,24 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void CreateIndex_WithEmptyData_CreatesIndex()
     {
-        var manager = IndexManager.Instance;
         var emptyData = new Dictionary<string, List<long>>();
 
         // This should not throw
-        manager.CreateIndex(emptyData, "test_idx", TestTable, TestDb);
+        _manager.CreateIndex(emptyData, "test_idx", TestTable, _testDb);
     }
 
     [Fact]
     public void CreateIndex_WithData_CanFilter()
     {
-        var manager = IndexManager.Instance;
         var data = new Dictionary<string, List<long>>
         {
             { "42", new List<long> { 1, 2 } },
             { "43", new List<long> { 3 } }
         };
 
-        manager.CreateIndex(data, "filter_idx", TestTable, TestDb);
+        _manager.CreateIndex(data, "filter_idx", TestTable, _testDb);
 
-        var result = manager.FilterUsingIndex("42", "filter_idx", TestTable, TestDb);
+        var result = _manager.FilterUsingIndex("42", "filter_idx", TestTable, _testDb);
         Assert.Equal(2, result.Count);
         Assert.Contains(1L, result);
         Assert.Contains(2L, result);
@@ -53,12 +54,11 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void InsertIntoIndex_AddsEntryToExistingIndex()
     {
-        var manager = IndexManager.Instance;
-        manager.CreateIndex([], "insert_idx", TestTable, TestDb);
+        _manager.CreateIndex([], "insert_idx", TestTable, _testDb);
 
-        manager.InsertIntoIndex("1", 99L, "insert_idx", TestTable, TestDb);
+        _manager.InsertIntoIndex("1", 99L, "insert_idx", TestTable, _testDb);
 
-        var result = manager.FilterUsingIndex("1", "insert_idx", TestTable, TestDb);
+        var result = _manager.FilterUsingIndex("1", "insert_idx", TestTable, _testDb);
         Assert.Single(result);
         Assert.Contains(99L, result);
     }
@@ -66,52 +66,49 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void IndexContainsRow_ReturnsTrueForExistingValue()
     {
-        var manager = IndexManager.Instance;
         var data = new Dictionary<string, List<long>>
         {
             { "99", new List<long> { 1 } }
         };
-        manager.CreateIndex(data, "contains_idx", TestTable, TestDb);
+        _manager.CreateIndex(data, "contains_idx", TestTable, _testDb);
 
-        Assert.True(manager.IndexContainsRow(1L, "contains_idx", TestTable, TestDb));
-        Assert.False(manager.IndexContainsRow(2L, "contains_idx", TestTable, TestDb));
+        Assert.True(_manager.IndexContainsRow(1L, "contains_idx", TestTable, _testDb));
+        Assert.False(_manager.IndexContainsRow(2L, "contains_idx", TestTable, _testDb));
     }
 
     [Fact]
     public void DeleteFromIndex_RemovesRowIds()
     {
-        var manager = IndexManager.Instance;
         var data = new Dictionary<string, List<long>>
         {
             { "10", new List<long> { 1, 2 } },
             { "20", new List<long> { 3 } }
         };
-        manager.CreateIndex(data, "delete_idx", TestTable, TestDb);
+        _manager.CreateIndex(data, "delete_idx", TestTable, _testDb);
 
-        manager.DeleteFromIndex([1L, 3L], "delete_idx", TestTable, TestDb);
+        _manager.DeleteFromIndex([1L, 3L], "delete_idx", TestTable, _testDb);
 
-        var resultA = manager.FilterUsingIndex("10", "delete_idx", TestTable, TestDb);
+        var resultA = _manager.FilterUsingIndex("10", "delete_idx", TestTable, _testDb);
         Assert.Single(resultA);
         Assert.Contains(2L, resultA);
 
-        var resultB = manager.FilterUsingIndex("20", "delete_idx", TestTable, TestDb);
+        var resultB = _manager.FilterUsingIndex("20", "delete_idx", TestTable, _testDb);
         Assert.Empty(resultB);
     }
 
     [Fact]
     public void DropIndex_RemovesIndex()
     {
-        var manager = IndexManager.Instance;
         var data = new Dictionary<string, List<long>>
         {
             { "50", new List<long> { 1 } }
         };
-        manager.CreateIndex(data, "drop_idx", TestTable, TestDb);
+        _manager.CreateIndex(data, "drop_idx", TestTable, _testDb);
 
-        manager.DropIndex("drop_idx", TestTable, TestDb);
+        _manager.DropIndex("drop_idx", TestTable, _testDb);
 
         // After dropping, trying to filter should throw because the index no longer exists
         Assert.Throws<Exception>(() =>
-            manager.FilterUsingIndex("50", "drop_idx", TestTable, TestDb));
+            _manager.FilterUsingIndex("50", "drop_idx", TestTable, _testDb));
     }
 }
