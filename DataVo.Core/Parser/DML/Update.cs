@@ -7,6 +7,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -47,7 +48,18 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
             (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
-            ExecuteUpdate(newRows, oldRowIds, databaseName);
+            var txContext = TransactionManager.Instance.GetContext(session);
+            if (txContext != null)
+            {
+                for (int i = 0; i < newRows.Count; i++)
+                {
+                    txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRows[i]);
+                }
+            }
+            else
+            {
+                ExecuteUpdate(newRows, oldRowIds, databaseName);
+            }
 
             Messages.Add($"Rows affected: {newRows.Count}");
         }

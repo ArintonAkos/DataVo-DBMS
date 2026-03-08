@@ -226,3 +226,24 @@ public class VacuumStatement : SqlStatement
 {
     public IdentifierNode TableName { get; set; } = null!;
 }
+
+// --- Transaction Control ---
+
+/// <summary>
+/// Represents a <c>BEGIN [TRANSACTION]</c> statement that opens an explicit transaction scope.
+/// All subsequent DML operations are buffered in memory until a <see cref="CommitStatement"/>
+/// or <see cref="RollbackStatement"/> is encountered.
+/// </summary>
+public class BeginTransactionStatement : SqlStatement { }
+
+/// <summary>
+/// Represents a <c>COMMIT</c> statement that finalizes the active transaction,
+/// flushing all buffered changes to the storage engine.
+/// </summary>
+public class CommitStatement : SqlStatement { }
+
+/// <summary>
+/// Represents a <c>ROLLBACK</c> statement that discards all buffered changes
+/// in the active transaction and restores the session to auto-commit mode.
+/// </summary>
+public class RollbackStatement : SqlStatement { }

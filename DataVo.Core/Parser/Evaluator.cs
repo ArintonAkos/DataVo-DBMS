@@ -1,6 +1,7 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.DQL;
+using DataVo.Core.Parser.Transactions;
 
 namespace DataVo.Core.Parser;
 
@@ -76,6 +77,18 @@ internal class Evaluator(List<SqlStatement> statements)
             else if (statement is VacuumStatement vacuumAst)
             {
                 currentQueue.Enqueue(new DML.Vacuum(vacuumAst));
+            }
+            else if (statement is BeginTransactionStatement)
+            {
+                currentQueue.Enqueue(new BeginTransaction());
+            }
+            else if (statement is CommitStatement)
+            {
+                currentQueue.Enqueue(new Commit());
+            }
+            else if (statement is RollbackStatement)
+            {
+                currentQueue.Enqueue(new Rollback());
             }
             else
             {
