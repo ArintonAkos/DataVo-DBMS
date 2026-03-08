@@ -19,7 +19,14 @@ public sealed class LockManager
 
     public static LockManager Instance => _instance.Value;
 
-    private LockManager() { }
+    /// <summary>
+    /// Creates a lock manager instance.
+    /// </summary>
+    /// <remarks>
+    /// The legacy process-wide singleton remains available through <see cref="Instance"/>,
+    /// while engine-scoped runtimes can create dedicated instances directly.
+    /// </remarks>
+    public LockManager() { }
 
     public void AcquireReadLock(string databaseName, string tableName)
     {

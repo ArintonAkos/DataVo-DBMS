@@ -1,5 +1,4 @@
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -47,13 +46,12 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             string tableName = ast.TableName.Name;
 
             // 1. Compact the storage: remove tombstoned rows, get surviving rows with new IDs
-            var compactedRows = StorageContext.Instance.CompactTable(tableName, databaseName);
+            var compactedRows = Context.CompactTable(tableName, databaseName);
 
             // 2. Rebuild all indexes for this table from scratch
             var indexes = Catalog.GetTableIndexes(tableName, databaseName);
@@ -61,7 +59,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
             foreach (var index in indexes)
             {
                 // Drop the old index
-                IndexManager.Instance.DropIndex(index.IndexFileName, tableName, databaseName);
+                Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
 
                 // Recreate with fresh data
                 var indexData = new Dictionary<string, List<long>>();
@@ -77,7 +75,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
                     indexData[indexKey].Add(newRowId);
                 }
 
-                IndexManager.Instance.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
+                Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
             }
 
             Messages.Add($"VACUUM complete. {compactedRows.Count} rows compacted in {tableName}.");

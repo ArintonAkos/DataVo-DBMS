@@ -1,5 +1,6 @@
 using DataVo.Core.Logging;
 using DataVo.Core.Parser.Transactions;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Core.Transactions;
@@ -18,12 +19,13 @@ namespace DataVo.Core.Transactions;
 /// recoveryManager.Recover();
 /// </code>
 /// </example>
-public sealed class RecoveryManager(DataVoConfig config)
+public sealed class RecoveryManager(DataVoConfig config, DataVoEngine? engine = null)
 {
     /// <summary>
     /// The active engine configuration used to decide whether recovery should run.
     /// </summary>
     private readonly DataVoConfig _config = config;
+    private readonly DataVoEngine _engine = engine ?? DataVoEngine.Current();
 
     /// <summary>
     /// Reads persisted WAL entries from disk.
@@ -75,7 +77,7 @@ public sealed class RecoveryManager(DataVoConfig config)
 
         try
         {
-            Commit.FlushContext(entry.ToTransactionContext(), entry.DatabaseName);
+            Commit.FlushContext(entry.ToTransactionContext(), entry.DatabaseName, _engine);
             _writer.MarkCheckpointed(entry.TransactionId);
             Logger.Info($"Recovered WAL transaction {entry.TransactionId}.");
         }
@@ -103,11 +105,13 @@ public sealed class RecoveryManager(DataVoConfig config)
     /// </summary>
     /// <param name="databaseName">The database containing the locked tables.</param>
     /// <param name="tableNames">The tables that must be protected during replay.</param>
-    private static void AcquireWriteLocks(string databaseName, List<string> tableNames)
+    private void AcquireWriteLocks(string databaseName, List<string> tableNames)
     {
+        var locks = _engine.LockManager;
+
         foreach (string tableName in tableNames)
         {
-            LockManager.Instance.AcquireWriteLock(databaseName, tableName);
+            locks.AcquireWriteLock(databaseName, tableName);
         }
     }
 
@@ -116,11 +120,13 @@ public sealed class RecoveryManager(DataVoConfig config)
     /// </summary>
     /// <param name="databaseName">The database containing the locked tables.</param>
     /// <param name="tableNames">The tables whose locks should be released.</param>
-    private static void ReleaseWriteLocks(string databaseName, List<string> tableNames)
+    private void ReleaseWriteLocks(string databaseName, List<string> tableNames)
     {
+        var locks = _engine.LockManager;
+
         for (int i = tableNames.Count - 1; i >= 0; i--)
         {
-            LockManager.Instance.ReleaseWriteLock(databaseName, tableNames[i]);
+            locks.ReleaseWriteLock(databaseName, tableNames[i]);
         }
     }
 }

@@ -1,10 +1,8 @@
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -33,11 +31,10 @@ internal class DropIndex(DropIndexStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             Catalog.DropIndex(_model.IndexName, _model.TableName, databaseName);
-            IndexManager.Instance.DropIndex(_model.IndexName, _model.TableName, databaseName);
+            Indexes.DropIndex(_model.IndexName, _model.TableName, databaseName);
 
             Logger.Info($"Index file {_model.IndexName} successfully dropped!");
             Messages.Add($"Index file {_model.IndexName} successfully dropped!");

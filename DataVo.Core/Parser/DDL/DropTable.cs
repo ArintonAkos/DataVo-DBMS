@@ -1,10 +1,8 @@
 using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DDL;
@@ -50,8 +48,7 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             if (ast.IfExists && !Catalog.TableExists(_model.TableName, databaseName))
             {
@@ -87,7 +84,7 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
 
         foreach (var index in indexes)
         {
-            IndexManager.Instance.DropIndex(index.IndexFileName, _model.TableName, databaseName);
+            Indexes.DropIndex(index.IndexFileName, _model.TableName, databaseName);
         }
     }
 }
