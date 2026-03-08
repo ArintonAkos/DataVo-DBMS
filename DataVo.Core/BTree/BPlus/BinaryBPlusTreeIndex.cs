@@ -2,12 +2,27 @@ using DataVo.Core.BTree.Core;
 
 namespace DataVo.Core.BTree.BPlus;
 
+/// <summary>
+/// Implements <see cref="IIndex"/> using a disk-backed binary B+Tree.
+/// </summary>
+/// <remarks>
+/// All row IDs are stored in leaf pages, and leaf pages are linked through <see cref="BPlusTreePage.NextPageId"/>.
+/// This layout supports efficient exact-match lookups and sequential/range-style leaf scanning.
+/// </remarks>
 public class BinaryBPlusTreeIndex : IIndex
 {
     private BPlusDiskPager _pager = null!;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BinaryBPlusTreeIndex"/> class.
+    /// </summary>
     public BinaryBPlusTreeIndex() { }
 
+    /// <summary>
+    /// Inserts a logical key-to-row mapping into the B+Tree.
+    /// </summary>
+    /// <param name="key">The logical key to insert.</param>
+    /// <param name="rowId">The row ID associated with the key.</param>
     public void Insert(string key, long rowId)
     {
         byte[] encodedKey = IndexKeyEncoder.Encode(key);
@@ -48,6 +63,12 @@ public class BinaryBPlusTreeIndex : IIndex
         }
     }
 
+    /// <summary>
+    /// Inserts a key/value pair into a page that is known not to be full.
+    /// </summary>
+    /// <param name="node">The page that will receive the insertion.</param>
+    /// <param name="key">The encoded key to insert.</param>
+    /// <param name="value">The row ID associated with the key.</param>
     private void InsertNonFull(BPlusTreePage node, byte[] key, long value)
     {
         if (node.IsLeaf)
@@ -87,6 +108,12 @@ public class BinaryBPlusTreeIndex : IIndex
         }
     }
 
+    /// <summary>
+    /// Splits a full child page and updates the parent routing page.
+    /// </summary>
+    /// <param name="parent">The parent page that will receive the promoted routing key.</param>
+    /// <param name="i">The child slot to split.</param>
+    /// <param name="child">The full child page.</param>
     private void SplitChild(BPlusTreePage parent, int i, BPlusTreePage child)
     {
         var newNode = _pager.AllocatePage();
@@ -151,6 +178,11 @@ public class BinaryBPlusTreeIndex : IIndex
         _pager.WritePage(parent);
     }
 
+    /// <summary>
+    /// Returns all row IDs associated with the specified key.
+    /// </summary>
+    /// <param name="key">The logical key to search for.</param>
+    /// <returns>A list of matching row IDs, excluding tombstoned zero values.</returns>
     public List<long> Search(string key)
     {
         var results = new List<long>();
@@ -202,6 +234,11 @@ public class BinaryBPlusTreeIndex : IIndex
         return results;
     }
 
+    /// <summary>
+    /// Determines whether the specified row ID appears in any leaf page.
+    /// </summary>
+    /// <param name="key">The row ID to search for.</param>
+    /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
     public bool ContainsValue(long key)
     {
         for (int i = 1; i < _pager.NumPages; i++)
@@ -217,8 +254,21 @@ public class BinaryBPlusTreeIndex : IIndex
         return false;
     }
 
+    /// <summary>
+    /// Placeholder for key-specific deletion. This operation is currently not implemented.
+    /// </summary>
+    /// <param name="key">The logical key to delete from.</param>
+    /// <param name="value">The specific row ID to remove.</param>
     public void Delete(string key, long value) { }
 
+    /// <summary>
+    /// Tombstones every occurrence of the specified row IDs in leaf pages.
+    /// </summary>
+    /// <param name="valuesToDelete">The row IDs to remove.</param>
+    /// <remarks>
+    /// This implementation performs logical deletion by writing the sentinel value <c>0</c>
+    /// instead of rebalancing or compacting the tree.
+    /// </remarks>
     public void DeleteValues(List<long> valuesToDelete)
     {
         if (_pager == null) return;
@@ -245,6 +295,10 @@ public class BinaryBPlusTreeIndex : IIndex
         }
     }
 
+    /// <summary>
+    /// Persists pager metadata to disk.
+    /// </summary>
+    /// <param name="filePath">The file path to initialize if the index has not yet been loaded.</param>
     public void Save(string filePath)
     {
         if (_pager == null)
@@ -257,11 +311,20 @@ public class BinaryBPlusTreeIndex : IIndex
         }
     }
 
+    /// <summary>
+    /// Opens the B+Tree file through a <see cref="BPlusDiskPager"/>.
+    /// </summary>
+    /// <param name="filePath">The path to the backing file.</param>
     public void Load(string filePath)
     {
         _pager = new BPlusDiskPager(filePath);
     }
 
+    /// <summary>
+    /// Creates and loads a <see cref="BinaryBPlusTreeIndex"/> from the specified file.
+    /// </summary>
+    /// <param name="filePath">The path to the backing file.</param>
+    /// <returns>A loaded <see cref="BinaryBPlusTreeIndex"/> instance.</returns>
     public static BinaryBPlusTreeIndex LoadFile(string filePath)
     {
         var index = new BinaryBPlusTreeIndex();
@@ -269,6 +332,9 @@ public class BinaryBPlusTreeIndex : IIndex
         return index;
     }
 
+    /// <summary>
+    /// Releases the underlying pager and any associated file handles.
+    /// </summary>
     public void Dispose()
     {
         _pager?.Dispose();
