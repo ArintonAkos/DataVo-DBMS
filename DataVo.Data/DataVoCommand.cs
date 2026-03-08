@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
@@ -28,6 +29,7 @@ public class DataVoCommand : DbCommand
     private readonly DataVoParameterCollection _parameters = new();
 
     /// <inheritdoc />
+    [AllowNull]
     public override string CommandText { get; set; } = string.Empty;
 
     /// <inheritdoc />
@@ -128,7 +130,7 @@ public class DataVoCommand : DbCommand
 
         string sql = SubstituteParameters(CommandText);
 
-        var engine = new QueryEngine(sql, _connection.Session);
+        var engine = new QueryEngine(sql, _connection.Session, _connection.Engine);
         var results = engine.Parse();
 
         foreach (var result in results)
