@@ -12,16 +12,16 @@ The `Transactions` module is the engine's coordination layer for ACID-oriented e
 
 ## Main Components
 
-| Component | Role |
-| :--- | :--- |
-| `TransactionManager.cs` | Opens, commits, and rolls back explicit transactions on a per-session basis. |
-| `TransactionContext.cs` | Buffers inserted rows, deleted row ids, and updated column sets until commit time. |
-| `LockManager.cs` | Maintains per-table `ReaderWriterLockSlim` instances keyed by `{database}.{table}`. |
-| `WalEntry.cs` | Serializes a committed transaction into replayable WAL operations. |
-| `WalReader.cs` | Reads persisted WAL entries from disk. |
-| `WalWriter.cs` | Appends new WAL entries, marks entries checkpointed, and prunes the log when appropriate. |
-| `RecoveryManager.cs` | Replays uncheckpointed WAL entries on startup before normal execution resumes. |
-| `WalFileStore.cs` | Provides synchronized low-level file access for WAL reads, appends, rewrites, and deletion. |
+| Component               | Role                                                                                        |
+| :---------------------- | :------------------------------------------------------------------------------------------ |
+| `TransactionManager.cs` | Opens, commits, and rolls back explicit transactions on a per-session basis.                |
+| `TransactionContext.cs` | Buffers inserted rows, deleted row ids, and updated column sets until commit time.          |
+| `LockManager.cs`        | Maintains per-table `ReaderWriterLockSlim` instances keyed by `{database}.{table}`.         |
+| `WalEntry.cs`           | Serializes a committed transaction into replayable WAL operations.                          |
+| `WalReader.cs`          | Reads persisted WAL entries from disk.                                                      |
+| `WalWriter.cs`          | Appends new WAL entries, marks entries checkpointed, and prunes the log when appropriate.   |
+| `RecoveryManager.cs`    | Replays uncheckpointed WAL entries on startup before normal execution resumes.              |
+| `WalFileStore.cs`       | Provides synchronized low-level file access for WAL reads, appends, rewrites, and deletion. |
 
 ## ACID Mapping
 
