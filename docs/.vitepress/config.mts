@@ -94,6 +94,7 @@ export default withMermaid(defineConfig({
                       { text: 'Select', link: '/DataVo.Core/Parser/DQL/Select' }
                     ]
                   },
+                  { text: 'Transactions', link: '/DataVo.Core/Parser/Transactions/' },
                   { text: 'Statements', link: '/DataVo.Core/Parser/Statements/' },
                   { text: 'JoinStrategies', link: '/DataVo.Core/Parser/Statements/JoinStrategies/' },
                   {
@@ -108,6 +109,7 @@ export default withMermaid(defineConfig({
                   { text: 'Utils', link: '/DataVo.Core/Parser/Utils/' }
                 ]
               },
+              { text: 'Transactions', link: '/DataVo.Core/Transactions/' },
               { text: 'Services', link: '/DataVo.Core/Services/' },
               {
                 text: 'StorageEngine',

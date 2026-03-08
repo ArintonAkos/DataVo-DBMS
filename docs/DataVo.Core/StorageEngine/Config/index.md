@@ -1,16 +1,24 @@
 # Config (StorageEngine) Overview
 
-The `Config` directory isolates the crucial tunable configuration parameters that govern how the `StorageEngine` interacts with the underlying hardware, memory buffers, and internal data structures. Centralizing these limits ensures uniform boundaries and query execution predictability.
+The `Config` directory centralizes the runtime settings that determine how `DataVo` persists data. It now controls not only the storage mode, but also whether write-ahead logging is enabled and where the WAL file is stored.
 
 ## Core Responsibilities
-* **Physical Constraints:** Establishes critical numeric boundaries such as physical page sizes, automatic buffering limits, and B-Tree array capacities. 
-* **Performance Tuning:** Allows developers to manipulate IO thresholds and caching subsystems by modifying a single source of truth.
+* **Storage Selection:** Switches the engine between `InMemory` and `Disk` operation.
+* **Durability Controls:** Enables or disables WAL, chooses the WAL file location, and defines checkpoint pruning thresholds.
 
 ## Component Breakdown
 
 | Component (File) | Architectural Role |
 |------------------|--------------------|
-| `DataVoConfig.cs` | Implements a static singleton defining logical constraints. This includes limits like `PAGE_SIZE`, `MAX_BUFFER_PAGES`, and B-Tree `NODE_CAPACITY` which standardizes file system alignment and byte boundaries universally. |
+| `DataVoConfig.cs` | Defines the active storage mode, disk storage path, WAL enablement, WAL file path, checkpoint threshold, and helper logic for resolving the effective WAL location. |
 
 ## Dependencies & Interactions
-This configuration is instantiated continuously throughout the `DiskStorageEngine.cs` and `IndexManager.cs` to explicitly calculate payload offsets, determine when a buffer needs to be flushed to disk, and decide when to split or merge B+Tree nodes.
+`DataVoConfig` is passed into `StorageContext.Initialize()`. From there it influences storage-engine selection, startup recovery, and commit-time WAL behavior.
+
+## WAL-Related Settings
+
+| Property | Meaning | Default Behavior |
+| :--- | :--- | :--- |
+| `WalEnabled` | Enables write-ahead logging for committed transactions. | Defaults to `true` in disk mode and `false` in memory mode. |
+| `WalFilePath` | The path of the append-only WAL file. | Defaults to `datavo.wal`. Relative paths are resolved against the disk storage directory in disk mode. |
+| `WalCheckpointThreshold` | Controls when checkpointed WAL entries are pruned. | Defaults to `1000` entries. |
