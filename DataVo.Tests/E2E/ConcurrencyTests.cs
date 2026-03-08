@@ -1,7 +1,7 @@
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
-using DataVo.Core.Transactions;
 
 namespace DataVo.Tests.E2E;
 
@@ -24,7 +24,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
         Task holderTask = Task.Run(() =>
         {
-            LockManager.Instance.AcquireReadLock(TestDb, table);
+            Engine.LockManager.AcquireReadLock(TestDb, table);
             try
             {
                 holderReady.SetResult();
@@ -32,7 +32,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
             }
             finally
             {
-                LockManager.Instance.ReleaseReadLock(TestDb, table);
+                Engine.LockManager.ReleaseReadLock(TestDb, table);
             }
         });
 
@@ -70,7 +70,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
         Task holderTask = Task.Run(() =>
         {
-            LockManager.Instance.AcquireWriteLock(TestDb, table);
+            Engine.LockManager.AcquireWriteLock(TestDb, table);
             try
             {
                 holderReady.SetResult();
@@ -78,7 +78,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
             }
             finally
             {
-                LockManager.Instance.ReleaseWriteLock(TestDb, table);
+                Engine.LockManager.ReleaseWriteLock(TestDb, table);
             }
         });
 
@@ -135,7 +135,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
     private void ExecuteForSession(Guid session, string sql)
     {
-        var engine = new QueryEngine(sql, session);
+        var engine = new QueryEngine(sql, session, Engine);
         var results = engine.Parse();
 
         EnsureSuccess(results, sql);
@@ -143,7 +143,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
     private QueryResult ExecuteAndReturnForSession(Guid session, string sql)
     {
-        var engine = new QueryEngine(sql, session);
+        var engine = new QueryEngine(sql, session, Engine);
         var results = engine.Parse();
 
         EnsureSuccess(results, sql);
@@ -168,13 +168,11 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
     }
 }
 
-[Collection("SequentialStorageTests")]
 public class InMemoryConcurrencyTests : ConcurrencyTestsBase
 {
     public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "ConcurrencyDb_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskConcurrencyTests : ConcurrencyTestsBase
 {
     public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency" }, "ConcurrencyDb_Disk") { }

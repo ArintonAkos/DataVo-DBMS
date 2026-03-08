@@ -65,13 +65,11 @@ public abstract class DistinctTestsBase : SqlExecutionTestsBase
     }
 }
 
-[Collection("SequentialStorageTests")]
 public class DistinctTestsDisk : DistinctTestsBase
 {
     public DistinctTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_distinct" }, "DistinctDB_Disk") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DistinctTestsMemory : DistinctTestsBase
 {
     public DistinctTestsMemory() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "DistinctDB_Mem") { }

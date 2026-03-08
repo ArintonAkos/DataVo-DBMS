@@ -93,14 +93,14 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
     {
         Execute("CREATE TABLE Depts (Id INT PRIMARY KEY)");
         Execute("CREATE TABLE Emps (Id INT PRIMARY KEY, DeptId INT REFERENCES Depts(Id))");
-        
+
         Execute("INSERT INTO Depts VALUES (1)");
         Execute("INSERT INTO Emps VALUES (10, 1)");
 
         // Attempt to update DeptId to a non-existent parent
         var res = ExecuteAndReturn("UPDATE Emps SET DeptId = 99 WHERE Id = 10");
         Assert.Contains(res.Messages, m => m.Contains("Foreign key violation"));
-        
+
         // Emps row should remain unchanged
         var emps = ExecuteAndReturn("SELECT * FROM Emps");
         Assert.Equal(1, emps.Data[0]["DeptId"]);
@@ -136,7 +136,7 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
     public void Update_Benchmark_1KRows()
     {
         Execute("CREATE TABLE Bench (Id INT PRIMARY KEY, Val INT, Str VARCHAR)");
-        
+
         // Insert 1000 rows
         for (int i = 1; i <= 1000; i++)
         {
@@ -144,12 +144,12 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
         }
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        
+
         // Update all 1000 rows, modifying a non-indexed and indexed column
         var res = ExecuteAndReturn("UPDATE Bench SET Val = 9999");
-        
+
         watch.Stop();
-        
+
         Assert.Contains(res.Messages, m => m.Contains("Rows affected: 1000"));
         Assert.True(watch.ElapsedMilliseconds < 5000, "Update of 1k rows took longer than 5 seconds!");
     }
@@ -157,13 +157,11 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryUpdateTests : UpdateTestsBase
 {
     public InMemoryUpdateTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "UpdateDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskUpdateTests : UpdateTestsBase
 {
     public DiskUpdateTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_update" }, "UpdateDB_Disk") { }

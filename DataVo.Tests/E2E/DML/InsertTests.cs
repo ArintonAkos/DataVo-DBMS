@@ -138,13 +138,11 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
 }
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryInsertTests : InsertTestsBase
 {
     public InMemoryInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "InsertDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskInsertTests : InsertTestsBase
 {
     public DiskInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_insert" }, "InsertDB_Disk") { }

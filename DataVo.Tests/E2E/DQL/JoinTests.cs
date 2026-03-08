@@ -127,13 +127,11 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryJoinTests : JoinTestsBase
 {
     public InMemoryJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "JoinDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskJoinTests : JoinTestsBase
 {
     public DiskJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_join" }, "JoinDB_Disk") { }

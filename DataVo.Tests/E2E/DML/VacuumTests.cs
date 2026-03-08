@@ -74,13 +74,11 @@ public abstract class VacuumTestsBase(DataVoConfig config, string testDbName) : 
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryVacuumTests : VacuumTestsBase
 {
     public InMemoryVacuumTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "VacuumDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskVacuumTests : VacuumTestsBase
 {
     public DiskVacuumTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_vacuum" }, "VacuumDB_Disk") { }

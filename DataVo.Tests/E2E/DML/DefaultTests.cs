@@ -19,7 +19,7 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
 
         // Assert - Insert something empty-ish and check what pops out
         Execute("INSERT INTO ConfigOptions (Id) VALUES (1)");
-        
+
         var result = ExecuteAndReturn("SELECT * FROM ConfigOptions");
         Assert.Single(result.Data);
 
@@ -47,7 +47,7 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
         // Assert
         var result = ExecuteAndReturn("SELECT * FROM DefaultsTest1");
         Assert.Single(result.Data);
-        
+
         var row = result.Data.First();
         Assert.Equal(1, row["Id"]);
         Assert.Equal("Task A", row["Name"]);
@@ -70,7 +70,7 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
         // Assert
         var result = ExecuteAndReturn("SELECT * FROM DefaultsTest2");
         Assert.Single(result.Data);
-        
+
         var row = result.Data.First();
         Assert.Equal(1, row["Id"]);
         Assert.Equal(100, row["Score"]); // Default overridden
@@ -92,7 +92,7 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
         // Assert
         var result = ExecuteAndReturn("SELECT * FROM DefaultsTest3");
         Assert.Single(result.Data);
-        
+
         var row = result.Data.First();
         Assert.Equal(1, row["Id"]);
         Assert.Null(row["Metadata"]); // User explicit NULL overrides default
@@ -114,17 +114,15 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
         // Assert
         var result = ExecuteAndReturn("SELECT * FROM DefaultsTest4");
         Assert.Single(result.Data);
-        
+
         var row = result.Data.First();
         Assert.Equal(1, row["Id"]);
         Assert.Equal("Specific", row["Category"]);
     }
 }
 
-[Collection("SequentialStorageTests")]
 public class DefaultTestsMemory() : DefaultTestsBase(new DataVoConfig { StorageMode = StorageMode.InMemory }, "DefaultDb_Mem");
 
-[Collection("SequentialStorageTests")]
 public class DefaultTestsDisk() : DefaultTestsBase(new DataVoConfig
 {
     StorageMode = StorageMode.Disk,

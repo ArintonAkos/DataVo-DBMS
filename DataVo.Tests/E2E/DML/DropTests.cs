@@ -77,13 +77,11 @@ public abstract class DropTestsBase(DataVoConfig config, string testDbName) : Sq
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryDropTests : DropTestsBase
 {
     public InMemoryDropTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "DropDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskDropTests : DropTestsBase
 {
     public DiskDropTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_drop" }, "DropDB_Disk") { }

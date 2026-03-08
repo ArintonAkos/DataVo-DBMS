@@ -1,32 +1,23 @@
 using System.Diagnostics;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser;
-using DataVo.Core.StorageEngine;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
 using Xunit.Abstractions;
 
 namespace DataVo.Tests.E2E;
 
-[Collection("SequentialStorageTests")]
 public class SqlBenchmarkTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
-    private readonly string _testDb = "BenchmarkDb";
+    private readonly string _testDb = $"BenchmarkDb_{Guid.NewGuid():N}";
     private readonly string _testTable = "PerfTable";
-    private readonly string _diskPath = "./test_datavo_benchmark";
+    private readonly string _diskPath = Path.Combine(Path.GetTempPath(), $"test_datavo_benchmark_{Guid.NewGuid():N}");
     private readonly Guid _session = Guid.NewGuid();
-
-    // Static lock to prevent parallel test collections from stepping on the global context
-    private static readonly object GlobalEngineLock = new object();
+    private DataVoEngine? _engine;
 
     public SqlBenchmarkTests(ITestOutputHelper output)
     {
         _output = output;
-
-        Monitor.Enter(GlobalEngineLock);
-
-        try { Catalog.DropDatabase(_testDb); } catch { }
-        try { if (Directory.Exists(_diskPath)) Directory.Delete(_diskPath, true); } catch { }
     }
 
     [Fact]
@@ -38,7 +29,7 @@ public class SqlBenchmarkTests : IDisposable
 
         // --- 1. IN-MEMORY PIPELINE BENCHMARK ---
         var inMemoryConfig = new DataVoConfig { StorageMode = StorageMode.InMemory };
-        StorageContext.Initialize(inMemoryConfig);
+        _engine = DataVoEngine.Initialize(inMemoryConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -61,12 +52,12 @@ public class SqlBenchmarkTests : IDisposable
 
 
         // Cleanup manually before starting Disk test in the same context
-        Catalog.DropDatabase(_testDb);
+        _engine.Catalog.DropDatabase(_testDb);
 
 
         // --- 2. DISK PIPELINE BENCHMARK ---
         var diskConfig = new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _diskPath };
-        StorageContext.Initialize(diskConfig);
+        _engine = DataVoEngine.Initialize(diskConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -107,7 +98,7 @@ public class SqlBenchmarkTests : IDisposable
         int employees = 5_000;
 
         var inMemoryConfig = new DataVoConfig { StorageMode = StorageMode.InMemory };
-        StorageContext.Initialize(inMemoryConfig);
+        _engine = DataVoEngine.Initialize(inMemoryConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -125,10 +116,10 @@ public class SqlBenchmarkTests : IDisposable
         stopwatch.Stop();
         var inMemoryQueryTime = stopwatch.ElapsedMilliseconds;
 
-        Catalog.DropDatabase(_testDb);
+        _engine.Catalog.DropDatabase(_testDb);
 
         var diskConfig = new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _diskPath };
-        StorageContext.Initialize(diskConfig);
+        _engine = DataVoEngine.Initialize(diskConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -159,7 +150,7 @@ public class SqlBenchmarkTests : IDisposable
 
     private void Execute(string sql)
     {
-        var engine = new QueryEngine(sql, _session);
+        var engine = new QueryEngine(sql, _session, _engine);
         var res = engine.Parse();
         if (res.Count != 0 && res.Last().IsError)
         {
@@ -170,15 +161,14 @@ public class SqlBenchmarkTests : IDisposable
 
     private Core.Contracts.Results.QueryResult ExecuteAndReturn(string sql)
     {
-        var engine = new QueryEngine(sql, _session);
+        var engine = new QueryEngine(sql, _session, _engine);
         return engine.Parse().Last();
     }
 
     public void Dispose()
     {
-        try { Catalog.DropDatabase(_testDb); } catch { }
+        try { _engine?.Catalog.DropDatabase(_testDb); } catch { }
+        try { _engine?.IndexManager.DropDatabaseIndexes(_testDb); } catch { }
         try { if (Directory.Exists(_diskPath)) Directory.Delete(_diskPath, true); } catch { }
-
-        Monitor.Exit(GlobalEngineLock);
     }
 }

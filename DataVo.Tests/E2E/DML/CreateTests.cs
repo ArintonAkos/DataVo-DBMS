@@ -35,13 +35,11 @@ public abstract class CreateTestsBase(DataVoConfig config, string testDbName) : 
 
 // --- Multiplexed XUnit Executions ---
 
-[Collection("SequentialStorageTests")]
 public class InMemoryCreateTests : CreateTestsBase
 {
     public InMemoryCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "CreateDB_Mem") { }
 }
 
-[Collection("SequentialStorageTests")]
 public class DiskCreateTests : CreateTestsBase
 {
     public DiskCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_create" }, "CreateDB_Disk") { }
