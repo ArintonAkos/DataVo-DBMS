@@ -16,6 +16,7 @@ The `Parser` module is arguably the most complex component of `DataVo.Core`, res
 | `Binding/` | Encapsulates the semantic resolution logic validating parsed symbols against the physical catalog. |
 | `Commands/` | Defines high-level meta-commands or internal control signals. |
 | `DDL/, DML/, DQL/` | Specialized parsing subroutines corresponding to Data Definition, Manipulation, and Query languages. |
+| `Transactions/` | Executes transactional commands such as `BEGIN`, `COMMIT`, and `ROLLBACK`, including WAL-backed durable commit processing. |
 | `Statements/` | Houses the parsing logic for compound SQL procedural statements. |
 | `Types/` | Manages the parsing and cast evaluation of raw data scalars into strongly-typed backend equivalents. |
 | `Utils/` | Auxiliary parsing utilities and lookahead inspectors. |
@@ -25,4 +26,8 @@ The `Parser` module is arguably the most complex component of `DataVo.Core`, res
 | `QueryEngine.cs` | The high-level coordinator wrapping the Lexer, Parser, and Evaluator into a single user-facing interface. |
 
 ## Dependencies & Interactions
-This module is the core ingest point for all commands originating from the `Server` module or external clients. It heavily relies on the `Constants` for keyword recognition, the `Enums` for operator switching, and instantiates the complex object hierarchies found in `Models`. Once parsed, it hands the resulting executable wrappers to the `Services` and `StorageEngine` for final application to the disk.
+This module is the core ingest point for all commands originating from the `Server` module or external clients. It heavily relies on the `Constants` for keyword recognition, the `Enums` for operator switching, and the object hierarchies found in `Models`. During execution it collaborates closely with:
+
+- `Transactions` for explicit transaction state, table-level locking, and durable commit handling.
+- `StorageEngine` for physical row persistence.
+- `BTree` and `Catalog` for index maintenance and schema validation.

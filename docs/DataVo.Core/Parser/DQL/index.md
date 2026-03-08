@@ -1,9 +1,10 @@
 # DQL (Parser Actions) Overview
-The `DQL` component acts as the high-level orchestrator conducting the retrieval and complex filtering required to execute projection logic typically originating from a `SELECT` statement mapping parsed criteria into relational calculus.
+The `DQL` component is responsible for read-oriented query execution, primarily `SELECT`. It evaluates filters, joins, grouping, aggregation, ordering, and projection while preserving read isolation semantics.
 
 ## Core Responsibilities
-* **Select Sequencing:** Defines the algorithmic procedure evaluating complex SQL mapping loops sequentially structuring filtering paths, executing Joins, processing aggregations, and culminating bound grouping lists.
-* **Expression Evaluation:** Unifies external math models resolving nested filters extracting records mapped cleanly onto transient memory payloads.
+* **Select Sequencing:** Executes the logical query pipeline from source resolution to result projection.
+* **Expression Evaluation:** Applies `WHERE`, `HAVING`, and join predicates against row sets.
+* **Read Isolation:** Acquires shared table-level locks so multiple readers can proceed concurrently while writers wait.
 
 ## Component Breakdown
 
@@ -12,7 +13,8 @@ The `DQL` component acts as the high-level orchestrator conducting the retrieval
 | `Select.cs` | The standalone orchestrator dynamically generating temporary internal cross-sections mapping `QueryResult` datasets utilizing distinct evaluation mechanisms mapping nested loop paths dynamically. |
 
 ## Dependencies & Interactions
-The `Select` operator directly links `DataVo.Core/Parser/Statements/Mechanism` applying distinct join paths validating aliases mapping actively across `SelectBinder.cs` instances. Produces exactly formatted `QueryResult` buffers for active routing out to client consoles.
+`Select` depends on the statement-evaluation pipeline, binding metadata, and the storage layer. Before execution it resolves all referenced tables and acquires read locks through `LockManager`, ensuring that reads remain consistent with concurrent DML activity at the table level.
 
 ## Implementation Specifics
-* **Execution Pathways:** Dynamically branches execution logic choosing either `StatementEvaluator.cs` or `StatementEvaluatorWOJoin.cs` depending purely stringently on topological mapping parameters resolving complex data fetches optimizing loop thresholds seamlessly across the Engine cache system.
+* **Execution Pathways:** Queries choose between filtered evaluation, join evaluation, or full table scan depending on the clauses present.
+* **Lock Scope:** Read locks are acquired for every referenced table before row evaluation begins and are released after projection and limit handling complete.
