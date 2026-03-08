@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataVo.Core", "DataVo.Core\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataVo.Tests", "DataVo.Tests\DataVo.Tests.csproj", "{50345692-7E47-4558-94E8-A2C04CD11C43}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataVo.Data", "DataVo.Data\DataVo.Data.csproj", "{92380032-1465-4CDF-BE7F-CE14FE3549F7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{50345692-7E47-4558-94E8-A2C04CD11C43}.Release|x64.Build.0 = Release|Any CPU
 		{50345692-7E47-4558-94E8-A2C04CD11C43}.Release|x86.ActiveCfg = Release|Any CPU
 		{50345692-7E47-4558-94E8-A2C04CD11C43}.Release|x86.Build.0 = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|x64.Build.0 = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Debug|x86.Build.0 = Debug|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|x64.ActiveCfg = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|x64.Build.0 = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|x86.ActiveCfg = Release|Any CPU
+		{92380032-1465-4CDF-BE7F-CE14FE3549F7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
