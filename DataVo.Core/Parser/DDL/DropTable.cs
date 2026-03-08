@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DDL;
@@ -52,6 +52,13 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
         {
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
+
+            if (ast.IfExists && !Catalog.TableExists(_model.TableName, databaseName))
+            {
+                Logger.Info($"Table {_model.TableName} does not exist. Skipping drop.");
+                Messages.Add($"Table {_model.TableName} does not exist. Skipping drop.");
+                return;
+            }
 
             DropAssociatedTableIndexes(databaseName);
 

@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using System.Xml.Serialization;
 using System.Collections.Concurrent;
 using DataVo.Core.Logging;
@@ -20,6 +20,16 @@ public static class Catalog
     private static string FilePath
     {
         get => Path.Combine(DIR_NAME, FILE_NAME);
+    }
+
+    public static bool DatabaseExists(string databaseName)
+    {
+        return GetDatabaseElement(databaseName) != null;
+    }
+
+    public static bool TableExists(string tableName, string databaseName)
+    {
+        return GetTableElement(databaseName, tableName) != null;
     }
 
     public static void CreateDatabase(Database database)
