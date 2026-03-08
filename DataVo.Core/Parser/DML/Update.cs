@@ -1,10 +1,10 @@
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Transactions;
@@ -34,10 +34,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
-            var txContext = TransactionManager.Instance.GetContext(session);
+            var txContext = Transactions.GetContext(session);
             if (txContext != null)
             {
                 List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
@@ -47,7 +46,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     return;
                 }
 
-                var existingRows = StorageContext.Instance.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+                var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
 
                 (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
@@ -60,7 +59,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
             else
             {
-                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
+                Locks.AcquireWriteLock(databaseName, _model.TableName);
 
                 try
                 {
@@ -71,7 +70,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                         return;
                     }
 
-                    var existingRows = StorageContext.Instance.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+                    var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
 
                     (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
@@ -81,7 +80,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
                 finally
                 {
-                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
                 }
             }
         }
@@ -99,7 +98,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <returns>A list of matching row IDs.</returns>
     private List<long> IdentifyRowsToUpdate(string databaseName)
     {
-        var whereStatement = new DataVo.Core.Parser.Statements.Where(_model.WhereExpression);
+        var whereStatement = new Statements.Where(_model.WhereExpression);
         return whereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
     }
 
@@ -216,7 +215,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
 
                 string indexName = primaryKeys.Contains(col) ? $"_PK_{_model.TableName}" : $"_UK_{col}";
-                if (IndexManager.Instance.IndexContainsKey(valStr, indexName, _model.TableName, databaseName))
+                if (Indexes.IndexContainsKey(valStr, indexName, _model.TableName, databaseName))
                 {
                     throw new Exception($"Constraint violation: Duplicate value '{valStr}' for unique column {col} in row {rowNumber}.");
                 }
@@ -274,7 +273,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 try
                 {
-                    childRowIds = IndexManager.Instance.FilterUsingIndex(oldParentValStr, childIndexName, childFk.ChildTable, databaseName).ToList();
+                    childRowIds = Indexes.FilterUsingIndex(oldParentValStr, childIndexName, childFk.ChildTable, databaseName).ToList();
                 }
                 catch
                 {
@@ -282,7 +281,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
 
                 childRowIds = childRowIds
-                    .Where(id => id != 0 && StorageContext.Instance.TableContainsRow(id, childFk.ChildTable, databaseName))
+                    .Where(id => id != 0 && Context.TableContainsRow(id, childFk.ChildTable, databaseName))
                     .ToList();
 
                 if (childRowIds.Count > 0)
@@ -303,24 +302,24 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
 
         // Delete old records from storage & indexes
-        StorageContext.Instance.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
+        Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
         foreach (var index in indexFiles)
         {
-            IndexManager.Instance.DeleteFromIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+            Indexes.DeleteFromIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
         }
 
         // Insert new records into storage & indexes
         for (int i = 0; i < newRows.Count; i++)
         {
             var newRow = newRows[i];
-            long assignedRowId = StorageContext.Instance.InsertOneIntoTable(newRow, _model.TableName, databaseName);
+            long assignedRowId = Context.InsertOneIntoTable(newRow, _model.TableName, databaseName);
 
             foreach (var index in indexFiles)
             {
                 if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
 
                 string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+                Indexes.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
             }
         }
     }
@@ -333,7 +332,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         foreach (var reference in foreignKey.References)
         {
-            if (!IndexManager.Instance.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
+            if (!DataVoEngine.Current().IndexManager.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
             {
                 return false;
             }
@@ -347,7 +346,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <returns>A list of Row IDs representing matched child records.</returns>
     private static List<long> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
     {
-        var allRows = StorageContext.Instance.GetTableContents(childTable, databaseName);
+        var allRows = DataVoEngine.Current().StorageContext.GetTableContents(childTable, databaseName);
         var matchingIds = new List<long>();
 
         foreach (var (rowId, row) in allRows)

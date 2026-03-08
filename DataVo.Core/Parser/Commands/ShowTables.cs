@@ -1,7 +1,5 @@
 ﻿using DataVo.Core.Logging;
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
-using DataVo.Core.Cache;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.Commands;
@@ -13,8 +11,7 @@ internal class ShowTables : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             Catalog.GetTables(databaseName)
                 .ForEach(Fields.Add);

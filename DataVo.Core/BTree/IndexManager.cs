@@ -1,6 +1,7 @@
 using DataVo.Core.BTree.Core;
 using DataVo.Core.BTree.Binary;
 using DataVo.Core.BTree.BPlus;
+using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Core.BTree;
 
@@ -32,10 +33,10 @@ public enum IndexPersistenceMode
 /// It also manages persistence behavior after mutations, supporting both immediate writes and buffered flushing.
 /// </para>
 /// </remarks>
-public class IndexManager
+public class IndexManager : IDisposable
 {
     private static IndexManager? _instance;
-    private const string DatabasesDir = "databases";
+    private readonly string _indexRootDirectory;
 
     /// <summary>
     /// In-memory cache of loaded indexes, keyed by "{dbName}/{tableName}_{indexName}".
@@ -50,7 +51,16 @@ public class IndexManager
     // Specifies the number of mutations that must occur before an index is flushed to disk.
     private int _flushMutationThreshold = 256;
 
-    private IndexManager() { }
+    public IndexManager()
+        : this(config: null, engineStorageRoot: null)
+    {
+    }
+
+    public IndexManager(DataVoConfig? config, string? engineStorageRoot)
+    {
+        _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
+        Directory.CreateDirectory(_indexRootDirectory);
+    }
 
     public static IndexManager Instance
     {
@@ -129,9 +139,29 @@ public class IndexManager
     /// <summary>
     /// Build the file path for a given index.
     /// </summary>
-    private static string GetIndexFilePath(string indexName, string tableName, string databaseName)
+    private string BuildIndexFilePath(string indexName, string tableName, string databaseName)
     {
-        return Path.Combine(DatabasesDir, databaseName, $"{tableName}_{indexName}_index.btree");
+        return Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree");
+    }
+
+    private static string ResolveIndexRootDirectory(DataVoConfig? config, string? engineStorageRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(engineStorageRoot))
+        {
+            return engineStorageRoot;
+        }
+
+        if (config == null)
+        {
+            return "databases";
+        }
+
+        if (config.StorageMode == StorageMode.Disk)
+        {
+            return config.DiskStoragePath ?? "./datavo_data";
+        }
+
+        return Path.Combine(Path.GetTempPath(), "datavo_indexes", Guid.NewGuid().ToString("N"));
     }
 
     /// <summary>
@@ -154,7 +184,7 @@ public class IndexManager
             return cached;
         }
 
-        string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+        string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
         if (File.Exists(filePath))
         {
             IIndex index;
@@ -194,7 +224,7 @@ public class IndexManager
     public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+        string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
 
         if (File.Exists(filePath))
         {
@@ -242,7 +272,7 @@ public class IndexManager
     public void DropIndex(string indexName, string tableName, string databaseName)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+        string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
 
         _cache.Remove(cacheKey);
         _cacheFilePaths.Remove(cacheKey);
@@ -301,7 +331,7 @@ public class IndexManager
         }
 
         // Also clean up the database index directory on disk
-        string dbIndexDir = Path.Combine(DatabasesDir, databaseName);
+        string dbIndexDir = Path.Combine(_indexRootDirectory, databaseName);
         if (Directory.Exists(dbIndexDir))
         {
             var btreeFiles = Directory.GetFiles(dbIndexDir, "*_index.btree");
@@ -386,7 +416,7 @@ public class IndexManager
     private void PersistAfterMutation(IIndex index, string indexName, string tableName, string databaseName)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        string filePath = GetIndexFilePath(indexName, tableName, databaseName);
+        string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
 
         if (_persistenceMode == IndexPersistenceMode.Immediate)
         {
@@ -417,6 +447,31 @@ public class IndexManager
                 _dirtyIndexes.Remove(cacheKey);
                 _pendingMutationCounts.Remove(cacheKey);
             }
+        }
+    }
+
+    /// <summary>
+    /// Flushes pending mutations and releases all cached index instances.
+    /// </summary>
+    public void Dispose()
+    {
+        FlushDirtyIndexes();
+
+        foreach (var index in _cache.Values)
+        {
+            if (index is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+
+        _cache.Clear();
+        _cacheFilePaths.Clear();
+
+        lock (_persistenceLock)
+        {
+            _dirtyIndexes.Clear();
+            _pendingMutationCounts.Clear();
         }
     }
 

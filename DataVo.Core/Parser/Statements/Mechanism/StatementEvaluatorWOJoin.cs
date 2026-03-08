@@ -104,7 +104,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that match the index lookup.</returns>
         private HashSet<long> EvaluateUsingSecondaryIndex(string rightValue, string indexFile)
         {
-            return [.. IndexManager.Instance.FilterUsingIndex(rightValue, indexFile, _table.TableName, _table.DatabaseName!)];
+            return [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, indexFile, _table.TableName, _table.DatabaseName!)];
         }
 
         /// <summary>
@@ -115,7 +115,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that match.</returns>
         private HashSet<long> EvaluateUsingPrimaryKey(string rightValue)
         {
-            return [.. IndexManager.Instance.FilterUsingIndex(rightValue, $"_PK_{_table.TableName}", _table.TableName, _table.DatabaseName!)];
+            return [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, $"_PK_{_table.TableName}", _table.TableName, _table.DatabaseName!)];
         }
 
         /// <summary>

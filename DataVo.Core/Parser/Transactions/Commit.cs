@@ -1,5 +1,4 @@
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -29,13 +28,12 @@ internal class Commit : BaseDbAction
     {
         try
         {
-            var context = TransactionManager.Instance.Commit(session);
+            var context = Transactions.Commit(session);
 
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
             var lockedTables = AcquireWriteLocks(databaseName, context);
-            DataVoConfig config = StorageContext.Instance.Config;
+            DataVoConfig config = Context.Config;
             bool walEnabled = config.StorageMode == StorageMode.Disk && config.WalEnabled;
             WalEntry? walEntry = walEnabled ? WalEntry.FromTransactionContext(databaseName, context) : null;
             WalWriter? walWriter = walEnabled ? new WalWriter(config) : null;
@@ -47,7 +45,7 @@ internal class Commit : BaseDbAction
                     walWriter.Append(walEntry);
                 }
 
-                FlushContext(context, databaseName);
+                FlushContext(context, databaseName, Engine);
 
                 if (walWriter != null && walEntry != null)
                 {
@@ -68,11 +66,14 @@ internal class Commit : BaseDbAction
         }
     }
 
-    internal static void FlushContext(TransactionContext context, string databaseName)
+    internal static void FlushContext(TransactionContext context, string databaseName, Runtime.DataVoEngine? engine = null)
     {
-        FlushInserts(context, databaseName);
-        FlushDeletes(context, databaseName);
-        FlushUpdates(context, databaseName);
+        var activeEngine = engine ?? Runtime.DataVoEngine.Current();
+        using var _ = Runtime.DataVoEngine.PushCurrent(activeEngine);
+
+        FlushInserts(context, databaseName, activeEngine);
+        FlushDeletes(context, databaseName, activeEngine);
+        FlushUpdates(context, databaseName, activeEngine);
     }
 
     private static List<string> AcquireWriteLocks(string databaseName, TransactionContext context)
@@ -86,7 +87,7 @@ internal class Commit : BaseDbAction
 
         foreach (string tableName in tableNames)
         {
-            LockManager.Instance.AcquireWriteLock(databaseName, tableName);
+            DataVo.Core.Runtime.DataVoEngine.Current().LockManager.AcquireWriteLock(databaseName, tableName);
         }
 
         return tableNames;
@@ -96,7 +97,7 @@ internal class Commit : BaseDbAction
     {
         for (int i = tableNames.Count - 1; i >= 0; i--)
         {
-            LockManager.Instance.ReleaseWriteLock(databaseName, tableNames[i]);
+            DataVo.Core.Runtime.DataVoEngine.Current().LockManager.ReleaseWriteLock(databaseName, tableNames[i]);
         }
     }
 
@@ -104,22 +105,22 @@ internal class Commit : BaseDbAction
     /// Replays all buffered INSERT operations using <see cref="StorageContext.InsertOneIntoTable"/>
     /// and updates all associated B-Tree indexes.
     /// </summary>
-    private static void FlushInserts(TransactionContext context, string databaseName)
+    private static void FlushInserts(TransactionContext context, string databaseName, Runtime.DataVoEngine engine)
     {
         foreach (var (tableName, rows) in context.InsertedRows)
         {
-            var indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+            var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
 
             foreach (var row in rows)
             {
-                long assignedRowId = StorageContext.Instance.InsertOneIntoTable(row, tableName, databaseName);
+                long assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
 
                 foreach (var index in indexFiles)
                 {
                     if (index.AttributeNames.Any(attr => row.TryGetValue(attr, out var v) && v == null)) continue;
 
                     string indexValue = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
-                    IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, tableName, databaseName);
+                    engine.IndexManager.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, tableName, databaseName);
                 }
             }
         }
@@ -129,18 +130,18 @@ internal class Commit : BaseDbAction
     /// Replays all buffered DELETE operations using <see cref="StorageContext.DeleteFromTable"/>
     /// and purges all associated B-Tree index entries.
     /// </summary>
-    private static void FlushDeletes(TransactionContext context, string databaseName)
+    private static void FlushDeletes(TransactionContext context, string databaseName, Runtime.DataVoEngine engine)
     {
         foreach (var (tableName, rowIds) in context.DeletedRowIds)
         {
             var rowIdList = rowIds.ToList();
 
-            StorageContext.Instance.DeleteFromTable(rowIdList, tableName, databaseName);
+            engine.StorageContext.DeleteFromTable(rowIdList, tableName, databaseName);
 
-            var indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+            var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
             foreach (var index in indexFiles)
             {
-                IndexManager.Instance.DeleteFromIndex(rowIdList, index.IndexFileName, tableName, databaseName);
+                engine.IndexManager.DeleteFromIndex(rowIdList, index.IndexFileName, tableName, databaseName);
             }
         }
     }
@@ -149,16 +150,16 @@ internal class Commit : BaseDbAction
     /// Replays all buffered UPDATE operations using an out-of-place strategy (delete old + insert new),
     /// consistent with the standard <see cref="DML.Update"/> executor approach.
     /// </summary>
-    private static void FlushUpdates(TransactionContext context, string databaseName)
+    private static void FlushUpdates(TransactionContext context, string databaseName, Runtime.DataVoEngine engine)
     {
         foreach (var (tableName, updates) in context.UpdatedRows)
         {
-            var indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+            var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
 
             foreach (var (rowId, updatedColumns) in updates)
             {
                 // Retrieve the existing row, merge changes, and perform out-of-place update
-                var existingRows = StorageContext.Instance.GetTableContents([rowId], tableName, databaseName);
+                var existingRows = engine.StorageContext.GetTableContents([rowId], tableName, databaseName);
                 if (!existingRows.TryGetValue(rowId, out var oldRow)) continue;
 
                 var newRow = new Dictionary<string, dynamic>(oldRow);
@@ -168,19 +169,19 @@ internal class Commit : BaseDbAction
                 }
 
                 // Delete old + Insert new
-                StorageContext.Instance.DeleteFromTable([rowId], tableName, databaseName);
+                engine.StorageContext.DeleteFromTable([rowId], tableName, databaseName);
                 foreach (var index in indexFiles)
                 {
-                    IndexManager.Instance.DeleteFromIndex([rowId], index.IndexFileName, tableName, databaseName);
+                    engine.IndexManager.DeleteFromIndex([rowId], index.IndexFileName, tableName, databaseName);
                 }
 
-                long newRowId = StorageContext.Instance.InsertOneIntoTable(newRow, tableName, databaseName);
+                long newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
                 foreach (var index in indexFiles)
                 {
                     if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
 
                     string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                    IndexManager.Instance.InsertIntoIndex(indexValue, newRowId, index.IndexFileName, tableName, databaseName);
+                    engine.IndexManager.InsertIntoIndex(indexValue, newRowId, index.IndexFileName, tableName, databaseName);
                 }
             }
         }

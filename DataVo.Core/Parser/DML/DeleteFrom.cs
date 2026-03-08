@@ -3,7 +3,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
-using DataVo.Core.Cache;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Parser.AST;
@@ -19,10 +19,9 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
     {
         try
         {
-            string databaseName = CacheStorage.Get(session)
-                ?? throw new Exception("No database in use!");
+            string databaseName = GetDatabaseName(session);
 
-            var txContext = TransactionManager.Instance.GetContext(session);
+            var txContext = Transactions.GetContext(session);
             if (txContext != null)
             {
                 List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
@@ -42,7 +41,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
             else
             {
-                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
+                Locks.AcquireWriteLock(databaseName, _model.TableName);
 
                 try
                 {
@@ -59,7 +58,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 }
                 finally
                 {
-                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
                 }
             }
         }
@@ -80,7 +79,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         if (childFks.Count > 0)
         {
             // Load the parent rows being deleted so we can check their FK column values
-            var parentRows = StorageContext.Instance.GetTableContents(toBeDeleted, tableName, databaseName);
+            var parentRows = Context.GetTableContents(toBeDeleted, tableName, databaseName);
 
             foreach (var childFk in childFks)
             {
@@ -98,7 +97,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                     try
                     {
-                        childRowIds = IndexManager.Instance.FilterUsingIndex(parentKeyStr, childIndexName, childFk.ChildTable, databaseName).ToList();
+                        childRowIds = Indexes.FilterUsingIndex(parentKeyStr, childIndexName, childFk.ChildTable, databaseName).ToList();
                     }
                     catch
                     {
@@ -108,7 +107,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                     // Filter out tombstoned rows
                     childRowIds = childRowIds
-                        .Where(id => id != 0 && StorageContext.Instance.TableContainsRow(id, childFk.ChildTable, databaseName))
+                        .Where(id => id != 0 && Context.TableContainsRow(id, childFk.ChildTable, databaseName))
                         .ToList();
 
                     if (childRowIds.Count == 0) continue;
@@ -131,7 +130,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         }
 
         // Delete entries from the main table
-        StorageContext.Instance.DeleteFromTable(toBeDeleted, tableName, databaseName);
+        Context.DeleteFromTable(toBeDeleted, tableName, databaseName);
 
         // Delete entries from all indexes
         Catalog.GetTableIndexes(tableName, databaseName)
@@ -139,7 +138,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             .ToList()
             .ForEach(indexFile =>
             {
-                IndexManager.Instance.DeleteFromIndex(toBeDeleted, indexFile, tableName, databaseName);
+                Indexes.DeleteFromIndex(toBeDeleted, indexFile, tableName, databaseName);
             });
     }
 
@@ -148,7 +147,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
     /// </summary>
     private static List<long> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
     {
-        var allRows = StorageContext.Instance.GetTableContents(childTable, databaseName);
+        var allRows = DataVoEngine.Current().StorageContext.GetTableContents(childTable, databaseName);
         var matchingIds = new List<long>();
 
         foreach (var (rowId, row) in allRows)
