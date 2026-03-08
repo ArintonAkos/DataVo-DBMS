@@ -92,6 +92,12 @@ public class OrderByNode : SqlNode
     public List<OrderByColumnNode> Columns { get; set; } = [];
 }
 
+public class LimitNode : SqlNode
+{
+    public int TakeTarget { get; set; }
+    public int SkipTarget { get; set; }
+}
+
 public class SelectStatement : SqlStatement
 {
     public bool IsDistinct { get; set; } = false;
@@ -103,6 +109,7 @@ public class SelectStatement : SqlStatement
     public GroupByNode? GroupByExpression { get; set; }
     public ExpressionNode? HavingExpression { get; set; }
     public OrderByNode? OrderByExpression { get; set; }
+    public LimitNode? LimitExpression { get; set; }
 }
 
 // --- Commands ---
