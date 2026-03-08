@@ -14,14 +14,14 @@ At runtime, the core project coordinates the full lifecycle of a query:
 
 ## Architectural Breakdown
 
-| Sub-Module | Primary Function |
-| :--- | :--- |
-| **BTree** | Maintains primary, unique, and foreign-key index structures used for fast lookup and constraint enforcement. |
-| **Parser** | Converts SQL text into AST-driven actions for DDL, DML, DQL, and transaction commands. |
-| **Transactions** | Implements explicit transactions, table-level locking, WAL serialization, and crash recovery coordination. |
-| **StorageEngine** | Provides the physical persistence abstraction for in-memory and disk-backed table storage. |
-| **Cache** | Tracks session-level state such as the active database. |
-| **Logger** | Emits operational diagnostics and execution traces. |
+| Sub-Module        | Primary Function                                                                                             |
+| :---------------- | :----------------------------------------------------------------------------------------------------------- |
+| **BTree**         | Maintains primary, unique, and foreign-key index structures used for fast lookup and constraint enforcement. |
+| **Parser**        | Converts SQL text into AST-driven actions for DDL, DML, DQL, and transaction commands.                       |
+| **Transactions**  | Implements explicit transactions, table-level locking, WAL serialization, and crash recovery coordination.   |
+| **StorageEngine** | Provides the physical persistence abstraction for in-memory and disk-backed table storage.                   |
+| **Cache**         | Tracks session-level state such as the active database.                                                      |
+| **Logger**        | Emits operational diagnostics and execution traces.                                                          |
 
 ## ACID Features Implemented
 
