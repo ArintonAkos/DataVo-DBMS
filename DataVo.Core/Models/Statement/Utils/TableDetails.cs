@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.StorageEngine;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Models.Statement.Utils
 {
@@ -18,7 +19,7 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _columnsCache ??= Catalog.Catalog.GetTableColumns(TableName, DatabaseName)
+                _columnsCache ??= DataVoEngine.Current().Catalog.GetTableColumns(TableName, DatabaseName)
                     .Select(c => c.Name)
                     .ToList();
                 return _columnsCache;
@@ -35,7 +36,7 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _primaryKeysCache ??= Catalog.Catalog.GetTablePrimaryKeys(TableName, DatabaseName);
+                _primaryKeysCache ??= DataVoEngine.Current().Catalog.GetTablePrimaryKeys(TableName, DatabaseName);
                 return _primaryKeysCache;
             }
         }
@@ -50,7 +51,7 @@ namespace DataVo.Core.Models.Statement.Utils
                     throw new Exception("Database not selected!");
                 }
 
-                _indexedColumnsCache ??= Catalog.Catalog.GetTableIndexedColumns(TableName, DatabaseName);
+                _indexedColumnsCache ??= DataVoEngine.Current().Catalog.GetTableIndexedColumns(TableName, DatabaseName);
                 return _indexedColumnsCache;
             }
         }
@@ -70,7 +71,7 @@ namespace DataVo.Core.Models.Statement.Utils
                 if (_tableContentCache == null)
                 {
                     _tableContentCache = [];
-                    var internalRows = StorageContext.Instance.GetTableContents(TableName, DatabaseName);
+                    var internalRows = DataVoEngine.Current().StorageContext.GetTableContents(TableName, DatabaseName);
                     foreach (var row in internalRows)
                     {
                         _tableContentCache[row.Key] = new Record(row.Key, row.Value);

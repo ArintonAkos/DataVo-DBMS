@@ -1,6 +1,7 @@
 using System.Text;
 using System.Collections.Concurrent;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.StorageEngine.Serialization;
 
@@ -148,14 +149,15 @@ public static class RowSerializer
     private static List<Column> GetCachedSchemaColumns(string databaseName, string tableName)
     {
         string cacheKey = BuildSchemaCacheKey(databaseName, tableName);
-        int currentVersion = Catalog.GetTableSchemaVersion(tableName, databaseName);
+        var catalog = DataVoEngine.Current().Catalog;
+        int currentVersion = catalog.GetTableSchemaVersion(tableName, databaseName);
 
         if (_schemaCache.TryGetValue(cacheKey, out var cachedEntry) && cachedEntry.Version == currentVersion)
         {
             return cachedEntry.Columns;
         }
 
-        var columns = Catalog.GetTableColumns(tableName, databaseName);
+        var columns = catalog.GetTableColumns(tableName, databaseName);
         _schemaCache[cacheKey] = new SchemaCacheEntry
         {
             Version = currentVersion,
@@ -167,6 +169,6 @@ public static class RowSerializer
 
     private static string BuildSchemaCacheKey(string databaseName, string tableName)
     {
-        return $"{databaseName}::{tableName}";
+        return $"{DataVoEngine.Current().Id:N}::{databaseName}::{tableName}";
     }
 }

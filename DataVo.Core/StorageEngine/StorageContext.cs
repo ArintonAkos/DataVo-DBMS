@@ -2,6 +2,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Core.StorageEngine;
@@ -40,6 +41,8 @@ public class StorageContext(DataVoConfig config)
     public static void Initialize(DataVoConfig config)
     {
         _instance = new StorageContext(config);
+
+        DataVoEngine.ResetCurrent(_instance);
 
         if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
         {

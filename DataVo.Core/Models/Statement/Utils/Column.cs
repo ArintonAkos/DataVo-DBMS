@@ -1,5 +1,5 @@
 ﻿using DataVo.Core.Contracts;
-using Database = DataVo.Core.Models.Catalog;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Models.Statement.Utils
 {
@@ -11,7 +11,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
         public string RawType()
         {
-            return Database.Catalog.GetTableColumnType(TableName, DatabaseName, ColumnName);
+            return DataVoEngine.Current().Catalog.GetTableColumnType(TableName, DatabaseName, ColumnName);
         }
     }
 }
