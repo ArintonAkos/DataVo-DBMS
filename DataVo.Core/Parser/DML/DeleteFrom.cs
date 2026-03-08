@@ -22,28 +22,46 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
-
-            if (toBeDeleted.Count == 0)
-            {
-                Messages.Add("Rows affected: 0");
-                return;
-            }
-
             var txContext = TransactionManager.Instance.GetContext(session);
             if (txContext != null)
             {
+                List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+
+                if (toBeDeleted.Count == 0)
+                {
+                    Messages.Add("Rows affected: 0");
+                    return;
+                }
+
                 foreach (long rowId in toBeDeleted)
                 {
                     txContext.BufferDelete(_model.TableName, rowId);
                 }
+
+                Messages.Add($"Rows affected: {toBeDeleted.Count}");
             }
             else
             {
-                ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
-            }
+                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
 
-            Messages.Add($"Rows affected: {toBeDeleted.Count}");
+                try
+                {
+                    List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+
+                    if (toBeDeleted.Count == 0)
+                    {
+                        Messages.Add("Rows affected: 0");
+                        return;
+                    }
+
+                    ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+                    Messages.Add($"Rows affected: {toBeDeleted.Count}");
+                }
+                finally
+                {
+                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                }
+            }
         }
         catch (Exception ex)
         {

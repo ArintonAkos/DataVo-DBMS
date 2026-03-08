@@ -33,9 +33,18 @@ internal class Commit : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            FlushInserts(context, databaseName);
-            FlushDeletes(context, databaseName);
-            FlushUpdates(context, databaseName);
+            var lockedTables = AcquireWriteLocks(databaseName, context);
+
+            try
+            {
+                FlushInserts(context, databaseName);
+                FlushDeletes(context, databaseName);
+                FlushUpdates(context, databaseName);
+            }
+            finally
+            {
+                ReleaseWriteLocks(databaseName, lockedTables);
+            }
 
             Messages.Add("Transaction committed.");
         }
@@ -43,6 +52,31 @@ internal class Commit : BaseDbAction
         {
             Logger.Error(ex.Message);
             Messages.Add($"Error: {ex.Message}");
+        }
+    }
+
+    private static List<string> AcquireWriteLocks(string databaseName, TransactionContext context)
+    {
+        var tableNames = context.InsertedRows.Keys
+            .Concat(context.DeletedRowIds.Keys)
+            .Concat(context.UpdatedRows.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (string tableName in tableNames)
+        {
+            LockManager.Instance.AcquireWriteLock(databaseName, tableName);
+        }
+
+        return tableNames;
+    }
+
+    private static void ReleaseWriteLocks(string databaseName, List<string> tableNames)
+    {
+        for (int i = tableNames.Count - 1; i >= 0; i--)
+        {
+            LockManager.Instance.ReleaseWriteLock(databaseName, tableNames[i]);
         }
     }
 

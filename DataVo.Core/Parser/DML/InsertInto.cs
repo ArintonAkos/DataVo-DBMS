@@ -39,7 +39,25 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 ?? throw new Exception("No database in use!");
 
             var txContext = TransactionManager.Instance.GetContext(session);
-            int rowsAffected = ProcessAndInsertTableRows(databaseName, txContext);
+            int rowsAffected;
+
+            if (txContext != null)
+            {
+                rowsAffected = ProcessAndInsertTableRows(databaseName, txContext);
+            }
+            else
+            {
+                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
+
+                try
+                {
+                    rowsAffected = ProcessAndInsertTableRows(databaseName, null);
+                }
+                finally
+                {
+                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                }
+            }
 
             Messages.Add($"Rows affected: {rowsAffected}");
         }
@@ -175,7 +193,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             string rawValue = ResolveRawValue(tableColumn, rawRow, hasColumns, insertColumnToIndex, i);
 
             tableColumn.Value = rawValue.Replace("'", "");
-            
+
             // Prioritize mapped AST Value or explicitly maintain user-injected nulls
             dynamic? parsedValue = tableColumn.ParsedValue;
 
@@ -193,7 +211,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 return false;
             }
 
-            if (foreignKeysByAttribute.TryGetValue(tableColumn.Name, out ForeignKey? foreignKey) && 
+            if (foreignKeysByAttribute.TryGetValue(tableColumn.Name, out ForeignKey? foreignKey) &&
                 !CheckForeignKeyConstraint(foreignKey, tableColumn.Value, databaseName))
             {
                 LogInsertError($"Foreign key violation in row {rowNumber}!");
@@ -205,10 +223,10 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     }
 
     private string ResolveRawValue(
-        Column tableColumn, 
-        List<string> rawRow, 
-        bool hasColumns, 
-        Dictionary<string, int>? insertColumnToIndex, 
+        Column tableColumn,
+        List<string> rawRow,
+        bool hasColumns,
+        Dictionary<string, int>? insertColumnToIndex,
         int index)
     {
         if (!hasColumns) return rawRow[index];
@@ -224,9 +242,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     private bool VerifyUniqueConstraint(Column tableColumn, string databaseName)
     {
         return IndexManager.Instance.IndexContainsKey(
-            tableColumn.Value!, 
-            $"_UK_{tableColumn.Name}", 
-            _model.TableName, 
+            tableColumn.Value!,
+            $"_UK_{tableColumn.Name}",
+            _model.TableName,
             databaseName);
     }
 
@@ -234,9 +252,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// Verifies the completed composite ID string does not collide with preexisting records to preserve Primary Keys.
     /// </summary>
     private bool VerifyPrimaryKeys(
-        Dictionary<string, dynamic> rowDict, 
-        List<string> primaryKeys, 
-        int rowNumber, 
+        Dictionary<string, dynamic> rowDict,
+        List<string> primaryKeys,
+        int rowNumber,
         string databaseName)
     {
         if (primaryKeys.Count == 0) return true;
@@ -273,7 +291,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         foreach (var index in indexFiles)
         {
             if (index.AttributeNames.Any(attr => rowDict[attr] == null)) continue;
-            
+
             string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
 
             IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);

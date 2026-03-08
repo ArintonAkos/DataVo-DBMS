@@ -9,6 +9,7 @@ using DataVo.Core.Parser.Utils;
 using DataVo.Core.Enums;
 using DataVo.Core.Constants;
 using DataVo.Core.Utils;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -48,40 +49,85 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             string database = ValidateDatabase(session);
 
-            ListedTable result = EvaluateStatements();
+            var lockedTables = AcquireReadLocks(database);
 
-            GroupedTable groupedTable = GroupResults(result);
-
-            result = AggregateGroupedTable(groupedTable);
-            result = ApplyHaving(result);
-            result = ApplyOrderBy(result);
-
-            Fields = CreateFieldsFromColumns(result);
-            Data = CreateDataFromResult(result, Fields);
-
-            if (_model.IsDistinct)
+            try
             {
-                Data = ApplyDistinct(Data);
-            }
+                ListedTable result = EvaluateStatements();
 
-            if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+                GroupedTable groupedTable = GroupResults(result);
+
+                result = AggregateGroupedTable(groupedTable);
+                result = ApplyHaving(result);
+                result = ApplyOrderBy(result);
+
+                Fields = CreateFieldsFromColumns(result);
+                Data = CreateDataFromResult(result, Fields);
+
+                if (_model.IsDistinct)
+                {
+                    Data = ApplyDistinct(Data);
+                }
+
+                if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+                {
+                    Data = Data.Skip(_model.LimitSkip.Value).ToList();
+                }
+
+                if (_model.LimitTake.HasValue)
+                {
+                    Data = Data.Take(_model.LimitTake.Value).ToList();
+                }
+
+                Logger.Info($"Rows selected: {Data.Count}");
+                Messages.Add($"Rows selected: {Data.Count}");
+            }
+            finally
             {
-                Data = Data.Skip(_model.LimitSkip.Value).ToList();
+                ReleaseReadLocks(database, lockedTables);
             }
-
-            if (_model.LimitTake.HasValue)
-            {
-                Data = Data.Take(_model.LimitTake.Value).ToList();
-            }
-
-            Logger.Info($"Rows selected: {Data.Count}");
-            Messages.Add($"Rows selected: {Data.Count}");
         }
         catch (Exception ex)
         {
             Messages.Add(ex.ToString());
             Logger.Error(ex.ToString());
         }
+    }
+
+    private List<string> AcquireReadLocks(string databaseName)
+    {
+        var tableNames = GetReferencedTableNames();
+
+        foreach (string tableName in tableNames)
+        {
+            LockManager.Instance.AcquireReadLock(databaseName, tableName);
+        }
+
+        return tableNames;
+    }
+
+    private static void ReleaseReadLocks(string databaseName, List<string> tableNames)
+    {
+        for (int i = tableNames.Count - 1; i >= 0; i--)
+        {
+            LockManager.Instance.ReleaseReadLock(databaseName, tableNames[i]);
+        }
+    }
+
+    private List<string> GetReferencedTableNames()
+    {
+        if (_model.TableService?.TableDetails?.Count > 0)
+        {
+            return [.. _model.TableService.TableDetails.Values
+                .Select(table => table.TableName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)];
+        }
+
+        return [.. new[] { _model.FromTable.TableName }
+            .Where(table => !string.IsNullOrWhiteSpace(table))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>

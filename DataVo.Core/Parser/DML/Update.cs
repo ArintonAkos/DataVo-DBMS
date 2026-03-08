@@ -37,31 +37,53 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             string databaseName = CacheStorage.Get(session)
                 ?? throw new Exception("No database in use!");
 
-            List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
-            if (toBeUpdated.Count == 0)
-            {
-                Messages.Add("Rows affected: 0");
-                return;
-            }
-
-            var existingRows = StorageContext.Instance.GetTableContents(toBeUpdated, _model.TableName, databaseName);
-
-            (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
-
             var txContext = TransactionManager.Instance.GetContext(session);
             if (txContext != null)
             {
+                List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                if (toBeUpdated.Count == 0)
+                {
+                    Messages.Add("Rows affected: 0");
+                    return;
+                }
+
+                var existingRows = StorageContext.Instance.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+
+                (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+
                 for (int i = 0; i < newRows.Count; i++)
                 {
                     txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRows[i]);
                 }
+
+                Messages.Add($"Rows affected: {newRows.Count}");
             }
             else
             {
-                ExecuteUpdate(newRows, oldRowIds, databaseName);
-            }
+                LockManager.Instance.AcquireWriteLock(databaseName, _model.TableName);
 
-            Messages.Add($"Rows affected: {newRows.Count}");
+                try
+                {
+                    List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                    if (toBeUpdated.Count == 0)
+                    {
+                        Messages.Add("Rows affected: 0");
+                        return;
+                    }
+
+                    var existingRows = StorageContext.Instance.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+
+                    (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+
+                    ExecuteUpdate(newRows, oldRowIds, databaseName);
+
+                    Messages.Add($"Rows affected: {newRows.Count}");
+                }
+                finally
+                {
+                    LockManager.Instance.ReleaseWriteLock(databaseName, _model.TableName);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -147,7 +169,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         {
             string colName = setExpr.Key;
             dynamic? newValue = ScalarEvaluator.Evaluate(setExpr.Value, oldRow);
-            
+
             if (newValue is string s && s.StartsWith("'") && s.EndsWith("'"))
             {
                 newValue = s.Trim('\'');
@@ -184,7 +206,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 string valStr = val.ToString()!;
                 string oldValStr = oldRow.TryGetValue(col, out var oldVal) ? (oldVal?.ToString() ?? "null_val") : "null_val";
-                
+
                 // Fine if it hasn't actually mutated
                 if (valStr == oldValStr) continue;
 
@@ -296,7 +318,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             foreach (var index in indexFiles)
             {
                 if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
-                
+
                 string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
                 IndexManager.Instance.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
             }
