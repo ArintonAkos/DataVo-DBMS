@@ -1,21 +1,39 @@
-# Binary Overview
-The `Binary` module contains the implementation of a classic Binary B-Tree disk-backed index. In a standard B-Tree, keys and their associated data pointers (Row IDs) can reside in both internal routing nodes and leaf nodes.
+# Binary B-Tree Overview
 
-## Core Responsibilities
-* **Index Mechanics:** Manages the logical tree hierarchy, routing keys, and balancing rules specific to a standard B-Tree.
-* **Binary Serialization:** Handles the direct conversion of B-Tree nodes into raw binary sequences written to fixed-size disk blocks.
+The `Binary` submodule contains a classic disk-backed B-Tree implementation. Unlike the B+Tree variant, this structure stores key/value mappings inside regular B-Tree pages rather than keeping all row IDs only at the leaf level.
 
-## Component Breakdown
+## Files in this folder
 
-| Component (File) | Architectural Role |
-|------------------|--------------------|
-| `BinaryBTreeIndex.cs` | Implements the core classical B-Tree algorithms (Traversal, Insertion, and Splitting) supporting exact-match data retrieval. |
-| `BTreePage.cs` | Represents an individual generic node in the B-Tree containing a distributed array of keys and Row IDs. |
-| `DiskPager.cs` | The physical I/O interface mapping `BTreePage` memory states directly to native system disk chunks via `FileStream`. |
+| File | Purpose |
+| :--- | :--- |
+| `BinaryBTreeIndex.cs` | High-level `IIndex` implementation for insert, search, logical delete, and row-ID existence checks. |
+| `BTreePage.cs` | Fixed-size 4 KB page model containing keys, row IDs, and child page pointers. |
+| `DiskPager.cs` | Low-level page allocator and memory-mapped file accessor for B-Tree pages. |
 
-## Dependencies & Interactions
-Like the `BPlus` module, this module implements the `IIndex` interface from `DataVo.Core/BTree/Core`. It is dynamically instantiated by the `IndexManager` when a standard Binary B-Tree is required for specific column statistics or user-defined configurations.
+## How it works
 
-## Implementation Specifics
-* **Supported Capabilities:** Exact match equality lookups, node splitting, and fast binary byte-packing.
-* **Not Supported / Limitations:** Because data pointers exist in internal nodes, ordered range scans (e.g., `BETWEEN X AND Y`) are fundamentally slower than the B+Tree variant since it requires full tree traversals instead of linear leaf transversals.
+- The pager reserves page `0` for metadata.
+- Tree pages begin at page `1`.
+- Each page stores a bounded number of string keys and aligned row ID values.
+- Insertion descends recursively until it reaches a non-full page.
+- If a child is full during descent, it is split before recursion continues.
+
+## Deletion behavior
+
+The current implementation does **not** rebalance or compact the tree during deletion. Instead, `DeleteValues` scans pages and replaces matching row IDs with the sentinel value `0`.
+
+That means:
+
+- the physical tree structure remains unchanged,
+- deleted entries are ignored by read operations,
+- the file may retain tombstoned slots until the index is rebuilt.
+
+## Strengths and limitations
+
+| Aspect | Notes |
+| :--- | :--- |
+| Exact-match lookups | Supported. |
+| Page splitting on insert | Supported. |
+| Memory-mapped file I/O | Supported. |
+| Logical deletion via tombstones | Supported. |
+| Range-scan optimization | Limited compared to the B+Tree because values are not organized exclusively in linked leaf pages. |

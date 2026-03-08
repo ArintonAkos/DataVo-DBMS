@@ -18,7 +18,14 @@ namespace DataVo.Core.BTree;
 /// </summary>
 public static class IndexKeyEncoder
 {
+    /// <summary>
+    /// The fixed size, in bytes, of every encoded key stored in the binary B+Tree format.
+    /// </summary>
     public const int KeySize = 32;
+
+    /// <summary>
+    /// The delimiter used when building composite key strings from multiple attribute values.
+    /// </summary>
     public const string CompositeKeySeparator = "##";
 
     /// <summary>
@@ -27,9 +34,10 @@ public static class IndexKeyEncoder
     public static byte[] EmptyKey => new byte[KeySize];
 
     /// <summary>
-    /// Encodes a string key (as passed through the IIndex interface) into a fixed-size byte[32].
-    /// Handles single values and composite keys separated by "##".
+    /// Encodes an index key string into a fixed-size byte buffer suitable for storage in a binary B+Tree.
     /// </summary>
+    /// <param name="key">The logical key string to encode. May represent a single value or a composite key.</param>
+    /// <returns>A <see cref="byte"/> array of length <see cref="KeySize"/>.</returns>
     public static byte[] Encode(string key)
     {
         var result = new byte[KeySize];
@@ -51,25 +59,32 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
-    /// Builds a composite key string from a row's column values.
-    /// Replaces the hardcoded "##" concatenation scattered across InsertInto.cs.
+    /// Builds a logical key string from a row and a sequence of indexed attributes.
     /// </summary>
+    /// <param name="row">The row values keyed by column name.</param>
+    /// <param name="attributes">The indexed attributes, in key order.</param>
+    /// <returns>A single-column key or a composite key joined with <see cref="CompositeKeySeparator"/>.</returns>
     public static string BuildKeyString(Dictionary<string, dynamic> row, IEnumerable<string> attributes)
     {
         return string.Join(CompositeKeySeparator, attributes.Select(attr => row[attr]?.ToString() ?? ""));
     }
 
     /// <summary>
-    /// Compares two byte[32] keys. Returns negative if a &lt; b, 0 if equal, positive if a &gt; b.
+    /// Compares two encoded keys using byte-wise ordering.
     /// </summary>
+    /// <param name="a">The first encoded key.</param>
+    /// <param name="b">The second encoded key.</param>
+    /// <returns>A negative value if <paramref name="a"/> is less than <paramref name="b"/>, zero if equal, or a positive value if greater.</returns>
     public static int CompareKeys(byte[] a, byte[] b)
     {
         return new ReadOnlySpan<byte>(a).SequenceCompareTo(b);
     }
 
     /// <summary>
-    /// Checks if a key is the empty (all-zero) sentinel.
+    /// Determines whether an encoded key is the all-zero sentinel value.
     /// </summary>
+    /// <param name="key">The encoded key to inspect.</param>
+    /// <returns><see langword="true"/> if the key contains only zero bytes; otherwise, <see langword="false"/>.</returns>
     public static bool IsEmptyKey(byte[] key)
     {
         for (int i = 0; i < key.Length; i++)
@@ -95,9 +110,13 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
-    /// Encodes a single value (string or int) into the result buffer at the given offset.
-    /// Returns the number of bytes written.
+    /// Encodes a single logical value into the destination buffer starting at the specified offset.
+    /// Integer values are encoded numerically; all other values are encoded as UTF-8.
     /// </summary>
+    /// <param name="value">The logical value to encode.</param>
+    /// <param name="dest">The destination buffer.</param>
+    /// <param name="offset">The starting offset into <paramref name="dest"/>.</param>
+    /// <returns>The number of bytes written to the destination buffer.</returns>
     private static int EncodeSingleValue(string value, byte[] dest, int offset)
     {
         if (offset >= KeySize) return 0;
@@ -118,9 +137,11 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
-    /// Encodes an integer using sign-flip + big-endian for correct byte-level sort order.
-    /// XORs with int.MinValue to flip the sign bit: negatives sort before positives.
+    /// Encodes a 32-bit integer using sign-flip plus big-endian byte order so byte comparison preserves numeric ordering.
     /// </summary>
+    /// <param name="value">The integer value to encode.</param>
+    /// <param name="dest">The destination buffer.</param>
+    /// <param name="offset">The offset at which to write the 4-byte encoded value.</param>
     private static void EncodeInt(int value, byte[] dest, int offset)
     {
         // XOR with MinValue flips the sign bit:

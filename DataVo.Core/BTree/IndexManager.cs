@@ -4,17 +4,34 @@ using DataVo.Core.BTree.BPlus;
 
 namespace DataVo.Core.BTree;
 
+/// <summary>
+/// Specifies how index mutations are persisted to disk.
+/// </summary>
 public enum IndexPersistenceMode
 {
+    /// <summary>
+    /// Persist each mutation immediately after it is applied.
+    /// </summary>
     Immediate,
+
+    /// <summary>
+    /// Buffer mutations in memory and flush them after a configured threshold is reached.
+    /// </summary>
     Buffered,
 }
 
 /// <summary>
-/// Singleton manager for all active B-Tree indexes.
-/// Provides the same interface previously offered by DbContext's index methods.
-/// Indexes are cached in memory and lazily loaded from disk.
+/// Central coordinator for all active index instances in the current process.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="IndexManager"/> owns the in-memory cache of loaded indexes, lazily loads index files on demand,
+/// and abstracts over multiple index implementations such as JSON B-Trees, binary B-Trees, and binary B+Trees.
+/// </para>
+/// <para>
+/// It also manages persistence behavior after mutations, supporting both immediate writes and buffered flushing.
+/// </para>
+/// </remarks>
 public class IndexManager
 {
     private static IndexManager? _instance;
@@ -44,6 +61,15 @@ public class IndexManager
         }
     }
 
+    /// <summary>
+    /// Configures how index mutations are persisted to disk.
+    /// </summary>
+    /// <param name="mode">The persistence mode to use for subsequent mutations.</param>
+    /// <param name="flushMutationThreshold">
+    /// When <paramref name="mode"/> is <see cref="IndexPersistenceMode.Buffered"/>,
+    /// the number of pending mutations required before an index is flushed automatically.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="flushMutationThreshold"/> is less than or equal to zero.</exception>
     public void ConfigurePersistence(IndexPersistenceMode mode, int flushMutationThreshold = 256)
     {
         if (flushMutationThreshold <= 0)
@@ -63,6 +89,12 @@ public class IndexManager
         }
     }
 
+    /// <summary>
+    /// Flushes all currently dirty buffered indexes to disk.
+    /// </summary>
+    /// <remarks>
+    /// This method is primarily relevant when <see cref="IndexPersistenceMode.Buffered"/> is enabled.
+    /// </remarks>
     public void FlushDirtyIndexes()
     {
         List<string> dirtyKeys;
@@ -147,15 +179,18 @@ public class IndexManager
     }
 
     /// <summary>
-    /// The default index type to use when a specific type is not provided.
-    /// Defaults to B+Tree if not specified.
+    /// Gets or sets the default index implementation to create when no explicit <see cref="IndexType"/> is supplied.
     /// </summary>
     public IndexType DefaultIndexType { get; set; } = IndexType.BinaryBPlusTree;
 
     /// <summary>
-    /// Create a new index and bulk-insert initial values.
-    /// values is a dictionary mapping index key → list of row IDs.
+    /// Creates a new index file, initializes the selected index implementation, and bulk-inserts the supplied key-to-row mappings.
     /// </summary>
+    /// <param name="values">The initial contents of the index, keyed by logical index key with one or more row IDs per key.</param>
+    /// <param name="indexName">The logical name of the index.</param>
+    /// <param name="tableName">The table that owns the index.</param>
+    /// <param name="databaseName">The database containing the table.</param>
+    /// <param name="indexType">An optional override for the index implementation to create. If omitted, <see cref="DefaultIndexType"/> is used.</param>
     public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
@@ -199,8 +234,11 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Drop an index — remove from cache and delete the .btree file.
+    /// Removes an index from the in-memory cache and deletes its backing file from disk.
     /// </summary>
+    /// <param name="indexName">The logical name of the index to drop.</param>
+    /// <param name="tableName">The table that owns the index.</param>
+    /// <param name="databaseName">The database containing the index.</param>
     public void DropIndex(string indexName, string tableName, string databaseName)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
@@ -222,9 +260,12 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Drop all cached indexes belonging to a database.
-    /// Evicts cache entries and deletes .btree files from disk.
+    /// Evicts and deletes every cached index belonging to the specified database.
     /// </summary>
+    /// <param name="databaseName">The database whose indexes should be removed.</param>
+    /// <remarks>
+    /// This method clears both in-memory state and any <c>*_index.btree</c> files found under the database directory.
+    /// </remarks>
     public void DropDatabaseIndexes(string databaseName)
     {
         string cachePrefix = $"{databaseName}/";
@@ -272,8 +313,13 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Insert a single key-value pair into an existing index.
+    /// Inserts a single logical key-to-row mapping into an existing index.
     /// </summary>
+    /// <param name="value">The logical index key.</param>
+    /// <param name="rowId">The row ID to associate with the key.</param>
+    /// <param name="indexName">The target index name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
@@ -282,9 +328,12 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Delete row IDs from an index.
-    /// Removes all entries containing any of the specified row IDs.
+    /// Removes the specified row IDs from an existing index.
     /// </summary>
+    /// <param name="toBeDeletedIds">The row IDs to remove from the index.</param>
+    /// <param name="indexName">The target index name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
@@ -293,8 +342,13 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Look up row IDs by index key value. Returns matching row IDs as a HashSet.
+    /// Looks up the row IDs associated with the specified key in an index.
     /// </summary>
+    /// <param name="columnValue">The logical index key to search for.</param>
+    /// <param name="indexName">The target index name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <returns>A set of matching row IDs. The returned set is empty when the key is not present.</returns>
     public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
@@ -302,8 +356,13 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Check if the index contains any entry for the given key value.
+    /// Determines whether the specified index contains at least one entry for the supplied key.
     /// </summary>
+    /// <param name="key">The logical index key to test.</param>
+    /// <param name="indexName">The target index name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <returns><see langword="true"/> if at least one row is indexed under <paramref name="key"/>; otherwise, <see langword="false"/>.</returns>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);
@@ -311,8 +370,13 @@ public class IndexManager
     }
 
     /// <summary>
-    /// Check if the index contains any entry for the given row ID.
+    /// Determines whether the specified row ID appears anywhere in the target index.
     /// </summary>
+    /// <param name="rowId">The row ID to search for.</param>
+    /// <param name="indexName">The target index name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
     public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
     {
         var index = GetOrLoad(indexName, tableName, databaseName);

@@ -1,21 +1,40 @@
-# Core (BTree) Overview
-The `Core` module within the `BTree` directory establishes the foundational contracts and interface primitives required by all underlying indexing strategies in `DataVo.Core`. 
+# Core BTree Contracts
 
-## Core Responsibilities
-* **Abstraction Guarantee:** Defines the `IIndex` interface, guaranteeing that the storage and evaluation engine can query any tree structure uniformly.
-* **Variant Definitions:** Identifies the algorithmic approach utilized by a specific file via the `IndexType` enumeration.
-* **Legacy Structures:** Contains the original, un-optimized `JsonBTreeIndex` used during early prototyping phases of the storage engine.
+The `Core` submodule contains the shared abstractions that allow the rest of the system to work with different index engines through a common API.
 
-## Component Breakdown
+## Files in this folder
 
-| Component (File) | Architectural Role |
-|------------------|--------------------|
-| `IIndex.cs` | The universal interface defining operations like `Insert`, `Delete`, and `Lookup` that all B-Tree variants must implement. |
-| `IndexType.cs` | An enumeration indicating whether an index file is serialized as JSON, a standard Binary B-Tree, or a Binary B+Tree. |
-| `JsonBTreeIndex.cs` | A legacy index implementation that serializes the entire tree state to a JSON string on disk. |
+| File                | Purpose                                                                                                                                  |
+| :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| `IIndex.cs`         | Defines the common operations supported by all index engines: insert, delete-by-rowID, search, row-ID existence checks, and persistence. |
+| `IndexType.cs`      | Enumerates the supported concrete index engines.                                                                                         |
+| `JsonBTreeIndex.cs` | JSON-backed B-Tree implementation built on `BTreeNode<string, long>`.                                                                    |
 
-## Dependencies & Interactions
-This module is the bedrock of the indexing subsystem. The `IndexManager` centrally relies on `IIndex` to avoid tight coupling to the physical `BinaryBTreeIndex` or `BinaryBPlusTreeIndex` implementations, enabling polymorphic behavior based on the config state tracking the index metadata. 
+## `IIndex`
 
-## Implementation Specifics
-* **Note on JsonBTreeIndex:** The `JsonBTreeIndex` is functionally supported but actively deprecated for production database usage due to the severe performance bottleneck of materializing entire strings into memory during every read/write. It is retained strictly as a fallback or for specialized debugging routines.
+`IIndex` is the contract used by `IndexManager` and the rest of the storage/query pipeline. All implementations expose the same high-level capabilities:
+
+- insert a logical key → row ID mapping,
+- remove row IDs from the index,
+- search exact matches by logical key,
+- test whether a row ID appears anywhere in the index,
+- persist the index to disk.
+
+## `IndexType`
+
+`IndexType` tells `IndexManager` which concrete implementation to create:
+
+- `JsonBTree`
+- `BinaryBTree`
+- `BinaryBPlusTree`
+
+## `JsonBTreeIndex`
+
+`JsonBTreeIndex` is the simplest implementation in the subsystem:
+
+- the tree lives in managed memory,
+- nodes are represented by `BTreeNode<string, long>`,
+- the full tree is serialized to JSON when saved,
+- deletes are handled by collecting entries and rebuilding the tree.
+
+This implementation is useful for compatibility, testing, and inspection, but it is less suitable for large or heavily updated indexes than the binary implementations.

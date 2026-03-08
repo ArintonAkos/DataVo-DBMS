@@ -3,9 +3,12 @@ using System.IO.MemoryMappedFiles;
 namespace DataVo.Core.BTree.BPlus;
 
 /// <summary>
-/// Handles translation between contiguous 4KB Blocks and BPlusTreePage models.
-/// Uses MemoryMappedFile for Zero-Copy OS level Page Caching and False-Sharing mitigation.
+/// Provides low-level page allocation and page I/O for binary B+Tree index files.
 /// </summary>
+/// <remarks>
+/// Page <c>0</c> stores pager metadata. All B+Tree pages begin at page <c>1</c>.
+/// The file is memory-mapped so the operating system can efficiently cache and flush pages.
+/// </remarks>
 public class BPlusDiskPager : IDisposable
 {
     private readonly FileStream _fs;
@@ -13,9 +16,20 @@ public class BPlusDiskPager : IDisposable
     private MemoryMappedViewAccessor? _accessor;
     private const long InitialCapacity = 10L * 1024 * 1024; // 10MB init map
 
+    /// <summary>
+    /// Gets or sets the page ID of the B+Tree root.
+    /// </summary>
     public int RootPageId { get; set; }
+
+    /// <summary>
+    /// Gets the total number of allocated pages, including the metadata page.
+    /// </summary>
     public int NumPages { get; private set; }
 
+    /// <summary>
+    /// Initializes a pager for the specified B+Tree file.
+    /// </summary>
+    /// <param name="filePath">The path to the backing <c>.btree</c> file.</param>
     public BPlusDiskPager(string filePath)
     {
         string? directory = Path.GetDirectoryName(filePath);
@@ -48,6 +62,9 @@ public class BPlusDiskPager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reads pager metadata from page <c>0</c>.
+    /// </summary>
     public void ReadMetadata()
     {
         byte[] meta = new byte[BPlusTreePage.PageSize];
@@ -56,6 +73,9 @@ public class BPlusDiskPager : IDisposable
         NumPages = BitConverter.ToInt32(meta, 4);
     }
 
+    /// <summary>
+    /// Writes pager metadata to page <c>0</c>.
+    /// </summary>
     public void WriteMetadata()
     {
         byte[] meta = new byte[BPlusTreePage.PageSize];
@@ -66,6 +86,10 @@ public class BPlusDiskPager : IDisposable
         _accessor!.WriteArray(0, meta, 0, BPlusTreePage.PageSize);
     }
 
+    /// <summary>
+    /// Allocates a new empty page, writes it to disk, and updates metadata.
+    /// </summary>
+    /// <returns>The newly allocated page.</returns>
     public BPlusTreePage AllocatePage()
     {
         int pageId = NumPages++;
@@ -83,6 +107,10 @@ public class BPlusDiskPager : IDisposable
         return page;
     }
 
+    /// <summary>
+    /// Expands the memory-mapped file to the specified capacity.
+    /// </summary>
+    /// <param name="newCapacity">The desired file capacity in bytes.</param>
     private void GrowMap(long newCapacity)
     {
         _accessor?.Flush();
@@ -94,12 +122,21 @@ public class BPlusDiskPager : IDisposable
         _accessor = _mmf.CreateViewAccessor();
     }
 
+    /// <summary>
+    /// Serializes and writes a page to disk.
+    /// </summary>
+    /// <param name="page">The page to write.</param>
     public void WritePage(BPlusTreePage page)
     {
         long offset = (long)page.PageId * BPlusTreePage.PageSize;
         _accessor!.WriteArray(offset, page.Serialize(), 0, BPlusTreePage.PageSize);
     }
 
+    /// <summary>
+    /// Reads and deserializes a page from the specified page ID.
+    /// </summary>
+    /// <param name="pageId">The page ID to read.</param>
+    /// <returns>The deserialized <see cref="BPlusTreePage"/>.</returns>
     public BPlusTreePage ReadPage(int pageId)
     {
         long offset = (long)pageId * BPlusTreePage.PageSize;
@@ -108,6 +145,9 @@ public class BPlusDiskPager : IDisposable
         return BPlusTreePage.Deserialize(data);
     }
 
+    /// <summary>
+    /// Flushes metadata and releases all file-mapping resources.
+    /// </summary>
     public void Dispose()
     {
         WriteMetadata();
