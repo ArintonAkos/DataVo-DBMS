@@ -17,14 +17,14 @@ public abstract class SqlExecutionTestsBase : IDisposable
     private readonly Guid _session = Guid.NewGuid();
 
     // Static lock to prevent Catalog/StorageContext stomp between parallel XUnit collections
-    protected static readonly object GlobalEngineLock = new object();
+    protected static readonly SemaphoreSlim GlobalEngineLock = new(1, 1);
 
     protected SqlExecutionTestsBase(DataVoConfig config, string testDbName)
     {
         Config = config;
         TestDb = testDbName;
 
-        Monitor.Enter(GlobalEngineLock);
+        GlobalEngineLock.Wait();
 
         // Initialize the global engine instance to use the test's config
         StorageContext.Initialize(Config);
@@ -77,6 +77,6 @@ public abstract class SqlExecutionTestsBase : IDisposable
             try { Directory.Delete(Config.DiskStoragePath, true); } catch { }
         }
 
-        Monitor.Exit(GlobalEngineLock);
+        GlobalEngineLock.Release();
     }
 }
