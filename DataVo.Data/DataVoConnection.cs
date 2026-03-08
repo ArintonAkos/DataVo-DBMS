@@ -1,7 +1,8 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using DataVo.Core.Parser;
-using DataVo.Core.StorageEngine;
+using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Data;
@@ -26,13 +27,20 @@ public class DataVoConnection : DbConnection
 {
     private readonly DataVoConnectionStringBuilder _builder;
     private ConnectionState _state = ConnectionState.Closed;
+    private DataVoEngine? _engine;
 
     /// <summary>
     /// The internal session identifier used by the DataVo engine for this connection.
     /// </summary>
     internal Guid Session { get; } = Guid.NewGuid();
 
+    /// <summary>
+    /// Gets the engine context associated with this open connection.
+    /// </summary>
+    internal DataVoEngine? Engine => _engine;
+
     /// <inheritdoc />
+    [AllowNull]
     public override string ConnectionString
     {
         get => _connectionString;
@@ -74,7 +82,7 @@ public class DataVoConnection : DbConnection
             throw new InvalidOperationException("Connection is already open.");
 
         var config = _builder.ToConfig();
-        StorageContext.Initialize(config);
+        _engine = DataVoEngine.Initialize(config);
 
         // Create and use the database
         ExecuteInternal($"CREATE DATABASE IF NOT EXISTS {_builder.DataSource};");
@@ -90,7 +98,7 @@ public class DataVoConnection : DbConnection
     {
         if (_state == ConnectionState.Closed) return;
 
-        if (TransactionManager.Instance.HasActiveTransaction(Session))
+        if (_engine?.TransactionManager.HasActiveTransaction(Session) == true)
         {
             ExecuteInternal("ROLLBACK;");
         }
@@ -133,7 +141,7 @@ public class DataVoConnection : DbConnection
     /// </summary>
     internal void ExecuteInternal(string sql)
     {
-        var engine = new QueryEngine(sql, Session);
+        var engine = new QueryEngine(sql, Session, _engine);
         var results = engine.Parse();
 
         foreach (var result in results)
