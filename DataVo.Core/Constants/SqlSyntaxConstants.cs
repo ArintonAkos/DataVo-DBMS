@@ -53,6 +53,11 @@ public static class SqlKeywords
     public const string DISTINCT = "DISTINCT";
     public const string LIMIT = "LIMIT";
     public const string OFFSET = "OFFSET";
+    public const string IN = "IN";
+    public const string BETWEEN = "BETWEEN";
+    public const string LIKE = "LIKE";
+    public const string UNION = "UNION";
+    public const string ALL = "ALL";
     public const string IF = "IF";
     public const string EXISTS = "EXISTS";
     public const string COLUMN = "COLUMN";
@@ -80,7 +85,7 @@ public static class SqlKeywords
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
-        LIMIT, OFFSET, IF, EXISTS,
+        LIMIT, OFFSET, IN, BETWEEN, LIKE, UNION, ALL, IF, EXISTS,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL,
         BEGIN, TRANSACTION, COMMIT, ROLLBACK
     ];

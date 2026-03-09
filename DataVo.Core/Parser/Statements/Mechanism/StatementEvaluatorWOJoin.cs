@@ -185,6 +185,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
                 Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
                 Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
+                Operators.LIKE => entry => ExpressionValueComparer.MatchesLike(entry.Value[leftValue], rightVal, trimQuotedStrings: true),
                 Operators.IS_NULL => entry => entry.Value[leftValue] == null,
                 Operators.IS_NOT_NULL => entry => entry.Value[leftValue] != null,
                 _ => throw new SecurityException("Invalid operator")
@@ -230,6 +231,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
                 Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
                 Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) >= 0,
+                Operators.LIKE => entry => ExpressionValueComparer.MatchesLike(entry.Value[leftValue], entry.Value[rightValue], trimQuotedStrings: true),
                 _ => throw new SecurityException("Invalid operator")
             };
         }
@@ -273,6 +275,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
                 Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
                 Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
+                Operators.LIKE => ExpressionValueComparer.MatchesLike(leftVal, rightVal, trimQuotedStrings: true),
                 Operators.IS_NULL => leftVal == null,
                 Operators.IS_NOT_NULL => leftVal != null,
                 _ => throw new SecurityException("Invalid operator")

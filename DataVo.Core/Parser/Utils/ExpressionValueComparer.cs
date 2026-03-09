@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace DataVo.Core.Parser.Utils;
 
 internal static class ExpressionValueComparer
@@ -86,5 +88,28 @@ internal static class ExpressionValueComparer
         {
             return string.Compare(Convert.ToString(leftValue), Convert.ToString(rightValue), StringComparison.Ordinal);
         }
+    }
+
+    public static bool MatchesLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false)
+    {
+        if (inputValue == null || patternValue == null)
+        {
+            return false;
+        }
+
+        string input = Convert.ToString(inputValue) ?? string.Empty;
+        string pattern = Convert.ToString(patternValue) ?? string.Empty;
+
+        if (trimQuotedStrings)
+        {
+            input = input.Trim('\'');
+            pattern = pattern.Trim('\'');
+        }
+
+        string regexPattern = "^" + Regex.Escape(pattern)
+            .Replace("%", ".*")
+            .Replace("_", ".") + "$";
+
+        return Regex.IsMatch(input, regexPattern, RegexOptions.Singleline);
     }
 }

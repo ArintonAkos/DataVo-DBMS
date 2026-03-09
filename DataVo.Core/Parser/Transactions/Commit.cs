@@ -87,7 +87,7 @@ internal class Commit : BaseDbAction
 
         foreach (string tableName in tableNames)
         {
-            DataVo.Core.Runtime.DataVoEngine.Current().LockManager.AcquireWriteLock(databaseName, tableName);
+            Runtime.DataVoEngine.Current().LockManager.AcquireWriteLock(databaseName, tableName);
         }
 
         return tableNames;
@@ -97,7 +97,7 @@ internal class Commit : BaseDbAction
     {
         for (int i = tableNames.Count - 1; i >= 0; i--)
         {
-            DataVo.Core.Runtime.DataVoEngine.Current().LockManager.ReleaseWriteLock(databaseName, tableNames[i]);
+            Runtime.DataVoEngine.Current().LockManager.ReleaseWriteLock(databaseName, tableNames[i]);
         }
     }
 
