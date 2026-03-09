@@ -72,7 +72,7 @@ internal class Where
             throw new Exception("Cannot bind null where statement.");
         }
 
-        ExpressionNode materializedStatement = SubqueryExpressionMaterializer.Materialize(_model.Statement, tableService.DatabaseName, DataVoEngine.Current());
+        ExpressionNode materializedStatement = SubqueryExpressionMaterializer.Materialize(_model.Statement, tableService.DatabaseName, DataVoEngine.Current(), tableService);
 
         _boundStatement = SelectBinder.BindWhere(materializedStatement, tableService)
             ?? throw new Exception("Failed to bind where statement.");
