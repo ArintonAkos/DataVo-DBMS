@@ -112,6 +112,18 @@ public class SelectStatement : SqlStatement
     public LimitNode? LimitExpression { get; set; }
 }
 
+public class UnionBranchNode : SqlNode
+{
+    public bool IsAll { get; set; }
+    public SelectStatement Select { get; set; } = null!;
+}
+
+public class UnionSelectStatement : SqlStatement
+{
+    public SelectStatement Left { get; set; } = null!;
+    public List<UnionBranchNode> Branches { get; set; } = [];
+}
+
 // --- Commands ---
 public class UseStatement : SqlStatement
 {
