@@ -368,15 +368,30 @@ public class Parser(List<Token> tokens)
 
             // Read tokens for the expression until we hit a comma, WHERE, or EOF
             var expressionTokens = new Queue<Token>();
+            int parenthesisDepth = 0;
             while (!IsEof())
             {
-                if (Current.Type == TokenType.Keyword && Current.Value == SqlKeywords.WHERE)
+                if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
+                {
+                    parenthesisDepth++;
+                    expressionTokens.Enqueue(Advance());
+                    continue;
+                }
+
+                if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CloseParenToken)
+                {
+                    parenthesisDepth--;
+                    expressionTokens.Enqueue(Advance());
+                    continue;
+                }
+
+                if (parenthesisDepth == 0 && Current.Type == TokenType.Keyword && Current.Value == SqlKeywords.WHERE)
                 {
                     parsingSetClauses = false;
                     break;
                 }
 
-                if (Current.Type == TokenType.Punctuation && Current.Value == ",")
+                if (parenthesisDepth == 0 && Current.Type == TokenType.Punctuation && Current.Value == ",")
                 {
                     Consume(TokenType.Punctuation, ","); // consume the comma
                     break; // break the inner loop to parse the next SET clause
@@ -872,7 +887,17 @@ public class Parser(List<Token> tokens)
 
             if (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.OpenParenToken)
             {
-                operators.Push(token);
+                if (tokens.Count > 0 && ParserSyntaxHelper.IsKeyword(tokens.Peek(), SqlKeywords.SELECT))
+                {
+                    values.Push(new ScalarSubqueryExpressionNode
+                    {
+                        Subquery = ParseSubqueryStatement(tokens, "scalar")
+                    });
+                }
+                else
+                {
+                    operators.Push(token);
+                }
             }
             else if (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.CloseParenToken)
             {
@@ -1226,6 +1251,7 @@ public class Parser(List<Token> tokens)
             ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
             ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
             InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
+            ScalarSubqueryExpressionNode scalar => new ScalarSubqueryExpressionNode { Subquery = scalar.Subquery },
             _ => throw new ParserException($"Parser Error: Unsupported expression node '{node.GetType().Name}'.")
         };
     }

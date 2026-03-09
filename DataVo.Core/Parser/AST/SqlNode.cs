@@ -74,6 +74,11 @@ public class ExistsSubqueryExpressionNode : ExpressionNode
     public SqlStatement Subquery { get; set; } = null!;
 }
 
+public class ScalarSubqueryExpressionNode : ExpressionNode
+{
+    public SqlStatement Subquery { get; set; } = null!;
+}
+
 public class JoinConditionNode : SqlNode
 {
     public ColumnRefNode Left { get; set; } = null!;

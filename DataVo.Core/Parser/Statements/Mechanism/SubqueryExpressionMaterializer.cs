@@ -23,6 +23,7 @@ internal static class SubqueryExpressionMaterializer
             },
             InSubqueryExpressionNode inSubquery => MaterializeInSubquery(inSubquery, databaseName, engine, outerScope),
             ExistsSubqueryExpressionNode existsSubquery => MaterializeExistsSubquery(existsSubquery, databaseName, engine, outerScope),
+            ScalarSubqueryExpressionNode scalarSubquery => MaterializeScalarSubquery(scalarSubquery, databaseName, engine, outerScope),
             _ => node
         };
     }
@@ -40,6 +41,37 @@ internal static class SubqueryExpressionMaterializer
 
         bool exists = subqueryResult.Data.Count > 0;
         return new LiteralNode { Value = node.IsNegated ? !exists : exists };
+    }
+
+    private static ExpressionNode MaterializeScalarSubquery(ScalarSubqueryExpressionNode node, string databaseName, DataVoEngine engine, TableService? outerScope)
+    {
+        RejectCorrelatedSubquery(node.Subquery, databaseName, outerScope);
+
+        QueryResult subqueryResult = ExecuteSubquery(node.Subquery, databaseName, engine);
+
+        if (subqueryResult.IsError)
+        {
+            throw new Exception(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
+        }
+
+        if (subqueryResult.Fields.Count != 1)
+        {
+            throw new Exception("Scalar subquery must return exactly one column.");
+        }
+
+        if (subqueryResult.Data.Count > 1)
+        {
+            throw new Exception("Scalar subquery returned more than one row.");
+        }
+
+        if (subqueryResult.Data.Count == 0)
+        {
+            return new NullLiteralNode();
+        }
+
+        string fieldName = subqueryResult.Fields[0];
+        subqueryResult.Data[0].TryGetValue(fieldName, out var value);
+        return ToLiteralNode(value);
     }
 
     private static ExpressionNode MaterializeInSubquery(InSubqueryExpressionNode node, string databaseName, DataVoEngine engine, TableService? outerScope)
@@ -163,6 +195,7 @@ internal static class SubqueryExpressionMaterializer
             InSubqueryExpressionNode inSubquery => ContainsCorrelatedReference(inSubquery.Left, innerScope, outerScope)
                 || ContainsCorrelatedReference(inSubquery.Subquery, innerScope.DatabaseName, innerScope),
             ExistsSubqueryExpressionNode existsSubquery => ContainsCorrelatedReference(existsSubquery.Subquery, innerScope.DatabaseName, innerScope),
+            ScalarSubqueryExpressionNode scalarSubquery => ContainsCorrelatedReference(scalarSubquery.Subquery, innerScope.DatabaseName, innerScope),
             ColumnRefNode columnRef => IsCorrelatedReference(columnRef, innerScope, outerScope),
             _ => false
         };
@@ -257,6 +290,7 @@ internal static class SubqueryExpressionMaterializer
             LiteralNode literal => new LiteralNode { Value = literal.Value },
             ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
             InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
+            ScalarSubqueryExpressionNode scalar => new ScalarSubqueryExpressionNode { Subquery = scalar.Subquery },
             _ => throw new Exception($"Unsupported expression node '{node.GetType().Name}' in subquery materialization.")
         };
     }
