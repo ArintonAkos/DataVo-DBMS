@@ -142,7 +142,7 @@ public class Parser(List<Token> tokens)
                 Consume(TokenType.Keyword, SqlKeywords.EXISTS);
                 stmt.IfNotExists = true;
             }
-            
+
             var tableNameToken = Consume(TokenType.Identifier, "table name");
             stmt.TableName = new IdentifierNode(tableNameToken.Value);
 
@@ -365,7 +365,7 @@ public class Parser(List<Token> tokens)
             };
 
             Consume(TokenType.Operator, "=");
-            
+
             // Read tokens for the expression until we hit a comma, WHERE, or EOF
             var expressionTokens = new Queue<Token>();
             while (!IsEof())
@@ -375,7 +375,7 @@ public class Parser(List<Token> tokens)
                     parsingSetClauses = false;
                     break;
                 }
-                
+
                 if (Current.Type == TokenType.Punctuation && Current.Value == ",")
                 {
                     Consume(TokenType.Punctuation, ","); // consume the comma
@@ -472,7 +472,37 @@ public class Parser(List<Token> tokens)
         return new VacuumStatement { TableName = new IdentifierNode(tableNameToken.Value) };
     }
 
-    private SelectStatement ParseSelectStatement()
+    private SqlStatement ParseSelectStatement()
+    {
+        var firstSelect = ParseSingleSelectStatement();
+
+        if (!Match(TokenType.Keyword, SqlKeywords.UNION))
+        {
+            return firstSelect;
+        }
+
+        var unionStatement = new UnionSelectStatement
+        {
+            Left = firstSelect
+        };
+
+        do
+        {
+            bool isAll = Match(TokenType.Keyword, SqlKeywords.ALL);
+            Consume(TokenType.Keyword, SqlKeywords.SELECT);
+
+            unionStatement.Branches.Add(new UnionBranchNode
+            {
+                IsAll = isAll,
+                Select = ParseSingleSelectStatement()
+            });
+        }
+        while (Match(TokenType.Keyword, SqlKeywords.UNION));
+
+        return unionStatement;
+    }
+
+    private SelectStatement ParseSingleSelectStatement()
     {
         var selectStmt = new SelectStatement();
 
@@ -778,8 +808,8 @@ public class Parser(List<Token> tokens)
         // E.g., DEFAULT 'Pending', DEFAULT 10, DEFAULT NULL.
         // We'll capture tokens until we hit a comma, a closing parenthesis, or the next constraint keyword.
         Queue<Token> tokens = new();
-        while (!IsEof() && 
-               Current.Type != TokenType.Punctuation && 
+        while (!IsEof() &&
+               Current.Type != TokenType.Punctuation &&
                !(Current.Type == TokenType.Keyword && (Current.Value == SqlKeywords.PRIMARY || Current.Value == SqlKeywords.UNIQUE || Current.Value == SqlKeywords.REFERENCES)))
         {
             tokens.Enqueue(Advance());
@@ -815,27 +845,11 @@ public class Parser(List<Token> tokens)
             }
             else if (token.Type == TokenType.Operator)
             {
-                while (operators.Count > 0 &&
-                      !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == SqlPunctuation.OpenParenToken) &&
-                      GetPrecedence(token.Value) <= GetPrecedence(operators.Peek().Value))
-                {
-                    EvaluateTopOperator(values, operators);
-                }
-                operators.Push(token);
+                PushOperator(values, operators, token);
             }
             else if (token.Type == TokenType.Identifier)
             {
-                string columnName = token.Value;
-                string? tableOrAlias = null;
-
-                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.DotToken)
-                {
-                    tokens.Dequeue(); // .
-                    tableOrAlias = columnName;
-                    columnName = tokens.Dequeue().Value;
-                }
-
-                values.Push(new ColumnRefNode { TableOrAlias = tableOrAlias, Column = columnName });
+                values.Push(ParseIdentifierExpression(token));
             }
             else if (token.Type == TokenType.StringLiteral)
             {
@@ -854,6 +868,20 @@ public class Parser(List<Token> tokens)
             {
                 values.Push(new NullLiteralNode());
             }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.IN)
+            {
+                ReducePendingOperandOperators(values, operators);
+                values.Push(ParseInExpression(values, tokens));
+            }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.BETWEEN)
+            {
+                ReducePendingOperandOperators(values, operators);
+                values.Push(ParseBetweenExpression(values, tokens));
+            }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.LIKE)
+            {
+                PushOperator(values, operators, new Token(TokenType.Operator, Operators.LIKE));
+            }
             else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.IS)
             {
                 bool isNot = false;
@@ -870,13 +898,7 @@ public class Parser(List<Token> tokens)
                     string opStr = isNot ? Operators.IS_NOT_NULL : Operators.IS_NULL;
                     var opToken = new Token(TokenType.Operator, opStr);
 
-                    while (operators.Count > 0 &&
-                          !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == SqlPunctuation.OpenParenToken) &&
-                          GetPrecedence(opToken.Value) <= GetPrecedence(operators.Peek().Value))
-                    {
-                        EvaluateTopOperator(values, operators);
-                    }
-                    operators.Push(opToken);
+                    PushOperator(values, operators, opToken);
                     values.Push(new NullLiteralNode());
                 }
                 else
@@ -898,7 +920,188 @@ public class Parser(List<Token> tokens)
         return values.Count != 0 ? values.Pop() : new LiteralNode { Value = SqlLiterals.TrueExpression };
     }
 
-    private void EvaluateTopOperator(Stack<ExpressionNode> values, Stack<Token> operators)
+    private static void ReducePendingOperandOperators(Stack<ExpressionNode> values, Stack<Token> operators)
+    {
+        while (operators.Count > 0 &&
+               !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == SqlPunctuation.OpenParenToken) &&
+               GetPrecedence(operators.Peek().Value) > GetPrecedence(Operators.EQUALS))
+        {
+            EvaluateTopOperator(values, operators);
+        }
+    }
+
+    private static void PushOperator(Stack<ExpressionNode> values, Stack<Token> operators, Token token)
+    {
+        while (operators.Count > 0 &&
+              !(operators.Peek().Type == TokenType.Punctuation && operators.Peek().Value == SqlPunctuation.OpenParenToken) &&
+              GetPrecedence(token.Value) <= GetPrecedence(operators.Peek().Value))
+        {
+            EvaluateTopOperator(values, operators);
+        }
+
+        operators.Push(token);
+    }
+
+    private ExpressionNode ParseInExpression(Stack<ExpressionNode> values, Queue<Token> tokens)
+    {
+        if (values.Count == 0)
+        {
+            throw new ParserException("Parser Error: IN requires a left-hand operand.");
+        }
+
+        if (tokens.Count == 0 || tokens.Dequeue() is not { Type: TokenType.Punctuation, Value: SqlPunctuation.OpenParenToken })
+        {
+            throw new ParserException("Parser Error: Expected '(' after IN.");
+        }
+
+        ExpressionNode left = values.Pop();
+        List<ExpressionNode> options = [];
+
+        while (tokens.Count > 0)
+        {
+            if (tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.CloseParenToken)
+            {
+                tokens.Dequeue();
+                break;
+            }
+
+            options.Add(ParseExpressionAtom(tokens, "IN list value"));
+
+            if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.CommaToken)
+            {
+                tokens.Dequeue();
+                continue;
+            }
+
+            if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.CloseParenToken)
+            {
+                tokens.Dequeue();
+                break;
+            }
+
+            throw new ParserException("Parser Error: Expected ',' or ')' in IN list.");
+        }
+
+        if (options.Count == 0)
+        {
+            throw new ParserException("Parser Error: IN list cannot be empty.");
+        }
+
+        ExpressionNode? combined = null;
+        foreach (ExpressionNode option in options)
+        {
+            ExpressionNode comparison = new BinaryExpressionNode
+            {
+                Operator = Operators.EQUALS,
+                Left = CloneExpression(left),
+                Right = option
+            };
+
+            combined = combined == null
+                ? comparison
+                : new BinaryExpressionNode
+                {
+                    Operator = Operators.OR,
+                    Left = combined,
+                    Right = comparison
+                };
+        }
+
+        return combined!;
+    }
+
+    private ExpressionNode ParseBetweenExpression(Stack<ExpressionNode> values, Queue<Token> tokens)
+    {
+        if (values.Count == 0)
+        {
+            throw new ParserException("Parser Error: BETWEEN requires a left-hand operand.");
+        }
+
+        ExpressionNode left = values.Pop();
+        ExpressionNode lowerBound = ParseExpressionAtom(tokens, "BETWEEN lower bound");
+
+        if (tokens.Count == 0 || tokens.Dequeue() is not { Type: TokenType.Operator, Value: Operators.AND })
+        {
+            throw new ParserException("Parser Error: Expected AND in BETWEEN expression.");
+        }
+
+        ExpressionNode upperBound = ParseExpressionAtom(tokens, "BETWEEN upper bound");
+
+        return new BinaryExpressionNode
+        {
+            Operator = Operators.AND,
+            Left = new BinaryExpressionNode
+            {
+                Operator = Operators.GREATER_THAN_OR_EQUAL_TO,
+                Left = CloneExpression(left),
+                Right = lowerBound
+            },
+            Right = new BinaryExpressionNode
+            {
+                Operator = Operators.LESS_THAN_OR_EQUAL_TO,
+                Left = CloneExpression(left),
+                Right = upperBound
+            }
+        };
+    }
+
+    private ExpressionNode ParseExpressionAtom(Queue<Token> tokens, string expectedDescription)
+    {
+        if (tokens.Count == 0)
+        {
+            throw new ParserException($"Parser Error: Expected {expectedDescription}.");
+        }
+
+        Token token = tokens.Dequeue();
+
+        return token.Type switch
+        {
+            TokenType.Identifier => ParseIdentifierExpression(token),
+            TokenType.StringLiteral => new LiteralNode { Value = token.Value },
+            TokenType.NumberLiteral => ParseNumericLiteral(token.Value),
+            TokenType.Keyword when token.Value == SqlKeywords.NULL => new NullLiteralNode(),
+            _ => throw new ParserException($"Parser Error: Unsupported {expectedDescription} '{token.Value}'.")
+        };
+    }
+
+    private static ExpressionNode ParseIdentifierExpression(Token token)
+    {
+        string[] parts = token.Value.Split('.', 2);
+
+        return parts.Length == 2
+            ? new ColumnRefNode { TableOrAlias = parts[0], Column = parts[1] }
+            : new ColumnRefNode { TableOrAlias = null, Column = token.Value };
+    }
+
+    private static LiteralNode ParseNumericLiteral(string value)
+    {
+        object numValue = value;
+        if (int.TryParse(value, out int i)) numValue = i;
+        else if (long.TryParse(value, out long l)) numValue = l;
+        else if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
+
+        return new LiteralNode { Value = numValue };
+    }
+
+    private static ExpressionNode CloneExpression(ExpressionNode node)
+    {
+        return node switch
+        {
+            BinaryExpressionNode binary => new BinaryExpressionNode
+            {
+                Operator = binary.Operator,
+                Left = CloneExpression(binary.Left),
+                Right = CloneExpression(binary.Right)
+            },
+            NullLiteralNode => new NullLiteralNode(),
+            LiteralNode literal => new LiteralNode { Value = literal.Value },
+            ColumnRefNode column => new ColumnRefNode { TableOrAlias = column.TableOrAlias, Column = column.Column },
+            ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
+            _ => throw new ParserException($"Parser Error: Unsupported expression node '{node.GetType().Name}'.")
+        };
+    }
+
+    private static void EvaluateTopOperator(Stack<ExpressionNode> values, Stack<Token> operators)
     {
         var opToken = operators.Pop();
         string op = opToken.Value.ToUpperInvariant();
@@ -921,7 +1124,7 @@ public class Parser(List<Token> tokens)
         {
             Operators.OR => 1,
             Operators.AND => 2,
-            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.IS_NULL or Operators.IS_NOT_NULL => 3,
+            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.LIKE or Operators.IS_NULL or Operators.IS_NOT_NULL => 3,
             Operators.ADD or Operators.SUBTRACT => 4,
             Operators.MUL or Operators.DIVIDE => 5,
             _ => -1,
