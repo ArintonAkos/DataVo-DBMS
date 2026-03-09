@@ -912,6 +912,10 @@ public class Parser(List<Token> tokens)
                 ReducePendingOperandOperators(values, operators);
                 values.Push(ParseInExpression(values, tokens));
             }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.EXISTS)
+            {
+                values.Push(ParseExistsExpression(tokens, isNegated: false));
+            }
             else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.BETWEEN)
             {
                 ReducePendingOperandOperators(values, operators);
@@ -943,6 +947,18 @@ public class Parser(List<Token> tokens)
                 else
                 {
                     throw new ParserException("Parser Error: Expected NULL after IS [NOT]");
+                }
+            }
+            else if (token.Type == TokenType.Keyword && token.Value == SqlKeywords.NOT_KEYWORD)
+            {
+                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.EXISTS)
+                {
+                    tokens.Dequeue();
+                    values.Push(ParseExistsExpression(tokens, isNegated: true));
+                }
+                else
+                {
+                    throw new ParserException("Parser Error: Only NOT EXISTS is supported in subquery expressions.");
                 }
             }
             else
@@ -1000,7 +1016,7 @@ public class Parser(List<Token> tokens)
             return new InSubqueryExpressionNode
             {
                 Left = left,
-                Subquery = ParseSubqueryStatement(tokens)
+                Subquery = ParseSubqueryStatement(tokens, "IN")
             };
         }
 
@@ -1059,7 +1075,21 @@ public class Parser(List<Token> tokens)
         return combined!;
     }
 
-    private SqlStatement ParseSubqueryStatement(Queue<Token> tokens)
+    private ExpressionNode ParseExistsExpression(Queue<Token> tokens, bool isNegated)
+    {
+        if (tokens.Count == 0 || tokens.Dequeue() is not { Type: TokenType.Punctuation, Value: SqlPunctuation.OpenParenToken })
+        {
+            throw new ParserException("Parser Error: Expected '(' after EXISTS.");
+        }
+
+        return new ExistsSubqueryExpressionNode
+        {
+            IsNegated = isNegated,
+            Subquery = ParseSubqueryStatement(tokens, isNegated ? "NOT EXISTS" : "EXISTS")
+        };
+    }
+
+    private SqlStatement ParseSubqueryStatement(Queue<Token> tokens, string context)
     {
         Queue<Token> subqueryTokens = [];
         int depth = 1;
@@ -1086,7 +1116,7 @@ public class Parser(List<Token> tokens)
 
         if (depth != 0)
         {
-            throw new ParserException("Parser Error: Unterminated IN subquery.");
+            throw new ParserException($"Parser Error: Unterminated {context} subquery.");
         }
 
         subqueryTokens.Enqueue(new Token(TokenType.EOF, string.Empty));
@@ -1096,12 +1126,12 @@ public class Parser(List<Token> tokens)
 
         if (statements.Count != 1)
         {
-            throw new ParserException("Parser Error: IN subquery must contain exactly one SELECT statement.");
+            throw new ParserException($"Parser Error: {context} subquery must contain exactly one SELECT statement.");
         }
 
         if (statements[0] is not SelectStatement && statements[0] is not UnionSelectStatement)
         {
-            throw new ParserException("Parser Error: IN subquery must be a SELECT statement.");
+            throw new ParserException($"Parser Error: {context} subquery must be a SELECT statement.");
         }
 
         return statements[0];
@@ -1194,6 +1224,8 @@ public class Parser(List<Token> tokens)
             LiteralNode literal => new LiteralNode { Value = literal.Value },
             ColumnRefNode column => new ColumnRefNode { TableOrAlias = column.TableOrAlias, Column = column.Column },
             ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
+            ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
+            InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
             _ => throw new ParserException($"Parser Error: Unsupported expression node '{node.GetType().Name}'.")
         };
     }
