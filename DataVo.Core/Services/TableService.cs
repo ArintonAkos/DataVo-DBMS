@@ -3,9 +3,16 @@ using DataVo.Core.Parser.Types;
 
 namespace DataVo.Core.Services
 {
-    public class TableService(string databaseName)
+    public class TableService
     {
+        public string DatabaseName { get; }
+
         public Dictionary<string, TableDetail> TableDetails { get; private set; } = [];
+
+        public TableService(string databaseName)
+        {
+            DatabaseName = databaseName;
+        }
 
         public TableDetail GetTableDetailByAliasOrName(string aliasOrName)
         {
@@ -70,7 +77,7 @@ namespace DataVo.Core.Services
         {
             var tableDetail = GetTableDetailByAliasOrName(aliasOrName);
             Row nullRow = new Row();
-            
+
             if (tableDetail.Columns != null)
             {
                 foreach (var col in tableDetail.Columns)
@@ -78,7 +85,7 @@ namespace DataVo.Core.Services
                     nullRow.Add(col, null!);
                 }
             }
-            
+
             return nullRow;
         }
 
@@ -99,7 +106,7 @@ namespace DataVo.Core.Services
                 throw new Exception("Duplicate table alias found");
             }
 
-            tableDetail.DatabaseName = databaseName;
+            tableDetail.DatabaseName = DatabaseName;
 
             TableDetails[tableDetail.GetTableNameInUse()] = tableDetail;
         }

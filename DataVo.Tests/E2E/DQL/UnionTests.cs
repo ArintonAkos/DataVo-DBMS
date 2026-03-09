@@ -57,6 +57,26 @@ public abstract class UnionTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("same number of columns", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Select_ChainedUnionAndUnionAll_AppliesLeftAssociativeSemantics()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Developers UNION ALL SELECT Name FROM Designers UNION SELECT Name FROM Developers");
+
+        Assert.False(result.IsError);
+        var names = result.Data.Select(row => row["Name"]?.ToString()).OrderBy(name => name).ToList();
+        Assert.Equal(["Alice", "Bob", "Cara"], names);
+    }
+
+    [Fact]
+    public void Select_Union_SupportsCompoundOrderByAndLimit()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Developers UNION SELECT Name FROM Designers ORDER BY Name DESC LIMIT 2");
+
+        Assert.False(result.IsError);
+        var names = result.Data.Select(row => row["Name"]?.ToString()).ToList();
+        Assert.Equal(["Cara", "Bob"], names);
+    }
 }
 
 public class UnionTestsMemory : UnionTestsBase

@@ -6,6 +6,7 @@ using DataVo.Core.Services;
 using DataVo.Core.Utils;
 using DataVo.Core.Parser.Binding;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Parser.Statements;
 
@@ -54,6 +55,11 @@ internal class Where
             .ToListedTable();
     }
 
+    public void Prepare(TableService tableService)
+    {
+        _ = BindStatement(tableService);
+    }
+
     private ExpressionNode BindStatement(TableService tableService)
     {
         if (_boundStatement is not null)
@@ -66,7 +72,9 @@ internal class Where
             throw new Exception("Cannot bind null where statement.");
         }
 
-        _boundStatement = SelectBinder.BindWhere(_model.Statement, tableService)
+        ExpressionNode materializedStatement = SubqueryExpressionMaterializer.Materialize(_model.Statement, tableService.DatabaseName, DataVoEngine.Current());
+
+        _boundStatement = SelectBinder.BindWhere(materializedStatement, tableService)
             ?? throw new Exception("Failed to bind where statement.");
 
         return _boundStatement;
