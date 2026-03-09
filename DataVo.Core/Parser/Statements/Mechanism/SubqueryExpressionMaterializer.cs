@@ -22,8 +22,24 @@ internal static class SubqueryExpressionMaterializer
                 Right = Materialize(binary.Right, databaseName, engine, outerScope)
             },
             InSubqueryExpressionNode inSubquery => MaterializeInSubquery(inSubquery, databaseName, engine, outerScope),
+            ExistsSubqueryExpressionNode existsSubquery => MaterializeExistsSubquery(existsSubquery, databaseName, engine, outerScope),
             _ => node
         };
+    }
+
+    private static ExpressionNode MaterializeExistsSubquery(ExistsSubqueryExpressionNode node, string databaseName, DataVoEngine engine, TableService? outerScope)
+    {
+        RejectCorrelatedSubquery(node.Subquery, databaseName, outerScope);
+
+        QueryResult subqueryResult = ExecuteSubquery(node.Subquery, databaseName, engine);
+
+        if (subqueryResult.IsError)
+        {
+            throw new Exception(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
+        }
+
+        bool exists = subqueryResult.Data.Count > 0;
+        return new LiteralNode { Value = node.IsNegated ? !exists : exists };
     }
 
     private static ExpressionNode MaterializeInSubquery(InSubqueryExpressionNode node, string databaseName, DataVoEngine engine, TableService? outerScope)
@@ -146,6 +162,7 @@ internal static class SubqueryExpressionMaterializer
                 || ContainsCorrelatedReference(binary.Right, innerScope, outerScope),
             InSubqueryExpressionNode inSubquery => ContainsCorrelatedReference(inSubquery.Left, innerScope, outerScope)
                 || ContainsCorrelatedReference(inSubquery.Subquery, innerScope.DatabaseName, innerScope),
+            ExistsSubqueryExpressionNode existsSubquery => ContainsCorrelatedReference(existsSubquery.Subquery, innerScope.DatabaseName, innerScope),
             ColumnRefNode columnRef => IsCorrelatedReference(columnRef, innerScope, outerScope),
             _ => false
         };
@@ -238,6 +255,8 @@ internal static class SubqueryExpressionMaterializer
             ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
             NullLiteralNode => new NullLiteralNode(),
             LiteralNode literal => new LiteralNode { Value = literal.Value },
+            ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
+            InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
             _ => throw new Exception($"Unsupported expression node '{node.GetType().Name}' in subquery materialization.")
         };
     }
