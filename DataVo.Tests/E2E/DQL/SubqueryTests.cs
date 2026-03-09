@@ -117,6 +117,87 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Select_ScalarSubquery_FiltersRows()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId = (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 10)");
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.Equal("Alice", result.Data[0]["Name"]);
+    }
+
+    [Fact]
+    public void Select_ScalarSubquery_ZeroRowsBecomesNull()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId = (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 999)");
+
+        Assert.False(result.IsError);
+        Assert.Empty(result.Data);
+    }
+
+    [Fact]
+    public void ScalarSubquery_MustReturnSingleColumn()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId = (SELECT Id, DeptId FROM Employees WHERE Id = 1)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("exactly one column", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ScalarSubquery_MustReturnAtMostOneRow()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId = (SELECT DeptId FROM ActiveDepartments)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("more than one row", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CorrelatedScalarSubquery_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("SELECT e.Name FROM Employees e WHERE e.DeptId = (SELECT a.DeptId FROM ActiveDepartments a WHERE a.DeptId = e.DeptId)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void UpdateSet_ScalarSubquery_AssignsValue()
+    {
+        Execute("UPDATE Employees SET DeptId = (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 10) WHERE Id = 2");
+
+        var result = ExecuteAndReturn("SELECT DeptId FROM Employees WHERE Id = 2");
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.Equal(10, result.Data[0]["DeptId"]);
+    }
+
+    [Fact]
+    public void UpdateSet_ScalarSubquery_ZeroRowsBecomesNull()
+    {
+        Execute("UPDATE Employees SET DeptId = (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 999) WHERE Id = 2");
+
+        var result = ExecuteAndReturn("SELECT DeptId FROM Employees WHERE Id = 2");
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.Null(result.Data[0]["DeptId"]);
+    }
+
+    [Fact]
+    public void UpdateSet_CorrelatedScalarSubquery_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("UPDATE Employees SET DeptId = (SELECT a.DeptId FROM ActiveDepartments a WHERE a.DeptId = Employees.DeptId) WHERE Id = 1");
+
+        Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
+
+        var verification = ExecuteAndReturn("SELECT DeptId FROM Employees WHERE Id = 1");
+        Assert.False(verification.IsError);
+        Assert.Single(verification.Data);
+        Assert.Equal(10, verification.Data[0]["DeptId"]);
+    }
 }
 
 public class SubqueryTestsMemory : SubqueryTestsBase

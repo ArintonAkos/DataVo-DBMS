@@ -2,11 +2,14 @@ using DataVo.Core.BTree;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Parser.Statements.Mechanism;
+using DataVo.Core.Services;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DML;
@@ -24,6 +27,7 @@ namespace DataVo.Core.Parser.DML;
 internal class Update(UpdateStatement ast) : BaseDbAction
 {
     private readonly UpdateModel _model = UpdateModel.FromAst(ast);
+    private Dictionary<string, ExpressionNode>? _materializedSetExpressions;
 
     /// <summary>
     /// Evaluates the conditions to find matching rows, applies the SET expressions, validates constraints,
@@ -35,6 +39,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         try
         {
             string databaseName = GetDatabaseName(session);
+            _ = GetMaterializedSetExpressions(databaseName);
 
             var txContext = Transactions.GetContext(session);
             if (txContext != null)
@@ -102,6 +107,23 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         return whereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
     }
 
+    private Dictionary<string, ExpressionNode> GetMaterializedSetExpressions(string databaseName)
+    {
+        if (_materializedSetExpressions != null)
+        {
+            return _materializedSetExpressions;
+        }
+
+        var tableService = new TableService(databaseName);
+        tableService.AddTableDetail(new TableDetail(_model.TableName, null));
+
+        _materializedSetExpressions = _model.SetExpressions.ToDictionary(
+            pair => pair.Key,
+            pair => SubqueryExpressionMaterializer.Materialize(pair.Value, databaseName, DataVoEngine.Current(), tableService));
+
+        return _materializedSetExpressions;
+    }
+
     /// <summary>
     /// Evaluates SET expressions to produce new rows and validates all integrity constraints (PKs, UKs, FKs).
     /// </summary>
@@ -128,7 +150,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             oldRowIds.Add(rowId);
 
             // Create and add new row to the list of new rows
-            var newRow = ApplySetExpressions(oldRow);
+            var newRow = ApplySetExpressions(oldRow, databaseName);
             newRows.Add(newRow);
 
             // Validate all constraints
@@ -160,11 +182,13 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// </summary>
     /// <param name="oldRow">The original row record.</param>
     /// <returns>A new dictionary representing the modified row.</returns>
-    private Dictionary<string, dynamic> ApplySetExpressions(Dictionary<string, dynamic> oldRow)
+    private Dictionary<string, dynamic> ApplySetExpressions(Dictionary<string, dynamic> oldRow, string databaseName)
     {
         var newRow = new Dictionary<string, dynamic>(oldRow);
 
-        foreach (var setExpr in _model.SetExpressions)
+        Dictionary<string, ExpressionNode> setExpressions = GetMaterializedSetExpressions(databaseName);
+
+        foreach (var setExpr in setExpressions)
         {
             string colName = setExpr.Key;
             dynamic? newValue = ScalarEvaluator.Evaluate(setExpr.Value, oldRow);
