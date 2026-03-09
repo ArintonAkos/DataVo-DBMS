@@ -61,6 +61,15 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("exactly one column", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void CorrelatedInSubquery_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("SELECT e.Name FROM Employees e WHERE e.DeptId IN (SELECT a.DeptId FROM ActiveDepartments a WHERE a.DeptId = e.DeptId)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public class SubqueryTestsMemory : SubqueryTestsBase
