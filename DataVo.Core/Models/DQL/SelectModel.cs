@@ -28,7 +28,7 @@ internal class SelectModel
         string rawTableName = ast.FromTable?.Name ?? string.Empty;
         var tableNameWithAlias = TableParserService.ParseTableWithAlias(rawTableName);
         string tableName = tableNameWithAlias.Item1;
-        string? tableAlias = tableNameWithAlias.Item2;
+        string? tableAlias = ast.FromAlias?.Name ?? tableNameWithAlias.Item2;
         TableDetail fromTable = new(tableName, tableAlias);
 
         Where whereStatement;
