@@ -88,6 +88,7 @@ internal class SelectModel
         JoinStatement = new Join(boundJoinModel, TableService);
         GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
         AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
+        WhereStatement.Prepare(TableService);
 
         TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
 

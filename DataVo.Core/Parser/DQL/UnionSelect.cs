@@ -3,6 +3,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -45,6 +46,9 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
                     Data = DistinctRows(Data, Fields);
                 }
             }
+
+            Data = ApplyOrderBy(Data, Fields, ast.OrderByExpression);
+            Data = ApplyLimit(Data, ast.LimitExpression);
 
             Logger.Info($"Rows selected: {Data.Count}");
             Messages.Add($"Rows selected: {Data.Count}");
@@ -101,6 +105,68 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         }
 
         return field;
+    }
+
+    private static List<Dictionary<string, dynamic>> ApplyOrderBy(List<Dictionary<string, dynamic>> rows, List<string> fields, OrderByNode? orderBy)
+    {
+        if (orderBy == null || orderBy.Columns.Count == 0)
+        {
+            return rows;
+        }
+
+        IOrderedEnumerable<Dictionary<string, dynamic>>? ordered = null;
+
+        foreach (var orderCol in orderBy.Columns)
+        {
+            string fieldName = CanonicalizeFieldName(orderCol.Column.Name);
+            Func<Dictionary<string, dynamic>, object?> keySelector = row => ResolveFieldValue(row, fieldName);
+
+            ordered = ordered == null
+                ? (orderCol.IsAscending
+                    ? rows.OrderBy(keySelector, DynamicObjectComparer.Instance)
+                    : rows.OrderByDescending(keySelector, DynamicObjectComparer.Instance))
+                : (orderCol.IsAscending
+                    ? ordered.ThenBy(keySelector, DynamicObjectComparer.Instance)
+                    : ordered.ThenByDescending(keySelector, DynamicObjectComparer.Instance));
+        }
+
+        return ordered?.ToList() ?? rows;
+    }
+
+    private static List<Dictionary<string, dynamic>> ApplyLimit(List<Dictionary<string, dynamic>> rows, LimitNode? limit)
+    {
+        if (limit == null)
+        {
+            return rows;
+        }
+
+        IEnumerable<Dictionary<string, dynamic>> query = rows;
+
+        if (limit.SkipTarget > 0)
+        {
+            query = query.Skip(limit.SkipTarget);
+        }
+
+        return query.Take(limit.TakeTarget).ToList();
+    }
+
+    private static object? ResolveFieldValue(Dictionary<string, dynamic> row, string fieldName)
+    {
+        if (row.TryGetValue(fieldName, out var value))
+        {
+            return value;
+        }
+
+        if (fieldName.Contains('.'))
+        {
+            string unqualified = fieldName.Split('.', 2)[1];
+            if (row.TryGetValue(unqualified, out value))
+            {
+                return value;
+            }
+        }
+
+        throw new Exception($"Compound ORDER BY column '{fieldName}' is not present in the UNION result.");
     }
 
     private static List<Dictionary<string, dynamic>> DistinctRows(List<Dictionary<string, dynamic>> rows, List<string> fields)

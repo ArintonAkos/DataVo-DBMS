@@ -474,10 +474,11 @@ public class Parser(List<Token> tokens)
 
     private SqlStatement ParseSelectStatement()
     {
-        var firstSelect = ParseSingleSelectStatement();
+        var firstSelect = ParseSingleSelectStatement(parseTailClauses: false);
 
         if (!Match(TokenType.Keyword, SqlKeywords.UNION))
         {
+            ParseSelectTail(firstSelect);
             return firstSelect;
         }
 
@@ -494,15 +495,17 @@ public class Parser(List<Token> tokens)
             unionStatement.Branches.Add(new UnionBranchNode
             {
                 IsAll = isAll,
-                Select = ParseSingleSelectStatement()
+                Select = ParseSingleSelectStatement(parseTailClauses: false)
             });
         }
         while (Match(TokenType.Keyword, SqlKeywords.UNION));
 
+        ParseUnionTail(unionStatement);
+
         return unionStatement;
     }
 
-    private SelectStatement ParseSingleSelectStatement()
+    private SelectStatement ParseSingleSelectStatement(bool parseTailClauses)
     {
         var selectStmt = new SelectStatement();
 
@@ -541,7 +544,7 @@ public class Parser(List<Token> tokens)
             // Collect all tokens until EOF or the next major keyword (e.g. GROUP BY) 
             // and pass them to the Shunting-Yard expression parser
             var expressionTokens = new Queue<Token>();
-            while (!IsEof() && !IsGroupByKeyword())
+            while (!IsEof() && !IsGroupByKeyword() && !IsOrderByKeyword() && !IsLimitKeyword() && !IsUnionKeyword())
             {
                 expressionTokens.Enqueue(Advance());
             }
@@ -559,7 +562,7 @@ public class Parser(List<Token> tokens)
         if (Match(TokenType.Keyword, SqlKeywords.HAVING))
         {
             var expressionTokens = new Queue<Token>();
-            while (!IsEof() && !IsOrderByKeyword())
+            while (!IsEof() && !IsOrderByKeyword() && !IsLimitKeyword() && !IsUnionKeyword())
             {
                 expressionTokens.Enqueue(Advance());
             }
@@ -567,33 +570,69 @@ public class Parser(List<Token> tokens)
             selectStmt.HavingExpression = ParseWhereExpression(expressionTokens);
         }
 
-        // 7. Parse optional ORDER BY
+        if (parseTailClauses)
+        {
+            ParseSelectTail(selectStmt);
+        }
+
+        return selectStmt;
+    }
+
+    private void ParseSelectTail(SelectStatement selectStmt)
+    {
         if (IsOrderByKeyword())
         {
             selectStmt.OrderByExpression = ParseOrderBy();
         }
 
-        // 8. Parse optional LIMIT
-        if (Match(TokenType.Keyword, SqlKeywords.LIMIT))
+        if (IsLimitKeyword())
         {
-            var limitToken = Consume(TokenType.NumberLiteral, "limit value");
-            int take = int.Parse(limitToken.Value);
-            int skip = 0;
+            selectStmt.LimitExpression = ParseLimit();
+        }
+    }
 
-            if (Match(TokenType.Keyword, SqlKeywords.OFFSET))
-            {
-                var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
-                skip = int.Parse(offsetToken.Value);
-            }
-
-            selectStmt.LimitExpression = new LimitNode
-            {
-                TakeTarget = take,
-                SkipTarget = skip
-            };
+    private void ParseUnionTail(UnionSelectStatement unionStatement)
+    {
+        if (IsOrderByKeyword())
+        {
+            unionStatement.OrderByExpression = ParseOrderBy();
         }
 
-        return selectStmt;
+        if (IsLimitKeyword())
+        {
+            unionStatement.LimitExpression = ParseLimit();
+        }
+    }
+
+    private LimitNode ParseLimit()
+    {
+        Consume(TokenType.Keyword, SqlKeywords.LIMIT);
+
+        var limitToken = Consume(TokenType.NumberLiteral, "limit value");
+        int take = int.Parse(limitToken.Value);
+        int skip = 0;
+
+        if (Match(TokenType.Keyword, SqlKeywords.OFFSET))
+        {
+            var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
+            skip = int.Parse(offsetToken.Value);
+        }
+
+        return new LimitNode
+        {
+            TakeTarget = take,
+            SkipTarget = skip
+        };
+    }
+
+    private bool IsLimitKeyword()
+    {
+        return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.LIMIT);
+    }
+
+    private bool IsUnionKeyword()
+    {
+        return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.UNION);
     }
 
     private bool IsJoinKeyword()
@@ -955,6 +994,16 @@ public class Parser(List<Token> tokens)
         }
 
         ExpressionNode left = values.Pop();
+
+        if (tokens.Count > 0 && ParserSyntaxHelper.IsKeyword(tokens.Peek(), SqlKeywords.SELECT))
+        {
+            return new InSubqueryExpressionNode
+            {
+                Left = left,
+                Subquery = ParseSubqueryStatement(tokens)
+            };
+        }
+
         List<ExpressionNode> options = [];
 
         while (tokens.Count > 0)
@@ -1008,6 +1057,54 @@ public class Parser(List<Token> tokens)
         }
 
         return combined!;
+    }
+
+    private SqlStatement ParseSubqueryStatement(Queue<Token> tokens)
+    {
+        Queue<Token> subqueryTokens = [];
+        int depth = 1;
+
+        while (tokens.Count > 0)
+        {
+            Token token = tokens.Dequeue();
+
+            if (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.OpenParenToken)
+            {
+                depth++;
+            }
+            else if (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.CloseParenToken)
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    break;
+                }
+            }
+
+            subqueryTokens.Enqueue(token);
+        }
+
+        if (depth != 0)
+        {
+            throw new ParserException("Parser Error: Unterminated IN subquery.");
+        }
+
+        subqueryTokens.Enqueue(new Token(TokenType.EOF, string.Empty));
+
+        var subqueryParser = new Parser([.. subqueryTokens]);
+        var statements = subqueryParser.Parse();
+
+        if (statements.Count != 1)
+        {
+            throw new ParserException("Parser Error: IN subquery must contain exactly one SELECT statement.");
+        }
+
+        if (statements[0] is not SelectStatement && statements[0] is not UnionSelectStatement)
+        {
+            throw new ParserException("Parser Error: IN subquery must be a SELECT statement.");
+        }
+
+        return statements[0];
     }
 
     private ExpressionNode ParseBetweenExpression(Stack<ExpressionNode> values, Queue<Token> tokens)

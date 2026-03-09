@@ -62,6 +62,12 @@ public class ResolvedColumnRefNode : ExpressionNode
     public string Column { get; set; } = string.Empty; // After resolution, the actual column name
 }
 
+public class InSubqueryExpressionNode : ExpressionNode
+{
+    public ExpressionNode Left { get; set; } = null!;
+    public SqlStatement Subquery { get; set; } = null!;
+}
+
 public class JoinConditionNode : SqlNode
 {
     public ColumnRefNode Left { get; set; } = null!;
@@ -122,6 +128,8 @@ public class UnionSelectStatement : SqlStatement
 {
     public SelectStatement Left { get; set; } = null!;
     public List<UnionBranchNode> Branches { get; set; } = [];
+    public OrderByNode? OrderByExpression { get; set; }
+    public LimitNode? LimitExpression { get; set; }
 }
 
 // --- Commands ---
