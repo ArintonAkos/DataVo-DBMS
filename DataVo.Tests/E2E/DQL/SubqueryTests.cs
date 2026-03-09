@@ -70,6 +70,53 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Select_ExistsSubquery_FiltersRows()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE EXISTS (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 10)");
+
+        Assert.False(result.IsError);
+        Assert.Equal(3, result.Data.Count);
+    }
+
+    [Fact]
+    public void Select_NotExistsSubquery_FiltersRows()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE NOT EXISTS (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 999)");
+
+        Assert.False(result.IsError);
+        Assert.Equal(3, result.Data.Count);
+    }
+
+    [Fact]
+    public void Delete_ExistsSubquery_FiltersRows()
+    {
+        Execute("DELETE FROM Employees WHERE EXISTS (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 10)");
+
+        var result = ExecuteAndReturn("SELECT Id FROM Employees");
+        Assert.False(result.IsError);
+        Assert.Empty(result.Data);
+    }
+
+    [Fact]
+    public void Update_NotExistsSubquery_CanPreventMutation()
+    {
+        Execute("UPDATE Employees SET Name = 'Updated' WHERE NOT EXISTS (SELECT DeptId FROM ActiveDepartments WHERE DeptId = 10)");
+
+        var result = ExecuteAndReturn("SELECT Name FROM Employees ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.Equal(["Alice", "Bob", "Cara"], result.Data.Select(row => row["Name"]?.ToString()).ToList());
+    }
+
+    [Fact]
+    public void CorrelatedExistsSubquery_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("SELECT e.Name FROM Employees e WHERE EXISTS (SELECT a.DeptId FROM ActiveDepartments a WHERE a.DeptId = e.DeptId)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public class SubqueryTestsMemory : SubqueryTestsBase
