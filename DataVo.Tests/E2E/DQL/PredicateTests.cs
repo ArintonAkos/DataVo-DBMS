@@ -67,6 +67,43 @@ public abstract class PredicateTestsBase : SqlExecutionTestsBase
 
         Assert.Equal([1, 5], ids);
     }
+
+    [Fact]
+    public void Select_Where_WithoutParentheses_FollowsAndPrecedence()
+    {
+        // SQL specifies that AND has higher precedence than OR.
+        // Equivalent to: Price > 20 OR (Name = 'Alpha' AND Price < 20)
+        // Matches:
+        //   - Price > 20  => 3, 4, 5
+        //   - Name = 'Alpha' AND Price < 20 => 1
+        // Expected total: 1, 3, 4, 5
+        var result = ExecuteAndReturn("SELECT * FROM Products WHERE Price > 20 OR Name = 'Alpha' AND Price < 20");
+
+        var ids = result.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([1, 3, 4, 5], ids);
+    }
+
+    [Fact]
+    public void Select_Where_WithParentheses_OverridesPrecedence()
+    {
+        // Parentheses force the OR to evaluate first.
+        // (Price > 20 OR Name = 'Alpha') => 3, 4, 5 AND 1 => (1, 3, 4, 5)
+        // ... AND Price < 20 => only 1 matches
+        // Expected total: 1
+        var result = ExecuteAndReturn("SELECT * FROM Products WHERE (Price > 20 OR Name = 'Alpha') AND Price < 20");
+
+        var ids = result.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([1], ids);
+    }
+
+    [Fact]
+    public void Select_Where_NestedParentheses_EvaluatesInternalsFirst()
+    {
+        // Deeply nested parentheses shouldn't break the expression tree
+        var result = ExecuteAndReturn("SELECT * FROM Products WHERE (((Price = 10)))");
+        var ids = result.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([1], ids);
+    }
 }
 
 public class PredicateTestsMemory : PredicateTestsBase
