@@ -22,6 +22,10 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             {
                 currentQueue.Enqueue(BindEngine(new Select(selectAst)));
             }
+            else if (statement is UnionSelectStatement unionSelectAst)
+            {
+                currentQueue.Enqueue(BindEngine(new UnionSelect(unionSelectAst)));
+            }
             else if (statement is InsertIntoStatement insertAst)
             {
                 currentQueue.Enqueue(BindEngine(new DML.InsertInto(insertAst)));
