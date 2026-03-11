@@ -213,6 +213,11 @@ public class AlterTableDropColumnStatement : AlterTableStatement
     public IdentifierNode ColumnName { get; set; } = null!;
 }
 
+public class AlterTableModifyColumnStatement : AlterTableStatement
+{
+    public ColumnDefinitionNode Column { get; set; } = null!;
+}
+
 public class CreateIndexStatement : SqlStatement
 {
     public IdentifierNode IndexName { get; set; } = null!;

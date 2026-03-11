@@ -95,6 +95,58 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("last remaining column", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_ConvertsExistingValuesAndPreservesDefault()
+    {
+        Execute("ALTER TABLE Users ADD COLUMN Score INT DEFAULT 7");
+        var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Score FLOAT");
+
+        Assert.False(alter.IsError);
+
+        Execute("INSERT INTO Users (Id, Name) VALUES (3, 'Cara')");
+
+        var result = ExecuteAndReturn("SELECT Score FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.Equal(3, result.Data.Count);
+        Assert.All(result.Data, row => Assert.Equal(7f, Convert.ToSingle(row["Score"])));
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_TruncatesVarcharAndUpdatesDefault()
+    {
+        var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Name VARCHAR(3) DEFAULT 'Zed'");
+
+        Assert.False(alter.IsError);
+
+        Execute("INSERT INTO Users (Id) VALUES (3)");
+
+        var result = ExecuteAndReturn("SELECT Name FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.Equal(["Ali", "Bob", "Zed"], result.Data.Select(row => row["Name"]?.ToString()).ToList());
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_RejectsPrimaryKeyColumn()
+    {
+        var result = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Id FLOAT");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_RejectsIncompatibleExistingValues()
+    {
+        var result = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Name INT");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("cannot convert existing value", StringComparison.OrdinalIgnoreCase));
+
+        var verify = ExecuteAndReturn("SELECT Name FROM Users ORDER BY Id");
+        Assert.False(verify.IsError);
+        Assert.Equal(["Alice", "Bob"], verify.Data.Select(row => row["Name"]?.ToString()).ToList());
+    }
 }
 
 public class AlterTableTestsMemory : AlterTableTestsBase
