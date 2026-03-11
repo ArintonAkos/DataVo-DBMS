@@ -2,7 +2,10 @@
 
 namespace DataVo.Core.Enums;
 
-public class Operators
+/// <summary>
+/// Centralizes the operators and built-in function names supported by expression parsing.
+/// </summary>
+public static class Operators
 {
     public const string AND = "AND";
     public const string OR = "OR";
@@ -29,12 +32,18 @@ public class Operators
 
     public const string NEGATE = "NOT";
 
+    /// <summary>
+    /// Gets the Boolean composition operators.
+    /// </summary>
     public static List<string> ConditionOperators =
     [
         AND,
         OR,
     ];
 
+    /// <summary>
+    /// Gets the comparison operators used in predicates.
+    /// </summary>
     public static List<string> LogicalOperators =
     [
         EQUALS,
@@ -48,6 +57,9 @@ public class Operators
         IS_NOT_NULL
     ];
 
+    /// <summary>
+    /// Gets the arithmetic operators supported by scalar expression evaluation.
+    /// </summary>
     public static List<string> ArithmeticOperators =
     [
         ADD,
@@ -56,6 +68,9 @@ public class Operators
         DIVIDE,
     ];
 
+    /// <summary>
+    /// Gets the built-in scalar function identifiers.
+    /// </summary>
     public static List<string> FunctionOperators =
     [
         LEN,
@@ -63,15 +78,29 @@ public class Operators
         LOWER,
     ];
 
+    private static readonly Lazy<List<string>> SupportedOperators = new(() => ConditionOperators
+        .Concat(LogicalOperators)
+        .Concat(ArithmeticOperators)
+        .Concat(FunctionOperators)
+        .OrderByDescending(op => op.Length)
+        .ToList());
+
+    /// <summary>
+    /// Gets all operators ordered by descending length so multi-character matches win over shorter prefixes.
+    /// </summary>
+    /// <returns>The supported operators in matching priority order.</returns>
     public static List<string> Supported()
     {
-        return ConditionOperators
-            .Concat(LogicalOperators)
-            .Concat(ArithmeticOperators)
-            .OrderByDescending(op => op.Length)
-            .ToList();
+        return SupportedOperators.Value;
     }
 
+    /// <summary>
+    /// Determines whether the input contains a supported operator starting at a given position.
+    /// </summary>
+    /// <param name="input">The expression text being scanned.</param>
+    /// <param name="pos">The zero-based position to inspect.</param>
+    /// <param name="length">When this method returns, contains the matched operator length if successful.</param>
+    /// <returns><see langword="true"/> when a supported operator is found; otherwise <see langword="false"/>.</returns>
     public static bool ContainsOperator(string input, int pos, out int length)
     {
         int remainingLength = input.Length - (pos + 1);

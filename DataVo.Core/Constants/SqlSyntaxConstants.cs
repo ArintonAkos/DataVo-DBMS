@@ -1,5 +1,12 @@
 namespace DataVo.Core.Constants;
 
+/// <summary>
+/// Defines the SQL keywords recognized by the lexer and parser.
+/// </summary>
+/// <remarks>
+/// The constants in this type centralize grammar tokens so parser components can remain consistent
+/// and avoid scattering hard-coded literals throughout the codebase.
+/// </remarks>
 public static class SqlKeywords
 {
     public const string SELECT = "SELECT";
@@ -65,17 +72,21 @@ public static class SqlKeywords
     public const string CASCADE = "CASCADE";
     public const string RESTRICT = "RESTRICT";
 
-    // NULL support
+    /// <summary>
+    /// Gets the complete set of currently recognized SQL keywords.
+    /// </summary>
     public const string IS = "IS";
     public const string NOT_KEYWORD = "NOT";
     public const string NULL = "NULL";
 
-    // Transaction support
     public const string BEGIN = "BEGIN";
     public const string TRANSACTION = "TRANSACTION";
     public const string COMMIT = "COMMIT";
     public const string ROLLBACK = "ROLLBACK";
 
+    /// <summary>
+    /// Gets all supported SQL keywords as a flat array for quick membership checks.
+    /// </summary>
     public static readonly string[] All =
     [
         SELECT, FROM, WHERE, INSERT, INTO, VALUES,
@@ -91,6 +102,9 @@ public static class SqlKeywords
     ];
 }
 
+/// <summary>
+/// Defines the punctuation tokens used by SQL parsing.
+/// </summary>
 public static class SqlPunctuation
 {
     public const char OpenParen = '(';
@@ -106,7 +120,13 @@ public static class SqlPunctuation
     public const string DotToken = ".";
 }
 
+/// <summary>
+/// Defines literal expressions that are treated specially by the parser.
+/// </summary>
 public static class SqlLiterals
 {
+    /// <summary>
+    /// Represents a Boolean expression that always evaluates to true.
+    /// </summary>
     public const string TrueExpression = "1=1";
 }

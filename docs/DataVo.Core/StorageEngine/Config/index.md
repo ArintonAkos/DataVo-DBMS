@@ -13,6 +13,10 @@ The `Config` directory centralizes the runtime settings that determine how `Data
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DataVoConfig.cs` | Defines the active storage mode, disk storage path, WAL enablement, WAL file path, checkpoint threshold, and helper logic for resolving the effective WAL location. |
 
+## File Documentation
+
+- [DataVoConfig](./DataVoConfig.md)
+
 ## Dependencies & Interactions
 
 `DataVoConfig` is passed into `StorageContext.Initialize()`. From there it influences storage-engine selection, startup recovery, and commit-time WAL behavior.

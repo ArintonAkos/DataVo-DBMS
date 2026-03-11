@@ -1,6 +1,9 @@
 namespace DataVo.Core.Enums;
 
-public class JoinTypes
+/// <summary>
+/// Defines the canonical join type names used across parsing and execution.
+/// </summary>
+public static class JoinTypes
 {
     public const string INNER = "INNER";
     public const string LEFT = "LEFT";
@@ -8,6 +11,9 @@ public class JoinTypes
     public const string FULL = "FULL";
     public const string CROSS = "CROSS";
 
+    /// <summary>
+    /// Gets the set of supported join type names.
+    /// </summary>
     public static readonly HashSet<string> All = new(StringComparer.OrdinalIgnoreCase)
     {
         INNER,
@@ -16,5 +22,4 @@ public class JoinTypes
         FULL,
         CROSS
     };
-
 }

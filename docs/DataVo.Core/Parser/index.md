@@ -27,6 +27,12 @@ The `Parser` module is arguably the most complex component of `DataVo.Core`, res
 | `Parser.cs`          | The central recursive descent parser orchestrating the construction of the entire AST.                                     |
 | `QueryEngine.cs`     | The high-level coordinator wrapping the Lexer, Parser, and Evaluator into a single user-facing interface.                  |
 
+## File Documentation
+
+- [Lexer](./Lexer.md)
+- [Parser](./Parser.md)
+- [QueryEngine](./QueryEngine.md)
+
 ## Dependencies & Interactions
 
 This module is the core ingest point for all commands originating from the `Server` module or external clients. It heavily relies on the `Constants` for keyword recognition, the `Enums` for operator switching, and the object hierarchies found in `Models`. During execution it collaborates closely with:
