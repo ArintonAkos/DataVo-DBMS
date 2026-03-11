@@ -123,6 +123,41 @@ internal sealed class CatalogStore
         }
     }
 
+    public void ModifyColumn(string tableName, string databaseName, Field field)
+    {
+        lock (_syncRoot)
+        {
+            var table = GetTableElement(databaseName, tableName)
+                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+
+            var attribute = GetTableAttributeElement(table, field.Name)
+                           ?? throw new Exception($"Column {field.Name} does not exist in table {tableName}!");
+
+            attribute.SetAttributeValue("Type", field.Type.ToString());
+
+            if (field.Length > 0)
+            {
+                attribute.SetAttributeValue("Length", field.Length);
+            }
+            else
+            {
+                attribute.SetAttributeValue("Length", null);
+            }
+
+            if (field.DefaultValue != null)
+            {
+                attribute.SetAttributeValue("DefaultValue", field.DefaultValue);
+            }
+            else
+            {
+                attribute.SetAttributeValue("DefaultValue", null);
+            }
+
+            SaveDocument();
+            TouchTableSchemaVersion(databaseName, tableName);
+        }
+    }
+
     public void DropDatabase(string databaseName)
     {
         lock (_syncRoot)
