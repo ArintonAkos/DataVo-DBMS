@@ -102,6 +102,29 @@ dotnet build
 dotnet test
 ```
 
+## Local Package Readiness
+
+The repository is configured so the library projects can be packed locally without publishing anything.
+
+Pack the NuGet artifacts into [artifacts/packages](artifacts/packages):
+
+```bash
+dotnet pack ABKR.sln -c Release
+```
+
+This currently produces package artifacts for:
+
+- `DataVo.Core`
+- `DataVo.Data`
+
+Application projects such as the server, frontend, and tests are marked non-packable.
+
+To inspect the generated files locally:
+
+```bash
+ls artifacts/packages
+```
+
 ## Contributing
 
 Contributions are welcome via pull requests with clear scope and tests for behavioral changes.
