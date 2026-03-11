@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
+    <IsPackable>true</IsPackable>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>Arinton Akos</Authors>
+    <Company>DataVo</Company>
+    <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and disk-backed storage, and embeddable .NET workflows.</Description>
+    <PackageTags>database;sql;dbms;dotnet;csharp;storage;embedded</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ArintonAkos/ABKR</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArintonAkos/ABKR.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
+    <PackageId>DataVo.Core</PackageId>
+    <Title>DataVo Core</Title>
+    <PackageReleaseNotes>Initial local pack-ready setup with SQL engine, storage, indexing, and ALTER TABLE support.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
+    <PackageId>DataVo.Data</PackageId>
+    <Title>DataVo Data</Title>
+    <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
+    <PackageReleaseNotes>Initial local pack-ready setup for the DataVo data-access package.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Link="README.md" Visible="false" />
+  </ItemGroup>
+</Project>
