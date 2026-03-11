@@ -12,6 +12,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "esbuild": "^0.27.3",
     "mermaid": "^11.12.3",
     "vitepress": "^1.6.4",
     "vitepress-plugin-mermaid": "^2.0.17",
