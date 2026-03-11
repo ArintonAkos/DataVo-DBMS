@@ -5,14 +5,34 @@ using DataVo.Core.Runtime;
 
 namespace DataVo.Core.StorageEngine.Serialization;
 
+/// <summary>
+/// Serializes row dictionaries to binary payloads and deserializes them back using the active catalog schema.
+/// </summary>
+/// <remarks>
+/// The serializer is schema-aware. Column order, null handling, and primitive encodings are driven by
+/// catalog metadata rather than by the order of values in the supplied dictionary.
+/// </remarks>
 public static class RowSerializer
 {
+    /// <summary>
+    /// Caches schema snapshots per engine/database/table combination.
+    /// </summary>
     private sealed class SchemaCacheEntry
     {
+        /// <summary>
+        /// Gets the schema version associated with the cached columns.
+        /// </summary>
         public int Version { get; init; }
+
+        /// <summary>
+        /// Gets the cached column metadata.
+        /// </summary>
         public List<Column> Columns { get; init; } = [];
     }
 
+    /// <summary>
+    /// Stores schema cache entries by engine/database/table key.
+    /// </summary>
     private static readonly ConcurrentDictionary<string, SchemaCacheEntry> _schemaCache = new();
 
     /// <summary>
@@ -27,49 +47,14 @@ public static class RowSerializer
 
         foreach (var column in columns)
         {
-            // Null check (implementing basic null bitmap or prefix later if necessary, 
-            // for now assume required matching the old mongodb behavior)
             if (!row.TryGetValue(column.Name, out var value) || value == null)
             {
-                // Write a boolean "is null" flag for every field
                 writer.Write(true);
                 continue;
             }
 
-            writer.Write(false); // Not null flag
-
-            string type = column.Type.ToUpperInvariant();
-            if (type == "INT")
-            {
-                writer.Write(Convert.ToInt32(value));
-            }
-            else if (type == "FLOAT")
-            {
-                writer.Write(Convert.ToSingle(value));
-            }
-            else if (type == "BIT")
-            {
-                writer.Write(Convert.ToBoolean(value));
-            }
-            else if (type == "DATE" || type == "DATETIME")
-            {
-                if (value is DateOnly dateOnly)
-                {
-                    writer.Write(dateOnly.ToDateTime(TimeOnly.MinValue).ToBinary());
-                }
-                else if (value is DateTime dateTime)
-                {
-                    writer.Write(dateTime.ToBinary());
-                }
-                else
-                {
-                    writer.Write(Convert.ToDateTime(value).ToBinary());
-                }
-            }
-            else // VARCHAR etc
-            {
-                writer.Write(value!.ToString() ?? "");
-            }
+            writer.Write(false);
+            WriteNonNullValue(writer, column, value);
         }
 
         writer.Flush();
@@ -110,42 +95,19 @@ public static class RowSerializer
                 continue;
             }
 
-            string type = column.Type.ToUpperInvariant();
-            if (type == "INT")
+            var value = ReadNonNullValue(reader, column);
+            if (includeColumn)
             {
-                int value = reader.ReadInt32();
-                if (includeColumn) row[column.Name] = value;
-            }
-            else if (type == "FLOAT")
-            {
-                float value = reader.ReadSingle();
-                if (includeColumn) row[column.Name] = value;
-            }
-            else if (type == "BIT")
-            {
-                bool value = reader.ReadBoolean();
-                if (includeColumn) row[column.Name] = value;
-            }
-            else if (type == "DATE")
-            {
-                DateOnly value = DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
-                if (includeColumn) row[column.Name] = value;
-            }
-            else if (type == "DATETIME")
-            {
-                DateTime value = DateTime.FromBinary(reader.ReadInt64());
-                if (includeColumn) row[column.Name] = value;
-            }
-            else // VARCHAR
-            {
-                string value = reader.ReadString();
-                if (includeColumn) row[column.Name] = value;
+                row[column.Name] = value;
             }
         }
 
         return row;
     }
 
+    /// <summary>
+    /// Gets schema columns from the cache or refreshes them from the catalog when the schema version changes.
+    /// </summary>
     private static List<Column> GetCachedSchemaColumns(string databaseName, string tableName)
     {
         string cacheKey = BuildSchemaCacheKey(databaseName, tableName);
@@ -167,6 +129,94 @@ public static class RowSerializer
         return columns;
     }
 
+    /// <summary>
+    /// Writes a non-null value using the column type encoding.
+    /// </summary>
+    private static void WriteNonNullValue(BinaryWriter writer, Column column, dynamic value)
+    {
+        string type = column.Type.ToUpperInvariant();
+        if (type == "INT")
+        {
+            writer.Write(Convert.ToInt32(value));
+            return;
+        }
+
+        if (type == "FLOAT")
+        {
+            writer.Write(Convert.ToSingle(value));
+            return;
+        }
+
+        if (type == "BIT")
+        {
+            writer.Write(Convert.ToBoolean(value));
+            return;
+        }
+
+        if (type == "DATE" || type == "DATETIME")
+        {
+            writer.Write(ToBinaryDateValue(value));
+            return;
+        }
+
+        writer.Write(value?.ToString() ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Reads a non-null value using the column type encoding.
+    /// </summary>
+    private static dynamic ReadNonNullValue(BinaryReader reader, Column column)
+    {
+        string type = column.Type.ToUpperInvariant();
+        if (type == "INT")
+        {
+            return reader.ReadInt32();
+        }
+
+        if (type == "FLOAT")
+        {
+            return reader.ReadSingle();
+        }
+
+        if (type == "BIT")
+        {
+            return reader.ReadBoolean();
+        }
+
+        if (type == "DATE")
+        {
+            return DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
+        }
+
+        if (type == "DATETIME")
+        {
+            return DateTime.FromBinary(reader.ReadInt64());
+        }
+
+        return reader.ReadString();
+    }
+
+    /// <summary>
+    /// Converts supported date representations to the binary format used by the serializer.
+    /// </summary>
+    private static long ToBinaryDateValue(dynamic value)
+    {
+        if (value is DateOnly dateOnly)
+        {
+            return dateOnly.ToDateTime(TimeOnly.MinValue).ToBinary();
+        }
+
+        if (value is DateTime dateTime)
+        {
+            return dateTime.ToBinary();
+        }
+
+        return Convert.ToDateTime(value).ToBinary();
+    }
+
+    /// <summary>
+    /// Builds the cache key used for schema caching.
+    /// </summary>
     private static string BuildSchemaCacheKey(string databaseName, string tableName)
     {
         return $"{DataVoEngine.Current().Id:N}::{databaseName}::{tableName}";

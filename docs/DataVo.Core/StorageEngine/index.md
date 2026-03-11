@@ -19,6 +19,13 @@ The `StorageEngine` module handles the physical allocation, serialization, and p
 | `IStorageEngine.cs`  | The master interface defining the universal contract methods (Read, Write, Delete page/row) any storage backend must support.                   |
 | `StorageContext.cs`  | The central state supervisor managing active storage configuration, routing operations to the current engine, and invoking recovery on startup. |
 
+## File Documentation
+
+- [IStorageEngine](./IStorageEngine.md)
+- [StorageContext](./StorageContext.md)
+- [DataVoConfig](./Config/DataVoConfig.md)
+- [RowSerializer](./Serialization/RowSerializer.md)
+
 ## Dependencies & Interactions
 
 The `StorageEngine` sits at the bottom of the dependency stack. It is driven by parser actions, index maintenance, and transaction recovery code. In disk mode, `StorageContext.Initialize()` can invoke `RecoveryManager` to replay uncheckpointed WAL entries before normal query execution resumes.
