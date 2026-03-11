@@ -30,6 +30,9 @@ public sealed class EngineCatalog
 
     public void CreateTable(Table table, string databaseName) => _store.CreateTable(table, databaseName);
 
+    public void AddColumn(string tableName, string databaseName, Field field) =>
+        _store.AddColumn(tableName, databaseName, field);
+
     public void DropTable(string tableName, string databaseName) => _store.DropTable(tableName, databaseName);
 
     public void CreateIndex(IndexFile indexFile, string tableName, string databaseName) =>
