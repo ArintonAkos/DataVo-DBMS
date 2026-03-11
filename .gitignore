@@ -372,4 +372,4 @@ local-docs/
 .agents/
 
 # Ignore vitepress cache
-docs/.vitepress/cache/
+docs/.vitepress
