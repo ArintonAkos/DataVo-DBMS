@@ -107,6 +107,22 @@ internal sealed class CatalogStore
         }
     }
 
+    public void DropColumn(string tableName, string databaseName, string columnName)
+    {
+        lock (_syncRoot)
+        {
+            var table = GetTableElement(databaseName, tableName)
+                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+
+            var attribute = GetTableAttributeElement(table, columnName)
+                           ?? throw new Exception($"Column {columnName} does not exist in table {tableName}!");
+
+            attribute.Remove();
+            SaveDocument();
+            TouchTableSchemaVersion(databaseName, tableName);
+        }
+    }
+
     public void DropDatabase(string databaseName)
     {
         lock (_syncRoot)
