@@ -109,7 +109,7 @@ The repository is configured so the library projects can be packed locally witho
 Pack the NuGet artifacts into [artifacts/packages](artifacts/packages):
 
 ```bash
-dotnet pack ABKR.sln -c Release
+dotnet pack DataVo.sln -c Release
 ```
 
 This currently produces package artifacts for:
