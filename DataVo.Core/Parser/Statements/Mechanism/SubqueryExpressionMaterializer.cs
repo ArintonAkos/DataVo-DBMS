@@ -6,6 +6,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.DQL;
 using DataVo.Core.Runtime;
 using DataVo.Core.Services;
+using System.Text.Json;
 
 namespace DataVo.Core.Parser.Statements.Mechanism;
 
@@ -92,10 +93,21 @@ internal static class SubqueryExpressionMaterializer
 
         string fieldName = subqueryResult.Fields[0];
         ExpressionNode? combined = null;
+        HashSet<string> seenValues = [];
 
         foreach (var row in subqueryResult.Data)
         {
             row.TryGetValue(fieldName, out var value);
+
+            if (value == null)
+            {
+                continue;
+            }
+
+            if (!seenValues.Add(BuildValueSignature(value)))
+            {
+                continue;
+            }
 
             ExpressionNode comparison = new BinaryExpressionNode
             {
@@ -115,6 +127,11 @@ internal static class SubqueryExpressionMaterializer
         }
 
         return combined ?? new LiteralNode { Value = false };
+    }
+
+    private static string BuildValueSignature(object value)
+    {
+        return $"{value.GetType().FullName}:{JsonSerializer.Serialize(value)}";
     }
 
     private static void RejectCorrelatedSubquery(SqlStatement subquery, string databaseName, TableService? outerScope)
