@@ -77,6 +77,24 @@ public abstract class UnionTestsBase : SqlExecutionTestsBase
         var names = result.Data.Select(row => row["Name"]?.ToString()).ToList();
         Assert.Equal(["Cara", "Bob"], names);
     }
+
+    [Fact]
+    public void Select_ParenthesizedTopLevelCompoundQuery_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("(SELECT Name FROM Developers UNION SELECT Name FROM Designers)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Parenthesized SELECT or compound queries are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Select_ParenthesizedUnionBranch_IsRejectedExplicitly()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Developers UNION (SELECT Name FROM Designers)");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("Parenthesized UNION branches are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public class UnionTestsMemory : UnionTestsBase
