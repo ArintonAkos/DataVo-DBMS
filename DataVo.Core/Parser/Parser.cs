@@ -165,8 +165,10 @@ public class Parser(List<Token> tokens)
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
             while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
             {
-                var colDef = new ColumnDefinitionNode();
-                colDef.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
+                var colDef = new ColumnDefinitionNode
+                {
+                    ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
+                };
 
                 Token typeToken = Advance();
                 string typeStr = typeToken.Value;
@@ -225,8 +227,10 @@ public class Parser(List<Token> tokens)
         }
         else if (Match(TokenType.Keyword, SqlKeywords.INDEX))
         {
-            var stmt = new CreateIndexStatement();
-            stmt.IndexName = new IdentifierNode(Consume(TokenType.Identifier, "index name").Value);
+            var stmt = new CreateIndexStatement
+            {
+                IndexName = new IdentifierNode(Consume(TokenType.Identifier, "index name").Value)
+            };
             Consume(TokenType.Keyword, SqlKeywords.ON);
             stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
@@ -252,8 +256,10 @@ public class Parser(List<Token> tokens)
                 Advance();
             }
 
-            var colDef = new ColumnDefinitionNode();
-            colDef.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
+            var colDef = new ColumnDefinitionNode
+            {
+                ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
+            };
 
             Token typeToken = Advance();
             string typeStr = typeToken.Value;
@@ -298,13 +304,67 @@ public class Parser(List<Token> tokens)
         {
             if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.COLUMN)) Advance();
 
-            var stmt = new AlterTableDropColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
-            stmt.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
+            var stmt = new AlterTableDropColumnStatement
+            {
+                TableName = new IdentifierNode(tableNameToken.Value),
+                ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
+            };
             return stmt;
         }
         else if (Match(TokenType.Keyword, SqlKeywords.MODIFY))
         {
-            return new AlterTableStatement { TableName = new IdentifierNode(tableNameToken.Value) };
+            var stmt = new AlterTableModifyColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
+
+            if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.COLUMN)
+                || (Current.Type == TokenType.Identifier && Current.Value.Equals(SqlKeywords.COLUMN, StringComparison.OrdinalIgnoreCase)))
+            {
+                Advance();
+            }
+
+            var colDef = new ColumnDefinitionNode
+            {
+                ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
+            };
+
+            Token typeToken = Advance();
+            string typeStr = typeToken.Value;
+            if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
+            {
+                typeStr += "(" + Advance().Value + ")";
+                Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+            }
+            colDef.DataType = typeStr;
+
+            while (!IsEof() && Current.Type != TokenType.Punctuation && Current.Type != TokenType.EOF)
+            {
+                if (Match(TokenType.Keyword, SqlKeywords.DEFAULT))
+                {
+                    colDef.DefaultExpression = ParseDefaultExpression();
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.PRIMARY))
+                {
+                    Consume(TokenType.Keyword, SqlKeywords.KEY);
+                    colDef.IsPrimaryKey = true;
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.UNIQUE))
+                {
+                    colDef.IsUnique = true;
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.REFERENCES))
+                {
+                    colDef.ReferencesTable = new IdentifierNode(Consume(TokenType.Identifier, "reference table name").Value);
+                    Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+                    colDef.ReferencesColumn = new IdentifierNode(Consume(TokenType.Identifier, "reference column name").Value);
+                    Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            stmt.Column = colDef;
+            return stmt;
         }
 
         throw new ParserException("Parser Error: Unknown ALTER TABLE operation.");
@@ -336,8 +396,10 @@ public class Parser(List<Token> tokens)
         }
         else if (Match(TokenType.Keyword, SqlKeywords.INDEX))
         {
-            var stmt = new DropIndexStatement();
-            stmt.IndexName = new IdentifierNode(Consume(TokenType.Identifier, "index name").Value);
+            var stmt = new DropIndexStatement
+            {
+                IndexName = new IdentifierNode(Consume(TokenType.Identifier, "index name").Value)
+            };
             Consume(TokenType.Keyword, SqlKeywords.ON);
             stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
             return stmt;
@@ -454,8 +516,10 @@ public class Parser(List<Token> tokens)
     private SqlStatement ParseInsertStatement()
     {
         Consume(TokenType.Keyword, SqlKeywords.INTO);
-        var stmt = new InsertIntoStatement();
-        stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
+        var stmt = new InsertIntoStatement
+        {
+            TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value)
+        };
 
         if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
         {
