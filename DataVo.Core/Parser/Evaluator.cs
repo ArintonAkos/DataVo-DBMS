@@ -50,6 +50,10 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             {
                 currentQueue.Enqueue(BindEngine(new DDL.AlterTableAddColumn(alterTableAddColumnAst)));
             }
+            else if (statement is AlterTableDropColumnStatement alterTableDropColumnAst)
+            {
+                currentQueue.Enqueue(BindEngine(new DDL.AlterTableDropColumn(alterTableDropColumnAst)));
+            }
             else if (statement is CreateIndexStatement createIndexAst)
             {
                 currentQueue.Enqueue(BindEngine(new DDL.CreateIndex(createIndexAst)));
