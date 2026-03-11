@@ -13,6 +13,11 @@ public class Parser(List<Token> tokens)
 
     // Pointer to the current token being parsed. If _position is at the end of the list, Current will return an EOF token.
     private Token Current => _position < tokens.Count ? tokens[_position] : tokens.Last();
+    private Token Peek(int offset)
+    {
+        int index = _position + offset;
+        return index < tokens.Count ? tokens[index] : tokens.Last();
+    }
     // Peek at the next token without advancing the position. Returns an EOF token if peeking beyond the end of the list.
     private Token Advance() => _position < tokens.Count ? tokens[_position++] : tokens.Last();
     // Helper method to check if we've reached the end of the token list
@@ -52,6 +57,17 @@ public class Parser(List<Token> tokens)
 
         while (!IsEof())
         {
+            if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
+            {
+                if (Peek(1).Type == TokenType.Keyword && Peek(1).Value == SqlKeywords.SELECT)
+                {
+                    throw new ParserException("Parser Error: Parenthesized SELECT or compound queries are not supported yet.");
+                }
+
+                Advance();
+                continue;
+            }
+
             if (Match(TokenType.Keyword, SqlKeywords.SELECT))
                 statements.Add(ParseSelectStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.USE))
@@ -505,6 +521,12 @@ public class Parser(List<Token> tokens)
         do
         {
             bool isAll = Match(TokenType.Keyword, SqlKeywords.ALL);
+
+            if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
+            {
+                throw new ParserException("Parser Error: Parenthesized UNION branches are not supported yet.");
+            }
+
             Consume(TokenType.Keyword, SqlKeywords.SELECT);
 
             unionStatement.Branches.Add(new UnionBranchNode
