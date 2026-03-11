@@ -119,6 +119,14 @@ This currently produces package artifacts for:
 
 Application projects such as the server, frontend, and tests are marked non-packable.
 
+### VS Code tasks
+
+You can also package directly from VS Code using the task runner:
+
+- `pack` → packs both `DataVo.Core` and `DataVo.Data` via `DataVo.sln`
+- `pack: core` → packs only `DataVo.Core`
+- `pack: data` → packs only `DataVo.Data`
+
 To inspect the generated files locally:
 
 ```bash
