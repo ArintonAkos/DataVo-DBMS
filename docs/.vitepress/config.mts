@@ -6,8 +6,34 @@ export default withMermaid(
     title: "DataVo DBMS",
     description: "A Custom C# Database Management System",
     themeConfig: {
-      nav: [{ text: "Home", link: "/" }],
+      nav: [
+        { text: "Home", link: "/" },
+        { text: "Features", link: "/features/" },
+        { text: "Core Modules", link: "/DataVo.Core/" },
+      ],
       sidebar: [
+        {
+          text: "Feature Documentation",
+          items: [
+            { text: "Overview", link: "/features/" },
+            { text: "Getting Started", link: "/features/getting-started" },
+            {
+              text: "Setup and Packaging",
+              link: "/features/setup-and-packaging",
+            },
+            {
+              text: "SELECT and Querying",
+              link: "/features/select-and-querying",
+            },
+            { text: "Data Modification", link: "/features/data-modification" },
+            { text: "Schema and DDL", link: "/features/schema-and-ddl" },
+            { text: "Transactions", link: "/features/transactions" },
+            {
+              text: "Roadmap and Integrations",
+              link: "/features/roadmap-and-integrations",
+            },
+          ],
+        },
         {
           text: "Architecture",
           items: [
@@ -46,6 +72,7 @@ export default withMermaid(
                 { text: "Enums", link: "/DataVo.Core/Enums/" },
                 { text: "Exceptions", link: "/DataVo.Core/Exceptions/" },
                 { text: "Logger", link: "/DataVo.Core/Logger/" },
+                { text: "Runtime", link: "/DataVo.Core/Runtime/" },
                 {
                   text: "Models",
                   collapsed: true,

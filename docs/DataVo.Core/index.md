@@ -30,6 +30,16 @@ At runtime, the core project coordinates the full lifecycle of a query:
 - [DataVoConfig](./StorageEngine/Config/DataVoConfig.md)
 - [Runtime Overview](./Runtime/index.md)
 
+## Read This Alongside
+
+If you want usage-oriented documentation with SQL examples and expected behavior, start with the [Feature Documentation](../features/index.md) section.
+
+This `DataVo.Core` area is contributor-facing and explains how the code is organized internally.
+
+## Documentation Status
+
+This module reference is being expanded incrementally. Some subsystems are already documented at file level, while others still have overview-only pages and are being filled in batch by batch.
+
 ## ACID Features Implemented
 
 - **Atomicity:** Explicit `BEGIN`, `COMMIT`, and `ROLLBACK` buffer writes in memory and flush them as a unit.
