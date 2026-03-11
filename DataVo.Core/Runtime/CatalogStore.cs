@@ -79,6 +79,34 @@ internal sealed class CatalogStore
         }
     }
 
+    public void AddColumn(string tableName, string databaseName, Field field)
+    {
+        lock (_syncRoot)
+        {
+            var table = GetTableElement(databaseName, tableName)
+                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+
+            if (GetTableAttributeElement(table, field.Name) != null)
+            {
+                throw new Exception($"Column {field.Name} already exists in table {tableName}!");
+            }
+
+            var structure = table.Elements("Structure").FirstOrDefault()
+                            ?? throw new Exception($"Table {tableName} has invalid catalog structure.");
+
+            using var writer = new StringWriter();
+            var namespaces = new XmlSerializerNamespaces();
+            var serializer = new XmlSerializer(typeof(Field));
+
+            namespaces.Add("", "");
+            serializer.Serialize(writer, field, namespaces);
+
+            structure.Add(XElement.Parse(writer.ToString()));
+            SaveDocument();
+            TouchTableSchemaVersion(databaseName, tableName);
+        }
+    }
+
     public void DropDatabase(string databaseName)
     {
         lock (_syncRoot)
