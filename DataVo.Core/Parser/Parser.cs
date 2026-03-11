@@ -246,6 +246,12 @@ public class Parser(List<Token> tokens)
         {
             var stmt = new AlterTableAddColumnStatement { TableName = new IdentifierNode(tableNameToken.Value) };
 
+            if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.COLUMN)
+                || (Current.Type == TokenType.Identifier && Current.Value.Equals(SqlKeywords.COLUMN, StringComparison.OrdinalIgnoreCase)))
+            {
+                Advance();
+            }
+
             var colDef = new ColumnDefinitionNode();
             colDef.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
 
