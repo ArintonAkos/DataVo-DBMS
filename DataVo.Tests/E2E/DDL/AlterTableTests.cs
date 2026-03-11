@@ -59,6 +59,42 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("currently supports only nullable/default columns", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void AlterTable_DropColumn_RemovesColumnAndPreservesPrimaryKeyLookups()
+    {
+        Execute("ALTER TABLE Users DROP COLUMN Name");
+
+        var result = ExecuteAndReturn("SELECT Id FROM Users WHERE Id = 2");
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+        Assert.Equal(2, result.Data[0]["Id"]);
+
+        var missingColumn = ExecuteAndReturn("SELECT Name FROM Users");
+        Assert.True(missingColumn.IsError);
+        Assert.Contains(missingColumn.Messages, m => m.Contains("invalid column name: Name", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("cannot resolve column 'Name'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AlterTable_DropColumn_RejectsPrimaryKeyColumn()
+    {
+        var result = ExecuteAndReturn("ALTER TABLE Users DROP COLUMN Id");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AlterTable_DropColumn_CannotRemoveLastRemainingColumn()
+    {
+        Execute("ALTER TABLE Users DROP COLUMN Name");
+
+        var result = ExecuteAndReturn("ALTER TABLE Users DROP COLUMN Id");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("last remaining column", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public class AlterTableTestsMemory : AlterTableTestsBase
