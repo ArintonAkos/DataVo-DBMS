@@ -59,6 +59,15 @@ public abstract class UnionTestsBase : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_Union_WithIncompatibleColumnTypes_ReturnsError()
+    {
+        var result = ExecuteAndReturn("SELECT Id FROM Developers UNION SELECT Name FROM Designers");
+
+        Assert.True(result.IsError);
+        Assert.Contains(result.Messages, m => m.Contains("incompatible types", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Select_ChainedUnionAndUnionAll_AppliesLeftAssociativeSemantics()
     {
         var result = ExecuteAndReturn("SELECT Name FROM Developers UNION ALL SELECT Name FROM Designers UNION SELECT Name FROM Developers");
