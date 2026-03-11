@@ -36,7 +36,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
                     return;
                 }
 
-                EnsureCompatibleShape(branchResult.Fields, Fields);
+                EnsureCompatibleShape(branchResult, Fields, Data);
 
                 var normalizedBranchRows = NormalizeRows(branchResult, Fields);
                 Data.AddRange(normalizedBranchRows);
@@ -67,12 +67,96 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return select.Perform(session);
     }
 
-    private static void EnsureCompatibleShape(List<string> branchFields, List<string> baseFields)
+    private static void EnsureCompatibleShape(QueryResult branchResult, List<string> baseFields, List<Dictionary<string, dynamic>> baseRows)
     {
+        List<string> branchFields = branchResult.Fields;
+
         if (branchFields.Count != baseFields.Count)
         {
             throw new Exception("UNION queries must project the same number of columns.");
         }
+
+        for (int i = 0; i < baseFields.Count; i++)
+        {
+            string baseKind = InferColumnKind(baseRows, baseFields[i]);
+            string branchKind = InferColumnKind(branchResult.Data, branchFields[i]);
+
+            if (baseKind == ColumnKinds.Unknown || branchKind == ColumnKinds.Unknown)
+            {
+                continue;
+            }
+
+            if (!string.Equals(baseKind, branchKind, StringComparison.Ordinal))
+            {
+                throw new Exception($"UNION column {i + 1} has incompatible types: {baseKind} vs {branchKind}.");
+            }
+        }
+    }
+
+    private static string InferColumnKind(List<Dictionary<string, dynamic>> rows, string fieldName)
+    {
+        foreach (var row in rows)
+        {
+            if (!row.TryGetValue(fieldName, out var value) || value == null)
+            {
+                continue;
+            }
+
+            return ClassifyValue(value);
+        }
+
+        return ColumnKinds.Unknown;
+    }
+
+    private static string ClassifyValue(object value)
+    {
+        Type type = value.GetType();
+
+        if (type == typeof(string))
+        {
+            return ColumnKinds.String;
+        }
+
+        if (type == typeof(bool))
+        {
+            return ColumnKinds.Boolean;
+        }
+
+        if (type == typeof(DateOnly) || type == typeof(DateTime))
+        {
+            return ColumnKinds.Date;
+        }
+
+        if (IsNumericType(type))
+        {
+            return ColumnKinds.Numeric;
+        }
+
+        return type.Name;
+    }
+
+    private static bool IsNumericType(Type type)
+    {
+        return type == typeof(byte)
+            || type == typeof(sbyte)
+            || type == typeof(short)
+            || type == typeof(ushort)
+            || type == typeof(int)
+            || type == typeof(uint)
+            || type == typeof(long)
+            || type == typeof(ulong)
+            || type == typeof(float)
+            || type == typeof(double)
+            || type == typeof(decimal);
+    }
+
+    private static class ColumnKinds
+    {
+        public const string Unknown = "unknown";
+        public const string Numeric = "numeric";
+        public const string String = "string";
+        public const string Boolean = "boolean";
+        public const string Date = "date";
     }
 
     private static List<Dictionary<string, dynamic>> NormalizeRows(QueryResult result, List<string> baseFields)
