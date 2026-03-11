@@ -13,6 +13,8 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
     {
         Execute("CREATE TABLE Employees (Id INT PRIMARY KEY, Name VARCHAR(50), DeptId INT)");
         Execute("CREATE TABLE ActiveDepartments (DeptId INT PRIMARY KEY)");
+        Execute("CREATE TABLE DepartmentCandidates (DeptId INT)");
+        Execute("CREATE TABLE NullDepartments (DeptId INT)");
 
         Execute("INSERT INTO Employees VALUES (1, 'Alice', 10)");
         Execute("INSERT INTO Employees VALUES (2, 'Bob', 20)");
@@ -20,6 +22,15 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
 
         Execute("INSERT INTO ActiveDepartments VALUES (10)");
         Execute("INSERT INTO ActiveDepartments VALUES (30)");
+
+        Execute("INSERT INTO DepartmentCandidates VALUES (10)");
+        Execute("INSERT INTO DepartmentCandidates VALUES (10)");
+        Execute("INSERT INTO DepartmentCandidates VALUES (20)");
+        Execute("INSERT INTO DepartmentCandidates VALUES (30)");
+        Execute("INSERT INTO DepartmentCandidates VALUES (NULL)");
+
+        Execute("INSERT INTO NullDepartments VALUES (NULL)");
+        Execute("INSERT INTO NullDepartments VALUES (NULL)");
     }
 
     [Fact]
@@ -69,6 +80,45 @@ public abstract class SubqueryTestsBase : SqlExecutionTestsBase
 
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("Correlated subqueries are not supported yet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Select_InSubquery_SupportsUnionSubquery()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId IN (SELECT DeptId FROM ActiveDepartments UNION SELECT DeptId FROM DepartmentCandidates)");
+
+        Assert.False(result.IsError);
+        var names = result.Data.Select(row => row["Name"]?.ToString()).OrderBy(name => name).ToList();
+        Assert.Equal(["Alice", "Bob", "Cara"], names);
+    }
+
+    [Fact]
+    public void Select_InSubquery_IgnoresDuplicateSubqueryValues()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId IN (SELECT DeptId FROM DepartmentCandidates UNION ALL SELECT DeptId FROM DepartmentCandidates)");
+
+        Assert.False(result.IsError);
+        var names = result.Data.Select(row => row["Name"]?.ToString()).OrderBy(name => name).ToList();
+        Assert.Equal(["Alice", "Bob", "Cara"], names);
+    }
+
+    [Fact]
+    public void Select_InSubquery_NullOnlySubqueryMatchesNothing()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId IN (SELECT DeptId FROM NullDepartments)");
+
+        Assert.False(result.IsError);
+        Assert.Empty(result.Data);
+    }
+
+    [Fact]
+    public void Select_InSubquery_HandlesLargerResultSets()
+    {
+        var result = ExecuteAndReturn("SELECT Name FROM Employees WHERE DeptId IN (SELECT DeptId FROM DepartmentCandidates)");
+
+        Assert.False(result.IsError);
+        var names = result.Data.Select(row => row["Name"]?.ToString()).OrderBy(name => name).ToList();
+        Assert.Equal(["Alice", "Bob", "Cara"], names);
     }
 
     [Fact]

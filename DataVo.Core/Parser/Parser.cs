@@ -578,13 +578,7 @@ public class Parser(List<Token> tokens)
         // 4. Parse optional WHERE
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
-            // Collect all tokens until EOF or the next major keyword (e.g. GROUP BY) 
-            // and pass them to the Shunting-Yard expression parser
-            var expressionTokens = new Queue<Token>();
-            while (!IsEof() && !IsGroupByKeyword() && !IsOrderByKeyword() && !IsLimitKeyword() && !IsUnionKeyword())
-            {
-                expressionTokens.Enqueue(Advance());
-            }
+            var expressionTokens = CollectExpressionTokens(() => IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
 
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
         }
@@ -598,11 +592,7 @@ public class Parser(List<Token> tokens)
         // 6. Parse optional HAVING
         if (Match(TokenType.Keyword, SqlKeywords.HAVING))
         {
-            var expressionTokens = new Queue<Token>();
-            while (!IsEof() && !IsOrderByKeyword() && !IsLimitKeyword() && !IsUnionKeyword())
-            {
-                expressionTokens.Enqueue(Advance());
-            }
+            var expressionTokens = CollectExpressionTokens(() => IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
 
             selectStmt.HavingExpression = ParseWhereExpression(expressionTokens);
         }
@@ -613,6 +603,33 @@ public class Parser(List<Token> tokens)
         }
 
         return selectStmt;
+    }
+
+    private Queue<Token> CollectExpressionTokens(Func<bool> shouldStopAtTopLevel)
+    {
+        var expressionTokens = new Queue<Token>();
+        int parenthesisDepth = 0;
+
+        while (!IsEof())
+        {
+            if (parenthesisDepth == 0 && shouldStopAtTopLevel())
+            {
+                break;
+            }
+
+            if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
+            {
+                parenthesisDepth++;
+            }
+            else if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CloseParenToken && parenthesisDepth > 0)
+            {
+                parenthesisDepth--;
+            }
+
+            expressionTokens.Enqueue(Advance());
+        }
+
+        return expressionTokens;
     }
 
     private void ParseSelectTail(SelectStatement selectStmt)
