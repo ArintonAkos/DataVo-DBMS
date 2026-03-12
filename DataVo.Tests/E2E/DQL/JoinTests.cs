@@ -122,6 +122,56 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.True(result.IsError);
         Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
     }
+
+    [Fact]
+    public void JoinTests_MultipleJoins_WithAliases_ReturnCorrectData()
+    {
+        Execute("CREATE TABLE Users (UserId INT PRIMARY KEY, UserName VARCHAR, Email VARCHAR)");
+        Execute("CREATE TABLE Products (ProductId INT PRIMARY KEY, ProductName VARCHAR)");
+        Execute("CREATE TABLE Orders (OrderId INT PRIMARY KEY, UserId INT REFERENCES Users(UserId), ProductId INT REFERENCES Products(ProductId))");
+
+        Execute("INSERT INTO Users VALUES (15, 'Oscar', 'oscar15@email.com')");
+        Execute("INSERT INTO Products VALUES (4, '4K Monitor')");
+        Execute("INSERT INTO Orders VALUES (1, 15, 4)");
+
+        var result = ExecuteAndReturn("SELECT u.UserName, u.Email FROM Users u JOIN Orders o ON u.UserId = o.UserId JOIN Products p ON o.ProductId = p.ProductId");
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+
+        var row = result.Data[0];
+        string userNameKey = row.ContainsKey("Users.UserName") ? "Users.UserName" : "u.UserName";
+        string emailKey = row.ContainsKey("Users.Email") ? "Users.Email" : "u.Email";
+
+        Assert.Equal("Oscar", row[userNameKey]);
+        Assert.Equal("oscar15@email.com", row[emailKey]);
+    }
+
+    [Fact]
+    public void JoinTests_MultipleJoins_WithAliases_AndWhereOnBaseTable_ReturnCorrectData()
+    {
+        Execute("CREATE TABLE Users (UserId INT PRIMARY KEY, UserName VARCHAR, Email VARCHAR, Age INT)");
+        Execute("CREATE TABLE Products (ProductId INT PRIMARY KEY, ProductName VARCHAR)");
+        Execute("CREATE TABLE Orders (OrderId INT PRIMARY KEY, UserId INT REFERENCES Users(UserId), ProductId INT REFERENCES Products(ProductId))");
+
+        Execute("INSERT INTO Users VALUES (15, 'Oscar', 'oscar15@email.com', 50)");
+        Execute("INSERT INTO Users VALUES (16, 'Paul', 'paul16@email.com', 20)");
+        Execute("INSERT INTO Products VALUES (4, '4K Monitor')");
+        Execute("INSERT INTO Orders VALUES (1, 15, 4)");
+        Execute("INSERT INTO Orders VALUES (2, 16, 4)");
+
+        var result = ExecuteAndReturn("SELECT u.UserName, u.Email FROM Users u JOIN Orders o ON u.UserId = o.UserId JOIN Products p ON o.ProductId = p.ProductId WHERE u.Age >= 25");
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Data);
+
+        var row = result.Data[0];
+        string userNameKey = row.ContainsKey("Users.UserName") ? "Users.UserName" : "u.UserName";
+        string emailKey = row.ContainsKey("Users.Email") ? "Users.Email" : "u.Email";
+
+        Assert.Equal("Oscar", row[userNameKey]);
+        Assert.Equal("oscar15@email.com", row[emailKey]);
+    }
 }
 
 

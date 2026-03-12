@@ -104,6 +104,15 @@ public abstract class PredicateTestsBase : SqlExecutionTestsBase
         var ids = result.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
         Assert.Equal([1], ids);
     }
+
+    [Fact]
+    public void Select_Where_WithLeadingAnd_AfterCommentStyleEditing_StillEvaluates()
+    {
+        var result = ExecuteAndReturn("SELECT * FROM Products WHERE AND Price >= 40");
+
+        var ids = result.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([4, 5], ids);
+    }
 }
 
 public class PredicateTestsMemory : PredicateTestsBase

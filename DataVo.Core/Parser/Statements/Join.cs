@@ -60,7 +60,7 @@ public class Join
     public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "")
     {
         int tableCount;
-        
+
         if (tableRows.Count > 0)
         {
             tableCount = tableRows.First().Value.Keys.Count();
