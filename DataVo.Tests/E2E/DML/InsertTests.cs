@@ -135,6 +135,26 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
         var selectResult = ExecuteAndReturn("SELECT * FROM Employees");
         Assert.Empty(selectResult.Data);
     }
+
+    [Fact]
+    public void Insert_FKConstraint_WithMultipleParentTables_OrderScenario_Succeeds()
+    {
+        Execute("CREATE TABLE Users (UserId INT PRIMARY KEY, UserName VARCHAR, Email VARCHAR, Age INT)");
+        Execute("CREATE TABLE Products (ProductId INT PRIMARY KEY, ProductName VARCHAR, Category VARCHAR, Price INT)");
+        Execute("CREATE TABLE Orders (OrderId INT PRIMARY KEY, UserId INT, ProductId INT, OrderDate DATE, Quantity INT, FOREIGN KEY (UserId) REFERENCES Users(UserId), FOREIGN KEY (ProductId) REFERENCES Products(ProductId))");
+
+        Execute("INSERT INTO Users (UserId, UserName, Email, Age) VALUES (15, 'Oscar', 'oscar15@email.com', 50)");
+        Execute("INSERT INTO Products (ProductId, ProductName, Category, Price) VALUES (4, '4K Monitor', 'Electronics', 300)");
+
+        var result = ExecuteAndReturn("INSERT INTO Orders (OrderId, UserId, ProductId, OrderDate, Quantity) VALUES (1, 15, 4, '2025-01-05', 1)");
+
+        Assert.DoesNotContain(result.Messages, m => m.Contains("Foreign key violation"));
+
+        var orders = ExecuteAndReturn("SELECT * FROM Orders");
+        Assert.Single(orders.Data);
+        Assert.Equal(15, orders.Data[0]["UserId"]);
+        Assert.Equal(4, orders.Data[0]["ProductId"]);
+    }
 }
 // --- Multiplexed XUnit Executions ---
 
