@@ -162,7 +162,7 @@ internal static class SubqueryExpressionMaterializer
     {
         var innerScope = BuildInnerScope(subquery, databaseName);
 
-        if (subquery.Columns.Any(column => IsCorrelatedColumnName(column.Expression, innerScope, outerScope)))
+        if (subquery.Columns.Any(column => IsCorrelatedColumnName(column.RawExpression, innerScope, outerScope)))
         {
             return true;
         }
