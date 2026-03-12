@@ -28,7 +28,7 @@ public abstract class LimitOffsetTestsBase : SqlExecutionTestsBase
 
         Assert.NotNull(result);
         Assert.Equal(2, result.Data.Count);
-        
+
         // Assert ID 1 and 2
         var ids = result.Data.Select(r => (int)r["Id"]).OrderBy(x => x).ToList();
         Assert.Equal([1, 2], ids);
@@ -40,6 +40,19 @@ public abstract class LimitOffsetTestsBase : SqlExecutionTestsBase
         var result = ExecuteAndReturn("SELECT Player FROM Ranking LIMIT 2 OFFSET 2");
 
         Assert.NotNull(result);
+        Assert.Equal(2, result.Data.Count);
+
+        var players = result.Data.Select(r => r["Player"]?.ToString()).OrderBy(x => x).ToList();
+        Assert.Equal(["Charlie", "David"], players);
+    }
+
+    [Fact]
+    public void Select_OffsetThenLimit_SkipsAndTakesProperly()
+    {
+        var result = ExecuteAndReturn("SELECT Player FROM Ranking OFFSET 2 LIMIT 2");
+
+        Assert.NotNull(result);
+        Assert.False(result.IsError);
         Assert.Equal(2, result.Data.Count);
 
         var players = result.Data.Select(r => r["Player"]?.ToString()).OrderBy(x => x).ToList();
