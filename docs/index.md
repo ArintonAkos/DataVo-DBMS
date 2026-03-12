@@ -40,6 +40,8 @@ features:
     link: /features/roadmap-and-integrations
 ---
 
+<SqlEditor />
+
 ## Choose a documentation path
 
 - **Feature Documentation**: use this when you want to know what SQL works, what the engine returns, and how behavior looks from the outside.
