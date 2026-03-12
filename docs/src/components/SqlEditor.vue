@@ -25,6 +25,9 @@
       <div v-for="(res, index) in results" :key="index" class="result-block">
         <div v-if="res.IsError" class="error-msg">
           <strong>Error:</strong> {{ res.Messages?.join(", ") }}
+          <div v-if="res.ErrorLine && res.ErrorColumn" class="error-location">
+            At line {{ res.ErrorLine }}, column {{ res.ErrorColumn }}
+          </div>
         </div>
 
         <div v-else>
@@ -76,9 +79,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue";
-import { EditorState } from "@codemirror/state";
+import {
+  EditorState,
+  StateEffect,
+  StateField,
+  Range,
+} from "@codemirror/state";
 import {
   EditorView,
+  Decoration,
   keymap,
   lineNumbers,
   highlightActiveLine,
@@ -115,6 +124,36 @@ const hasExecuted = ref(false);
 const editorHost = ref<HTMLDivElement | null>(null);
 
 let editorView: EditorView | null = null;
+
+type ErrorMarkerPayload = { from: number; to: number };
+
+const setErrorMarkerEffect = StateEffect.define<ErrorMarkerPayload>();
+const clearErrorMarkerEffect = StateEffect.define<void>();
+
+const errorMarkerDecoration = Decoration.mark({ class: "cm-error-squiggle" });
+
+const errorMarkerField = StateField.define({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes);
+
+    for (const effect of tr.effects) {
+      if (effect.is(clearErrorMarkerEffect)) {
+        decorations = Decoration.none;
+      }
+      if (effect.is(setErrorMarkerEffect)) {
+        decorations = Decoration.set([
+          errorMarkerDecoration.range(effect.value.from, effect.value.to),
+        ] as Range<Decoration>[]);
+      }
+    }
+
+    return decorations;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 const executeShortcut = EditorView.domEventHandlers({
   keydown(event, view) {
@@ -168,6 +207,7 @@ const createEditor = () => {
       oneDark,
       syncSqlState,
       executeShortcut,
+      errorMarkerField,
       EditorView.lineWrapping,
       EditorView.theme({
         "&": {
@@ -209,6 +249,8 @@ const executeSql = async () => {
     sqlQuery.value = editorView.state.doc.toString();
   }
 
+  clearErrorMarker();
+
   isRunning.value = true;
   hasExecuted.value = false;
   results.value = [];
@@ -219,6 +261,7 @@ const executeSql = async () => {
 
     const parsedResults = client.execute(sqlQuery.value);
     results.value = parsedResults;
+    applyErrorMarkerFromResults(parsedResults);
     hasExecuted.value = true;
   } catch (e: any) {
     results.value = [
@@ -230,6 +273,8 @@ const executeSql = async () => {
         ExecutionTime: "",
       },
     ];
+
+    applyErrorMarkerFromResults(results.value);
   } finally {
     isRunning.value = false;
   }
@@ -253,6 +298,7 @@ const resetPlayground = async () => {
         ExecutionTime: "",
       },
     ];
+    clearErrorMarker();
     hasExecuted.value = true;
   } catch (e: any) {
     results.value = [
@@ -264,7 +310,62 @@ const resetPlayground = async () => {
         ExecutionTime: "",
       },
     ];
+    clearErrorMarker();
   }
+};
+
+const clearErrorMarker = () => {
+  if (!editorView) {
+    return;
+  }
+
+  editorView.dispatch({ effects: [clearErrorMarkerEffect.of()] });
+};
+
+const applyErrorMarkerFromResults = (queryResults: QueryResult[]) => {
+  if (!editorView) {
+    return;
+  }
+
+  const firstError = queryResults.find(
+    (r) => r.IsError && r.ErrorLine && r.ErrorColumn,
+  );
+
+  if (!firstError || !firstError.ErrorLine || !firstError.ErrorColumn) {
+    return;
+  }
+
+  const marker = toDocumentRange(firstError.ErrorLine, firstError.ErrorColumn);
+  if (!marker) {
+    return;
+  }
+
+  editorView.dispatch({
+    effects: [setErrorMarkerEffect.of(marker)],
+    selection: { anchor: marker.from },
+    scrollIntoView: true,
+  });
+};
+
+const toDocumentRange = (line: number, column: number): ErrorMarkerPayload | null => {
+  if (!editorView) {
+    return null;
+  }
+
+  const doc = editorView.state.doc;
+  if (line < 1 || line > doc.lines) {
+    return null;
+  }
+
+  const lineInfo = doc.line(line);
+  const clampedColumn = Math.max(1, Math.min(column, lineInfo.length + 1));
+  const from = lineInfo.from + clampedColumn - 1;
+  const to = Math.min(from + 1, lineInfo.to);
+
+  return {
+    from,
+    to: to > from ? to : from + 1,
+  };
 };
 
 onMounted(() => {
@@ -357,6 +458,14 @@ onBeforeUnmount(() => {
   min-height: 160px;
 }
 
+:deep(.cm-error-squiggle) {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--vp-c-danger-1);
+  text-underline-offset: 2px;
+  background-color: color-mix(in srgb, var(--vp-c-danger-1) 12%, transparent);
+}
+
 .results-area {
   border-top: 1px solid var(--vp-c-divider);
   padding: 1rem;
@@ -383,6 +492,12 @@ onBeforeUnmount(() => {
   background-color: var(--vp-c-danger-soft);
   padding: 0.5rem;
   border-radius: 4px;
+}
+
+.error-location {
+  margin-top: 0.35rem;
+  font-size: 0.82em;
+  color: var(--vp-c-danger-2);
 }
 
 .error-stack {

@@ -9,6 +9,8 @@ export interface QueryResult {
   Fields: string[];
   ExecutionTime: string;
   IsError: boolean;
+  ErrorLine?: number;
+  ErrorColumn?: number;
 }
 
 export class DataVoClient {
@@ -138,7 +140,7 @@ export class DataVoClient {
         ];
       }
 
-      return parsed as QueryResult[];
+      return this.attachErrorLocations(parsed as QueryResult[]);
     } catch (error: any) {
       console.error("Error executing SQL:", error);
 
@@ -166,13 +168,13 @@ export class DataVoClient {
           }
 
           return [
-            {
+            this.attachErrorLocationToResult({
               IsError: true,
               Messages: messages,
               Data: [],
               Fields: [],
               ExecutionTime: "",
-            },
+            }),
           ];
         }
       } catch (diagnosticError) {
@@ -180,15 +182,55 @@ export class DataVoClient {
       }
 
       return [
-        {
+        this.attachErrorLocationToResult({
           IsError: true,
           Messages: [error.message || "Unknown execution error"],
           Data: [],
           Fields: [],
           ExecutionTime: "",
-        },
+        }),
       ];
     }
+  }
+
+  private attachErrorLocations(results: QueryResult[]): QueryResult[] {
+    return results.map((result) => this.attachErrorLocationToResult(result));
+  }
+
+  private attachErrorLocationToResult(result: QueryResult): QueryResult {
+    if (!result.IsError || !result.Messages || result.Messages.length === 0) {
+      return result;
+    }
+
+    const parsedLocation = this.parseErrorLocation(result.Messages);
+    if (!parsedLocation) {
+      return result;
+    }
+
+    return {
+      ...result,
+      ErrorLine: parsedLocation.line,
+      ErrorColumn: parsedLocation.column,
+    };
+  }
+
+  private parseErrorLocation(
+    messages: string[],
+  ): { line: number; column: number } | null {
+    const combined = messages.join("\n");
+    const match = combined.match(/line\s+(\d+)\s*,\s*column\s+(\d+)/i);
+    if (!match) {
+      return null;
+    }
+
+    const line = Number.parseInt(match[1], 10);
+    const column = Number.parseInt(match[2], 10);
+
+    if (Number.isNaN(line) || Number.isNaN(column)) {
+      return null;
+    }
+
+    return { line, column };
   }
 
   public reset(): void {
