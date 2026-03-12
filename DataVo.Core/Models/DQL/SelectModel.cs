@@ -20,6 +20,7 @@ internal class SelectModel
     public bool IsDistinct { get; set; } = false;
     public int? LimitTake { get; set; }
     public int? LimitSkip { get; set; }
+    public Dictionary<string, TableDetail> CteTables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     private SelectStatement Ast { get; set; } = null!;
 
@@ -66,6 +67,57 @@ internal class SelectModel
 
     public OrderByNode? GetOrderByExpression() => Ast.OrderByExpression;
 
+    public SelectColumnNode? GetSelectColumnByAlias(string alias)
+    {
+        return Ast.Columns.FirstOrDefault(c => c.Alias != null && c.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public List<SelectColumnNode> GetAggregateColumns()
+    {
+        return [.. Ast.Columns.Where(c => c.Expression is AggregateExpressionNode)];
+    }
+
+    public List<SelectColumnNode> GetComputedExpressionColumns()
+    {
+        return [.. Ast.Columns.Where(c => IsComputedExpression(c.Expression))];
+    }
+
+    public List<SelectColumnNode> GetWindowFunctionColumns()
+    {
+        return [.. Ast.Columns.Where(c => c.Expression is WindowFunctionExpressionNode)];
+    }
+
+    public void SetCteTables(Dictionary<string, TableDetail> cteTables)
+    {
+        CteTables = new Dictionary<string, TableDetail>(cteTables, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsComputedExpression(ExpressionNode? expression)
+    {
+        return expression switch
+        {
+            null => false,
+            AggregateExpressionNode => false,
+            ColumnRefNode => false,
+            ResolvedColumnRefNode => false,
+            NullLiteralNode => false,
+            LiteralNode => false,
+            BinaryExpressionNode binary => IsArithmeticBinary(binary),
+            _ => false
+        };
+    }
+
+    private static bool IsArithmeticBinary(BinaryExpressionNode binary)
+    {
+        if (binary.Operator is "+" or "-" or "*" or "/" or "ADD" or "SUB" or "MUL" or "DIV")
+        {
+            return true;
+        }
+
+        return (binary.Left is BinaryExpressionNode left && IsArithmeticBinary(left))
+            || (binary.Right is BinaryExpressionNode right && IsArithmeticBinary(right));
+    }
+
     private List<string> GetAllColumns()
     {
         List<string> columns = [];
@@ -82,7 +134,7 @@ internal class SelectModel
     {
         Database = databaseName;
         TableService = new TableService(databaseName);
-        TableService.AddTableDetail(FromTable);
+        TableService.AddTableDetail(ResolveTableDetail(FromTable));
 
         var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
         JoinStatement = new Join(boundJoinModel, TableService);
@@ -95,23 +147,38 @@ internal class SelectModel
         return false;
     }
 
+    private TableDetail ResolveTableDetail(TableDetail requested)
+    {
+        if (!CteTables.TryGetValue(requested.TableName, out var cteTable))
+        {
+            return requested;
+        }
+
+        return new TableDetail(
+            requested.TableName,
+            requested.TableAlias,
+            cteTable.Columns ?? [],
+            cteTable.TableContentValues ?? []
+        );
+    }
+
     private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SelectColumnNode> columns, TableService tableService)
     {
         Dictionary<string, List<string>> selectedColumns = [];
 
         foreach (var colNode in columns)
         {
+            string name = (colNode.RawExpression ?? string.Empty).Trim();
+            string normalizedName = name.Replace(" . ", ".").Replace(" .", ".").Replace(". ", ".");
 
-            string name = colNode.Expression.Trim();
-
-            if (name == "*")
+            if (normalizedName == "*")
             {
                 return null;
             }
 
-            if (name.EndsWith(".*", StringComparison.Ordinal))
+            if (normalizedName.EndsWith(".*", StringComparison.Ordinal))
             {
-                string tableOrAlias = name[..^2];
+                string tableOrAlias = normalizedName[..^2];
                 var tableDetail = tableService.GetTableDetailByAliasOrName(tableOrAlias);
                 string tableName = tableDetail.TableName;
 
@@ -132,12 +199,29 @@ internal class SelectModel
                 continue;
             }
 
-            if (name.Contains('(') && name.Contains(')'))
+            // Skip aggregates in the selected-columns resolved-to-table mapping — they are handled separately.
+            if (colNode.Expression is AggregateExpressionNode)
             {
                 continue;
             }
 
-            var parseResult = tableService.ParseAndFindTableNameByColumn(name);
+            if (colNode.Expression is WindowFunctionExpressionNode)
+            {
+                continue;
+            }
+
+            // Computed expressions are evaluated in projection and are not direct table-column mappings.
+            if (IsComputedExpression(colNode.Expression))
+            {
+                continue;
+            }
+
+            if (normalizedName.Contains('(') && normalizedName.Contains(')'))
+            {
+                continue;
+            }
+
+            var parseResult = tableService.ParseAndFindTableNameByColumn(normalizedName);
             string resolvedTableName = parseResult.Item1;
             string resolvedColumnName = parseResult.Item2;
 
