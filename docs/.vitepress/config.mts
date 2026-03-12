@@ -5,6 +5,9 @@ export default withMermaid(
   defineConfig({
     title: "DataVo DBMS",
     description: "A Custom C# Database Management System",
+    head: [
+      ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ],
     themeConfig: {
       nav: [
         { text: "Home", link: "/" },
