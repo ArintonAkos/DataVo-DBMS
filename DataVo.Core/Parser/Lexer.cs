@@ -61,20 +61,46 @@ public class Token
     public string Value { get; }
 
     /// <summary>
+    /// Gets the zero-based character position within the SQL text.
+    /// </summary>
+    public int Position { get; }
+
+    /// <summary>
+    /// Gets the one-based line number where the token starts.
+    /// </summary>
+    public int Line { get; }
+
+    /// <summary>
+    /// Gets the one-based column number where the token starts.
+    /// </summary>
+    public int Column { get; }
+
+    /// <summary>
     /// Initializes a new token instance.
     /// </summary>
     /// <param name="type">The token category.</param>
     /// <param name="value">The token text.</param>
-    public Token(TokenType type, string value)
+    public Token(TokenType type, string value, int position = -1, int line = -1, int column = -1)
     {
         Type = type;
         Value = value;
+        Position = position;
+        Line = line;
+        Column = column;
     }
 
     /// <summary>
     /// Returns a debugger-friendly token representation.
     /// </summary>
-    public override string ToString() => $"{Type}: '{Value}'";
+    public override string ToString()
+    {
+        if (Line > 0 && Column > 0)
+        {
+            return $"{Type}: '{Value}' at line {Line}, column {Column}";
+        }
+
+        return $"{Type}: '{Value}'";
+    }
 }
 
 /// <summary>
@@ -145,22 +171,26 @@ public class Lexer
 
             if (IsSingleCharOperator(current))
             {
-                tokens.Add(new Token(TokenType.Operator, current.ToString()));
+                var lc = GetLineColumn(_position);
+                tokens.Add(new Token(TokenType.Operator, current.ToString(), _position, lc.line, lc.column));
                 _position++;
                 continue;
             }
 
             if (IsPunctuation(current))
             {
-                tokens.Add(new Token(TokenType.Punctuation, current.ToString()));
+                var lc = GetLineColumn(_position);
+                tokens.Add(new Token(TokenType.Punctuation, current.ToString(), _position, lc.line, lc.column));
                 _position++;
                 continue;
             }
 
-            throw new LexerException($"Lexer Error: Unrecognized character '{current}' at position {_position}");
+            var errLoc = GetLineColumn(_position);
+            throw new LexerException($"Lexer Error: Unrecognized character '{current}' at line {errLoc.line}, column {errLoc.column} (position {_position}).");
         }
 
-        tokens.Add(new Token(TokenType.EOF, ""));
+        var eofLoc = GetLineColumn(_position);
+        tokens.Add(new Token(TokenType.EOF, "", _position, eofLoc.line, eofLoc.column));
         return tokens;
     }
 
@@ -169,6 +199,9 @@ public class Lexer
     /// </summary>
     private Token ReadStringLiteral(char quoteChar)
     {
+        int quotePosition = _position;
+        var quoteLoc = GetLineColumn(quotePosition);
+
         _position++;
         int start = _position;
 
@@ -178,12 +211,12 @@ public class Lexer
         }
 
         if (_position >= _input.Length)
-            throw new LexerException("Lexer Error: Unterminated string literal.");
+            throw new LexerException($"Lexer Error: Unterminated string literal at line {quoteLoc.line}, column {quoteLoc.column}.");
 
         string value = _input.Substring(start, _position - start);
         _position++;
 
-        return new Token(TokenType.StringLiteral, $"'{value}'");
+        return new Token(TokenType.StringLiteral, $"'{value}'", quotePosition, quoteLoc.line, quoteLoc.column);
     }
 
     /// <summary>
@@ -192,6 +225,7 @@ public class Lexer
     private Token ReadNumberLiteral()
     {
         int start = _position;
+        var startLoc = GetLineColumn(start);
         bool hasDecimal = false;
 
         if (_input[_position] == '-') _position++;
@@ -200,13 +234,13 @@ public class Lexer
         {
             if (_input[_position] == '.')
             {
-                if (hasDecimal) throw new LexerException("Lexer Error: Malformed number literal with multiple decimals.");
+                if (hasDecimal) throw new LexerException($"Lexer Error: Malformed number literal with multiple decimals at line {startLoc.line}, column {startLoc.column}.");
                 hasDecimal = true;
             }
             _position++;
         }
 
-        return new Token(TokenType.NumberLiteral, _input.Substring(start, _position - start));
+        return new Token(TokenType.NumberLiteral, _input.Substring(start, _position - start), start, startLoc.line, startLoc.column);
     }
 
     /// <summary>
@@ -215,6 +249,7 @@ public class Lexer
     private Token ReadIdentifierOrKeyword()
     {
         int start = _position;
+        var startLoc = GetLineColumn(start);
 
         while (_position < _input.Length && (char.IsLetterOrDigit(_input[_position]) || _input[_position] == '_' || _input[_position] == '.'))
         {
@@ -228,12 +263,12 @@ public class Lexer
         {
             if (upper == Operators.AND || upper == Operators.OR)
             {
-                return new Token(TokenType.Operator, upper);
+                return new Token(TokenType.Operator, upper, start, startLoc.line, startLoc.column);
             }
-            return new Token(TokenType.Keyword, upper);
+            return new Token(TokenType.Keyword, upper, start, startLoc.line, startLoc.column);
         }
 
-        return new Token(TokenType.Identifier, value);
+        return new Token(TokenType.Identifier, value, start, startLoc.line, startLoc.column);
     }
 
     /// <summary>
@@ -250,7 +285,9 @@ public class Lexer
             || potentialOp == Operators.NOT_EQUALS
             || potentialOp == "<>")
         {
-            token = new Token(TokenType.Operator, potentialOp);
+            var start = _position;
+            var startLoc = GetLineColumn(start);
+            token = new Token(TokenType.Operator, potentialOp, start, startLoc.line, startLoc.column);
             _position += 2;
             return true;
         }
@@ -372,5 +409,27 @@ public class Lexer
         }
 
         return false;
+    }
+
+    private (int line, int column) GetLineColumn(int position)
+    {
+        int line = 1;
+        int column = 1;
+
+        int max = Math.Min(position, _input.Length);
+        for (int i = 0; i < max; i++)
+        {
+            if (_input[i] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else
+            {
+                column++;
+            }
+        }
+
+        return (line, column);
     }
 }

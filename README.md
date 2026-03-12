@@ -61,82 +61,88 @@ For deeper details, see: [performance and storage design](docs/architecture/perf
 
 DataVo targets modern .NET and runs on Windows, Linux, and macOS. Runtime execution benefits from native machine code generation pathways (JIT and AOT in the .NET toolchain).
 
-## Repository Focus
+# DataVo
 
-### DataVo.Core
+[![build](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/) [![tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/) [![license-MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Primary engine implementation:
+DataVo is a C#-native SQL engine with a browser-friendly WebAssembly build and an embeddable TypeScript/npm packaging option for easy demos and live playgrounds.
 
-- `Parser/`: lexer, parser, AST, binding, execution
-- `StorageEngine/`: memory/disk abstractions and persistence context
-- `BTree/`: indexing infrastructure
-- `Models/`, `Services/`, `Exceptions/`, `Enums/`, `Constants/`, `Utils/`: shared domain and infrastructure support
+Quick highlights:
 
-### DataVo.Tests
+- Full SQL pipeline implemented in C# (Lexer → Parser → AST → Binder → Executor)
+- In-memory and disk-backed storage engines, with B-Tree indexes
+- WASM/browser target with a docs-hosted interactive SQL playground
+- Test suite with end-to-end SQL regressions
 
-Quality and regression safety net:
+Why publish this here? The project is both a technical demonstration and a foundation for embedding a deterministic SQL engine in apps or demos without relying on external DB services.
 
-- `E2E/`: end-to-end SQL behavior
-- `BTree/`: index correctness and persistence behavior
-- `StorageEngine/`: storage-level behavior
+## Quickstart (npm-distributed WASM bundle)
 
-## Architecture Docs
+If you publish the prebuilt browser bundle as an npm package (suggested package name: `@your-org/datavo-wasm`), consumers can install and run the interactive playground or embed the engine in a web app with two steps.
 
-- [SQL pipeline and components](docs/architecture/sql-pipeline-and-components.md)
-- [AST build sequence](docs/architecture/ast-build-sequence.md)
-- [AST visualizer](docs/architecture/ast-tree-visualizer.html)
-- [Performance and storage design](docs/architecture/performance-and-storage-design.md)
+Install the package (example):
 
-## Roadmap
+```bash
+npm install @your-org/datavo-wasm
+```
 
-- ACID transaction management
-- ADO.NET provider support
-- EF LINQ integration
-- deeper vector and GIS embedding support
-- WebAssembly target support for browser/edge scenarios
+Example usage (browser/edge):
 
-## Build and Test
+```ts
+import { initialize, executeSql } from "@your-org/datavo-wasm";
+
+await initialize(); // loads and initializes the WASM runtime
+const result = await executeSql(
+  "CREATE DATABASE Demo; USE Demo; CREATE TABLE Users (UserId INT, UserName VARCHAR); INSERT INTO Users VALUES (1,'Alice'); SELECT * FROM Users;",
+);
+console.log(result);
+```
+
+If you prefer shipping the WASM assets alongside your docs site, `./scripts/deploy-browser-wasm.sh` shows the exact files copied into `docs/public/datavo-wasm` during publishing.
+
+## Local development (engine and docs)
+
+Build and run tests locally:
 
 ```bash
 dotnet build
 dotnet test
 ```
 
-## Local Package Readiness
-
-The repository is configured so the library projects can be packed locally without publishing anything.
-
-Pack the NuGet artifacts into [artifacts/packages](artifacts/packages):
+Run the docs site (includes the integrated SQL playground):
 
 ```bash
-dotnet pack DataVo.sln -c Release
+./scripts/deploy-browser-wasm.sh
+cd docs
+npm install
+npm run docs:dev   # or `npm run docs:build` to build static site
 ```
 
-This currently produces package artifacts for:
+Notes: the `deploy-browser-wasm` script publishes the browser-wasm project and copies the runtime files and `datavo.interop.js` into the docs site.
 
-- `DataVo.Core`
-- `DataVo.Data`
+## API & integration notes for the npm bundle
 
-Application projects such as the server, frontend, and tests are marked non-packable.
+- Provide a small JS/TS API surface from the package that abstracts loading and calling the WASM bundle (e.g. `initialize()`, `executeSql(sql)`, and a `reset()` helper).
+- Include prebuilt `datavo.wasm` and the minimal JS shims (`dotnet.*.js` + `datavo.interop.js`) so consumers do not need a .NET toolchain.
+- Document known browser limitations (trimming/AOT differences and that the initial boot can take a couple seconds on first load).
 
-### VS Code tasks
+## Known caveats
 
-You can also package directly from VS Code using the task runner:
-
-- `pack` → packs both `DataVo.Core` and `DataVo.Data` via `DataVo.sln`
-- `pack: core` → packs only `DataVo.Core`
-- `pack: data` → packs only `DataVo.Data`
-
-To inspect the generated files locally:
-
-```bash
-ls artifacts/packages
-```
+- WASM publish emits a small number of warnings related to runtime pinvoke detection; these are benign for the demo flow but noted for transparency.
+- We temporarily disabled trimming while debugging WASM boot issues; if you enable aggressive trimming you should test the published bundle across browsers.
 
 ## Contributing
 
-Contributions are welcome via pull requests with clear scope and tests for behavioral changes.
+Contributions welcome. Suggested first tasks:
+
+- triage small issues and label `good first issue`
+- add CI to run `dotnet test` and `npm run docs:build` on PRs
+- improve README/docs examples showing how to embed the npm bundle
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
+
+## Contact
+
+Open issues or PRs on GitHub; ping me for a walkthrough demo.
