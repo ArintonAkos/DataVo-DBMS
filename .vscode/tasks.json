@@ -48,6 +48,12 @@
         "Release"
       ],
       "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "deploy: browser wasm",
+      "command": "${workspaceFolder}/scripts/deploy-browser-wasm.sh",
+      "type": "process",
+      "problemMatcher": "$msCompile"
     }
   ]
 }
