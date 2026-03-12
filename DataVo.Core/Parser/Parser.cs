@@ -57,11 +57,18 @@ public class Parser(List<Token> tokens)
 
         while (!IsEof())
         {
+            if ((Current.Type == TokenType.Identifier || Current.Type == TokenType.Keyword)
+                && Current.Value.Equals("WITH", StringComparison.OrdinalIgnoreCase))
+            {
+                statements.Add(ParseWithSelectStatement());
+                continue;
+            }
+
             if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
             {
                 if (Peek(1).Type == TokenType.Keyword && Peek(1).Value == SqlKeywords.SELECT)
                 {
-                    throw new ParserException("Parser Error: Parenthesized SELECT or compound queries are not supported yet.");
+                    throw new ParserException($"Parser Error: Parenthesized SELECT or compound queries are not supported yet near {Current}.");
                 }
 
                 Advance();
@@ -674,6 +681,56 @@ public class Parser(List<Token> tokens)
         return unionStatement;
     }
 
+    private SelectStatement ParseWithSelectStatement()
+    {
+        ConsumeIdentifierOrKeywordValue("WITH", "WITH");
+
+        var ctes = new List<CteDefinitionNode>();
+
+        while (true)
+        {
+            var cteNameToken = Consume(TokenType.Identifier, "CTE name");
+            ConsumeIdentifierOrKeywordValue("AS", "AS");
+            Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+            Consume(TokenType.Keyword, SqlKeywords.SELECT);
+
+            var cteSelect = ParseSingleSelectStatement(parseTailClauses: false);
+            ParseSelectTail(cteSelect);
+
+            Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+
+            ctes.Add(new CteDefinitionNode
+            {
+                Name = new IdentifierNode(cteNameToken.Value),
+                Select = cteSelect
+            });
+
+            if (!Match(TokenType.Punctuation, SqlPunctuation.CommaToken))
+            {
+                break;
+            }
+        }
+
+        Consume(TokenType.Keyword, SqlKeywords.SELECT);
+        var mainSelect = ParseSingleSelectStatement(parseTailClauses: false);
+        ParseSelectTail(mainSelect);
+        mainSelect.Ctes = ctes;
+
+        return mainSelect;
+    }
+
+    private void ConsumeIdentifierOrKeywordValue(string expectedValue, string expectedLabel)
+    {
+        if ((Current.Type == TokenType.Identifier || Current.Type == TokenType.Keyword)
+            && Current.Value.Equals(expectedValue, StringComparison.OrdinalIgnoreCase))
+        {
+            Advance();
+            return;
+        }
+
+        throw new ParserException($"Parser Error: Expected {expectedLabel} but found {Current}.");
+    }
+
     private SelectStatement ParseSingleSelectStatement(bool parseTailClauses)
     {
         var selectStmt = new SelectStatement();
@@ -749,6 +806,13 @@ public class Parser(List<Token> tokens)
                 break;
             }
 
+            if (parenthesisDepth == 0
+                && Current.Type == TokenType.Punctuation
+                && Current.Value == SqlPunctuation.CloseParenToken)
+            {
+                break;
+            }
+
             if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
             {
                 parenthesisDepth++;
@@ -771,10 +835,7 @@ public class Parser(List<Token> tokens)
             selectStmt.OrderByExpression = ParseOrderBy();
         }
 
-        if (IsLimitKeyword())
-        {
-            selectStmt.LimitExpression = ParseLimit();
-        }
+        selectStmt.LimitExpression = ParseLimitOffsetClause();
     }
 
     private void ParseUnionTail(UnionSelectStatement unionStatement)
@@ -784,10 +845,42 @@ public class Parser(List<Token> tokens)
             unionStatement.OrderByExpression = ParseOrderBy();
         }
 
-        if (IsLimitKeyword())
+        unionStatement.LimitExpression = ParseLimitOffsetClause();
+    }
+
+    private LimitNode? ParseLimitOffsetClause()
+    {
+        int? take = null;
+        int skip = 0;
+        bool parsedAny = false;
+
+        while (!IsEof() && (IsLimitKeyword() || IsOffsetKeyword()))
         {
-            unionStatement.LimitExpression = ParseLimit();
+            if (IsLimitKeyword())
+            {
+                Consume(TokenType.Keyword, SqlKeywords.LIMIT);
+                var limitToken = Consume(TokenType.NumberLiteral, "limit value");
+                take = int.Parse(limitToken.Value);
+                parsedAny = true;
+                continue;
+            }
+
+            Consume(TokenType.Keyword, SqlKeywords.OFFSET);
+            var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
+            skip = int.Parse(offsetToken.Value);
+            parsedAny = true;
         }
+
+        if (!parsedAny)
+        {
+            return null;
+        }
+
+        return new LimitNode
+        {
+            TakeTarget = take ?? int.MaxValue,
+            SkipTarget = skip
+        };
     }
 
     private LimitNode ParseLimit()
@@ -814,6 +907,11 @@ public class Parser(List<Token> tokens)
     private bool IsLimitKeyword()
     {
         return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.LIMIT);
+    }
+
+    private bool IsOffsetKeyword()
+    {
+        return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.OFFSET);
     }
 
     private bool IsUnionKeyword()
@@ -981,50 +1079,85 @@ public class Parser(List<Token> tokens)
                 throw new ParserException("Parser Error: Expected ',' between SELECT columns.");
             }
 
-            if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.StarToken)
-            {
-                var colNode = new SelectColumnNode { Expression = SqlPunctuation.StarToken };
-                Advance();
+            // Collect tokens for a full expression until a top-level comma or FROM keyword
+            Queue<Token> exprTokens = new();
+            int parenDepth = 0;
 
-                if (Match(TokenType.Keyword, SqlKeywords.AS))
+            while (!IsEof())
+            {
+                // Stop if we encounter FROM at top-level (not inside parentheses)
+                if (parenDepth == 0 && ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.FROM)) break;
+
+                if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.OpenParenToken)
                 {
-                    var aliasToken = Consume(TokenType.Identifier, "column alias");
-                    colNode.Alias = aliasToken.Value;
+                    parenDepth++;
+                    exprTokens.Enqueue(Advance());
+                    continue;
                 }
 
-                columns.Add(colNode);
+                if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CloseParenToken)
+                {
+                    parenDepth = Math.Max(0, parenDepth - 1);
+                    exprTokens.Enqueue(Advance());
+                    continue;
+                }
+
+                // If we hit a comma at top-level, end of this expression
+                if (parenDepth == 0 && Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+                {
+                    break;
+                }
+
+                // If we hit AS or an identifier that looks like an alias after an expression, stop token collection here
+                if (parenDepth == 0 && ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.AS))
+                {
+                    break;
+                }
+
+                // If we hit FROM at any point, break
+                if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.FROM)) break;
+
+                // Collect the token as part of the expression
+                exprTokens.Enqueue(Advance());
             }
-            else if (Current.Type == TokenType.Identifier)
+
+            // Build the column node from collected tokens
+            var colNode = new SelectColumnNode();
+            if (exprTokens.Count == 0)
             {
-                var identifier = Advance();
-                var colNode = new SelectColumnNode();
-
-                if (identifier.Value.EndsWith(".", StringComparison.Ordinal) &&
-                    Current.Type == TokenType.Punctuation &&
-                    Current.Value == SqlPunctuation.StarToken)
-                {
-                    Advance(); // consume '*'
-                    colNode.Expression = $"{identifier.Value}{SqlPunctuation.StarToken}";
-                }
-                else
-                {
-                    colNode.Expression = identifier.Value;
-                }
-
-                if (Match(TokenType.Keyword, SqlKeywords.AS))
-                {
-                    var aliasToken = Consume(TokenType.Identifier, "column alias");
-                    colNode.Alias = aliasToken.Value;
-                }
-
-                columns.Add(colNode);
-            }
-            else
-            {
-                // Skip unexpected tokens in column list for now
-                Advance();
+                // Unexpected — skip and continue
+                if (!IsEof()) Advance();
                 continue;
             }
+
+            // Compose raw expression text for downstream consumers
+            colNode.RawExpression = string.Join(" ", exprTokens.Select(t => t.Value));
+
+            // Parse expression tokens into an ExpressionNode
+            try
+            {
+                colNode.Expression = TryParseWindowFunctionExpression(CloneQueue(exprTokens))
+                    ?? ParseWhereExpression(CloneQueue(exprTokens));
+            }
+            catch (ParserException ex)
+            {
+                if (ex.Message.Contains("not supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw;
+                }
+
+                // Fall back to storing raw text when parsing fails
+                colNode.Expression = null;
+            }
+
+            // Optional alias
+            if (Match(TokenType.Keyword, SqlKeywords.AS))
+            {
+                var aliasToken = Consume(TokenType.Identifier, "column alias");
+                colNode.Alias = aliasToken.Value;
+            }
+
+            columns.Add(colNode);
 
             // Consume comma if present, otherwise assume end of column list
             if (Match(TokenType.Punctuation, SqlPunctuation.CommaToken))
@@ -1105,9 +1238,70 @@ public class Parser(List<Token> tokens)
             {
                 PushOperator(values, operators, token);
             }
+            else if (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.StarToken)
+            {
+                PushOperator(values, operators, new Token(TokenType.Operator, Operators.MUL));
+            }
             else if (token.Type == TokenType.Identifier)
             {
-                values.Push(ParseIdentifierExpression(token));
+                if (token.Value.Equals("OVER", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ParserException($"Parser Error: Window functions (OVER/PARTITION BY) are not supported yet near {token}.");
+                }
+
+                // Detect aggregate / function calls like SUM(...), COUNT(*)
+                if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.OpenParenToken)
+                {
+                    if (!IsSupportedAggregateFunction(token.Value))
+                    {
+                        throw new ParserException($"Parser Error: Function '{token.Value}' is not supported yet near {token}.");
+                    }
+
+                    // consume '('
+                    tokens.Dequeue();
+                    int depth = 1;
+                    Queue<Token> inner = new();
+
+                    while (tokens.Count > 0 && depth > 0)
+                    {
+                        var tk = tokens.Dequeue();
+                        if (tk.Type == TokenType.Punctuation && tk.Value == SqlPunctuation.OpenParenToken)
+                        {
+                            depth++;
+                            inner.Enqueue(tk);
+                        }
+                        else if (tk.Type == TokenType.Punctuation && tk.Value == SqlPunctuation.CloseParenToken)
+                        {
+                            depth--;
+                            if (depth > 0) inner.Enqueue(tk);
+                        }
+                        else if (depth > 0)
+                        {
+                            inner.Enqueue(tk);
+                        }
+                    }
+
+                    // inner now contains tokens for the function argument(s)
+                    // COUNT(*) special-case
+                    bool isStar = inner.Count == 1 && inner.Peek().Type == TokenType.Punctuation && inner.Peek().Value == SqlPunctuation.StarToken;
+
+                    ExpressionNode? arg = null;
+                    if (!isStar && inner.Count > 0)
+                    {
+                        arg = ParseWhereExpression(CloneQueue(inner));
+                    }
+
+                    values.Push(new AggregateExpressionNode
+                    {
+                        FunctionName = token.Value,
+                        Argument = arg,
+                        IsStar = isStar
+                    });
+                }
+                else
+                {
+                    values.Push(ParseIdentifierExpression(token));
+                }
             }
             else if (token.Type == TokenType.StringLiteral)
             {
@@ -1192,6 +1386,164 @@ public class Parser(List<Token> tokens)
         }
 
         return values.Count != 0 ? values.Pop() : new LiteralNode { Value = SqlLiterals.TrueExpression };
+    }
+
+    private ExpressionNode? TryParseWindowFunctionExpression(Queue<Token> exprTokens)
+    {
+        var tokensList = exprTokens.ToList();
+
+        if (tokensList.Count < 8)
+        {
+            return null;
+        }
+
+        if (tokensList[0].Type != TokenType.Identifier && tokensList[0].Type != TokenType.Keyword)
+        {
+            return null;
+        }
+
+        if (!tokensList[0].Value.Equals("RANK", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (tokensList[1].Type != TokenType.Punctuation || tokensList[1].Value != SqlPunctuation.OpenParenToken
+            || tokensList[2].Type != TokenType.Punctuation || tokensList[2].Value != SqlPunctuation.CloseParenToken)
+        {
+            return null;
+        }
+
+        if (!tokensList[3].Value.Equals("OVER", StringComparison.OrdinalIgnoreCase)
+            || tokensList[4].Type != TokenType.Punctuation || tokensList[4].Value != SqlPunctuation.OpenParenToken
+            || tokensList[^1].Type != TokenType.Punctuation || tokensList[^1].Value != SqlPunctuation.CloseParenToken)
+        {
+            return null;
+        }
+
+        List<Token> spec = tokensList.Skip(5).Take(tokensList.Count - 6).ToList();
+        int i = 0;
+
+        List<ColumnRefNode> partitionColumns = [];
+        if (i < spec.Count && spec[i].Value.Equals("PARTITION", StringComparison.OrdinalIgnoreCase))
+        {
+            i++;
+            if (i >= spec.Count || !spec[i].Value.Equals("BY", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ParserException("Parser Error: Expected BY after PARTITION in window function.");
+            }
+
+            i++;
+            while (i < spec.Count && !spec[i].Value.Equals("ORDER", StringComparison.OrdinalIgnoreCase))
+            {
+                if (spec[i].Type == TokenType.Punctuation && spec[i].Value == SqlPunctuation.CommaToken)
+                {
+                    i++;
+                    continue;
+                }
+
+                if (spec[i].Type != TokenType.Identifier)
+                {
+                    throw new ParserException($"Parser Error: Expected PARTITION BY column but found {spec[i]}.");
+                }
+
+                partitionColumns.Add(ParseColumnRefToken(spec[i]));
+                i++;
+            }
+
+            if (partitionColumns.Count == 0)
+            {
+                throw new ParserException("Parser Error: PARTITION BY requires at least one column.");
+            }
+        }
+
+        if (i >= spec.Count || !spec[i].Value.Equals("ORDER", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ParserException("Parser Error: Window function requires ORDER BY clause.");
+        }
+
+        i++;
+        if (i >= spec.Count || !spec[i].Value.Equals("BY", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ParserException("Parser Error: Expected BY after ORDER in window function.");
+        }
+
+        i++;
+        if (i >= spec.Count || spec[i].Type != TokenType.Identifier)
+        {
+            throw new ParserException("Parser Error: ORDER BY in window function requires a column.");
+        }
+
+        ColumnRefNode orderByColumn = ParseColumnRefToken(spec[i]);
+        i++;
+
+        bool isAscending = true;
+        if (i < spec.Count)
+        {
+            if (spec[i].Value.Equals(SqlKeywords.ASC, StringComparison.OrdinalIgnoreCase))
+            {
+                isAscending = true;
+                i++;
+            }
+            else if (spec[i].Value.Equals(SqlKeywords.DESC, StringComparison.OrdinalIgnoreCase))
+            {
+                isAscending = false;
+                i++;
+            }
+        }
+
+        if (i != spec.Count)
+        {
+            throw new ParserException("Parser Error: Unsupported window specification syntax.");
+        }
+
+        return new WindowFunctionExpressionNode
+        {
+            FunctionName = "RANK",
+            PartitionByColumns = partitionColumns,
+            OrderByColumn = orderByColumn,
+            IsOrderAscending = isAscending
+        };
+    }
+
+    private static ColumnRefNode ParseColumnRefToken(Token token)
+    {
+        string[] parts = token.Value.Split('.');
+
+        if (parts.Length == 1)
+        {
+            return new ColumnRefNode { Column = parts[0] };
+        }
+
+        if (parts.Length == 2)
+        {
+            return new ColumnRefNode
+            {
+                TableOrAlias = parts[0],
+                Column = parts[1]
+            };
+        }
+
+        throw new ParserException($"Parser Error: Invalid column reference '{token.Value}' in window function.");
+    }
+
+    private static bool IsSupportedAggregateFunction(string functionName)
+    {
+        return functionName.Equals("SUM", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("AVG", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MIN", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Queue<Token> CloneQueue(Queue<Token> source)
+    {
+        Queue<Token> clone = new();
+        foreach (Token token in source)
+        {
+            clone.Enqueue(token);
+        }
+
+        return clone;
     }
 
     private static Queue<Token> NormalizeExpressionTokens(Queue<Token> tokens)

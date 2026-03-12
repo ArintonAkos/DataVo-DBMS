@@ -20,7 +20,8 @@ public class IdentifierNode(string name) : SqlNode
 
 public class SelectColumnNode : SqlNode
 {
-    public string Expression { get; set; } = string.Empty; // e.g. "A.Id" or "*"
+    public string RawExpression { get; set; } = string.Empty; // e.g. "A.Id" or "*" (Raw string)
+    public ExpressionNode? Expression { get; set; } // The actual expression tree
     public string? Alias { get; set; } // e.g. "AId"
 }
 
@@ -28,6 +29,21 @@ public class SelectColumnNode : SqlNode
 public abstract class ExpressionNode : SqlNode
 {
     // Base class for expressions (used in WHERE, HAVING, etc.)
+}
+
+public class AggregateExpressionNode : ExpressionNode
+{
+    public string FunctionName { get; set; } = string.Empty; // SUM, COUNT, etc.
+    public ExpressionNode? Argument { get; set; }
+    public bool IsStar { get; set; } // For COUNT(*)
+}
+
+public class WindowFunctionExpressionNode : ExpressionNode
+{
+    public string FunctionName { get; set; } = string.Empty; // RANK
+    public List<ColumnRefNode> PartitionByColumns { get; set; } = [];
+    public ColumnRefNode OrderByColumn { get; set; } = null!;
+    public bool IsOrderAscending { get; set; } = true;
 }
 
 public class BinaryExpressionNode : ExpressionNode
@@ -119,6 +135,7 @@ public class SelectStatement : SqlStatement
 {
     public bool IsDistinct { get; set; } = false;
     public List<SelectColumnNode> Columns { get; set; } = []; // Could be IdentifierNode, Asterisk, or Aggregate
+    public List<CteDefinitionNode> Ctes { get; set; } = [];
     public IdentifierNode? FromTable { get; set; }
     public IdentifierNode? FromAlias { get; set; }
     public List<JoinDetailNode> Joins { get; set; } = [];
@@ -141,6 +158,12 @@ public class UnionSelectStatement : SqlStatement
     public List<UnionBranchNode> Branches { get; set; } = [];
     public OrderByNode? OrderByExpression { get; set; }
     public LimitNode? LimitExpression { get; set; }
+}
+
+public class CteDefinitionNode : SqlNode
+{
+    public IdentifierNode Name { get; set; } = null!;
+    public SelectStatement Select { get; set; } = null!;
 }
 
 // --- Commands ---
