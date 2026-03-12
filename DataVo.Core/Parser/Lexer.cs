@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Enums;
 using DataVo.Core.Constants;
@@ -10,13 +9,40 @@ namespace DataVo.Core.Parser;
 /// </summary>
 public enum TokenType
 {
-    Keyword,      // SELECT, FROM, WHERE, INSERT, INTO, VALUES, CREATE, TABLE, DROP, INDEX, ON
-    Identifier,   // TableName, ColumnName (e.g., Users, Age)
-    StringLiteral,// 'John Doe', '2023-01-01'
-    NumberLiteral,// 42, 3.14
-    Operator,     // +, -, *, /, =, !=, >, <, >=, <=, AND, OR
-    Punctuation,  // (, ), ,, *
-    EOF           // End of File / Query
+    /// <summary>
+    /// Reserved SQL keyword tokens such as <c>SELECT</c> or <c>CREATE</c>.
+    /// </summary>
+    Keyword,
+
+    /// <summary>
+    /// User-defined identifiers such as table names or column names.
+    /// </summary>
+    Identifier,
+
+    /// <summary>
+    /// Quoted string literal values.
+    /// </summary>
+    StringLiteral,
+
+    /// <summary>
+    /// Integer or floating-point numeric literal values.
+    /// </summary>
+    NumberLiteral,
+
+    /// <summary>
+    /// SQL operators such as comparison, arithmetic, and Boolean operators.
+    /// </summary>
+    Operator,
+
+    /// <summary>
+    /// Punctuation tokens such as commas and parentheses.
+    /// </summary>
+    Punctuation,
+
+    /// <summary>
+    /// End-of-input marker appended after tokenization completes.
+    /// </summary>
+    EOF
 }
 
 /// <summary>
@@ -64,17 +90,6 @@ public class Lexer
 {
     private readonly string _input;
     private int _position;
-
-    /// <summary>
-    /// Gets the set of keywords recognized directly by tokenization.
-    /// </summary>
-    private static readonly HashSet<string> Keywords =
-        new([.. SqlKeywords.All, Operators.AND, Operators.OR], StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Gets the supported multi-character operators that should be matched before single-character operators.
-    /// </summary>
-    private static readonly string[] MultiCharOperators = { Operators.GREATER_THAN_OR_EQUAL_TO, Operators.LESS_THAN_OR_EQUAL_TO, Operators.NOT_EQUALS, "<>" };
 
     /// <summary>
     /// Initializes a new lexer for SQL input.
@@ -209,7 +224,7 @@ public class Lexer
         string value = _input.Substring(start, _position - start);
         string upper = value.ToUpperInvariant();
 
-        if (Keywords.Contains(upper))
+        if (IsKeyword(upper))
         {
             if (upper == Operators.AND || upper == Operators.OR)
             {
@@ -230,7 +245,10 @@ public class Lexer
         if (_position + 1 >= _input.Length) return false;
 
         string potentialOp = _input.Substring(_position, 2);
-        if (Array.Exists(MultiCharOperators, op => op == potentialOp))
+        if (potentialOp == Operators.GREATER_THAN_OR_EQUAL_TO
+            || potentialOp == Operators.LESS_THAN_OR_EQUAL_TO
+            || potentialOp == Operators.NOT_EQUALS
+            || potentialOp == "<>")
         {
             token = new Token(TokenType.Operator, potentialOp);
             _position += 2;
@@ -269,7 +287,90 @@ public class Lexer
     /// </summary>
     private static string RemoveSqlComments(string input)
     {
-        string pattern = @"(--[^\r\n]*|/\*[\s\S]*?\*/)";
-        return Regex.Replace(input, pattern, string.Empty, RegexOptions.Multiline);
+        if (string.IsNullOrEmpty(input))
+        {
+            return input;
+        }
+
+        var builder = new System.Text.StringBuilder(input.Length);
+        bool inSingleQuote = false;
+        bool inDoubleQuote = false;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            char current = input[i];
+            char next = i + 1 < input.Length ? input[i + 1] : '\0';
+
+            if (!inDoubleQuote && current == '\'')
+            {
+                inSingleQuote = !inSingleQuote;
+                builder.Append(current);
+                continue;
+            }
+
+            if (!inSingleQuote && current == '"')
+            {
+                inDoubleQuote = !inDoubleQuote;
+                builder.Append(current);
+                continue;
+            }
+
+            if (!inSingleQuote && !inDoubleQuote && current == '-' && next == '-')
+            {
+                i += 2;
+                while (i < input.Length && input[i] != '\r' && input[i] != '\n')
+                {
+                    i++;
+                }
+
+                if (i < input.Length)
+                {
+                    builder.Append(input[i]);
+                }
+
+                continue;
+            }
+
+            if (!inSingleQuote && !inDoubleQuote && current == '/' && next == '*')
+            {
+                i += 2;
+                while (i + 1 < input.Length && !(input[i] == '*' && input[i + 1] == '/'))
+                {
+                    i++;
+                }
+
+                if (i + 1 < input.Length)
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            builder.Append(current);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Determines whether a token should be treated as a recognized SQL keyword.
+    /// </summary>
+    private static bool IsKeyword(string value)
+    {
+        if (value == Operators.AND || value == Operators.OR)
+        {
+            return true;
+        }
+
+        foreach (string keyword in SqlKeywords.All)
+        {
+            if (keyword == value)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

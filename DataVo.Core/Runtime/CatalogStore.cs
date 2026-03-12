@@ -419,6 +419,38 @@ internal sealed class CatalogStore
         return result;
     }
 
+    public string ExportState()
+    {
+        lock (_syncRoot)
+        {
+            using var writer = new StringWriter();
+            _doc.Save(writer);
+            return writer.ToString();
+        }
+    }
+
+    public void LoadState(string? xml)
+    {
+        lock (_syncRoot)
+        {
+            if (string.IsNullOrWhiteSpace(xml))
+            {
+                _doc = new XDocument(new XElement("Databases"));
+                _tableSchemaVersions.Clear();
+                return;
+            }
+
+            var loaded = XDocument.Parse(xml);
+            if (loaded.Root?.Name != "Databases")
+            {
+                throw new Exception("Invalid catalog state. Root element 'Databases' was expected.");
+            }
+
+            _doc = loaded;
+            _tableSchemaVersions.Clear();
+        }
+    }
+
     private void Initialize()
     {
         if (!_persistToDisk)

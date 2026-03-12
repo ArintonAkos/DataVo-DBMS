@@ -4,6 +4,7 @@ using DataVo.Core.Parser.Types;
 using DataVo.Core.Parser.Statements.JoinStrategies;
 using DataVo.Core.Services;
 using DataVo.Core.Enums;
+using DataVo.Core.Models.Statement.Utils;
 using static DataVo.Core.Models.Statement.JoinModel;
 
 namespace DataVo.Core.Parser.Statements;
@@ -79,38 +80,45 @@ public class Join
             throw new Exception("Couldn't JOIN already joined tables!");
         }
 
-        TopologicalSort sorter = new();
-
-        foreach (var condition in Model.JoinConditions)
-        {
-            sorter.AddEdge(condition.LeftColumn, condition.RightColumn);
-        }
-
-        sorter.Sort();
-        List<string> sortedTableNames = [.. sorter.GetSorted().Select(jc => jc.TableName)];
-
-        List<JoinCondition> sortedJoinConditions = [.. Model.JoinConditions.Where(jc => sortedTableNames.IndexOf(jc.LeftColumn.TableName) < sortedTableNames.IndexOf(jc.RightColumn.TableName))];
-
         string joinFrom = string.IsNullOrEmpty(baseTableName) ? tableRows.First().Value.Keys.First() : baseTableName;
         List<string> joinedTables = [joinFrom];
 
-        foreach (var joinCondition in sortedJoinConditions)
-        {
-            var leftTableName = joinCondition.LeftColumn.TableName;
-            var rightTableName = joinCondition.RightColumn.TableName;
+        List<JoinCondition> remainingConditions = [.. Model.JoinConditions.Select(condition => new JoinCondition(
+            new Column(condition.LeftColumn.DatabaseName, condition.LeftColumn.TableName, condition.LeftColumn.ColumnName),
+            new Column(condition.RightColumn.DatabaseName, condition.RightColumn.TableName, condition.RightColumn.ColumnName),
+            condition.JoinType))];
 
-            if (!joinedTables.Contains(rightTableName) && joinedTables.Contains(leftTableName))
+        while (remainingConditions.Count > 0)
+        {
+            bool progressed = false;
+
+            for (int i = 0; i < remainingConditions.Count; i++)
             {
-                tableRows = PerformJoinCondition(tableRows, joinCondition);
-                joinedTables.Add(rightTableName);
+                var joinCondition = remainingConditions[i];
+                var leftTableName = joinCondition.LeftColumn.TableName;
+                var rightTableName = joinCondition.RightColumn.TableName;
+
+                if (!joinedTables.Contains(rightTableName) && joinedTables.Contains(leftTableName))
+                {
+                    tableRows = PerformJoinCondition(tableRows, joinCondition);
+                    joinedTables.Add(rightTableName);
+                    remainingConditions.RemoveAt(i);
+                    progressed = true;
+                    break;
+                }
+
+                if (!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
+                {
+                    (joinCondition.LeftColumn, joinCondition.RightColumn) = (joinCondition.RightColumn, joinCondition.LeftColumn);
+                    tableRows = PerformJoinCondition(tableRows, joinCondition);
+                    joinedTables.Add(leftTableName);
+                    remainingConditions.RemoveAt(i);
+                    progressed = true;
+                    break;
+                }
             }
-            else if (!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
-            {
-                (joinCondition.LeftColumn, joinCondition.RightColumn) = (joinCondition.RightColumn, joinCondition.LeftColumn);
-                tableRows = PerformJoinCondition(tableRows, joinCondition);
-                joinedTables.Add(leftTableName);
-            }
-            else if (!joinedTables.Contains(leftTableName) && !joinedTables.Contains(rightTableName))
+
+            if (!progressed)
             {
                 throw new Exception("Error while joining tables!");
             }

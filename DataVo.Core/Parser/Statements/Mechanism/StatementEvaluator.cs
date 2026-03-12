@@ -85,7 +85,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             rightValue = rightValue.Trim('\'');
         }
 
-        var table = TableService.TableDetails[tableName];
+        var table = TableService.GetTableDetailByAliasOrName(tableName);
 
         if (table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
         {
@@ -183,7 +183,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         string leftValue = leftCol.Column;
         var rightVal = rightLit.Value;
 
-        var table = TableService.TableDetails[tableName];
+        var table = TableService.GetTableDetailByAliasOrName(tableName);
 
         Func<KeyValuePair<long, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
 
@@ -246,7 +246,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         string leftValue = leftCol.Column;
         string rightValue = rightCol.Column;
 
-        var table = TableService.TableDetails[tableName];
+        var table = TableService.GetTableDetailByAliasOrName(tableName);
 
         Func<KeyValuePair<long, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
 
