@@ -35,6 +35,7 @@ public static class SqlKeywords
     public const string KEY = "KEY";
     public const string UNIQUE = "UNIQUE";
     public const string REFERENCES = "REFERENCES";
+    public const string FOREIGN = "FOREIGN";
     public const string INT = "INT";
     public const string FLOAT = "FLOAT";
     public const string BIT = "BIT";
@@ -92,7 +93,7 @@ public static class SqlKeywords
         SELECT, FROM, WHERE, INSERT, INTO, VALUES,
         CREATE, TABLE, DROP, INDEX, ON, SHOW, DATABASES,
         TABLES, DESCRIBE, DELETE, UPDATE, SET, USE, GO,
-        DATABASE, DEFAULT, PRIMARY, KEY, UNIQUE, REFERENCES,
+        DATABASE, DEFAULT, PRIMARY, KEY, UNIQUE, REFERENCES, FOREIGN,
         INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,

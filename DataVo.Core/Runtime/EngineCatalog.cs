@@ -150,6 +150,16 @@ public sealed class EngineCatalog
         _store.GetTableIndexedColumns(tableName, databaseName);
 
     /// <summary>
+    /// Serializes the current catalog state.
+    /// </summary>
+    public string ExportState() => _store.ExportState();
+
+    /// <summary>
+    /// Loads a serialized catalog state.
+    /// </summary>
+    public void LoadState(string? xml) => _store.LoadState(xml);
+
+    /// <summary>
     /// Returns the current schema version for a table.
     /// </summary>
     public int GetTableSchemaVersion(string tableName, string databaseName) =>

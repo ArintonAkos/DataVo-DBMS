@@ -165,6 +165,18 @@ public class Parser(List<Token> tokens)
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
             while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
             {
+                if (IsForeignKeyConstraint(Current))
+                {
+                    ParseTableLevelForeignKeyConstraint(stmt);
+
+                    if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+                    {
+                        Advance();
+                    }
+
+                    continue;
+                }
+
                 var colDef = new ColumnDefinitionNode
                 {
                     ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
@@ -239,6 +251,56 @@ public class Parser(List<Token> tokens)
             return stmt;
         }
         throw new ParserException("Parser Error: Unknown CREATE statement type.");
+    }
+
+    private bool IsForeignKeyConstraint(Token token)
+    {
+        return (token.Type == TokenType.Keyword || token.Type == TokenType.Identifier)
+            && token.Value.Equals(SqlKeywords.FOREIGN, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ParseTableLevelForeignKeyConstraint(CreateTableStatement stmt)
+    {
+        Advance();
+        Consume(TokenType.Keyword, SqlKeywords.KEY);
+        Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+
+        string columnName = Consume(TokenType.Identifier, "foreign key column name").Value;
+        Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+        Consume(TokenType.Keyword, SqlKeywords.REFERENCES);
+
+        string referenceTable = Consume(TokenType.Identifier, "reference table name").Value;
+        Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+        string referenceColumn = Consume(TokenType.Identifier, "reference column name").Value;
+        Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+
+        string onDeleteAction = "RESTRICT";
+        if (Match(TokenType.Keyword, SqlKeywords.ON))
+        {
+            Consume(TokenType.Keyword, SqlKeywords.DELETE);
+            if (Match(TokenType.Keyword, SqlKeywords.CASCADE))
+            {
+                onDeleteAction = "CASCADE";
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.RESTRICT))
+            {
+                onDeleteAction = "RESTRICT";
+            }
+            else
+            {
+                throw new ParserException("Parser Error: Expected CASCADE or RESTRICT after ON DELETE.");
+            }
+        }
+
+        ColumnDefinitionNode? column = stmt.Columns.FirstOrDefault(c => c.ColumnName.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
+        if (column == null)
+        {
+            throw new ParserException($"Parser Error: FOREIGN KEY column '{columnName}' must reference a previously declared column.");
+        }
+
+        column.ReferencesTable = new IdentifierNode(referenceTable);
+        column.ReferencesColumn = new IdentifierNode(referenceColumn);
+        column.OnDeleteAction = onDeleteAction;
     }
 
     private SqlStatement ParseAlterStatement()
@@ -904,6 +966,7 @@ public class Parser(List<Token> tokens)
     private List<SelectColumnNode> ParseColumnList()
     {
         var columns = new List<SelectColumnNode>();
+        bool expectingColumn = true;
 
         while (!IsEof())
         {
@@ -911,6 +974,11 @@ public class Parser(List<Token> tokens)
             if (ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.FROM))
             {
                 break;
+            }
+
+            if (!expectingColumn)
+            {
+                throw new ParserException("Parser Error: Expected ',' between SELECT columns.");
             }
 
             if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.StarToken)
@@ -959,7 +1027,18 @@ public class Parser(List<Token> tokens)
             }
 
             // Consume comma if present, otherwise assume end of column list
-            Match(TokenType.Punctuation, SqlPunctuation.CommaToken);
+            if (Match(TokenType.Punctuation, SqlPunctuation.CommaToken))
+            {
+                if (IsEof() || Current.Type == TokenType.Keyword)
+                {
+                    throw new ParserException("Parser Error: trailing comma in SELECT column list.");
+                }
+
+                expectingColumn = true;
+                continue;
+            }
+
+            expectingColumn = false;
         }
 
         return columns;
@@ -986,6 +1065,12 @@ public class Parser(List<Token> tokens)
     private ExpressionNode? ParseWhereExpression(Queue<Token> tokens)
     {
         if (tokens.Count == 0) return null;
+
+        tokens = NormalizeExpressionTokens(tokens);
+        if (tokens.Count == 0)
+        {
+            return new LiteralNode { Value = SqlLiterals.TrueExpression };
+        }
 
         Stack<ExpressionNode> values = new();
         Stack<Token> operators = new();
@@ -1107,6 +1192,79 @@ public class Parser(List<Token> tokens)
         }
 
         return values.Count != 0 ? values.Pop() : new LiteralNode { Value = SqlLiterals.TrueExpression };
+    }
+
+    private static Queue<Token> NormalizeExpressionTokens(Queue<Token> tokens)
+    {
+        var source = tokens.ToList();
+        var normalized = new List<Token>(source.Count);
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            Token token = source[i];
+
+            if (token.Type == TokenType.Operator && (token.Value == Operators.AND || token.Value == Operators.OR))
+            {
+                Token? previous = GetPreviousSignificantToken(normalized);
+                Token? next = GetNextSignificantToken(source, i + 1);
+
+                bool hasLeftOperand = previous != null && CanEndExpression(previous);
+                bool hasRightOperand = next != null && CanStartExpression(next);
+
+                if (!hasLeftOperand || !hasRightOperand)
+                {
+                    continue;
+                }
+            }
+
+            normalized.Add(token);
+        }
+
+        Queue<Token> queue = new();
+        foreach (Token token in normalized)
+        {
+            queue.Enqueue(token);
+        }
+
+        return queue;
+    }
+
+    private static Token? GetPreviousSignificantToken(List<Token> tokens)
+    {
+        for (int i = tokens.Count - 1; i >= 0; i--)
+        {
+            return tokens[i];
+        }
+
+        return null;
+    }
+
+    private static Token? GetNextSignificantToken(List<Token> tokens, int startIndex)
+    {
+        for (int i = startIndex; i < tokens.Count; i++)
+        {
+            return tokens[i];
+        }
+
+        return null;
+    }
+
+    private static bool CanEndExpression(Token token)
+    {
+        return token.Type == TokenType.Identifier
+            || token.Type == TokenType.StringLiteral
+            || token.Type == TokenType.NumberLiteral
+            || (token.Type == TokenType.Keyword && token.Value == SqlKeywords.NULL)
+            || (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.CloseParenToken);
+    }
+
+    private static bool CanStartExpression(Token token)
+    {
+        return token.Type == TokenType.Identifier
+            || token.Type == TokenType.StringLiteral
+            || token.Type == TokenType.NumberLiteral
+            || (token.Type == TokenType.Keyword && (token.Value == SqlKeywords.NULL || token.Value == SqlKeywords.EXISTS || token.Value == SqlKeywords.NOT_KEYWORD || token.Value == SqlKeywords.SELECT))
+            || (token.Type == TokenType.Punctuation && token.Value == SqlPunctuation.OpenParenToken);
     }
 
     private static void ReducePendingOperandOperators(Stack<ExpressionNode> values, Stack<Token> operators)
@@ -1373,6 +1531,11 @@ public class Parser(List<Token> tokens)
         // Shunting-Yard normally pops right then left
         var right = values.Count > 0 ? values.Pop() : null;
         var left = values.Count > 0 ? values.Pop() : null;
+
+        if (left == null || right == null)
+        {
+            throw new ParserException($"Parser Error: Operator '{op}' is missing an operand.");
+        }
 
         values.Push(new BinaryExpressionNode
         {

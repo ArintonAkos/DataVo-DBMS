@@ -29,6 +29,7 @@ public class StorageContext(DataVoConfig config)
     {
         StorageMode.InMemory => new InMemoryStorageEngine(),
         StorageMode.Disk => new DiskStorageEngine(config.DiskStoragePath ?? "./datavo_data"),
+        StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
         _ => throw new ArgumentOutOfRangeException()
     };
     private static StorageContext? _instance;

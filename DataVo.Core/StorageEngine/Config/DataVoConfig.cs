@@ -9,7 +9,10 @@ public enum StorageMode
     InMemory,
 
     /// <summary>Stores data in on-disk table files.</summary>
-    Disk
+    Disk,
+
+    /// <summary>Stores data using a custom-provided IStorageEngine.</summary>
+    Custom
 }
 
 /// <summary>
@@ -32,6 +35,12 @@ public class DataVoConfig
     /// Gets or sets the active storage mode.
     /// </summary>
     public StorageMode StorageMode { get; set; } = StorageMode.InMemory;
+
+    /// <summary>
+    /// Gets or sets a custom payload storage engine. 
+    /// Required if StorageMode is set to Custom.
+    /// </summary>
+    public IStorageEngine? CustomStorageEngine { get; set; }
 
     private bool? _walEnabled;
 

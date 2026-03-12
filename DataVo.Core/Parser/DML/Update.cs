@@ -356,12 +356,41 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         foreach (var reference in foreignKey.References)
         {
-            if (!DataVoEngine.Current().IndexManager.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
+            if (ReferenceExists(reference.ReferenceTableName, reference.ReferenceAttributeName, columnValue, databaseName))
             {
-                return false;
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ReferenceExists(string tableName, string columnName, string expectedValue, string databaseName)
+    {
+        try
+        {
+            if (DataVoEngine.Current().IndexManager.IndexContainsKey(expectedValue, $"_PK_{tableName}", tableName, databaseName))
+            {
+                return true;
             }
         }
-        return true;
+        catch
+        {
+            // Fall back to a table scan below.
+        }
+
+        var rows = DataVoEngine.Current().StorageContext.GetTableContents(tableName, databaseName);
+        foreach (var row in rows.Values)
+        {
+            if (row.TryGetValue(columnName, out var value) && value != null && string.Equals(value.ToString(), expectedValue, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
