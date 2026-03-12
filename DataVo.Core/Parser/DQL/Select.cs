@@ -3,12 +3,14 @@ using DataVo.Core.Models.DQL;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
+using DataVo.Core.Parser.Statements.Mechanism;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Enums;
 using DataVo.Core.Constants;
 using DataVo.Core.Utils;
 using DataVo.Core.Transactions;
+using DataVo.Core.Models.Statement.Utils;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -31,6 +33,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// The parsed model representation of the SELECT statement.
     /// </summary>
     private readonly SelectModel _model = SelectModel.FromAst(ast);
+    private readonly Dictionary<JoinedRow, Dictionary<string, object?>> _windowValues = [];
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -46,6 +49,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     {
         try
         {
+            if (ast.Ctes.Count > 0)
+            {
+                _model.SetCteTables(MaterializeCtes(ast.Ctes, session));
+            }
+
             string database = ValidateDatabase(session);
 
             var lockedTables = AcquireReadLocks(database);
@@ -59,6 +67,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 result = AggregateGroupedTable(groupedTable);
                 result = ApplyHaving(result);
                 result = ApplyOrderBy(result);
+                ComputeWindowFunctionValues(result);
 
                 Fields = CreateFieldsFromColumns(result);
                 Data = CreateDataFromResult(result, Fields);
@@ -91,6 +100,48 @@ internal class Select(SelectStatement ast) : BaseDbAction
             Messages.Add(ex.ToString());
             Logger.Error(ex.ToString());
         }
+    }
+
+    private Dictionary<string, TableDetail> MaterializeCtes(List<CteDefinitionNode> ctes, Guid session)
+    {
+        Dictionary<string, TableDetail> materialized = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cte in ctes)
+        {
+            Dictionary<string, TableDetail> inherited = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var table in _model.CteTables)
+            {
+                inherited[table.Key] = table.Value;
+            }
+
+            foreach (var table in materialized)
+            {
+                inherited[table.Key] = table.Value;
+            }
+
+            var cteSelect = new Select(cte.Select);
+            cteSelect.UseEngine(Engine);
+            cteSelect._model.SetCteTables(inherited);
+
+            var cteResult = cteSelect.Perform(session);
+            if (cteResult.IsError)
+            {
+                throw new Exception(cteResult.Messages.FirstOrDefault() ?? $"Failed to materialize CTE '{cte.Name.Name}'.");
+            }
+
+            List<Record> rows = [];
+            long rowId = 1;
+            foreach (var row in cteResult.Data)
+            {
+                var values = row.ToDictionary(k => k.Key, v => (dynamic)v.Value!);
+                rows.Add(new Record(rowId++, values));
+            }
+
+            materialized[cte.Name.Name] = new TableDetail(cte.Name.Name, null, [.. cteResult.Fields], rows);
+        }
+
+        return materialized;
     }
 
     private List<string> AcquireReadLocks(string databaseName)
@@ -220,7 +271,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// <returns>An <see cref="IOrderedEnumerable{T}"/> incorporating the new sort criterion.</returns>
     private IOrderedEnumerable<JoinedRow> ApplyOrderToColumn(ListedTable tableData, IOrderedEnumerable<JoinedRow>? ordered, OrderByColumnNode orderCol)
     {
-        Func<JoinedRow, object?> keySelector = row => ResolveColumnValue(row, orderCol.Column.Name);
+        Func<JoinedRow, object?> keySelector = row => ResolveOrderByValue(row, orderCol.Column.Name);
 
         if (ordered == null)
         {
@@ -232,6 +283,22 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return orderCol.IsAscending
             ? ordered.ThenBy(keySelector, DynamicObjectComparer.Instance)
             : ordered.ThenByDescending(keySelector, DynamicObjectComparer.Instance);
+    }
+
+    private object? ResolveOrderByValue(JoinedRow row, string orderByToken)
+    {
+        var aliasColumn = _model.GetSelectColumnByAlias(orderByToken);
+        if (aliasColumn?.Expression != null)
+        {
+            return ResolveNodeValue(aliasColumn.Expression, row);
+        }
+
+        if (row.ContainsKey(GroupBy.HASH_VALUE) && row[GroupBy.HASH_VALUE].ContainsKey(orderByToken))
+        {
+            return row[GroupBy.HASH_VALUE][orderByToken];
+        }
+
+        return ResolveColumnValue(row, orderByToken);
     }
 
     /// <summary>
@@ -273,7 +340,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.WhereStatement.IsEvaluatable())
         {
-            result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
+            var whereExpression = _model.WhereStatement.GetExpression();
+            if (whereExpression != null && ContainsArithmeticExpression(whereExpression))
+            {
+                result = EvaluateWhereWithExpression(whereExpression);
+            }
+            else
+            {
+                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
+            }
         }
         else if (_model.JoinStatement.ContainsJoin())
         {
@@ -289,6 +364,41 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return result;
+    }
+
+    private ListedTable EvaluateWhereWithExpression(ExpressionNode whereExpression)
+    {
+        ListedTable source = _model.JoinStatement.ContainsJoin()
+            ? EvaluateJoin()
+            : new ListedTable(_model.FromTable!.TableContentValues!
+                .Select(row => new JoinedRow(_model.FromTable.TableName, row.ToRow()))
+                .ToList());
+
+        var filtered = source
+            .Where(row => EvaluatePredicate(whereExpression, row))
+            .ToList();
+
+        return new ListedTable(filtered);
+    }
+
+    private static bool ContainsArithmeticExpression(ExpressionNode node)
+    {
+        if (node is BinaryExpressionNode binary)
+        {
+            if (binary.Operator is "+" or "-" or "*" or "/" or "ADD" or "SUB" or "MUL" or "DIV")
+            {
+                return true;
+            }
+
+            return ContainsArithmeticExpression(binary.Left) || ContainsArithmeticExpression(binary.Right);
+        }
+
+        if (node is AggregateExpressionNode aggregate && aggregate.Argument != null)
+        {
+            return ContainsArithmeticExpression(aggregate.Argument);
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -340,11 +450,38 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         JoinedRow? firstRow = filteredTable.FirstOrDefault();
+        if (firstRow != null)
+        {
+            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
+            {
+                fields.Add(expressionColumn.Alias ?? expressionColumn.RawExpression);
+            }
+
+            foreach (var windowColumn in _model.GetWindowFunctionColumns())
+            {
+                fields.Add(windowColumn.Alias ?? windowColumn.RawExpression);
+            }
+        }
+
         if (firstRow != null && firstRow.ContainsKey(GroupBy.HASH_VALUE))
         {
-            foreach (var columnName in firstRow[GroupBy.HASH_VALUE].Keys)
+            foreach (var aggregateColumn in _model.GetAggregateColumns())
             {
-                fields.Add(columnName);
+                if (aggregateColumn.Alias != null)
+                {
+                    fields.Add(aggregateColumn.Alias);
+                    continue;
+                }
+
+                if (aggregateColumn.Expression is AggregateExpressionNode aggregateExpression)
+                {
+                    string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggregateExpression);
+                    string outputName = firstRow[GroupBy.HASH_VALUE].ContainsKey(canonicalKey)
+                        ? canonicalKey
+                        : ResolveAggregateKey(aggregateExpression, firstRow);
+
+                    fields.Add(outputName);
+                }
             }
         }
 
@@ -399,14 +536,165 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (row.ContainsKey(GroupBy.HASH_VALUE))
         {
-            foreach (var columnName in row[GroupBy.HASH_VALUE].Keys)
+            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
             {
                 string currentFieldName = fieldsList[fieldIndex++];
-                data[currentFieldName] = row[GroupBy.HASH_VALUE][columnName];
+                if (expressionColumn.Expression != null)
+                {
+                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
+                }
+            }
+
+            foreach (var aggregateColumn in _model.GetAggregateColumns())
+            {
+                string currentFieldName = fieldsList[fieldIndex++];
+
+                if (aggregateColumn.Expression is AggregateExpressionNode aggregateExpression)
+                {
+                    data[currentFieldName] = ResolveNodeValue(aggregateExpression, row);
+                }
+            }
+
+            foreach (var windowColumn in _model.GetWindowFunctionColumns())
+            {
+                string currentFieldName = fieldsList[fieldIndex++];
+                data[currentFieldName] = ResolveWindowValue(row, currentFieldName);
+            }
+        }
+        else
+        {
+            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
+            {
+                string currentFieldName = fieldsList[fieldIndex++];
+                if (expressionColumn.Expression != null)
+                {
+                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
+                }
+            }
+
+            foreach (var windowColumn in _model.GetWindowFunctionColumns())
+            {
+                string currentFieldName = fieldsList[fieldIndex++];
+                data[currentFieldName] = ResolveWindowValue(row, currentFieldName);
             }
         }
 
         return data;
+    }
+
+    private void ComputeWindowFunctionValues(ListedTable rows)
+    {
+        _windowValues.Clear();
+        List<SelectColumnNode> windowColumns = _model.GetWindowFunctionColumns();
+        if (windowColumns.Count == 0 || rows.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var col in windowColumns)
+        {
+            if (col.Expression is not WindowFunctionExpressionNode windowExpr)
+            {
+                continue;
+            }
+
+            if (!windowExpr.FunctionName.Equals("RANK", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception($"Unsupported window function: {windowExpr.FunctionName}");
+            }
+
+            string outputName = col.Alias ?? col.RawExpression;
+
+            var partitions = rows
+                .GroupBy(row => BuildPartitionSignature(row, windowExpr.PartitionByColumns))
+                .ToList();
+
+            foreach (var partition in partitions)
+            {
+                List<JoinedRow> ordered = windowExpr.IsOrderAscending
+                    ? [.. partition.OrderBy(r => ResolveWindowOrderValue(r, windowExpr.OrderByColumn), DynamicObjectComparer.Instance)]
+                    : [.. partition.OrderByDescending(r => ResolveWindowOrderValue(r, windowExpr.OrderByColumn), DynamicObjectComparer.Instance)];
+
+                object? previousOrderValue = null;
+                long currentRank = 1;
+
+                for (int i = 0; i < ordered.Count; i++)
+                {
+                    var row = ordered[i];
+                    object? currentOrderValue = ResolveWindowOrderValue(row, windowExpr.OrderByColumn);
+
+                    if (i == 0)
+                    {
+                        currentRank = 1;
+                    }
+                    else if (DynamicObjectComparer.Instance.Compare(previousOrderValue, currentOrderValue) != 0)
+                    {
+                        currentRank = i + 1;
+                    }
+
+                    if (!_windowValues.TryGetValue(row, out var rowValues))
+                    {
+                        rowValues = [];
+                        _windowValues[row] = rowValues;
+                    }
+
+                    rowValues[outputName] = currentRank;
+                    previousOrderValue = currentOrderValue;
+                }
+            }
+        }
+    }
+
+    private string BuildPartitionSignature(JoinedRow row, List<ColumnRefNode> partitionColumns)
+    {
+        if (partitionColumns.Count == 0)
+        {
+            return "__ALL__";
+        }
+
+        var parts = partitionColumns
+            .Select(col => ResolveWindowOrderValue(row, col))
+            .Select(BuildWindowValueSignature);
+
+        return string.Join("|", parts);
+    }
+
+    private static string BuildWindowValueSignature(object? value)
+    {
+        if (value == null)
+        {
+            return "NULL";
+        }
+
+        return value switch
+        {
+            string s => $"System.String:{s}",
+            char c => $"System.Char:{c}",
+            bool b => $"System.Boolean:{b}",
+            DateOnly d => $"System.DateOnly:{d:O}",
+            DateTime dt => $"System.DateTime:{dt:O}",
+            IFormattable formattable => $"{value.GetType().FullName}:{formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture)}",
+            _ => $"{value.GetType().FullName}:{value}"
+        };
+    }
+
+    private object? ResolveWindowOrderValue(JoinedRow row, ColumnRefNode column)
+    {
+        string reference = string.IsNullOrWhiteSpace(column.TableOrAlias)
+            ? column.Column
+            : $"{column.TableOrAlias}.{column.Column}";
+
+        return ResolveColumnValue(row, reference);
+    }
+
+    private object? ResolveWindowValue(JoinedRow row, string outputField)
+    {
+        if (_windowValues.TryGetValue(row, out var values) && values.TryGetValue(outputField, out var value))
+        {
+            return value;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -535,20 +823,63 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// <exception cref="Exception">Thrown when the node type is not supported in a HAVING context.</exception>
     private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
     {
-        if (node is LiteralNode literalNode)
+        return ExpressionEvaluator.Evaluate(
+            node,
+            row,
+            (colRef, r) =>
+            {
+                string reference = string.IsNullOrEmpty(colRef.TableOrAlias) ? colRef.Column : $"{colRef.TableOrAlias}.{colRef.Column}";
+                return ResolveColumnValue(r, reference);
+            },
+            (aggNode, r) =>
+            {
+                // Aggregates are materialized into the grouped/aggregated row under the HASH_VALUE map.
+                if (!r.ContainsKey(GroupBy.HASH_VALUE)) throw new Exception("Aggregate expression used outside grouped/aggregated context.");
+
+                var aggMap = r[GroupBy.HASH_VALUE];
+
+                string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggNode);
+                if (aggMap.ContainsKey(canonicalKey))
+                {
+                    return aggMap[canonicalKey];
+                }
+
+                string resolvedKey = ResolveAggregateKey(aggNode, r);
+                return aggMap[resolvedKey];
+            }
+        );
+    }
+
+    private string ResolveAggregateKey(AggregateExpressionNode aggNode, JoinedRow row)
+    {
+        var aggMap = row[GroupBy.HASH_VALUE];
+
+        // Try to match by function name and argument if available
+        string funcName = aggNode.FunctionName.ToUpperInvariant();
+
+        // If COUNT(*) style
+        if (aggNode.IsStar)
         {
-            return literalNode.Value;
-        }
-        else if (node is ResolvedColumnRefNode resolvedColNode)
-        {
-            return ResolveColumnValue(row, $"{resolvedColNode.TableName}.{resolvedColNode.Column}");
-        }
-        else if (node is ColumnRefNode colNode)
-        {
-            return ResolveColumnValue(row, string.IsNullOrEmpty(colNode.TableOrAlias) ? colNode.Column : $"{colNode.TableOrAlias}.{colNode.Column}");
+            // Find a key that starts with FUNCNAME(
+            var key = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
+            if (key != null) return key;
+            throw new Exception($"Aggregate result '{funcName}(*)' not found in grouped row.");
         }
 
-        throw new Exception($"Unsupported HAVING value node type: {node.GetType().Name}");
+        // If argument is a column reference, try to build the header name
+        if (aggNode.Argument is ColumnRefNode argCol)
+        {
+            string colRefStr = string.IsNullOrEmpty(argCol.TableOrAlias) ? argCol.Column : $"{argCol.TableOrAlias}.{argCol.Column}";
+            // Try keys that contain the column reference
+            var key = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase) && k.Contains(argCol.Column, StringComparison.OrdinalIgnoreCase));
+            if (key != null) return key;
+        }
+
+        // Fallback: return first matching function
+        var anyKey = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
+        if (anyKey != null) return anyKey;
+
+        throw new Exception($"Aggregate result for {funcName} not found in grouped row.");
     }
 
     /// <summary>

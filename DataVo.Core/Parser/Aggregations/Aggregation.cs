@@ -1,17 +1,26 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 
 namespace DataVo.Core.Parser.Aggregations
 {
-    public abstract class Aggregation(Column field)
+    public abstract class Aggregation(Column? field, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName)
     {
-        protected readonly Column _field = field;
+        protected readonly Column? _field = field;
+        protected readonly ExpressionNode? _expression = expression;
+        private readonly Func<JoinedRow, object?> _valueSelector = valueSelector;
+        private readonly string? _headerName = headerName;
 
         public string ColumnName
         {
             get
             {
+                if (_field is null)
+                {
+                    return "<expression>";
+                }
+
                 return $"{_field.TableName}.{_field.ColumnName}";
             }
         }
@@ -48,21 +57,37 @@ namespace DataVo.Core.Parser.Aggregations
 
         public virtual string GetHeaderName()
         {
+            if (!string.IsNullOrWhiteSpace(_headerName))
+            {
+                return _headerName;
+            }
+
             return $"{ClassName}({ColumnName})";
         }
 
         protected dynamic? SelectColumn(JoinedRow row)
         {
-            return row[_field.TableName][_field.ColumnName];
+            return _valueSelector(row);
         }
 
         protected T SelectColumn<T>(JoinedRow row)
         {
             try
             {
-                return row[_field.TableName][_field.ColumnName];
+                object? value = _valueSelector(row);
+                if (value is null)
+                {
+                    return default!;
+                }
+
+                if (value is T direct)
+                {
+                    return direct;
+                }
+
+                return (T)Convert.ChangeType(value, typeof(T));
             }
-            catch (InvalidCastException)
+            catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
             {
                 throw new Exception($"Wrong aggregation ({ClassName}) called on {ColumnName} fields data type!");
             }
@@ -70,6 +95,11 @@ namespace DataVo.Core.Parser.Aggregations
 
         protected void ValidateNumericColumn()
         {
+            if (_field is null)
+            {
+                return;
+            }
+
             if (!TableColumnService.IsNumeric(_field))
             {
                 throw new Exception($"Cannot apply {ClassName} aggregation on non numeric column!");
@@ -78,6 +108,11 @@ namespace DataVo.Core.Parser.Aggregations
 
         protected void ValidateStringColumn()
         {
+            if (_field is null)
+            {
+                return;
+            }
+
             if (!TableColumnService.IsString(_field))
             {
                 throw new Exception($"Cannot apply {ClassName} aggregation on non string column!");
@@ -86,6 +121,11 @@ namespace DataVo.Core.Parser.Aggregations
 
         protected void ValidateDateColumn()
         {
+            if (_field is null)
+            {
+                return;
+            }
+
             if (!TableColumnService.IsDate(_field))
             {
                 throw new Exception($"Cannot apply {ClassName} aggregation on non date column!");
