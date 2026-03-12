@@ -303,11 +303,40 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     {
         foreach (var reference in foreignKey.References)
         {
-            if (!Indexes.IndexContainsKey(columnValue, $"_PK_{reference.ReferenceTableName}", reference.ReferenceTableName, databaseName))
+            if (ReferenceExists(reference.ReferenceTableName, reference.ReferenceAttributeName, columnValue, databaseName))
             {
-                return false;
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool ReferenceExists(string tableName, string columnName, string expectedValue, string databaseName)
+    {
+        try
+        {
+            if (Indexes.IndexContainsKey(expectedValue, $"_PK_{tableName}", tableName, databaseName))
+            {
+                return true;
             }
         }
-        return true;
+        catch
+        {
+            // Fall back to a table scan below.
+        }
+
+        var rows = Context.GetTableContents(tableName, databaseName);
+        foreach (var row in rows.Values)
+        {
+            if (row.TryGetValue(columnName, out var value) && value != null && string.Equals(value.ToString(), expectedValue, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

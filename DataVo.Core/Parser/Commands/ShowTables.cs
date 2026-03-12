@@ -12,9 +12,13 @@ internal class ShowTables : BaseDbAction
         try
         {
             string databaseName = GetDatabaseName(session);
+            Fields.Add("TableName");
 
             Catalog.GetTables(databaseName)
-                .ForEach(Fields.Add);
+                .ForEach(tableName => Data.Add(new Dictionary<string, dynamic>
+                {
+                    ["TableName"] = tableName,
+                }));
         }
         catch (Exception ex)
         {

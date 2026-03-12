@@ -11,8 +11,13 @@ internal class ShowDatabases : BaseDbAction
     {
         try
         {
+            Fields.Add("DatabaseName");
+
             Catalog.GetDatabases()
-                .ForEach(Fields.Add);
+                .ForEach(databaseName => Data.Add(new Dictionary<string, dynamic>
+                {
+                    ["DatabaseName"] = databaseName,
+                }));
         }
         catch (Exception ex)
         {
