@@ -96,14 +96,32 @@ public class DataVoConnection : DbConnection
     /// </summary>
     public override void Close()
     {
-        if (_state == ConnectionState.Closed) return;
+        if (_state == ConnectionState.Closed)
+        {
+            _engine?.Dispose();
+            _engine = null;
+            return;
+        }
 
         if (_engine?.TransactionManager.HasActiveTransaction(Session) == true)
         {
             ExecuteInternal("ROLLBACK;");
         }
 
+        _engine?.Dispose();
+        _engine = null;
         _state = ConnectionState.Closed;
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Close();
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <inheritdoc />
