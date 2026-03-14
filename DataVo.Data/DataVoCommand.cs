@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
@@ -165,8 +166,8 @@ public class DataVoCommand : DbCommand
 
         return value switch
         {
-            int or long or float or double or decimal => value.ToString()!,
-            bool b => b ? "1" : "0",
+            int or long or float or double or decimal => Convert.ToString(value, CultureInfo.InvariantCulture)!,
+            bool b => b ? "true" : "false",
             string s => $"'{s.Replace("'", "''")}'",
             _ => $"'{value}'"
         };
