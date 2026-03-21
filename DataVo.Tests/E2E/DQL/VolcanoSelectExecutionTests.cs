@@ -239,4 +239,19 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal(1, (int)result.Data[0]["o.Id"]);
         Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_ProjectSubsetWithOrderByDifferentColumn_UsesVolcanoProjectionSafely()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Name VARCHAR, Score INT)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (1, 'A', 70)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (2, 'B', 95)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (3, 'C', 80)");
+
+        var result = ExecuteAndReturn("SELECT Name FROM Scores ORDER BY Score DESC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("C", (string)result.Data[0]["Name"]);
+    }
 }
