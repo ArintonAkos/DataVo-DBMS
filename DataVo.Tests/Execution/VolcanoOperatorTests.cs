@@ -128,4 +128,25 @@ public class VolcanoOperatorTests
         Assert.Equal(2, (int)rows[1]["Orders.Id"]);
         Assert.Equal("Bob", (string)rows[1]["Customers.Name"]);
     }
+
+    [Fact]
+    public void SortOperator_OrdersRowsByKey()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 70 }),
+            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 90 }),
+            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 80 })
+        };
+
+        IQueryOperator scan = new TableScanOperator(input);
+        IQueryOperator sort = new SortOperator(scan, row => row["Score"], ascending: false);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(sort);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(2, (int)rows[0]["Id"]);
+        Assert.Equal(3, (int)rows[1]["Id"]);
+        Assert.Equal(1, (int)rows[2]["Id"]);
+    }
 }

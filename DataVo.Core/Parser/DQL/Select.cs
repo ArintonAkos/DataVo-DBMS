@@ -39,6 +39,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private readonly Dictionary<JoinedRow, Dictionary<string, object?>> _windowValues = [];
     private bool _volcanoLimitPushedDown;
     private bool _volcanoOffsetPushedDown;
+    private bool _volcanoOrderPushedDown;
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -71,7 +72,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
                 result = AggregateGroupedTable(groupedTable);
                 result = ApplyHaving(result);
-                result = ApplyOrderBy(result);
+                result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
                 ComputeWindowFunctionValues(result);
 
                 Fields = CreateFieldsFromColumns(result);
@@ -807,13 +808,21 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
-        if (CanPushDownOffsetToVolcano())
+        bool orderPushedDown = false;
+        if (TryBuildNoJoinOrderPushdown(out var orderByColumn, out bool isAscending))
+        {
+            root = new SortOperator(root, row => ResolveNoJoinOrderValue(row, orderByColumn), isAscending);
+            orderPushedDown = true;
+            _volcanoOrderPushedDown = true;
+        }
+
+        if (CanPushDownOffsetToVolcano(orderPushedDown))
         {
             root = new SkipOperator(root, _model.LimitSkip!.Value);
             _volcanoOffsetPushedDown = true;
         }
 
-        if (CanPushDownLimitToVolcano())
+        if (CanPushDownLimitToVolcano(orderPushedDown))
         {
             root = new TakeOperator(root, _model.LimitTake!.Value);
             _volcanoLimitPushedDown = true;
@@ -867,13 +876,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
-        if (CanPushDownOffsetToVolcano())
+        if (CanPushDownOffsetToVolcano(orderPushedDown: false))
         {
             root = new SkipOperator(root, _model.LimitSkip!.Value);
             _volcanoOffsetPushedDown = true;
         }
 
-        if (CanPushDownLimitToVolcano())
+        if (CanPushDownLimitToVolcano(orderPushedDown: false))
         {
             root = new TakeOperator(root, _model.LimitTake!.Value);
             _volcanoLimitPushedDown = true;
@@ -924,7 +933,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return joined;
     }
 
-    private bool CanPushDownLimitToVolcano()
+    private bool CanPushDownLimitToVolcano(bool orderPushedDown)
     {
         if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
         {
@@ -947,10 +956,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         var orderBy = _model.GetOrderByExpression();
-        return orderBy == null || orderBy.Columns.Count == 0;
+        if (orderBy == null || orderBy.Columns.Count == 0)
+        {
+            return true;
+        }
+
+        return orderPushedDown;
     }
 
-    private bool CanPushDownOffsetToVolcano()
+    private bool CanPushDownOffsetToVolcano(bool orderPushedDown)
     {
         if (!_model.LimitSkip.HasValue || _model.LimitSkip.Value <= 0)
         {
@@ -973,7 +987,67 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         var orderBy = _model.GetOrderByExpression();
-        return orderBy == null || orderBy.Columns.Count == 0;
+        if (orderBy == null || orderBy.Columns.Count == 0)
+        {
+            return true;
+        }
+
+        return orderPushedDown;
+    }
+
+    private bool TryBuildNoJoinOrderPushdown(out string orderByColumn, out bool isAscending)
+    {
+        orderByColumn = string.Empty;
+        isAscending = true;
+
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy == null || orderBy.Columns.Count != 1)
+        {
+            return false;
+        }
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        var orderColumn = orderBy.Columns[0];
+        isAscending = orderColumn.IsAscending;
+
+        // Keep this slice safe: push down only direct base-column ordering.
+        if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
+        {
+            return false;
+        }
+
+        string token = orderColumn.Column.Name;
+        if (token.Contains('.'))
+        {
+            string[] parts = token.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!parts[0].Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase)
+                && (_model.FromTable.TableAlias == null || !parts[0].Equals(_model.FromTable.TableAlias, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            orderByColumn = parts[1];
+            return true;
+        }
+
+        orderByColumn = token;
+        return true;
+    }
+
+    private static object? ResolveNoJoinOrderValue(ExecutionRow row, string orderByColumn)
+    {
+        return row.Values.TryGetValue(orderByColumn, out var value)
+            ? value
+            : null;
     }
 
     private static bool RequiresExpressionEvaluation(ExpressionNode node)

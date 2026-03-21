@@ -122,4 +122,20 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_OrderByWithLimitOffset_UsesVolcanoSortThenWindow()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Score INT)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (1, 70)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (2, 95)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (3, 80)");
+
+        var result = ExecuteAndReturn("SELECT Id, Score FROM Scores ORDER BY Score DESC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(3, (int)result.Data[0]["Id"]);
+        Assert.Equal(80, (int)result.Data[0]["Score"]);
+    }
 }
