@@ -352,7 +352,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (_model.WhereStatement.IsEvaluatable())
         {
             var whereExpression = _model.WhereStatement.GetExpression();
-            if (ShouldUseVolcanoNoJoinPath(whereExpression))
+            if (ShouldUseVolcanoInnerJoinPath(whereExpression))
+            {
+                result = EvaluateInnerJoinWithVolcano(whereExpression);
+            }
+            else if (ShouldUseVolcanoNoJoinPath(whereExpression))
             {
                 result = EvaluateNoJoinWithVolcano(whereExpression);
             }
@@ -383,6 +387,41 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return result;
+    }
+
+    private bool ShouldUseVolcanoInnerJoinPath(ExpressionNode? whereExpression)
+    {
+        if (!Engine.Config.EnableVolcanoExecution)
+        {
+            return false;
+        }
+
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
+        {
+            return false;
+        }
+
+        if (_model.JoinStatement.Model.JoinConditions.Count != 1)
+        {
+            return false;
+        }
+
+        var condition = _model.JoinStatement.Model.JoinConditions[0];
+        if (!condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string fromTable = _model.FromTable.TableName;
+        bool leftTouchesFrom = condition.LeftColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
+        bool rightTouchesFrom = condition.RightColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
+
+        return leftTouchesFrom || rightTouchesFrom;
     }
 
     private bool ShouldUseVolcanoNoJoinPath(ExpressionNode? whereExpression)
@@ -786,6 +825,103 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         return new ListedTable(listed);
+    }
+
+    private ListedTable EvaluateInnerJoinWithVolcano(ExpressionNode? whereExpression)
+    {
+        var condition = _model.JoinStatement.Model.JoinConditions[0];
+
+        string leftTableName = condition.LeftColumn.TableName;
+        string rightTableName = condition.RightColumn.TableName;
+        string leftJoinColumn = condition.LeftColumn.ColumnName;
+        string rightJoinColumn = condition.RightColumn.ColumnName;
+
+        // Ensure left stream starts from FROM table for deterministic row flow.
+        if (!leftTableName.Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase)
+            && rightTableName.Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase))
+        {
+            (leftTableName, rightTableName) = (rightTableName, leftTableName);
+            (leftJoinColumn, rightJoinColumn) = (rightJoinColumn, leftJoinColumn);
+        }
+
+        var rightTable = _model.TableService!.GetTableDetailByAliasOrName(rightTableName);
+
+        var leftRows = _model.FromTable.TableContentValues!
+            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+            .ToList();
+
+        var rightRows = rightTable.TableContentValues!
+            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+            .ToList();
+
+        IQueryOperator leftScan = new TableScanOperator(leftRows);
+        IQueryOperator rightScan = new TableScanOperator(rightRows);
+        IQueryOperator root = new InnerJoinOperator(leftScan, rightScan, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
+
+        if (!IsAllTrueExpression(whereExpression))
+        {
+            root = new FilterOperator(root, row =>
+            {
+                var joinedRow = ToJoinedRowFromJoinExecution(row, leftTableName, rightTableName);
+                return EvaluatePredicate(whereExpression!, joinedRow);
+            });
+        }
+
+        if (CanPushDownOffsetToVolcano())
+        {
+            root = new SkipOperator(root, _model.LimitSkip!.Value);
+            _volcanoOffsetPushedDown = true;
+        }
+
+        if (CanPushDownLimitToVolcano())
+        {
+            root = new TakeOperator(root, _model.LimitTake!.Value);
+            _volcanoLimitPushedDown = true;
+        }
+
+        List<ExecutionRow> joinedRows = OperatorPipelineRunner.ExecuteToList(root);
+        List<JoinedRow> listed = joinedRows
+            .Select(row => ToJoinedRowFromJoinExecution(row, leftTableName, rightTableName))
+            .ToList();
+
+        return new ListedTable(listed);
+    }
+
+    private static Dictionary<string, dynamic> ToExecutionValues(Row row)
+    {
+        var values = new Dictionary<string, dynamic>();
+        foreach (string key in row.Keys)
+        {
+            values[key] = row[key];
+        }
+
+        return values;
+    }
+
+    private static JoinedRow ToJoinedRowFromJoinExecution(ExecutionRow row, string leftTableName, string rightTableName)
+    {
+        var leftValues = new Dictionary<string, dynamic>();
+        var rightValues = new Dictionary<string, dynamic>();
+
+        string leftPrefix = $"{leftTableName}.";
+        string rightPrefix = $"{rightTableName}.";
+
+        foreach (var entry in row.Values)
+        {
+            if (entry.Key.StartsWith(leftPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                leftValues[entry.Key[leftPrefix.Length..]] = entry.Value;
+            }
+            else if (entry.Key.StartsWith(rightPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                rightValues[entry.Key[rightPrefix.Length..]] = entry.Value;
+            }
+        }
+
+        var joined = new JoinedRow();
+        joined.Add(leftTableName, new Row(leftValues));
+        joined.Add(rightTableName, new Row(rightValues));
+        return joined;
     }
 
     private bool CanPushDownLimitToVolcano()

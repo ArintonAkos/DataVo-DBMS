@@ -74,4 +74,52 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal(2, (int)result.Data[0]["Id"]);
     }
+
+    [Fact]
+    public void Select_SingleInnerJoin_WithoutWhere_UsesVolcanoJoinPathAndReturnsExpectedWindow()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT c.Name, o.Id
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
+        Assert.Equal(2, (int)result.Data[0]["o.Id"]);
+    }
+
+    [Fact]
+    public void Select_SingleInnerJoin_WithWhere_UsesVolcanoJoinPathAndFiltersRows()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT c.Name, o.Id
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            WHERE c.Name = 'Alice'
+            LIMIT 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+    }
 }
