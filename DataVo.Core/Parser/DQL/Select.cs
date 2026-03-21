@@ -937,13 +937,21 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
-        if (CanPushDownOffsetToVolcano(orderPushedDown: false))
+        bool orderPushedDown = false;
+        if (TryBuildJoinOrderPushdown(out var orderByKey, out bool isAscending))
+        {
+            root = new SortOperator(root, row => ResolveJoinOrderValue(row, orderByKey), isAscending);
+            orderPushedDown = true;
+            _volcanoOrderPushedDown = true;
+        }
+
+        if (CanPushDownOffsetToVolcano(orderPushedDown))
         {
             root = new SkipOperator(root, _model.LimitSkip!.Value);
             _volcanoOffsetPushedDown = true;
         }
 
-        if (CanPushDownLimitToVolcano(orderPushedDown: false))
+        if (CanPushDownLimitToVolcano(orderPushedDown))
         {
             root = new TakeOperator(root, _model.LimitTake!.Value);
             _volcanoLimitPushedDown = true;
@@ -1115,9 +1123,71 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return true;
     }
 
+    private bool TryBuildJoinOrderPushdown(out string orderByKey, out bool isAscending)
+    {
+        orderByKey = string.Empty;
+        isAscending = true;
+
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy == null || orderBy.Columns.Count != 1)
+        {
+            return false;
+        }
+
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        var orderColumn = orderBy.Columns[0];
+        isAscending = orderColumn.IsAscending;
+
+        if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
+        {
+            return false;
+        }
+
+        if (_model.TableService == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            string token = orderColumn.Column.Name;
+            if (!token.Contains('.'))
+            {
+                var resolved = _model.TableService.ParseAndFindTableNameByColumn(token);
+                orderByKey = $"{resolved.Item1}.{resolved.Item2}";
+                return true;
+            }
+
+            string[] parts = token.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            var table = _model.TableService.GetTableDetailByAliasOrName(parts[0]);
+            orderByKey = $"{table.TableName}.{parts[1]}";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static object? ResolveNoJoinOrderValue(ExecutionRow row, string orderByColumn)
     {
         return row.Values.TryGetValue(orderByColumn, out var value)
+            ? value
+            : null;
+    }
+
+    private static object? ResolveJoinOrderValue(ExecutionRow row, string orderByKey)
+    {
+        return row.Values.TryGetValue(orderByKey, out var value)
             ? value
             : null;
     }

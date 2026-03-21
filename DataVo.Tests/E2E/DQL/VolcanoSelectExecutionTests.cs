@@ -169,4 +169,29 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal(2, result.Data.Count);
         Assert.All(result.Data, row => Assert.Equal("Athens", (string)row["ci.CityName"]));
     }
+
+    [Fact]
+    public void Select_SingleInnerJoin_OrderByWithLimitOffset_UsesVolcanoJoinSortWindow()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY o.Id DESC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(2, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
+    }
 }
