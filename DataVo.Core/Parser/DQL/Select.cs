@@ -41,6 +41,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoOffsetPushedDown;
     private bool _volcanoOrderPushedDown;
     private bool _volcanoProjectionPushedDown;
+    private bool _volcanoDistinctPushedDown;
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -79,7 +80,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 Fields = CreateFieldsFromColumns(result);
                 Data = CreateDataFromResult(result, Fields);
 
-                if (_model.IsDistinct)
+                if (_model.IsDistinct && !_volcanoDistinctPushedDown)
                 {
                     Data = ApplyDistinct(Data);
                 }
@@ -873,6 +874,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _volcanoOrderPushedDown = true;
         }
 
+        if (TryBuildNoJoinDistinctPushdown(out var distinctColumns))
+        {
+            root = new DistinctOperator(root, row => BuildDistinctKey(row, distinctColumns));
+            _volcanoDistinctPushedDown = true;
+        }
+
         if (CanPushDownOffsetToVolcano(orderPushedDown))
         {
             root = new SkipOperator(root, _model.LimitSkip!.Value);
@@ -1203,6 +1210,69 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return projectionColumns.Count > 0;
+    }
+
+    private bool TryBuildNoJoinDistinctPushdown(out List<string> distinctColumns)
+    {
+        distinctColumns = [];
+
+        if (!_model.IsDistinct)
+        {
+            return false;
+        }
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (_model.GroupByStatement.ContainsGroupBy() || _model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0
+            || _model.GetAggregateColumns().Count > 0)
+        {
+            return false;
+        }
+
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            distinctColumns.Add(parts[1]);
+        }
+
+        return distinctColumns.Count > 0;
+    }
+
+    private static string BuildDistinctKey(ExecutionRow row, IReadOnlyList<string> columns)
+    {
+        if (columns.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        List<string> parts = [];
+        foreach (string column in columns)
+        {
+            object? value = row.Values.TryGetValue(column, out var found) ? found : null;
+            string typePart = value?.GetType().Name ?? "<null>";
+            string valuePart = value?.ToString() ?? "<null>";
+            parts.Add($"{column}:{typePart}:{valuePart}");
+        }
+
+        return string.Join("|", parts);
     }
 
     private bool TryBuildJoinOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)

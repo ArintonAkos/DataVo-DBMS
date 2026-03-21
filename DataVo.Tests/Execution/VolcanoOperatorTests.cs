@@ -174,4 +174,25 @@ public class VolcanoOperatorTests
         Assert.Equal(1, (int)rows[1]["Id"]);
         Assert.Equal(3, (int)rows[2]["Id"]);
     }
+
+    [Fact]
+    public void DistinctOperator_RemovesDuplicateKeys()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 1 }),
+            new(2, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 2 }),
+            new(3, new Dictionary<string, dynamic> { ["Name"] = "B", ["Score"] = 3 })
+        };
+
+        IQueryOperator op = new DistinctOperator(
+            new TableScanOperator(input),
+            row => Convert.ToString(row["Name"]) ?? string.Empty);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", (string)rows[0]["Name"]);
+        Assert.Equal("B", (string)rows[1]["Name"]);
+    }
 }
