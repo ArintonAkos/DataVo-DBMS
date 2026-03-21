@@ -836,9 +836,19 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         bool orderPushedDown = false;
-        if (TryBuildNoJoinOrderPushdown(out var orderByColumn, out bool isAscending))
+        if (TryBuildNoJoinOrderPushdown(out var orderKeys))
         {
-            root = new SortOperator(root, row => ResolveNoJoinOrderValue(row, orderByColumn), isAscending);
+            List<SortOperator.SortKeySpec> sortSpecs = [];
+            foreach (var orderKey in orderKeys)
+            {
+                string key = orderKey.Key;
+                bool ascending = orderKey.IsAscending;
+                sortSpecs.Add(new SortOperator.SortKeySpec(
+                    row => ResolveNoJoinOrderValue(row, key),
+                    ascending));
+            }
+
+            root = new SortOperator(root, sortSpecs);
             orderPushedDown = true;
             _volcanoOrderPushedDown = true;
         }
@@ -938,9 +948,19 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         bool orderPushedDown = false;
-        if (TryBuildJoinOrderPushdown(out var orderByKey, out bool isAscending))
+        if (TryBuildJoinOrderPushdown(out var orderKeys))
         {
-            root = new SortOperator(root, row => ResolveJoinOrderValue(row, orderByKey), isAscending);
+            List<SortOperator.SortKeySpec> sortSpecs = [];
+            foreach (var orderKey in orderKeys)
+            {
+                string key = orderKey.Key;
+                bool ascending = orderKey.IsAscending;
+                sortSpecs.Add(new SortOperator.SortKeySpec(
+                    row => ResolveJoinOrderValue(row, key),
+                    ascending));
+            }
+
+            root = new SortOperator(root, sortSpecs);
             orderPushedDown = true;
             _volcanoOrderPushedDown = true;
         }
@@ -1075,13 +1095,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return orderPushedDown;
     }
 
-    private bool TryBuildNoJoinOrderPushdown(out string orderByColumn, out bool isAscending)
+    private bool TryBuildNoJoinOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)
     {
-        orderByColumn = string.Empty;
-        isAscending = true;
+        orderKeys = [];
 
         var orderBy = _model.GetOrderByExpression();
-        if (orderBy == null || orderBy.Columns.Count != 1)
+        if (orderBy == null || orderBy.Columns.Count == 0)
         {
             return false;
         }
@@ -1091,45 +1110,44 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        var orderColumn = orderBy.Columns[0];
-        isAscending = orderColumn.IsAscending;
-
-        // Keep this slice safe: push down only direct base-column ordering.
-        if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
+        foreach (var orderColumn in orderBy.Columns)
         {
-            return false;
-        }
-
-        string token = orderColumn.Column.Name;
-        if (token.Contains('.'))
-        {
-            string[] parts = token.Split('.');
-            if (parts.Length != 2)
+            if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
             {
                 return false;
             }
 
-            if (!parts[0].Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase)
-                && (_model.FromTable.TableAlias == null || !parts[0].Equals(_model.FromTable.TableAlias, StringComparison.OrdinalIgnoreCase)))
+            string token = orderColumn.Column.Name;
+            if (token.Contains('.'))
             {
-                return false;
+                string[] parts = token.Split('.');
+                if (parts.Length != 2)
+                {
+                    return false;
+                }
+
+                if (!parts[0].Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase)
+                    && (_model.FromTable.TableAlias == null || !parts[0].Equals(_model.FromTable.TableAlias, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return false;
+                }
+
+                orderKeys.Add((parts[1], orderColumn.IsAscending));
+                continue;
             }
 
-            orderByColumn = parts[1];
-            return true;
+            orderKeys.Add((token, orderColumn.IsAscending));
         }
 
-        orderByColumn = token;
-        return true;
+        return orderKeys.Count > 0;
     }
 
-    private bool TryBuildJoinOrderPushdown(out string orderByKey, out bool isAscending)
+    private bool TryBuildJoinOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)
     {
-        orderByKey = string.Empty;
-        isAscending = true;
+        orderKeys = [];
 
         var orderBy = _model.GetOrderByExpression();
-        if (orderBy == null || orderBy.Columns.Count != 1)
+        if (orderBy == null || orderBy.Columns.Count == 0)
         {
             return false;
         }
@@ -1139,43 +1157,44 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        var orderColumn = orderBy.Columns[0];
-        isAscending = orderColumn.IsAscending;
-
-        if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
-        {
-            return false;
-        }
-
         if (_model.TableService == null)
         {
             return false;
         }
 
-        try
+        foreach (var orderColumn in orderBy.Columns)
         {
-            string token = orderColumn.Column.Name;
-            if (!token.Contains('.'))
-            {
-                var resolved = _model.TableService.ParseAndFindTableNameByColumn(token);
-                orderByKey = $"{resolved.Item1}.{resolved.Item2}";
-                return true;
-            }
-
-            string[] parts = token.Split('.');
-            if (parts.Length != 2)
+            if (_model.GetSelectColumnByAlias(orderColumn.Column.Name)?.Expression != null)
             {
                 return false;
             }
 
-            var table = _model.TableService.GetTableDetailByAliasOrName(parts[0]);
-            orderByKey = $"{table.TableName}.{parts[1]}";
-            return true;
+            try
+            {
+                string token = orderColumn.Column.Name;
+                if (!token.Contains('.'))
+                {
+                    var resolved = _model.TableService.ParseAndFindTableNameByColumn(token);
+                    orderKeys.Add(($"{resolved.Item1}.{resolved.Item2}", orderColumn.IsAscending));
+                    continue;
+                }
+
+                string[] parts = token.Split('.');
+                if (parts.Length != 2)
+                {
+                    return false;
+                }
+
+                var table = _model.TableService.GetTableDetailByAliasOrName(parts[0]);
+                orderKeys.Add(($"{table.TableName}.{parts[1]}", orderColumn.IsAscending));
+            }
+            catch
+            {
+                return false;
+            }
         }
-        catch
-        {
-            return false;
-        }
+
+        return orderKeys.Count > 0;
     }
 
     private static object? ResolveNoJoinOrderValue(ExecutionRow row, string orderByColumn)

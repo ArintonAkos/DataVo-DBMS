@@ -7,9 +7,23 @@ namespace DataVo.Core.Execution.Volcano;
 /// </summary>
 public sealed class SortOperator : IQueryOperator
 {
+    /// <summary>
+    /// Defines one sort key and its direction.
+    /// </summary>
+    public sealed class SortKeySpec
+    {
+        public SortKeySpec(Func<ExecutionRow, object?> keySelector, bool ascending)
+        {
+            KeySelector = keySelector;
+            Ascending = ascending;
+        }
+
+        public Func<ExecutionRow, object?> KeySelector { get; }
+        public bool Ascending { get; }
+    }
+
     private readonly IQueryOperator _source;
-    private readonly Func<ExecutionRow, object?> _keySelector;
-    private readonly bool _ascending;
+    private readonly IReadOnlyList<SortKeySpec> _sortKeys;
 
     private List<ExecutionRow> _sortedRows = [];
     private int _index;
@@ -18,10 +32,17 @@ public sealed class SortOperator : IQueryOperator
     /// Initializes a sort operator over a source stream.
     /// </summary>
     public SortOperator(IQueryOperator source, Func<ExecutionRow, object?> keySelector, bool ascending)
+        : this(source, [new SortKeySpec(keySelector, ascending)])
+    {
+    }
+
+    /// <summary>
+    /// Initializes a sort operator over a source stream with multiple sort keys.
+    /// </summary>
+    public SortOperator(IQueryOperator source, IReadOnlyList<SortKeySpec> sortKeys)
     {
         _source = source;
-        _keySelector = keySelector;
-        _ascending = ascending;
+        _sortKeys = sortKeys;
     }
 
     /// <inheritdoc />
@@ -48,9 +69,28 @@ public sealed class SortOperator : IQueryOperator
             _source.Close();
         }
 
-        _sortedRows = _ascending
-            ? [.. _sortedRows.OrderBy(_keySelector, DynamicObjectComparer.Instance)]
-            : [.. _sortedRows.OrderByDescending(_keySelector, DynamicObjectComparer.Instance)];
+        if (_sortKeys.Count > 0)
+        {
+            IOrderedEnumerable<ExecutionRow>? ordered = null;
+
+            foreach (SortKeySpec key in _sortKeys)
+            {
+                if (ordered == null)
+                {
+                    ordered = key.Ascending
+                        ? _sortedRows.OrderBy(key.KeySelector, DynamicObjectComparer.Instance)
+                        : _sortedRows.OrderByDescending(key.KeySelector, DynamicObjectComparer.Instance);
+                }
+                else
+                {
+                    ordered = key.Ascending
+                        ? ordered.ThenBy(key.KeySelector, DynamicObjectComparer.Instance)
+                        : ordered.ThenByDescending(key.KeySelector, DynamicObjectComparer.Instance);
+                }
+            }
+
+            _sortedRows = ordered?.ToList() ?? _sortedRows;
+        }
 
         _index = 0;
     }
