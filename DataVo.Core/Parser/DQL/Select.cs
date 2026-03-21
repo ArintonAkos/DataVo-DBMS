@@ -407,22 +407,49 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.JoinStatement.Model.JoinConditions.Count != 1)
+        var conditions = _model.JoinStatement.Model.JoinConditions;
+        if (conditions.Count == 0)
         {
             return false;
         }
 
-        var condition = _model.JoinStatement.Model.JoinConditions[0];
-        if (!condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase))
+        if (conditions.Any(c => !c.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
         string fromTable = _model.FromTable.TableName;
-        bool leftTouchesFrom = condition.LeftColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
-        bool rightTouchesFrom = condition.RightColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
+        HashSet<string> reachable = [fromTable];
+        int expanded;
 
-        return leftTouchesFrom || rightTouchesFrom;
+        do
+        {
+            expanded = 0;
+            foreach (var condition in conditions)
+            {
+                bool leftIn = reachable.Contains(condition.LeftColumn.TableName);
+                bool rightIn = reachable.Contains(condition.RightColumn.TableName);
+
+                if (leftIn && !rightIn)
+                {
+                    if (reachable.Add(condition.RightColumn.TableName))
+                    {
+                        expanded++;
+                    }
+                }
+                else if (rightIn && !leftIn)
+                {
+                    if (reachable.Add(condition.LeftColumn.TableName))
+                    {
+                        expanded++;
+                    }
+                }
+            }
+        }
+        while (expanded > 0);
+
+        return _model.JoinStatement.Model.JoinTableDetails.Values
+            .All(detail => reachable.Contains(detail.TableName));
     }
 
     private bool ShouldUseVolcanoNoJoinPath(ExpressionNode? whereExpression)
@@ -838,40 +865,74 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateInnerJoinWithVolcano(ExpressionNode? whereExpression)
     {
-        var condition = _model.JoinStatement.Model.JoinConditions[0];
+        string fromTableName = _model.FromTable.TableName;
+        HashSet<string> joinedTables = [fromTableName];
+        List<string> joinOrder = [fromTableName];
+        List<DataVo.Core.Models.Statement.JoinModel.JoinCondition> remaining = [.. _model.JoinStatement.Model.JoinConditions];
 
-        string leftTableName = condition.LeftColumn.TableName;
-        string rightTableName = condition.RightColumn.TableName;
-        string leftJoinColumn = condition.LeftColumn.ColumnName;
-        string rightJoinColumn = condition.RightColumn.ColumnName;
+        var initialRows = _model.FromTable.TableContentValues!
+            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+            .ToList();
 
-        // Ensure left stream starts from FROM table for deterministic row flow.
-        if (!leftTableName.Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase)
-            && rightTableName.Equals(_model.FromTable.TableName, StringComparison.OrdinalIgnoreCase))
+        IQueryOperator root = new TableScanOperator(initialRows);
+
+        while (remaining.Count > 0)
         {
-            (leftTableName, rightTableName) = (rightTableName, leftTableName);
-            (leftJoinColumn, rightJoinColumn) = (rightJoinColumn, leftJoinColumn);
+            int pickIndex = -1;
+            bool leftSideAlreadyJoined = false;
+
+            for (int i = 0; i < remaining.Count; i++)
+            {
+                bool leftIn = joinedTables.Contains(remaining[i].LeftColumn.TableName);
+                bool rightIn = joinedTables.Contains(remaining[i].RightColumn.TableName);
+
+                if (leftIn ^ rightIn)
+                {
+                    pickIndex = i;
+                    leftSideAlreadyJoined = leftIn;
+                    break;
+                }
+            }
+
+            if (pickIndex < 0)
+            {
+                throw new Exception("Unable to build Volcano join pipeline for disconnected INNER JOIN graph.");
+            }
+
+            var picked = remaining[pickIndex];
+            remaining.RemoveAt(pickIndex);
+
+            string existingTable = leftSideAlreadyJoined ? picked.LeftColumn.TableName : picked.RightColumn.TableName;
+            string existingColumn = leftSideAlreadyJoined ? picked.LeftColumn.ColumnName : picked.RightColumn.ColumnName;
+            string newTable = leftSideAlreadyJoined ? picked.RightColumn.TableName : picked.LeftColumn.TableName;
+            string newColumn = leftSideAlreadyJoined ? picked.RightColumn.ColumnName : picked.LeftColumn.ColumnName;
+
+            string streamJoinKey = joinedTables.Count == 1 && existingTable.Equals(fromTableName, StringComparison.OrdinalIgnoreCase)
+                ? existingColumn
+                : $"{existingTable}.{existingColumn}";
+
+            var newTableDetail = _model.TableService!.GetTableDetailByAliasOrName(newTable);
+            var newRows = newTableDetail.TableContentValues!
+                .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+                .ToList();
+
+            root = new InnerJoinOperator(
+                root,
+                new TableScanOperator(newRows),
+                streamJoinKey,
+                newColumn,
+                existingTable,
+                newTable);
+
+            joinedTables.Add(newTable);
+            joinOrder.Add(newTable);
         }
-
-        var rightTable = _model.TableService!.GetTableDetailByAliasOrName(rightTableName);
-
-        var leftRows = _model.FromTable.TableContentValues!
-            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
-            .ToList();
-
-        var rightRows = rightTable.TableContentValues!
-            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
-            .ToList();
-
-        IQueryOperator leftScan = new TableScanOperator(leftRows);
-        IQueryOperator rightScan = new TableScanOperator(rightRows);
-        IQueryOperator root = new InnerJoinOperator(leftScan, rightScan, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
 
         if (!IsAllTrueExpression(whereExpression))
         {
             root = new FilterOperator(root, row =>
             {
-                var joinedRow = ToJoinedRowFromJoinExecution(row, leftTableName, rightTableName);
+                var joinedRow = ToJoinedRowFromJoinExecution(row, joinOrder);
                 return EvaluatePredicate(whereExpression!, joinedRow);
             });
         }
@@ -890,7 +951,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         List<ExecutionRow> joinedRows = OperatorPipelineRunner.ExecuteToList(root);
         List<JoinedRow> listed = joinedRows
-            .Select(row => ToJoinedRowFromJoinExecution(row, leftTableName, rightTableName))
+            .Select(row => ToJoinedRowFromJoinExecution(row, joinOrder))
             .ToList();
 
         return new ListedTable(listed);
@@ -907,29 +968,40 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return values;
     }
 
-    private static JoinedRow ToJoinedRowFromJoinExecution(ExecutionRow row, string leftTableName, string rightTableName)
+    private static JoinedRow ToJoinedRowFromJoinExecution(ExecutionRow row, IReadOnlyList<string> tableNames)
     {
-        var leftValues = new Dictionary<string, dynamic>();
-        var rightValues = new Dictionary<string, dynamic>();
-
-        string leftPrefix = $"{leftTableName}.";
-        string rightPrefix = $"{rightTableName}.";
+        Dictionary<string, Dictionary<string, dynamic>> buckets = [];
+        foreach (string tableName in tableNames)
+        {
+            buckets[tableName] = [];
+        }
 
         foreach (var entry in row.Values)
         {
-            if (entry.Key.StartsWith(leftPrefix, StringComparison.OrdinalIgnoreCase))
+            bool matched = false;
+            foreach (string tableName in tableNames)
             {
-                leftValues[entry.Key[leftPrefix.Length..]] = entry.Value;
+                string prefix = $"{tableName}.";
+                if (entry.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    buckets[tableName][entry.Key[prefix.Length..]] = entry.Value;
+                    matched = true;
+                    break;
+                }
             }
-            else if (entry.Key.StartsWith(rightPrefix, StringComparison.OrdinalIgnoreCase))
+
+            if (!matched && tableNames.Count == 1)
             {
-                rightValues[entry.Key[rightPrefix.Length..]] = entry.Value;
+                buckets[tableNames[0]][entry.Key] = entry.Value;
             }
         }
 
         var joined = new JoinedRow();
-        joined.Add(leftTableName, new Row(leftValues));
-        joined.Add(rightTableName, new Row(rightValues));
+        foreach (string tableName in tableNames)
+        {
+            joined.Add(tableName, new Row(buckets[tableName]));
+        }
+
         return joined;
     }
 

@@ -138,4 +138,35 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal(3, (int)result.Data[0]["Id"]);
         Assert.Equal(80, (int)result.Data[0]["Score"]);
     }
+
+    [Fact]
+    public void Select_MultiInnerJoin_UsesVolcanoJoinPipeline()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, CityId INT, Name VARCHAR)");
+        Execute("CREATE TABLE Cities (Id INT PRIMARY KEY, CityName VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 12)");
+
+        Execute("INSERT INTO Customers (Id, CityId, Name) VALUES (10, 100, 'Alice')");
+        Execute("INSERT INTO Customers (Id, CityId, Name) VALUES (11, 101, 'Bob')");
+        Execute("INSERT INTO Customers (Id, CityId, Name) VALUES (12, 100, 'Cara')");
+
+        Execute("INSERT INTO Cities (Id, CityName) VALUES (100, 'Athens')");
+        Execute("INSERT INTO Cities (Id, CityName) VALUES (101, 'Rome')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name, ci.CityName
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            JOIN Cities ci ON c.CityId = ci.Id
+            WHERE ci.CityName = 'Athens'
+            LIMIT 2");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.All(result.Data, row => Assert.Equal("Athens", (string)row["ci.CityName"]));
+    }
 }

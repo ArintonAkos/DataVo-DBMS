@@ -131,12 +131,14 @@ public sealed class InnerJoinOperator : IQueryOperator
 
         foreach (var cell in leftRow.Values)
         {
-            values[$"{_leftTableName}.{cell.Key}"] = cell.Value;
+            string key = cell.Key.Contains('.') ? cell.Key : $"{_leftTableName}.{cell.Key}";
+            values[key] = cell.Value;
         }
 
         foreach (var cell in rightRow.Values)
         {
-            values[$"{_rightTableName}.{cell.Key}"] = cell.Value;
+            string key = cell.Key.Contains('.') ? cell.Key : $"{_rightTableName}.{cell.Key}";
+            values[key] = cell.Value;
         }
 
         _outputRowId++;
