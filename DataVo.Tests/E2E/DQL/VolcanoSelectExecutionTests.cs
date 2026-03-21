@@ -59,4 +59,19 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal(2, (int)result.Data[0]["Id"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_WithoutWhereAndOffsetAndLimit_UsesVolcanoPathAndReturnsExpectedWindow()
+    {
+        Execute("CREATE TABLE Numbers (Id INT PRIMARY KEY, Value INT)");
+        Execute("INSERT INTO Numbers (Id, Value) VALUES (1, 10)");
+        Execute("INSERT INTO Numbers (Id, Value) VALUES (2, 20)");
+        Execute("INSERT INTO Numbers (Id, Value) VALUES (3, 30)");
+
+        var result = ExecuteAndReturn("SELECT Id, Value FROM Numbers LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(2, (int)result.Data[0]["Id"]);
+    }
 }

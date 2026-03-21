@@ -352,9 +352,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (_model.WhereStatement.IsEvaluatable())
         {
             var whereExpression = _model.WhereStatement.GetExpression();
-            if (ShouldUseVolcanoWherePath(whereExpression))
+            if (ShouldUseVolcanoNoJoinPath(whereExpression))
             {
-                result = EvaluateWhereWithVolcano(whereExpression!);
+                result = EvaluateNoJoinWithVolcano(whereExpression);
             }
             else if (whereExpression != null && RequiresExpressionEvaluation(whereExpression))
             {
@@ -369,6 +369,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             result = EvaluateJoin();
         }
+        else if (ShouldUseVolcanoNoJoinPath(null))
+        {
+            result = EvaluateNoJoinWithVolcano(null);
+        }
         else
         {
             var listResult = _model.FromTable!.TableContentValues!
@@ -381,14 +385,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return result;
     }
 
-    private bool ShouldUseVolcanoWherePath(ExpressionNode? whereExpression)
+    private bool ShouldUseVolcanoNoJoinPath(ExpressionNode? whereExpression)
     {
         if (!Engine.Config.EnableVolcanoExecution)
-        {
-            return false;
-        }
-
-        if (whereExpression == null)
         {
             return false;
         }
@@ -398,7 +397,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (ContainsSubqueryExpression(whereExpression))
+        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
         {
             return false;
         }
@@ -528,6 +527,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool IsNearestJoinTwoPhaseEligible(ExpressionNode? whereExpression, out ExpressionNode? embeddingFilter)
     {
         embeddingFilter = null;
+
+        if (_model.TableService == null)
+        {
+            return false;
+        }
 
         // Try to extract WHERE predicates that reference only the embedding table
         embeddingFilter = ExpressionExtractor.TryExtractTableSpecificPredicates(
@@ -738,7 +742,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return new ListedTable(filtered);
     }
 
-    private ListedTable EvaluateWhereWithVolcano(ExpressionNode whereExpression)
+    private ListedTable EvaluateNoJoinWithVolcano(ExpressionNode? whereExpression)
     {
         var sourceRows = _model.FromTable!.TableContentValues!
             .Select((record, index) =>
@@ -754,14 +758,16 @@ internal class Select(SelectStatement ast) : BaseDbAction
             })
             .ToList();
 
-        IQueryOperator scan = new TableScanOperator(sourceRows);
-        IQueryOperator filter = new FilterOperator(scan, row =>
+        IQueryOperator root = new TableScanOperator(sourceRows);
+        if (whereExpression != null)
         {
-            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(row.Values));
-            return EvaluatePredicate(whereExpression, joinedRow);
-        });
+            root = new FilterOperator(root, row =>
+            {
+                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(row.Values));
+                return EvaluatePredicate(whereExpression, joinedRow);
+            });
+        }
 
-        IQueryOperator root = filter;
         if (CanPushDownOffsetToVolcano())
         {
             root = new SkipOperator(root, _model.LimitSkip!.Value);
