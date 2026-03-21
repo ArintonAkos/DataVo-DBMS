@@ -194,4 +194,49 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal(2, (int)result.Data[0]["o.Id"]);
         Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_MultiColumnOrderByWithLimitOffset_UsesVolcanoSortWindow()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Bucket INT, Score INT)");
+        Execute("INSERT INTO Scores (Id, Bucket, Score) VALUES (1, 1, 80)");
+        Execute("INSERT INTO Scores (Id, Bucket, Score) VALUES (2, 1, 70)");
+        Execute("INSERT INTO Scores (Id, Bucket, Score) VALUES (3, 2, 90)");
+        Execute("INSERT INTO Scores (Id, Bucket, Score) VALUES (4, 2, 60)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id, Bucket, Score
+            FROM Scores
+            ORDER BY Bucket DESC, Score ASC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(3, (int)result.Data[0]["Id"]);
+    }
+
+    [Fact]
+    public void Select_Join_MultiColumnOrderByWithLimitOffset_UsesVolcanoSortWindow()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY c.Name ASC, o.Id DESC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(1, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+    }
 }
