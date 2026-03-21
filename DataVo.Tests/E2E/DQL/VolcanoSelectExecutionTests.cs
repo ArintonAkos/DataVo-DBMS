@@ -254,4 +254,20 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("C", (string)result.Data[0]["Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_Distinct_UsesVolcanoDistinctPushdownSafely()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Name VARCHAR, Score INT)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (1, 'A', 70)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (2, 'A', 95)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (3, 'B', 80)");
+
+        var result = ExecuteAndReturn("SELECT DISTINCT Name FROM Scores ORDER BY Name ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Name"]);
+        Assert.Equal("B", (string)result.Data[1]["Name"]);
+    }
 }
