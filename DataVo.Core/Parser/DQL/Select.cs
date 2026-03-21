@@ -40,6 +40,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoLimitPushedDown;
     private bool _volcanoOffsetPushedDown;
     private bool _volcanoOrderPushedDown;
+    private bool _volcanoProjectionPushedDown;
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -835,6 +836,25 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
+        if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
+        {
+            root = new ProjectOperator(root, row =>
+            {
+                var values = new Dictionary<string, dynamic>();
+                foreach (string column in projectionColumns)
+                {
+                    if (row.Values.TryGetValue(column, out var value))
+                    {
+                        values[column] = value;
+                    }
+                }
+
+                return values;
+            });
+
+            _volcanoProjectionPushedDown = true;
+        }
+
         bool orderPushedDown = false;
         if (TryBuildNoJoinOrderPushdown(out var orderKeys))
         {
@@ -1140,6 +1160,49 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return orderKeys.Count > 0;
+    }
+
+    private bool TryBuildNoJoinProjectionPushdown(out HashSet<string> projectionColumns)
+    {
+        projectionColumns = [];
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0
+            || _model.GetAggregateColumns().Count > 0)
+        {
+            return false;
+        }
+
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            projectionColumns.Add(parts[1]);
+        }
+
+        // Include ORDER BY keys so sorting can still run correctly after projection.
+        if (TryBuildNoJoinOrderPushdown(out var orderKeys))
+        {
+            foreach (var key in orderKeys)
+            {
+                projectionColumns.Add(key.Key);
+            }
+        }
+
+        return projectionColumns.Count > 0;
     }
 
     private bool TryBuildJoinOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)
