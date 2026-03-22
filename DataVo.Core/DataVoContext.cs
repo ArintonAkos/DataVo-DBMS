@@ -2,6 +2,7 @@
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core;
 
@@ -71,6 +72,56 @@ public sealed class DataVoContext : IDisposable
     public List<QueryResult> Execute(string query, Guid sessionId)
     {
         return new QueryEngine(query, sessionId, Engine).Parse();
+    }
+
+    /// <summary>
+    /// Executes a nearest-neighbor vector search using an HNSW index in the current session database.
+    /// </summary>
+    /// <param name="tableName">The table containing the indexed vector column.</param>
+    /// <param name="indexName">The vector index name.</param>
+    /// <param name="queryVector">The query vector.</param>
+    /// <param name="topK">The number of nearest rows to return.</param>
+    /// <returns>The matching table rows in ranked order.</returns>
+    public List<Dictionary<string, dynamic>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
+    {
+        string databaseName = ResolveCurrentDatabase();
+        using var _ = DataVoEngine.PushCurrent(Engine);
+
+        List<long> rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        if (rowIds.Count == 0)
+        {
+            return [];
+        }
+
+        Dictionary<long, Dictionary<string, dynamic>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
+        return rowIds
+            .Where(rows.ContainsKey)
+            .Select(id => rows[id])
+            .ToList();
+    }
+
+    /// <summary>
+    /// Executes a nearest-neighbor vector search using a vector literal formatted as <c>[x,y,z]</c>.
+    /// </summary>
+    public List<Dictionary<string, dynamic>> SearchNearest(string tableName, string indexName, string queryVector, int topK = 10)
+    {
+        if (!VectorParser.TryParseVector(queryVector, out float[] parsedVector))
+        {
+            throw new ArgumentException("Query vector must be in format [x,y,z].", nameof(queryVector));
+        }
+
+        return SearchNearest(tableName, indexName, parsedVector, topK);
+    }
+
+    private string ResolveCurrentDatabase()
+    {
+        string? databaseName = Engine.Sessions.Get(SessionId);
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            throw new InvalidOperationException("No database selected for the current session. Execute USE <database> first.");
+        }
+
+        return databaseName;
     }
 
     /// <summary>
