@@ -36,15 +36,11 @@ public class VectorContextTests
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
 
-        Dictionary<long, Dictionary<string, dynamic>> rows = context.Engine.StorageContext.GetTableContents("Embeddings", dbName);
-        var vectors = rows
-            .Select(kvp =>
-            {
-                int id = Convert.ToInt32(kvp.Value["Id"]);
-                float[] vector = id == 1 ? [1f, 0f, 0f] : [0f, 1f, 0f];
-                return (RowId: kvp.Key, Vector: vector);
-            })
-            .ToList();
+        var vectors = new List<(long RowId, float[] Vector)>
+        {
+            (1, [1f, 0f, 0f]),
+            (2, [0f, 1f, 0f])
+        };
 
         context.Engine.IndexManager.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", dbName, "cosine");
 

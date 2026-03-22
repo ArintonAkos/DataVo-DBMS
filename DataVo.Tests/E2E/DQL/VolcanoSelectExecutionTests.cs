@@ -524,4 +524,37 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal("B", (string)result.Data[1]["Category"]);
         Assert.Equal(1L, Convert.ToInt64(result.Data[1]["C"]));
     }
+
+    [Fact]
+    public void Select_NoJoin_GlobalSum_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Amount) VALUES (1, 10)");
+        Execute("INSERT INTO Sales (Id, Amount) VALUES (2, 25)");
+        Execute("INSERT INTO Sales (Id, Amount) VALUES (3, 5)");
+
+        var result = ExecuteAndReturn("SELECT SUM(Amount) AS Total FROM Sales WHERE Amount >= 10");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(35d, Convert.ToDouble(result.Data[0]["Total"]));
+    }
+
+    [Fact]
+    public void Select_NoJoin_GroupedAvg_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 20)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 30)");
+
+        var result = ExecuteAndReturn("SELECT Category, AVG(Amount) AS AvgAmount FROM Sales GROUP BY Category ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal(15d, Convert.ToDouble(result.Data[0]["AvgAmount"]));
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[1]["AvgAmount"]));
+    }
 }
