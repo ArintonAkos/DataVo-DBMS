@@ -1,0 +1,12 @@
+{
+	"servers": {
+		"ef-core-docs-mcp": {
+			"type": "stdio",
+			"command": "/Users/arintonakos/Projects/AI-Utils/ef-core-mcp/.venv/bin/python",
+			"args": [
+				"/Users/arintonakos/Projects/AI-Utils/ef-core-mcp/mcp_server.py"
+			]
+		}
+	},
+	"inputs": []
+}
