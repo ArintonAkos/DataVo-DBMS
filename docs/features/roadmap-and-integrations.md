@@ -63,6 +63,10 @@ The long-term goal is that `DataVo` should be approachable from mainstream .NET 
 
 Vector embedding support is explicitly part of the product direction.
 
+Detailed execution plan:
+
+- [Vector DB + HNSW roadmap](vector-db-hnsw-roadmap.md)
+
 ### Why it matters
 
 The project is aiming to reduce the friction of embedding/vector workflows that often require external plugins in other local databases.
