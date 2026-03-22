@@ -1249,10 +1249,13 @@ public class Parser(List<Token> tokens)
                     throw new ParserException($"Parser Error: Window functions (OVER/PARTITION BY) are not supported yet near {token}.");
                 }
 
-                // Detect aggregate / function calls like SUM(...), COUNT(*)
+                // Detect aggregate / scalar function calls like SUM(...), COUNT(*), LOWER(...)
                 if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Punctuation && tokens.Peek().Value == SqlPunctuation.OpenParenToken)
                 {
-                    if (!IsSupportedAggregateFunction(token.Value))
+                    bool isAggregate = IsSupportedAggregateFunction(token.Value);
+                    bool isScalarFunction = IsSupportedScalarFunction(token.Value);
+
+                    if (!isAggregate && !isScalarFunction)
                     {
                         throw new ParserException($"Parser Error: Function '{token.Value}' is not supported yet near {token}.");
                     }
@@ -1282,21 +1285,43 @@ public class Parser(List<Token> tokens)
                     }
 
                     // inner now contains tokens for the function argument(s)
-                    // COUNT(*) special-case
-                    bool isStar = inner.Count == 1 && inner.Peek().Type == TokenType.Punctuation && inner.Peek().Value == SqlPunctuation.StarToken;
-
-                    ExpressionNode? arg = null;
-                    if (!isStar && inner.Count > 0)
+                    if (isAggregate)
                     {
-                        arg = ParseWhereExpression(CloneQueue(inner));
+                        // COUNT(*) special-case
+                        bool isStar = inner.Count == 1 && inner.Peek().Type == TokenType.Punctuation && inner.Peek().Value == SqlPunctuation.StarToken;
+
+                        ExpressionNode? arg = null;
+                        if (!isStar && inner.Count > 0)
+                        {
+                            arg = ParseWhereExpression(CloneQueue(inner));
+                        }
+
+                        values.Push(new AggregateExpressionNode
+                        {
+                            FunctionName = token.Value,
+                            Argument = arg,
+                            IsStar = isStar
+                        });
                     }
-
-                    values.Push(new AggregateExpressionNode
+                    else
                     {
-                        FunctionName = token.Value,
-                        Argument = arg,
-                        IsStar = isStar
-                    });
+                        if (inner.Count == 0)
+                        {
+                            throw new ParserException($"Parser Error: Function '{token.Value}' requires an argument.");
+                        }
+
+                        ExpressionNode? arg = ParseWhereExpression(CloneQueue(inner));
+                        if (arg == null)
+                        {
+                            throw new ParserException($"Parser Error: Function '{token.Value}' has an invalid argument.");
+                        }
+
+                        values.Push(new ScalarFunctionExpressionNode
+                        {
+                            FunctionName = token.Value,
+                            Arguments = [arg]
+                        });
+                    }
                 }
                 else
                 {
@@ -1533,6 +1558,12 @@ public class Parser(List<Token> tokens)
             || functionName.Equals("AVG", StringComparison.OrdinalIgnoreCase)
             || functionName.Equals("MIN", StringComparison.OrdinalIgnoreCase)
             || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSupportedScalarFunction(string functionName)
+    {
+        return functionName.Equals(Operators.LOWER, StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals(Operators.UPPER, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Queue<Token> CloneQueue(Queue<Token> source)

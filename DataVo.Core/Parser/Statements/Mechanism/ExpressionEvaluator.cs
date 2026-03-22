@@ -24,6 +24,10 @@ internal static class ExpressionEvaluator
         {
             return resolveAggregate(agg, row);
         }
+        if (node is ScalarFunctionExpressionNode scalarFunction)
+        {
+            return EvaluateScalarFunction(scalarFunction, row, resolveColumn, resolveAggregate);
+        }
         if (node is BinaryExpressionNode bin)
         {
             object? left = Evaluate(bin.Left, row, resolveColumn, resolveAggregate);
@@ -70,6 +74,35 @@ internal static class ExpressionEvaluator
         }
 
         throw new Exception($"Unsupported expression node type: {node.GetType().Name}");
+    }
+
+    private static object? EvaluateScalarFunction(
+        ScalarFunctionExpressionNode scalarFunction,
+        JoinedRow row,
+        Func<ColumnRefNode, JoinedRow, object?> resolveColumn,
+        Func<AggregateExpressionNode, JoinedRow, object?> resolveAggregate)
+    {
+        if (scalarFunction.Arguments.Count != 1)
+        {
+            throw new Exception($"Scalar function '{scalarFunction.FunctionName}' expects exactly one argument.");
+        }
+
+        object? value = Evaluate(scalarFunction.Arguments[0], row, resolveColumn, resolveAggregate);
+
+        if (value == null)
+        {
+            return null;
+        }
+
+        string normalized = scalarFunction.FunctionName.ToUpperInvariant();
+        string input = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+
+        return normalized switch
+        {
+            "LOWER" => input.ToLowerInvariant(),
+            "UPPER" => input.ToUpperInvariant(),
+            _ => throw new Exception($"Unsupported scalar function: {scalarFunction.FunctionName}")
+        };
     }
 
     private static bool ToBool(object? v)
