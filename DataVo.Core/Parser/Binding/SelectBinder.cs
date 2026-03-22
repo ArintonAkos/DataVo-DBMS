@@ -38,7 +38,7 @@ internal static class SelectBinder
                 if (join.JoinType.Equals(JoinTypes.CROSS, StringComparison.OrdinalIgnoreCase))
                 {
                     string leftTableName = ast.FromAlias?.Name ?? ast.FromTable?.Name ?? string.Empty;
-                    
+
                     model.JoinConditions.Add(new JoinModel.JoinCondition(
                         leftTableName,
                         "__dummy__",
