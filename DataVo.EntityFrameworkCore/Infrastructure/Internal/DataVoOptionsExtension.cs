@@ -25,6 +25,10 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
 
     public bool BootstrapDiagnosticsEnabled { get; private set; }
 
+    public bool ProviderIdentityPreviewEnabled { get; private set; }
+
+    public bool NativeQueryTranslationPreviewEnabled { get; private set; }
+
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
     // ------------------------------------------------------------------ service registration
@@ -57,6 +61,13 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
                 "UseInMemoryDatabase(...)) before calling UseDataVo(...). " +
                 "DataVo is currently a persistence bridge, not a standalone LINQ provider.");
         }
+
+        if (NativeQueryTranslationPreviewEnabled && !ProviderIdentityPreviewEnabled)
+        {
+            throw new InvalidOperationException(
+                "DataVo configuration error: native query translation preview requires provider identity preview. " +
+                "Enable provider identity preview first.");
+        }
     }
 
     // ------------------------------------------------------------------ fluent mutation API
@@ -82,6 +93,18 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
     public DataVoOptionsExtension WithBootstrapDiagnostics(bool enabled)
     {
         BootstrapDiagnosticsEnabled = enabled;
+        return this;
+    }
+
+    public DataVoOptionsExtension WithProviderIdentityPreview(bool enabled)
+    {
+        ProviderIdentityPreviewEnabled = enabled;
+        return this;
+    }
+
+    public DataVoOptionsExtension WithNativeQueryTranslationPreview(bool enabled)
+    {
+        NativeQueryTranslationPreviewEnabled = enabled;
         return this;
     }
 
@@ -117,8 +140,10 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
             get
             {
                 string diagnosticsFlag = Extension.BootstrapDiagnosticsEnabled ? " diagnostics=on" : string.Empty;
+                string providerIdentityFlag = Extension.ProviderIdentityPreviewEnabled ? " providerIdentityPreview=on" : string.Empty;
+                string nativeTranslationFlag = Extension.NativeQueryTranslationPreviewEnabled ? " nativeTranslationPreview=on" : string.Empty;
                 string cs = Extension.BuildEffectiveConnectionString() ?? "(none)";
-                return $"using DataVo({cs}){diagnosticsFlag}";
+                return $"using DataVo({cs}){diagnosticsFlag}{providerIdentityFlag}{nativeTranslationFlag}";
             }
         }
 
@@ -130,7 +155,9 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
             return HashCode.Combine(
                 Extension.StorageMode is not null,
                 string.IsNullOrWhiteSpace(Extension.DataSource),
-                string.IsNullOrWhiteSpace(Extension.ConnectionString));
+                string.IsNullOrWhiteSpace(Extension.ConnectionString),
+                Extension.ProviderIdentityPreviewEnabled,
+                Extension.NativeQueryTranslationPreviewEnabled);
         }
 
         public override void PopulateDebugInfo(IDictionary<string, string> debugInfo)
@@ -139,6 +166,8 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
             debugInfo["DataVo:StorageMode"] = Extension.StorageMode?.ToString() ?? "unset";
             debugInfo["DataVo:DataSource"] = Extension.DataSource ?? string.Empty;
             debugInfo["DataVo:Diagnostics"] = Extension.BootstrapDiagnosticsEnabled ? "1" : "0";
+            debugInfo["DataVo:ProviderIdentityPreview"] = Extension.ProviderIdentityPreviewEnabled ? "1" : "0";
+            debugInfo["DataVo:NativeQueryTranslationPreview"] = Extension.NativeQueryTranslationPreviewEnabled ? "1" : "0";
         }
 
         public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other)
@@ -146,7 +175,9 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
             return other is ExtensionInfo otherInfo &&
                    (Extension.StorageMode is not null) == (otherInfo.Extension.StorageMode is not null) &&
                    string.IsNullOrWhiteSpace(Extension.DataSource) == string.IsNullOrWhiteSpace(otherInfo.Extension.DataSource) &&
-                   string.IsNullOrWhiteSpace(Extension.ConnectionString) == string.IsNullOrWhiteSpace(otherInfo.Extension.ConnectionString);
+                   string.IsNullOrWhiteSpace(Extension.ConnectionString) == string.IsNullOrWhiteSpace(otherInfo.Extension.ConnectionString) &&
+                   Extension.ProviderIdentityPreviewEnabled == otherInfo.Extension.ProviderIdentityPreviewEnabled &&
+                   Extension.NativeQueryTranslationPreviewEnabled == otherInfo.Extension.NativeQueryTranslationPreviewEnabled;
         }
     }
 }

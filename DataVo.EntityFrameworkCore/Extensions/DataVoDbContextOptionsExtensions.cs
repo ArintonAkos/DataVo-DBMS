@@ -31,7 +31,101 @@ public static class DataVoDbContextOptionsExtensions
             extension.ConnectionString,
             extension.StorageMode,
             extension.DataSource,
-            extension.BootstrapDiagnosticsEnabled);
+            extension.BootstrapDiagnosticsEnabled,
+            extension.ProviderIdentityPreviewEnabled,
+            extension.NativeQueryTranslationPreviewEnabled);
+    }
+
+    /// <summary>
+    /// Returns the current DataVo provider preview status attached to the EF Core options, if configured.
+    /// </summary>
+    public static DataVoProviderPreviewStatus? GetDataVoProviderPreviewStatus(this DbContextOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var modeStatus = options.GetDataVoProviderModeStatus();
+        var bootstrap = options.GetDataVoBootstrapOptions();
+        if (bootstrap is null || modeStatus is null)
+        {
+            return null;
+        }
+
+        return new DataVoProviderPreviewStatus(
+            bootstrap.EffectiveConnectionString,
+            modeStatus.ProviderIdentityPreviewEnabled,
+            modeStatus.NativeQueryTranslationPreviewEnabled,
+            modeStatus.IsBridgeOnlyMode);
+    }
+
+    /// <summary>
+    /// Returns the active DataVo provider mode status from a public options snapshot, if configured.
+    /// </summary>
+    public static DataVoProviderModeStatus? GetDataVoProviderModeStatus(this DbContextOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var extension = options.FindExtension<DataVoOptionsExtension>();
+        if (extension is null)
+        {
+            return null;
+        }
+
+        DataVoProviderMode mode = extension.NativeQueryTranslationPreviewEnabled
+            ? DataVoProviderMode.NativeTranslationPreview
+            : extension.ProviderIdentityPreviewEnabled
+                ? DataVoProviderMode.ProviderIdentityPreview
+                : DataVoProviderMode.BridgeOnly;
+
+        return new DataVoProviderModeStatus(
+            mode,
+            extension.ProviderIdentityPreviewEnabled,
+            extension.NativeQueryTranslationPreviewEnabled);
+    }
+
+    /// <summary>
+    /// Returns the current DataVo provider preview status from an EF Core internal options snapshot, if configured.
+    /// </summary>
+    public static DataVoProviderPreviewStatus? GetDataVoProviderPreviewStatus(this IDbContextOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var extension = options.FindExtension<Infrastructure.Internal.DataVoOptionsExtension>();
+        var modeStatus = options.GetDataVoProviderModeStatus();
+        if (extension is null || modeStatus is null)
+        {
+            return null;
+        }
+
+        return new DataVoProviderPreviewStatus(
+            extension.BuildEffectiveConnectionString(),
+            modeStatus.ProviderIdentityPreviewEnabled,
+            modeStatus.NativeQueryTranslationPreviewEnabled,
+            modeStatus.IsBridgeOnlyMode);
+    }
+
+    /// <summary>
+    /// Returns the active DataVo provider mode status from an EF Core internal options snapshot, if configured.
+    /// </summary>
+    public static DataVoProviderModeStatus? GetDataVoProviderModeStatus(this IDbContextOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var extension = options.FindExtension<Infrastructure.Internal.DataVoOptionsExtension>();
+        if (extension is null)
+        {
+            return null;
+        }
+
+        DataVoProviderMode mode = extension.NativeQueryTranslationPreviewEnabled
+            ? DataVoProviderMode.NativeTranslationPreview
+            : extension.ProviderIdentityPreviewEnabled
+                ? DataVoProviderMode.ProviderIdentityPreview
+                : DataVoProviderMode.BridgeOnly;
+
+        return new DataVoProviderModeStatus(
+            mode,
+            extension.ProviderIdentityPreviewEnabled,
+            extension.NativeQueryTranslationPreviewEnabled);
     }
 
     // ------------------------------------------------------------------ UseDataVo – connection-string overloads
