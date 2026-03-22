@@ -42,6 +42,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoOrderPushedDown;
     private bool _volcanoProjectionPushedDown;
     private bool _volcanoDistinctPushedDown;
+    private bool _volcanoGroupByPushedDown;
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -839,6 +840,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
+        if (TryBuildNoJoinGroupByPushdown(out var groupByColumns))
+        {
+            Logger.Info($"Planner: push down GROUP BY as distinct ({groupByColumns.Count} keys).");
+            root = new DistinctOperator(root, row => BuildDistinctKey(row, groupByColumns));
+            _volcanoGroupByPushedDown = true;
+        }
+
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down projection ({projectionColumns.Count} columns).");
@@ -1109,7 +1117,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.GroupByStatement.ContainsGroupBy())
+        if (_model.GroupByStatement.ContainsGroupBy() && !_volcanoGroupByPushedDown)
         {
             return false;
         }
@@ -1140,7 +1148,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.GroupByStatement.ContainsGroupBy())
+        if (_model.GroupByStatement.ContainsGroupBy() && !_volcanoGroupByPushedDown)
         {
             return false;
         }
@@ -1247,6 +1255,86 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return projectionColumns.Count > 0;
+    }
+
+    private bool TryBuildNoJoinGroupByPushdown(out List<string> groupByColumns)
+    {
+        groupByColumns = [];
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (!_model.GroupByStatement.ContainsGroupBy())
+        {
+            return false;
+        }
+
+        if (_model.AggregateStatement.ContainsAggregate())
+        {
+            return false;
+        }
+
+        if (_model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0
+            || _model.GetAggregateColumns().Count > 0)
+        {
+            return false;
+        }
+
+        string fromTable = _model.FromTable.TableName;
+        foreach (var groupedColumn in _model.GroupByStatement.Model.Columns)
+        {
+            if (!groupedColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            groupByColumns.Add(groupedColumn.ColumnName);
+        }
+
+        if (groupByColumns.Count == 0)
+        {
+            return false;
+        }
+
+        var groupByKeySet = new HashSet<string>(groupByColumns, StringComparer.OrdinalIgnoreCase);
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!parts[0].Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!groupByKeySet.Contains(parts[1]))
+            {
+                return false;
+            }
+        }
+
+        if (TryBuildNoJoinOrderPushdown(out var orderKeys)
+            && orderKeys.Any(key => !groupByKeySet.Contains(key.Key)))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryBuildNoJoinDistinctPushdown(out List<string> distinctColumns)
