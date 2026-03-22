@@ -252,6 +252,7 @@ public class CreateIndexStatement : SqlStatement
     public IdentifierNode IndexName { get; set; } = null!;
     public IdentifierNode TableName { get; set; } = null!;
     public IdentifierNode ColumnName { get; set; } = null!;
+    public IdentifierNode? UsingMethod { get; set; }
 }
 
 public class DropIndexStatement : SqlStatement

@@ -277,6 +277,20 @@ public class Lexer
     private bool TryReadMultiCharOperator(out Token? token)
     {
         token = null;
+        if (_position + 2 < _input.Length)
+        {
+            string potentialThreeCharOp = _input.Substring(_position, 3);
+            if (potentialThreeCharOp == Operators.VECTOR_DISTANCE_L2
+                || potentialThreeCharOp == Operators.VECTOR_DISTANCE_COSINE)
+            {
+                var start = _position;
+                var startLoc = GetLineColumn(start);
+                token = new Token(TokenType.Operator, potentialThreeCharOp, start, startLoc.line, startLoc.column);
+                _position += 3;
+                return true;
+            }
+        }
+
         if (_position + 1 >= _input.Length) return false;
 
         string potentialOp = _input.Substring(_position, 2);
