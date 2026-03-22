@@ -11,6 +11,7 @@ using DataVo.Core.Constants;
 using DataVo.Core.Utils;
 using DataVo.Core.Transactions;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Models.Catalog;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -336,6 +337,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// <returns>A <see cref="ListedTable"/> containing the initial matched rows.</returns>
     private ListedTable EvaluateStatements()
     {
+        ListedTable? nearestNeighborFastPath = TryEvaluateNearestNeighborUsingVectorIndex();
+        if (nearestNeighborFastPath != null)
+        {
+            return nearestNeighborFastPath;
+        }
+
         ListedTable result;
 
         if (_model.WhereStatement.IsEvaluatable())
@@ -364,6 +371,203 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return result;
+    }
+
+    private ListedTable? TryEvaluateNearestNeighborUsingVectorIndex()
+    {
+        if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
+        {
+            return null;
+        }
+
+        if (_model.Database is null)
+        {
+            return null;
+        }
+
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy == null || orderBy.Columns.Count == 0)
+        {
+            return null;
+        }
+
+        OrderByColumnNode firstOrderColumn = orderBy.Columns[0];
+        if (!firstOrderColumn.IsAscending)
+        {
+            return null;
+        }
+
+        var orderedSelectColumn = _model.GetSelectColumnByAlias(firstOrderColumn.Column.Name);
+        if (orderedSelectColumn?.Expression is not BinaryExpressionNode distanceExpression)
+        {
+            return null;
+        }
+
+        if (distanceExpression.Operator != Operators.VECTOR_DISTANCE_COSINE
+            && distanceExpression.Operator != Operators.VECTOR_DISTANCE_L2)
+        {
+            return null;
+        }
+
+        if (!TryResolveVectorDistanceExpression(distanceExpression, out string tableName, out string columnName, out float[] queryVector))
+        {
+            return null;
+        }
+
+        string columnType = Catalog.GetTableColumnType(tableName, _model.Database, columnName);
+        if (!columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase)
+            && !columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new Exception($"Vector operator '{distanceExpression.Operator}' can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
+        }
+
+        if (!_model.FromTable.IndexedColumns!.TryGetValue(columnName, out string? indexName))
+        {
+            return null;
+        }
+
+        IndexFile? indexMetadata = Catalog
+            .GetTableIndexes(tableName, _model.Database)
+            .FirstOrDefault(index => index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase));
+
+        if (indexMetadata == null || !indexMetadata.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        int topK = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
+        if (topK <= 0)
+        {
+            return null;
+        }
+
+        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
+        if (rowIds.Count == 0)
+        {
+            return new ListedTable();
+        }
+
+        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        TableData seedRows = [];
+        foreach (long rowId in rowIds)
+        {
+            if (!rows.TryGetValue(rowId, out var rowValues))
+            {
+                continue;
+            }
+
+            seedRows[rowId] = new Record(rowId, rowValues);
+        }
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            if (!IsNearestJoinTwoPhaseEligible())
+            {
+                return null;
+            }
+
+            return EvaluateJoinFromSeed(seedRows);
+        }
+
+        return new ListedTable(seedRows.Values
+            .Select(record => new JoinedRow(_model.FromTable.TableName, record.ToRow()))
+            .ToList());
+    }
+
+    private bool IsNearestJoinTwoPhaseEligible()
+    {
+        ExpressionNode? whereExpression = _model.WhereStatement.GetExpression();
+        bool noExplicitFilter = whereExpression is LiteralNode literal
+            && literal.Value?.ToString() == SqlLiterals.TrueExpression;
+
+        if (!noExplicitFilter)
+        {
+            return false;
+        }
+
+        return _model.JoinStatement.Model.JoinConditions
+            .All(condition => condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private ListedTable EvaluateJoinFromSeed(TableData seedRows)
+    {
+        if (seedRows.Count == 0)
+        {
+            return new ListedTable();
+        }
+
+        HashedTable groupedInitialTable = [];
+        foreach (var row in seedRows)
+        {
+            groupedInitialTable.Add(new JoinedRowId(row.Key), new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
+        }
+
+        return _model.JoinStatement!
+            .Evaluate(groupedInitialTable, _model.FromTable.TableName)
+            .ToListedTable();
+    }
+
+    private bool TryResolveVectorDistanceExpression(BinaryExpressionNode expression, out string tableName, out string columnName, out float[] queryVector)
+    {
+        tableName = string.Empty;
+        columnName = string.Empty;
+        queryVector = [];
+
+        if (TryResolveVectorColumnReference(expression.Left, out tableName, out columnName)
+            && TryResolveVectorLiteral(expression.Right, out queryVector))
+        {
+            return true;
+        }
+
+        if (TryResolveVectorColumnReference(expression.Right, out tableName, out columnName)
+            && TryResolveVectorLiteral(expression.Left, out queryVector))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveVectorColumnReference(ExpressionNode expression, out string tableName, out string columnName)
+    {
+        tableName = string.Empty;
+        columnName = string.Empty;
+
+        if (expression is ResolvedColumnRefNode resolved)
+        {
+            tableName = resolved.TableName;
+            columnName = resolved.Column;
+            return true;
+        }
+
+        if (expression is ColumnRefNode colRef)
+        {
+            string reference = string.IsNullOrWhiteSpace(colRef.TableOrAlias)
+                ? colRef.Column
+                : $"{colRef.TableOrAlias}.{colRef.Column}";
+
+            (tableName, columnName) = _model.TableService!.ParseAndFindTableNameByColumn(reference);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveVectorLiteral(ExpressionNode expression, out float[] vector)
+    {
+        vector = [];
+
+        if (expression is LiteralNode literal)
+        {
+            return VectorParser.TryCoerceToVector(literal.Value, out vector);
+        }
+
+        if (expression is NullLiteralNode)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private ListedTable EvaluateWhereWithExpression(ExpressionNode whereExpression)

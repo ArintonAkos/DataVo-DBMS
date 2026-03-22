@@ -6,6 +6,7 @@ using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DDL;
 
@@ -60,9 +61,42 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
             var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
-            Dictionary<string, List<long>> indexValues = CreateIndexContents(tableDataRows);
+            if (_model.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_model.Attributes.Count != 1)
+                {
+                    throw new Exception("HNSW index currently supports exactly one VECTOR column.");
+                }
 
-            Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
+                string vectorColumnName = _model.Attributes[0];
+                string columnType = Catalog.GetTableColumnType(_model.TableName, databaseName, vectorColumnName);
+                if (!columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase)
+                    && !columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new Exception("HNSW index can only be created on VECTOR columns.");
+                }
+
+                List<(long RowId, float[] Vector)> vectors = [];
+                foreach (var row in tableDataRows)
+                {
+                    if (!row.Value.TryGetValue(vectorColumnName, out dynamic? value) || value == null)
+                    {
+                        continue;
+                    }
+
+                    if (VectorParser.TryCoerceToVector(value, out float[] vector))
+                    {
+                        vectors.Add((row.Key, vector));
+                    }
+                }
+
+                Indexes.CreateVectorIndex(vectors, _model.IndexName, _model.TableName, databaseName);
+            }
+            else
+            {
+                Dictionary<string, List<long>> indexValues = CreateIndexContents(tableDataRows);
+                Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
+            }
 
             Logger.Info($"New index file {_model.IndexName} successfully created!");
             Messages.Add($"New index file {_model.IndexName} successfully created!");

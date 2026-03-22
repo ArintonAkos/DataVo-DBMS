@@ -4,6 +4,7 @@ using DataVo.Core.Parser.Binding;
 using DataVo.Core.Parser.Statements;
 using DataVo.Core.Services;
 using DataVo.Core.Constants;
+using DataVo.Core.Enums;
 
 namespace DataVo.Core.Models.DQL;
 
@@ -109,7 +110,9 @@ internal class SelectModel
 
     private static bool IsArithmeticBinary(BinaryExpressionNode binary)
     {
-        if (binary.Operator is "+" or "-" or "*" or "/" or "ADD" or "SUB" or "MUL" or "DIV")
+        if (binary.Operator is "+" or "-" or "*" or "/" or "ADD" or "SUB" or "MUL" or "DIV"
+            || binary.Operator == Operators.VECTOR_DISTANCE_L2
+            || binary.Operator == Operators.VECTOR_DISTANCE_COSINE)
         {
             return true;
         }
@@ -134,7 +137,13 @@ internal class SelectModel
     {
         Database = databaseName;
         TableService = new TableService(databaseName);
-        TableService.AddTableDetail(ResolveTableDetail(FromTable));
+
+        FromTable = ResolveTableDetail(FromTable);
+        TableService.AddTableDetail(FromTable);
+
+        WhereStatement = Ast.WhereExpression != null
+            ? new Where(Ast.WhereExpression, FromTable)
+            : new Where(new LiteralNode { Value = SqlLiterals.TrueExpression }, FromTable);
 
         var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
         JoinStatement = new Join(boundJoinModel, TableService);
