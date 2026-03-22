@@ -195,4 +195,64 @@ public class VolcanoOperatorTests
         Assert.Equal("A", (string)rows[0]["Name"]);
         Assert.Equal("B", (string)rows[1]["Name"]);
     }
+
+    [Fact]
+    public void HashAggregateOperator_GroupsAndComputesCountSumAvg()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
+        };
+
+        IQueryOperator op = new HashAggregateOperator(
+            new TableScanOperator(input),
+            ["Category"],
+            [
+                new HashAggregateOperator.AggregateSpec("CountRows", HashAggregateOperator.AggregateFunction.Count),
+                new HashAggregateOperator.AggregateSpec("SumAmount", HashAggregateOperator.AggregateFunction.Sum, row => row["Amount"]),
+                new HashAggregateOperator.AggregateSpec("AvgAmount", HashAggregateOperator.AggregateFunction.Avg, row => row["Amount"]) 
+            ]);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op)
+            .OrderBy(r => (string)r["Category"])
+            .ToList();
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", (string)rows[0]["Category"]);
+        Assert.Equal(2L, (long)rows[0]["CountRows"]);
+        Assert.Equal(30d, Convert.ToDouble(rows[0]["SumAmount"]));
+        Assert.Equal(15d, Convert.ToDouble(rows[0]["AvgAmount"]));
+
+        Assert.Equal("B", (string)rows[1]["Category"]);
+        Assert.Equal(1L, (long)rows[1]["CountRows"]);
+        Assert.Equal(7d, Convert.ToDouble(rows[1]["SumAmount"]));
+        Assert.Equal(7d, Convert.ToDouble(rows[1]["AvgAmount"]));
+    }
+
+    [Fact]
+    public void HashAggregateOperator_GlobalMinMax_WorksWithoutGroupKeys()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["V"] = 42 }),
+            new(2, new Dictionary<string, dynamic> { ["V"] = 5 }),
+            new(3, new Dictionary<string, dynamic> { ["V"] = 19 }),
+        };
+
+        IQueryOperator op = new HashAggregateOperator(
+            new TableScanOperator(input),
+            [],
+            [
+                new HashAggregateOperator.AggregateSpec("MinV", HashAggregateOperator.AggregateFunction.Min, row => row["V"]),
+                new HashAggregateOperator.AggregateSpec("MaxV", HashAggregateOperator.AggregateFunction.Max, row => row["V"]) 
+            ]);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Single(rows);
+        Assert.Equal(5, (int)rows[0]["MinV"]);
+        Assert.Equal(42, (int)rows[0]["MaxV"]);
+    }
 }
