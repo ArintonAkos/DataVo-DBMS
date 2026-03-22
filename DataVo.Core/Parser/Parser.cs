@@ -776,12 +776,18 @@ public class Parser(List<Token> tokens)
             selectStmt.Joins.Add(ParseJoinDetail());
         }
 
-        // 4. Parse optional WHERE
+        // 4. Parse optional WHERE (also supports historical WHERE-before-JOIN form)
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
-            var expressionTokens = CollectExpressionTokens(() => IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
+            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
 
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
+        }
+
+        // 4b. Parse optional JOINs after WHERE for backward compatibility.
+        while (IsJoinKeyword())
+        {
+            selectStmt.Joins.Add(ParseJoinDetail());
         }
 
         // 5. Parse optional GROUP BY

@@ -11,6 +11,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements.Mechanism;
 using DataVo.Core.Services;
 using DataVo.Core.Transactions;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -239,7 +240,27 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
 
                 string indexName = primaryKeys.Contains(col) ? $"_PK_{_model.TableName}" : $"_UK_{col}";
-                if (Indexes.IndexContainsKey(valStr, indexName, _model.TableName, databaseName))
+                bool duplicateExists = false;
+
+                try
+                {
+                    duplicateExists = Indexes.IndexContainsKey(valStr, indexName, _model.TableName, databaseName);
+                }
+                catch
+                {
+                    // Fall back to row scan below.
+                }
+
+                if (!duplicateExists)
+                {
+                    var rows = Context.GetTableContents(_model.TableName, databaseName);
+                    duplicateExists = rows
+                        .Any(entry => entry.Value.TryGetValue(col, out var existing)
+                                      && existing != null
+                                      && string.Equals(existing.ToString(), valStr, StringComparison.Ordinal));
+                }
+
+                if (duplicateExists)
                 {
                     throw new Exception($"Constraint violation: Duplicate value '{valStr}' for unique column {col} in row {rowNumber}.");
                 }
@@ -329,7 +350,14 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
         foreach (var index in indexFiles)
         {
-            Indexes.DeleteFromIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+            if (index.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+            {
+                Indexes.DeleteFromVectorIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+            }
+            else
+            {
+                Indexes.DeleteFromIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+            }
         }
 
         // Insert new records into storage & indexes
@@ -341,6 +369,23 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             foreach (var index in indexFiles)
             {
                 if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
+
+                if (index.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (index.AttributeNames.Count != 1)
+                    {
+                        throw new Exception($"HNSW index '{index.IndexFileName}' must reference exactly one VECTOR column.");
+                    }
+
+                    string vectorColumn = index.AttributeNames[0];
+                    if (!VectorParser.TryCoerceToVector(newRow[vectorColumn], out float[] vector))
+                    {
+                        throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{index.IndexFileName}'.");
+                    }
+
+                    Indexes.InsertIntoVectorIndex(vector, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+                    continue;
+                }
 
                 string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
                 Indexes.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);

@@ -89,13 +89,25 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         if (table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
         {
-            return EvaluateUsingSecondaryIndex(table, rightValue, indexFile);
+            HashedTable indexed = EvaluateUsingSecondaryIndex(table, rightValue, indexFile);
+            if (indexed.Count > 0)
+            {
+                return indexed;
+            }
+
+            return EvaluateUsingFullScan(table, leftValue, rightValue);
         }
 
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue);
         if (columnIndex > -1)
         {
-            return EvaluateUsingPrimaryKey(table, rightValue);
+            HashedTable indexed = EvaluateUsingPrimaryKey(table, rightValue);
+            if (indexed.Count > 0)
+            {
+                return indexed;
+            }
+
+            return EvaluateUsingFullScan(table, leftValue, rightValue);
         }
 
         return EvaluateUsingFullScan(table, leftValue, rightValue);

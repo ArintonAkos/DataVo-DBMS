@@ -9,9 +9,10 @@ public class VectorContextTests
     public void DataVoContext_SearchNearest_ReturnsRankedRows()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        string dbName = $"VecCtx_{Guid.NewGuid():N}";
 
-        context.Execute("CREATE DATABASE VecCtx");
-        context.Execute("USE VecCtx");
+        context.Execute($"CREATE DATABASE {dbName}");
+        context.Execute($"USE {dbName}");
         context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
@@ -27,14 +28,15 @@ public class VectorContextTests
     public void DataVoContext_SearchNearest_UsesPrimaryIndexManager_WhenPolymorphicIndexExists()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        string dbName = $"VecCtxV2_{Guid.NewGuid():N}";
 
-        context.Execute("CREATE DATABASE VecCtxV2");
-        context.Execute("USE VecCtxV2");
+        context.Execute($"CREATE DATABASE {dbName}");
+        context.Execute($"USE {dbName}");
         context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
 
-        Dictionary<long, Dictionary<string, dynamic>> rows = context.Engine.StorageContext.GetTableContents("Embeddings", "VecCtxV2");
+        Dictionary<long, Dictionary<string, dynamic>> rows = context.Engine.StorageContext.GetTableContents("Embeddings", dbName);
         var vectors = rows
             .Select(kvp =>
             {
@@ -44,7 +46,7 @@ public class VectorContextTests
             })
             .ToList();
 
-        context.Engine.IndexManager.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", "VecCtxV2", "cosine");
+        context.Engine.IndexManager.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", dbName, "cosine");
 
         List<Dictionary<string, dynamic>> results = context.SearchNearest("Embeddings", "idx_emb_v2", "[0.9,0.1,0]", topK: 1);
 
@@ -56,9 +58,10 @@ public class VectorContextTests
     public void DataVoContext_SearchNearest_FallsBackToLegacyIndexManager_WhenV2LoadFails()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        string dbName = $"VecCtxFallback_{Guid.NewGuid():N}";
 
-        context.Execute("CREATE DATABASE VecCtxFallback");
-        context.Execute("USE VecCtxFallback");
+        context.Execute($"CREATE DATABASE {dbName}");
+        context.Execute($"USE {dbName}");
         context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");

@@ -7,6 +7,7 @@ using DataVo.Core.StorageEngine;
 using System.Text.RegularExpressions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Transactions;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -239,11 +240,24 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
     private bool VerifyUniqueConstraint(Column tableColumn, string databaseName)
     {
-        return Indexes.IndexContainsKey(
-            tableColumn.Value!,
-            $"_UK_{tableColumn.Name}",
-            _model.TableName,
-            databaseName);
+        string candidate = tableColumn.Value!;
+
+        try
+        {
+            if (Indexes.IndexContainsKey(candidate, $"_UK_{tableColumn.Name}", _model.TableName, databaseName))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Fall back to a row scan when the index is unavailable.
+        }
+
+        var rows = Context.GetTableContents(_model.TableName, databaseName);
+        return rows.Values.Any(row => row.TryGetValue(tableColumn.Name, out var value)
+                                      && value != null
+                                      && string.Equals(value.ToString(), candidate, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -264,7 +278,24 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
 
         string id = IndexKeyEncoder.BuildKeyString(rowDict, primaryKeys);
-        if (Indexes.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName))
+        bool exists = false;
+
+        try
+        {
+            exists = Indexes.IndexContainsKey(id, $"_PK_{_model.TableName}", _model.TableName, databaseName);
+        }
+        catch
+        {
+            // Fall back to row scan below.
+        }
+
+        if (!exists)
+        {
+            var rows = Context.GetTableContents(_model.TableName, databaseName);
+            exists = rows.Values.Any(row => string.Equals(IndexKeyEncoder.BuildKeyString(row, primaryKeys), id, StringComparison.Ordinal));
+        }
+
+        if (exists)
         {
             LogInsertError($"Primary key violation in row {rowNumber}!");
             return false;
@@ -290,8 +321,24 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         {
             if (index.AttributeNames.Any(attr => rowDict[attr] == null)) continue;
 
-            string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
+            if (index.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index.AttributeNames.Count != 1)
+                {
+                    throw new Exception($"HNSW index '{index.IndexFileName}' must reference exactly one VECTOR column.");
+                }
 
+                string vectorColumn = index.AttributeNames[0];
+                if (!VectorParser.TryCoerceToVector(rowDict[vectorColumn], out float[] vector))
+                {
+                    throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{index.IndexFileName}'.");
+                }
+
+                Indexes.InsertIntoVectorIndex(vector, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+                continue;
+            }
+
+            string indexValue = IndexKeyEncoder.BuildKeyString(rowDict, index.AttributeNames);
             Indexes.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
         }
     }

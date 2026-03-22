@@ -103,6 +103,7 @@ internal class SelectModel
             ResolvedColumnRefNode => false,
             NullLiteralNode => false,
             LiteralNode => false,
+            ScalarFunctionExpressionNode => true,
             BinaryExpressionNode binary => IsArithmeticBinary(binary),
             _ => false
         };

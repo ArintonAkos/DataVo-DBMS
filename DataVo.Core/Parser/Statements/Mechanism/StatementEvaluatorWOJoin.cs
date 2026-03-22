@@ -84,13 +84,19 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
             if (_table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
             {
-                return EvaluateUsingSecondaryIndex(rightValue, indexFile);
+                HashSet<long> indexed = EvaluateUsingSecondaryIndex(rightValue, indexFile);
+                return indexed.Count > 0
+                    ? indexed
+                    : EvaluateUsingFullScan(leftValue, rightLit.Value);
             }
 
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue);
             if (columnIndex > -1)
             {
-                return EvaluateUsingPrimaryKey(rightValue);
+                HashSet<long> indexed = EvaluateUsingPrimaryKey(rightValue);
+                return indexed.Count > 0
+                    ? indexed
+                    : EvaluateUsingFullScan(leftValue, rightLit.Value);
             }
 
             return EvaluateUsingFullScan(leftValue, rightLit.Value);
