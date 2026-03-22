@@ -459,4 +459,36 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_GroupByWithoutAggregates_UsesVolcanoGroupByPushdownSafely()
+    {
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Category VARCHAR)");
+        Execute("INSERT INTO Items (Id, Category) VALUES (1, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (2, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (3, 'B')");
+
+        var result = ExecuteAndReturn("SELECT Category FROM Items GROUP BY Category ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+    }
+
+    [Fact]
+    public void Select_NoJoin_GroupByWithoutAggregatesWithOrderWindow_UsesVolcanoGroupWindowPushdownSafely()
+    {
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Category VARCHAR)");
+        Execute("INSERT INTO Items (Id, Category) VALUES (1, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (2, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (3, 'B')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (4, 'C')");
+
+        var result = ExecuteAndReturn("SELECT Category FROM Items GROUP BY Category ORDER BY Category ASC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("B", (string)result.Data[0]["Category"]);
+    }
 }
