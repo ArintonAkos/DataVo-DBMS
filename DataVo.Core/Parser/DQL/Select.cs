@@ -983,6 +983,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
+        if (TryBuildJoinDistinctPushdown(out var distinctColumns))
+        {
+            Logger.Info($"Planner: push down JOIN DISTINCT ({distinctColumns.Count} keys).");
+            root = new DistinctOperator(root, row => BuildDistinctKey(row, distinctColumns));
+            _volcanoDistinctPushedDown = true;
+        }
+
         bool orderPushedDown = false;
         if (TryBuildJoinOrderPushdown(out var orderKeys))
         {
@@ -1338,6 +1345,68 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return orderKeys.Count > 0;
+    }
+
+    private bool TryBuildJoinDistinctPushdown(out List<string> distinctColumns)
+    {
+        distinctColumns = [];
+
+        if (!_model.IsDistinct)
+        {
+            return false;
+        }
+
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (_model.GroupByStatement.ContainsGroupBy() || _model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        if (_model.GetOrderByExpression()?.Columns.Count > 0)
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0
+            || _model.GetAggregateColumns().Count > 0)
+        {
+            return false;
+        }
+
+        if (_model.TableService == null)
+        {
+            return false;
+        }
+
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            try
+            {
+                var table = _model.TableService.GetTableDetailByAliasOrName(parts[0]);
+                distinctColumns.Add($"{table.TableName}.{parts[1]}");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return distinctColumns.Count > 0;
     }
 
     private static object? ResolveNoJoinOrderValue(ExecutionRow row, string orderByColumn)

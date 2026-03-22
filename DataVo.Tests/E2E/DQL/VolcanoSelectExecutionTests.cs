@@ -270,4 +270,29 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal("A", (string)result.Data[0]["Name"]);
         Assert.Equal("B", (string)result.Data[1]["Name"]);
     }
+
+    [Fact]
+    public void Select_Join_Distinct_UsesVolcanoDistinctPushdownSafely()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 11)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT DISTINCT c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+
+        var names = result.Data.Select(row => (string)row["c.Name"]).OrderBy(x => x).ToList();
+        Assert.Equal("Alice", names[0]);
+        Assert.Equal("Bob", names[1]);
+    }
 }
