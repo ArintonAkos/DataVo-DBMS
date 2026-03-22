@@ -491,4 +491,37 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("B", (string)result.Data[0]["Category"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_GlobalCount_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Category VARCHAR)");
+        Execute("INSERT INTO Items (Id, Category) VALUES (1, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (2, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (3, 'B')");
+
+        var result = ExecuteAndReturn("SELECT COUNT(*) AS C FROM Items WHERE Category = 'A'");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(2L, Convert.ToInt64(result.Data[0]["C"]));
+    }
+
+    [Fact]
+    public void Select_NoJoin_GroupedCount_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Category VARCHAR)");
+        Execute("INSERT INTO Items (Id, Category) VALUES (1, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (2, 'A')");
+        Execute("INSERT INTO Items (Id, Category) VALUES (3, 'B')");
+
+        var result = ExecuteAndReturn("SELECT Category, COUNT(*) AS C FROM Items GROUP BY Category ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal(2L, Convert.ToInt64(result.Data[0]["C"]));
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+        Assert.Equal(1L, Convert.ToInt64(result.Data[1]["C"]));
+    }
 }

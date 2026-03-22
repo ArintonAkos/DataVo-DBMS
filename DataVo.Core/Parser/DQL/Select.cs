@@ -43,6 +43,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoProjectionPushedDown;
     private bool _volcanoDistinctPushedDown;
     private bool _volcanoGroupByPushedDown;
+    private bool _volcanoAggregatePushedDown;
+    private HashSet<string> _volcanoAggregateGroupKeyColumns = [];
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -71,11 +73,18 @@ internal class Select(SelectStatement ast) : BaseDbAction
             {
                 ListedTable result = EvaluateStatements();
 
-                GroupedTable groupedTable = GroupResults(result);
+                if (_volcanoAggregatePushedDown)
+                {
+                    result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                }
+                else
+                {
+                    GroupedTable groupedTable = GroupResults(result);
 
-                result = AggregateGroupedTable(groupedTable);
-                result = ApplyHaving(result);
-                result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                    result = AggregateGroupedTable(groupedTable);
+                    result = ApplyHaving(result);
+                    result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                }
                 ComputeWindowFunctionValues(result);
 
                 Fields = CreateFieldsFromColumns(result);
@@ -847,6 +856,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _volcanoGroupByPushedDown = true;
         }
 
+        if (TryBuildNoJoinAggregatePushdown(out var aggregateGroupByColumns, out var aggregateSpecs))
+        {
+            Logger.Info($"Planner: push down aggregate ({aggregateSpecs.Count} functions).");
+            root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs);
+            _volcanoAggregatePushedDown = true;
+            _volcanoAggregateGroupKeyColumns = [.. aggregateGroupByColumns];
+        }
+
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down projection ({projectionColumns.Count} columns).");
@@ -906,9 +923,40 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
-        var listed = filteredRows
-            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
-            .ToList();
+        List<JoinedRow> listed;
+        if (_volcanoAggregatePushedDown)
+        {
+            listed = filteredRows.Select(row =>
+            {
+                var baseValues = new Dictionary<string, dynamic>();
+                foreach (string key in _volcanoAggregateGroupKeyColumns)
+                {
+                    if (row.Values.TryGetValue(key, out var value))
+                    {
+                        baseValues[key] = value;
+                    }
+                }
+
+                var aggValues = new Dictionary<string, dynamic>();
+                foreach (var entry in row.Values)
+                {
+                    if (!_volcanoAggregateGroupKeyColumns.Contains(entry.Key))
+                    {
+                        aggValues[entry.Key] = entry.Value;
+                    }
+                }
+
+                var joined = new JoinedRow(_model.FromTable.TableName, new Row(baseValues));
+                joined.Add(GroupBy.HASH_VALUE, new Row(aggValues));
+                return joined;
+            }).ToList();
+        }
+        else
+        {
+            listed = filteredRows
+                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                .ToList();
+        }
 
         return new ListedTable(listed);
     }
@@ -1334,6 +1382,161 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
+        return true;
+    }
+
+    private bool TryBuildNoJoinAggregatePushdown(
+        out List<string> groupByColumns,
+        out List<HashAggregateOperator.AggregateSpec> aggregateSpecs)
+    {
+        groupByColumns = [];
+        aggregateSpecs = [];
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (_model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0)
+        {
+            return false;
+        }
+
+        var aggregateColumns = _model.GetAggregateColumns();
+        if (aggregateColumns.Count == 0)
+        {
+            return false;
+        }
+
+        string fromTable = _model.FromTable.TableName;
+        foreach (var groupedColumn in _model.GroupByStatement.Model.Columns)
+        {
+            if (!groupedColumn.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            groupByColumns.Add(groupedColumn.ColumnName);
+        }
+
+        var groupByKeySet = new HashSet<string>(groupByColumns, StringComparer.OrdinalIgnoreCase);
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!parts[0].Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!groupByKeySet.Contains(parts[1]))
+            {
+                return false;
+            }
+        }
+
+        var seenOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var aggregateColumn in aggregateColumns)
+        {
+            if (aggregateColumn.Expression is not AggregateExpressionNode agg)
+            {
+                return false;
+            }
+
+            if (!TryBuildAggregateSpec(agg, fromTable, out var spec))
+            {
+                return false;
+            }
+
+            if (!seenOutputs.Add(spec.OutputColumn))
+            {
+                return false;
+            }
+
+            aggregateSpecs.Add(spec);
+        }
+
+        return aggregateSpecs.Count > 0;
+    }
+
+    private bool TryBuildAggregateSpec(AggregateExpressionNode agg, string fromTable, out HashAggregateOperator.AggregateSpec spec)
+    {
+        spec = null!;
+
+        HashAggregateOperator.AggregateFunction function = agg.FunctionName.ToUpperInvariant() switch
+        {
+            "COUNT" => HashAggregateOperator.AggregateFunction.Count,
+            "SUM" => HashAggregateOperator.AggregateFunction.Sum,
+            "AVG" => HashAggregateOperator.AggregateFunction.Avg,
+            "MIN" => HashAggregateOperator.AggregateFunction.Min,
+            "MAX" => HashAggregateOperator.AggregateFunction.Max,
+            _ => (HashAggregateOperator.AggregateFunction)(-1)
+        };
+
+        if ((int)function < 0)
+        {
+            return false;
+        }
+
+        string outputKey = AggregateExpressionFormatter.BuildHeader(agg);
+
+        if (agg.IsStar)
+        {
+            if (function != HashAggregateOperator.AggregateFunction.Count)
+            {
+                return false;
+            }
+
+            spec = new HashAggregateOperator.AggregateSpec(outputKey, function, null);
+            return true;
+        }
+
+        string? argumentColumn = null;
+        if (agg.Argument is ResolvedColumnRefNode resolved)
+        {
+            if (!resolved.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            argumentColumn = resolved.Column;
+        }
+        else if (agg.Argument is ColumnRefNode colRef)
+        {
+            string reference = string.IsNullOrWhiteSpace(colRef.TableOrAlias)
+                ? colRef.Column
+                : $"{colRef.TableOrAlias}.{colRef.Column}";
+
+            var parsed = _model.TableService!.ParseAndFindTableNameByColumn(reference);
+            if (!parsed.Item1.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            argumentColumn = parsed.Item2;
+        }
+
+        if (argumentColumn == null)
+        {
+            return false;
+        }
+
+        spec = new HashAggregateOperator.AggregateSpec(outputKey, function, row =>
+            row.Values.TryGetValue(argumentColumn, out var value) ? value : null);
         return true;
     }
 
