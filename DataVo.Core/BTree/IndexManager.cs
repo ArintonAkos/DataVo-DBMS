@@ -51,17 +51,33 @@ public class IndexManager : IDisposable
     // Specifies the number of mutations that must occur before an index is flushed to disk.
     private int _flushMutationThreshold = 256;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IndexManager"/> class using default configuration.
+    /// </summary>
     public IndexManager()
         : this(config: null, engineStorageRoot: null)
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IndexManager"/> class with the specified configuration and storage root.
+    /// </summary>
+    /// <param name="config">The configuration parameters, or null to use defaults.</param>
+    /// <param name="engineStorageRoot">The root directory for index storage, overriding config if provided.</param>
     public IndexManager(DataVoConfig? config, string? engineStorageRoot)
     {
         _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
         Directory.CreateDirectory(_indexRootDirectory);
     }
 
+    /// <summary>
+    /// Gets the singleton instance of the <see cref="IndexManager"/> used globally.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var manager = IndexManager.Instance;
+    /// </code>
+    /// </example>
     public static IndexManager Instance
     {
         get
@@ -231,24 +247,7 @@ public class IndexManager : IDisposable
             File.Delete(filePath);
         }
 
-        IndexType typeToUse = indexType ?? DefaultIndexType;
-
-        IIndex index = typeToUse switch
-        {
-            IndexType.BinaryBPlusTree => new BinaryBPlusTreeIndex(),
-            IndexType.BinaryBTree => new BinaryBTreeIndex(),
-            _ => new JsonBTreeIndex()
-        };
-
-        // Initial setup for binary pagers required before inserting
-        if (index is BinaryBTreeIndex binIndex)
-        {
-            binIndex.Load(filePath);
-        }
-        else if (index is BinaryBPlusTreeIndex bplusIndex)
-        {
-            bplusIndex.Load(filePath);
-        }
+        IIndex index = InstantiateIndex(indexType ?? DefaultIndexType, filePath);
 
         foreach (var kvp in values)
         {
@@ -261,6 +260,33 @@ public class IndexManager : IDisposable
         index.Save(filePath);
         _cache[cacheKey] = index;
         _cacheFilePaths[cacheKey] = filePath;
+    }
+
+    /// <summary>
+    /// Instantiates and initializes the correct index implementation based on the specified type.
+    /// </summary>
+    /// <param name="typeToUse">The type of the index to create.</param>
+    /// <param name="filePath">The file path where the index will be loaded from or saved to.</param>
+    /// <returns>A new <see cref="IIndex"/> instance.</returns>
+    private static IIndex InstantiateIndex(IndexType typeToUse, string filePath)
+    {
+        IIndex index = typeToUse switch
+        {
+            IndexType.BinaryBPlusTree => new BinaryBPlusTreeIndex(),
+            IndexType.BinaryBTree => new BinaryBTreeIndex(),
+            _ => new JsonBTreeIndex()
+        };
+
+        if (index is BinaryBTreeIndex binIndex)
+        {
+            binIndex.Load(filePath);
+        }
+        else if (index is BinaryBPlusTreeIndex bplusIndex)
+        {
+            bplusIndex.Load(filePath);
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -298,6 +324,15 @@ public class IndexManager : IDisposable
     /// </remarks>
     public void DropDatabaseIndexes(string databaseName)
     {
+        EvictDatabaseIndexesFromCache(databaseName);
+        DeleteDatabaseIndexDirectory(databaseName);
+    }
+
+    /// <summary>
+    /// Evicts all cached indexes for a given database and deletes their backing files.
+    /// </summary>
+    private void EvictDatabaseIndexesFromCache(string databaseName)
+    {
         string cachePrefix = $"{databaseName}/";
 
         var keysToRemove = _cache.Keys
@@ -329,8 +364,13 @@ public class IndexManager : IDisposable
                 _pendingMutationCounts.Remove(cacheKey);
             }
         }
+    }
 
-        // Also clean up the database index directory on disk
+    /// <summary>
+    /// Deletes the directory containing all index files for a given database.
+    /// </summary>
+    private void DeleteDatabaseIndexDirectory(string databaseName)
+    {
         string dbIndexDir = Path.Combine(_indexRootDirectory, databaseName);
         if (Directory.Exists(dbIndexDir))
         {
@@ -473,6 +513,8 @@ public class IndexManager : IDisposable
             _dirtyIndexes.Clear();
             _pendingMutationCounts.Clear();
         }
+        
+        GC.SuppressFinalize(this);
     }
 
 }
