@@ -983,6 +983,26 @@ internal class Select(SelectStatement ast) : BaseDbAction
             });
         }
 
+        if (TryBuildJoinProjectionPushdown(out var projectionColumns))
+        {
+            Logger.Info($"Planner: push down JOIN projection ({projectionColumns.Count} columns).");
+            root = new ProjectOperator(root, row =>
+            {
+                var values = new Dictionary<string, dynamic>();
+                foreach (string column in projectionColumns)
+                {
+                    if (row.Values.TryGetValue(column, out var value))
+                    {
+                        values[column] = value;
+                    }
+                }
+
+                return values;
+            });
+
+            _volcanoProjectionPushedDown = true;
+        }
+
         if (TryBuildJoinDistinctPushdown(out var distinctColumns))
         {
             Logger.Info($"Planner: push down JOIN DISTINCT ({distinctColumns.Count} keys).");
@@ -1430,6 +1450,62 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return distinctColumns.Count > 0;
+    }
+
+    private bool TryBuildJoinProjectionPushdown(out HashSet<string> projectionColumns)
+    {
+        projectionColumns = [];
+
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0
+            || _model.GetWindowFunctionColumns().Count > 0
+            || _model.GetAggregateColumns().Count > 0)
+        {
+            return false;
+        }
+
+        if (_model.TableService == null)
+        {
+            return false;
+        }
+
+        foreach (string selected in _model.GetSelectedColumns())
+        {
+            string baseName = selected.Contains(" AS ", StringComparison.OrdinalIgnoreCase)
+                ? selected.Split(" AS ", StringSplitOptions.None)[0]
+                : selected;
+
+            string[] parts = baseName.Split('.');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            try
+            {
+                var table = _model.TableService.GetTableDetailByAliasOrName(parts[0]);
+                projectionColumns.Add($"{table.TableName}.{parts[1]}");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Keep ORDER BY keys available for join sort pushdown.
+        if (TryBuildJoinOrderPushdown(out var orderKeys))
+        {
+            foreach (var key in orderKeys)
+            {
+                projectionColumns.Add(key.Key);
+            }
+        }
+
+        return projectionColumns.Count > 0;
     }
 
     private static bool HasEquivalentKeySet(IEnumerable<string> left, IEnumerable<string> right)
