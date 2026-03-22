@@ -1,4 +1,5 @@
 using System.Xml.Serialization;
+using System.ComponentModel;
 
 namespace DataVo.Core.Models.Catalog;
 
@@ -21,4 +22,9 @@ public class IndexFile
     [XmlArray("IndexAttributes")]
     [XmlArrayItem("IAttribute")]
     public required List<string> AttributeNames { get; set; }
+
+    /// <summary>Gets or sets the logical index implementation kind (for example BTREE or HNSW).</summary>
+    [XmlAttribute("IndexKind")]
+    [DefaultValue("BTREE")]
+    public string IndexKind { get; set; } = "BTREE";
 }

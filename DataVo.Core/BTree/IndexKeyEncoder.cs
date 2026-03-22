@@ -1,4 +1,5 @@
 using System.Text;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.BTree;
 
@@ -66,7 +67,22 @@ public static class IndexKeyEncoder
     /// <returns>A single-column key or a composite key joined with <see cref="CompositeKeySeparator"/>.</returns>
     public static string BuildKeyString(Dictionary<string, dynamic> row, IEnumerable<string> attributes)
     {
-        return string.Join(CompositeKeySeparator, attributes.Select(attr => row[attr]?.ToString() ?? ""));
+        return string.Join(CompositeKeySeparator, attributes.Select(attr => NormalizeValue(row[attr])));
+    }
+
+    private static string NormalizeValue(dynamic? value)
+    {
+        if (value == null)
+        {
+            return string.Empty;
+        }
+
+        if (VectorParser.TryCoerceToVector(value, out float[] vector))
+        {
+            return VectorParser.SerializeVector(vector);
+        }
+
+        return value.ToString() ?? string.Empty;
     }
 
     /// <summary>
@@ -151,7 +167,7 @@ public static class IndexKeyEncoder
         // int.MaxValue (2B) → 0xFFFFFFFF (sorts last)
         uint flipped = unchecked((uint)(value ^ int.MinValue));
 
-        dest[offset]     = (byte)(flipped >> 24);
+        dest[offset] = (byte)(flipped >> 24);
         dest[offset + 1] = (byte)(flipped >> 16);
         dest[offset + 2] = (byte)(flipped >> 8);
         dest[offset + 3] = (byte)flipped;

@@ -2,6 +2,8 @@ using DataVo.Core.BTree.Core;
 using DataVo.Core.BTree.Binary;
 using DataVo.Core.BTree.BPlus;
 using DataVo.Core.StorageEngine.Config;
+using System.Text.Json;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.BTree;
 
@@ -35,6 +37,12 @@ public enum IndexPersistenceMode
 /// </remarks>
 public class IndexManager : IDisposable
 {
+    private sealed class VectorIndexSnapshot
+    {
+        public string Metric { get; set; } = "cosine";
+        public Dictionary<long, float[]> Entries { get; set; } = [];
+    }
+
     private static IndexManager? _instance;
     private readonly string _indexRootDirectory;
 
@@ -43,6 +51,8 @@ public class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<string, IIndex> _cache = [];
     private readonly Dictionary<string, string> _cacheFilePaths = [];
+    private readonly Dictionary<string, VectorIndexSnapshot> _vectorCache = [];
+    private readonly Dictionary<string, string> _vectorCacheFilePaths = [];
     private readonly HashSet<string> _dirtyIndexes = [];
     private readonly Dictionary<string, int> _pendingMutationCounts = [];
     private readonly Lock _persistenceLock = new();
@@ -158,6 +168,11 @@ public class IndexManager : IDisposable
     private string BuildIndexFilePath(string indexName, string tableName, string databaseName)
     {
         return Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree");
+    }
+
+    private string BuildVectorIndexFilePath(string indexName, string tableName, string databaseName)
+    {
+        return Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.hnsw");
     }
 
     private static string ResolveIndexRootDirectory(DataVoConfig? config, string? engineStorageRoot)
@@ -299,9 +314,12 @@ public class IndexManager : IDisposable
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
+        string vectorFilePath = BuildVectorIndexFilePath(indexName, tableName, databaseName);
 
         _cache.Remove(cacheKey);
         _cacheFilePaths.Remove(cacheKey);
+        _vectorCache.Remove(cacheKey);
+        _vectorCacheFilePaths.Remove(cacheKey);
 
         lock (_persistenceLock)
         {
@@ -312,6 +330,11 @@ public class IndexManager : IDisposable
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
+        }
+
+        if (File.Exists(vectorFilePath))
+        {
+            File.Delete(vectorFilePath);
         }
     }
 
@@ -379,7 +402,100 @@ public class IndexManager : IDisposable
             {
                 File.Delete(file);
             }
+
+            var hnswFiles = Directory.GetFiles(dbIndexDir, "*_index.hnsw");
+            foreach (var file in hnswFiles)
+            {
+                File.Delete(file);
+            }
         }
+    }
+
+    public void CreateVectorIndex(IEnumerable<(long RowId, float[] Vector)> vectors, string indexName, string tableName, string databaseName, string metric = "cosine")
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        string filePath = BuildVectorIndexFilePath(indexName, tableName, databaseName);
+
+        string? directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var snapshot = new VectorIndexSnapshot
+        {
+            Metric = NormalizeVectorMetric(metric),
+            Entries = [],
+        };
+
+        foreach (var (rowId, vector) in vectors)
+        {
+            snapshot.Entries[rowId] = [.. vector];
+        }
+
+        PersistVectorSnapshot(filePath, snapshot);
+        _vectorCache[cacheKey] = snapshot;
+        _vectorCacheFilePaths[cacheKey] = filePath;
+    }
+
+    public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName)
+    {
+        var snapshot = GetOrLoadVector(indexName, tableName, databaseName);
+        snapshot.Entries[rowId] = [.. vector];
+
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        string filePath = _vectorCacheFilePaths.GetValueOrDefault(cacheKey)
+            ?? BuildVectorIndexFilePath(indexName, tableName, databaseName);
+        PersistVectorSnapshot(filePath, snapshot);
+    }
+
+    public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    {
+        var snapshot = GetOrLoadVector(indexName, tableName, databaseName);
+        foreach (long rowId in toBeDeletedIds)
+        {
+            snapshot.Entries.Remove(rowId);
+        }
+
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        string filePath = _vectorCacheFilePaths.GetValueOrDefault(cacheKey)
+            ?? BuildVectorIndexFilePath(indexName, tableName, databaseName);
+        PersistVectorSnapshot(filePath, snapshot);
+    }
+
+    public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName)
+    {
+        if (topK <= 0)
+        {
+            return [];
+        }
+
+        var snapshot = GetOrLoadVector(indexName, tableName, databaseName);
+        if (snapshot.Entries.Count == 0)
+        {
+            return [];
+        }
+
+        var ranked = new List<(long RowId, float Distance)>(snapshot.Entries.Count);
+        foreach (var entry in snapshot.Entries)
+        {
+            if (entry.Value.Length != queryVector.Length)
+            {
+                continue;
+            }
+
+            float distance = snapshot.Metric == "cosine"
+                ? VectorParser.CosineDistance(queryVector, entry.Value)
+                : VectorParser.EuclideanDistance(queryVector, entry.Value);
+            ranked.Add((entry.Key, distance));
+        }
+
+        return ranked
+            .OrderBy(item => item.Distance)
+            .ThenBy(item => item.RowId)
+            .Take(topK)
+            .Select(item => item.RowId)
+            .ToList();
     }
 
     /// <summary>
@@ -392,6 +508,13 @@ public class IndexManager : IDisposable
     /// <param name="databaseName">The owning database name.</param>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
+        if (HasVectorIndex(indexName, tableName, databaseName)
+            && VectorParser.TryParseVector(value, out float[] vector))
+        {
+            InsertIntoVectorIndex(vector, rowId, indexName, tableName, databaseName);
+            return;
+        }
+
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.Insert(value, rowId);
         PersistAfterMutation(index, indexName, tableName, databaseName);
@@ -406,6 +529,12 @@ public class IndexManager : IDisposable
     /// <param name="databaseName">The owning database name.</param>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
+        if (HasVectorIndex(indexName, tableName, databaseName))
+        {
+            DeleteFromVectorIndex(toBeDeletedIds, indexName, tableName, databaseName);
+            return;
+        }
+
         var index = GetOrLoad(indexName, tableName, databaseName);
         index.DeleteValues(toBeDeletedIds);
         PersistAfterMutation(index, indexName, tableName, databaseName);
@@ -421,6 +550,11 @@ public class IndexManager : IDisposable
     /// <returns>A set of matching row IDs. The returned set is empty when the key is not present.</returns>
     public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
+        if (HasVectorIndex(indexName, tableName, databaseName))
+        {
+            return [];
+        }
+
         var index = GetOrLoad(indexName, tableName, databaseName);
         return [.. index.Search(columnValue)];
     }
@@ -435,6 +569,11 @@ public class IndexManager : IDisposable
     /// <returns><see langword="true"/> if at least one row is indexed under <paramref name="key"/>; otherwise, <see langword="false"/>.</returns>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
+        if (HasVectorIndex(indexName, tableName, databaseName))
+        {
+            return false;
+        }
+
         var index = GetOrLoad(indexName, tableName, databaseName);
         return index.Search(key).Count > 0;
     }
@@ -449,8 +588,67 @@ public class IndexManager : IDisposable
     /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
     public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
     {
+        if (HasVectorIndex(indexName, tableName, databaseName))
+        {
+            var snapshot = GetOrLoadVector(indexName, tableName, databaseName);
+            return snapshot.Entries.ContainsKey(rowId);
+        }
+
         var index = GetOrLoad(indexName, tableName, databaseName);
         return index.ContainsValue(rowId);
+    }
+
+    private bool HasVectorIndex(string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        return _vectorCache.ContainsKey(cacheKey) || File.Exists(BuildVectorIndexFilePath(indexName, tableName, databaseName));
+    }
+
+    private VectorIndexSnapshot GetOrLoadVector(string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_vectorCache.TryGetValue(cacheKey, out var cachedSnapshot))
+        {
+            return cachedSnapshot;
+        }
+
+        string filePath = BuildVectorIndexFilePath(indexName, tableName, databaseName);
+        if (!File.Exists(filePath))
+        {
+            throw new Exception($"Vector index {indexName} on table {tableName} does not exist!");
+        }
+
+        var snapshot = JsonSerializer.Deserialize<VectorIndexSnapshot>(File.ReadAllText(filePath));
+        if (snapshot == null)
+        {
+            throw new Exception($"Failed to load vector index {indexName} on table {tableName}.");
+        }
+
+        _vectorCache[cacheKey] = snapshot;
+        _vectorCacheFilePaths[cacheKey] = filePath;
+        return snapshot;
+    }
+
+    private static void PersistVectorSnapshot(string filePath, VectorIndexSnapshot snapshot)
+    {
+        string json = JsonSerializer.Serialize(snapshot);
+        File.WriteAllText(filePath, json);
+    }
+
+    private static string NormalizeVectorMetric(string metric)
+    {
+        if (metric.Equals("cosine", StringComparison.OrdinalIgnoreCase))
+        {
+            return "cosine";
+        }
+
+        if (metric.Equals("l2", StringComparison.OrdinalIgnoreCase)
+            || metric.Equals("euclidean", StringComparison.OrdinalIgnoreCase))
+        {
+            return "euclidean";
+        }
+
+        return "cosine";
     }
 
     private void PersistAfterMutation(IIndex index, string indexName, string tableName, string databaseName)
@@ -507,13 +705,15 @@ public class IndexManager : IDisposable
 
         _cache.Clear();
         _cacheFilePaths.Clear();
+        _vectorCache.Clear();
+        _vectorCacheFilePaths.Clear();
 
         lock (_persistenceLock)
         {
             _dirtyIndexes.Clear();
             _pendingMutationCounts.Clear();
         }
-        
+
         GC.SuppressFinalize(this);
     }
 
