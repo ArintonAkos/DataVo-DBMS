@@ -1270,6 +1270,20 @@ internal class Select(SelectStatement ast) : BaseDbAction
             distinctColumns.Add(parts[1]);
         }
 
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy != null && orderBy.Columns.Count > 0)
+        {
+            if (!TryBuildNoJoinOrderPushdown(out var orderKeys))
+            {
+                return false;
+            }
+
+            if (!HasEquivalentKeySet(distinctColumns, orderKeys.Select(k => k.Key)))
+            {
+                return false;
+            }
+        }
+
         return distinctColumns.Count > 0;
     }
 
@@ -1366,11 +1380,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.GetOrderByExpression()?.Columns.Count > 0)
-        {
-            return false;
-        }
-
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
             || _model.GetAggregateColumns().Count > 0)
@@ -1406,7 +1415,28 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
         }
 
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy != null && orderBy.Columns.Count > 0)
+        {
+            if (!TryBuildJoinOrderPushdown(out var orderKeys))
+            {
+                return false;
+            }
+
+            if (!HasEquivalentKeySet(distinctColumns, orderKeys.Select(k => k.Key)))
+            {
+                return false;
+            }
+        }
+
         return distinctColumns.Count > 0;
+    }
+
+    private static bool HasEquivalentKeySet(IEnumerable<string> left, IEnumerable<string> right)
+    {
+        var leftSet = new HashSet<string>(left, StringComparer.OrdinalIgnoreCase);
+        var rightSet = new HashSet<string>(right, StringComparer.OrdinalIgnoreCase);
+        return leftSet.SetEquals(rightSet);
     }
 
     private static object? ResolveNoJoinOrderValue(ExecutionRow row, string orderByColumn)

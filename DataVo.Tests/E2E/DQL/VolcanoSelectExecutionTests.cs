@@ -333,4 +333,43 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_DistinctWithOrderAndWindow_UsesVolcanoDistinctSortWindowPushdownSafely()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Name VARCHAR, Score INT)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (1, 'B', 70)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (2, 'A', 95)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (3, 'A', 80)");
+
+        var result = ExecuteAndReturn("SELECT DISTINCT Name FROM Scores ORDER BY Name ASC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("B", (string)result.Data[0]["Name"]);
+    }
+
+    [Fact]
+    public void Select_Join_DistinctWithOrderAndWindow_UsesVolcanoDistinctSortWindowPushdownSafely()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 11)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Bob')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Alice')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT DISTINCT c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY c.Name ASC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
+    }
 }
