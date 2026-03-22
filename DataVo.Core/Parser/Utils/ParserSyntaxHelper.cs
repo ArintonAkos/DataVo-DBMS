@@ -24,7 +24,8 @@ internal static class ParserSyntaxHelper
 
     public static bool IsJoinKeyword(Token token)
     {
-        return token.Type == TokenType.Keyword && JoinKeywords.Contains(token.Value);
+        return (token.Type == TokenType.Keyword || token.Type == TokenType.Identifier)
+            && JoinKeywords.Contains(token.Value);
     }
 
     public static bool IsGroupByAt(IReadOnlyList<Token> tokens, int index)

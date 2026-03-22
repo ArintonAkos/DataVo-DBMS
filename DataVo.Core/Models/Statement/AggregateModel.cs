@@ -66,6 +66,11 @@ namespace DataVo.Core.Models.Statement
                 }
 
                 string functionName2 = token[..openParen2].Trim();
+                if (!IsAggregateFunction(functionName2))
+                {
+                    continue;
+                }
+
                 string rawColumnName2 = token[(openParen2 + 1)..closeParen2].Trim();
 
                 Column column2;
@@ -123,6 +128,15 @@ namespace DataVo.Core.Models.Statement
             }
 
             return row[tableName][columnName];
+        }
+
+        private static bool IsAggregateFunction(string functionName)
+        {
+            return functionName.Equals("count", StringComparison.OrdinalIgnoreCase)
+                || functionName.Equals("sum", StringComparison.OrdinalIgnoreCase)
+                || functionName.Equals("avg", StringComparison.OrdinalIgnoreCase)
+                || functionName.Equals("min", StringComparison.OrdinalIgnoreCase)
+                || functionName.Equals("max", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
