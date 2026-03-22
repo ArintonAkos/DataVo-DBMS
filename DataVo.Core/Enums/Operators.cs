@@ -7,29 +7,86 @@ namespace DataVo.Core.Enums;
 /// </summary>
 public static class Operators
 {
+    /// <summary>
+    /// Represents the SQL AND keyword.
+    /// </summary>
     public const string AND = "AND";
+    /// <summary>
+    /// Represents the SQL OR keyword.
+    /// </summary>
     public const string OR = "OR";
 
+    /// <summary>
+    /// Represents the SQL EQUALS keyword.
+    /// </summary>
     public const string EQUALS = "=";
+    /// <summary>
+    /// Represents the SQL NOT_EQUALS keyword.
+    /// </summary>
     public const string NOT_EQUALS = "!=";
+    /// <summary>
+    /// Represents the SQL GREATER_THAN keyword.
+    /// </summary>
     public const string GREATER_THAN = ">";
+    /// <summary>
+    /// Represents the SQL LESS_THAN keyword.
+    /// </summary>
     public const string LESS_THAN = "<";
+    /// <summary>
+    /// Represents the SQL GREATER_THAN_OR_EQUAL_TO keyword.
+    /// </summary>
     public const string GREATER_THAN_OR_EQUAL_TO = ">=";
+    /// <summary>
+    /// Represents the SQL LESS_THAN_OR_EQUAL_TO keyword.
+    /// </summary>
     public const string LESS_THAN_OR_EQUAL_TO = "<=";
+    /// <summary>
+    /// Represents the SQL LIKE keyword.
+    /// </summary>
     public const string LIKE = "LIKE";
 
+    /// <summary>
+    /// Represents the SQL IS_NULL keyword.
+    /// </summary>
     public const string IS_NULL = "IS NULL";
+    /// <summary>
+    /// Represents the SQL IS_NOT_NULL keyword.
+    /// </summary>
     public const string IS_NOT_NULL = "IS NOT NULL";
 
+    /// <summary>
+    /// Represents the SQL ADD keyword.
+    /// </summary>
     public const string ADD = "+";
+    /// <summary>
+    /// Represents the SQL SUBTRACT keyword.
+    /// </summary>
     public const string SUBTRACT = "-";
+    /// <summary>
+    /// Represents the SQL MUL keyword.
+    /// </summary>
     public const string MUL = "*";
+    /// <summary>
+    /// Represents the SQL DIVIDE keyword.
+    /// </summary>
     public const string DIVIDE = "/";
 
+    /// <summary>
+    /// Represents the SQL LEN keyword.
+    /// </summary>
     public const string LEN = "LEN";
+    /// <summary>
+    /// Represents the SQL UPPER keyword.
+    /// </summary>
     public const string UPPER = "UPPER";
+    /// <summary>
+    /// Represents the SQL LOWER keyword.
+    /// </summary>
     public const string LOWER = "LOWER";
 
+    /// <summary>
+    /// Represents the SQL NEGATE keyword.
+    /// </summary>
     public const string NEGATE = "NOT";
 
     /// <summary>

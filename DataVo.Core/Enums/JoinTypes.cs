@@ -5,10 +5,25 @@ namespace DataVo.Core.Enums;
 /// </summary>
 public static class JoinTypes
 {
+    /// <summary>
+    /// Represents the SQL INNER keyword.
+    /// </summary>
     public const string INNER = "INNER";
+    /// <summary>
+    /// Represents the SQL LEFT keyword.
+    /// </summary>
     public const string LEFT = "LEFT";
+    /// <summary>
+    /// Represents the SQL RIGHT keyword.
+    /// </summary>
     public const string RIGHT = "RIGHT";
+    /// <summary>
+    /// Represents the SQL FULL keyword.
+    /// </summary>
     public const string FULL = "FULL";
+    /// <summary>
+    /// Represents the SQL CROSS keyword.
+    /// </summary>
     public const string CROSS = "CROSS";
 
     /// <summary>

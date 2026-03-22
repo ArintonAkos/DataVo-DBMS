@@ -1,9 +1,9 @@
-﻿namespace DataVo.Core.Enums;
+namespace DataVo.Core.Enums;
 
-[Serializable]
 /// <summary>
 /// Represents the primitive SQL data types currently supported by the engine catalog.
 /// </summary>
+[Serializable]
 public enum DataTypes
 {
     /// <summary>32-bit integer values.</summary>
