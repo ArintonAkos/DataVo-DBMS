@@ -281,7 +281,7 @@ internal static class DataVoQueryTranslationAnalyzer
                 return false;
             }
 
-            if (methodCallExpression.Object is not MemberExpression sourceMember || !IsEntityMember(sourceMember, parameter))
+            if (!IsSupportedStringSource(methodCallExpression.Object, parameter))
             {
                 return false;
             }
@@ -292,6 +292,48 @@ internal static class DataVoQueryTranslationAnalyzer
             }
 
             return IsClosureEvaluatable(methodCallExpression.Arguments[0]);
+        }
+
+        private static bool IsSupportedStringScalarMethod(MethodCallExpression methodCallExpression, ParameterExpression parameter)
+        {
+            if (methodCallExpression.Method.DeclaringType != typeof(string))
+            {
+                return false;
+            }
+
+            if (methodCallExpression.Method.Name is not (nameof(string.ToLower) or nameof(string.ToUpper)))
+            {
+                return false;
+            }
+
+            if (methodCallExpression.Arguments.Count != 0)
+            {
+                return false;
+            }
+
+            return IsSupportedStringSource(methodCallExpression.Object, parameter);
+        }
+
+        private static bool IsSupportedStringSource(Expression? expression, ParameterExpression parameter)
+        {
+            if (expression is null)
+            {
+                return false;
+            }
+
+            expression = UnwrapConvert(expression);
+
+            if (expression is MemberExpression memberExpression)
+            {
+                return IsEntityMember(memberExpression, parameter);
+            }
+
+            if (expression is MethodCallExpression methodCallExpression)
+            {
+                return IsSupportedStringScalarMethod(methodCallExpression, parameter);
+            }
+
+            return false;
         }
 
         private static bool IsSimpleOperand(Expression expression, ParameterExpression parameter)
@@ -316,7 +358,8 @@ internal static class DataVoQueryTranslationAnalyzer
 
             if (expression is MethodCallExpression methodCallExpression)
             {
-                return IsSupportedStringPredicate(methodCallExpression, parameter);
+                return IsSupportedStringPredicate(methodCallExpression, parameter) ||
+                       IsSupportedStringScalarMethod(methodCallExpression, parameter);
             }
 
             return IsClosureEvaluatable(expression);

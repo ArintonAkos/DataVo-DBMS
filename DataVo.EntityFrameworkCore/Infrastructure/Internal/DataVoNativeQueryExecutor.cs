@@ -418,6 +418,13 @@ internal static class DataVoNativeQueryTranslator
 
         if (expression is MethodCallExpression methodCallExpression)
         {
+            if (methodCallExpression.Method.DeclaringType == typeof(string) && methodCallExpression.Type == typeof(string))
+            {
+                return new SqlOperand(
+                    TranslateStringScalarExpression(methodCallExpression, parameter, entityType, tableIdentifier),
+                    IsNullLiteral: false);
+            }
+
             return new SqlOperand(
                 TranslateStringMethodExpression(methodCallExpression, parameter, entityType, tableIdentifier),
                 IsNullLiteral: false);
@@ -521,15 +528,7 @@ internal static class DataVoNativeQueryTranslator
             throw new NotSupportedException($"Native translation does not support method '{expression.Method.Name}'.");
         }
 
-        if (expression.Object is not MemberExpression sourceMember ||
-            !TryResolveProperty(sourceMember, parameter, entityType, out IProperty? sourceProperty) ||
-            sourceProperty is null ||
-            sourceProperty.ClrType != typeof(string))
-        {
-            throw new NotSupportedException("Native string method translation requires a mapped string property source.");
-        }
-
-        string sourceColumn = sourceProperty.GetColumnName(tableIdentifier) ?? sourceProperty.Name;
+        string sourceColumn = ResolveStringSourceSql(expression.Object, parameter, entityType, tableIdentifier);
 
         if (expression.Arguments.Count != 1)
         {
@@ -546,6 +545,63 @@ internal static class DataVoNativeQueryTranslator
             nameof(string.EndsWith) => BuildLikePredicate(sourceColumn, $"%{argument}"),
             _ => throw new NotSupportedException($"Native string method '{expression.Method.Name}' is not supported.")
         };
+    }
+
+    private static string TranslateStringScalarExpression(
+        MethodCallExpression expression,
+        ParameterExpression parameter,
+        IEntityType entityType,
+        StoreObjectIdentifier tableIdentifier)
+    {
+        if (expression.Method.DeclaringType != typeof(string))
+        {
+            throw new NotSupportedException($"Native translation does not support method '{expression.Method.Name}'.");
+        }
+
+        if (expression.Arguments.Count != 0)
+        {
+            throw new NotSupportedException($"Native string scalar method '{expression.Method.Name}' requires zero arguments.");
+        }
+
+        string sourceSql = ResolveStringSourceSql(expression.Object, parameter, entityType, tableIdentifier);
+
+        return expression.Method.Name switch
+        {
+            nameof(string.ToLower) => $"LOWER({sourceSql})",
+            nameof(string.ToUpper) => $"UPPER({sourceSql})",
+            _ => throw new NotSupportedException($"Native string scalar method '{expression.Method.Name}' is not supported.")
+        };
+    }
+
+    private static string ResolveStringSourceSql(
+        Expression? source,
+        ParameterExpression parameter,
+        IEntityType entityType,
+        StoreObjectIdentifier tableIdentifier)
+    {
+        if (source is null)
+        {
+            throw new NotSupportedException("Native string translation requires an instance source.");
+        }
+
+        source = UnwrapConvert(source);
+
+        if (source is MemberExpression sourceMember &&
+            TryResolveProperty(sourceMember, parameter, entityType, out IProperty? sourceProperty) &&
+            sourceProperty is not null &&
+            sourceProperty.ClrType == typeof(string))
+        {
+            return sourceProperty.GetColumnName(tableIdentifier) ?? sourceProperty.Name;
+        }
+
+        if (source is MethodCallExpression methodCallExpression &&
+            methodCallExpression.Method.DeclaringType == typeof(string) &&
+            methodCallExpression.Type == typeof(string))
+        {
+            return TranslateStringScalarExpression(methodCallExpression, parameter, entityType, tableIdentifier);
+        }
+
+        throw new NotSupportedException("Native string method translation requires a mapped string property source.");
     }
 
     private static string BuildLikePredicate(string sourceColumn, string pattern)
