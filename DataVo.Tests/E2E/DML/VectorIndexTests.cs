@@ -169,7 +169,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         // Should only return 'active' embeddings
         Assert.NotEmpty(result.Data);
-        Assert.All(result.Data, row => 
+        Assert.All(result.Data, row =>
             Assert.Contains("Item", (string)row["i.Name"]));
     }
 

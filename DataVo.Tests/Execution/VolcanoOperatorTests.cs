@@ -212,7 +212,7 @@ public class VolcanoOperatorTests
             [
                 new HashAggregateOperator.AggregateSpec("CountRows", HashAggregateOperator.AggregateFunction.Count),
                 new HashAggregateOperator.AggregateSpec("SumAmount", HashAggregateOperator.AggregateFunction.Sum, row => row["Amount"]),
-                new HashAggregateOperator.AggregateSpec("AvgAmount", HashAggregateOperator.AggregateFunction.Avg, row => row["Amount"]) 
+                new HashAggregateOperator.AggregateSpec("AvgAmount", HashAggregateOperator.AggregateFunction.Avg, row => row["Amount"])
             ]);
 
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op)
@@ -246,7 +246,7 @@ public class VolcanoOperatorTests
             [],
             [
                 new HashAggregateOperator.AggregateSpec("MinV", HashAggregateOperator.AggregateFunction.Min, row => row["V"]),
-                new HashAggregateOperator.AggregateSpec("MaxV", HashAggregateOperator.AggregateFunction.Max, row => row["V"]) 
+                new HashAggregateOperator.AggregateSpec("MaxV", HashAggregateOperator.AggregateFunction.Max, row => row["V"])
             ]);
 
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
