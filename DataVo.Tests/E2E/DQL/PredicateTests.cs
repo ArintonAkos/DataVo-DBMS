@@ -47,6 +47,28 @@ public abstract class PredicateTestsBase : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_Where_LowerUpper_Functions_FilterRows()
+    {
+        var lowerResult = ExecuteAndReturn("SELECT * FROM Products WHERE LOWER(Name) = 'alpha'");
+        var lowerIds = lowerResult.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([1], lowerIds);
+
+        var upperResult = ExecuteAndReturn("SELECT * FROM Products WHERE UPPER(Name) = 'BETA'");
+        var upperIds = upperResult.Data.Select(row => (int)row["Id"]).OrderBy(id => id).ToList();
+        Assert.Equal([3], upperIds);
+    }
+
+    [Fact]
+    public void Select_Projection_LowerUpper_Functions_ReturnComputedValues()
+    {
+        var result = ExecuteAndReturn("SELECT LOWER(Name) AS LowerName, UPPER(Name) AS UpperName FROM Products WHERE Id = 1");
+
+        var row = Assert.Single(result.Data);
+        Assert.Equal("alpha", row["LowerName"]?.ToString());
+        Assert.Equal("ALPHA", row["UpperName"]?.ToString());
+    }
+
+    [Fact]
     public void Update_CanUseInPredicate()
     {
         Execute("UPDATE Products SET Category = 'priority' WHERE Id IN (2, 4)");
