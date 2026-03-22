@@ -63,7 +63,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
     {
         // Default values must be static literals when creating the table
         if (expr is NullLiteralNode) return "NULL";
-        
+
         if (expr is LiteralNode literal)
         {
             string value = literal.Value?.ToString() ?? "NULL";
@@ -76,13 +76,13 @@ public class CreateTableModel(string tableName, List<Field> fields)
         else if (expr is ColumnRefNode colRef)
         {
             // For booleans, true/false are parsed as identifiers (ColumnRefNode)
-            if (colRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase) || 
+            if (colRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                 colRef.Column.Equals("false", StringComparison.OrdinalIgnoreCase))
             {
                 return colRef.Column.ToLowerInvariant();
             }
         }
-        
+
         throw new Exception($"DEFAULT expression must be a constant literal value. Actual type: {expr.GetType()}");
     }
 
@@ -93,6 +93,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
         if (t.Contains("float")) return DataTypes.Float;
         if (t.Contains("bit")) return DataTypes.Bit;
         if (t.Contains("date")) return DataTypes.Date;
+        if (t.Contains("vector")) return DataTypes.Vector;
         return DataTypes.Varchar;
     }
 
