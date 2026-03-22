@@ -271,3 +271,32 @@ public class DiskVectorIndexTests : VectorIndexTestsBase
 {
     public DiskVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_vector" }, "VectorDB_Disk") { }
 }
+
+public class WasmVectorPlannerIntegrationTests : SqlExecutionTestsBase
+{
+    public WasmVectorPlannerIntegrationTests() : base(new DataVoConfig { StorageMode = StorageMode.Wasm }, "VectorDB_Wasm") { }
+
+    [Fact]
+    public void Select_NearestJoin_AutomaticPlannerPath_WorksOnWasmBackend()
+    {
+        Execute("CREATE TABLE p_embeddings (product_id INT PRIMARY KEY, Emb VECTOR(3))");
+        Execute("CREATE TABLE products (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO p_embeddings (product_id, Emb) VALUES (1, '[1,0,0]')");
+        Execute("INSERT INTO p_embeddings (product_id, Emb) VALUES (2, '[0,1,0]')");
+        Execute("INSERT INTO products (Id, Name) VALUES (1, 'Chair')");
+        Execute("INSERT INTO products (Id, Name) VALUES (2, 'Table')");
+        ExecuteAndReturn("CREATE INDEX idx_p_emb_wasm ON p_embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT p.Name, p.Id, a.Emb <=> '[0.95,0.05,0]' AS rank
+            FROM p_embeddings a
+            JOIN products p ON a.product_id = p.Id
+            ORDER BY rank ASC
+            LIMIT 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Chair", result.Data[0]["p.Name"]);
+    }
+}
