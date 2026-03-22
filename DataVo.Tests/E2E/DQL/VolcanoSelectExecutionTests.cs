@@ -420,4 +420,43 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal(11, (int)result.Data[0]["o.CustomerId"]);
     }
+
+    [Fact]
+    public void Select_NoJoin_DistinctWithIncompatibleOrderKey_PreservesLegacyWindowSemantics()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Name VARCHAR, Score INT)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (1, 'A', 70)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (2, 'A', 95)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (3, 'B', 80)");
+
+        var result = ExecuteAndReturn("SELECT DISTINCT Name FROM Scores ORDER BY Score DESC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("B", (string)result.Data[0]["Name"]);
+    }
+
+    [Fact]
+    public void Select_Join_DistinctWithIncompatibleOrderKey_PreservesLegacyWindowSemantics()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT DISTINCT c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY o.Id DESC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
+    }
 }
