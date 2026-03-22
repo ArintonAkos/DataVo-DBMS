@@ -813,6 +813,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateNoJoinWithVolcano(ExpressionNode? whereExpression)
     {
+        Logger.Info("Planner: using Volcano no-join pipeline.");
+
         var sourceRows = _model.FromTable!.TableContentValues!
             .Select((record, index) =>
             {
@@ -839,6 +841,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
         {
+            Logger.Info($"Planner: push down projection ({projectionColumns.Count} columns).");
             root = new ProjectOperator(root, row =>
             {
                 var values = new Dictionary<string, dynamic>();
@@ -859,6 +862,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         bool orderPushedDown = false;
         if (TryBuildNoJoinOrderPushdown(out var orderKeys))
         {
+            Logger.Info($"Planner: push down ORDER BY ({orderKeys.Count} keys).");
             List<SortOperator.SortKeySpec> sortSpecs = [];
             foreach (var orderKey in orderKeys)
             {
@@ -876,6 +880,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (TryBuildNoJoinDistinctPushdown(out var distinctColumns))
         {
+            Logger.Info($"Planner: push down DISTINCT ({distinctColumns.Count} keys).");
             root = new DistinctOperator(root, row => BuildDistinctKey(row, distinctColumns));
             _volcanoDistinctPushedDown = true;
         }
@@ -902,6 +907,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateInnerJoinWithVolcano(ExpressionNode? whereExpression)
     {
+        Logger.Info("Planner: using Volcano join pipeline.");
+
         string fromTableName = _model.FromTable.TableName;
         HashSet<string> joinedTables = [fromTableName];
         List<string> joinOrder = [fromTableName];
@@ -961,6 +968,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 existingTable,
                 newTable);
 
+            Logger.Info($"Planner: appended INNER JOIN edge {existingTable}.{existingColumn} = {newTable}.{newColumn}");
+
             joinedTables.Add(newTable);
             joinOrder.Add(newTable);
         }
@@ -977,6 +986,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         bool orderPushedDown = false;
         if (TryBuildJoinOrderPushdown(out var orderKeys))
         {
+            Logger.Info($"Planner: push down JOIN ORDER BY ({orderKeys.Count} keys).");
             List<SortOperator.SortKeySpec> sortSpecs = [];
             foreach (var orderKey in orderKeys)
             {
