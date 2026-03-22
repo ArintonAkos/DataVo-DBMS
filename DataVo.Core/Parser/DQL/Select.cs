@@ -461,12 +461,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.JoinStatement.ContainsJoin())
         {
-            if (!IsNearestJoinTwoPhaseEligible())
+            if (!IsNearestJoinTwoPhaseEligible(out var embeddingFilter))
             {
                 return null;
             }
 
-            return EvaluateJoinFromSeed(seedRows);
+            return EvaluateJoinFromSeed(seedRows, embeddingFilter);
         }
 
         return new ListedTable(seedRows.Values
@@ -474,30 +474,59 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList());
     }
 
-    private bool IsNearestJoinTwoPhaseEligible()
+    private bool IsNearestJoinTwoPhaseEligible(out ExpressionNode? embeddingFilter)
     {
-        ExpressionNode? whereExpression = _model.WhereStatement.GetExpression();
-        bool noExplicitFilter = whereExpression is LiteralNode literal
-            && literal.Value?.ToString() == SqlLiterals.TrueExpression;
+        embeddingFilter = null;
 
-        if (!noExplicitFilter)
+        // Try to extract WHERE predicates that reference only the embedding table
+        ExpressionNode? whereExpression = _model.WhereStatement.GetExpression();
+        
+        embeddingFilter = ExpressionExtractor.TryExtractTableSpecificPredicates(
+            whereExpression,
+            _model.FromTable.TableName,
+            _model.TableService);
+
+        // Check if we have valid filters (either extracted predicates or no WHERE clause at all)
+        bool hasValidFilter = embeddingFilter != null || IsAllTrueExpression(whereExpression);
+
+        if (!hasValidFilter)
         {
-            return false;
+            return false; // WHERE references joined tables or unsupported patterns
         }
 
+        // Verify all joins are INNER (only safe type for this optimization)
         return _model.JoinStatement.Model.JoinConditions
             .All(condition => condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase));
     }
 
-    private ListedTable EvaluateJoinFromSeed(TableData seedRows)
+    private static bool IsAllTrueExpression(ExpressionNode? expression)
+    {
+        return expression is LiteralNode literal
+            && literal.Value?.ToString() == SqlLiterals.TrueExpression;
+    }
+
+    private ListedTable EvaluateJoinFromSeed(TableData seedRows, ExpressionNode? embeddingFilter = null)
     {
         if (seedRows.Count == 0)
         {
             return new ListedTable();
         }
 
+        // Phase 2: Apply embedding table predicates to filter seed rows
+        TableData filteredRows = seedRows;
+        if (embeddingFilter != null)
+        {
+            filteredRows = ApplyPredicateToSeedRows(seedRows, embeddingFilter);
+            
+            if (filteredRows.Count == 0)
+            {
+                return new ListedTable(); // No rows passed the filter
+            }
+        }
+
+        // Phase 3: Original join execution on filtered seed set
         HashedTable groupedInitialTable = [];
-        foreach (var row in seedRows)
+        foreach (var row in filteredRows)
         {
             groupedInitialTable.Add(new JoinedRowId(row.Key), new JoinedRow(_model.FromTable.TableName, row.Value.ToRow()));
         }
@@ -505,6 +534,25 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return _model.JoinStatement!
             .Evaluate(groupedInitialTable, _model.FromTable.TableName)
             .ToListedTable();
+    }
+
+    private TableData ApplyPredicateToSeedRows(TableData seedRows, ExpressionNode predicate)
+    {
+        TableData result = [];
+
+        foreach (var seedRow in seedRows)
+        {
+            // Create a JoinedRow to evaluate the predicate
+            var joinedRow = new JoinedRow(_model.FromTable.TableName, seedRow.Value.ToRow());
+
+            // Evaluate the predicate against this row
+            if (EvaluatePredicate(predicate, joinedRow))
+            {
+                result[seedRow.Key] = seedRow.Value;
+            }
+        }
+
+        return result;
     }
 
     private bool TryResolveVectorDistanceExpression(BinaryExpressionNode expression, out string tableName, out string columnName, out float[] queryVector)
