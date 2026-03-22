@@ -20,4 +20,7 @@ public enum DataTypes
 
     /// <summary>Variable-length UTF-16 string values.</summary>
     Varchar,
+
+    /// <summary>Dense floating-point vector values.</summary>
+    Vector,
 }

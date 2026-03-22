@@ -138,6 +138,10 @@ public static class SqlKeywords
     /// </summary>
     public const string VARCHAR = "VARCHAR";
     /// <summary>
+    /// Represents the SQL VECTOR keyword.
+    /// </summary>
+    public const string VECTOR = "VECTOR";
+    /// <summary>
     /// Represents the SQL AS keyword.
     /// </summary>
     public const string AS = "AS";
@@ -293,6 +297,15 @@ public static class SqlKeywords
     public const string ROLLBACK = "ROLLBACK";
 
     /// <summary>
+    /// Represents the SQL USING keyword.
+    /// </summary>
+    public const string USING = "USING";
+    /// <summary>
+    /// Represents the SQL HNSW keyword.
+    /// </summary>
+    public const string HNSW = "HNSW";
+
+    /// <summary>
     /// Gets all supported SQL keywords as a flat array for quick membership checks.
     /// </summary>
     public static readonly string[] All =
@@ -301,12 +314,13 @@ public static class SqlKeywords
         CREATE, TABLE, DROP, INDEX, ON, SHOW, DATABASES,
         TABLES, DESCRIBE, DELETE, UPDATE, SET, USE, GO,
         DATABASE, DEFAULT, PRIMARY, KEY, UNIQUE, REFERENCES, FOREIGN,
-        INT, FLOAT, BIT, DATE, VARCHAR, AS, BY, GROUP, ORDER,
+        INT, FLOAT, BIT, DATE, VARCHAR, VECTOR, AS, BY, GROUP, ORDER,
         HAVING, ASC, DESC, ALTER, ADD, MODIFY,
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
         LIMIT, OFFSET, IN, BETWEEN, LIKE, UNION, ALL, IF, EXISTS, COLUMN,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL,
-        BEGIN, TRANSACTION, COMMIT, ROLLBACK
+        BEGIN, TRANSACTION, COMMIT, ROLLBACK,
+        USING, HNSW
     ];
 }
 
