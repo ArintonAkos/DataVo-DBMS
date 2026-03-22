@@ -278,6 +278,80 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Rebuilds an existing scalar index from the provided key-to-row mapping.
+    /// Rebuild is implemented as drop-and-create at the file level.
+    /// </summary>
+    public void RebuildIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        _cache.Remove(cacheKey);
+        _cacheFilePaths.Remove(cacheKey);
+
+        CreateIndex(values, indexName, tableName, databaseName, indexType);
+    }
+
+    /// <summary>
+    /// Validates whether a scalar index file exists and can be loaded successfully.
+    /// </summary>
+    public bool IsIndexHealthy(string indexName, string tableName, string databaseName)
+    {
+        string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = GetOrLoad(indexName, tableName, databaseName);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to recover a scalar index by rebuilding it with supplied source data when load fails.
+    /// </summary>
+    /// <returns><c>true</c> when the index is healthy after recovery; otherwise <c>false</c>.</returns>
+    public bool TryRecoverIndex(
+        string indexName,
+        string tableName,
+        string databaseName,
+        Func<Dictionary<string, List<long>>> rebuildDataFactory,
+        IndexType? indexType = null)
+    {
+        if (IsIndexHealthy(indexName, tableName, databaseName))
+        {
+            return true;
+        }
+
+        try
+        {
+            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            _cache.Remove(cacheKey);
+            _cacheFilePaths.Remove(cacheKey);
+
+            string filePath = BuildIndexFilePath(indexName, tableName, databaseName);
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            var rebuildData = rebuildDataFactory();
+            RebuildIndex(rebuildData, indexName, tableName, databaseName, indexType);
+
+            return IsIndexHealthy(indexName, tableName, databaseName);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Instantiates and initializes the correct index implementation based on the specified type.
     /// </summary>
     /// <param name="typeToUse">The type of the index to create.</param>
@@ -436,6 +510,79 @@ public class IndexManager : IDisposable
         PersistVectorSnapshot(filePath, snapshot);
         _vectorCache[cacheKey] = snapshot;
         _vectorCacheFilePaths[cacheKey] = filePath;
+    }
+
+    /// <summary>
+    /// Rebuilds an existing vector index from the provided rowId/vector source data.
+    /// </summary>
+    public void RebuildVectorIndex(IEnumerable<(long RowId, float[] Vector)> vectors, string indexName, string tableName, string databaseName, string metric = "cosine")
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        _vectorCache.Remove(cacheKey);
+        _vectorCacheFilePaths.Remove(cacheKey);
+
+        CreateVectorIndex(vectors, indexName, tableName, databaseName, metric);
+    }
+
+    /// <summary>
+    /// Validates whether a vector index file exists and can be loaded successfully.
+    /// </summary>
+    public bool IsVectorIndexHealthy(string indexName, string tableName, string databaseName)
+    {
+        string filePath = BuildVectorIndexFilePath(indexName, tableName, databaseName);
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = GetOrLoadVector(indexName, tableName, databaseName);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to recover a vector index by rebuilding it with supplied source data when load fails.
+    /// </summary>
+    /// <returns><c>true</c> when the index is healthy after recovery; otherwise <c>false</c>.</returns>
+    public bool TryRecoverVectorIndex(
+        string indexName,
+        string tableName,
+        string databaseName,
+        Func<IEnumerable<(long RowId, float[] Vector)>> rebuildDataFactory,
+        string metric = "cosine")
+    {
+        if (IsVectorIndexHealthy(indexName, tableName, databaseName))
+        {
+            return true;
+        }
+
+        try
+        {
+            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            _vectorCache.Remove(cacheKey);
+            _vectorCacheFilePaths.Remove(cacheKey);
+
+            string filePath = BuildVectorIndexFilePath(indexName, tableName, databaseName);
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            var rebuildData = rebuildDataFactory();
+            RebuildVectorIndex(rebuildData, indexName, tableName, databaseName, metric);
+
+            return IsVectorIndexHealthy(indexName, tableName, databaseName);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName)

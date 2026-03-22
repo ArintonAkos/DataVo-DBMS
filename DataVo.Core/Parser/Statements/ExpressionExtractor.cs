@@ -14,6 +14,9 @@ namespace DataVo.Core.Parser.Statements;
 ///
 /// Conservative approach: Only extracts predicates that clearly reference a single table,
 /// avoiding false positives that could cause incorrect filtering.
+/// Supports:
+/// - AND chains (partial extraction allowed)
+/// - OR chains (only when BOTH branches are table-specific)
 /// </remarks>
 internal static class ExpressionExtractor
 {
@@ -24,10 +27,10 @@ internal static class ExpressionExtractor
     /// <param name="tableName">The table that predicates must reference exclusively.</param>
     /// <param name="tableService">Service for resolving column-to-table mappings.</param>
     /// <returns>
-    /// An expression containing only TABLE-specific predicates connected by AND.
+    /// An expression containing only TABLE-specific predicates.
     /// Returns null if:
     /// - No safe predicates can be extracted
-    /// - The expression uses OR connectors (not yet supported)
+    /// - An OR branch references non-target-table columns
     /// - The expression references columns from other tables
     /// </returns>
     public static ExpressionNode? TryExtractTableSpecificPredicates(
@@ -50,14 +53,11 @@ internal static class ExpressionExtractor
         string tableName,
         TableService tableService)
     {
-        // Leaf predicates: check if safe for this table
         if (expression is not BinaryExpressionNode binary)
         {
-            // Single column refs, literals, etc. - not a predicate we can extract
             return null;
         }
 
-        // Handle AND operator: extract from both sides, combine results
         if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase))
         {
             var left = TryExtractInternal(binary.Left, tableName, tableService);
@@ -73,29 +73,39 @@ internal static class ExpressionExtractor
                 };
             }
 
-            return left ?? right; // Return whichever side succeeded
+            return left ?? right;
         }
 
-        // Handle OR operator: cannot safely extract (would require complex logic)
         if (binary.Operator.Equals(Operators.OR, StringComparison.OrdinalIgnoreCase))
         {
-            return null; // OR is not supported initially
+            var left = TryExtractInternal(binary.Left, tableName, tableService);
+            var right = TryExtractInternal(binary.Right, tableName, tableService);
+
+            if (left is not null && right is not null)
+            {
+                return new BinaryExpressionNode
+                {
+                    Operator = Operators.OR,
+                    Left = left,
+                    Right = right
+                };
+            }
+
+            return null;
         }
 
-        // Check if this is a comparison predicate (=, !=, <, >, etc.)
         if (!IsComparisonOperator(binary.Operator))
         {
             return null;
         }
 
-        // Check if the predicate references only the target table
         if (ReferencesOnlyTable(binary.Left, tableName, tableService)
             && ReferencesOnlyTable(binary.Right, tableName, tableService))
         {
-            return binary; // This predicate is safe to extract
+            return binary;
         }
 
-        return null; // Predicate references other tables
+        return null;
     }
 
     /// <summary>

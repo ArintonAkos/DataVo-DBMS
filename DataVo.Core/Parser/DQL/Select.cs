@@ -12,6 +12,7 @@ using DataVo.Core.Utils;
 using DataVo.Core.Transactions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -441,6 +442,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
+        ExpressionNode? materializedWhere = MaterializeWhereForFastPath();
+        if (!ShouldUseVectorFastPath(topK, materializedWhere))
+        {
+            return null;
+        }
+
         List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
         if (rowIds.Count == 0)
         {
@@ -461,7 +468,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.JoinStatement.ContainsJoin())
         {
-            if (!IsNearestJoinTwoPhaseEligible(out var embeddingFilter))
+            if (!IsNearestJoinTwoPhaseEligible(materializedWhere, out var embeddingFilter))
             {
                 return null;
             }
@@ -474,13 +481,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList());
     }
 
-    private bool IsNearestJoinTwoPhaseEligible(out ExpressionNode? embeddingFilter)
+    private bool IsNearestJoinTwoPhaseEligible(ExpressionNode? whereExpression, out ExpressionNode? embeddingFilter)
     {
         embeddingFilter = null;
 
         // Try to extract WHERE predicates that reference only the embedding table
-        ExpressionNode? whereExpression = _model.WhereStatement.GetExpression();
-        
         embeddingFilter = ExpressionExtractor.TryExtractTableSpecificPredicates(
             whereExpression,
             _model.FromTable.TableName,
@@ -505,6 +510,62 @@ internal class Select(SelectStatement ast) : BaseDbAction
             && literal.Value?.ToString() == SqlLiterals.TrueExpression;
     }
 
+    private ExpressionNode? MaterializeWhereForFastPath()
+    {
+        ExpressionNode? whereExpression = _model.WhereStatement.GetExpression();
+        if (whereExpression == null)
+        {
+            return null;
+        }
+
+        if (_model.Database is null || _model.TableService is null)
+        {
+            return whereExpression;
+        }
+
+        return SubqueryExpressionMaterializer.Materialize(
+            whereExpression,
+            _model.Database,
+            DataVoEngine.Current(),
+            _model.TableService);
+    }
+
+    private bool ShouldUseVectorFastPath(int topK, ExpressionNode? whereExpression)
+    {
+        int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
+        if (totalRows <= 0)
+        {
+            return false;
+        }
+
+        if (topK >= totalRows)
+        {
+            return false;
+        }
+
+        if (whereExpression == null || IsAllTrueExpression(whereExpression))
+        {
+            return true;
+        }
+
+        int complexity = EstimatePredicateComplexity(whereExpression);
+        int threshold = Math.Max(32, totalRows / 3);
+
+        return topK <= threshold || complexity <= 6;
+    }
+
+    private static int EstimatePredicateComplexity(ExpressionNode node)
+    {
+        return node switch
+        {
+            BinaryExpressionNode binary when binary.Operator == Operators.AND || binary.Operator == Operators.OR
+                => 1 + EstimatePredicateComplexity(binary.Left) + EstimatePredicateComplexity(binary.Right),
+            BinaryExpressionNode => 1,
+            ScalarFunctionExpressionNode scalar => 2 + scalar.Arguments.Sum(EstimatePredicateComplexity),
+            _ => 1
+        };
+    }
+
     private ListedTable EvaluateJoinFromSeed(TableData seedRows, ExpressionNode? embeddingFilter = null)
     {
         if (seedRows.Count == 0)
@@ -517,7 +578,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (embeddingFilter != null)
         {
             filteredRows = ApplyPredicateToSeedRows(seedRows, embeddingFilter);
-            
+
             if (filteredRows.Count == 0)
             {
                 return new ListedTable(); // No rows passed the filter
@@ -1036,6 +1097,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
             Operators.GREATER_THAN => CompareDynamics(leftValue, rightValue) > 0,
             Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) <= 0,
             Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) >= 0,
+            Operators.LIKE => ExpressionValueComparer.MatchesLike(leftValue, rightValue, trimQuotedStrings: true),
+            Operators.IS_NULL => leftValue == null,
+            Operators.IS_NOT_NULL => leftValue != null,
             _ => throw new Exception($"Unsupported HAVING operator: {op}")
         };
     }
