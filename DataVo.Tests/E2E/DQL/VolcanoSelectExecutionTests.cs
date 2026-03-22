@@ -295,4 +295,42 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal("Alice", names[0]);
         Assert.Equal("Bob", names[1]);
     }
+
+    [Fact]
+    public void Select_NoJoin_DistinctWithLimit_UsesVolcanoDistinctAndWindowPushdownSafely()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Name VARCHAR, Score INT)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (1, 'A', 70)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (2, 'A', 95)");
+        Execute("INSERT INTO Scores (Id, Name, Score) VALUES (3, 'B', 80)");
+
+        var result = ExecuteAndReturn("SELECT DISTINCT Name FROM Scores LIMIT 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("A", (string)result.Data[0]["Name"]);
+    }
+
+    [Fact]
+    public void Select_Join_DistinctWithLimit_UsesVolcanoDistinctAndWindowPushdownSafely()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 11)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT DISTINCT c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            LIMIT 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+    }
 }

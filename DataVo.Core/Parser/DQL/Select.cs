@@ -1084,7 +1084,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.IsDistinct)
+        if (_model.IsDistinct && !_volcanoDistinctPushedDown)
         {
             return false;
         }
@@ -1115,7 +1115,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.IsDistinct)
+        if (_model.IsDistinct && !_volcanoDistinctPushedDown)
         {
             return false;
         }
