@@ -69,6 +69,32 @@ public sealed class DataVoDbContextOptionsBuilder
         _extension.WithBootstrapDiagnostics(enabled);
         return this;
     }
+
+    /// <summary>
+    /// Enables the provider-identity preview surface. This does not yet replace the host
+    /// provider, but exposes incremental preview behavior and status APIs for future work.
+    /// </summary>
+    public DataVoDbContextOptionsBuilder EnableProviderIdentityPreview(bool enabled = true)
+    {
+        _extension.WithProviderIdentityPreview(enabled);
+        return this;
+    }
+
+    /// <summary>
+    /// Enables the native query translation preview flag. This currently acts as a preview
+    /// capability toggle and implies provider identity preview.
+    /// </summary>
+    public DataVoDbContextOptionsBuilder EnableNativeQueryTranslationPreview(bool enabled = true)
+    {
+        _extension.WithNativeQueryTranslationPreview(enabled);
+
+        if (enabled)
+        {
+            _extension.WithProviderIdentityPreview(true);
+        }
+
+        return this;
+    }
 }
 
 /// <summary>
@@ -78,12 +104,17 @@ public sealed record DataVoBootstrapOptions(
     string? ConnectionString,
     DataVoStorageMode? StorageMode,
     string? DataSource,
-    bool BootstrapDiagnosticsEnabled)
+    bool BootstrapDiagnosticsEnabled,
+    bool ProviderIdentityPreviewEnabled,
+    bool NativeQueryTranslationPreviewEnabled)
 {
     /// <summary>Returns the effective connection string used at runtime.</summary>
     public string? EffectiveConnectionString =>
         StorageMode is not null && DataSource is { Length: > 0 }
             ? $"StorageMode={(StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Disk")};DataSource={DataSource}"
             : ConnectionString;
+
+    /// <summary>Whether the bridge is still operating in bridge-only mode.</summary>
+    public bool IsBridgeOnlyMode => !ProviderIdentityPreviewEnabled && !NativeQueryTranslationPreviewEnabled;
 }
 

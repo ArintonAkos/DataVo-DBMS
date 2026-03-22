@@ -45,6 +45,9 @@ public enum DataVoEfOperation
     /// <summary>A raw SQL command routed to DataVo through the bridge.</summary>
     RawSql,
 
+    /// <summary>A guarded LINQ query executed after DataVo refresh.</summary>
+    Query,
+
     /// <summary>Connection validation (<c>CanConnect</c>).</summary>
     Connection,
 }
