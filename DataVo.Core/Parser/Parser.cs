@@ -255,6 +255,18 @@ public class Parser(List<Token> tokens)
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
             stmt.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
             Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+
+            if (Match(TokenType.Keyword, SqlKeywords.USING))
+            {
+                Token usingMethodToken = Advance();
+                if (usingMethodToken.Type != TokenType.Identifier && usingMethodToken.Type != TokenType.Keyword)
+                {
+                    throw new ParserException("Parser Error: Expected index method name after USING.");
+                }
+
+                stmt.UsingMethod = new IdentifierNode(usingMethodToken.Value);
+            }
+
             return stmt;
         }
         throw new ParserException("Parser Error: Unknown CREATE statement type.");
@@ -1935,6 +1947,7 @@ public class Parser(List<Token> tokens)
             Operators.OR => 1,
             Operators.AND => 2,
             Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.LIKE or Operators.IS_NULL or Operators.IS_NOT_NULL => 3,
+            Operators.VECTOR_DISTANCE_L2 or Operators.VECTOR_DISTANCE_COSINE => 4,
             Operators.ADD or Operators.SUBTRACT => 4,
             Operators.MUL or Operators.DIVIDE => 5,
             _ => -1,
