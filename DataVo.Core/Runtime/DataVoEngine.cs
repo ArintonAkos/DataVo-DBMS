@@ -1,6 +1,7 @@
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.BTree;
+using DataVo.Core.Indexing;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Runtime;
@@ -36,6 +37,7 @@ public sealed class DataVoEngine : IDisposable
         TransactionManager = new TransactionManager();
         LockManager = new LockManager();
         IndexManager = new IndexManager(Config, ResolveIndexRootDirectory());
+        IndexManagerV2 = new IndexManagerV2(Config, ResolveIndexRootDirectory());
     }
 
     public Guid Id { get; }
@@ -74,6 +76,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the index manager owned by this engine.
     /// </summary>
     public IndexManager IndexManager { get; }
+
+    /// <summary>
+    /// Gets the new polymorphic index manager owned by this engine.
+    /// </summary>
+    public IndexManagerV2 IndexManagerV2 { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
@@ -157,6 +164,7 @@ public sealed class DataVoEngine : IDisposable
     /// </summary>
     public void Dispose()
     {
+        IndexManagerV2.Dispose();
         IndexManager.Dispose();
     }
 }
