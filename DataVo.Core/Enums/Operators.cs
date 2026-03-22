@@ -72,6 +72,15 @@ public static class Operators
     public const string DIVIDE = "/";
 
     /// <summary>
+    /// Represents the vector euclidean-distance operator.
+    /// </summary>
+    public const string VECTOR_DISTANCE_L2 = "<->";
+    /// <summary>
+    /// Represents the vector cosine-distance operator.
+    /// </summary>
+    public const string VECTOR_DISTANCE_COSINE = "<=>";
+
+    /// <summary>
     /// Represents the SQL LEN keyword.
     /// </summary>
     public const string LEN = "LEN";
@@ -123,6 +132,8 @@ public static class Operators
         SUBTRACT,
         MUL,
         DIVIDE,
+        VECTOR_DISTANCE_L2,
+        VECTOR_DISTANCE_COSINE,
     ];
 
     /// <summary>
