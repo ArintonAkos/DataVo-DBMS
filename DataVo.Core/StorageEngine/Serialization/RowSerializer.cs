@@ -2,6 +2,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.StorageEngine.Serialization;
 
@@ -159,6 +160,21 @@ public static class RowSerializer
             return;
         }
 
+        if (type == "VECTOR")
+        {
+            if (!VectorParser.TryCoerceToVector(value, out float[] vector))
+            {
+                throw new InvalidOperationException($"Column '{column.Name}' expects VECTOR data.");
+            }
+
+            writer.Write(vector.Length);
+            foreach (float item in vector)
+            {
+                writer.Write(item);
+            }
+            return;
+        }
+
         writer.Write(value?.ToString() ?? string.Empty);
     }
 
@@ -191,6 +207,18 @@ public static class RowSerializer
         if (type == "DATETIME")
         {
             return DateTime.FromBinary(reader.ReadInt64());
+        }
+
+        if (type == "VECTOR")
+        {
+            int count = reader.ReadInt32();
+            float[] vector = new float[count];
+            for (int i = 0; i < count; i++)
+            {
+                vector[i] = reader.ReadSingle();
+            }
+
+            return vector;
         }
 
         return reader.ReadString();

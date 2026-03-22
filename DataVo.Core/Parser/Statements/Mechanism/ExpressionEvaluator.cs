@@ -2,6 +2,8 @@ using System.Globalization;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Enums;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.Statements.Mechanism;
 
@@ -47,6 +49,10 @@ internal static class ExpressionEvaluator
                 case "/":
                 case "DIV":
                     return ApplyNumericOp(left, right, (a, b) => a / b);
+                case Operators.VECTOR_DISTANCE_L2:
+                    return EvaluateVectorDistance(bin, left, right, useCosine: false);
+                case Operators.VECTOR_DISTANCE_COSINE:
+                    return EvaluateVectorDistance(bin, left, right, useCosine: true);
                 case "=":
                 case "==":
                 case "EQ":
@@ -74,6 +80,33 @@ internal static class ExpressionEvaluator
         }
 
         throw new Exception($"Unsupported expression node type: {node.GetType().Name}");
+    }
+
+    private static double EvaluateVectorDistance(BinaryExpressionNode node, object? left, object? right, bool useCosine)
+    {
+        bool leftFromColumn = node.Left is ColumnRefNode || node.Left is ResolvedColumnRefNode;
+        bool rightFromColumn = node.Right is ColumnRefNode || node.Right is ResolvedColumnRefNode;
+
+        if (!VectorParser.TryCoerceToVector(left, out float[] leftVector))
+        {
+            string side = leftFromColumn ? "left VECTOR column" : "left vector operand";
+            throw new Exception($"Vector operator '{node.Operator}' requires {side}.");
+        }
+
+        if (!VectorParser.TryCoerceToVector(right, out float[] rightVector))
+        {
+            string side = rightFromColumn ? "right VECTOR column" : "right vector operand";
+            throw new Exception($"Vector operator '{node.Operator}' requires {side}.");
+        }
+
+        if (leftVector.Length != rightVector.Length)
+        {
+            throw new Exception($"Vector operator '{node.Operator}' requires matching dimensions ({leftVector.Length} != {rightVector.Length}).");
+        }
+
+        return useCosine
+            ? VectorParser.CosineDistance(leftVector, rightVector)
+            : VectorParser.EuclideanDistance(leftVector, rightVector);
     }
 
     private static object? EvaluateScalarFunction(

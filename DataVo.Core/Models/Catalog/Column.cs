@@ -1,4 +1,5 @@
 using DataVo.Core.Contracts;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Models.Catalog;
 
@@ -15,16 +16,16 @@ public class Column : IColumn
 {
     /// <summary>Gets or sets the column name.</summary>
     public string Name { get; set; } = null!;
-    
+
     /// <summary>Gets or sets the data type of the column (e.g., INT, VARCHAR, DATE).</summary>
     public string Type { get; set; } = null!;
-    
+
     /// <summary>Gets or sets the max length for variable-length types like VARCHAR.</summary>
     public int Length { get; set; }
-    
+
     /// <summary>Gets or sets the raw string representation of the column's value.</summary>
     public string? Value { get; set; }
-    
+
     /// <summary>Gets or sets the raw string representation of the column's default value.</summary>
     public string? DefaultValue { get; set; }
 
@@ -50,6 +51,7 @@ public class Column : IColumn
                     "BIT" => bool.Parse(Value),
                     "INT" => int.Parse(Value),
                     "FLOAT" => double.Parse(Value, System.Globalization.CultureInfo.InvariantCulture),
+                    "VECTOR" => VectorParser.TryParseVector(Value, out float[] parsedVector) ? parsedVector : null,
                     _ => Value,
                 };
             }
@@ -90,6 +92,7 @@ public class Column : IColumn
                     "BIT" => bool.Parse(DefaultValue),
                     "INT" => int.Parse(DefaultValue),
                     "FLOAT" => double.Parse(DefaultValue, System.Globalization.CultureInfo.InvariantCulture),
+                    "VECTOR" => VectorParser.TryParseVector(DefaultValue, out float[] parsedVector) ? parsedVector : null,
                     _ => DefaultValue,
                 };
             }
