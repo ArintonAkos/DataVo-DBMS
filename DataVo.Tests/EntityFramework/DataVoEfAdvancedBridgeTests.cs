@@ -1628,7 +1628,7 @@ public class DataVoEfAdvancedBridgeTests
     }
 
     [Fact]
-    public void ExplainQueryFromDataVo_UnsupportedStringMethod_WithTranslationPreview_ReportsGuardedFallback()
+    public void ExplainQueryFromDataVo_ToLowerPredicate_WithTranslationPreview_ReportsNativePreview()
     {
         string cs = $"StorageMode=InMemory;DataSource=where_tolower_diag_{Guid.NewGuid():N}";
         using var ctx = CreateContext(cs, o => o.EnableNativeQueryTranslationPreview());
@@ -1636,12 +1636,13 @@ public class DataVoEfAdvancedBridgeTests
         var diagnostics = ctx.ExplainQueryFromDataVo<AdvancedRow>(q =>
             q.Where(row => row.Name.ToLower() == "alpha"));
 
-        Assert.Equal(DataVoQueryTranslationOutcome.GuardedFallback, diagnostics.Outcome);
-        Assert.Contains(diagnostics.FallbackReasons, reason => reason.Contains("Where", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(DataVoQueryTranslationOutcome.NativeTranslationPreview, diagnostics.Outcome);
+        Assert.Empty(diagnostics.FallbackReasons);
+        Assert.Empty(diagnostics.BlockedReasons);
     }
 
     [Fact]
-    public void QueryFromDataVo_UnsupportedStringMethod_WithTranslationPreview_FallsBackAndExecutes()
+    public void QueryFromDataVo_ToLowerPredicate_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_where_tolower_fallback_{Guid.NewGuid():N}";
         string cs = $"StorageMode=Disk;DataSource={db}";
@@ -1669,6 +1670,19 @@ public class DataVoEfAdvancedBridgeTests
         {
             if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ExplainQueryFromDataVo_UnsupportedReplaceMethod_WithTranslationPreview_ReportsGuardedFallback()
+    {
+        string cs = $"StorageMode=InMemory;DataSource=where_replace_diag_{Guid.NewGuid():N}";
+        using var ctx = CreateContext(cs, o => o.EnableNativeQueryTranslationPreview());
+
+        var diagnostics = ctx.ExplainQueryFromDataVo<AdvancedRow>(q =>
+            q.Where(row => row.Name.Replace("a", "b") == "blphb"));
+
+        Assert.Equal(DataVoQueryTranslationOutcome.GuardedFallback, diagnostics.Outcome);
+        Assert.Contains(diagnostics.FallbackReasons, reason => reason.Contains("Where", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
