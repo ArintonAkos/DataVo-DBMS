@@ -341,7 +341,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (_model.WhereStatement.IsEvaluatable())
         {
             var whereExpression = _model.WhereStatement.GetExpression();
-            if (whereExpression != null && ContainsArithmeticExpression(whereExpression))
+            if (whereExpression != null && RequiresExpressionEvaluation(whereExpression))
             {
                 result = EvaluateWhereWithExpression(whereExpression);
             }
@@ -381,7 +381,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return new ListedTable(filtered);
     }
 
-    private static bool ContainsArithmeticExpression(ExpressionNode node)
+    private static bool RequiresExpressionEvaluation(ExpressionNode node)
     {
         if (node is BinaryExpressionNode binary)
         {
@@ -390,12 +390,17 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 return true;
             }
 
-            return ContainsArithmeticExpression(binary.Left) || ContainsArithmeticExpression(binary.Right);
+            return RequiresExpressionEvaluation(binary.Left) || RequiresExpressionEvaluation(binary.Right);
+        }
+
+        if (node is ScalarFunctionExpressionNode)
+        {
+            return true;
         }
 
         if (node is AggregateExpressionNode aggregate && aggregate.Argument != null)
         {
-            return ContainsArithmeticExpression(aggregate.Argument);
+            return RequiresExpressionEvaluation(aggregate.Argument);
         }
 
         return false;

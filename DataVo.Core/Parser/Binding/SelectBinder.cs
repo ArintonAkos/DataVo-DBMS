@@ -147,6 +147,16 @@ internal static class SelectBinder
             return binary;
         }
 
+        if (node is ScalarFunctionExpressionNode scalarFunction)
+        {
+            for (int index = 0; index < scalarFunction.Arguments.Count; index++)
+            {
+                scalarFunction.Arguments[index] = BindWhere(scalarFunction.Arguments[index], tableService)!;
+            }
+
+            return scalarFunction;
+        }
+
         if (node is ColumnRefNode columnRef)
         {
             if (string.IsNullOrWhiteSpace(columnRef.Column))

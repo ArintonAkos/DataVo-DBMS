@@ -38,6 +38,12 @@ public class AggregateExpressionNode : ExpressionNode
     public bool IsStar { get; set; } // For COUNT(*)
 }
 
+public class ScalarFunctionExpressionNode : ExpressionNode
+{
+    public string FunctionName { get; set; } = string.Empty; // LOWER, UPPER, LEN, etc.
+    public List<ExpressionNode> Arguments { get; set; } = [];
+}
+
 public class WindowFunctionExpressionNode : ExpressionNode
 {
     public string FunctionName { get; set; } = string.Empty; // RANK
