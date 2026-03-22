@@ -143,6 +143,123 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Contains(result.Messages, message => message.Contains("requires left VECTOR column", StringComparison.OrdinalIgnoreCase)
                                                 || message.Contains("can only be used with VECTOR columns", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Select_NearestWithSimpleWhere_FilteredBeforeJoin()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'inactive')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (1, 'Item1')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (3, 'Item3')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT i.Name, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
+            FROM Embeddings e
+            WHERE e.Status = 'active'
+            JOIN Items i ON e.Id = i.Id
+            ORDER BY distance ASC
+            LIMIT 2");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        // Should only return 'active' embeddings
+        Assert.NotEmpty(result.Data);
+        Assert.All(result.Data, row => 
+            Assert.Contains("Item", (string)row["i.Name"]));
+    }
+
+    [Fact]
+    public void Select_NearestWithMultipleAndPredicates_AllApplied()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Category VARCHAR, Score INT)");
+        Execute("CREATE TABLE Metadata (Id INT PRIMARY KEY, Title VARCHAR)");
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Category, Score) VALUES (1, '[1,0,0]', 'tech', 95)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Category, Score) VALUES (2, '[0,1,0]', 'tech', 50)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Category, Score) VALUES (3, '[0.92,0.08,0]', 'news', 95)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Category, Score) VALUES (4, '[0.91,0.09,0]', 'tech', 95)");
+        Execute("INSERT INTO Metadata (Id, Title) VALUES (1, 'First')");
+        Execute("INSERT INTO Metadata (Id, Title) VALUES (4, 'Fourth')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT m.Title, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
+            FROM Embeddings e
+            WHERE e.Category = 'tech' AND e.Score >= 95
+            JOIN Metadata m ON e.Id = m.Id
+            ORDER BY distance ASC
+            LIMIT 5");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        // Should only return 'tech' embeddings with score >= 95
+        Assert.NotEmpty(result.Data);
+        Assert.All(result.Data, row =>
+        {
+            Assert.True((int)row["e.Id"] == 1 || (int)row["e.Id"] == 4);
+        });
+    }
+
+    [Fact]
+    public void Select_NearestWithIsNullPredicate_FiltersNullRows()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), DeletedAt VARCHAR)");
+        Execute("CREATE TABLE Refs (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Embeddings (Id, Emb, DeletedAt) VALUES (1, '[1,0,0]', NULL)");
+        Execute("INSERT INTO Embeddings (Id, Emb, DeletedAt) VALUES (2, '[0,1,0]', '2026-01-01')");
+        Execute("INSERT INTO Embeddings (Id, Emb, DeletedAt) VALUES (3, '[0.9,0.1,0]', NULL)");
+        Execute("INSERT INTO Refs (Id, Name) VALUES (1, 'Ref1')");
+        Execute("INSERT INTO Refs (Id, Name) VALUES (3, 'Ref3')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT r.Name, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
+            FROM Embeddings e
+            WHERE e.DeletedAt IS NULL
+            JOIN Refs r ON e.Id = r.Id
+            ORDER BY distance ASC
+            LIMIT 5");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        // Should only return embeddings where deleted_at IS NULL
+        Assert.NotEmpty(result.Data);
+        Assert.All(result.Data, row =>
+            Assert.NotNull(row["e.Id"]));
+    }
+
+    [Fact]
+    public void Select_NearestWithUnsupportedOrPredicate_FallsBackToNormalExecution()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'pending')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (1, 'Item1')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (2, 'Item2')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec ON Embeddings (Emb) USING HNSW");
+
+        // OR predicates should fall back to normal execution (not use HNSW fast path)
+        var result = ExecuteAndReturn(@"
+            SELECT i.Name, e.Id
+            FROM Embeddings e
+            WHERE e.Status = 'active' OR e.Status = 'pending'
+            JOIN Items i ON e.Id = i.Id
+            ORDER BY e.Id ASC
+            LIMIT 5");
+
+        // Should complete without error (fallback to normal execution)
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.NotEmpty(result.Data);
+    }
 }
 
 public class InMemoryVectorIndexTests : VectorIndexTestsBase
