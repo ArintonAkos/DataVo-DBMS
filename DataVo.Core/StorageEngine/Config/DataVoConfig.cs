@@ -11,6 +11,9 @@ public enum StorageMode
     /// <summary>Stores data in on-disk table files.</summary>
     Disk,
 
+    /// <summary>Stores data in a browser/WASM backend (intended for OPFS-capable engines).</summary>
+    Wasm,
+
     /// <summary>Stores data using a custom-provided IStorageEngine.</summary>
     Custom
 }
@@ -41,6 +44,13 @@ public class DataVoConfig
     /// Required if StorageMode is set to Custom.
     /// </summary>
     public IStorageEngine? CustomStorageEngine { get; set; }
+
+    /// <summary>
+    /// Gets or sets a WASM/browser payload storage engine (for example OPFS-backed).
+    /// Used when <see cref="StorageMode"/> is <see cref="StorageMode.Wasm"/>.
+    /// When null, the runtime falls back to an in-memory backend.
+    /// </summary>
+    public IStorageEngine? WasmStorageEngine { get; set; }
 
     private bool? _walEnabled;
 

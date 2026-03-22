@@ -1,7 +1,7 @@
 using DataVo.Core.StorageEngine.Config;
-using DataVo.Core.StorageEngine.Disk;
-using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.StorageEngine.Backends;
+using DataVo.Core.StorageEngine.Backends.Abstractions;
 using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
 
@@ -25,14 +25,13 @@ public class StorageContext(DataVoConfig config)
     /// </summary>
     public DataVoConfig Config { get; } = config;
 
-    private readonly IStorageEngine _storageEngine = config.StorageMode switch
-    {
-        StorageMode.InMemory => new InMemoryStorageEngine(),
-        StorageMode.Disk => new DiskStorageEngine(config.DiskStoragePath ?? "./datavo_data"),
-        StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
-        _ => throw new ArgumentOutOfRangeException()
-    };
+    private readonly IStorageEngine _storageEngine = ResolveStorageEngine(config);
     private static StorageContext? _instance;
+
+    /// <summary>
+    /// Gets the resolved storage backend metadata for this context.
+    /// </summary>
+    public IStorageBackend? Backend => _storageEngine as IStorageBackend;
 
     /// <summary>
     /// For legacy singleton usage during benchmarks, defaults to InMemory if unconfigured.
@@ -59,6 +58,18 @@ public class StorageContext(DataVoConfig config)
         {
             new RecoveryManager(config).Recover();
         }
+    }
+
+    private static IStorageEngine ResolveStorageEngine(DataVoConfig config)
+    {
+        return config.StorageMode switch
+        {
+            StorageMode.InMemory => new InMemoryStorageBackend(),
+            StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data"),
+            StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
+            StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
+            _ => throw new ArgumentOutOfRangeException()
+        };
     }
 
     /// <summary>

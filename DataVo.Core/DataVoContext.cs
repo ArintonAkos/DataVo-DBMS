@@ -87,7 +87,15 @@ public sealed class DataVoContext : IDisposable
         string databaseName = ResolveCurrentDatabase();
         using var _ = DataVoEngine.PushCurrent(Engine);
 
-        List<long> rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        List<long> rowIds;
+        try
+        {
+            rowIds = Engine.IndexManagerV2.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        }
+        catch
+        {
+            rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        }
         if (rowIds.Count == 0)
         {
             return [];

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
+using DataVo.Core.Indexing.BTree;
+using DataVo.Core.Indexing.HNSW;
 
 namespace DataVo.Core.Indexing;
 
@@ -90,6 +92,7 @@ public class IndexManagerV2 : IDisposable
     {
         _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
         Directory.CreateDirectory(_indexRootDirectory);
+        EnsureDefaultRegistrations();
     }
 
     /// <summary>
@@ -320,5 +323,114 @@ public class IndexManagerV2 : IDisposable
     public void Dispose()
     {
         FlushAll();
+    }
+
+    private void EnsureDefaultRegistrations()
+    {
+        RegisterIndexType("BTREE", new BTreeIndexFactory(), new BTreeIndexPersistence());
+        RegisterIndexType("HNSW", new HNSWIndexFactory(), new HNSWIndexPersistence());
+    }
+
+    private static string GetCacheKey(string indexName, string tableName, string databaseName)
+    {
+        return $"{databaseName}/{tableName}_{indexName}";
+    }
+
+    /// <summary>
+    /// Compatibility API: creates or replaces a vector index.
+    /// </summary>
+    public void CreateVectorIndex(IEnumerable<(long RowId, float[] Vector)> vectors, string indexName, string tableName, string databaseName, string metric = "cosine")
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var metadata = new IndexMetadata
+        {
+            IndexName = indexName,
+            DatabaseName = databaseName,
+            TableName = tableName,
+            ColumnName = string.Empty,
+            IndexType = "HNSW",
+            PersistenceFormat = "json",
+            Parameters = new Dictionary<string, object> { ["metric"] = metric }
+        };
+
+        var hnsw = (HNSWIndex)CreateIndex("HNSW", metadata, metadata.Parameters);
+        hnsw.Metric = metric.Equals("l2", StringComparison.OrdinalIgnoreCase) || metric.Equals("euclidean", StringComparison.OrdinalIgnoreCase)
+            ? "euclidean"
+            : "cosine";
+        hnsw.Clear();
+
+        foreach (var (rowId, vector) in vectors)
+        {
+            hnsw.Insert(rowId, [.. vector]);
+        }
+
+        _cachePaths[cacheKey] = BuildIndexPath(metadata);
+        MarkDirty(cacheKey);
+        FlushInternal(cacheKey);
+    }
+
+    /// <summary>
+    /// Compatibility API: inserts/updates a single vector in an existing vector index.
+    /// </summary>
+    public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
+        hnsw.Insert(rowId, [.. vector]);
+        MarkDirty(cacheKey);
+        FlushInternal(cacheKey);
+    }
+
+    /// <summary>
+    /// Compatibility API: deletes vectors by row IDs.
+    /// </summary>
+    public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
+        hnsw.Delete(toBeDeletedIds);
+        MarkDirty(cacheKey);
+        FlushInternal(cacheKey);
+    }
+
+    /// <summary>
+    /// Compatibility API: nearest-neighbor vector search.
+    /// </summary>
+    public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName)
+    {
+        if (topK <= 0)
+        {
+            return [];
+        }
+
+        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
+        return hnsw.SearchTopK(queryVector, topK);
+    }
+
+    private HNSWIndex GetOrLoadVectorIndex(string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_cache.TryGetValue(cacheKey, out var cached) && cached is HNSWIndex cachedIndex)
+        {
+            return cachedIndex;
+        }
+
+        var metadata = new IndexMetadata
+        {
+            IndexName = indexName,
+            DatabaseName = databaseName,
+            TableName = tableName,
+            ColumnName = string.Empty,
+            IndexType = "HNSW",
+            PersistenceFormat = "json",
+        };
+
+        var loaded = TryLoadIndex(metadata);
+        if (loaded is HNSWIndex hnsw)
+        {
+            return hnsw;
+        }
+
+        throw new Exception($"Vector index {indexName} on table {tableName} does not exist!");
     }
 }

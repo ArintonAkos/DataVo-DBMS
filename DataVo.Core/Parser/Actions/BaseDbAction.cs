@@ -1,6 +1,7 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.BTree;
+using DataVo.Core.Indexing;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Transactions;
@@ -16,6 +17,7 @@ internal abstract class BaseDbAction : IDbAction
     protected TransactionManager Transactions;
     protected LockManager Locks;
     protected IndexManager Indexes;
+    protected IndexManagerV2 IndexesV2;
     protected List<Dictionary<string, dynamic>> Data = [];
     protected List<string> Fields = [];
 
@@ -30,6 +32,7 @@ internal abstract class BaseDbAction : IDbAction
         Transactions = Engine.TransactionManager;
         Locks = Engine.LockManager;
         Indexes = Engine.IndexManager;
+        IndexesV2 = Engine.IndexManagerV2;
     }
 
     internal void UseEngine(DataVoEngine engine)
@@ -41,6 +44,7 @@ internal abstract class BaseDbAction : IDbAction
         Transactions = engine.TransactionManager;
         Locks = engine.LockManager;
         Indexes = engine.IndexManager;
+        IndexesV2 = engine.IndexManagerV2;
     }
 
     protected string GetDatabaseName(Guid session)
