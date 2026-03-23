@@ -611,6 +611,43 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_NoJoin_GroupedAggregateWithHaving_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 20)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 30)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Category, SUM(Amount) AS Total
+            FROM Sales
+            GROUP BY Category
+            HAVING SUM(Amount) >= 30
+            ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[0]["Total"]));
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[1]["Total"]));
+    }
+
+    [Fact]
+    public void Select_NoJoin_AggregateExpressionArgument_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Amount) VALUES (1, 10)");
+        Execute("INSERT INTO Sales (Id, Amount) VALUES (2, 25)");
+
+        var result = ExecuteAndReturn("SELECT SUM(Amount * 2) AS TotalDouble FROM Sales");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(70d, Convert.ToDouble(result.Data[0]["TotalDouble"]));
+    }
+
+    [Fact]
     public void Select_LeftJoinShape_FallsBackToLegacyAndReturnsExpectedRows()
     {
         Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");

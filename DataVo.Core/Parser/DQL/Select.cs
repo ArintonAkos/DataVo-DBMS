@@ -101,6 +101,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
                 if (_volcanoAggregatePushedDown)
                 {
+                    result = ApplyHaving(result);
                     result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
                 }
                 else
@@ -727,6 +728,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        // Keep ORDER BY after HAVING unless HAVING is also pushed down.
+        if (_model.GetHavingExpression() != null)
         {
             return false;
         }
@@ -1753,11 +1760,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.GetHavingExpression() != null)
-        {
-            return false;
-        }
-
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0)
         {
@@ -1861,39 +1863,61 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return true;
         }
 
-        string? argumentColumn = null;
-        if (agg.Argument is ResolvedColumnRefNode resolved)
-        {
-            if (!resolved.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            argumentColumn = resolved.Column;
-        }
-        else if (agg.Argument is ColumnRefNode colRef)
-        {
-            string reference = string.IsNullOrWhiteSpace(colRef.TableOrAlias)
-                ? colRef.Column
-                : $"{colRef.TableOrAlias}.{colRef.Column}";
-
-            var parsed = _model.TableService!.ParseAndFindTableNameByColumn(reference);
-            if (!parsed.Item1.Equals(fromTable, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            argumentColumn = parsed.Item2;
-        }
-
-        if (argumentColumn == null)
+        if (agg.Argument == null)
         {
             return false;
         }
 
+        if (!IsAggregateArgumentPushdownSupported(agg.Argument, fromTable))
+        {
+            return false;
+        }
+
+        ExpressionNode argument = agg.Argument;
         spec = new HashAggregateOperator.AggregateSpec(outputKey, function, row =>
-            row.Values.TryGetValue(argumentColumn, out var value) ? value : null);
+            EvaluateAggregateArgumentForPushdown(argument, row, fromTable));
         return true;
+    }
+
+    private bool IsAggregateArgumentPushdownSupported(ExpressionNode argument, string fromTable)
+    {
+        return argument switch
+        {
+            LiteralNode or NullLiteralNode => true,
+            ResolvedColumnRefNode resolved => resolved.TableName.Equals(fromTable, StringComparison.OrdinalIgnoreCase),
+            ColumnRefNode colRef => IsColumnReferenceOnTable(colRef, fromTable),
+            BinaryExpressionNode binary => IsAggregateArgumentPushdownSupported(binary.Left, fromTable)
+                && IsAggregateArgumentPushdownSupported(binary.Right, fromTable),
+            ScalarFunctionExpressionNode scalar => scalar.Arguments.All(arg => IsAggregateArgumentPushdownSupported(arg, fromTable)),
+            _ => false,
+        };
+    }
+
+    private bool IsColumnReferenceOnTable(ColumnRefNode colRef, string fromTable)
+    {
+        string reference = string.IsNullOrWhiteSpace(colRef.TableOrAlias)
+            ? colRef.Column
+            : $"{colRef.TableOrAlias}.{colRef.Column}";
+
+        var parsed = _model.TableService!.ParseAndFindTableNameByColumn(reference);
+        return parsed.Item1.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private object? EvaluateAggregateArgumentForPushdown(ExpressionNode argument, ExecutionRow row, string fromTable)
+    {
+        var joinedRow = new JoinedRow(fromTable, new Row(new Dictionary<string, dynamic>(row.Values)));
+
+        return ExpressionEvaluator.Evaluate(
+            argument,
+            joinedRow,
+            (colRef, r) =>
+            {
+                string reference = string.IsNullOrWhiteSpace(colRef.TableOrAlias)
+                    ? colRef.Column
+                    : $"{colRef.TableOrAlias}.{colRef.Column}";
+                return ResolveColumnValue(r, reference);
+            },
+            (_, _) => throw new Exception("Nested aggregate expression is not supported in aggregate pushdown argument."));
     }
 
     private bool TryBuildNoJoinDistinctPushdown(out List<string> distinctColumns)
