@@ -99,6 +99,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
             WalEnabled = config.WalEnabled,
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,
+            EnableVolcanoExecution = config.EnableVolcanoExecution,
         };
     }
 
@@ -111,6 +112,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
             WalEnabled = config.WalEnabled,
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,
+            EnableVolcanoExecution = config.EnableVolcanoExecution,
         };
     }
 }
