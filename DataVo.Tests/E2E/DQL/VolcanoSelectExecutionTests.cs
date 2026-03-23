@@ -648,6 +648,30 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_NoJoin_GroupByHavingOrderAndWindow_PreservesSemantics()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 20)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 15)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (4, 'B', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (5, 'C', 7)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Category, SUM(Amount) AS Total
+            FROM Sales
+            GROUP BY Category
+            HAVING SUM(Amount) >= 20
+            ORDER BY Total DESC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("B", (string)result.Data[0]["Category"]);
+        Assert.Equal(25d, Convert.ToDouble(result.Data[0]["Total"]));
+    }
+
+    [Fact]
     public void Select_LeftJoinShape_FallsBackToLegacyAndReturnsExpectedRows()
     {
         Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
@@ -736,5 +760,31 @@ public class VolcanoSpillGuardrailTests : SqlExecutionTestsBase
         Assert.Equal(25d, Convert.ToDouble(result.Data[0]["Total"]));
         Assert.Equal("B", (string)result.Data[1]["Category"]);
         Assert.Equal(30d, Convert.ToDouble(result.Data[1]["Total"]));
+    }
+
+    [Fact]
+    public void Select_Join_OrderByAboveThreshold_PreservesResultSemantics()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 12)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Cara')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (12, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY c.Name ASC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(3, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
     }
 }
