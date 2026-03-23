@@ -961,6 +961,55 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
     }
 
+    private bool ShouldAvoidSortPushdownForSpillRisk(ExpressionNode? whereExpression, bool hasJoin)
+    {
+        if (!Engine.Config.EnableVolcanoSpillGuardrails)
+        {
+            return false;
+        }
+
+        int threshold = Engine.Config.VolcanoSortSpillThresholdRows;
+        if (threshold <= 0)
+        {
+            return false;
+        }
+
+        int estimatedRows = EstimateRowsForSpillRisk(whereExpression, hasJoin);
+        return estimatedRows > threshold;
+    }
+
+    private bool ShouldAvoidAggregatePushdownForSpillRisk(ExpressionNode? whereExpression, bool hasJoin)
+    {
+        if (!Engine.Config.EnableVolcanoSpillGuardrails)
+        {
+            return false;
+        }
+
+        int threshold = Engine.Config.VolcanoAggregateSpillThresholdRows;
+        if (threshold <= 0)
+        {
+            return false;
+        }
+
+        int estimatedRows = EstimateRowsForSpillRisk(whereExpression, hasJoin);
+        return estimatedRows > threshold;
+    }
+
+    private int EstimateRowsForSpillRisk(ExpressionNode? whereExpression, bool hasJoin)
+    {
+        int baseRows = hasJoin
+            ? EstimateJoinInputRowCount()
+            : (_model.FromTable?.TableContentValues?.Count ?? 0);
+
+        if (baseRows <= 0)
+        {
+            return 0;
+        }
+
+        double selectivity = EstimatePredicateSelectivity(whereExpression);
+        return Math.Max(1, (int)Math.Ceiling(baseRows * selectivity));
+    }
+
     private ListedTable EvaluateJoinFromSeed(TableData seedRows, ExpressionNode? embeddingFilter = null)
     {
         if (seedRows.Count == 0)
@@ -1144,10 +1193,17 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (TryBuildNoJoinAggregatePushdown(out var aggregateGroupByColumns, out var aggregateSpecs))
         {
-            Logger.Info($"Planner: push down aggregate ({aggregateSpecs.Count} functions).");
-            root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs);
-            _volcanoAggregatePushedDown = true;
-            _volcanoAggregateGroupKeyColumns = [.. aggregateGroupByColumns];
+            if (ShouldAvoidAggregatePushdownForSpillRisk(whereExpression, hasJoin: false))
+            {
+                Logger.Info("Planner: skip aggregate pushdown due to spill guardrail estimate.");
+            }
+            else
+            {
+                Logger.Info($"Planner: push down aggregate ({aggregateSpecs.Count} functions).");
+                root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs);
+                _volcanoAggregatePushedDown = true;
+                _volcanoAggregateGroupKeyColumns = [.. aggregateGroupByColumns];
+            }
         }
 
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
@@ -1173,20 +1229,27 @@ internal class Select(SelectStatement ast) : BaseDbAction
         bool orderPushedDown = false;
         if (TryBuildNoJoinOrderPushdown(out var orderKeys))
         {
-            Logger.Info($"Planner: push down ORDER BY ({orderKeys.Count} keys).");
-            List<SortOperator.SortKeySpec> sortSpecs = [];
-            foreach (var orderKey in orderKeys)
+            if (ShouldAvoidSortPushdownForSpillRisk(whereExpression, hasJoin: false))
             {
-                string key = orderKey.Key;
-                bool ascending = orderKey.IsAscending;
-                sortSpecs.Add(new SortOperator.SortKeySpec(
-                    row => ResolveNoJoinOrderValue(row, key),
-                    ascending));
+                Logger.Info("Planner: skip ORDER BY pushdown due to spill guardrail estimate.");
             }
+            else
+            {
+                Logger.Info($"Planner: push down ORDER BY ({orderKeys.Count} keys).");
+                List<SortOperator.SortKeySpec> sortSpecs = [];
+                foreach (var orderKey in orderKeys)
+                {
+                    string key = orderKey.Key;
+                    bool ascending = orderKey.IsAscending;
+                    sortSpecs.Add(new SortOperator.SortKeySpec(
+                        row => ResolveNoJoinOrderValue(row, key),
+                        ascending));
+                }
 
-            root = new SortOperator(root, sortSpecs);
-            orderPushedDown = true;
-            _volcanoOrderPushedDown = true;
+                root = new SortOperator(root, sortSpecs);
+                orderPushedDown = true;
+                _volcanoOrderPushedDown = true;
+            }
         }
 
         if (TryBuildNoJoinDistinctPushdown(out var distinctColumns))
@@ -1361,20 +1424,27 @@ internal class Select(SelectStatement ast) : BaseDbAction
         bool orderPushedDown = false;
         if (TryBuildJoinOrderPushdown(out var orderKeys))
         {
-            Logger.Info($"Planner: push down JOIN ORDER BY ({orderKeys.Count} keys).");
-            List<SortOperator.SortKeySpec> sortSpecs = [];
-            foreach (var orderKey in orderKeys)
+            if (ShouldAvoidSortPushdownForSpillRisk(whereExpression, hasJoin: true))
             {
-                string key = orderKey.Key;
-                bool ascending = orderKey.IsAscending;
-                sortSpecs.Add(new SortOperator.SortKeySpec(
-                    row => ResolveJoinOrderValue(row, key),
-                    ascending));
+                Logger.Info("Planner: skip JOIN ORDER BY pushdown due to spill guardrail estimate.");
             }
+            else
+            {
+                Logger.Info($"Planner: push down JOIN ORDER BY ({orderKeys.Count} keys).");
+                List<SortOperator.SortKeySpec> sortSpecs = [];
+                foreach (var orderKey in orderKeys)
+                {
+                    string key = orderKey.Key;
+                    bool ascending = orderKey.IsAscending;
+                    sortSpecs.Add(new SortOperator.SortKeySpec(
+                        row => ResolveJoinOrderValue(row, key),
+                        ascending));
+                }
 
-            root = new SortOperator(root, sortSpecs);
-            orderPushedDown = true;
-            _volcanoOrderPushedDown = true;
+                root = new SortOperator(root, sortSpecs);
+                orderPushedDown = true;
+                _volcanoOrderPushedDown = true;
+            }
         }
 
         if (CanPushDownOffsetToVolcano(orderPushedDown))
