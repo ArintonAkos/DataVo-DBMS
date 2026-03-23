@@ -76,6 +76,12 @@ public class DataVoConfig
     /// </summary>
     public int VolcanoAggregateSpillThresholdRows { get; set; } = 20000;
 
+    /// <summary>
+    /// Gets or sets the right-side row-count threshold for choosing nested-loop inner join in Volcano plans.
+    /// When the estimated/build side is above this threshold, hash join is preferred.
+    /// </summary>
+    public int VolcanoNestedLoopJoinThresholdRows { get; set; } = 128;
+
     private bool? _walEnabled;
 
     /// <summary>

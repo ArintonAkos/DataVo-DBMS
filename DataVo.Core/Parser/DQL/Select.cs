@@ -1371,13 +1371,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 rightInput = BuildTableFilterOperator(rightInput, newTable, tableFilter);
             }
 
-            root = new InnerJoinOperator(
+            root = BuildVolcanoInnerJoinOperator(
                 root,
                 rightInput,
                 streamJoinKey,
                 newColumn,
                 existingTable,
-                newTable);
+                newTable,
+                estimatedRightRows: newRows.Count);
 
             Logger.Info($"Planner: appended INNER JOIN edge {existingTable}.{existingColumn} = {newTable}.{newColumn}");
 
@@ -1501,6 +1502,26 @@ internal class Select(SelectStatement ast) : BaseDbAction
             var joinedRow = new JoinedRow(tableName, new Row(new Dictionary<string, dynamic>(row.Values)));
             return EvaluatePredicate(filterExpression, joinedRow);
         });
+    }
+
+    private IQueryOperator BuildVolcanoInnerJoinOperator(
+        IQueryOperator left,
+        IQueryOperator right,
+        string leftJoinColumn,
+        string rightJoinColumn,
+        string leftTableName,
+        string rightTableName,
+        int estimatedRightRows)
+    {
+        int nestedLoopThreshold = Math.Max(1, Engine.Config.VolcanoNestedLoopJoinThresholdRows);
+        if (estimatedRightRows <= nestedLoopThreshold)
+        {
+            Logger.Info($"Planner: choose nested-loop join for build side '{rightTableName}' ({estimatedRightRows} rows <= {nestedLoopThreshold}).");
+            return new NestedLoopJoinOperator(left, right, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
+        }
+
+        Logger.Info($"Planner: choose hash join for build side '{rightTableName}' ({estimatedRightRows} rows > {nestedLoopThreshold}).");
+        return new InnerJoinOperator(left, right, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
     }
 
     private int PickNextVolcanoJoinConditionIndex(

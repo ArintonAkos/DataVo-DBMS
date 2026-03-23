@@ -130,6 +130,35 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void NestedLoopJoinOperator_JoinsRowsOnMatchingKeys()
+    {
+        var leftRows = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["CustomerId"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["CustomerId"] = 11 }),
+            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["CustomerId"] = 99 })
+        };
+
+        var rightRows = new List<ExecutionRow>
+        {
+            new(10, new Dictionary<string, dynamic> { ["Id"] = 10, ["Name"] = "Alice" }),
+            new(11, new Dictionary<string, dynamic> { ["Id"] = 11, ["Name"] = "Bob" })
+        };
+
+        IQueryOperator leftScan = new TableScanOperator(leftRows);
+        IQueryOperator rightScan = new TableScanOperator(rightRows);
+        IQueryOperator join = new NestedLoopJoinOperator(leftScan, rightScan, "CustomerId", "Id", "Orders", "Customers");
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(join);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, (int)rows[0]["Orders.Id"]);
+        Assert.Equal("Alice", (string)rows[0]["Customers.Name"]);
+        Assert.Equal(2, (int)rows[1]["Orders.Id"]);
+        Assert.Equal("Bob", (string)rows[1]["Customers.Name"]);
+    }
+
+    [Fact]
     public void SortOperator_OrdersRowsByKey()
     {
         var input = new List<ExecutionRow>
