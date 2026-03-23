@@ -1243,7 +1243,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         while (remaining.Count > 0)
         {
-            int pickIndex = PickNextVolcanoJoinConditionIndex(remaining, joinedTables, out bool leftSideAlreadyJoined);
+            int pickIndex = PickNextVolcanoJoinConditionIndex(
+                remaining,
+                joinedTables,
+                tableFilters,
+                out bool leftSideAlreadyJoined);
 
             if (pickIndex < 0)
             {
@@ -1401,6 +1405,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private int PickNextVolcanoJoinConditionIndex(
         List<DataVo.Core.Models.Statement.JoinModel.JoinCondition> remaining,
         HashSet<string> joinedTables,
+        Dictionary<string, ExpressionNode> tableFilters,
         out bool leftSideAlreadyJoined)
     {
         leftSideAlreadyJoined = false;
@@ -1421,7 +1426,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 ? remaining[i].RightColumn.TableName
                 : remaining[i].LeftColumn.TableName;
 
-            int candidateRowCount = ResolveJoinTableRowCount(candidateTable);
+            int candidateRowCount = ResolveJoinTableRowCount(candidateTable, tableFilters);
             if (candidateRowCount < bestRowCount)
             {
                 bestRowCount = candidateRowCount;
@@ -1433,7 +1438,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return selectedIndex;
     }
 
-    private int ResolveJoinTableRowCount(string tableOrAlias)
+    private int ResolveJoinTableRowCount(string tableOrAlias, Dictionary<string, ExpressionNode> tableFilters)
     {
         if (_model.TableService == null)
         {
@@ -1441,7 +1446,19 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         var detail = _model.TableService.GetTableDetailByAliasOrName(tableOrAlias);
-        return detail?.TableContentValues?.Count ?? int.MaxValue;
+        int baseRowCount = detail?.TableContentValues?.Count ?? int.MaxValue;
+        if (baseRowCount == int.MaxValue)
+        {
+            return baseRowCount;
+        }
+
+        if (!tableFilters.TryGetValue(tableOrAlias, out var localFilter))
+        {
+            return baseRowCount;
+        }
+
+        double selectivity = EstimatePredicateSelectivity(localFilter);
+        return Math.Max(1, (int)Math.Ceiling(baseRowCount * selectivity));
     }
 
     private static Dictionary<string, dynamic> ToExecutionValues(Row row)
