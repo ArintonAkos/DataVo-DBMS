@@ -14,9 +14,9 @@ public sealed class InnerJoinOperator : IQueryOperator
     private readonly string _leftTableName;
     private readonly string _rightTableName;
 
-    private readonly Dictionary<string, List<ExecutionRow>> _rightLookup = [];
-    private ExecutionRow? _currentLeft;
-    private List<ExecutionRow>? _currentMatches;
+    private readonly Dictionary<string, List<TypedExecutionRow>> _rightLookup = [];
+    private TypedExecutionRow? _currentLeft;
+    private List<TypedExecutionRow>? _currentMatches;
     private int _currentMatchIndex;
     private long _outputRowId;
 
@@ -71,7 +71,7 @@ public sealed class InnerJoinOperator : IQueryOperator
                     _rightLookup[key] = bucket;
                 }
 
-                bucket.Add(row);
+                bucket.Add(row.ToTyped());
             }
         }
         finally
@@ -93,11 +93,13 @@ public sealed class InnerJoinOperator : IQueryOperator
                 return MergeRows(_currentLeft, rightRow);
             }
 
-            _currentLeft = _left.GetNextRow();
-            if (_currentLeft == null)
+            ExecutionRow? nextLeft = _left.GetNextRow();
+            if (nextLeft == null)
             {
                 return null;
             }
+
+            _currentLeft = nextLeft.ToTyped();
 
             _currentMatches = null;
             _currentMatchIndex = 0;
@@ -125,7 +127,7 @@ public sealed class InnerJoinOperator : IQueryOperator
         _rightLookup.Clear();
     }
 
-    private ExecutionRow MergeRows(ExecutionRow leftRow, ExecutionRow rightRow)
+    private ExecutionRow MergeRows(TypedExecutionRow leftRow, TypedExecutionRow rightRow)
     {
         var values = new Dictionary<string, dynamic>();
 

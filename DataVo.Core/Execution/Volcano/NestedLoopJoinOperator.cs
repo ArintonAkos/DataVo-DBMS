@@ -14,8 +14,8 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
     private readonly string _leftTableName;
     private readonly string _rightTableName;
 
-    private readonly List<ExecutionRow> _rightRows = [];
-    private ExecutionRow? _currentLeft;
+    private readonly List<TypedExecutionRow> _rightRows = [];
+    private TypedExecutionRow? _currentLeft;
     private int _rightIndex;
     private long _outputRowId;
 
@@ -53,7 +53,7 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
                     break;
                 }
 
-                _rightRows.Add(row);
+                _rightRows.Add(row.ToTyped());
             }
         }
         finally
@@ -70,7 +70,8 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
         {
             if (_currentLeft == null)
             {
-                _currentLeft = _left.GetNextRow();
+                ExecutionRow? leftRow = _left.GetNextRow();
+                _currentLeft = leftRow?.ToTyped();
                 _rightIndex = 0;
 
                 if (_currentLeft == null)
@@ -112,7 +113,7 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
         _rightRows.Clear();
     }
 
-    private ExecutionRow MergeRows(ExecutionRow leftRow, ExecutionRow rightRow)
+    private ExecutionRow MergeRows(TypedExecutionRow leftRow, TypedExecutionRow rightRow)
     {
         var values = new Dictionary<string, dynamic>();
 
