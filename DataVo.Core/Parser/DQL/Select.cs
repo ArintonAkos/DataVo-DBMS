@@ -37,6 +37,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// </summary>
     private readonly SelectModel _model = SelectModel.FromAst(ast);
     private readonly Dictionary<JoinedRow, Dictionary<string, object?>> _windowValues = [];
+    private bool _volcanoLimitPushedDown;
+    private bool _volcanoOffsetPushedDown;
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -80,12 +82,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
                     Data = ApplyDistinct(Data);
                 }
 
-                if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+                if (!_volcanoOffsetPushedDown && _model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
                 {
                     Data = Data.Skip(_model.LimitSkip.Value).ToList();
                 }
 
-                if (_model.LimitTake.HasValue)
+                if (!_volcanoLimitPushedDown && _model.LimitTake.HasValue)
                 {
                     Data = Data.Take(_model.LimitTake.Value).ToList();
                 }
@@ -768,9 +770,16 @@ internal class Select(SelectStatement ast) : BaseDbAction
         });
 
         IQueryOperator root = filter;
+        if (CanPushDownOffsetToVolcano())
+        {
+            root = new SkipOperator(root, _model.LimitSkip!.Value);
+            _volcanoOffsetPushedDown = true;
+        }
+
         if (CanPushDownLimitToVolcano())
         {
             root = new TakeOperator(root, _model.LimitTake!.Value);
+            _volcanoLimitPushedDown = true;
         }
 
         List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
@@ -788,7 +797,28 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+        if (_model.IsDistinct)
+        {
+            return false;
+        }
+
+        if (_model.GroupByStatement.ContainsGroupBy())
+        {
+            return false;
+        }
+
+        if (_model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        var orderBy = _model.GetOrderByExpression();
+        return orderBy == null || orderBy.Columns.Count == 0;
+    }
+
+    private bool CanPushDownOffsetToVolcano()
+    {
+        if (!_model.LimitSkip.HasValue || _model.LimitSkip.Value <= 0)
         {
             return false;
         }

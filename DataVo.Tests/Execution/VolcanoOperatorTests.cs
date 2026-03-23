@@ -81,4 +81,22 @@ public class VolcanoOperatorTests
         Assert.Equal(1, rows[0].RowId);
         Assert.Equal(2, rows[1].RowId);
     }
+
+    [Fact]
+    public void SkipOperator_SkipsConfiguredRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["V"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["V"] = 20 }),
+            new(3, new Dictionary<string, dynamic> { ["V"] = 30 })
+        };
+
+        IQueryOperator op = new SkipOperator(new TableScanOperator(input), 2);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0].RowId);
+    }
 }
