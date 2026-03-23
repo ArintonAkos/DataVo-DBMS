@@ -32,6 +32,32 @@ namespace DataVo.Core.Parser.DQL;
 /// <param name="ast">The parsed <see cref="SelectStatement"/> AST node representing the SELECT query.</param>
 internal class Select(SelectStatement ast) : BaseDbAction
 {
+    private enum LogicalPlanKind
+    {
+        LegacyWhereJoin,
+        LegacyWhereExpression,
+        LegacyJoinOnly,
+        LegacyNoJoinScan,
+        VolcanoNoJoin,
+        VolcanoInnerJoin
+    }
+
+    private sealed class PhysicalPlanDecision
+    {
+        public PhysicalPlanDecision(LogicalPlanKind logicalPlan, bool useVolcano, int estimatedCost, string reason)
+        {
+            LogicalPlan = logicalPlan;
+            UseVolcano = useVolcano;
+            EstimatedCost = estimatedCost;
+            Reason = reason;
+        }
+
+        public LogicalPlanKind LogicalPlan { get; }
+        public bool UseVolcano { get; }
+        public int EstimatedCost { get; }
+        public string Reason { get; }
+    }
+
     /// <summary>
     /// The parsed model representation of the SELECT statement.
     /// </summary>
@@ -360,46 +386,142 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return nearestNeighborFastPath;
         }
 
-        ListedTable result;
+        ExpressionNode? whereExpression = _model.WhereStatement.IsEvaluatable()
+            ? _model.WhereStatement.GetExpression()
+            : null;
 
-        if (_model.WhereStatement.IsEvaluatable())
+        PhysicalPlanDecision plan = BuildPhysicalPlan(whereExpression);
+        Logger.Info($"Planner: logical={plan.LogicalPlan}, physical={(plan.UseVolcano ? "Volcano" : "Legacy")}, cost={plan.EstimatedCost}, reason={plan.Reason}");
+
+        return plan.LogicalPlan switch
         {
-            var whereExpression = _model.WhereStatement.GetExpression();
+            LogicalPlanKind.VolcanoInnerJoin => EvaluateInnerJoinWithVolcano(whereExpression),
+            LogicalPlanKind.VolcanoNoJoin => EvaluateNoJoinWithVolcano(whereExpression),
+            LogicalPlanKind.LegacyWhereExpression when whereExpression != null => EvaluateWhereWithExpression(whereExpression),
+            LogicalPlanKind.LegacyWhereJoin => _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement),
+            LogicalPlanKind.LegacyJoinOnly => EvaluateJoin(),
+            LogicalPlanKind.LegacyNoJoinScan => BuildLegacyNoJoinScan(),
+            _ => BuildLegacyNoJoinScan()
+        };
+    }
+
+    private PhysicalPlanDecision BuildPhysicalPlan(ExpressionNode? whereExpression)
+    {
+        if (whereExpression != null)
+        {
             if (ShouldUseVolcanoInnerJoinPath(whereExpression))
             {
-                result = EvaluateInnerJoinWithVolcano(whereExpression);
+                return new PhysicalPlanDecision(
+                    LogicalPlanKind.VolcanoInnerJoin,
+                    useVolcano: true,
+                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoInnerJoin, whereExpression),
+                    reason: "JOIN graph is fully INNER and connected");
             }
-            else if (ShouldUseVolcanoNoJoinPath(whereExpression))
-            {
-                result = EvaluateNoJoinWithVolcano(whereExpression);
-            }
-            else if (whereExpression != null && RequiresExpressionEvaluation(whereExpression))
-            {
-                result = EvaluateWhereWithExpression(whereExpression);
-            }
-            else
-            {
-                result = _model.WhereStatement.EvaluateWithJoin(_model.TableService!, _model.JoinStatement);
-            }
-        }
-        else if (_model.JoinStatement.ContainsJoin())
-        {
-            result = EvaluateJoin();
-        }
-        else if (ShouldUseVolcanoNoJoinPath(null))
-        {
-            result = EvaluateNoJoinWithVolcano(null);
-        }
-        else
-        {
-            var listResult = _model.FromTable!.TableContentValues!
-                .Select(row => new JoinedRow(_model.FromTable.TableName, row.ToRow()))
-                .ToList();
 
-            result = new ListedTable(listResult);
+            if (ShouldUseVolcanoNoJoinPath(whereExpression))
+            {
+                return new PhysicalPlanDecision(
+                    LogicalPlanKind.VolcanoNoJoin,
+                    useVolcano: true,
+                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoNoJoin, whereExpression),
+                    reason: "single-table filter with no subquery");
+            }
+
+            if (RequiresExpressionEvaluation(whereExpression))
+            {
+                return new PhysicalPlanDecision(
+                    LogicalPlanKind.LegacyWhereExpression,
+                    useVolcano: false,
+                    estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereExpression, whereExpression),
+                    reason: "expression predicate requires legacy evaluator");
+            }
+
+            return new PhysicalPlanDecision(
+                LogicalPlanKind.LegacyWhereJoin,
+                useVolcano: false,
+                estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereJoin, whereExpression),
+                reason: "fallback where/join evaluation");
         }
 
-        return result;
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            if (ShouldUseVolcanoInnerJoinPath(null))
+            {
+                return new PhysicalPlanDecision(
+                    LogicalPlanKind.VolcanoInnerJoin,
+                    useVolcano: true,
+                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoInnerJoin, null),
+                    reason: "join-only query has connected INNER JOIN graph");
+            }
+
+            return new PhysicalPlanDecision(
+                LogicalPlanKind.LegacyJoinOnly,
+                useVolcano: false,
+                estimatedCost: EstimateCost(LogicalPlanKind.LegacyJoinOnly, null),
+                reason: "join without where uses legacy join strategy");
+        }
+
+        if (ShouldUseVolcanoNoJoinPath(null))
+        {
+            return new PhysicalPlanDecision(
+                LogicalPlanKind.VolcanoNoJoin,
+                useVolcano: true,
+                estimatedCost: EstimateCost(LogicalPlanKind.VolcanoNoJoin, null),
+                reason: "simple no-join scan path");
+        }
+
+        return new PhysicalPlanDecision(
+            LogicalPlanKind.LegacyNoJoinScan,
+            useVolcano: false,
+            estimatedCost: EstimateCost(LogicalPlanKind.LegacyNoJoinScan, null),
+            reason: "volcano disabled or unsupported");
+    }
+
+    private int EstimateCost(LogicalPlanKind plan, ExpressionNode? whereExpression)
+    {
+        int rowCount = plan switch
+        {
+            LogicalPlanKind.VolcanoInnerJoin or LogicalPlanKind.LegacyWhereJoin or LogicalPlanKind.LegacyJoinOnly => EstimateJoinInputRowCount(),
+            _ => _model.FromTable?.TableContentValues?.Count ?? 0
+        };
+
+        int complexity = whereExpression == null ? 1 : EstimatePredicateComplexity(whereExpression);
+
+        return plan switch
+        {
+            LogicalPlanKind.VolcanoNoJoin => 8 + complexity + (rowCount / 1000),
+            LogicalPlanKind.VolcanoInnerJoin => 14 + complexity + (rowCount / 750),
+            LogicalPlanKind.LegacyWhereExpression => 30 + (2 * complexity) + (rowCount / 500),
+            LogicalPlanKind.LegacyWhereJoin => 24 + complexity + (rowCount / 400),
+            LogicalPlanKind.LegacyJoinOnly => 22 + (rowCount / 350),
+            LogicalPlanKind.LegacyNoJoinScan => 16 + (rowCount / 450),
+            _ => 100
+        };
+    }
+
+    private int EstimateJoinInputRowCount()
+    {
+        int total = _model.FromTable?.TableContentValues?.Count ?? 0;
+        if (_model.TableService == null)
+        {
+            return total;
+        }
+
+        foreach (var detail in _model.JoinStatement.Model.JoinTableDetails.Values)
+        {
+            total += detail.TableContentValues?.Count ?? 0;
+        }
+
+        return total;
+    }
+
+    private ListedTable BuildLegacyNoJoinScan()
+    {
+        var listResult = _model.FromTable!.TableContentValues!
+            .Select(row => new JoinedRow(_model.FromTable.TableName, row.ToRow()))
+            .ToList();
+
+        return new ListedTable(listResult);
     }
 
     private bool ShouldUseVolcanoInnerJoinPath(ExpressionNode? whereExpression)
@@ -978,21 +1100,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         while (remaining.Count > 0)
         {
-            int pickIndex = -1;
-            bool leftSideAlreadyJoined = false;
-
-            for (int i = 0; i < remaining.Count; i++)
-            {
-                bool leftIn = joinedTables.Contains(remaining[i].LeftColumn.TableName);
-                bool rightIn = joinedTables.Contains(remaining[i].RightColumn.TableName);
-
-                if (leftIn ^ rightIn)
-                {
-                    pickIndex = i;
-                    leftSideAlreadyJoined = leftIn;
-                    break;
-                }
-            }
+            int pickIndex = PickNextVolcanoJoinConditionIndex(remaining, joinedTables, out bool leftSideAlreadyJoined);
 
             if (pickIndex < 0)
             {
@@ -1103,6 +1211,52 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         return new ListedTable(listed);
+    }
+
+    private int PickNextVolcanoJoinConditionIndex(
+        List<DataVo.Core.Models.Statement.JoinModel.JoinCondition> remaining,
+        HashSet<string> joinedTables,
+        out bool leftSideAlreadyJoined)
+    {
+        leftSideAlreadyJoined = false;
+        int selectedIndex = -1;
+        int bestRowCount = int.MaxValue;
+
+        for (int i = 0; i < remaining.Count; i++)
+        {
+            bool leftIn = joinedTables.Contains(remaining[i].LeftColumn.TableName);
+            bool rightIn = joinedTables.Contains(remaining[i].RightColumn.TableName);
+
+            if (!(leftIn ^ rightIn))
+            {
+                continue;
+            }
+
+            string candidateTable = leftIn
+                ? remaining[i].RightColumn.TableName
+                : remaining[i].LeftColumn.TableName;
+
+            int candidateRowCount = ResolveJoinTableRowCount(candidateTable);
+            if (candidateRowCount < bestRowCount)
+            {
+                bestRowCount = candidateRowCount;
+                selectedIndex = i;
+                leftSideAlreadyJoined = leftIn;
+            }
+        }
+
+        return selectedIndex;
+    }
+
+    private int ResolveJoinTableRowCount(string tableOrAlias)
+    {
+        if (_model.TableService == null)
+        {
+            return int.MaxValue;
+        }
+
+        var detail = _model.TableService.GetTableDetailByAliasOrName(tableOrAlias);
+        return detail?.TableContentValues?.Count ?? int.MaxValue;
     }
 
     private static Dictionary<string, dynamic> ToExecutionValues(Row row)

@@ -557,4 +557,42 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal("B", (string)result.Data[1]["Category"]);
         Assert.Equal(30d, Convert.ToDouble(result.Data[1]["AvgAmount"]));
     }
+
+    [Fact]
+    public void Select_LeftJoinShape_FallsBackToLegacyAndReturnsExpectedRows()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            LEFT JOIN Customers c ON o.CustomerId = c.Id
+            ORDER BY o.Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+        Assert.Equal(2, (int)result.Data[1]["o.Id"]);
+        Assert.Null(result.Data[1]["c.Name"]);
+    }
+
+    [Fact]
+    public void Select_NoJoin_ComputedWhereExpression_FallsBackAndReturnsExpectedRows()
+    {
+        Execute("CREATE TABLE Numbers (Id INT PRIMARY KEY, Value INT)");
+        Execute("INSERT INTO Numbers (Id, Value) VALUES (1, 3)");
+        Execute("INSERT INTO Numbers (Id, Value) VALUES (2, 6)");
+
+        var result = ExecuteAndReturn("SELECT Id FROM Numbers WHERE Value * 2 > 10 ORDER BY Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(2, (int)result.Data[0]["Id"]);
+    }
 }
