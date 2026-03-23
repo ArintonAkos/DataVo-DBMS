@@ -651,8 +651,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable BuildLegacyNoJoinScan()
     {
-        var listResult = _model.FromTable!.TableContentValues!
-            .Select(row => new JoinedRow(_model.FromTable.TableName, row.ToRow()))
+        var sourceRows = _model.FromTable!.TableContentValues!
+            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+            .ToList();
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(new TableScanOperator(sourceRows));
+
+        var listResult = rows
+            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
             .ToList();
 
         return new ListedTable(listResult);
@@ -1070,6 +1076,24 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateWhereWithExpression(ExpressionNode whereExpression)
     {
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            var sourceRows = _model.FromTable!.TableContentValues!
+                .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+                .ToList();
+
+            IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), row =>
+            {
+                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values)));
+                return EvaluatePredicate(whereExpression, joinedRow);
+            });
+
+            List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
+            return new ListedTable(filteredRows
+                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                .ToList());
+        }
+
         ListedTable source = _model.JoinStatement.ContainsJoin()
             ? EvaluateJoin()
             : new ListedTable(_model.FromTable!.TableContentValues!
