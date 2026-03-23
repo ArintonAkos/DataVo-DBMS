@@ -32,4 +32,32 @@ public sealed class ExecutionRow
         get => Values[key];
         set => Values[key] = value;
     }
+
+    /// <summary>
+    /// Converts this dynamic-backed row to a typed object-backed row carrier.
+    /// </summary>
+    public TypedExecutionRow ToTyped()
+    {
+        var typedValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in Values)
+        {
+            typedValues[entry.Key] = entry.Value;
+        }
+
+        return new TypedExecutionRow(RowId, typedValues);
+    }
+
+    /// <summary>
+    /// Creates an execution row from a typed object-backed row carrier.
+    /// </summary>
+    public static ExecutionRow FromTyped(TypedExecutionRow typed)
+    {
+        var values = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in typed.Values)
+        {
+            values[entry.Key] = entry.Value;
+        }
+
+        return new ExecutionRow(typed.RowId, values);
+    }
 }

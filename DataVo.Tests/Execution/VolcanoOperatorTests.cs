@@ -205,6 +205,36 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void SortOperator_ExternalSpillRunGenerationAndMerge_PreservesOrder()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 40 }),
+            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 10 }),
+            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 30 }),
+            new(4, new Dictionary<string, dynamic> { ["Id"] = 4, ["Score"] = 20 }),
+        };
+
+        IQueryOperator sort = new SortOperator(
+            new TableScanOperator(input),
+            [new SortOperator.SortKeySpec(row => row["Score"], ascending: true)],
+            new SortOperator.SortExecutionOptions
+            {
+                EnableExternalSpill = true,
+                SpillThresholdRows = 2,
+                SpillRunSizeRows = 2
+            });
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(sort);
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(2, (int)rows[0]["Id"]);
+        Assert.Equal(4, (int)rows[1]["Id"]);
+        Assert.Equal(3, (int)rows[2]["Id"]);
+        Assert.Equal(1, (int)rows[3]["Id"]);
+    }
+
+    [Fact]
     public void DistinctOperator_RemovesDuplicateKeys()
     {
         var input = new List<ExecutionRow>
@@ -283,5 +313,24 @@ public class VolcanoOperatorTests
         Assert.Single(rows);
         Assert.Equal(5, (int)rows[0]["MinV"]);
         Assert.Equal(42, (int)rows[0]["MaxV"]);
+    }
+
+    [Fact]
+    public void ExecutionRow_TypedCarrier_RoundTripPreservesValues()
+    {
+        var row = new ExecutionRow(7, new Dictionary<string, dynamic>
+        {
+            ["Id"] = 7,
+            ["Name"] = "Alice",
+            ["Flag"] = true
+        });
+
+        TypedExecutionRow typed = row.ToTyped();
+        ExecutionRow rebuilt = ExecutionRow.FromTyped(typed);
+
+        Assert.Equal(7L, rebuilt.RowId);
+        Assert.Equal(7, (int)rebuilt["Id"]);
+        Assert.Equal("Alice", (string)rebuilt["Name"]);
+        Assert.True((bool)rebuilt["Flag"]);
     }
 }

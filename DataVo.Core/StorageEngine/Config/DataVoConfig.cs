@@ -82,6 +82,28 @@ public class DataVoConfig
     /// </summary>
     public int VolcanoNestedLoopJoinThresholdRows { get; set; } = 128;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether Volcano sort operators may spill to temporary runs and merge them.
+    /// </summary>
+    public bool EnableVolcanoExternalSortSpill { get; set; }
+
+    /// <summary>
+    /// Gets or sets the row threshold after which Volcano sort uses external run generation and merge.
+    /// A value less than or equal to zero disables threshold-based spill triggering.
+    /// </summary>
+    public int VolcanoExternalSortThresholdRows { get; set; } = 50000;
+
+    /// <summary>
+    /// Gets or sets the run size used during external sort run generation.
+    /// </summary>
+    public int VolcanoExternalSortRunSizeRows { get; set; } = 5000;
+
+    /// <summary>
+    /// Gets or sets an optional directory path for external sort temporary run files.
+    /// When null or empty, the process temp directory is used.
+    /// </summary>
+    public string? VolcanoExternalSortTempDirectory { get; set; }
+
     private bool? _walEnabled;
 
     /// <summary>
