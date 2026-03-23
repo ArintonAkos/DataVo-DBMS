@@ -58,6 +58,24 @@ public class DataVoConfig
     /// </summary>
     public bool EnableVolcanoExecution { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether Volcano planner should apply spill guardrails.
+    /// When enabled, large estimated intermediates avoid in-memory Volcano sort/aggregate pushdown.
+    /// </summary>
+    public bool EnableVolcanoSpillGuardrails { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the estimated row threshold for Volcano sort pushdown.
+    /// A value less than or equal to zero disables this guardrail.
+    /// </summary>
+    public int VolcanoSortSpillThresholdRows { get; set; } = 20000;
+
+    /// <summary>
+    /// Gets or sets the estimated row threshold for Volcano aggregate pushdown.
+    /// A value less than or equal to zero disables this guardrail.
+    /// </summary>
+    public int VolcanoAggregateSpillThresholdRows { get; set; } = 20000;
+
     private bool? _walEnabled;
 
     /// <summary>

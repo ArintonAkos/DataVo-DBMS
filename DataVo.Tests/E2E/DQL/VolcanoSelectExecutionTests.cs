@@ -685,3 +685,56 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
         Assert.Equal(2, (int)result.Data[0]["Id"]);
     }
 }
+
+public class VolcanoSpillGuardrailTests : SqlExecutionTestsBase
+{
+    public VolcanoSpillGuardrailTests()
+        : base(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory,
+            EnableVolcanoExecution = true,
+            EnableVolcanoSpillGuardrails = true,
+            VolcanoSortSpillThresholdRows = 2,
+            VolcanoAggregateSpillThresholdRows = 2
+        }, "VolcanoSpillGuardrailDB")
+    {
+    }
+
+    [Fact]
+    public void Select_NoJoin_OrderByAboveThreshold_PreservesResultSemantics()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Score INT)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (1, 50)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (2, 90)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (3, 70)");
+
+        var result = ExecuteAndReturn("SELECT Id FROM Scores ORDER BY Score DESC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(3, (int)result.Data[0]["Id"]);
+    }
+
+    [Fact]
+    public void Select_NoJoin_AggregateAboveThreshold_PreservesResultSemantics()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 15)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 30)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Category, SUM(Amount) AS Total
+            FROM Sales
+            GROUP BY Category
+            HAVING SUM(Amount) >= 25
+            ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal(25d, Convert.ToDouble(result.Data[0]["Total"]));
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[1]["Total"]));
+    }
+}
