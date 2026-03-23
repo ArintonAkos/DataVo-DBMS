@@ -1250,12 +1250,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down projection ({projectionColumns.Count} columns).");
-            root = new ProjectOperator(root, row =>
+            root = new ProjectOperator(root, typedRow =>
             {
-                var values = new Dictionary<string, dynamic>();
+                var values = new Dictionary<string, object?>();
                 foreach (string column in projectionColumns)
                 {
-                    if (row.Values.TryGetValue(column, out var value))
+                    if (typedRow.Values.TryGetValue(column, out var value))
                     {
                         values[column] = value;
                     }
@@ -1296,7 +1296,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildNoJoinDistinctPushdown(out var distinctColumns))
         {
             Logger.Info($"Planner: push down DISTINCT ({distinctColumns.Count} keys).");
-            root = new DistinctOperator(root, row => BuildDistinctKey(row, distinctColumns));
+            root = new DistinctOperator(root, typedRow => BuildDistinctKey(typedRow, distinctColumns));
             _volcanoDistinctPushedDown = true;
         }
 
@@ -1452,12 +1452,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down JOIN projection ({projectionColumns.Count} columns).");
-            root = new ProjectOperator(root, row =>
+            root = new ProjectOperator(root, typedRow =>
             {
-                var values = new Dictionary<string, dynamic>();
+                var values = new Dictionary<string, object?>();
                 foreach (string column in projectionColumns)
                 {
-                    if (row.Values.TryGetValue(column, out var value))
+                    if (typedRow.Values.TryGetValue(column, out var value))
                     {
                         values[column] = value;
                     }
@@ -1472,7 +1472,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildJoinDistinctPushdown(out var distinctColumns))
         {
             Logger.Info($"Planner: push down JOIN DISTINCT ({distinctColumns.Count} keys).");
-            root = new DistinctOperator(root, row => BuildDistinctKey(row, distinctColumns));
+            root = new DistinctOperator(root, typedRow => BuildDistinctKey(typedRow, distinctColumns));
             _volcanoDistinctPushedDown = true;
         }
 
@@ -2316,6 +2316,25 @@ internal class Select(SelectStatement ast) : BaseDbAction
     }
 
     private static string BuildDistinctKey(ExecutionRow row, IReadOnlyList<string> columns)
+    {
+        if (columns.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        List<string> parts = [];
+        foreach (string column in columns)
+        {
+            object? value = row.Values.TryGetValue(column, out var found) ? found : null;
+            string typePart = value?.GetType().Name ?? "<null>";
+            string valuePart = value?.ToString() ?? "<null>";
+            parts.Add($"{column}:{typePart}:{valuePart}");
+        }
+
+        return string.Join("|", parts);
+    }
+
+    private static string BuildDistinctKey(TypedExecutionRow row, IReadOnlyList<string> columns)
     {
         if (columns.Count == 0)
         {
