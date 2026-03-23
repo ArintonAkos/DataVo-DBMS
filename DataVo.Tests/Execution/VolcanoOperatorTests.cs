@@ -267,7 +267,7 @@ public class VolcanoOperatorTests
 
         IQueryOperator op = new DistinctOperator(
             new TableScanOperator(input),
-            row => Convert.ToString(row.Values["Name"]) ?? string.Empty);
+            (TypedExecutionRow row) => Convert.ToString(row.Values["Name"]) ?? string.Empty);
 
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
 
@@ -287,7 +287,7 @@ public class VolcanoOperatorTests
 
         IQueryOperator op = new ProjectOperator(
             new TableScanOperator(input),
-            row => new Dictionary<string, object?>
+            (TypedExecutionRow row) => new Dictionary<string, object?>
             {
                 ["Id"] = row.Values["Id"],
                 ["Name"] = row.Values["Name"]
