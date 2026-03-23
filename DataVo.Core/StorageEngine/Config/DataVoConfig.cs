@@ -104,6 +104,28 @@ public class DataVoConfig
     /// </summary>
     public string? VolcanoExternalSortTempDirectory { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether Volcano hash aggregate may spill to partition files and merge/reduce them.
+    /// </summary>
+    public bool EnableVolcanoExternalAggregateSpill { get; set; }
+
+    /// <summary>
+    /// Gets or sets the row threshold after which Volcano aggregate uses external partition spill.
+    /// A value less than or equal to zero disables threshold-based spill triggering.
+    /// </summary>
+    public int VolcanoExternalAggregateThresholdRows { get; set; } = 50000;
+
+    /// <summary>
+    /// Gets or sets the number of hash partitions used during external aggregate spill.
+    /// </summary>
+    public int VolcanoExternalAggregatePartitionCount { get; set; } = 16;
+
+    /// <summary>
+    /// Gets or sets an optional directory path for external aggregate temporary partition files.
+    /// When null or empty, the process temp directory is used.
+    /// </summary>
+    public string? VolcanoExternalAggregateTempDirectory { get; set; }
+
     private bool? _walEnabled;
 
     /// <summary>

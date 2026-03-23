@@ -64,17 +64,38 @@ internal class Select(SelectStatement ast) : BaseDbAction
         NestedLoop
     }
 
+    private enum JoinPlanSide
+    {
+        Left,
+        Right
+    }
+
     private sealed class JoinEdgePhysicalPlan
     {
-        public JoinEdgePhysicalPlan(JoinPhysicalAlgorithm algorithm, int estimatedBuildRows, string reason)
+        public JoinEdgePhysicalPlan(
+            JoinPhysicalAlgorithm algorithm,
+            JoinPlanSide buildSide,
+            JoinPlanSide probeSide,
+            int estimatedBuildRows,
+            int estimatedProbeRows,
+            int estimatedCost,
+            string reason)
         {
             Algorithm = algorithm;
+            BuildSide = buildSide;
+            ProbeSide = probeSide;
             EstimatedBuildRows = estimatedBuildRows;
+            EstimatedProbeRows = estimatedProbeRows;
+            EstimatedCost = estimatedCost;
             Reason = reason;
         }
 
         public JoinPhysicalAlgorithm Algorithm { get; }
+        public JoinPlanSide BuildSide { get; }
+        public JoinPlanSide ProbeSide { get; }
         public int EstimatedBuildRows { get; }
+        public int EstimatedProbeRows { get; }
+        public int EstimatedCost { get; }
         public string Reason { get; }
     }
 
@@ -1220,7 +1241,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             else
             {
                 Logger.Info($"Planner: push down aggregate ({aggregateSpecs.Count} functions).");
-                root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs);
+                root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs, BuildAggregateExecutionOptions());
                 _volcanoAggregatePushedDown = true;
                 _volcanoAggregateGroupKeyColumns = [.. aggregateGroupByColumns];
             }
@@ -1391,7 +1412,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 rightInput = BuildTableFilterOperator(rightInput, newTable, tableFilter);
             }
 
-            JoinEdgePhysicalPlan joinPlan = BuildJoinEdgePhysicalPlan(newTable, newRows.Count);
+            int estimatedLeftRows = EstimateJoinedStreamRows(joinedTables, tableFilters);
+            int estimatedRightRows = ResolveJoinTableRowCount(newTable, tableFilters);
+            JoinEdgePhysicalPlan joinPlan = BuildJoinEdgePhysicalPlan(
+                buildSideTable: newTable,
+                estimatedLeftRows,
+                estimatedRightRows);
             root = BuildVolcanoInnerJoinOperator(
                 root,
                 rightInput,
@@ -1401,7 +1427,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 newTable,
                 joinPlan);
 
-            Logger.Info($"Planner: physical join edge plan {existingTable}->{newTable}: {joinPlan.Algorithm} ({joinPlan.EstimatedBuildRows} rows), reason={joinPlan.Reason}");
+            Logger.Info($"Planner: physical join edge plan {existingTable}->{newTable}: alg={joinPlan.Algorithm}, build={joinPlan.BuildSide}({joinPlan.EstimatedBuildRows}), probe={joinPlan.ProbeSide}({joinPlan.EstimatedProbeRows}), cost={joinPlan.EstimatedCost}, reason={joinPlan.Reason}");
 
             Logger.Info($"Planner: appended INNER JOIN edge {existingTable}.{existingColumn} = {newTable}.{newColumn}");
 
@@ -1538,21 +1564,72 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
     }
 
-    private JoinEdgePhysicalPlan BuildJoinEdgePhysicalPlan(string buildSideTable, int estimatedBuildRows)
+    private HashAggregateOperator.AggregateExecutionOptions BuildAggregateExecutionOptions()
     {
-        int nestedLoopThreshold = Math.Max(1, Engine.Config.VolcanoNestedLoopJoinThresholdRows);
-        if (estimatedBuildRows <= nestedLoopThreshold)
+        return new HashAggregateOperator.AggregateExecutionOptions
         {
-            return new JoinEdgePhysicalPlan(
-                JoinPhysicalAlgorithm.NestedLoop,
-                estimatedBuildRows,
-                $"build side '{buildSideTable}' is under threshold {nestedLoopThreshold}");
+            EnableExternalSpill = Engine.Config.EnableVolcanoExternalAggregateSpill,
+            SpillThresholdRows = Engine.Config.VolcanoExternalAggregateThresholdRows,
+            PartitionCount = Engine.Config.VolcanoExternalAggregatePartitionCount,
+            SpillDirectory = Engine.Config.VolcanoExternalAggregateTempDirectory
+        };
+    }
+
+    private JoinEdgePhysicalPlan BuildJoinEdgePhysicalPlan(string buildSideTable, int estimatedLeftRows, int estimatedRightRows)
+    {
+        JoinPlanSide buildSide;
+        JoinPlanSide probeSide;
+        int buildRows;
+        int probeRows;
+
+        if (estimatedLeftRows <= estimatedRightRows)
+        {
+            buildSide = JoinPlanSide.Left;
+            probeSide = JoinPlanSide.Right;
+            buildRows = Math.Max(1, estimatedLeftRows);
+            probeRows = Math.Max(1, estimatedRightRows);
+        }
+        else
+        {
+            buildSide = JoinPlanSide.Right;
+            probeSide = JoinPlanSide.Left;
+            buildRows = Math.Max(1, estimatedRightRows);
+            probeRows = Math.Max(1, estimatedLeftRows);
         }
 
+        int nestedLoopThreshold = Math.Max(1, Engine.Config.VolcanoNestedLoopJoinThresholdRows);
+        JoinPhysicalAlgorithm algorithm = buildRows <= nestedLoopThreshold
+            ? JoinPhysicalAlgorithm.NestedLoop
+            : JoinPhysicalAlgorithm.Hash;
+
+        int estimatedCost = algorithm == JoinPhysicalAlgorithm.NestedLoop
+            ? probeRows * buildRows
+            : (probeRows + (3 * buildRows));
+
         return new JoinEdgePhysicalPlan(
-            JoinPhysicalAlgorithm.Hash,
-            estimatedBuildRows,
-            $"build side '{buildSideTable}' exceeds threshold {nestedLoopThreshold}");
+            algorithm,
+            buildSide,
+            probeSide,
+            buildRows,
+            probeRows,
+            estimatedCost,
+            $"chosen using left={estimatedLeftRows}, right={estimatedRightRows}, threshold={nestedLoopThreshold}, edge build table '{buildSideTable}'");
+    }
+
+    private int EstimateJoinedStreamRows(HashSet<string> joinedTables, Dictionary<string, ExpressionNode> tableFilters)
+    {
+        if (_model.TableService == null)
+        {
+            return _model.FromTable?.TableContentValues?.Count ?? 0;
+        }
+
+        int total = 0;
+        foreach (string joined in joinedTables)
+        {
+            total += ResolveJoinTableRowCount(joined, tableFilters);
+        }
+
+        return total;
     }
 
     private IQueryOperator BuildVolcanoInnerJoinOperator(
@@ -1564,12 +1641,29 @@ internal class Select(SelectStatement ast) : BaseDbAction
         string rightTableName,
         JoinEdgePhysicalPlan joinPlan)
     {
-        if (joinPlan.Algorithm == JoinPhysicalAlgorithm.NestedLoop)
+        IQueryOperator probeInput = left;
+        IQueryOperator buildInput = right;
+        string probeJoinColumn = leftJoinColumn;
+        string buildJoinColumn = rightJoinColumn;
+        string probeTableName = leftTableName;
+        string buildTableName = rightTableName;
+
+        if (joinPlan.BuildSide == JoinPlanSide.Left)
         {
-            return new NestedLoopJoinOperator(left, right, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
+            probeInput = right;
+            buildInput = left;
+            probeJoinColumn = rightJoinColumn;
+            buildJoinColumn = leftJoinColumn;
+            probeTableName = rightTableName;
+            buildTableName = leftTableName;
         }
 
-        return new InnerJoinOperator(left, right, leftJoinColumn, rightJoinColumn, leftTableName, rightTableName);
+        if (joinPlan.Algorithm == JoinPhysicalAlgorithm.NestedLoop)
+        {
+            return new NestedLoopJoinOperator(probeInput, buildInput, probeJoinColumn, buildJoinColumn, probeTableName, buildTableName);
+        }
+
+        return new InnerJoinOperator(probeInput, buildInput, probeJoinColumn, buildJoinColumn, probeTableName, buildTableName);
     }
 
     private int PickNextVolcanoJoinConditionIndex(

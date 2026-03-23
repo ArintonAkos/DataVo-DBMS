@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Execution.Volcano;
@@ -7,6 +8,32 @@ namespace DataVo.Core.Execution.Volcano;
 /// </summary>
 public sealed class HashAggregateOperator : IQueryOperator
 {
+    /// <summary>
+    /// Options for enabling external spill with partitioning and merge/reduce aggregation.
+    /// </summary>
+    public sealed class AggregateExecutionOptions
+    {
+        /// <summary>
+        /// Enables external partition spill when source row count exceeds <see cref="SpillThresholdRows"/>.
+        /// </summary>
+        public bool EnableExternalSpill { get; init; }
+
+        /// <summary>
+        /// Row threshold that triggers external partition spill.
+        /// </summary>
+        public int SpillThresholdRows { get; init; } = 50000;
+
+        /// <summary>
+        /// Number of hash partitions used during spill run generation.
+        /// </summary>
+        public int PartitionCount { get; init; } = 16;
+
+        /// <summary>
+        /// Optional directory for partition run files. Defaults to process temporary directory.
+        /// </summary>
+        public string? SpillDirectory { get; init; }
+    }
+
     public enum AggregateFunction
     {
         Count,
@@ -41,54 +68,45 @@ public sealed class HashAggregateOperator : IQueryOperator
     private readonly IQueryOperator _source;
     private readonly IReadOnlyList<string> _groupKeyColumns;
     private readonly IReadOnlyList<AggregateSpec> _aggregateSpecs;
+    private readonly AggregateExecutionOptions _options;
 
     private List<ExecutionRow> _rows = [];
     private int _index;
 
     public HashAggregateOperator(IQueryOperator source, IReadOnlyList<string> groupKeyColumns, IReadOnlyList<AggregateSpec> aggregateSpecs)
+        : this(source, groupKeyColumns, aggregateSpecs, options: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a hash aggregate operator over a source stream with spill options.
+    /// </summary>
+    public HashAggregateOperator(
+        IQueryOperator source,
+        IReadOnlyList<string> groupKeyColumns,
+        IReadOnlyList<AggregateSpec> aggregateSpecs,
+        AggregateExecutionOptions? options)
     {
         _source = source;
         _groupKeyColumns = groupKeyColumns;
         _aggregateSpecs = aggregateSpecs;
+        _options = options ?? new AggregateExecutionOptions();
     }
 
     /// <inheritdoc />
     public void Open()
     {
-        _source.Open();
-
-        var groups = new Dictionary<string, GroupAccumulator>(StringComparer.Ordinal);
-
-        try
-        {
-            while (true)
-            {
-                ExecutionRow? row = _source.GetNextRow();
-                if (row == null)
-                {
-                    break;
-                }
-
-                string groupKey = BuildGroupKey(row, _groupKeyColumns);
-                if (!groups.TryGetValue(groupKey, out var accumulator))
-                {
-                    accumulator = new GroupAccumulator(CloneGroupKeys(row, _groupKeyColumns), _aggregateSpecs.Count);
-                    groups[groupKey] = accumulator;
-                }
-
-                ApplyRowToAccumulator(row, accumulator);
-            }
-        }
-        finally
-        {
-            _source.Close();
-        }
+        var groups = ExecuteAggregatePlan();
 
         _rows = [];
         long rowId = 1;
         foreach (GroupAccumulator accumulator in groups.Values)
         {
-            var values = new Dictionary<string, dynamic>(accumulator.GroupKeys, StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in accumulator.GroupKeys)
+            {
+                values[key.Key] = key.Value;
+            }
 
             for (int i = 0; i < _aggregateSpecs.Count; i++)
             {
@@ -101,6 +119,269 @@ public sealed class HashAggregateOperator : IQueryOperator
         }
 
         _index = 0;
+    }
+
+    private Dictionary<string, GroupAccumulator> ExecuteAggregatePlan()
+    {
+        _source.Open();
+        try
+        {
+            var observedRows = new List<ExecutionRow>();
+            int observedCount = 0;
+
+            while (true)
+            {
+                ExecutionRow? row = _source.GetNextRow();
+                if (row == null)
+                {
+                    break;
+                }
+
+                observedRows.Add(row);
+                observedCount++;
+
+                if (ShouldUseExternalSpill(observedCount))
+                {
+                    return ExecuteWithExternalSpill(observedRows);
+                }
+            }
+
+            return ExecuteInMemory(observedRows);
+        }
+        finally
+        {
+            _source.Close();
+        }
+    }
+
+    private bool ShouldUseExternalSpill(int observedRows)
+    {
+        return _options.EnableExternalSpill
+            && _options.SpillThresholdRows > 0
+            && observedRows > _options.SpillThresholdRows;
+    }
+
+    private Dictionary<string, GroupAccumulator> ExecuteInMemory(List<ExecutionRow> rows)
+    {
+        var groups = new Dictionary<string, GroupAccumulator>(StringComparer.Ordinal);
+        foreach (ExecutionRow row in rows)
+        {
+            UpsertAggregate(groups, row);
+        }
+
+        return groups;
+    }
+
+    private Dictionary<string, GroupAccumulator> ExecuteWithExternalSpill(List<ExecutionRow> initialRows)
+    {
+        int partitionCount = Math.Max(2, _options.PartitionCount);
+        List<string> partitionFiles = CreatePartitionFiles(partitionCount);
+        List<StreamWriter> writers = partitionFiles.Select(path => new StreamWriter(path, append: false)).ToList();
+
+        try
+        {
+            foreach (ExecutionRow row in initialRows)
+            {
+                WriteRowToPartition(row, partitionFiles, writers);
+            }
+
+            while (true)
+            {
+                ExecutionRow? row = _source.GetNextRow();
+                if (row == null)
+                {
+                    break;
+                }
+
+                WriteRowToPartition(row, partitionFiles, writers);
+            }
+        }
+        finally
+        {
+            foreach (var writer in writers)
+            {
+                writer.Dispose();
+            }
+        }
+
+        var global = new Dictionary<string, GroupAccumulator>(StringComparer.Ordinal);
+        try
+        {
+            foreach (string file in partitionFiles)
+            {
+                Dictionary<string, GroupAccumulator> partial = ReducePartition(file);
+                MergePartial(global, partial);
+            }
+        }
+        finally
+        {
+            CleanupPartitionFiles(partitionFiles);
+        }
+
+        return global;
+    }
+
+    private List<string> CreatePartitionFiles(int partitionCount)
+    {
+        string baseDirectory = string.IsNullOrWhiteSpace(_options.SpillDirectory)
+            ? Path.GetTempPath()
+            : _options.SpillDirectory!;
+
+        Directory.CreateDirectory(baseDirectory);
+
+        List<string> files = [];
+        for (int i = 0; i < partitionCount; i++)
+        {
+            files.Add(Path.Combine(baseDirectory, $"datavo-agg-part-{Guid.NewGuid():N}-{i}.jsonl"));
+        }
+
+        return files;
+    }
+
+    private void WriteRowToPartition(ExecutionRow row, List<string> partitionFiles, List<StreamWriter> writers)
+    {
+        string key = BuildGroupKey(row.ToTyped(), _groupKeyColumns);
+        int index = Math.Abs(key.GetHashCode()) % partitionFiles.Count;
+
+        TypedExecutionRow typed = row.ToTyped();
+        writers[index].WriteLine(JsonSerializer.Serialize(typed));
+    }
+
+    private Dictionary<string, GroupAccumulator> ReducePartition(string partitionFile)
+    {
+        var groups = new Dictionary<string, GroupAccumulator>(StringComparer.Ordinal);
+        using var reader = new StreamReader(partitionFile);
+
+        while (true)
+        {
+            string? line = reader.ReadLine();
+            if (line == null)
+            {
+                break;
+            }
+
+            TypedExecutionRow? typed = JsonSerializer.Deserialize<TypedExecutionRow>(line);
+            if (typed == null)
+            {
+                continue;
+            }
+
+            var normalized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in typed.Values)
+            {
+                normalized[entry.Key] = NormalizeDeserializedValue(entry.Value);
+            }
+
+            UpsertAggregate(groups, ExecutionRow.FromTyped(new TypedExecutionRow(typed.RowId, normalized)));
+        }
+
+        return groups;
+    }
+
+    private void MergePartial(
+        Dictionary<string, GroupAccumulator> global,
+        Dictionary<string, GroupAccumulator> partial)
+    {
+        foreach (var entry in partial)
+        {
+            if (!global.TryGetValue(entry.Key, out var accumulator))
+            {
+                global[entry.Key] = entry.Value;
+                continue;
+            }
+
+            MergeAccumulatorStates(accumulator, entry.Value);
+        }
+    }
+
+    private void MergeAccumulatorStates(GroupAccumulator target, GroupAccumulator source)
+    {
+        for (int i = 0; i < _aggregateSpecs.Count; i++)
+        {
+            AggregateSpec spec = _aggregateSpecs[i];
+            AggregateState targetState = target.States[i];
+            AggregateState sourceState = source.States[i];
+
+            switch (spec.Function)
+            {
+                case AggregateFunction.Count:
+                    targetState.Count += sourceState.Count;
+                    break;
+                case AggregateFunction.Sum:
+                case AggregateFunction.Avg:
+                    targetState.Sum += sourceState.Sum;
+                    targetState.Count += sourceState.Count;
+                    break;
+                case AggregateFunction.Min:
+                    if (sourceState.HasComparable
+                        && (!targetState.HasComparable || DynamicObjectComparer.Instance.Compare(sourceState.ComparableValue, targetState.ComparableValue) < 0))
+                    {
+                        targetState.ComparableValue = sourceState.ComparableValue;
+                        targetState.HasComparable = true;
+                    }
+
+                    break;
+                case AggregateFunction.Max:
+                    if (sourceState.HasComparable
+                        && (!targetState.HasComparable || DynamicObjectComparer.Instance.Compare(sourceState.ComparableValue, targetState.ComparableValue) > 0))
+                    {
+                        targetState.ComparableValue = sourceState.ComparableValue;
+                        targetState.HasComparable = true;
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private static void CleanupPartitionFiles(IEnumerable<string> files)
+    {
+        foreach (string file in files)
+        {
+            try
+            {
+                if (File.Exists(file))
+                {
+                    File.Delete(file);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static object? NormalizeDeserializedValue(object? value)
+    {
+        if (value is not JsonElement element)
+        {
+            return value;
+        }
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => element.TryGetInt64(out long int64)
+                ? int64
+                : element.GetDouble(),
+            _ => element.ToString()
+        };
+    }
+
+    private void UpsertAggregate(Dictionary<string, GroupAccumulator> groups, ExecutionRow row)
+    {
+        TypedExecutionRow typedRow = row.ToTyped();
+        string groupKey = BuildGroupKey(typedRow, _groupKeyColumns);
+        if (!groups.TryGetValue(groupKey, out var accumulator))
+        {
+            accumulator = new GroupAccumulator(CloneGroupKeys(typedRow, _groupKeyColumns), _aggregateSpecs.Count);
+            groups[groupKey] = accumulator;
+        }
+
+        ApplyRowToAccumulator(typedRow, accumulator);
     }
 
     /// <inheritdoc />
@@ -123,8 +404,10 @@ public sealed class HashAggregateOperator : IQueryOperator
         _index = 0;
     }
 
-    private void ApplyRowToAccumulator(ExecutionRow row, GroupAccumulator accumulator)
+    private void ApplyRowToAccumulator(TypedExecutionRow row, GroupAccumulator accumulator)
     {
+        ExecutionRow? dynamicRow = null;
+
         for (int i = 0; i < _aggregateSpecs.Count; i++)
         {
             AggregateSpec spec = _aggregateSpecs[i];
@@ -138,7 +421,8 @@ public sealed class HashAggregateOperator : IQueryOperator
                 }
                 else
                 {
-                    object? value = spec.ArgumentSelector(row);
+                    dynamicRow ??= ExecutionRow.FromTyped(row);
+                    object? value = spec.ArgumentSelector(dynamicRow);
                     if (value != null)
                     {
                         state.Count++;
@@ -148,7 +432,8 @@ public sealed class HashAggregateOperator : IQueryOperator
                 continue;
             }
 
-            object? argument = spec.ArgumentSelector?.Invoke(row);
+            dynamicRow ??= ExecutionRow.FromTyped(row);
+            object? argument = spec.ArgumentSelector?.Invoke(dynamicRow);
             if (argument == null)
             {
                 continue;
@@ -197,9 +482,9 @@ public sealed class HashAggregateOperator : IQueryOperator
         };
     }
 
-    private static Dictionary<string, dynamic> CloneGroupKeys(ExecutionRow row, IReadOnlyList<string> groupKeyColumns)
+    private static Dictionary<string, object?> CloneGroupKeys(TypedExecutionRow row, IReadOnlyList<string> groupKeyColumns)
     {
-        var values = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (string keyColumn in groupKeyColumns)
         {
             values[keyColumn] = row.Values.TryGetValue(keyColumn, out var value) ? value : null!;
@@ -208,7 +493,7 @@ public sealed class HashAggregateOperator : IQueryOperator
         return values;
     }
 
-    private static string BuildGroupKey(ExecutionRow row, IReadOnlyList<string> groupKeyColumns)
+    private static string BuildGroupKey(TypedExecutionRow row, IReadOnlyList<string> groupKeyColumns)
     {
         if (groupKeyColumns.Count == 0)
         {
@@ -229,7 +514,7 @@ public sealed class HashAggregateOperator : IQueryOperator
 
     private sealed class GroupAccumulator
     {
-        public GroupAccumulator(Dictionary<string, dynamic> groupKeys, int aggregateCount)
+        public GroupAccumulator(Dictionary<string, object?> groupKeys, int aggregateCount)
         {
             GroupKeys = groupKeys;
             States = new AggregateState[aggregateCount];
@@ -239,7 +524,7 @@ public sealed class HashAggregateOperator : IQueryOperator
             }
         }
 
-        public Dictionary<string, dynamic> GroupKeys { get; }
+        public Dictionary<string, object?> GroupKeys { get; }
         public AggregateState[] States { get; }
     }
 }
