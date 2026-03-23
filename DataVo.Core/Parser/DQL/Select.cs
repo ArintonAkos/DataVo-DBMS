@@ -1228,7 +1228,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildNoJoinGroupByPushdown(out var groupByColumns))
         {
             Logger.Info($"Planner: push down GROUP BY as distinct ({groupByColumns.Count} keys).");
-            root = new DistinctOperator(root, row => BuildDistinctKey(row, groupByColumns));
+            root = new DistinctOperator(root, (ExecutionRow row) => BuildDistinctKey(row, groupByColumns));
             _volcanoGroupByPushedDown = true;
         }
 
@@ -1250,7 +1250,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildNoJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down projection ({projectionColumns.Count} columns).");
-            root = new ProjectOperator(root, typedRow =>
+            root = new ProjectOperator(root, (TypedExecutionRow typedRow) =>
             {
                 var values = new Dictionary<string, object?>();
                 foreach (string column in projectionColumns)
@@ -1296,7 +1296,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildNoJoinDistinctPushdown(out var distinctColumns))
         {
             Logger.Info($"Planner: push down DISTINCT ({distinctColumns.Count} keys).");
-            root = new DistinctOperator(root, typedRow => BuildDistinctKey(typedRow, distinctColumns));
+            root = new DistinctOperator(root, (TypedExecutionRow typedRow) => BuildDistinctKey(typedRow, distinctColumns));
             _volcanoDistinctPushedDown = true;
         }
 
@@ -1452,7 +1452,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildJoinProjectionPushdown(out var projectionColumns))
         {
             Logger.Info($"Planner: push down JOIN projection ({projectionColumns.Count} columns).");
-            root = new ProjectOperator(root, typedRow =>
+            root = new ProjectOperator(root, (TypedExecutionRow typedRow) =>
             {
                 var values = new Dictionary<string, object?>();
                 foreach (string column in projectionColumns)
@@ -1472,7 +1472,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (TryBuildJoinDistinctPushdown(out var distinctColumns))
         {
             Logger.Info($"Planner: push down JOIN DISTINCT ({distinctColumns.Count} keys).");
-            root = new DistinctOperator(root, typedRow => BuildDistinctKey(typedRow, distinctColumns));
+            root = new DistinctOperator(root, (TypedExecutionRow typedRow) => BuildDistinctKey(typedRow, distinctColumns));
             _volcanoDistinctPushedDown = true;
         }
 
