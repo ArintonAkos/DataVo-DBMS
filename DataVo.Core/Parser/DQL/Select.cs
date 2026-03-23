@@ -1417,7 +1417,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
             JoinEdgePhysicalPlan joinPlan = BuildJoinEdgePhysicalPlan(
                 buildSideTable: newTable,
                 estimatedLeftRows,
-                estimatedRightRows);
+                estimatedRightRows,
+                leftJoinTable: existingTable,
+                leftJoinColumn: existingColumn,
+                rightJoinTable: newTable,
+                rightJoinColumn: newColumn,
+                tableFilters);
             root = BuildVolcanoInnerJoinOperator(
                 root,
                 rightInput,
@@ -1575,12 +1580,24 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
     }
 
-    private JoinEdgePhysicalPlan BuildJoinEdgePhysicalPlan(string buildSideTable, int estimatedLeftRows, int estimatedRightRows)
+    private JoinEdgePhysicalPlan BuildJoinEdgePhysicalPlan(
+        string buildSideTable,
+        int estimatedLeftRows,
+        int estimatedRightRows,
+        string leftJoinTable,
+        string leftJoinColumn,
+        string rightJoinTable,
+        string rightJoinColumn,
+        Dictionary<string, ExpressionNode> tableFilters)
     {
         JoinPlanSide buildSide;
         JoinPlanSide probeSide;
         int buildRows;
         int probeRows;
+        string buildTable;
+        string buildColumn;
+        string probeTable;
+        string probeColumn;
 
         if (estimatedLeftRows <= estimatedRightRows)
         {
@@ -1588,6 +1605,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
             probeSide = JoinPlanSide.Right;
             buildRows = Math.Max(1, estimatedLeftRows);
             probeRows = Math.Max(1, estimatedRightRows);
+            buildTable = leftJoinTable;
+            buildColumn = leftJoinColumn;
+            probeTable = rightJoinTable;
+            probeColumn = rightJoinColumn;
         }
         else
         {
@@ -1595,16 +1616,28 @@ internal class Select(SelectStatement ast) : BaseDbAction
             probeSide = JoinPlanSide.Left;
             buildRows = Math.Max(1, estimatedRightRows);
             probeRows = Math.Max(1, estimatedLeftRows);
+            buildTable = rightJoinTable;
+            buildColumn = rightJoinColumn;
+            probeTable = leftJoinTable;
+            probeColumn = leftJoinColumn;
         }
 
+        int buildDistinct = EstimateJoinKeyDistinct(buildTable, buildColumn, tableFilters, buildRows);
+        int probeDistinct = EstimateJoinKeyDistinct(probeTable, probeColumn, tableFilters, probeRows);
+        int maxDistinct = Math.Max(1, Math.Max(buildDistinct, probeDistinct));
+        int estimatedOutputRows = Math.Max(1, (int)Math.Ceiling((double)(buildRows * probeRows) / maxDistinct));
+
         int nestedLoopThreshold = Math.Max(1, Engine.Config.VolcanoNestedLoopJoinThresholdRows);
-        JoinPhysicalAlgorithm algorithm = buildRows <= nestedLoopThreshold
+        int hashCost = buildRows + probeRows + (estimatedOutputRows / 2);
+        int nestedLoopCost = buildRows * probeRows;
+
+        JoinPhysicalAlgorithm algorithm = (buildRows <= nestedLoopThreshold && nestedLoopCost <= hashCost)
             ? JoinPhysicalAlgorithm.NestedLoop
             : JoinPhysicalAlgorithm.Hash;
 
         int estimatedCost = algorithm == JoinPhysicalAlgorithm.NestedLoop
-            ? probeRows * buildRows
-            : (probeRows + (3 * buildRows));
+            ? nestedLoopCost
+            : hashCost;
 
         return new JoinEdgePhysicalPlan(
             algorithm,
@@ -1613,7 +1646,54 @@ internal class Select(SelectStatement ast) : BaseDbAction
             buildRows,
             probeRows,
             estimatedCost,
-            $"chosen using left={estimatedLeftRows}, right={estimatedRightRows}, threshold={nestedLoopThreshold}, edge build table '{buildSideTable}'");
+            $"chosen using left={estimatedLeftRows}, right={estimatedRightRows}, ndv(build/probe)=({buildDistinct}/{probeDistinct}), estOut={estimatedOutputRows}, threshold={nestedLoopThreshold}, edge build table '{buildSideTable}'");
+    }
+
+    private int EstimateJoinKeyDistinct(
+        string tableOrAlias,
+        string joinColumn,
+        Dictionary<string, ExpressionNode> tableFilters,
+        int estimatedRows)
+    {
+        if (_model.TableService == null)
+        {
+            return Math.Max(1, estimatedRows / 2);
+        }
+
+        var detail = _model.TableService.GetTableDetailByAliasOrName(tableOrAlias);
+        var rows = detail.TableContentValues;
+        if (rows == null || rows.Count == 0)
+        {
+            return 1;
+        }
+
+        int sampleSize = Math.Min(2048, rows.Count);
+        var distinct = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < sampleSize; i++)
+        {
+            Row row = rows[i].ToRow();
+            object? value = row.ContainsKey(joinColumn) ? row[joinColumn] : null;
+            string typePart = value?.GetType().Name ?? "<null>";
+            string valuePart = value?.ToString() ?? "<null>";
+            distinct.Add($"{typePart}:{valuePart}");
+        }
+
+        if (distinct.Count == 0)
+        {
+            return 1;
+        }
+
+        double scale = (double)rows.Count / sampleSize;
+        int estimatedDistinct = (int)Math.Ceiling(distinct.Count * Math.Max(1d, scale * 0.8d));
+
+        if (tableFilters.TryGetValue(tableOrAlias, out var filter))
+        {
+            double selectivity = EstimatePredicateSelectivity(filter);
+            estimatedDistinct = Math.Max(1, (int)Math.Ceiling(estimatedDistinct * selectivity));
+        }
+
+        return Math.Min(Math.Max(1, estimatedDistinct), Math.Max(1, estimatedRows));
     }
 
     private int EstimateJoinedStreamRows(HashSet<string> joinedTables, Dictionary<string, ExpressionNode> tableFilters)
