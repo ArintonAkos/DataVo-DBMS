@@ -124,6 +124,58 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_SingleInnerJoin_WithPerTableAndPredicate_PreservesSemantics()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            WHERE o.Id >= 2 AND c.Name = 'Alice'
+            ORDER BY o.Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(3, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+    }
+
+    [Fact]
+    public void Select_SingleInnerJoin_WithCrossTableOrPredicate_PreservesSemantics()
+    {
+        Execute("CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT)");
+        Execute("CREATE TABLE Customers (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (1, 10)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (2, 11)");
+        Execute("INSERT INTO Orders (Id, CustomerId) VALUES (3, 10)");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
+        Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
+
+        var result = ExecuteAndReturn(@"
+            SELECT o.Id, c.Name
+            FROM Orders o
+            JOIN Customers c ON o.CustomerId = c.Id
+            WHERE o.Id = 1 OR c.Name = 'Bob'
+            ORDER BY o.Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, (int)result.Data[0]["o.Id"]);
+        Assert.Equal("Alice", (string)result.Data[0]["c.Name"]);
+        Assert.Equal(2, (int)result.Data[1]["o.Id"]);
+        Assert.Equal("Bob", (string)result.Data[1]["c.Name"]);
+    }
+
+    [Fact]
     public void Select_NoJoin_OrderByWithLimitOffset_UsesVolcanoSortThenWindow()
     {
         Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Score INT)");

@@ -1088,6 +1088,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         Logger.Info("Planner: using Volcano join pipeline.");
 
         string fromTableName = _model.FromTable.TableName;
+        Dictionary<string, ExpressionNode> tableFilters = BuildJoinTableFilterPushdowns(whereExpression);
+        if (tableFilters.Count > 0)
+        {
+            Logger.Info($"Planner: push down JOIN table filters ({tableFilters.Count} tables).");
+        }
+
         HashSet<string> joinedTables = [fromTableName];
         List<string> joinOrder = [fromTableName];
         List<DataVo.Core.Models.Statement.JoinModel.JoinCondition> remaining = [.. _model.JoinStatement.Model.JoinConditions];
@@ -1097,6 +1103,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         IQueryOperator root = new TableScanOperator(initialRows);
+        if (tableFilters.TryGetValue(fromTableName, out var fromFilter))
+        {
+            root = BuildTableFilterOperator(root, fromTableName, fromFilter);
+        }
 
         while (remaining.Count > 0)
         {
@@ -1124,9 +1134,15 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
                 .ToList();
 
+            IQueryOperator rightInput = new TableScanOperator(newRows);
+            if (tableFilters.TryGetValue(newTable, out var tableFilter))
+            {
+                rightInput = BuildTableFilterOperator(rightInput, newTable, tableFilter);
+            }
+
             root = new InnerJoinOperator(
                 root,
-                new TableScanOperator(newRows),
+                rightInput,
                 streamJoinKey,
                 newColumn,
                 existingTable,
@@ -1211,6 +1227,42 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         return new ListedTable(listed);
+    }
+
+    private Dictionary<string, ExpressionNode> BuildJoinTableFilterPushdowns(ExpressionNode? whereExpression)
+    {
+        Dictionary<string, ExpressionNode> extracted = new(StringComparer.OrdinalIgnoreCase);
+
+        if (_model.TableService == null || whereExpression == null || IsAllTrueExpression(whereExpression))
+        {
+            return extracted;
+        }
+
+        HashSet<string> candidateTables = [_model.FromTable.TableName];
+        foreach (var detail in _model.JoinStatement.Model.JoinTableDetails.Values)
+        {
+            candidateTables.Add(detail.TableName);
+        }
+
+        foreach (string table in candidateTables)
+        {
+            ExpressionNode? tablePredicate = ExpressionExtractor.TryExtractTableSpecificPredicates(whereExpression, table, _model.TableService);
+            if (tablePredicate != null && !IsAllTrueExpression(tablePredicate))
+            {
+                extracted[table] = tablePredicate;
+            }
+        }
+
+        return extracted;
+    }
+
+    private IQueryOperator BuildTableFilterOperator(IQueryOperator input, string tableName, ExpressionNode filterExpression)
+    {
+        return new FilterOperator(input, row =>
+        {
+            var joinedRow = new JoinedRow(tableName, new Row(new Dictionary<string, dynamic>(row.Values)));
+            return EvaluatePredicate(filterExpression, joinedRow);
+        });
     }
 
     private int PickNextVolcanoJoinConditionIndex(
