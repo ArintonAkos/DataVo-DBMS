@@ -411,20 +411,26 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             if (ShouldUseVolcanoInnerJoinPath(whereExpression))
             {
-                return new PhysicalPlanDecision(
-                    LogicalPlanKind.VolcanoInnerJoin,
-                    useVolcano: true,
-                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoInnerJoin, whereExpression),
-                    reason: "JOIN graph is fully INNER and connected");
+                return ChooseCheaperPlan(
+                    volcanoPlan: LogicalPlanKind.VolcanoInnerJoin,
+                    legacyPlan: LogicalPlanKind.LegacyWhereJoin,
+                    whereExpression,
+                    volcanoReason: "JOIN graph is fully INNER and connected",
+                    legacyReason: "legacy join path estimated cheaper for current predicate");
             }
 
             if (ShouldUseVolcanoNoJoinPath(whereExpression))
             {
-                return new PhysicalPlanDecision(
-                    LogicalPlanKind.VolcanoNoJoin,
-                    useVolcano: true,
-                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoNoJoin, whereExpression),
-                    reason: "single-table filter with no subquery");
+                LogicalPlanKind legacyCandidate = RequiresExpressionEvaluation(whereExpression)
+                    ? LogicalPlanKind.LegacyWhereExpression
+                    : LogicalPlanKind.LegacyWhereJoin;
+
+                return ChooseCheaperPlan(
+                    volcanoPlan: LogicalPlanKind.VolcanoNoJoin,
+                    legacyPlan: legacyCandidate,
+                    whereExpression,
+                    volcanoReason: "single-table filter with no subquery",
+                    legacyReason: "legacy filter path estimated cheaper for current predicate");
             }
 
             if (RequiresExpressionEvaluation(whereExpression))
@@ -447,11 +453,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             if (ShouldUseVolcanoInnerJoinPath(null))
             {
-                return new PhysicalPlanDecision(
-                    LogicalPlanKind.VolcanoInnerJoin,
-                    useVolcano: true,
-                    estimatedCost: EstimateCost(LogicalPlanKind.VolcanoInnerJoin, null),
-                    reason: "join-only query has connected INNER JOIN graph");
+                return ChooseCheaperPlan(
+                    volcanoPlan: LogicalPlanKind.VolcanoInnerJoin,
+                    legacyPlan: LogicalPlanKind.LegacyJoinOnly,
+                    whereExpression: null,
+                    volcanoReason: "join-only query has connected INNER JOIN graph",
+                    legacyReason: "legacy join-only path estimated cheaper");
             }
 
             return new PhysicalPlanDecision(
@@ -463,11 +470,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (ShouldUseVolcanoNoJoinPath(null))
         {
-            return new PhysicalPlanDecision(
-                LogicalPlanKind.VolcanoNoJoin,
-                useVolcano: true,
-                estimatedCost: EstimateCost(LogicalPlanKind.VolcanoNoJoin, null),
-                reason: "simple no-join scan path");
+            return ChooseCheaperPlan(
+                volcanoPlan: LogicalPlanKind.VolcanoNoJoin,
+                legacyPlan: LogicalPlanKind.LegacyNoJoinScan,
+                whereExpression: null,
+                volcanoReason: "simple no-join scan path",
+                legacyReason: "legacy no-join scan estimated cheaper");
         }
 
         return new PhysicalPlanDecision(
@@ -475,6 +483,32 @@ internal class Select(SelectStatement ast) : BaseDbAction
             useVolcano: false,
             estimatedCost: EstimateCost(LogicalPlanKind.LegacyNoJoinScan, null),
             reason: "volcano disabled or unsupported");
+    }
+
+    private PhysicalPlanDecision ChooseCheaperPlan(
+        LogicalPlanKind volcanoPlan,
+        LogicalPlanKind legacyPlan,
+        ExpressionNode? whereExpression,
+        string volcanoReason,
+        string legacyReason)
+    {
+        int volcanoCost = EstimateCost(volcanoPlan, whereExpression);
+        int legacyCost = EstimateCost(legacyPlan, whereExpression);
+
+        if (volcanoCost <= legacyCost)
+        {
+            return new PhysicalPlanDecision(
+                volcanoPlan,
+                useVolcano: true,
+                estimatedCost: volcanoCost,
+                reason: $"{volcanoReason}; compared to {legacyPlan} cost {legacyCost}");
+        }
+
+        return new PhysicalPlanDecision(
+            legacyPlan,
+            useVolcano: false,
+            estimatedCost: legacyCost,
+            reason: $"{legacyReason}; compared to {volcanoPlan} cost {volcanoCost}");
     }
 
     private int EstimateCost(LogicalPlanKind plan, ExpressionNode? whereExpression)
@@ -486,17 +520,116 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
 
         int complexity = whereExpression == null ? 1 : EstimatePredicateComplexity(whereExpression);
+        double selectivity = EstimatePredicateSelectivity(whereExpression);
+        int effectiveRows = Math.Max(1, (int)Math.Ceiling(rowCount * selectivity));
+        int pipelineFeatures = EstimatePipelineFeatureCost();
 
         return plan switch
         {
-            LogicalPlanKind.VolcanoNoJoin => 8 + complexity + (rowCount / 1000),
-            LogicalPlanKind.VolcanoInnerJoin => 14 + complexity + (rowCount / 750),
-            LogicalPlanKind.LegacyWhereExpression => 30 + (2 * complexity) + (rowCount / 500),
-            LogicalPlanKind.LegacyWhereJoin => 24 + complexity + (rowCount / 400),
-            LogicalPlanKind.LegacyJoinOnly => 22 + (rowCount / 350),
-            LogicalPlanKind.LegacyNoJoinScan => 16 + (rowCount / 450),
+            LogicalPlanKind.VolcanoNoJoin => 8 + complexity + pipelineFeatures + (effectiveRows / 1000),
+            LogicalPlanKind.VolcanoInnerJoin => 14 + complexity + pipelineFeatures + (effectiveRows / 750),
+            LogicalPlanKind.LegacyWhereExpression => 30 + (2 * complexity) + pipelineFeatures + (effectiveRows / 500),
+            LogicalPlanKind.LegacyWhereJoin => 24 + complexity + pipelineFeatures + (effectiveRows / 400),
+            LogicalPlanKind.LegacyJoinOnly => 22 + pipelineFeatures + (effectiveRows / 350),
+            LogicalPlanKind.LegacyNoJoinScan => 16 + pipelineFeatures + (effectiveRows / 450),
             _ => 100
         };
+    }
+
+    private int EstimatePipelineFeatureCost()
+    {
+        int score = 0;
+
+        if (_model.GetOrderByExpression()?.Columns.Count > 0)
+        {
+            score += 2;
+        }
+
+        if (_model.IsDistinct)
+        {
+            score += 2;
+        }
+
+        if (_model.GroupByStatement.ContainsGroupBy())
+        {
+            score += 3;
+        }
+
+        if (_model.LimitTake.HasValue || (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0))
+        {
+            score += 1;
+        }
+
+        return score;
+    }
+
+    private static double EstimatePredicateSelectivity(ExpressionNode? node)
+    {
+        if (node == null)
+        {
+            return 1d;
+        }
+
+        if (node is LiteralNode literal && literal.Value?.ToString() == SqlLiterals.TrueExpression)
+        {
+            return 1d;
+        }
+
+        if (node is ScalarFunctionExpressionNode)
+        {
+            return 0.5d;
+        }
+
+        if (node is not BinaryExpressionNode binary)
+        {
+            return 0.5d;
+        }
+
+        if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase))
+        {
+            double left = EstimatePredicateSelectivity(binary.Left);
+            double right = EstimatePredicateSelectivity(binary.Right);
+            return Math.Clamp(left * right, 0.01d, 1d);
+        }
+
+        if (binary.Operator.Equals(Operators.OR, StringComparison.OrdinalIgnoreCase))
+        {
+            double left = EstimatePredicateSelectivity(binary.Left);
+            double right = EstimatePredicateSelectivity(binary.Right);
+            double combined = left + right - (left * right);
+            return Math.Clamp(combined, 0.01d, 1d);
+        }
+
+        if (binary.Operator.Equals(Operators.EQUALS, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.1d;
+        }
+
+        if (binary.Operator.Equals(Operators.NOT_EQUALS, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.9d;
+        }
+
+        if (binary.Operator.Equals(Operators.GREATER_THAN, StringComparison.OrdinalIgnoreCase)
+            || binary.Operator.Equals(Operators.GREATER_THAN_OR_EQUAL_TO, StringComparison.OrdinalIgnoreCase)
+            || binary.Operator.Equals(Operators.LESS_THAN, StringComparison.OrdinalIgnoreCase)
+            || binary.Operator.Equals(Operators.LESS_THAN_OR_EQUAL_TO, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.35d;
+        }
+
+        if (binary.Operator.Equals(Operators.LIKE, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.25d;
+        }
+
+        if (binary.Operator.Equals(Operators.IS_NULL, StringComparison.OrdinalIgnoreCase)
+            || binary.Operator.Equals(Operators.IS_NOT_NULL, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.1d;
+        }
+
+        return 0.5d;
     }
 
     private int EstimateJoinInputRowCount()
