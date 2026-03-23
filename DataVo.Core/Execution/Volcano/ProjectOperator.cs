@@ -6,7 +6,8 @@ namespace DataVo.Core.Execution.Volcano;
 public sealed class ProjectOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
-    private readonly Func<ExecutionRow, Dictionary<string, dynamic>> _projector;
+    private readonly Func<ExecutionRow, Dictionary<string, dynamic>>? _projector;
+    private readonly Func<TypedExecutionRow, Dictionary<string, object?>>? _typedProjector;
 
     /// <summary>
     /// Initializes a projection operator over a source stream.
@@ -15,6 +16,15 @@ public sealed class ProjectOperator : IQueryOperator
     {
         _source = source;
         _projector = projector;
+    }
+
+    /// <summary>
+    /// Initializes a projection operator over a source stream using typed row payloads.
+    /// </summary>
+    public ProjectOperator(IQueryOperator source, Func<TypedExecutionRow, Dictionary<string, object?>> typedProjector)
+    {
+        _source = source;
+        _typedProjector = typedProjector;
     }
 
     /// <inheritdoc />
@@ -32,7 +42,14 @@ public sealed class ProjectOperator : IQueryOperator
             return null;
         }
 
-        return new ExecutionRow(row.RowId, _projector(row));
+        if (_typedProjector != null)
+        {
+            TypedExecutionRow typed = row.ToTyped();
+            var projected = _typedProjector(typed);
+            return ExecutionRow.FromTyped(new TypedExecutionRow(row.RowId, projected));
+        }
+
+        return new ExecutionRow(row.RowId, _projector!(row));
     }
 
     /// <inheritdoc />

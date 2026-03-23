@@ -256,6 +256,52 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void DistinctOperator_TypedSelector_RemovesDuplicateKeys()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 1 }),
+            new(2, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 2 }),
+            new(3, new Dictionary<string, dynamic> { ["Name"] = "B", ["Score"] = 3 })
+        };
+
+        IQueryOperator op = new DistinctOperator(
+            new TableScanOperator(input),
+            row => Convert.ToString(row.Values["Name"]) ?? string.Empty);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", (string)rows[0]["Name"]);
+        Assert.Equal("B", (string)rows[1]["Name"]);
+    }
+
+    [Fact]
+    public void ProjectOperator_TypedProjector_ProjectsExpectedFields()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Name"] = "A", ["Score"] = 50 }),
+            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Name"] = "B", ["Score"] = 95 }),
+        };
+
+        IQueryOperator op = new ProjectOperator(
+            new TableScanOperator(input),
+            row => new Dictionary<string, object?>
+            {
+                ["Id"] = row.Values["Id"],
+                ["Name"] = row.Values["Name"]
+            });
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, (int)rows[0]["Id"]);
+        Assert.Equal("A", (string)rows[0]["Name"]);
+        Assert.DoesNotContain("Score", rows[0].Values.Keys);
+    }
+
+    [Fact]
     public void HashAggregateOperator_GroupsAndComputesCountSumAvg()
     {
         var input = new List<ExecutionRow>
