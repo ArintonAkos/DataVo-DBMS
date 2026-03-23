@@ -88,14 +88,7 @@ public sealed class DataVoContext : IDisposable
         using var _ = DataVoEngine.PushCurrent(Engine);
 
         List<long> rowIds;
-        try
-        {
-            rowIds = Engine.IndexManagerV2.SearchVector(queryVector, topK, indexName, tableName, databaseName);
-        }
-        catch
-        {
-            rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
-        }
+        rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
         if (rowIds.Count == 0)
         {
             return [];

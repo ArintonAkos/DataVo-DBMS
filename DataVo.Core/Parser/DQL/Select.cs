@@ -492,15 +492,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
-        List<long> rowIds;
-        try
-        {
-            rowIds = IndexesV2.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
-        }
-        catch
-        {
-            rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
-        }
+        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
         if (rowIds.Count == 0)
         {
             return new ListedTable();

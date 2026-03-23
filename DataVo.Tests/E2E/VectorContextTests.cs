@@ -24,7 +24,7 @@ public class VectorContextTests
     }
 
     [Fact]
-    public void DataVoContext_SearchNearest_UsesIndexManagerV2_WhenV2IndexExists()
+    public void DataVoContext_SearchNearest_UsesPrimaryIndexManager_WhenPolymorphicIndexExists()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
 
@@ -44,7 +44,7 @@ public class VectorContextTests
             })
             .ToList();
 
-        context.Engine.IndexManagerV2.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", "VecCtxV2", "cosine");
+        context.Engine.IndexManager.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", "VecCtxV2", "cosine");
 
         List<Dictionary<string, dynamic>> results = context.SearchNearest("Embeddings", "idx_emb_v2", "[0.9,0.1,0]", topK: 1);
 
