@@ -1,4 +1,6 @@
 using System.Text.Json;
+using DataVo.Core.BTree;
+using DataVo.Core.BTree.Core;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
@@ -39,9 +41,9 @@ public enum IndexPersistenceMode
 /// IndexManager itself, following the Open/Closed principle.
 /// </para>
 /// </remarks>
-public class IndexManagerV2 : IDisposable
+public class IndexManager : IDisposable
 {
-    private static IndexManagerV2? _instance;
+    private static IndexManager? _instance;
     private readonly string _indexRootDirectory;
 
     /// <summary>
@@ -83,12 +85,18 @@ public class IndexManagerV2 : IDisposable
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
 
-    public IndexManagerV2()
+    /// <summary>
+    /// Initializes a new polymorphic index manager with default configuration.
+    /// </summary>
+    public IndexManager()
         : this(config: null, engineStorageRoot: null)
     {
     }
 
-    public IndexManagerV2(DataVoConfig? config, string? engineStorageRoot)
+    /// <summary>
+    /// Initializes a new polymorphic index manager with optional configuration.
+    /// </summary>
+    public IndexManager(DataVoConfig? config, string? engineStorageRoot)
     {
         _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
         Directory.CreateDirectory(_indexRootDirectory);
@@ -98,11 +106,11 @@ public class IndexManagerV2 : IDisposable
     /// <summary>
     /// Gets the singleton instance (for backward compatibility).
     /// </summary>
-    public static IndexManagerV2 Instance
+    public static IndexManager Instance
     {
         get
         {
-            _instance ??= new IndexManagerV2();
+            _instance ??= new IndexManager();
             return _instance;
         }
     }
@@ -134,7 +142,7 @@ public class IndexManagerV2 : IDisposable
                 throw new NotSupportedException($"Index type '{indexType}' not registered");
 
             var index = factory.CreateIndex(metadata.IndexName, metadata.ColumnName, @params);
-            
+
             _cache[metadata.CacheKey] = index;
             _metadata[metadata.CacheKey] = metadata;
             _dirtyIndices.Add(metadata.CacheKey);
@@ -283,10 +291,165 @@ public class IndexManagerV2 : IDisposable
     /// </summary>
     public void SetPersistenceMode(IndexPersistenceMode mode, int flushThreshold = 256)
     {
+        if (flushThreshold <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(flushThreshold), "Flush threshold must be greater than zero.");
+        }
+
         lock (_lock)
         {
             _persistenceMode = mode;
             _flushMutationThreshold = flushThreshold;
+        }
+    }
+
+    /// <summary>
+    /// Creates or replaces a scalar BTree index.
+    /// </summary>
+    public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    {
+        IndexMetadata metadata = CreateScalarMetadata(indexName, tableName, databaseName);
+
+        var index = (IIndex)CreateIndex("BTREE", metadata, []);
+
+        foreach (var entry in values)
+        {
+            foreach (long rowId in entry.Value)
+            {
+                index.Insert(entry.Key, rowId);
+            }
+        }
+
+        _cachePaths[metadata.CacheKey] = BuildIndexPath(metadata);
+        MarkDirty(metadata.CacheKey);
+        FlushInternal(metadata.CacheKey);
+    }
+
+    /// <summary>
+    /// Rebuilds an existing scalar BTree index from supplied values.
+    /// </summary>
+    public void RebuildIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    {
+        DropIndex(indexName, tableName, databaseName);
+        CreateIndex(values, indexName, tableName, databaseName, indexType);
+    }
+
+    /// <summary>
+    /// Drops a single index (scalar or vector).
+    /// </summary>
+    public void DropIndex(string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        RemoveIndex(cacheKey);
+
+        string tableDirectory = Path.Combine(_indexRootDirectory, databaseName, tableName);
+        if (Directory.Exists(tableDirectory))
+        {
+            foreach (string extension in _persistenceHandlers.Values.Select(handler => handler.FileExtension).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string filePath = Path.Combine(tableDirectory, $"{indexName}{extension}");
+                if (!File.Exists(filePath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(filePath);
+                }
+                catch
+                {
+                    // Keep legacy compatibility behavior: best-effort cleanup.
+                }
+            }
+        }
+
+        // Delete legacy-formatted scalar index files if they exist.
+        string legacyScalarPath = Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree");
+        if (File.Exists(legacyScalarPath))
+        {
+            try
+            {
+                File.Delete(legacyScalarPath);
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops all indexes for a database.
+    /// </summary>
+    public void DropDatabaseIndexes(string databaseName)
+    {
+        string databaseDirectory = Path.Combine(_indexRootDirectory, databaseName);
+        if (Directory.Exists(databaseDirectory))
+        {
+            try
+            {
+                Directory.Delete(databaseDirectory, recursive: true);
+            }
+            catch
+            {
+                // Keep cache cleanup even if directory deletion fails.
+            }
+        }
+
+        List<string> keysToRemove;
+        lock (_lock)
+        {
+            keysToRemove = _cache.Keys
+                .Where(cacheKey => cacheKey.StartsWith($"{databaseName}/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        foreach (string cacheKey in keysToRemove)
+        {
+            RemoveIndex(cacheKey);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether a scalar index can be loaded and queried.
+    /// </summary>
+    public bool IsIndexHealthy(string indexName, string tableName, string databaseName)
+    {
+        try
+        {
+            _ = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to recover a scalar index by rebuilding it from source data.
+    /// </summary>
+    public bool TryRecoverIndex(
+        string indexName,
+        string tableName,
+        string databaseName,
+        Dictionary<string, List<long>> rebuildData,
+        IndexType? indexType = null)
+    {
+        if (IsIndexHealthy(indexName, tableName, databaseName))
+        {
+            return true;
+        }
+
+        try
+        {
+            RebuildIndex(rebuildData, indexName, tableName, databaseName, indexType);
+            return IsIndexHealthy(indexName, tableName, databaseName);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -320,6 +483,9 @@ public class IndexManagerV2 : IDisposable
         return Path.Combine(Path.GetTempPath(), "datavo_indexes", Guid.NewGuid().ToString("N"));
     }
 
+    /// <summary>
+    /// Flushes managed indexes and releases delegated manager resources.
+    /// </summary>
     public void Dispose()
     {
         FlushAll();
@@ -370,7 +536,7 @@ public class IndexManagerV2 : IDisposable
     }
 
     /// <summary>
-    /// Compatibility API: inserts/updates a single vector in an existing vector index.
+    /// Inserts or updates a single vector in an existing vector index.
     /// </summary>
     public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName)
     {
@@ -382,7 +548,7 @@ public class IndexManagerV2 : IDisposable
     }
 
     /// <summary>
-    /// Compatibility API: deletes vectors by row IDs.
+    /// Deletes vectors by row IDs.
     /// </summary>
     public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
@@ -394,7 +560,7 @@ public class IndexManagerV2 : IDisposable
     }
 
     /// <summary>
-    /// Compatibility API: nearest-neighbor vector search.
+    /// Performs nearest-neighbor vector search.
     /// </summary>
     public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName)
     {
@@ -405,6 +571,88 @@ public class IndexManagerV2 : IDisposable
 
         var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
         return hnsw.SearchTopK(queryVector, topK);
+    }
+
+    /// <summary>
+    /// Inserts a scalar key into a BTree index.
+    /// </summary>
+    public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        index.Insert(value, rowId);
+        MarkDirty(cacheKey);
+        FlushInternal(cacheKey);
+    }
+
+    /// <summary>
+    /// Deletes row IDs from a scalar BTree index.
+    /// </summary>
+    public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        index.DeleteValues(toBeDeletedIds);
+        MarkDirty(cacheKey);
+        FlushInternal(cacheKey);
+    }
+
+    /// <summary>
+    /// Performs point lookup via scalar BTree index.
+    /// </summary>
+    public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
+    {
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        return [.. index.Search(columnValue)];
+    }
+
+    /// <summary>
+    /// Checks whether a scalar index contains a specific key.
+    /// </summary>
+    public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
+    {
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        return index.Search(key).Any();
+    }
+
+    /// <summary>
+    /// Checks whether a scalar index references a row ID.
+    /// </summary>
+    public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
+    {
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        return index.ContainsValue(rowId);
+    }
+
+    private IIndex GetOrLoadScalarIndex(string indexName, string tableName, string databaseName)
+    {
+        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_cache.TryGetValue(cacheKey, out var cached) && cached is IIndex scalar)
+        {
+            return scalar;
+        }
+
+        IndexMetadata metadata = CreateScalarMetadata(indexName, tableName, databaseName);
+        object? loaded = TryLoadIndex(metadata);
+        if (loaded is IIndex loadedScalar)
+        {
+            return loadedScalar;
+        }
+
+        throw new Exception($"Index {indexName} on table {tableName} does not exist!");
+    }
+
+    private static IndexMetadata CreateScalarMetadata(string indexName, string tableName, string databaseName)
+    {
+        return new IndexMetadata
+        {
+            IndexName = indexName,
+            DatabaseName = databaseName,
+            TableName = tableName,
+            ColumnName = string.Empty,
+            IndexType = "BTREE",
+            PersistenceFormat = "json"
+        };
     }
 
     private HNSWIndex GetOrLoadVectorIndex(string indexName, string tableName, string databaseName)
@@ -434,3 +682,4 @@ public class IndexManagerV2 : IDisposable
         throw new Exception($"Vector index {indexName} on table {tableName} does not exist!");
     }
 }
+

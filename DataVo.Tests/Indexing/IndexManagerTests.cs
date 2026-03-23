@@ -3,16 +3,16 @@ using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.Indexing;
 
-public class IndexManagerV2Tests : IDisposable
+public class IndexManagerTests : IDisposable
 {
     private readonly string _testDir;
-    private readonly IndexManagerV2 _manager;
+    private readonly IndexManager _manager;
 
-    public IndexManagerV2Tests()
+    public IndexManagerTests()
     {
         _testDir = Path.Combine(Path.GetTempPath(), $"datavo_imv2_tests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
-        _manager = new IndexManagerV2(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
+        _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
     }
 
     [Fact]
