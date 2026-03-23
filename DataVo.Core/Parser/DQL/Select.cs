@@ -13,6 +13,7 @@ using DataVo.Core.Transactions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Execution.Volcano;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -349,7 +350,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (_model.WhereStatement.IsEvaluatable())
         {
             var whereExpression = _model.WhereStatement.GetExpression();
-            if (whereExpression != null && RequiresExpressionEvaluation(whereExpression))
+            if (ShouldUseVolcanoWherePath(whereExpression))
+            {
+                result = EvaluateWhereWithVolcano(whereExpression!);
+            }
+            else if (whereExpression != null && RequiresExpressionEvaluation(whereExpression))
             {
                 result = EvaluateWhereWithExpression(whereExpression);
             }
@@ -372,6 +377,43 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return result;
+    }
+
+    private bool ShouldUseVolcanoWherePath(ExpressionNode? whereExpression)
+    {
+        if (!Engine.Config.EnableVolcanoExecution)
+        {
+            return false;
+        }
+
+        if (whereExpression == null)
+        {
+            return false;
+        }
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        if (ContainsSubqueryExpression(whereExpression))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ContainsSubqueryExpression(ExpressionNode expression)
+    {
+        return expression switch
+        {
+            BinaryExpressionNode binary => ContainsSubqueryExpression(binary.Left)
+                || ContainsSubqueryExpression(binary.Right),
+            ScalarFunctionExpressionNode scalar => scalar.Arguments.Any(ContainsSubqueryExpression),
+            InSubqueryExpressionNode or ExistsSubqueryExpressionNode or ScalarSubqueryExpressionNode => true,
+            _ => false,
+        };
     }
 
     private ListedTable? TryEvaluateNearestNeighborUsingVectorIndex()
@@ -700,6 +742,74 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         return new ListedTable(filtered);
+    }
+
+    private ListedTable EvaluateWhereWithVolcano(ExpressionNode whereExpression)
+    {
+        var sourceRows = _model.FromTable!.TableContentValues!
+            .Select((record, index) =>
+            {
+                var row = record.ToRow();
+                var values = new Dictionary<string, dynamic>();
+                foreach (string key in row.Keys)
+                {
+                    values[key] = row[key];
+                }
+
+                return new ExecutionRow(index + 1, values);
+            })
+            .ToList();
+
+        IQueryOperator scan = new TableScanOperator(sourceRows);
+        IQueryOperator filter = new FilterOperator(scan, row =>
+        {
+            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(row.Values));
+            return EvaluatePredicate(whereExpression, joinedRow);
+        });
+
+        IQueryOperator root = filter;
+        if (CanPushDownLimitToVolcano())
+        {
+            root = new TakeOperator(root, _model.LimitTake!.Value);
+        }
+
+        List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
+        var listed = filteredRows
+            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+            .ToList();
+
+        return new ListedTable(listed);
+    }
+
+    private bool CanPushDownLimitToVolcano()
+    {
+        if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
+        {
+            return false;
+        }
+
+        if (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)
+        {
+            return false;
+        }
+
+        if (_model.IsDistinct)
+        {
+            return false;
+        }
+
+        if (_model.GroupByStatement.ContainsGroupBy())
+        {
+            return false;
+        }
+
+        if (_model.GetHavingExpression() != null)
+        {
+            return false;
+        }
+
+        var orderBy = _model.GetOrderByExpression();
+        return orderBy == null || orderBy.Columns.Count == 0;
     }
 
     private static bool RequiresExpressionEvaluation(ExpressionNode node)

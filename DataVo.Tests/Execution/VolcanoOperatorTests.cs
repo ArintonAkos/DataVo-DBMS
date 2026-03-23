@@ -62,4 +62,23 @@ public class VolcanoOperatorTests
             op.Close();
         }
     }
+
+    [Fact]
+    public void TakeOperator_ReturnsAtMostConfiguredRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["V"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["V"] = 20 }),
+            new(3, new Dictionary<string, dynamic> { ["V"] = 30 })
+        };
+
+        IQueryOperator op = new TakeOperator(new TableScanOperator(input), 2);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0].RowId);
+        Assert.Equal(2, rows[1].RowId);
+    }
 }

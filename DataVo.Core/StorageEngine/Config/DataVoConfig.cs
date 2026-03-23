@@ -52,6 +52,12 @@ public class DataVoConfig
     /// </summary>
     public IStorageEngine? WasmStorageEngine { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether eligible SELECT paths should use Volcano-style streaming operators.
+    /// Defaults to <see langword="false"/> for compatibility.
+    /// </summary>
+    public bool EnableVolcanoExecution { get; set; }
+
     private bool? _walEnabled;
 
     /// <summary>
