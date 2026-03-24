@@ -15,6 +15,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Execution.Volcano;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -122,6 +123,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoDistinctPushedDown;
     private bool _volcanoGroupByPushedDown;
     private bool _volcanoAggregatePushedDown;
+    private readonly Dictionary<string, int> _queryHybridRoutingCounters = new(StringComparer.OrdinalIgnoreCase);
+    private int _queryVectorExpansionPasses;
     private HashSet<string> _volcanoAggregateGroupKeyColumns = [];
     private HashSet<string> _volcanoAggregateOutputColumns = [];
 
@@ -137,6 +140,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// </exception>
     public override void PerformAction(Guid session)
     {
+        var queryStopwatch = Stopwatch.StartNew();
+        ResetQueryHybridTelemetry();
+
         try
         {
             if (ast.Ctes.Count > 0)
@@ -187,6 +193,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
                 Logger.Info($"Rows selected: {Data.Count}");
                 Messages.Add($"Rows selected: {Data.Count}");
+
+                ReportHybridRoutingTelemetry(queryStopwatch.ElapsedMilliseconds, Data.Count);
             }
             finally
             {
@@ -1214,6 +1222,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
 
             topK = nextTopK;
+            _queryVectorExpansionPasses++;
             LogVectorPredicateFastPathExpansion($"pass={pass}; expandingTopK={topK}");
         }
 
@@ -1259,6 +1268,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         if (seedPredicate == null)
+        {
+            return Math.Min(totalRows, requestedTopK);
+        }
+
+        if (!Engine.Config.EnableHybridOrderByAdaptiveInitialTopK)
         {
             return Math.Min(totalRows, requestedTopK);
         }
@@ -1582,7 +1596,44 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
-        Engine.Config.IncrementHybridRoutingCounter(bucket);
+        _queryHybridRoutingCounters.TryGetValue(bucket, out int current);
+        _queryHybridRoutingCounters[bucket] = current + 1;
+    }
+
+    private void ResetQueryHybridTelemetry()
+    {
+        _queryHybridRoutingCounters.Clear();
+        _queryVectorExpansionPasses = 0;
+    }
+
+    private void ReportHybridRoutingTelemetry(long elapsedMilliseconds, int selectedRows)
+    {
+        if (!Engine.Config.EnableHybridRoutingTelemetryCounters)
+        {
+            return;
+        }
+
+        int usedBuckets = _queryHybridRoutingCounters.Values.Sum();
+        bool usedHybridRoute = usedBuckets > 0;
+
+        if (Engine.Config.EnableHybridRoutingPerQueryTelemetry && usedHybridRoute)
+        {
+            string buckets = string.Join(", ", _queryHybridRoutingCounters
+                .OrderByDescending(pair => pair.Value)
+                .Select(pair => $"{pair.Key}={pair.Value}"));
+
+            Logger.Info($"Planner(hybrid-route-query): elapsedMs={elapsedMilliseconds}; rows={selectedRows}; expansionPasses={_queryVectorExpansionPasses}; buckets={buckets}");
+        }
+
+        bool hasSnapshot = Engine.Config.RecordHybridRoutingQueryAndTryBuildSnapshot(
+            _queryHybridRoutingCounters,
+            _queryVectorExpansionPasses,
+            out string? snapshotMessage);
+
+        if (hasSnapshot && !string.IsNullOrWhiteSpace(snapshotMessage))
+        {
+            Logger.Info($"Planner(hybrid-route-snapshot): {snapshotMessage}");
+        }
     }
 
     private bool TryResolveVectorIndex(string tableName, string columnName, string databaseName, out string indexName, out IndexFile indexMetadata)
