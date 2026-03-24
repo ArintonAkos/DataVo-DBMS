@@ -17,6 +17,7 @@ rm -rf "$DOCS_WASM_DIR"
 mkdir -p "$DOCS_WASM_DIR"
 cp -R "$APP_BUNDLE_DIR"/* "$DOCS_WASM_DIR/"
 cp "$BROWSER_DIR/datavo.interop.js" "$DOCS_WASM_DIR/"
+cp "$BROWSER_DIR/datavo.storage.worker.js" "$DOCS_WASM_DIR/"
 
 if [[ -f "$PUBLISH_DIR/DataVo.Browser.deps.json" ]]; then
   cp "$PUBLISH_DIR/DataVo.Browser.deps.json" "$DOCS_WASM_DIR/"

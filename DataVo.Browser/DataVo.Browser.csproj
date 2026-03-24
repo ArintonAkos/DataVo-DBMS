@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <None Include="datavo.interop.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <None Include="datavo.storage.worker.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
   </ItemGroup>
 
 </Project>
