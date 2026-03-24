@@ -202,6 +202,14 @@ public class DataVoConfig
     /// </summary>
     public int VectorPredicateFastPathExpansionFactor { get; set; } = 2;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether planner should track hybrid vector route counters.
+    /// </summary>
+    public bool EnableHybridRoutingTelemetryCounters { get; set; } = true;
+
+    private readonly object _hybridRoutingTelemetrySync = new();
+    private readonly Dictionary<string, int> _hybridRoutingTelemetryCounters = new(StringComparer.OrdinalIgnoreCase);
+
     private bool? _walEnabled;
 
     /// <summary>
@@ -245,5 +253,66 @@ public class DataVoConfig
             : Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, WalFilePath);
+    }
+
+    /// <summary>
+    /// Increments a named hybrid routing counter bucket.
+    /// </summary>
+    /// <param name="bucket">Counter bucket key.</param>
+    public void IncrementHybridRoutingCounter(string bucket)
+    {
+        if (!EnableHybridRoutingTelemetryCounters || string.IsNullOrWhiteSpace(bucket))
+        {
+            return;
+        }
+
+        lock (_hybridRoutingTelemetrySync)
+        {
+            _hybridRoutingTelemetryCounters.TryGetValue(bucket, out int current);
+            _hybridRoutingTelemetryCounters[bucket] = current + 1;
+        }
+    }
+
+    /// <summary>
+    /// Gets the current value of a hybrid routing counter bucket.
+    /// </summary>
+    /// <param name="bucket">Counter bucket key.</param>
+    /// <returns>The bucket value, or 0 when no samples were recorded.</returns>
+    public int GetHybridRoutingCounter(string bucket)
+    {
+        if (string.IsNullOrWhiteSpace(bucket))
+        {
+            return 0;
+        }
+
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return _hybridRoutingTelemetryCounters.TryGetValue(bucket, out int current)
+                ? current
+                : 0;
+        }
+    }
+
+    /// <summary>
+    /// Returns a point-in-time snapshot of hybrid routing counters.
+    /// </summary>
+    /// <returns>Read-only bucket/value pairs.</returns>
+    public IReadOnlyDictionary<string, int> GetHybridRoutingCountersSnapshot()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return new Dictionary<string, int>(_hybridRoutingTelemetryCounters, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Clears all accumulated hybrid routing counters.
+    /// </summary>
+    public void ResetHybridRoutingCounters()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            _hybridRoutingTelemetryCounters.Clear();
+        }
     }
 }
