@@ -14,6 +14,8 @@ using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Execution.Volcano;
+using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -78,6 +80,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             JoinPlanSide probeSide,
             int estimatedBuildRows,
             int estimatedProbeRows,
+            int estimatedOutputRows,
             int estimatedCost,
             string reason)
         {
@@ -86,6 +89,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             ProbeSide = probeSide;
             EstimatedBuildRows = estimatedBuildRows;
             EstimatedProbeRows = estimatedProbeRows;
+            EstimatedOutputRows = estimatedOutputRows;
             EstimatedCost = estimatedCost;
             Reason = reason;
         }
@@ -95,6 +99,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         public JoinPlanSide ProbeSide { get; }
         public int EstimatedBuildRows { get; }
         public int EstimatedProbeRows { get; }
+        public int EstimatedOutputRows { get; }
         public int EstimatedCost { get; }
         public string Reason { get; }
     }
@@ -103,6 +108,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// The parsed model representation of the SELECT statement.
     /// </summary>
     private readonly SelectModel _model = SelectModel.FromAst(ast);
+    private const double JoinCardinalityFeedbackAlpha = 0.35d;
+    private static readonly object _joinCardinalityFeedbackSync = new();
+    private static readonly ConcurrentDictionary<string, double> _joinCardinalityFeedback = new(StringComparer.OrdinalIgnoreCase);
+    private static string? _joinCardinalityFeedbackLoadedPath;
+    private static bool _joinCardinalityFeedbackLoaded;
     private readonly Dictionary<JoinedRow, Dictionary<string, object?>> _windowValues = [];
     private bool _volcanoLimitPushedDown;
     private bool _volcanoOffsetPushedDown;
@@ -1172,7 +1182,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
                 .ToList();
 
-            IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), row =>
+            IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), (ExecutionRow row) =>
             {
                 var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values)));
                 return EvaluatePredicate(whereExpression, joinedRow);
@@ -1218,9 +1228,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
         IQueryOperator root = new TableScanOperator(sourceRows);
         if (whereExpression != null)
         {
-            root = new FilterOperator(root, row =>
+            root = new FilterOperator(root, (TypedExecutionRow typedRow) =>
             {
-                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(row.Values));
+                var joinedRow = BuildSingleTableJoinedRow(_model.FromTable.TableName, typedRow.Values);
                 return EvaluatePredicate(whereExpression, joinedRow);
             });
         }
@@ -1283,7 +1293,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                     string key = orderKey.Key;
                     bool ascending = orderKey.IsAscending;
                     sortSpecs.Add(new SortOperator.SortKeySpec(
-                        row => ResolveNoJoinOrderValue(row, key),
+                        (TypedExecutionRow row) => ResolveNoJoinOrderValue(row, key),
                         ascending));
                 }
 
@@ -1364,6 +1374,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         HashSet<string> joinedTables = [fromTableName];
         List<string> joinOrder = [fromTableName];
+        List<(string FeedbackKey, CountingPassthroughOperator Counter, int EstimatedOutputRows)> joinCounters = [];
         List<DataVo.Core.Models.Statement.JoinModel.JoinCondition> remaining = [.. _model.JoinStatement.Model.JoinConditions];
 
         var initialRows = _model.FromTable.TableContentValues!
@@ -1423,6 +1434,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 rightJoinTable: newTable,
                 rightJoinColumn: newColumn,
                 tableFilters);
+
+            string feedbackKey = BuildJoinFeedbackKey(existingTable, existingColumn, newTable, newColumn);
             root = BuildVolcanoInnerJoinOperator(
                 root,
                 rightInput,
@@ -1431,6 +1444,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 existingTable,
                 newTable,
                 joinPlan);
+
+            var countedJoin = new CountingPassthroughOperator(root);
+            root = countedJoin;
+            joinCounters.Add((feedbackKey, countedJoin, joinPlan.EstimatedOutputRows));
 
             Logger.Info($"Planner: physical join edge plan {existingTable}->{newTable}: alg={joinPlan.Algorithm}, build={joinPlan.BuildSide}({joinPlan.EstimatedBuildRows}), probe={joinPlan.ProbeSide}({joinPlan.EstimatedProbeRows}), cost={joinPlan.EstimatedCost}, reason={joinPlan.Reason}");
 
@@ -1442,9 +1459,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (!IsAllTrueExpression(whereExpression))
         {
-            root = new FilterOperator(root, row =>
+            root = new FilterOperator(root, (TypedExecutionRow typedRow) =>
             {
-                var joinedRow = ToJoinedRowFromJoinExecution(row, joinOrder);
+                var joinedRow = ToJoinedRowFromJoinExecution(typedRow, joinOrder);
                 return EvaluatePredicate(whereExpression!, joinedRow);
             });
         }
@@ -1492,7 +1509,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                     string key = orderKey.Key;
                     bool ascending = orderKey.IsAscending;
                     sortSpecs.Add(new SortOperator.SortKeySpec(
-                        row => ResolveJoinOrderValue(row, key),
+                        (TypedExecutionRow row) => ResolveJoinOrderValue(row, key),
                         ascending));
                 }
 
@@ -1515,6 +1532,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         List<ExecutionRow> joinedRows = OperatorPipelineRunner.ExecuteToList(root);
+        UpdateJoinCardinalityFeedback(joinCounters);
+
         List<JoinedRow> listed = joinedRows
             .Select(row => ToJoinedRowFromJoinExecution(row, joinOrder))
             .ToList();
@@ -1551,9 +1570,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private IQueryOperator BuildTableFilterOperator(IQueryOperator input, string tableName, ExpressionNode filterExpression)
     {
-        return new FilterOperator(input, row =>
+        return new FilterOperator(input, (TypedExecutionRow typedRow) =>
         {
-            var joinedRow = new JoinedRow(tableName, new Row(new Dictionary<string, dynamic>(row.Values)));
+            var joinedRow = BuildSingleTableJoinedRow(tableName, typedRow.Values);
             return EvaluatePredicate(filterExpression, joinedRow);
         });
     }
@@ -1576,7 +1595,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
             EnableExternalSpill = Engine.Config.EnableVolcanoExternalAggregateSpill,
             SpillThresholdRows = Engine.Config.VolcanoExternalAggregateThresholdRows,
             PartitionCount = Engine.Config.VolcanoExternalAggregatePartitionCount,
-            SpillDirectory = Engine.Config.VolcanoExternalAggregateTempDirectory
+            SpillDirectory = Engine.Config.VolcanoExternalAggregateTempDirectory,
+            EnableAdaptivePartitioning = Engine.Config.VolcanoExternalAggregateAdaptivePartitioning,
+            TargetRowsPerPartition = Engine.Config.VolcanoExternalAggregateTargetRowsPerPartition,
+            MaxPartitionCount = Engine.Config.VolcanoExternalAggregateMaxPartitionCount
         };
     }
 
@@ -1624,14 +1646,31 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         int buildDistinct = EstimateJoinKeyDistinct(buildTable, buildColumn, tableFilters, buildRows);
         int probeDistinct = EstimateJoinKeyDistinct(probeTable, probeColumn, tableFilters, probeRows);
-        int maxDistinct = Math.Max(1, Math.Max(buildDistinct, probeDistinct));
-        int estimatedOutputRows = Math.Max(1, (int)Math.Ceiling((double)(buildRows * probeRows) / maxDistinct));
+        int estimatedOutputRows = EstimateJoinEdgeOutputRows(
+            estimatedLeftRows,
+            estimatedRightRows,
+            leftJoinTable,
+            leftJoinColumn,
+            rightJoinTable,
+            rightJoinColumn,
+            tableFilters,
+            out int estimatedOutputRowsHeuristic,
+            out bool hasLearnedOutput,
+            out long learnedOutputRows);
 
         int nestedLoopThreshold = Math.Max(1, Engine.Config.VolcanoNestedLoopJoinThresholdRows);
+        int probeThreshold = nestedLoopThreshold * 8;
+        int outputThreshold = nestedLoopThreshold * 8;
+
         int hashCost = buildRows + probeRows + (estimatedOutputRows / 2);
         int nestedLoopCost = buildRows * probeRows;
 
-        JoinPhysicalAlgorithm algorithm = (buildRows <= nestedLoopThreshold && nestedLoopCost <= hashCost)
+        bool nestedLoopEligible = buildRows <= nestedLoopThreshold
+            && probeRows <= probeThreshold
+            && estimatedOutputRows <= outputThreshold
+            && nestedLoopCost <= hashCost * 2;
+
+        JoinPhysicalAlgorithm algorithm = nestedLoopEligible
             ? JoinPhysicalAlgorithm.NestedLoop
             : JoinPhysicalAlgorithm.Hash;
 
@@ -1639,14 +1678,231 @@ internal class Select(SelectStatement ast) : BaseDbAction
             ? nestedLoopCost
             : hashCost;
 
+        string feedbackReason = hasLearnedOutput
+            ? $", learnedOut={learnedOutputRows}"
+            : ", learnedOut=<none>";
+
         return new JoinEdgePhysicalPlan(
             algorithm,
             buildSide,
             probeSide,
             buildRows,
             probeRows,
+            estimatedOutputRows,
             estimatedCost,
-            $"chosen using left={estimatedLeftRows}, right={estimatedRightRows}, ndv(build/probe)=({buildDistinct}/{probeDistinct}), estOut={estimatedOutputRows}, threshold={nestedLoopThreshold}, edge build table '{buildSideTable}'");
+            $"chosen using left={estimatedLeftRows}, right={estimatedRightRows}, ndv(build/probe)=({buildDistinct}/{probeDistinct}), estOut={estimatedOutputRows} (heuristic={estimatedOutputRowsHeuristic}{feedbackReason}), thresholds(build/probe/out)=({nestedLoopThreshold}/{probeThreshold}/{outputThreshold}), edge build table '{buildSideTable}'");
+    }
+
+    private int EstimateJoinEdgeOutputRows(
+        int estimatedLeftRows,
+        int estimatedRightRows,
+        string leftJoinTable,
+        string leftJoinColumn,
+        string rightJoinTable,
+        string rightJoinColumn,
+        Dictionary<string, ExpressionNode> tableFilters,
+        out int estimatedOutputRowsHeuristic,
+        out bool hasLearnedOutput,
+        out long learnedOutputRows)
+    {
+        int leftDistinct = EstimateJoinKeyDistinct(leftJoinTable, leftJoinColumn, tableFilters, Math.Max(1, estimatedLeftRows));
+        int rightDistinct = EstimateJoinKeyDistinct(rightJoinTable, rightJoinColumn, tableFilters, Math.Max(1, estimatedRightRows));
+        int maxDistinct = Math.Max(1, Math.Max(leftDistinct, rightDistinct));
+
+        estimatedOutputRowsHeuristic = Math.Max(1, (int)Math.Ceiling((double)(Math.Max(1, estimatedLeftRows) * Math.Max(1, estimatedRightRows)) / maxDistinct));
+        string feedbackKey = BuildJoinFeedbackKey(leftJoinTable, leftJoinColumn, rightJoinTable, rightJoinColumn);
+
+        hasLearnedOutput = TryGetJoinCardinalityFeedback(feedbackKey, out learnedOutputRows);
+        if (hasLearnedOutput)
+        {
+            return Math.Max(1, (int)Math.Round((estimatedOutputRowsHeuristic * 0.4d) + (learnedOutputRows * 0.6d)));
+        }
+
+        return estimatedOutputRowsHeuristic;
+    }
+
+    private bool TryGetJoinCardinalityFeedback(string edgeKey, out long learnedRows)
+    {
+        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedback)
+        {
+            learnedRows = 0;
+            return false;
+        }
+
+        EnsureJoinCardinalityFeedbackLoaded();
+
+        if (_joinCardinalityFeedback.TryGetValue(edgeKey, out var value))
+        {
+            learnedRows = Math.Max(1L, (long)Math.Round(value));
+            return true;
+        }
+
+        learnedRows = 0;
+        return false;
+    }
+
+    private static void RecordJoinCardinalityFeedback(string edgeKey, long observedRows)
+    {
+        double sanitizedObserved = Math.Max(1L, observedRows);
+        _joinCardinalityFeedback.AddOrUpdate(
+            edgeKey,
+            sanitizedObserved,
+            (_, existing) => (existing * (1d - JoinCardinalityFeedbackAlpha)) + (sanitizedObserved * JoinCardinalityFeedbackAlpha));
+    }
+
+    private void UpdateJoinCardinalityFeedback(
+        List<(string FeedbackKey, CountingPassthroughOperator Counter, int EstimatedOutputRows)> joinCounters)
+    {
+        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedback)
+        {
+            return;
+        }
+
+        EnsureJoinCardinalityFeedbackLoaded();
+
+        foreach (var (feedbackKey, counter, estimatedOutputRows) in joinCounters)
+        {
+            long observed = Math.Max(1, counter.EmittedRows);
+            RecordJoinCardinalityFeedback(feedbackKey, observed);
+            Logger.Info($"Planner: join feedback learned for {feedbackKey}: observed={observed}, estimated={estimatedOutputRows}");
+        }
+
+        TrimJoinCardinalityFeedbackEntries();
+        PersistJoinCardinalityFeedbackIfEnabled();
+    }
+
+    private void EnsureJoinCardinalityFeedbackLoaded()
+    {
+        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedbackPersistence)
+        {
+            return;
+        }
+
+        string? path = Engine.Config.VolcanoJoinCardinalityFeedbackPersistenceFile;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        lock (_joinCardinalityFeedbackSync)
+        {
+            bool samePath = string.Equals(_joinCardinalityFeedbackLoadedPath, path, StringComparison.OrdinalIgnoreCase);
+            if (_joinCardinalityFeedbackLoaded && samePath)
+            {
+                return;
+            }
+
+            _joinCardinalityFeedback.Clear();
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    string json = File.ReadAllText(path);
+                    Dictionary<string, double>? loaded = JsonSerializer.Deserialize<Dictionary<string, double>>(json);
+                    if (loaded != null)
+                    {
+                        foreach (var entry in loaded)
+                        {
+                            if (!string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0)
+                            {
+                                _joinCardinalityFeedback[entry.Key] = entry.Value;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Info($"Planner: unable to load join feedback persistence: {ex.Message}");
+            }
+
+            _joinCardinalityFeedbackLoadedPath = path;
+            _joinCardinalityFeedbackLoaded = true;
+        }
+    }
+
+    private void PersistJoinCardinalityFeedbackIfEnabled()
+    {
+        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedbackPersistence)
+        {
+            return;
+        }
+
+        string? path = Engine.Config.VolcanoJoinCardinalityFeedbackPersistenceFile;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            string directory = Path.GetDirectoryName(path) ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var snapshot = _joinCardinalityFeedback.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+            string json = JsonSerializer.Serialize(snapshot);
+            File.WriteAllText(path, json);
+        }
+        catch (Exception ex)
+        {
+            Logger.Info($"Planner: unable to persist join feedback: {ex.Message}");
+        }
+    }
+
+    private void TrimJoinCardinalityFeedbackEntries()
+    {
+        int maxEntries = Math.Max(16, Engine.Config.VolcanoJoinCardinalityFeedbackMaxEntries);
+        if (_joinCardinalityFeedback.Count <= maxEntries)
+        {
+            return;
+        }
+
+        var keep = _joinCardinalityFeedback
+            .OrderByDescending(entry => entry.Value)
+            .Take(maxEntries)
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+
+        _joinCardinalityFeedback.Clear();
+        foreach (var entry in keep)
+        {
+            _joinCardinalityFeedback[entry.Key] = entry.Value;
+        }
+    }
+
+    private string BuildJoinFeedbackKey(string leftTable, string leftColumn, string rightTable, string rightColumn)
+    {
+        string normalizedLeft = NormalizeTableIdentifier(leftTable);
+        string normalizedRight = NormalizeTableIdentifier(rightTable);
+        string leftRef = $"{normalizedLeft}.{leftColumn}";
+        string rightRef = $"{normalizedRight}.{rightColumn}";
+
+        if (string.Compare(leftRef, rightRef, StringComparison.OrdinalIgnoreCase) <= 0)
+        {
+            return $"{leftRef}={rightRef}";
+        }
+
+        return $"{rightRef}={leftRef}";
+    }
+
+    private string NormalizeTableIdentifier(string tableOrAlias)
+    {
+        if (_model.TableService == null)
+        {
+            return tableOrAlias;
+        }
+
+        try
+        {
+            return _model.TableService.GetTableDetailByAliasOrName(tableOrAlias).TableName;
+        }
+        catch
+        {
+            return tableOrAlias;
+        }
     }
 
     private int EstimateJoinKeyDistinct(
@@ -1754,7 +2010,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
     {
         leftSideAlreadyJoined = false;
         int selectedIndex = -1;
-        int bestRowCount = int.MaxValue;
+        int bestEstimatedOutputRows = int.MaxValue;
+        int bestCandidateRowCount = int.MaxValue;
+        int estimatedJoinedRows = EstimateJoinedStreamRows(joinedTables, tableFilters);
 
         for (int i = 0; i < remaining.Count; i++)
         {
@@ -1771,9 +2029,29 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 : remaining[i].LeftColumn.TableName;
 
             int candidateRowCount = ResolveJoinTableRowCount(candidateTable, tableFilters);
-            if (candidateRowCount < bestRowCount)
+
+            string existingTable = leftIn ? remaining[i].LeftColumn.TableName : remaining[i].RightColumn.TableName;
+            string existingColumn = leftIn ? remaining[i].LeftColumn.ColumnName : remaining[i].RightColumn.ColumnName;
+            string newTable = leftIn ? remaining[i].RightColumn.TableName : remaining[i].LeftColumn.TableName;
+            string newColumn = leftIn ? remaining[i].RightColumn.ColumnName : remaining[i].LeftColumn.ColumnName;
+
+            int edgeOutputRows = EstimateJoinEdgeOutputRows(
+                estimatedJoinedRows,
+                candidateRowCount,
+                existingTable,
+                existingColumn,
+                newTable,
+                newColumn,
+                tableFilters,
+                out _,
+                out _,
+                out _);
+
+            if (edgeOutputRows < bestEstimatedOutputRows
+                || (edgeOutputRows == bestEstimatedOutputRows && candidateRowCount < bestCandidateRowCount))
             {
-                bestRowCount = candidateRowCount;
+                bestEstimatedOutputRows = edgeOutputRows;
+                bestCandidateRowCount = candidateRowCount;
                 selectedIndex = i;
                 leftSideAlreadyJoined = leftIn;
             }
@@ -1851,6 +2129,22 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return joined;
+    }
+
+    private static JoinedRow ToJoinedRowFromJoinExecution(TypedExecutionRow row, IReadOnlyList<string> tableNames)
+    {
+        return ToJoinedRowFromJoinExecution(ExecutionRow.FromTyped(row), tableNames);
+    }
+
+    private static JoinedRow BuildSingleTableJoinedRow(string tableName, IReadOnlyDictionary<string, object?> values)
+    {
+        var rowValues = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in values)
+        {
+            rowValues[entry.Key] = entry.Value;
+        }
+
+        return new JoinedRow(tableName, new Row(rowValues));
     }
 
     private bool CanPushDownLimitToVolcano(bool orderPushedDown)
@@ -2196,7 +2490,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 return false;
             }
 
-            spec = new HashAggregateOperator.AggregateSpec(outputKey, function, null);
+            spec = new HashAggregateOperator.AggregateSpec(outputKey, function, (Func<ExecutionRow, object?>?)null);
             return true;
         }
 
@@ -2211,7 +2505,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         ExpressionNode argument = agg.Argument;
-        spec = new HashAggregateOperator.AggregateSpec(outputKey, function, row =>
+        spec = new HashAggregateOperator.AggregateSpec(outputKey, function, (TypedExecutionRow row) =>
             EvaluateAggregateArgumentForPushdown(argument, row, fromTable));
         return true;
     }
@@ -2240,9 +2534,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return parsed.Item1.Equals(fromTable, StringComparison.OrdinalIgnoreCase);
     }
 
-    private object? EvaluateAggregateArgumentForPushdown(ExpressionNode argument, ExecutionRow row, string fromTable)
+    private object? EvaluateAggregateArgumentForPushdown(ExpressionNode argument, TypedExecutionRow row, string fromTable)
     {
-        var joinedRow = new JoinedRow(fromTable, new Row(new Dictionary<string, dynamic>(row.Values)));
+        var joinedRow = BuildSingleTableJoinedRow(fromTable, row.Values);
 
         return ExpressionEvaluator.Evaluate(
             argument,
@@ -2549,7 +2843,21 @@ internal class Select(SelectStatement ast) : BaseDbAction
             : null;
     }
 
+    private static object? ResolveNoJoinOrderValue(TypedExecutionRow row, string orderByColumn)
+    {
+        return row.Values.TryGetValue(orderByColumn, out var value)
+            ? value
+            : null;
+    }
+
     private static object? ResolveJoinOrderValue(ExecutionRow row, string orderByKey)
+    {
+        return row.Values.TryGetValue(orderByKey, out var value)
+            ? value
+            : null;
+    }
+
+    private static object? ResolveJoinOrderValue(TypedExecutionRow row, string orderByKey)
     {
         return row.Values.TryGetValue(orderByKey, out var value)
             ? value
@@ -2771,6 +3079,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
+        Dictionary<JoinedRow, TypedExecutionRow> typedRows = BuildTypedWindowRows(rows);
+
         foreach (var col in windowColumns)
         {
             if (col.Expression is not WindowFunctionExpressionNode windowExpr)
@@ -2786,14 +3096,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
             string outputName = col.Alias ?? col.RawExpression;
 
             var partitions = rows
-                .GroupBy(row => BuildPartitionSignature(row, windowExpr.PartitionByColumns))
+                .GroupBy(row => BuildPartitionSignature(typedRows[row], windowExpr.PartitionByColumns))
                 .ToList();
 
             foreach (var partition in partitions)
             {
                 List<JoinedRow> ordered = windowExpr.IsOrderAscending
-                    ? [.. partition.OrderBy(r => ResolveWindowOrderValue(r, windowExpr.OrderByColumn), DynamicObjectComparer.Instance)]
-                    : [.. partition.OrderByDescending(r => ResolveWindowOrderValue(r, windowExpr.OrderByColumn), DynamicObjectComparer.Instance)];
+                    ? [.. partition.OrderBy(r => ResolveWindowOrderValue(typedRows[r], windowExpr.OrderByColumn), DynamicObjectComparer.Instance)]
+                    : [.. partition.OrderByDescending(r => ResolveWindowOrderValue(typedRows[r], windowExpr.OrderByColumn), DynamicObjectComparer.Instance)];
 
                 object? previousOrderValue = null;
                 long currentRank = 1;
@@ -2801,7 +3111,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 for (int i = 0; i < ordered.Count; i++)
                 {
                     var row = ordered[i];
-                    object? currentOrderValue = ResolveWindowOrderValue(row, windowExpr.OrderByColumn);
+                    object? currentOrderValue = ResolveWindowOrderValue(typedRows[row], windowExpr.OrderByColumn);
 
                     if (i == 0)
                     {
@@ -2825,7 +3135,37 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
     }
 
-    private string BuildPartitionSignature(JoinedRow row, List<ColumnRefNode> partitionColumns)
+    private static Dictionary<JoinedRow, TypedExecutionRow> BuildTypedWindowRows(ListedTable rows)
+    {
+        var typed = new Dictionary<JoinedRow, TypedExecutionRow>();
+        long rowId = 1;
+
+        foreach (JoinedRow row in rows)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            bool singleTable = row.Keys.Count() == 1;
+
+            foreach (string tableName in row.Keys)
+            {
+                Row tableRow = row[tableName];
+                foreach (string column in tableRow.Keys)
+                {
+                    object? value = tableRow[column];
+                    values[$"{tableName}.{column}"] = value;
+                    if (singleTable && !values.ContainsKey(column))
+                    {
+                        values[column] = value;
+                    }
+                }
+            }
+
+            typed[row] = new TypedExecutionRow(rowId++, values);
+        }
+
+        return typed;
+    }
+
+    private string BuildPartitionSignature(TypedExecutionRow row, List<ColumnRefNode> partitionColumns)
     {
         if (partitionColumns.Count == 0)
         {
@@ -2858,13 +3198,53 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
     }
 
-    private object? ResolveWindowOrderValue(JoinedRow row, ColumnRefNode column)
+    private object? ResolveWindowOrderValue(TypedExecutionRow row, ColumnRefNode column)
     {
         string reference = string.IsNullOrWhiteSpace(column.TableOrAlias)
             ? column.Column
             : $"{column.TableOrAlias}.{column.Column}";
 
-        return ResolveColumnValue(row, reference);
+        return ResolveTypedColumnValue(row, reference);
+    }
+
+    private object? ResolveTypedColumnValue(TypedExecutionRow row, string columnReference)
+    {
+        string[] referenceParts = columnReference.Split('.');
+
+        if (referenceParts.Length == 1)
+        {
+            if (row.Values.TryGetValue(columnReference, out var directValue))
+            {
+                return directValue;
+            }
+
+            List<string> matchedKeys = [.. row.Values.Keys.Where(k =>
+                k.Equals(columnReference, StringComparison.OrdinalIgnoreCase)
+                || k.EndsWith($".{columnReference}", StringComparison.OrdinalIgnoreCase))];
+
+            if (matchedKeys.Count == 0) throw new Exception($"Column '{columnReference}' not found.");
+            if (matchedKeys.Count > 1) throw new Exception($"Column '{columnReference}' is ambiguous.");
+
+            return row.Values[matchedKeys[0]];
+        }
+
+        string tableOrAlias = referenceParts[0];
+        string colName = referenceParts[1];
+        string resolvedTableName = NormalizeTableIdentifier(tableOrAlias);
+
+        string normalizedKey = $"{resolvedTableName}.{colName}";
+        if (row.Values.TryGetValue(normalizedKey, out var normalizedValue))
+        {
+            return normalizedValue;
+        }
+
+        string aliasKey = $"{tableOrAlias}.{colName}";
+        if (row.Values.TryGetValue(aliasKey, out var aliasValue))
+        {
+            return aliasValue;
+        }
+
+        throw new Exception($"Column '{columnReference}' not found in typed window row.");
     }
 
     private object? ResolveWindowValue(JoinedRow row, string outputField)

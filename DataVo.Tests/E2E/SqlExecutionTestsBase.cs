@@ -100,6 +100,10 @@ public abstract class SqlExecutionTestsBase : IDisposable
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,
             EnableVolcanoExecution = config.EnableVolcanoExecution,
+            EnableVolcanoJoinCardinalityFeedback = config.EnableVolcanoJoinCardinalityFeedback,
+            EnableVolcanoJoinCardinalityFeedbackPersistence = config.EnableVolcanoJoinCardinalityFeedbackPersistence,
+            VolcanoJoinCardinalityFeedbackPersistenceFile = config.VolcanoJoinCardinalityFeedbackPersistenceFile,
+            VolcanoJoinCardinalityFeedbackMaxEntries = config.VolcanoJoinCardinalityFeedbackMaxEntries,
         };
     }
 
@@ -113,6 +117,10 @@ public abstract class SqlExecutionTestsBase : IDisposable
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,
             EnableVolcanoExecution = config.EnableVolcanoExecution,
+            EnableVolcanoJoinCardinalityFeedback = config.EnableVolcanoJoinCardinalityFeedback,
+            EnableVolcanoJoinCardinalityFeedbackPersistence = config.EnableVolcanoJoinCardinalityFeedbackPersistence,
+            VolcanoJoinCardinalityFeedbackPersistenceFile = config.VolcanoJoinCardinalityFeedbackPersistenceFile,
+            VolcanoJoinCardinalityFeedbackMaxEntries = config.VolcanoJoinCardinalityFeedbackMaxEntries,
         };
     }
 }

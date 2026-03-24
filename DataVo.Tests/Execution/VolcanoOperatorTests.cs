@@ -64,6 +64,44 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void FilterOperator_TypedPredicate_FiltersRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Score"] = 70 }),
+            new(2, new Dictionary<string, dynamic> { ["Score"] = 90 }),
+            new(3, new Dictionary<string, dynamic> { ["Score"] = 95 })
+        };
+
+        IQueryOperator op = new FilterOperator(
+            new TableScanOperator(input),
+            (TypedExecutionRow row) => Convert.ToInt32(row.Values["Score"]) >= 90);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(2L, rows[0].RowId);
+        Assert.Equal(3L, rows[1].RowId);
+    }
+
+    [Fact]
+    public void CountingPassthroughOperator_CountsEmittedRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["V"] = 1 }),
+            new(2, new Dictionary<string, dynamic> { ["V"] = 2 }),
+            new(3, new Dictionary<string, dynamic> { ["V"] = 3 })
+        };
+
+        var counter = new CountingPassthroughOperator(new TableScanOperator(input));
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(counter);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(3L, counter.EmittedRows);
+    }
+
+    [Fact]
     public void TakeOperator_ReturnsAtMostConfiguredRows()
     {
         var input = new List<ExecutionRow>
@@ -205,6 +243,28 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void SortOperator_TypedSortKey_OrdersRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 40 }),
+            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 10 }),
+            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 30 })
+        };
+
+        IQueryOperator sort = new SortOperator(
+            new TableScanOperator(input),
+            [new SortOperator.SortKeySpec((TypedExecutionRow row) => row.Values["Score"], ascending: true)]);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(sort);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(2, (int)rows[0]["Id"]);
+        Assert.Equal(3, (int)rows[1]["Id"]);
+        Assert.Equal(1, (int)rows[2]["Id"]);
+    }
+
+    [Fact]
     public void SortOperator_ExternalSpillRunGenerationAndMerge_PreservesOrder()
     {
         var input = new List<ExecutionRow>
@@ -334,6 +394,38 @@ public class VolcanoOperatorTests
         Assert.Equal(1L, (long)rows[1]["CountRows"]);
         Assert.Equal(7d, Convert.ToDouble(rows[1]["SumAmount"]));
         Assert.Equal(7d, Convert.ToDouble(rows[1]["AvgAmount"]));
+    }
+
+    [Fact]
+    public void HashAggregateOperator_TypedArgumentSelector_ComputesAggregates()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
+        };
+
+        IQueryOperator op = new HashAggregateOperator(
+            new TableScanOperator(input),
+            ["Category"],
+            [
+                new HashAggregateOperator.AggregateSpec("SumAmount", HashAggregateOperator.AggregateFunction.Sum, (TypedExecutionRow row) => row.Values["Amount"]),
+                new HashAggregateOperator.AggregateSpec("MaxAmount", HashAggregateOperator.AggregateFunction.Max, (TypedExecutionRow row) => row.Values["Amount"])
+            ]);
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op)
+            .OrderBy(r => (string)r["Category"])
+            .ToList();
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", (string)rows[0]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(rows[0]["SumAmount"]));
+        Assert.Equal(20, (int)rows[0]["MaxAmount"]);
+
+        Assert.Equal("B", (string)rows[1]["Category"]);
+        Assert.Equal(7d, Convert.ToDouble(rows[1]["SumAmount"]));
+        Assert.Equal(7, (int)rows[1]["MaxAmount"]);
     }
 
     [Fact]
