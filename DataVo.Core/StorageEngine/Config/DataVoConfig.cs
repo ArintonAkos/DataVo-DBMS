@@ -187,6 +187,21 @@ public class DataVoConfig
     /// </summary>
     public int VectorPredicateFastPathMaxTopK { get; set; } = 20000;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether planner should log vector fast-path acceptance/rejection decisions.
+    /// </summary>
+    public bool EnableVectorPredicateFastPathTelemetry { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets maximum additional candidate expansion passes when LIMIT is present and post-filtered rows are insufficient.
+    /// </summary>
+    public int VectorPredicateFastPathMaxExpansionPasses { get; set; } = 2;
+
+    /// <summary>
+    /// Gets or sets the geometric growth factor for vector fast-path candidate expansion.
+    /// </summary>
+    public int VectorPredicateFastPathExpansionFactor { get; set; } = 2;
+
     private bool? _walEnabled;
 
     /// <summary>
