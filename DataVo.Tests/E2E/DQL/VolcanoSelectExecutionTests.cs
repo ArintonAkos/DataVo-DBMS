@@ -788,3 +788,62 @@ public class VolcanoSpillGuardrailTests : SqlExecutionTestsBase
         Assert.Equal("Bob", (string)result.Data[0]["c.Name"]);
     }
 }
+
+public class VolcanoExternalSpillExecutionTests : SqlExecutionTestsBase
+{
+    public VolcanoExternalSpillExecutionTests()
+        : base(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory,
+            EnableVolcanoExecution = true,
+            EnableVolcanoSpillGuardrails = false,
+            EnableVolcanoExternalSortSpill = true,
+            VolcanoExternalSortThresholdRows = 2,
+            VolcanoExternalSortRunSizeRows = 2,
+            EnableVolcanoExternalAggregateSpill = true,
+            VolcanoExternalAggregateThresholdRows = 2,
+            VolcanoExternalAggregatePartitionCount = 2
+        }, "VolcanoExternalSpillDB")
+    {
+    }
+
+    [Fact]
+    public void Select_NoJoin_OrderBy_ExternalSortSpillEnabled_PreservesResultSemantics()
+    {
+        Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Score INT)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (1, 40)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (2, 10)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (3, 30)");
+        Execute("INSERT INTO Scores (Id, Score) VALUES (4, 20)");
+
+        var result = ExecuteAndReturn("SELECT Id FROM Scores ORDER BY Score ASC LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(4, (int)result.Data[0]["Id"]);
+    }
+
+    [Fact]
+    public void Select_NoJoin_GroupedAggregate_ExternalAggregateSpillEnabled_PreservesResultSemantics()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 20)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 7)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (4, 'B', 9)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Category, SUM(Amount) AS Total
+            FROM Sales
+            GROUP BY Category
+            HAVING SUM(Amount) >= 15
+            ORDER BY Category ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal("A", (string)result.Data[0]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[0]["Total"]));
+        Assert.Equal("B", (string)result.Data[1]["Category"]);
+        Assert.Equal(16d, Convert.ToDouble(result.Data[1]["Total"]));
+    }
+}
