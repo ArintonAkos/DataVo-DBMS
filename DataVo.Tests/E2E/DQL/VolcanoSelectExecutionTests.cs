@@ -634,6 +634,30 @@ public class VolcanoSelectExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_NoJoin_GroupedAggregateWithHaving_OrderByAggregateAlias_UsesVolcanoAggregatePushdownSafely()
+    {
+        Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Category VARCHAR, Amount INT)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (1, 'A', 10)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (2, 'A', 20)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (3, 'B', 15)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (4, 'B', 15)");
+        Execute("INSERT INTO Sales (Id, Category, Amount) VALUES (5, 'C', 5)");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Category, SUM(Amount) AS Total
+            FROM Sales
+            GROUP BY Category
+            HAVING SUM(Amount) >= 20
+            ORDER BY Total DESC, Category ASC
+            LIMIT 1 OFFSET 1");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal("B", (string)result.Data[0]["Category"]);
+        Assert.Equal(30d, Convert.ToDouble(result.Data[0]["Total"]));
+    }
+
+    [Fact]
     public void Select_NoJoin_AggregateExpressionArgument_UsesVolcanoAggregatePushdownSafely()
     {
         Execute("CREATE TABLE Sales (Id INT PRIMARY KEY, Amount INT)");

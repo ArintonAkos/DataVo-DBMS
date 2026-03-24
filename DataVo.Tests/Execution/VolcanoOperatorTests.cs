@@ -526,6 +526,50 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void HashAggregateOperator_ExternalSpillAdaptivePartitioning_PreservesResults()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 30 }),
+            new(4, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
+            new(5, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 9 }),
+            new(6, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 14 }),
+        };
+
+        IQueryOperator op = new HashAggregateOperator(
+            new TableScanOperator(input),
+            ["Category"],
+            [
+                new HashAggregateOperator.AggregateSpec("CountRows", HashAggregateOperator.AggregateFunction.Count),
+                new HashAggregateOperator.AggregateSpec("SumAmount", HashAggregateOperator.AggregateFunction.Sum, row => row["Amount"])
+            ],
+            new HashAggregateOperator.AggregateExecutionOptions
+            {
+                EnableExternalSpill = true,
+                SpillThresholdRows = 2,
+                PartitionCount = 2,
+                EnableAdaptivePartitioning = true,
+                TargetRowsPerPartition = 1,
+                MaxPartitionCount = 2
+            });
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(op)
+            .OrderBy(r => (string)r["Category"])
+            .ToList();
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", (string)rows[0]["Category"]);
+        Assert.Equal(3L, (long)rows[0]["CountRows"]);
+        Assert.Equal(60d, Convert.ToDouble(rows[0]["SumAmount"]));
+
+        Assert.Equal("B", (string)rows[1]["Category"]);
+        Assert.Equal(3L, (long)rows[1]["CountRows"]);
+        Assert.Equal(30d, Convert.ToDouble(rows[1]["SumAmount"]));
+    }
+
+    [Fact]
     public void ExecutionRow_TypedCarrier_RoundTripPreservesValues()
     {
         var row = new ExecutionRow(7, new Dictionary<string, dynamic>
