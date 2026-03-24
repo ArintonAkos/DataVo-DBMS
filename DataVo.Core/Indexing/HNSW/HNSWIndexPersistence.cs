@@ -13,6 +13,8 @@ public class HNSWIndexPersistence : IIndexPersistence
         public string Metric { get; set; } = "cosine";
         public int M { get; set; } = 16;
         public int EfConstruction { get; set; } = 64;
+        public bool EnableAdaptiveEfConstruction { get; set; } = true;
+        public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
         public int EfSearch { get; set; } = 64;
         public bool EnableDiversityHeuristic { get; set; } = true;
         public bool EnableDeleteGraphRepair { get; set; } = true;
@@ -48,6 +50,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             Metric = hnsw.Metric,
             M = hnsw.M,
             EfConstruction = hnsw.EfConstruction,
+            EnableAdaptiveEfConstruction = hnsw.EnableAdaptiveEfConstruction,
+            AdaptiveEfConstructionMultiplier = hnsw.AdaptiveEfConstructionMultiplier,
             EfSearch = hnsw.EfSearch,
             EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = hnsw.EnableDeleteGraphRepair,
@@ -91,6 +95,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             Metric = string.IsNullOrWhiteSpace(snapshot.Metric) ? "cosine" : snapshot.Metric,
             M = snapshot.M > 0 ? snapshot.M : 16,
             EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
+            EnableAdaptiveEfConstruction = snapshot.EnableAdaptiveEfConstruction,
+            AdaptiveEfConstructionMultiplier = snapshot.AdaptiveEfConstructionMultiplier > 0d ? snapshot.AdaptiveEfConstructionMultiplier : 1.25d,
             EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
             EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = snapshot.EnableDeleteGraphRepair,

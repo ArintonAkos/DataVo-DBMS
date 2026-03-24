@@ -33,9 +33,10 @@ public class HNSWIndexTests : IDisposable
         Assert.True(index.MaxLevel >= 0);
         Assert.NotEmpty(index.NodeLevels);
         Assert.NotEmpty(index.Layers);
-        Assert.All(index.Layers.Values.SelectMany(level => level.Values), neighbors =>
+        Assert.All(index.Layers, level =>
         {
-            Assert.True(neighbors.Count <= index.M);
+            int maxNeighbors = level.Key == 0 ? Math.Max(2, index.M * 2) : index.M;
+            Assert.All(level.Value.Values, neighbors => Assert.True(neighbors.Count <= maxNeighbors));
         });
 
         Assert.True(index.Layers.TryGetValue(0, out var levelZero));
@@ -79,6 +80,8 @@ public class HNSWIndexTests : IDisposable
             Metric = "euclidean",
             M = 10,
             EfConstruction = 40,
+            EnableAdaptiveEfConstruction = false,
+            AdaptiveEfConstructionMultiplier = 2.1d,
             EfSearch = 30,
             EnableDiversityHeuristic = false,
             EnableAdaptiveEfSearch = false,
@@ -99,6 +102,8 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal("euclidean", loaded.Metric);
         Assert.Equal(10, loaded.M);
         Assert.Equal(40, loaded.EfConstruction);
+        Assert.False(loaded.EnableAdaptiveEfConstruction);
+        Assert.Equal(2.1d, loaded.AdaptiveEfConstructionMultiplier);
         Assert.Equal(30, loaded.EfSearch);
         Assert.False(loaded.EnableDiversityHeuristic);
         Assert.False(loaded.EnableAdaptiveEfSearch);
@@ -241,6 +246,76 @@ public class HNSWIndexTests : IDisposable
         Assert.True(recallHighM >= recallLowM - 1e-6, $"Expected higher M not to reduce recall. m8={recallLowM:F3}, m16={recallHighM:F3}");
     }
 
+    [Fact]
+    public void Benchmark_RecallStability_UnderInsertDeleteChurn_RemainsBounded()
+    {
+        const int dimension = 12;
+        const int vectors = 400;
+        const int queries = 24;
+        const int topK = 10;
+        const int churnCycles = 6;
+        const int churnBatch = 48;
+
+        var random = new Random(20260326);
+        var dataset = BuildDataset(seed: 20260326, vectors, dimension);
+        var querySet = BuildQueries(seed: 20260327, queries, dimension);
+
+        var index = new HNSWIndex
+        {
+            Metric = "cosine",
+            M = 12,
+            EfConstruction = 96,
+            EnableAdaptiveEfConstruction = true,
+            AdaptiveEfConstructionMultiplier = 1.5d,
+            EfSearch = 96,
+            EnableAdaptiveEfSearch = true,
+            EnableDiversityHeuristic = true,
+            EnableDeleteGraphRepair = true
+        };
+
+        foreach (var (rowId, vector) in dataset)
+        {
+            index.Insert(rowId, vector);
+        }
+
+        long nextId = vectors + 1;
+        var recalls = new List<double>
+        {
+            EvaluateRecallAtK(index, querySet, topK)
+        };
+
+        for (int cycle = 0; cycle < churnCycles; cycle++)
+        {
+            List<long> removable = index.Entries.Keys
+                .OrderBy(_ => random.Next())
+                .Take(churnBatch)
+                .ToList();
+
+            index.Delete(removable);
+
+            for (int i = 0; i < churnBatch; i++)
+            {
+                float[] vector = new float[dimension];
+                for (int d = 0; d < dimension; d++)
+                {
+                    vector[d] = (float)random.NextDouble();
+                }
+
+                index.Insert(nextId++, vector);
+            }
+
+            Assert.Equal(vectors, index.Count);
+            recalls.Add(EvaluateRecallAtK(index, querySet, topK));
+        }
+
+        double minRecall = recalls.Min();
+        double maxRecall = recalls.Max();
+        double drift = maxRecall - minRecall;
+
+        Assert.True(minRecall >= 0.45d, $"Expected churn min recall@10 >= 0.45, got {minRecall:F3}");
+        Assert.True(drift <= 0.35d, $"Expected churn recall drift <= 0.35, got {drift:F3}");
+    }
+
     private static List<(long RowId, float[] Vector)> BuildDataset(int seed, int vectors, int dimension)
     {
         var random = new Random(seed);
@@ -312,6 +387,27 @@ public class HNSWIndexTests : IDisposable
                 .ThenBy(item => item.RowId)
                 .Take(topK)
                 .Select(item => item.RowId)
+                .ToList();
+
+            int overlap = ann.Intersect(exact).Count();
+            totalRecall += (double)overlap / topK;
+        }
+
+        return totalRecall / querySet.Count;
+    }
+
+    private static double EvaluateRecallAtK(HNSWIndex index, List<float[]> querySet, int topK)
+    {
+        double totalRecall = 0d;
+        foreach (float[] query in querySet)
+        {
+            List<long> ann = index.SearchTopK(query, topK);
+            List<long> exact = index.Entries
+                .Select(entry => (entry.Key, DistanceCosine(query, entry.Value)))
+                .OrderBy(item => item.Item2)
+                .ThenBy(item => item.Key)
+                .Take(topK)
+                .Select(item => item.Key)
                 .ToList();
 
             int overlap = ann.Intersect(exact).Count();

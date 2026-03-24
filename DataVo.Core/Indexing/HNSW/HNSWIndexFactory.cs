@@ -33,6 +33,12 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (TryReadInt(@params, "efConstruction", out int efConstruction) && efConstruction > 0)
             index.EfConstruction = efConstruction;
 
+        if (TryReadBool(@params, "enableAdaptiveEfConstruction", out bool enableAdaptiveEfConstruction))
+            index.EnableAdaptiveEfConstruction = enableAdaptiveEfConstruction;
+
+        if (TryReadDouble(@params, "adaptiveEfConstructionMultiplier", out double adaptiveEfConstructionMultiplier) && adaptiveEfConstructionMultiplier > 0d)
+            index.AdaptiveEfConstructionMultiplier = adaptiveEfConstructionMultiplier;
+
         if (TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
             index.EfSearch = efSearch;
 
