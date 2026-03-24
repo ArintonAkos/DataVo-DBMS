@@ -478,6 +478,87 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Empty(result.Data);
     }
 
+    [Fact]
+    public void Select_VectorOrderByMixedPredicate_HybridRouteAcceptBucket_Increments()
+    {
+        Engine.Config.EnableHybridRoutingTelemetryCounters = true;
+        Engine.Config.ResetHybridRoutingCounters();
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0.9,0.1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0,1,0]', 'inactive')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (4, '[0,0,1]', 'inactive')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_hybrid_accept ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id, Emb <=> '[1,0,0]' AS rank
+            FROM Embeddings
+            WHERE Status = 'active'
+            ORDER BY rank ASC
+            LIMIT 2");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, Engine.Config.GetHybridRoutingCounter("hybrid.orderby.accept"));
+        Assert.Equal(0, Engine.Config.GetHybridRoutingCounter("hybrid.orderby.reject.topk_ge_total_rows"));
+    }
+
+    [Fact]
+    public void Select_VectorOrderByMixedPredicate_HybridRouteRejectBucket_Increments_WhenTopKHitsTotalRows()
+    {
+        Engine.Config.EnableHybridRoutingTelemetryCounters = true;
+        Engine.Config.ResetHybridRoutingCounters();
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0.9,0.1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0,1,0]', 'inactive')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_hybrid_reject ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id, Emb <=> '[1,0,0]' AS rank
+            FROM Embeddings
+            WHERE Status = 'active'
+            ORDER BY rank ASC
+            LIMIT 3");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, Engine.Config.GetHybridRoutingCounter("hybrid.orderby.reject.topk_ge_total_rows"));
+    }
+
+    [Fact]
+    public void Select_VectorOrderByMixedPredicate_HybridInitialTopKAdaptiveBucket_Increments()
+    {
+        Engine.Config.EnableHybridRoutingTelemetryCounters = true;
+        Engine.Config.ResetHybridRoutingCounters();
+        Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 8;
+        Engine.Config.VectorPredicateFastPathExpansionFactor = 2;
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+
+        for (int id = 1; id <= 130; id++)
+        {
+            Execute($"INSERT INTO Embeddings (Id, Emb, Status) VALUES ({id}, '[1,0,0]', 'inactive')");
+        }
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (131, '[0.95,0.05,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (132, '[0.95,0.05,0]', 'active')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_hybrid_adaptive ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id, Emb <=> '[1,0,0]' AS rank
+            FROM Embeddings
+            WHERE Status = 'active'
+            ORDER BY rank ASC
+            LIMIT 2");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, Engine.Config.GetHybridRoutingCounter("hybrid.orderby.initial_topk.adaptive"));
+    }
+
 }
 
 public class InMemoryVectorIndexTests : VectorIndexTestsBase

@@ -881,21 +881,31 @@ internal class Select(SelectStatement ast) : BaseDbAction
         int topK = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
         if (topK <= 0)
         {
+            IncrementHybridRoutingCounter("hybrid.orderby.reject.invalid_topk");
             return null;
         }
 
         ExpressionNode? materializedWhere = MaterializeWhereForFastPath();
-        if (!ShouldUseVectorFastPath(topK, materializedWhere))
+        if (!ShouldUseVectorFastPath(topK, materializedWhere, out string routingReason))
         {
+            IncrementHybridRoutingCounter($"hybrid.orderby.reject.{routingReason}");
+            LogHybridRoutingDecision($"reject:{routingReason}", topK, topK, null);
             return null;
         }
+
+        IncrementHybridRoutingCounter("hybrid.orderby.accept");
 
         ExpressionNode? seedPredicate = ResolveSeedPredicateForExpansion(materializedWhere);
         int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
         if (totalRows <= 0)
         {
+            IncrementHybridRoutingCounter("hybrid.orderby.reject.empty_input");
             return new ListedTable();
         }
+
+        int initialTopK = ResolveHybridOrderByInitialTopK(totalRows, topK, seedPredicate, out string initialSizingMode);
+        IncrementHybridRoutingCounter($"hybrid.orderby.initial_topk.{initialSizingMode}");
+        LogHybridRoutingDecision("accept", topK, initialTopK, seedPredicate);
 
         List<long> rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
@@ -903,7 +913,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             tableName,
             indexMetadata.IndexKind,
             totalRows,
-            topK,
+            initialTopK,
             seedPredicate);
         if (rowIds.Count == 0)
         {
@@ -1240,6 +1250,53 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _model.TableService);
     }
 
+    private int ResolveHybridOrderByInitialTopK(int totalRows, int requestedTopK, ExpressionNode? seedPredicate, out string sizingMode)
+    {
+        sizingMode = "baseline";
+        if (requestedTopK <= 0)
+        {
+            return 0;
+        }
+
+        if (seedPredicate == null)
+        {
+            return Math.Min(totalRows, requestedTopK);
+        }
+
+        double selectivity = Math.Clamp(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
+        if (selectivity >= 0.95d)
+        {
+            return Math.Min(totalRows, requestedTopK);
+        }
+
+        int capByConfig = Engine.Config.VectorPredicateFastPathMaxTopK > 0
+            ? Engine.Config.VectorPredicateFastPathMaxTopK
+            : totalRows;
+
+        int capByRatio = (int)Math.Ceiling(totalRows * Math.Clamp(Engine.Config.VectorPredicateFastPathMaxTopKRatio, 0.01d, 1d));
+        int effectiveCap = Math.Min(totalRows, Math.Max(requestedTopK, Math.Min(capByConfig, capByRatio)));
+
+        int estimatedRequired = Math.Max(requestedTopK, (int)Math.Ceiling(requestedTopK / selectivity));
+        int initialTopK = Math.Min(effectiveCap, estimatedRequired);
+        if (initialTopK > requestedTopK)
+        {
+            sizingMode = "adaptive";
+        }
+
+        return Math.Max(1, initialTopK);
+    }
+
+    private void LogHybridRoutingDecision(string outcome, int requestedTopK, int initialTopK, ExpressionNode? seedPredicate)
+    {
+        if (!Engine.Config.EnableVectorPredicateFastPathTelemetry)
+        {
+            return;
+        }
+
+        double selectivity = seedPredicate == null ? 1d : Math.Clamp(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
+        Logger.Info($"Planner(hybrid-route): {outcome}; requestedTopK={requestedTopK}; initialTopK={initialTopK}; seedSelectivity={selectivity:F3}");
+    }
+
     private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
     {
         Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(candidateRowIds, tableName, _model.Database!);
@@ -1485,16 +1542,20 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _model.TableService);
     }
 
-    private bool ShouldUseVectorFastPath(int topK, ExpressionNode? whereExpression)
+    private bool ShouldUseVectorFastPath(int topK, ExpressionNode? whereExpression, out string reason)
     {
+        reason = "accepted";
+
         int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
         if (totalRows <= 0)
         {
+            reason = "empty_input";
             return false;
         }
 
         if (topK >= totalRows)
         {
+            reason = "topk_ge_total_rows";
             return false;
         }
 
@@ -1505,8 +1566,23 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         int complexity = EstimatePredicateComplexity(whereExpression);
         int threshold = Math.Max(32, totalRows / 3);
+        bool accepted = topK <= threshold || complexity <= 6;
+        if (!accepted)
+        {
+            reason = "complexity_gate";
+        }
 
-        return topK <= threshold || complexity <= 6;
+        return accepted;
+    }
+
+    private void IncrementHybridRoutingCounter(string bucket)
+    {
+        if (!Engine.Config.EnableHybridRoutingTelemetryCounters)
+        {
+            return;
+        }
+
+        Engine.Config.IncrementHybridRoutingCounter(bucket);
     }
 
     private bool TryResolveVectorIndex(string tableName, string columnName, string databaseName, out string indexName, out IndexFile indexMetadata)
