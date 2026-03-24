@@ -890,7 +890,21 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
-        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database, indexMetadata.IndexKind);
+        ExpressionNode? seedPredicate = ResolveSeedPredicateForExpansion(materializedWhere);
+        int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
+        if (totalRows <= 0)
+        {
+            return new ListedTable();
+        }
+
+        List<long> rowIds = SearchVectorWithExpansionIfNeeded(
+            queryVector,
+            indexName,
+            tableName,
+            indexMetadata.IndexKind,
+            totalRows,
+            topK,
+            seedPredicate);
         if (rowIds.Count == 0)
         {
             return new ListedTable();
@@ -914,9 +928,10 @@ internal class Select(SelectStatement ast) : BaseDbAction
             {
                 if (materializedWhere == null || !ReferencesOnlyFromTable(materializedWhere, _model.FromTable.TableName))
                 {
+                    ExpressionNode? partialEmbeddingFilter = ResolveSeedPredicateForExpansion(materializedWhere);
                     try
                     {
-                        return EvaluateJoinFromSeed(seedRows, materializedWhere);
+                        return EvaluateJoinFromSeed(seedRows, partialEmbeddingFilter);
                     }
                     catch
                     {
@@ -928,6 +943,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
 
             return EvaluateJoinFromSeed(seedRows, embeddingFilter);
+        }
+
+        if (materializedWhere != null && !IsAllTrueExpression(materializedWhere))
+        {
+            seedRows = ApplyPredicateToSeedRows(seedRows, materializedWhere);
         }
 
         return new ListedTable(seedRows.Values
@@ -1145,12 +1165,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
         string indexKind,
         int totalRows,
         int initialTopK,
-        ExpressionNode whereExpression)
+        ExpressionNode? whereExpression)
     {
         int topK = Math.Clamp(initialTopK, 1, totalRows);
         int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
         int requiredRows = (_model.LimitTake ?? 0) + (_model.LimitSkip ?? 0);
+        bool canEstimatePostFilter = whereExpression != null && !IsAllTrueExpression(whereExpression);
         int lastPostFilterEstimate = -1;
 
         List<long> rowIds = [];
@@ -1163,12 +1184,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 return rowIds;
             }
 
-            if (requiredRows <= 0 || topK >= totalRows)
+            if (requiredRows <= 0 || topK >= totalRows || !canEstimatePostFilter)
             {
                 return rowIds;
             }
 
-            int postFilterEstimate = EstimatePostFilterCandidateMatches(rowIds, tableName, whereExpression);
+            int postFilterEstimate = EstimatePostFilterCandidateMatches(rowIds, tableName, whereExpression!);
             lastPostFilterEstimate = postFilterEstimate;
             LogVectorPredicateFastPathExpansion($"pass={pass}; postFilterEstimate={postFilterEstimate}; required={requiredRows}");
             if (postFilterEstimate >= requiredRows)
@@ -1192,6 +1213,31 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return rowIds;
+    }
+
+    private ExpressionNode? ResolveSeedPredicateForExpansion(ExpressionNode? whereExpression)
+    {
+        if (whereExpression == null || IsAllTrueExpression(whereExpression))
+        {
+            return null;
+        }
+
+        if (!_model.JoinStatement.ContainsJoin())
+        {
+            return ReferencesOnlyFromTable(whereExpression, _model.FromTable.TableName)
+                ? whereExpression
+                : null;
+        }
+
+        if (_model.TableService == null)
+        {
+            return null;
+        }
+
+        return ExpressionExtractor.TryExtractTableSpecificPredicates(
+            whereExpression,
+            _model.FromTable.TableName,
+            _model.TableService);
     }
 
     private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
