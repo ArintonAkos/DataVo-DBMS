@@ -1016,12 +1016,23 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         double distanceSelectivity = EstimateVectorDistanceSelectivity(distanceOperator, comparisonOperator, threshold);
         int topK = ResolveVectorPredicateTopK(totalRows, distanceSelectivity);
-        if (!ShouldUseVectorPredicateFastPath(totalRows, topK, distanceSelectivity, materializedWhere))
+        if (!ShouldUseVectorPredicateFastPath(totalRows, topK, distanceSelectivity, materializedWhere, out string decisionReason))
         {
+            LogVectorPredicateFastPathDecision($"rejected: {decisionReason}", totalRows, topK, distanceSelectivity);
             return null;
         }
 
-        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database, indexMetadata.IndexKind);
+        LogVectorPredicateFastPathDecision("accepted", totalRows, topK, distanceSelectivity);
+
+        List<long> rowIds = SearchVectorWithExpansionIfNeeded(
+            queryVector,
+            indexName,
+            tableName,
+            indexMetadata.IndexKind,
+            totalRows,
+            topK,
+            materializedWhere);
+
         if (rowIds.Count == 0)
         {
             return new ListedTable();
@@ -1083,35 +1094,139 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return Math.Min(totalRows, requested);
     }
 
-    private bool ShouldUseVectorPredicateFastPath(int totalRows, int topK, double estimatedSelectivity, ExpressionNode? whereExpression)
+    private bool ShouldUseVectorPredicateFastPath(int totalRows, int topK, double estimatedSelectivity, ExpressionNode? whereExpression, out string reason)
     {
+        reason = "accepted";
+
         if (!Engine.Config.EnableVectorPredicateFastPath)
         {
+            reason = "disabled by config";
             return false;
         }
 
         if (totalRows < Engine.Config.VectorPredicateFastPathMinRows)
         {
+            reason = $"table too small ({totalRows} < {Engine.Config.VectorPredicateFastPathMinRows})";
             return false;
         }
 
         if (topK <= 0 || topK >= totalRows)
         {
+            reason = $"invalid candidate size ({topK} of {totalRows})";
             return false;
         }
 
         double ratio = (double)topK / totalRows;
         if (ratio > Engine.Config.VectorPredicateFastPathMaxTopKRatio)
         {
+            reason = $"candidate ratio too high ({ratio:F3} > {Engine.Config.VectorPredicateFastPathMaxTopKRatio:F3})";
             return false;
         }
 
         if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
         {
+            reason = "where contains subquery";
             return false;
         }
 
-        return estimatedSelectivity < 0.85d;
+        if (estimatedSelectivity >= 0.85d)
+        {
+            reason = $"low expected gain (selectivity {estimatedSelectivity:F3})";
+            return false;
+        }
+
+        return true;
+    }
+
+    private List<long> SearchVectorWithExpansionIfNeeded(
+        float[] queryVector,
+        string indexName,
+        string tableName,
+        string indexKind,
+        int totalRows,
+        int initialTopK,
+        ExpressionNode whereExpression)
+    {
+        int topK = Math.Clamp(initialTopK, 1, totalRows);
+        int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
+        int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
+        int requiredRows = (_model.LimitTake ?? 0) + (_model.LimitSkip ?? 0);
+
+        List<long> rowIds = [];
+        for (int pass = 0; pass <= maxPasses; pass++)
+        {
+            rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database!, indexKind);
+            LogVectorPredicateFastPathExpansion($"pass={pass}; requestedTopK={topK}; returned={rowIds.Count}");
+            if (rowIds.Count == 0)
+            {
+                return rowIds;
+            }
+
+            if (requiredRows <= 0 || topK >= totalRows)
+            {
+                return rowIds;
+            }
+
+            int postFilterEstimate = EstimatePostFilterCandidateMatches(rowIds, tableName, whereExpression);
+            LogVectorPredicateFastPathExpansion($"pass={pass}; postFilterEstimate={postFilterEstimate}; required={requiredRows}");
+            if (postFilterEstimate >= requiredRows)
+            {
+                return rowIds;
+            }
+
+            int nextTopK = Math.Min(totalRows, topK * expansionFactor);
+            if (nextTopK <= topK)
+            {
+                return rowIds;
+            }
+
+            topK = nextTopK;
+            LogVectorPredicateFastPathExpansion($"pass={pass}; expandingTopK={topK}");
+        }
+
+        return rowIds;
+    }
+
+    private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
+    {
+        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(candidateRowIds, tableName, _model.Database!);
+        int count = 0;
+
+        foreach (long rowId in candidateRowIds)
+        {
+            if (!rows.TryGetValue(rowId, out var rowValues))
+            {
+                continue;
+            }
+
+            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(rowValues));
+            if (EvaluatePredicate(whereExpression, joinedRow))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void LogVectorPredicateFastPathDecision(string outcome, int totalRows, int topK, double selectivity)
+    {
+        if (!Engine.Config.EnableVectorPredicateFastPathTelemetry)
+        {
+            return;
+        }
+
+        Logger.Info($"Planner(vector-fastpath): {outcome}; rows={totalRows}; topK={topK}; selectivity={selectivity:F3}");
+    }
+
+    private void LogVectorPredicateFastPathExpansion(string message)
+    {
+        if (!Engine.Config.EnableVectorPredicateFastPathTelemetry)
+        {
+            return;
+        }
+
+        Logger.Info($"Planner(vector-fastpath-expansion): {message}");
     }
 
     private static double EstimateVectorDistanceSelectivity(string distanceOperator, string comparisonOperator, double threshold)
