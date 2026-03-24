@@ -987,8 +987,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 out string tableName,
                 out string columnName,
                 out float[] queryVector,
-                out _,
-                out _))
+            out string distanceOperator,
+            out string comparisonOperator,
+            out double threshold))
         {
             return null;
         }
@@ -1013,7 +1014,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        int topK = ResolveVectorPredicateTopK(totalRows);
+        double distanceSelectivity = EstimateVectorDistanceSelectivity(distanceOperator, comparisonOperator, threshold);
+        int topK = ResolveVectorPredicateTopK(totalRows, distanceSelectivity);
+        if (!ShouldUseVectorPredicateFastPath(totalRows, topK, distanceSelectivity, materializedWhere))
+        {
+            return null;
+        }
+
         List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database, indexMetadata.IndexKind);
         if (rowIds.Count == 0)
         {
@@ -1048,7 +1055,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList());
     }
 
-    private int ResolveVectorPredicateTopK(int totalRows)
+    private int ResolveVectorPredicateTopK(int totalRows, double estimatedSelectivity)
     {
         if (totalRows <= 0)
         {
@@ -1057,7 +1064,14 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
         {
-            return totalRows;
+            int multiplier = Math.Max(1, Engine.Config.VectorPredicateFastPathCandidateMultiplier);
+            int cap = Engine.Config.VectorPredicateFastPathMaxTopK > 0
+                ? Engine.Config.VectorPredicateFastPathMaxTopK
+                : totalRows;
+
+            int estimatedMatches = Math.Max(1, (int)Math.Ceiling(totalRows * Math.Clamp(estimatedSelectivity, 0.01d, 1d)));
+            int adaptiveTopK = Math.Max(64, estimatedMatches * multiplier);
+            return Math.Min(totalRows, Math.Min(adaptiveTopK, cap));
         }
 
         int requested = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
@@ -1069,17 +1083,79 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return Math.Min(totalRows, requested);
     }
 
+    private bool ShouldUseVectorPredicateFastPath(int totalRows, int topK, double estimatedSelectivity, ExpressionNode? whereExpression)
+    {
+        if (!Engine.Config.EnableVectorPredicateFastPath)
+        {
+            return false;
+        }
+
+        if (totalRows < Engine.Config.VectorPredicateFastPathMinRows)
+        {
+            return false;
+        }
+
+        if (topK <= 0 || topK >= totalRows)
+        {
+            return false;
+        }
+
+        double ratio = (double)topK / totalRows;
+        if (ratio > Engine.Config.VectorPredicateFastPathMaxTopKRatio)
+        {
+            return false;
+        }
+
+        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
+        {
+            return false;
+        }
+
+        return estimatedSelectivity < 0.85d;
+    }
+
+    private static double EstimateVectorDistanceSelectivity(string distanceOperator, string comparisonOperator, double threshold)
+    {
+        bool lessStyle = comparisonOperator == Operators.LESS_THAN || comparisonOperator == Operators.LESS_THAN_OR_EQUAL_TO;
+
+        double baseSelectivity = distanceOperator switch
+        {
+            Operators.VECTOR_DISTANCE_COSINE => threshold switch
+            {
+                <= 0.10d => 0.02d,
+                <= 0.20d => 0.05d,
+                <= 0.40d => 0.15d,
+                <= 0.80d => 0.40d,
+                _ => 0.70d
+            },
+            Operators.VECTOR_DISTANCE_L2 => threshold switch
+            {
+                <= 0.25d => 0.05d,
+                <= 0.50d => 0.10d,
+                <= 1.00d => 0.20d,
+                <= 2.00d => 0.45d,
+                _ => 0.75d
+            },
+            _ => 0.50d
+        };
+
+        double selectivity = lessStyle ? baseSelectivity : (1d - baseSelectivity);
+        return Math.Clamp(selectivity, 0.01d, 0.99d);
+    }
+
     private bool TryExtractVectorDistancePredicate(
         ExpressionNode expression,
         out string tableName,
         out string columnName,
         out float[] queryVector,
+        out string distanceOperator,
         out string comparisonOperator,
         out double threshold)
     {
         tableName = string.Empty;
         columnName = string.Empty;
         queryVector = [];
+        distanceOperator = string.Empty;
         comparisonOperator = string.Empty;
         threshold = 0d;
 
@@ -1090,14 +1166,16 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase))
         {
-            return TryExtractVectorDistancePredicate(binary.Left, out tableName, out columnName, out queryVector, out comparisonOperator, out threshold)
-                || TryExtractVectorDistancePredicate(binary.Right, out tableName, out columnName, out queryVector, out comparisonOperator, out threshold);
+            return TryExtractVectorDistancePredicate(binary.Left, out tableName, out columnName, out queryVector, out distanceOperator, out comparisonOperator, out threshold)
+                || TryExtractVectorDistancePredicate(binary.Right, out tableName, out columnName, out queryVector, out distanceOperator, out comparisonOperator, out threshold);
         }
 
         if (!TryGetDistanceComparison(binary, out var distanceExpression, out comparisonOperator, out threshold))
         {
             return false;
         }
+
+        distanceOperator = distanceExpression.Operator;
 
         return TryResolveVectorDistanceExpression(distanceExpression, out tableName, out columnName, out queryVector);
     }
