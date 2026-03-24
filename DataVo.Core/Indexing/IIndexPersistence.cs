@@ -50,4 +50,24 @@ public interface IIndexPersistence
     /// <param name="filePath">The path to check.</param>
     /// <returns>True if the file exists; false otherwise.</returns>
     bool FileExists(string filePath);
+
+    /// <summary>
+    /// Ensures the target directory exists.
+    /// </summary>
+    /// <param name="directoryPath">Directory path to create if missing.</param>
+    void EnsureDirectory(string directoryPath);
+
+    /// <summary>
+    /// Attempts to delete the index file at the provided path.
+    /// </summary>
+    /// <param name="filePath">The file path to delete.</param>
+    /// <returns>True when deletion succeeds or the file does not exist; otherwise false.</returns>
+    bool TryDeleteFile(string filePath);
+
+    /// <summary>
+    /// Attempts to delete a directory recursively.
+    /// </summary>
+    /// <param name="directoryPath">The directory path to delete.</param>
+    /// <returns>True when deletion succeeds or the directory does not exist; otherwise false.</returns>
+    bool TryDeleteDirectory(string directoryPath);
 }

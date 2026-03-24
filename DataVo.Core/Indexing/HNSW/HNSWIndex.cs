@@ -14,8 +14,11 @@ namespace DataVo.Core.Indexing.HNSW;
 /// - Improved insertion/deletion algorithms
 /// </para>
 /// </remarks>
-public class HNSWIndex : IIndexBase
+public class HNSWIndex : IVectorIndex
 {
+    /// <summary>
+    /// Gets the index type identifier.
+    /// </summary>
     public string IndexType => "HNSW";
 
     /// <summary>
