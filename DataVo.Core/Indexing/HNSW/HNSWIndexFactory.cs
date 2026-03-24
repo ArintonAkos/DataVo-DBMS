@@ -39,6 +39,9 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (TryReadBool(@params, "enableDiversityHeuristic", out bool enableDiversityHeuristic))
             index.EnableDiversityHeuristic = enableDiversityHeuristic;
 
+        if (TryReadBool(@params, "enableDeleteGraphRepair", out bool enableDeleteGraphRepair))
+            index.EnableDeleteGraphRepair = enableDeleteGraphRepair;
+
         return index;
     }
 

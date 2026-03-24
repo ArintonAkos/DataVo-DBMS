@@ -77,6 +77,11 @@ public class HNSWIndex : IVectorIndex
     public bool EnableDiversityHeuristic { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether delete operations should repair local graph neighborhoods.
+    /// </summary>
+    public bool EnableDeleteGraphRepair { get; set; } = true;
+
+    /// <summary>
     /// Inserts or updates a vector entry.
     /// </summary>
     public void Insert(long rowId, float[] vector)
@@ -626,6 +631,8 @@ public class HNSWIndex : IVectorIndex
 
                 if (levelGraph.TryGetValue(rowId, out var neighbors))
                 {
+                    List<long> removedNeighbors = [.. neighbors];
+
                     foreach (long neighbor in neighbors)
                     {
                         if (levelGraph.TryGetValue(neighbor, out var neighborList))
@@ -635,6 +642,11 @@ public class HNSWIndex : IVectorIndex
                     }
 
                     levelGraph.Remove(rowId);
+
+                    if (EnableDeleteGraphRepair)
+                    {
+                        RepairNeighborhoodAfterDelete(currentLevel, removedNeighbors, rowId);
+                    }
                 }
 
                 if (levelGraph.Count == 0)
@@ -672,6 +684,70 @@ public class HNSWIndex : IVectorIndex
         Layers.Clear();
         EntryPointId = null;
         MaxLevel = -1;
+    }
+
+    private void RepairNeighborhoodAfterDelete(int level, IReadOnlyCollection<long> removedNeighbors, long removedNodeId)
+    {
+        if (removedNeighbors.Count < 2)
+        {
+            return;
+        }
+
+        if (!Layers.TryGetValue(level, out var levelGraph))
+        {
+            return;
+        }
+
+        List<long> candidates = removedNeighbors
+            .Where(nodeId => nodeId != removedNodeId && Entries.ContainsKey(nodeId) && NodeExistsAtLevel(nodeId, level))
+            .Distinct()
+            .ToList();
+
+        if (candidates.Count < 2)
+        {
+            return;
+        }
+
+        foreach (long source in candidates)
+        {
+            if (!levelGraph.TryGetValue(source, out var sourceNeighbors))
+            {
+                sourceNeighbors = [];
+                levelGraph[source] = sourceNeighbors;
+            }
+
+            List<long> mergeCandidates = sourceNeighbors
+                .Where(nodeId => nodeId != removedNodeId && Entries.ContainsKey(nodeId) && NodeExistsAtLevel(nodeId, level))
+                .Concat(candidates.Where(nodeId => nodeId != source))
+                .Distinct()
+                .ToList();
+
+            List<(long RowId, float Distance)> rankedCandidates = mergeCandidates
+                .Select(nodeId => (RowId: nodeId, Distance: Distance(Entries[source], Entries[nodeId])))
+                .OrderBy(item => item.Distance)
+                .ThenBy(item => item.RowId)
+                .ToList();
+
+            List<long> selected = SelectNeighbors(rankedCandidates, source, M);
+            levelGraph[source] = selected;
+        }
+
+        // Ensure bidirectional consistency after local rewiring.
+        foreach (long source in candidates)
+        {
+            if (!levelGraph.TryGetValue(source, out var sourceNeighbors))
+            {
+                continue;
+            }
+
+            foreach (long neighbor in sourceNeighbors)
+            {
+                if (neighbor != removedNodeId && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
+                {
+                    AddNeighbor(level, neighbor, source);
+                }
+            }
+        }
     }
 
     private float Distance(float[] a, float[] b)

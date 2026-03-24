@@ -15,6 +15,7 @@ public class HNSWIndexPersistence : IIndexPersistence
         public int EfConstruction { get; set; } = 64;
         public int EfSearch { get; set; } = 64;
         public bool EnableDiversityHeuristic { get; set; } = true;
+        public bool EnableDeleteGraphRepair { get; set; } = true;
         public long? EntryPointId { get; set; }
         public int MaxLevel { get; set; } = -1;
         public Dictionary<long, int> NodeLevels { get; set; } = [];
@@ -47,6 +48,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfConstruction = hnsw.EfConstruction,
             EfSearch = hnsw.EfSearch,
             EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
+            EnableDeleteGraphRepair = hnsw.EnableDeleteGraphRepair,
             EntryPointId = hnsw.EntryPointId,
             MaxLevel = hnsw.MaxLevel,
             NodeLevels = hnsw.NodeLevels,
@@ -87,6 +89,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
             EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
             EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
+            EnableDeleteGraphRepair = snapshot.EnableDeleteGraphRepair,
             EntryPointId = snapshot.EntryPointId,
             MaxLevel = snapshot.MaxLevel,
             Entries = snapshot.Entries ?? [],
