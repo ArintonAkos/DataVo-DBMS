@@ -205,7 +205,7 @@ public sealed class HashAggregateOperator : IQueryOperator
         {
             foreach (ExecutionRow row in initialRows)
             {
-                WriteRowToPartition(row, partitionFiles, writers);
+                WriteRowToPartition(row.ToTyped(), partitionFiles, writers);
             }
 
             while (true)
@@ -216,7 +216,7 @@ public sealed class HashAggregateOperator : IQueryOperator
                     break;
                 }
 
-                WriteRowToPartition(row, partitionFiles, writers);
+                WriteRowToPartition(row.ToTyped(), partitionFiles, writers);
             }
         }
         finally
@@ -275,12 +275,10 @@ public sealed class HashAggregateOperator : IQueryOperator
         return files;
     }
 
-    private void WriteRowToPartition(ExecutionRow row, List<string> partitionFiles, List<StreamWriter> writers)
+    private void WriteRowToPartition(TypedExecutionRow typed, List<string> partitionFiles, List<StreamWriter> writers)
     {
-        string key = BuildGroupKey(row.ToTyped(), _groupKeyColumns);
-        int index = Math.Abs(key.GetHashCode()) % partitionFiles.Count;
-
-        TypedExecutionRow typed = row.ToTyped();
+        string key = BuildGroupKey(typed, _groupKeyColumns);
+        int index = (key.GetHashCode() & int.MaxValue) % partitionFiles.Count;
         writers[index].WriteLine(JsonSerializer.Serialize(typed));
     }
 

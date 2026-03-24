@@ -122,6 +122,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoGroupByPushedDown;
     private bool _volcanoAggregatePushedDown;
     private HashSet<string> _volcanoAggregateGroupKeyColumns = [];
+    private HashSet<string> _volcanoAggregateOutputColumns = [];
 
     /// <summary>
     /// Executes the SELECT query end-to-end.
@@ -1254,6 +1255,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 root = new HashAggregateOperator(root, aggregateGroupByColumns, aggregateSpecs, BuildAggregateExecutionOptions());
                 _volcanoAggregatePushedDown = true;
                 _volcanoAggregateGroupKeyColumns = [.. aggregateGroupByColumns];
+                _volcanoAggregateOutputColumns = [.. aggregateSpecs.Select(spec => spec.OutputColumn)];
             }
         }
 
@@ -2211,6 +2213,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private bool TryBuildNoJoinOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)
     {
+        if (_volcanoAggregatePushedDown)
+        {
+            return TryBuildNoJoinAggregateOrderPushdown(out orderKeys);
+        }
+
         orderKeys = [];
 
         var orderBy = _model.GetOrderByExpression();
@@ -2254,6 +2261,109 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
 
         return orderKeys.Count > 0;
+    }
+
+    private bool TryBuildNoJoinAggregateOrderPushdown(out List<(string Key, bool IsAscending)> orderKeys)
+    {
+        orderKeys = [];
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return false;
+        }
+
+        var orderBy = _model.GetOrderByExpression();
+        if (orderBy == null || orderBy.Columns.Count == 0)
+        {
+            return false;
+        }
+
+        string fromTable = _model.FromTable.TableName;
+        string? fromAlias = _model.FromTable.TableAlias;
+        var groupBySet = new HashSet<string>(_volcanoAggregateGroupKeyColumns, StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> aggregateAliasMap = BuildAggregateAliasToOutputKeyMap();
+
+        foreach (var orderColumn in orderBy.Columns)
+        {
+            string token = orderColumn.Column.Name;
+
+            if (token.Contains('.'))
+            {
+                string[] parts = token.Split('.');
+                if (parts.Length != 2)
+                {
+                    return false;
+                }
+
+                if (!parts[0].Equals(fromTable, StringComparison.OrdinalIgnoreCase)
+                    && (fromAlias == null || !parts[0].Equals(fromAlias, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return false;
+                }
+
+                if (!groupBySet.Contains(parts[1]))
+                {
+                    return false;
+                }
+
+                orderKeys.Add((parts[1], orderColumn.IsAscending));
+                continue;
+            }
+
+            if (aggregateAliasMap.TryGetValue(token, out string aggregateOutputKey))
+            {
+                orderKeys.Add((aggregateOutputKey, orderColumn.IsAscending));
+                continue;
+            }
+
+            if (_volcanoAggregateOutputColumns.Contains(token))
+            {
+                orderKeys.Add((token, orderColumn.IsAscending));
+                continue;
+            }
+
+            if (groupBySet.Contains(token))
+            {
+                orderKeys.Add((token, orderColumn.IsAscending));
+                continue;
+            }
+
+            if (_model.GetSelectColumnByAlias(token)?.Expression is AggregateExpressionNode aggregateExpression)
+            {
+                string outputKey = AggregateExpressionFormatter.BuildHeader(aggregateExpression);
+                if (_volcanoAggregateOutputColumns.Contains(outputKey))
+                {
+                    orderKeys.Add((outputKey, orderColumn.IsAscending));
+                    continue;
+                }
+            }
+
+            return false;
+        }
+
+        return orderKeys.Count > 0;
+    }
+
+    private Dictionary<string, string> BuildAggregateAliasToOutputKeyMap()
+    {
+        Dictionary<string, string> aliasMap = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var aggregateColumn in _model.GetAggregateColumns())
+        {
+            if (aggregateColumn.Expression is not AggregateExpressionNode aggregateExpression)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(aggregateColumn.Alias))
+            {
+                continue;
+            }
+
+            aliasMap[aggregateColumn.Alias] = AggregateExpressionFormatter.BuildHeader(aggregateExpression);
+        }
+
+        return aliasMap;
     }
 
     private bool TryBuildNoJoinProjectionPushdown(out HashSet<string> projectionColumns)
