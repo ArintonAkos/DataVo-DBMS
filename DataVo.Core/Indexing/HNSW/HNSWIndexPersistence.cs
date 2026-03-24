@@ -7,6 +7,20 @@ namespace DataVo.Core.Indexing.HNSW;
 /// </summary>
 public class HNSWIndexPersistence : IIndexPersistence
 {
+    private sealed class HnswSnapshot
+    {
+        public string IndexType { get; set; } = "HNSW";
+        public string Metric { get; set; } = "cosine";
+        public int M { get; set; } = 16;
+        public int EfConstruction { get; set; } = 64;
+        public int EfSearch { get; set; } = 64;
+        public long? EntryPointId { get; set; }
+        public int MaxLevel { get; set; } = -1;
+        public Dictionary<long, int> NodeLevels { get; set; } = [];
+        public Dictionary<int, Dictionary<long, List<long>>> Layers { get; set; } = [];
+        public Dictionary<long, float[]> Entries { get; set; } = [];
+    }
+
     /// <summary>
     /// Gets the serialized file extension for vector index files.
     /// </summary>
@@ -24,10 +38,17 @@ public class HNSWIndexPersistence : IIndexPersistence
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
-        var payload = new
+        var payload = new HnswSnapshot
         {
             IndexType = "HNSW",
             Metric = hnsw.Metric,
+            M = hnsw.M,
+            EfConstruction = hnsw.EfConstruction,
+            EfSearch = hnsw.EfSearch,
+            EntryPointId = hnsw.EntryPointId,
+            MaxLevel = hnsw.MaxLevel,
+            NodeLevels = hnsw.NodeLevels,
+            Layers = hnsw.Layers,
             Entries = hnsw.Entries
         };
 
@@ -48,34 +69,32 @@ public class HNSWIndexPersistence : IIndexPersistence
             throw new FileNotFoundException($"Vector index file not found: {filePath}");
 
         string json = File.ReadAllText(filePath);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        var index = new HNSWIndex();
-
-        // Extract metric
-        if (root.TryGetProperty("Metric", out var metricElem) && metricElem.ValueKind == JsonValueKind.String)
-            index.Metric = metricElem.GetString() ?? "cosine";
-
-        // Extract entries
-        if (root.TryGetProperty("Entries", out var entriesElem) && entriesElem.ValueKind == JsonValueKind.Object)
+        var options = new JsonSerializerOptions
         {
-            foreach (var prop in entriesElem.EnumerateObject())
-            {
-                if (long.TryParse(prop.Name, out var rowId))
-                {
-                    if (prop.Value.ValueKind == JsonValueKind.Array)
-                    {
-                        var vector = new List<float>();
-                        foreach (var elem in prop.Value.EnumerateArray())
-                        {
-                            if (elem.ValueKind == JsonValueKind.Number)
-                                vector.Add(elem.GetSingle());
-                        }
-                        index.Insert(rowId, vector.ToArray());
-                    }
-                }
-            }
+            PropertyNameCaseInsensitive = true
+        };
+
+        HnswSnapshot? snapshot = JsonSerializer.Deserialize<HnswSnapshot>(json, options);
+        if (snapshot == null)
+            throw new InvalidOperationException($"Failed to deserialize HNSW index payload: {filePath}");
+
+        var index = new HNSWIndex
+        {
+            Metric = string.IsNullOrWhiteSpace(snapshot.Metric) ? "cosine" : snapshot.Metric,
+            M = snapshot.M > 0 ? snapshot.M : 16,
+            EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
+            EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
+            EntryPointId = snapshot.EntryPointId,
+            MaxLevel = snapshot.MaxLevel,
+            Entries = snapshot.Entries ?? [],
+            NodeLevels = snapshot.NodeLevels ?? [],
+            Layers = snapshot.Layers ?? []
+        };
+
+        // Backward compatibility: legacy snapshots only had Entries + Metric.
+        if (index.Entries.Count > 0 && (index.NodeLevels.Count == 0 || index.Layers.Count == 0))
+        {
+            index.RebuildGraphFromEntries();
         }
 
         return index;
@@ -129,6 +148,9 @@ public class HNSWIndexPersistence : IIndexPersistence
         }
     }
 
+    /// <summary>
+    /// Attempts to delete an index directory recursively.
+    /// </summary>
     public bool TryDeleteDirectory(string directoryPath)
     {
         try
