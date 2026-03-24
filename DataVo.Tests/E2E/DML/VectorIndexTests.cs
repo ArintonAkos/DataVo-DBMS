@@ -388,6 +388,36 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal(132, result.Data[1]["Id"]);
     }
 
+    [Fact]
+    public void Select_VectorDistanceWherePredicate_WithLimit_NoExpansionPasses_CanUnderfillAfterPostFilter()
+    {
+        Engine.Config.VectorPredicateFastPathMinRows = 1;
+        Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 0;
+        Engine.Config.VectorPredicateFastPathExpansionFactor = 2;
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+
+        for (int id = 1; id <= 130; id++)
+        {
+            Execute($"INSERT INTO Embeddings (Id, Emb, Status) VALUES ({id}, '[1,0,0]', 'inactive')");
+        }
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (131, '[0.95,0.05,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (132, '[0.95,0.05,0]', 'active')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec_no_expand ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id
+            FROM Embeddings
+            WHERE Emb <=> '[1,0,0]' < 0.1 AND Status = 'active'
+            ORDER BY Id ASC
+            LIMIT 2");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Empty(result.Data);
+    }
+
 }
 
 public class InMemoryVectorIndexTests : VectorIndexTestsBase
