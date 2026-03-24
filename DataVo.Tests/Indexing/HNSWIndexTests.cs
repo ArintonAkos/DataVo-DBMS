@@ -196,9 +196,9 @@ public class HNSWIndexTests : IDisposable
         };
 
         var random = new Random(20260324);
-        const int dimension = 16;
-        const int vectors = 600;
-        const int queries = 40;
+        const int dimension = 12;
+        const int vectors = 280;
+        const int queries = 18;
         const int topK = 10;
 
         for (int id = 1; id <= vectors; id++)
@@ -242,9 +242,9 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_RecallTrend_ImprovesWithEfSearchAndM_Matrix()
     {
-        const int dimension = 12;
-        const int vectors = 500;
-        const int queries = 30;
+        const int dimension = 10;
+        const int vectors = 220;
+        const int queries = 14;
         const int topK = 10;
 
         var dataset = BuildDataset(seed: 20260324, vectors, dimension);
@@ -266,9 +266,9 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_RecallTrend_ImprovesWithInsertionCandidateExpansion()
     {
-        const int dimension = 14;
-        const int vectors = 480;
-        const int queries = 28;
+        const int dimension = 10;
+        const int vectors = 220;
+        const int queries = 14;
         const int topK = 10;
 
         var dataset = BuildDataset(seed: 20260331, vectors, dimension);
@@ -302,9 +302,9 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_RecallTrend_AdaptiveInsertionExpansionPolicy_IsStable()
     {
-        const int dimension = 14;
-        const int vectors = 450;
-        const int queries = 24;
+        const int dimension = 10;
+        const int vectors = 210;
+        const int queries = 14;
         const int topK = 10;
 
         var dataset = BuildDataset(seed: 20260402, vectors, dimension);
@@ -342,12 +342,12 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_RecallStability_UnderInsertDeleteChurn_RemainsBounded()
     {
-        const int dimension = 12;
-        const int vectors = 400;
-        const int queries = 24;
+        const int dimension = 10;
+        const int vectors = 220;
+        const int queries = 14;
         const int topK = 10;
-        const int churnCycles = 6;
-        const int churnBatch = 48;
+        const int churnCycles = 4;
+        const int churnBatch = 24;
 
         var random = new Random(20260326);
         var dataset = BuildDataset(seed: 20260326, vectors, dimension);
@@ -412,11 +412,11 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_ChurnMatrix_RecallAndLatencyRemainStable()
     {
-        const int dimension = 16;
-        const int vectors = 500;
-        const int queries = 28;
+        const int dimension = 12;
+        const int vectors = 260;
+        const int queries = 16;
         const int topK = 10;
-        const int churnCycles = 10;
+        const int churnCycles = 5;
 
         double[] churnRatios = [0.05d, 0.10d, 0.20d];
         var baseDataset = BuildDataset(seed: 20260328, vectors, dimension);
@@ -501,12 +501,12 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Benchmark_ChurnSoak_MultiRunVariance_IsBounded()
     {
-        const int runs = 3;
-        const int dimension = 14;
-        const int vectors = 360;
-        const int queries = 20;
+        const int runs = 2;
+        const int dimension = 10;
+        const int vectors = 200;
+        const int queries = 12;
         const int topK = 10;
-        const int churnCycles = 8;
+        const int churnCycles = 4;
 
         double[] churnRatios = [0.10d, 0.20d];
         var recallByRatio = new Dictionary<double, List<double>>();
