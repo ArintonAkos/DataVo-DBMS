@@ -1151,6 +1151,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
         int requiredRows = (_model.LimitTake ?? 0) + (_model.LimitSkip ?? 0);
+        int lastPostFilterEstimate = -1;
 
         List<long> rowIds = [];
         for (int pass = 0; pass <= maxPasses; pass++)
@@ -1168,6 +1169,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
 
             int postFilterEstimate = EstimatePostFilterCandidateMatches(rowIds, tableName, whereExpression);
+            lastPostFilterEstimate = postFilterEstimate;
             LogVectorPredicateFastPathExpansion($"pass={pass}; postFilterEstimate={postFilterEstimate}; required={requiredRows}");
             if (postFilterEstimate >= requiredRows)
             {
@@ -1182,6 +1184,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
             topK = nextTopK;
             LogVectorPredicateFastPathExpansion($"pass={pass}; expandingTopK={topK}");
+        }
+
+        if (requiredRows > 0)
+        {
+            LogVectorPredicateFastPathExpansion($"exhausted; finalCandidates={rowIds.Count}; finalPostFilterEstimate={Math.Max(0, lastPostFilterEstimate)}; required={requiredRows}");
         }
 
         return rowIds;
