@@ -49,9 +49,23 @@ public sealed class SortOperator : IQueryOperator
         }
 
         /// <summary>
+        /// Initializes a typed sort key selector and direction.
+        /// </summary>
+        public SortKeySpec(Func<TypedExecutionRow, object?> typedKeySelector, bool ascending)
+        {
+            TypedKeySelector = typedKeySelector;
+            Ascending = ascending;
+        }
+
+        /// <summary>
         /// Key selector used to resolve sort values from a row.
         /// </summary>
         public Func<ExecutionRow, object?> KeySelector { get; }
+
+        /// <summary>
+        /// Typed key selector used to resolve sort values from a row.
+        /// </summary>
+        public Func<TypedExecutionRow, object?>? TypedKeySelector { get; }
 
         /// <summary>
         /// Sort direction for this key.
@@ -193,18 +207,28 @@ public sealed class SortOperator : IQueryOperator
             if (ordered == null)
             {
                 ordered = key.Ascending
-                    ? input.OrderBy(key.KeySelector, DynamicObjectComparer.Instance)
-                    : input.OrderByDescending(key.KeySelector, DynamicObjectComparer.Instance);
+                    ? input.OrderBy(row => ResolveSortKeyValue(key, row), DynamicObjectComparer.Instance)
+                    : input.OrderByDescending(row => ResolveSortKeyValue(key, row), DynamicObjectComparer.Instance);
             }
             else
             {
                 ordered = key.Ascending
-                    ? ordered.ThenBy(key.KeySelector, DynamicObjectComparer.Instance)
-                    : ordered.ThenByDescending(key.KeySelector, DynamicObjectComparer.Instance);
+                    ? ordered.ThenBy(row => ResolveSortKeyValue(key, row), DynamicObjectComparer.Instance)
+                    : ordered.ThenByDescending(row => ResolveSortKeyValue(key, row), DynamicObjectComparer.Instance);
             }
         }
 
         return ordered?.ToList() ?? input;
+    }
+
+    private static object? ResolveSortKeyValue(SortKeySpec key, ExecutionRow row)
+    {
+        if (key.TypedKeySelector != null)
+        {
+            return key.TypedKeySelector(row.ToTyped());
+        }
+
+        return key.KeySelector(row);
     }
 
     private void BuildSpillRuns(List<ExecutionRow> initialRows)

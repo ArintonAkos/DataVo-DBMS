@@ -32,6 +32,21 @@ public sealed class HashAggregateOperator : IQueryOperator
         /// Optional directory for partition run files. Defaults to process temporary directory.
         /// </summary>
         public string? SpillDirectory { get; init; }
+
+        /// <summary>
+        /// Enables adaptive partition sizing based on observed spill row volume.
+        /// </summary>
+        public bool EnableAdaptivePartitioning { get; init; } = true;
+
+        /// <summary>
+        /// Target rows per partition when adaptive sizing is enabled.
+        /// </summary>
+        public int TargetRowsPerPartition { get; init; } = 4096;
+
+        /// <summary>
+        /// Maximum partition count for adaptive partition sizing.
+        /// </summary>
+        public int MaxPartitionCount { get; init; } = 128;
     }
 
     public enum AggregateFunction
@@ -52,9 +67,17 @@ public sealed class HashAggregateOperator : IQueryOperator
             ArgumentSelector = argumentSelector;
         }
 
+        public AggregateSpec(string outputColumn, AggregateFunction function, Func<TypedExecutionRow, object?> typedArgumentSelector)
+        {
+            OutputColumn = outputColumn;
+            Function = function;
+            TypedArgumentSelector = typedArgumentSelector;
+        }
+
         public string OutputColumn { get; }
         public AggregateFunction Function { get; }
         public Func<ExecutionRow, object?>? ArgumentSelector { get; }
+        public Func<TypedExecutionRow, object?>? TypedArgumentSelector { get; }
     }
 
     private sealed class AggregateState
@@ -174,7 +197,7 @@ public sealed class HashAggregateOperator : IQueryOperator
 
     private Dictionary<string, GroupAccumulator> ExecuteWithExternalSpill(List<ExecutionRow> initialRows)
     {
-        int partitionCount = Math.Max(2, _options.PartitionCount);
+        int partitionCount = ResolvePartitionCount(initialRows.Count);
         List<string> partitionFiles = CreatePartitionFiles(partitionCount);
         List<StreamWriter> writers = partitionFiles.Select(path => new StreamWriter(path, append: false)).ToList();
 
@@ -219,6 +242,20 @@ public sealed class HashAggregateOperator : IQueryOperator
         }
 
         return global;
+    }
+
+    private int ResolvePartitionCount(int observedRows)
+    {
+        int minPartitionCount = Math.Max(2, _options.PartitionCount);
+        if (!_options.EnableAdaptivePartitioning)
+        {
+            return minPartitionCount;
+        }
+
+        int targetRows = Math.Max(1, _options.TargetRowsPerPartition);
+        int adaptive = (int)Math.Ceiling((double)Math.Max(1, observedRows) / targetRows);
+        int cappedAdaptive = Math.Clamp(adaptive, minPartitionCount, Math.Max(minPartitionCount, _options.MaxPartitionCount));
+        return Math.Max(minPartitionCount, cappedAdaptive);
     }
 
     private List<string> CreatePartitionFiles(int partitionCount)
@@ -415,14 +452,13 @@ public sealed class HashAggregateOperator : IQueryOperator
 
             if (spec.Function == AggregateFunction.Count)
             {
-                if (spec.ArgumentSelector == null)
+                if (spec.ArgumentSelector == null && spec.TypedArgumentSelector == null)
                 {
                     state.Count++;
                 }
                 else
                 {
-                    dynamicRow ??= ExecutionRow.FromTyped(row);
-                    object? value = spec.ArgumentSelector(dynamicRow);
+                    object? value = ResolveAggregateArgumentValue(spec, row, ref dynamicRow);
                     if (value != null)
                     {
                         state.Count++;
@@ -432,8 +468,7 @@ public sealed class HashAggregateOperator : IQueryOperator
                 continue;
             }
 
-            dynamicRow ??= ExecutionRow.FromTyped(row);
-            object? argument = spec.ArgumentSelector?.Invoke(dynamicRow);
+            object? argument = ResolveAggregateArgumentValue(spec, row, ref dynamicRow);
             if (argument == null)
             {
                 continue;
@@ -467,6 +502,25 @@ public sealed class HashAggregateOperator : IQueryOperator
                     break;
             }
         }
+    }
+
+    private static object? ResolveAggregateArgumentValue(
+        AggregateSpec spec,
+        TypedExecutionRow row,
+        ref ExecutionRow? dynamicRow)
+    {
+        if (spec.TypedArgumentSelector != null)
+        {
+            return spec.TypedArgumentSelector(row);
+        }
+
+        if (spec.ArgumentSelector == null)
+        {
+            return null;
+        }
+
+        dynamicRow ??= ExecutionRow.FromTyped(row);
+        return spec.ArgumentSelector(dynamicRow);
     }
 
     private static object? FinalizeAggregate(AggregateSpec spec, AggregateState state)

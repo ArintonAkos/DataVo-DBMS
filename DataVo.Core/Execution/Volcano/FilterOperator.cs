@@ -6,7 +6,8 @@ namespace DataVo.Core.Execution.Volcano;
 public sealed class FilterOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
-    private readonly Func<ExecutionRow, bool> _predicate;
+    private readonly Func<ExecutionRow, bool>? _predicate;
+    private readonly Func<TypedExecutionRow, bool>? _typedPredicate;
 
     /// <summary>
     /// Initializes a filter operator over a source stream.
@@ -15,6 +16,15 @@ public sealed class FilterOperator : IQueryOperator
     {
         _source = source;
         _predicate = predicate;
+    }
+
+    /// <summary>
+    /// Initializes a filter operator over a source stream using typed row payloads.
+    /// </summary>
+    public FilterOperator(IQueryOperator source, Func<TypedExecutionRow, bool> typedPredicate)
+    {
+        _source = source;
+        _typedPredicate = typedPredicate;
     }
 
     /// <inheritdoc />
@@ -34,7 +44,11 @@ public sealed class FilterOperator : IQueryOperator
                 return null;
             }
 
-            if (_predicate(row))
+            bool keep = _typedPredicate != null
+                ? _typedPredicate(row.ToTyped())
+                : _predicate!(row);
+
+            if (keep)
             {
                 return row;
             }

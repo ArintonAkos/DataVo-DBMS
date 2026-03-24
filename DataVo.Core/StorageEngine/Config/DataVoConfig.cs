@@ -126,6 +126,41 @@ public class DataVoConfig
     /// </summary>
     public string? VolcanoExternalAggregateTempDirectory { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether external aggregate spill should adapt partition count based on observed volume.
+    /// </summary>
+    public bool VolcanoExternalAggregateAdaptivePartitioning { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets target rows per partition when adaptive aggregate partitioning is enabled.
+    /// </summary>
+    public int VolcanoExternalAggregateTargetRowsPerPartition { get; set; } = 4096;
+
+    /// <summary>
+    /// Gets or sets maximum partition count used by adaptive aggregate partitioning.
+    /// </summary>
+    public int VolcanoExternalAggregateMaxPartitionCount { get; set; } = 128;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Volcano join-cardinality feedback learning is enabled.
+    /// </summary>
+    public bool EnableVolcanoJoinCardinalityFeedback { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether join-cardinality feedback should be persisted across engine restarts.
+    /// </summary>
+    public bool EnableVolcanoJoinCardinalityFeedbackPersistence { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional file path used to persist join-cardinality feedback when persistence is enabled.
+    /// </summary>
+    public string? VolcanoJoinCardinalityFeedbackPersistenceFile { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum number of learned join-cardinality entries retained in memory/persistence.
+    /// </summary>
+    public int VolcanoJoinCardinalityFeedbackMaxEntries { get; set; } = 4096;
+
     private bool? _walEnabled;
 
     /// <summary>
