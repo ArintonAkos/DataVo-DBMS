@@ -72,6 +72,11 @@ public class HNSWIndex : IVectorIndex
     public int EfSearch { get; set; } = DefaultEfSearch;
 
     /// <summary>
+    /// Gets or sets a value indicating whether heuristic diversified neighbor selection is enabled.
+    /// </summary>
+    public bool EnableDiversityHeuristic { get; set; } = true;
+
+    /// <summary>
     /// Inserts or updates a vector entry.
     /// </summary>
     public void Insert(long rowId, float[] vector)
@@ -113,6 +118,11 @@ public class HNSWIndex : IVectorIndex
         {
             List<(long RowId, float Distance)> candidates = SearchLayer(vector, entryPoint, EfConstruction, currentLevel);
             List<long> neighbors = SelectNeighbors(candidates, rowId, M);
+
+            if (neighbors.Count == 0 && entryPoint != rowId && NodeExistsAtLevel(entryPoint, currentLevel))
+            {
+                neighbors.Add(entryPoint);
+            }
 
             ConnectNode(rowId, neighbors, currentLevel);
             if (neighbors.Count > 0)
@@ -159,6 +169,12 @@ public class HNSWIndex : IVectorIndex
             return [];
         }
 
+        int expectedDimension = Entries.First().Value.Length;
+        if (queryVector.Length != expectedDimension)
+        {
+            return [];
+        }
+
         if (topK >= Entries.Count)
         {
             return ExactSearchTopK(queryVector, topK);
@@ -172,7 +188,8 @@ public class HNSWIndex : IVectorIndex
         }
 
         int ef = Math.Max(topK, Math.Max(1, EfSearch));
-        List<(long RowId, float Distance)> candidates = SearchLayer(queryVector, entryPoint, ef, 0);
+        List<long> seeds = BuildLevelZeroSeeds(entryPoint, ef);
+        List<(long RowId, float Distance)> candidates = SearchLayer(queryVector, seeds, ef, 0);
 
         if (candidates.Count < topK)
         {
@@ -322,7 +339,51 @@ public class HNSWIndex : IVectorIndex
         return current;
     }
 
+    private List<long> BuildLevelZeroSeeds(long entryPoint, int ef)
+    {
+        int maxSeeds = Math.Clamp(Math.Max(2, ef / 8), 2, 16);
+        var seeds = new List<long> { entryPoint };
+
+        foreach (long neighbor in GetNeighbors(0, entryPoint))
+        {
+            if (seeds.Count >= maxSeeds)
+            {
+                break;
+            }
+
+            if (Entries.ContainsKey(neighbor) && !seeds.Contains(neighbor))
+            {
+                seeds.Add(neighbor);
+            }
+        }
+
+        if (seeds.Count >= maxSeeds)
+        {
+            return seeds;
+        }
+
+        foreach (long candidate in NodeLevels.Keys.OrderBy(key => key))
+        {
+            if (seeds.Count >= maxSeeds)
+            {
+                break;
+            }
+
+            if (NodeExistsAtLevel(candidate, 0) && !seeds.Contains(candidate))
+            {
+                seeds.Add(candidate);
+            }
+        }
+
+        return seeds;
+    }
+
     private List<(long RowId, float Distance)> SearchLayer(float[] query, long entryPoint, int ef, int level)
+    {
+        return SearchLayer(query, [entryPoint], ef, level);
+    }
+
+    private List<(long RowId, float Distance)> SearchLayer(float[] query, IReadOnlyCollection<long> entryPoints, int ef, int level)
     {
         ef = Math.Max(1, ef);
 
@@ -353,10 +414,27 @@ public class HNSWIndex : IVectorIndex
             resultQueue.Enqueue((rowId, distance), -distance);
         }
 
-        float startDistance = Distance(query, Entries[entryPoint]);
-        candidateQueue.Enqueue((entryPoint, startDistance), startDistance);
-        AddResult(entryPoint, startDistance);
-        visited.Add(entryPoint);
+        foreach (long entryPoint in entryPoints)
+        {
+            if (!Entries.TryGetValue(entryPoint, out var vector))
+            {
+                continue;
+            }
+
+            if (!visited.Add(entryPoint))
+            {
+                continue;
+            }
+
+            float startDistance = Distance(query, vector);
+            candidateQueue.Enqueue((entryPoint, startDistance), startDistance);
+            AddResult(entryPoint, startDistance);
+        }
+
+        if (candidateQueue.Count == 0)
+        {
+            return [];
+        }
 
         while (candidateQueue.TryDequeue(out var current, out float currentDistance))
         {
@@ -394,13 +472,77 @@ public class HNSWIndex : IVectorIndex
 
     private List<long> SelectNeighbors(List<(long RowId, float Distance)> candidates, long targetNode, int neighborLimit)
     {
-        return candidates
+        var ordered = candidates
             .Where(candidate => candidate.RowId != targetNode)
             .OrderBy(candidate => candidate.Distance)
             .ThenBy(candidate => candidate.RowId)
-            .Take(Math.Max(1, neighborLimit))
-            .Select(candidate => candidate.RowId)
             .ToList();
+
+        int limit = Math.Max(1, neighborLimit);
+        if (!EnableDiversityHeuristic || ordered.Count <= 1)
+        {
+            return ordered
+                .Take(limit)
+                .Select(candidate => candidate.RowId)
+                .ToList();
+        }
+
+        var selected = new List<(long RowId, float Distance)>(limit);
+        foreach (var candidate in ordered)
+        {
+            if (!Entries.TryGetValue(candidate.RowId, out var candidateVector)
+                || !Entries.TryGetValue(targetNode, out var targetVector))
+            {
+                continue;
+            }
+
+            bool occluded = false;
+            foreach (var existing in selected)
+            {
+                if (!Entries.TryGetValue(existing.RowId, out var existingVector))
+                {
+                    continue;
+                }
+
+                float candidateToExisting = Distance(candidateVector, existingVector);
+                float candidateToTarget = Distance(candidateVector, targetVector);
+                if (candidateToExisting < candidateToTarget)
+                {
+                    occluded = true;
+                    break;
+                }
+            }
+
+            if (occluded)
+            {
+                continue;
+            }
+
+            selected.Add(candidate);
+            if (selected.Count >= limit)
+            {
+                break;
+            }
+        }
+
+        if (selected.Count < limit)
+        {
+            foreach (var candidate in ordered)
+            {
+                if (selected.Any(item => item.RowId == candidate.RowId))
+                {
+                    continue;
+                }
+
+                selected.Add(candidate);
+                if (selected.Count >= limit)
+                {
+                    break;
+                }
+            }
+        }
+
+        return selected.Select(item => item.RowId).ToList();
     }
 
     private void ConnectNode(long nodeId, List<long> neighbors, int level)
@@ -459,6 +601,11 @@ public class HNSWIndex : IVectorIndex
         }
 
         return [];
+    }
+
+    private bool NodeExistsAtLevel(long nodeId, int level)
+    {
+        return NodeLevels.TryGetValue(nodeId, out int nodeLevel) && nodeLevel >= level;
     }
 
     private void RemoveNode(long rowId)
