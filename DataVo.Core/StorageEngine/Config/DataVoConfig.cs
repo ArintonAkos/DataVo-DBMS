@@ -161,6 +161,32 @@ public class DataVoConfig
     /// </summary>
     public int VolcanoJoinCardinalityFeedbackMaxEntries { get; set; } = 4096;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether vector distance predicates in WHERE are eligible for vector index prefilter fast path.
+    /// </summary>
+    public bool EnableVectorPredicateFastPath { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the minimum base-table row count required before vector predicate fast path is considered.
+    /// </summary>
+    public int VectorPredicateFastPathMinRows { get; set; } = 128;
+
+    /// <summary>
+    /// Gets or sets the maximum candidate ratio allowed for vector predicate fast path.
+    /// When computed top-K exceeds this fraction of the table, legacy filtering is preferred.
+    /// </summary>
+    public double VectorPredicateFastPathMaxTopKRatio { get; set; } = 0.6d;
+
+    /// <summary>
+    /// Gets or sets a multiplier used to expand estimated qualifying rows into ANN candidate top-K.
+    /// </summary>
+    public int VectorPredicateFastPathCandidateMultiplier { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets an absolute cap for computed ANN candidate top-K in vector predicate fast path.
+    /// </summary>
+    public int VectorPredicateFastPathMaxTopK { get; set; } = 20000;
+
     private bool? _walEnabled;
 
     /// <summary>

@@ -315,6 +315,47 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal("Item3", result.Data[1]["i.Name"]);
     }
 
+    [Fact]
+    public void Select_VectorDistanceWherePredicate_ReversedComparison_Works()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_reversed ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id
+            FROM Embeddings
+            WHERE 0.2 > Emb <=> '[0.95,0.05,0]'
+            ORDER BY Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, result.Data[0]["Id"]);
+        Assert.Equal(3, result.Data[1]["Id"]);
+    }
+
+    [Fact]
+    public void Select_VectorDistanceWherePredicate_GreaterThan_Works()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_gt ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id
+            FROM Embeddings
+            WHERE Emb <=> '[0.95,0.05,0]' > 0.6
+            ORDER BY Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(2, result.Data[0]["Id"]);
+    }
+
 }
 
 public class InMemoryVectorIndexTests : VectorIndexTestsBase
