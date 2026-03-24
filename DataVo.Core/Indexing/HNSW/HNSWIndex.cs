@@ -6,12 +6,10 @@ namespace DataVo.Core.Indexing.HNSW;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Current implementation uses a simple snapshot-based approach with cosine and euclidean distance metrics.
-/// Future enhancements could include:
-/// - True HNSW graph structure for better search efficiency
-/// - Configurable M and ef parameters
-/// - Multi-layer navigation
-/// - Improved insertion/deletion algorithms
+/// Current implementation maintains layered graph connectivity with configurable M / ef parameters,
+/// adaptive search breadth, diversified neighbor selection, and local delete repair.
+///
+/// The implementation keeps exact-search fallback paths where needed to preserve correctness.
 /// </para>
 /// </remarks>
 public class HNSWIndex : IVectorIndex
@@ -65,6 +63,16 @@ public class HNSWIndex : IVectorIndex
     /// Gets or sets candidate breadth used during insertion.
     /// </summary>
     public int EfConstruction { get; set; } = DefaultEfConstruction;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether insertion-time efConstruction is adaptively scaled.
+    /// </summary>
+    public bool EnableAdaptiveEfConstruction { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets multiplier used for adaptive efConstruction calculation.
+    /// </summary>
+    public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
 
     /// <summary>
     /// Gets or sets candidate breadth used during querying.
@@ -131,8 +139,11 @@ public class HNSWIndex : IVectorIndex
         int maxConnectLevel = Math.Min(level, MaxLevel);
         for (int currentLevel = maxConnectLevel; currentLevel >= 0; currentLevel--)
         {
-            List<(long RowId, float Distance)> candidates = SearchLayer(vector, entryPoint, EfConstruction, currentLevel);
-            List<long> neighbors = SelectNeighbors(candidates, rowId, M);
+            int efConstruction = ResolveEffectiveEfConstruction(currentLevel);
+            List<long> insertionSeeds = BuildInsertionSeeds(entryPoint, efConstruction, currentLevel);
+            List<(long RowId, float Distance)> candidates = SearchLayer(vector, insertionSeeds, efConstruction, currentLevel);
+            int neighborLimit = ResolveNeighborLimit(currentLevel);
+            List<long> neighbors = SelectNeighbors(candidates, rowId, neighborLimit);
 
             if (neighbors.Count == 0 && entryPoint != rowId && NodeExistsAtLevel(entryPoint, currentLevel))
             {
@@ -393,6 +404,54 @@ public class HNSWIndex : IVectorIndex
         return seeds;
     }
 
+    private List<long> BuildInsertionSeeds(long entryPoint, int ef, int level)
+    {
+        int seedBudget = level == 0
+            ? Math.Clamp(Math.Max(4, ef / 8), 4, 24)
+            : Math.Clamp(Math.Max(2, ef / 16), 2, 12);
+
+        var seeds = new List<long> { entryPoint };
+
+        foreach (long neighbor in GetNeighbors(level, entryPoint))
+        {
+            if (seeds.Count >= seedBudget)
+            {
+                break;
+            }
+
+            if (Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level) && !seeds.Contains(neighbor))
+            {
+                seeds.Add(neighbor);
+            }
+        }
+
+        if (seeds.Count >= seedBudget)
+        {
+            return seeds;
+        }
+
+        IEnumerable<long> fallbackPool = NodeLevels
+            .Where(pair => pair.Value >= level)
+            .OrderByDescending(pair => pair.Value)
+            .ThenBy(pair => pair.Key)
+            .Select(pair => pair.Key);
+
+        foreach (long candidate in fallbackPool)
+        {
+            if (seeds.Count >= seedBudget)
+            {
+                break;
+            }
+
+            if (Entries.ContainsKey(candidate) && !seeds.Contains(candidate))
+            {
+                seeds.Add(candidate);
+            }
+        }
+
+        return seeds;
+    }
+
     private List<(long RowId, float Distance)> SearchLayer(float[] query, long entryPoint, int ef, int level)
     {
         return SearchLayer(query, [entryPoint], ef, level);
@@ -562,7 +621,12 @@ public class HNSWIndex : IVectorIndex
 
     private void ConnectNode(long nodeId, List<long> neighbors, int level)
     {
-        foreach (long neighbor in neighbors)
+        List<long> uniqueNeighbors = neighbors
+            .Where(neighbor => neighbor != nodeId && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
+            .Distinct()
+            .ToList();
+
+        foreach (long neighbor in uniqueNeighbors)
         {
             AddNeighbor(level, nodeId, neighbor);
             AddNeighbor(level, neighbor, nodeId);
@@ -590,17 +654,25 @@ public class HNSWIndex : IVectorIndex
 
         sourceNeighbors.Add(target);
 
-        int maxNeighbors = Math.Max(1, M);
+        int maxNeighbors = ResolveNeighborLimit(level);
         if (sourceNeighbors.Count <= maxNeighbors)
         {
             return;
         }
 
-        float[] sourceVector = Entries[source];
-        List<long> pruned = sourceNeighbors
-            .Where(Entries.ContainsKey)
-            .OrderBy(neighbor => Distance(sourceVector, Entries[neighbor]))
-            .ThenBy(neighbor => neighbor)
+        if (!Entries.TryGetValue(source, out var sourceVector))
+        {
+            return;
+        }
+
+        List<(long RowId, float Distance)> rankedCandidates = sourceNeighbors
+            .Where(neighbor => Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
+            .Select(neighbor => (RowId: neighbor, Distance: Distance(sourceVector, Entries[neighbor])))
+            .OrderBy(candidate => candidate.Distance)
+            .ThenBy(candidate => candidate.RowId)
+            .ToList();
+
+        List<long> pruned = SelectNeighbors(rankedCandidates, source, maxNeighbors)
             .Take(maxNeighbors)
             .ToList();
 
@@ -710,6 +782,29 @@ public class HNSWIndex : IVectorIndex
         int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, graphFactor * topKFactor));
 
         return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
+    }
+
+    private int ResolveEffectiveEfConstruction(int level)
+    {
+        int maxAllowedEf = Math.Max(1, Entries.Count);
+        int baseEf = Math.Min(maxAllowedEf, Math.Max(ResolveNeighborLimit(level), Math.Max(1, EfConstruction)));
+        if (!EnableAdaptiveEfConstruction || Entries.Count <= 1)
+        {
+            return baseEf;
+        }
+
+        double graphFactor = Math.Log2(Entries.Count + 1);
+        double levelFactor = level == 0 ? 1d : 0.75d;
+        double breadth = graphFactor * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier * levelFactor;
+        int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, breadth));
+
+        return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
+    }
+
+    private int ResolveNeighborLimit(int level)
+    {
+        int m = Math.Max(1, M);
+        return level == 0 ? Math.Max(2, m * 2) : m;
     }
 
     private void RepairNeighborhoodAfterDelete(int level, IReadOnlyCollection<long> removedNeighbors, long removedNodeId)
