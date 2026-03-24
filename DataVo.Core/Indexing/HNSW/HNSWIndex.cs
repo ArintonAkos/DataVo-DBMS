@@ -465,6 +465,18 @@ public class HNSWIndex : IVectorIndex
         var candidateQueue = new PriorityQueue<(long RowId, float Distance), float>();
         var resultQueue = new PriorityQueue<(long RowId, float Distance), float>();
 
+        bool TryGetWorstResultDistance(out float worstDistance)
+        {
+            if (resultQueue.TryPeek(out _, out float worstPriority))
+            {
+                worstDistance = -worstPriority;
+                return true;
+            }
+
+            worstDistance = float.PositiveInfinity;
+            return false;
+        }
+
         void AddResult(long rowId, float distance)
         {
             if (resultQueue.Count < ef)
@@ -513,8 +525,8 @@ public class HNSWIndex : IVectorIndex
         while (candidateQueue.TryDequeue(out var current, out float currentDistance))
         {
             if (resultQueue.Count >= ef
-                && resultQueue.TryPeek(out _, out float worstPriority)
-                && currentDistance > -worstPriority)
+                && TryGetWorstResultDistance(out float currentWorstDistance)
+                && currentDistance > currentWorstDistance)
             {
                 break;
             }
@@ -532,6 +544,14 @@ public class HNSWIndex : IVectorIndex
                 }
 
                 float distance = Distance(query, neighborVector);
+
+                if (resultQueue.Count >= ef
+                    && TryGetWorstResultDistance(out float worstDistance)
+                    && distance >= worstDistance)
+                {
+                    continue;
+                }
+
                 candidateQueue.Enqueue((neighbor, distance), distance);
                 AddResult(neighbor, distance);
             }

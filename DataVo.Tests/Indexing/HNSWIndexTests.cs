@@ -1,4 +1,5 @@
 using DataVo.Core.Indexing.HNSW;
+using System.Diagnostics;
 
 namespace DataVo.Tests.Indexing;
 
@@ -316,6 +317,95 @@ public class HNSWIndexTests : IDisposable
         Assert.True(drift <= 0.35d, $"Expected churn recall drift <= 0.35, got {drift:F3}");
     }
 
+    [Fact]
+    public void Benchmark_ChurnMatrix_RecallAndLatencyRemainStable()
+    {
+        const int dimension = 16;
+        const int vectors = 500;
+        const int queries = 28;
+        const int topK = 10;
+        const int churnCycles = 10;
+
+        double[] churnRatios = [0.05d, 0.10d, 0.20d];
+        var baseDataset = BuildDataset(seed: 20260328, vectors, dimension);
+        var querySet = BuildQueries(seed: 20260329, queries, dimension);
+
+        var ratioToAvgRecall = new Dictionary<double, double>();
+
+        for (int ratioIndex = 0; ratioIndex < churnRatios.Length; ratioIndex++)
+        {
+            double churnRatio = churnRatios[ratioIndex];
+            int churnBatch = Math.Max(1, (int)Math.Round(vectors * churnRatio));
+
+            var random = new Random(20260330 + ratioIndex);
+            var index = new HNSWIndex
+            {
+                Metric = "cosine",
+                M = 12,
+                EfConstruction = 96,
+                EnableAdaptiveEfConstruction = true,
+                AdaptiveEfConstructionMultiplier = 1.5d,
+                EfSearch = 96,
+                EnableAdaptiveEfSearch = true,
+                EnableDiversityHeuristic = true,
+                EnableDeleteGraphRepair = true
+            };
+
+            foreach (var (rowId, vector) in baseDataset)
+            {
+                index.Insert(rowId, vector);
+            }
+
+            long nextId = vectors + 1;
+            var snapshots = new List<QueryQualitySnapshot>
+            {
+                EvaluateRecallAndLatencyAtK(index, querySet, topK)
+            };
+
+            for (int cycle = 0; cycle < churnCycles; cycle++)
+            {
+                List<long> removable = index.Entries.Keys
+                    .OrderBy(_ => random.Next())
+                    .Take(churnBatch)
+                    .ToList();
+
+                index.Delete(removable);
+
+                for (int i = 0; i < churnBatch; i++)
+                {
+                    float[] vector = new float[dimension];
+                    for (int d = 0; d < dimension; d++)
+                    {
+                        vector[d] = (float)random.NextDouble();
+                    }
+
+                    index.Insert(nextId++, vector);
+                }
+
+                Assert.Equal(vectors, index.Count);
+                snapshots.Add(EvaluateRecallAndLatencyAtK(index, querySet, topK));
+            }
+
+            double minRecall = snapshots.Min(snapshot => snapshot.AvgRecall);
+            double maxRecall = snapshots.Max(snapshot => snapshot.AvgRecall);
+            double avgRecall = snapshots.Average(snapshot => snapshot.AvgRecall);
+            double drift = maxRecall - minRecall;
+
+            double baselineP95 = snapshots.First().P95LatencyMs;
+            double maxP95 = snapshots.Max(snapshot => snapshot.P95LatencyMs);
+            double p95MultiplierCap = Math.Max(1.0d, baselineP95 * 4.0d + 0.25d);
+
+            Assert.True(minRecall >= 0.40d, $"Expected min recall@10 >= 0.40 for churnRatio={churnRatio:F2}, got {minRecall:F3}");
+            Assert.True(drift <= 0.40d, $"Expected recall drift <= 0.40 for churnRatio={churnRatio:F2}, got {drift:F3}");
+            Assert.True(maxP95 <= p95MultiplierCap, $"Expected p95 latency bounded for churnRatio={churnRatio:F2}. baseline={baselineP95:F3}ms, max={maxP95:F3}ms");
+
+            ratioToAvgRecall[churnRatio] = avgRecall;
+        }
+
+        Assert.True(ratioToAvgRecall[0.05d] + 1e-6 >= ratioToAvgRecall[0.20d] - 0.15d,
+            $"Expected low-churn average recall to stay close to high-churn. low={ratioToAvgRecall[0.05d]:F3}, high={ratioToAvgRecall[0.20d]:F3}");
+    }
+
     private static List<(long RowId, float[] Vector)> BuildDataset(int seed, int vectors, int dimension)
     {
         var random = new Random(seed);
@@ -416,6 +506,41 @@ public class HNSWIndexTests : IDisposable
 
         return totalRecall / querySet.Count;
     }
+
+    private static QueryQualitySnapshot EvaluateRecallAndLatencyAtK(HNSWIndex index, List<float[]> querySet, int topK)
+    {
+        double totalRecall = 0d;
+        var latencies = new List<double>(querySet.Count);
+
+        foreach (float[] query in querySet)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            List<long> ann = index.SearchTopK(query, topK);
+            stopwatch.Stop();
+            latencies.Add(stopwatch.Elapsed.TotalMilliseconds);
+
+            List<long> exact = index.Entries
+                .Select(entry => (entry.Key, DistanceCosine(query, entry.Value)))
+                .OrderBy(item => item.Item2)
+                .ThenBy(item => item.Key)
+                .Take(topK)
+                .Select(item => item.Key)
+                .ToList();
+
+            int overlap = ann.Intersect(exact).Count();
+            totalRecall += (double)overlap / topK;
+        }
+
+        double avgRecall = totalRecall / querySet.Count;
+        double avgLatency = latencies.Average();
+        double p95Latency = latencies
+            .OrderBy(value => value)
+            .ElementAt(Math.Min(latencies.Count - 1, (int)Math.Ceiling(latencies.Count * 0.95d) - 1));
+
+        return new QueryQualitySnapshot(avgRecall, avgLatency, p95Latency);
+    }
+
+    private readonly record struct QueryQualitySnapshot(double AvgRecall, double AvgLatencyMs, double P95LatencyMs);
 
     private static float DistanceCosine(float[] a, float[] b)
     {
