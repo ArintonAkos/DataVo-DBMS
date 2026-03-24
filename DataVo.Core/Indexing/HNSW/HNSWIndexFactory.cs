@@ -45,6 +45,24 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (TryReadDouble(@params, "insertionCandidateExpansionFactor", out double insertionCandidateExpansionFactor) && insertionCandidateExpansionFactor > 0d)
             index.InsertionCandidateExpansionFactor = insertionCandidateExpansionFactor;
 
+        if (TryReadBool(@params, "enableAdaptiveInsertionCandidateExpansion", out bool enableAdaptiveInsertionCandidateExpansion))
+            index.EnableAdaptiveInsertionCandidateExpansion = enableAdaptiveInsertionCandidateExpansion;
+
+        if (TryReadDouble(@params, "adaptiveInsertionExpansionMinFactor", out double adaptiveInsertionExpansionMinFactor) && adaptiveInsertionExpansionMinFactor > 0d)
+            index.AdaptiveInsertionExpansionMinFactor = adaptiveInsertionExpansionMinFactor;
+
+        if (TryReadDouble(@params, "adaptiveInsertionExpansionMaxFactor", out double adaptiveInsertionExpansionMaxFactor) && adaptiveInsertionExpansionMaxFactor > 0d)
+            index.AdaptiveInsertionExpansionMaxFactor = adaptiveInsertionExpansionMaxFactor;
+
+        if (TryReadBool(@params, "enableInsertionNeighborhoodPruning", out bool enableInsertionNeighborhoodPruning))
+            index.EnableInsertionNeighborhoodPruning = enableInsertionNeighborhoodPruning;
+
+        if (TryReadDouble(@params, "insertionNeighborhoodPruningThreshold", out double insertionNeighborhoodPruningThreshold) && insertionNeighborhoodPruningThreshold > 0d)
+            index.InsertionNeighborhoodPruningThreshold = insertionNeighborhoodPruningThreshold;
+
+        if (TryReadInt(@params, "insertionNeighborhoodPruneHops", out int insertionNeighborhoodPruneHops) && insertionNeighborhoodPruneHops > 0)
+            index.InsertionNeighborhoodPruneHops = insertionNeighborhoodPruneHops;
+
         if (TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
             index.EfSearch = efSearch;
 

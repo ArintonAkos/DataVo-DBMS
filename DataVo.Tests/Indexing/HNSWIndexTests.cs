@@ -85,6 +85,12 @@ public class HNSWIndexTests : IDisposable
             AdaptiveEfConstructionMultiplier = 2.1d,
             EnableInsertionCandidateExpansion = false,
             InsertionCandidateExpansionFactor = 1.8d,
+            EnableAdaptiveInsertionCandidateExpansion = false,
+            AdaptiveInsertionExpansionMinFactor = 1.1d,
+            AdaptiveInsertionExpansionMaxFactor = 2.2d,
+            EnableInsertionNeighborhoodPruning = true,
+            InsertionNeighborhoodPruningThreshold = 0.92d,
+            InsertionNeighborhoodPruneHops = 2,
             EfSearch = 30,
             EnableDiversityHeuristic = false,
             EnableAdaptiveEfSearch = false,
@@ -109,6 +115,12 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal(2.1d, loaded.AdaptiveEfConstructionMultiplier);
         Assert.False(loaded.EnableInsertionCandidateExpansion);
         Assert.Equal(1.8d, loaded.InsertionCandidateExpansionFactor);
+        Assert.False(loaded.EnableAdaptiveInsertionCandidateExpansion);
+        Assert.Equal(1.1d, loaded.AdaptiveInsertionExpansionMinFactor);
+        Assert.Equal(2.2d, loaded.AdaptiveInsertionExpansionMaxFactor);
+        Assert.True(loaded.EnableInsertionNeighborhoodPruning);
+        Assert.Equal(0.92d, loaded.InsertionNeighborhoodPruningThreshold);
+        Assert.Equal(2, loaded.InsertionNeighborhoodPruneHops);
         Assert.Equal(30, loaded.EfSearch);
         Assert.False(loaded.EnableDiversityHeuristic);
         Assert.False(loaded.EnableAdaptiveEfSearch);
@@ -288,6 +300,46 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
+    public void Benchmark_RecallTrend_AdaptiveInsertionExpansionPolicy_IsStable()
+    {
+        const int dimension = 14;
+        const int vectors = 450;
+        const int queries = 24;
+        const int topK = 10;
+
+        var dataset = BuildDataset(seed: 20260402, vectors, dimension);
+        var querySet = BuildQueries(seed: 20260403, queries, dimension);
+
+        double recallFixed = EvaluateRecallAtK(
+            dataset,
+            querySet,
+            topK,
+            m: 12,
+            efConstruction: 72,
+            efSearch: 72,
+            enableInsertionCandidateExpansion: true,
+            insertionCandidateExpansionFactor: 1.5d,
+            enableAdaptiveInsertionCandidateExpansion: false);
+
+        double recallAdaptive = EvaluateRecallAtK(
+            dataset,
+            querySet,
+            topK,
+            m: 12,
+            efConstruction: 72,
+            efSearch: 72,
+            enableInsertionCandidateExpansion: true,
+            insertionCandidateExpansionFactor: 1.5d,
+            enableAdaptiveInsertionCandidateExpansion: true,
+            adaptiveInsertionExpansionMinFactor: 1.0d,
+            adaptiveInsertionExpansionMaxFactor: 2.4d);
+
+        Assert.True(
+            recallAdaptive >= recallFixed - 0.03d,
+            $"Expected adaptive insertion expansion policy to remain stable. fixed={recallFixed:F3}, adaptive={recallAdaptive:F3}");
+    }
+
+    [Fact]
     public void Benchmark_RecallStability_UnderInsertDeleteChurn_RemainsBounded()
     {
         const int dimension = 12;
@@ -446,6 +498,62 @@ public class HNSWIndexTests : IDisposable
             $"Expected low-churn average recall to stay close to high-churn. low={ratioToAvgRecall[0.05d]:F3}, high={ratioToAvgRecall[0.20d]:F3}");
     }
 
+    [Fact]
+    public void Benchmark_ChurnSoak_MultiRunVariance_IsBounded()
+    {
+        const int runs = 3;
+        const int dimension = 14;
+        const int vectors = 360;
+        const int queries = 20;
+        const int topK = 10;
+        const int churnCycles = 8;
+
+        double[] churnRatios = [0.10d, 0.20d];
+        var recallByRatio = new Dictionary<double, List<double>>();
+        var p95ByRatio = new Dictionary<double, List<double>>();
+
+        foreach (double ratio in churnRatios)
+        {
+            recallByRatio[ratio] = [];
+            p95ByRatio[ratio] = [];
+        }
+
+        for (int run = 0; run < runs; run++)
+        {
+            var dataset = BuildDataset(seed: 20260410 + run, vectors, dimension);
+            var querySet = BuildQueries(seed: 20260420 + run, queries, dimension);
+
+            foreach (double churnRatio in churnRatios)
+            {
+                ChurnExperimentResult result = RunChurnExperiment(
+                    dataset,
+                    querySet,
+                    topK,
+                    churnRatio,
+                    churnCycles,
+                    seed: 20260430 + (run * 10) + (int)(churnRatio * 100));
+
+                recallByRatio[churnRatio].Add(result.AvgRecall);
+                p95ByRatio[churnRatio].Add(result.P95LatencyMs);
+            }
+        }
+
+        foreach (double ratio in churnRatios)
+        {
+            List<double> recalls = recallByRatio[ratio];
+            List<double> p95s = p95ByRatio[ratio];
+
+            double meanRecall = recalls.Average();
+            double recallStdDev = StdDev(recalls);
+            double meanP95 = p95s.Average();
+            double p95StdDev = StdDev(p95s);
+
+            Assert.True(meanRecall >= 0.38d, $"Expected mean recall >= 0.38 for churn ratio {ratio:F2}, got {meanRecall:F3}");
+            Assert.True(recallStdDev <= 0.10d, $"Expected recall stddev <= 0.10 for churn ratio {ratio:F2}, got {recallStdDev:F3}");
+            Assert.True(p95StdDev <= Math.Max(8.0d, meanP95 * 1.25d), $"Expected bounded p95 variance for churn ratio {ratio:F2}. mean={meanP95:F3}ms stddev={p95StdDev:F3}ms");
+        }
+    }
+
     private static List<(long RowId, float[] Vector)> BuildDataset(int seed, int vectors, int dimension)
     {
         var random = new Random(seed);
@@ -492,7 +600,10 @@ public class HNSWIndexTests : IDisposable
         int efConstruction,
         int efSearch,
         bool enableInsertionCandidateExpansion = true,
-        double insertionCandidateExpansionFactor = 1.5d)
+        double insertionCandidateExpansionFactor = 1.5d,
+        bool enableAdaptiveInsertionCandidateExpansion = true,
+        double adaptiveInsertionExpansionMinFactor = 1.0d,
+        double adaptiveInsertionExpansionMaxFactor = 2.5d)
     {
         var index = new HNSWIndex
         {
@@ -501,6 +612,9 @@ public class HNSWIndexTests : IDisposable
             EfConstruction = efConstruction,
             EnableInsertionCandidateExpansion = enableInsertionCandidateExpansion,
             InsertionCandidateExpansionFactor = insertionCandidateExpansionFactor,
+            EnableAdaptiveInsertionCandidateExpansion = enableAdaptiveInsertionCandidateExpansion,
+            AdaptiveInsertionExpansionMinFactor = adaptiveInsertionExpansionMinFactor,
+            AdaptiveInsertionExpansionMaxFactor = adaptiveInsertionExpansionMaxFactor,
             EfSearch = efSearch,
             EnableDiversityHeuristic = true,
             EnableDeleteGraphRepair = true
@@ -584,7 +698,94 @@ public class HNSWIndexTests : IDisposable
         return new QueryQualitySnapshot(avgRecall, avgLatency, p95Latency);
     }
 
+    private static ChurnExperimentResult RunChurnExperiment(
+        List<(long RowId, float[] Vector)> dataset,
+        List<float[]> querySet,
+        int topK,
+        double churnRatio,
+        int churnCycles,
+        int seed)
+    {
+        var random = new Random(seed);
+        int vectors = dataset.Count;
+        int dimension = dataset[0].Vector.Length;
+        int churnBatch = Math.Max(1, (int)Math.Round(vectors * churnRatio));
+
+        var index = new HNSWIndex
+        {
+            Metric = "cosine",
+            M = 12,
+            EfConstruction = 96,
+            EnableAdaptiveEfConstruction = true,
+            AdaptiveEfConstructionMultiplier = 1.5d,
+            EnableInsertionCandidateExpansion = true,
+            InsertionCandidateExpansionFactor = 1.5d,
+            EnableAdaptiveInsertionCandidateExpansion = true,
+            AdaptiveInsertionExpansionMinFactor = 1.0d,
+            AdaptiveInsertionExpansionMaxFactor = 2.5d,
+            EnableInsertionNeighborhoodPruning = true,
+            InsertionNeighborhoodPruningThreshold = 0.85d,
+            InsertionNeighborhoodPruneHops = 1,
+            EfSearch = 96,
+            EnableAdaptiveEfSearch = true,
+            EnableDiversityHeuristic = true,
+            EnableDeleteGraphRepair = true
+        };
+
+        foreach (var (rowId, vector) in dataset)
+        {
+            index.Insert(rowId, vector);
+        }
+
+        long nextId = vectors + 1;
+        var snapshots = new List<QueryQualitySnapshot>
+        {
+            EvaluateRecallAndLatencyAtK(index, querySet, topK)
+        };
+
+        for (int cycle = 0; cycle < churnCycles; cycle++)
+        {
+            List<long> removable = index.Entries.Keys
+                .OrderBy(_ => random.Next())
+                .Take(churnBatch)
+                .ToList();
+
+            index.Delete(removable);
+
+            for (int i = 0; i < churnBatch; i++)
+            {
+                float[] vector = new float[dimension];
+                for (int d = 0; d < dimension; d++)
+                {
+                    vector[d] = (float)random.NextDouble();
+                }
+
+                index.Insert(nextId++, vector);
+            }
+
+            snapshots.Add(EvaluateRecallAndLatencyAtK(index, querySet, topK));
+        }
+
+        return new ChurnExperimentResult(
+            snapshots.Average(snapshot => snapshot.AvgRecall),
+            snapshots.Average(snapshot => snapshot.AvgLatencyMs),
+            snapshots.Max(snapshot => snapshot.P95LatencyMs));
+    }
+
+    private static double StdDev(List<double> values)
+    {
+        if (values.Count <= 1)
+        {
+            return 0d;
+        }
+
+        double mean = values.Average();
+        double variance = values.Sum(value => Math.Pow(value - mean, 2)) / values.Count;
+        return Math.Sqrt(variance);
+    }
+
     private readonly record struct QueryQualitySnapshot(double AvgRecall, double AvgLatencyMs, double P95LatencyMs);
+    private readonly record struct ChurnExperimentResult(double AvgRecall, double AvgLatencyMs, double P95LatencyMs);
 
     private static float DistanceCosine(float[] a, float[] b)
     {

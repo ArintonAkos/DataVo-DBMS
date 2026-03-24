@@ -1,6 +1,6 @@
 # HNSW + Hybrid Planner: Current State and What Happens Internally
 
-> Last updated: 2026-03-24
+> Last updated: 2026-03-24 (late)
 > Audience: implementation and architecture tracking
 > Status: Active implementation (hybrid planner optimization in progress)
 
@@ -21,8 +21,13 @@ At this moment, the optimizer/planner side is significantly advanced, while the 
   - Candidate-first execution for vector queries
   - Adaptive topK sizing and expansion passes
   - Per-query and periodic telemetry snapshots
-- Not fully implemented yet:
-  - Production-grade, full HNSW graph behavior with complete ANN controls and tuning parity
+- Implemented now in HNSW core:
+    - Layered graph connectivity with persisted tuning parameters
+    - Multi-seed search and diversity-aware neighbor selection
+    - Adaptive efSearch and adaptive efConstruction
+    - Insertion candidate expansion (fixed + adaptive density-driven mode)
+    - Insertion-time local neighborhood pruning (high-degree pressure)
+    - Delete-time local graph repair
 
 ## End-to-end execution flow
 
@@ -150,6 +155,28 @@ Typical bucket names:
 - `hybrid.orderby.initial_topk.baseline`
 - `hybrid.orderby.initial_topk.adaptive`
 
+## New HNSW insertion behavior (latest)
+
+Insertion path now has two additional controls:
+
+- Adaptive insertion expansion policy:
+    - Expands insertion candidate budget based on local graph density near insertion seeds.
+    - Sparser regions receive broader candidate budgets, denser regions stay tighter.
+- Canonical-style local pruning after insert:
+    - After connecting a node, touched neighborhoods can be rebuilt from local candidate pools.
+    - This reduces degree-pressure artifacts under insert/delete churn.
+
+Key tuning parameters now persisted in index snapshots:
+
+- `EnableInsertionCandidateExpansion`
+- `InsertionCandidateExpansionFactor`
+- `EnableAdaptiveInsertionCandidateExpansion`
+- `AdaptiveInsertionExpansionMinFactor`
+- `AdaptiveInsertionExpansionMaxFactor`
+- `EnableInsertionNeighborhoodPruning`
+- `InsertionNeighborhoodPruningThreshold`
+- `InsertionNeighborhoodPruneHops`
+
 ## What benchmark-backed test shows
 
 A representative mixed workload test was added.
@@ -161,11 +188,18 @@ Observed in test snapshots:
 
 Interpretation: adaptive initial topK reduced expansion retries by about 42.9% on that workload shape.
 
+Additional benchmark coverage now includes:
+
+- Insertion expansion recall trend (fixed-factor on/off comparison)
+- Adaptive insertion expansion policy stability checks
+- Churn matrix recall+latency bounds across churn ratios
+- Multi-run churn soak variance guardrails (mean + stddev constraints)
+
 ## Phase status (high-level)
 
-- Phase 5 (telemetry + expansion tuning): nearly complete
-- Phase 6 (hybrid planner optimization): in progress
-- Next major index-core step: continue HNSW internals toward richer ANN graph behavior
+- Phase 5 (telemetry + expansion tuning): complete
+- Phase 6 (hybrid planner optimization): near complete
+- Phase 7 (HNSW production hardening): near complete, final tuning and long-soak confidence passes ongoing
 
 ## Practical takeaway
 

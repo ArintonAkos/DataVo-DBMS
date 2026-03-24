@@ -85,6 +85,36 @@ public class HNSWIndex : IVectorIndex
     public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
 
     /// <summary>
+    /// Gets or sets a value indicating whether insertion candidate expansion factor should be adapted by local graph density.
+    /// </summary>
+    public bool EnableAdaptiveInsertionCandidateExpansion { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets minimum adaptive insertion expansion factor.
+    /// </summary>
+    public double AdaptiveInsertionExpansionMinFactor { get; set; } = 1.0d;
+
+    /// <summary>
+    /// Gets or sets maximum adaptive insertion expansion factor.
+    /// </summary>
+    public double AdaptiveInsertionExpansionMaxFactor { get; set; } = 2.5d;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether local neighborhoods should be rebuilt after insertion when degree pressure is high.
+    /// </summary>
+    public bool EnableInsertionNeighborhoodPruning { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets activation threshold for insertion neighborhood pruning expressed as degree ratio to max degree.
+    /// </summary>
+    public double InsertionNeighborhoodPruningThreshold { get; set; } = 0.85d;
+
+    /// <summary>
+    /// Gets or sets how many neighborhood hops should be considered during insertion-time local rewiring.
+    /// </summary>
+    public int InsertionNeighborhoodPruneHops { get; set; } = 1;
+
+    /// <summary>
     /// Gets or sets candidate breadth used during querying.
     /// </summary>
     public int EfSearch { get; set; } = DefaultEfSearch;
@@ -153,7 +183,7 @@ public class HNSWIndex : IVectorIndex
             List<long> insertionSeeds = BuildInsertionSeeds(entryPoint, efConstruction, currentLevel);
             List<(long RowId, float Distance)> candidates = SearchLayer(vector, insertionSeeds, efConstruction, currentLevel);
             int neighborLimit = ResolveNeighborLimit(currentLevel);
-            int candidateLimit = ResolveInsertionCandidateLimit(currentLevel, efConstruction);
+            int candidateLimit = ResolveInsertionCandidateLimit(currentLevel, efConstruction, insertionSeeds);
             candidates = ExpandInsertionCandidates(vector, candidates, currentLevel, candidateLimit);
             List<long> neighbors = SelectNeighbors(candidates, rowId, neighborLimit);
 
@@ -663,6 +693,11 @@ public class HNSWIndex : IVectorIndex
             AddNeighbor(level, nodeId, neighbor);
             AddNeighbor(level, neighbor, nodeId);
         }
+
+        if (EnableInsertionNeighborhoodPruning)
+        {
+            StabilizeNeighborhoodAfterInsert(level, nodeId, uniqueNeighbors);
+        }
     }
 
     private void AddNeighbor(int level, long source, long target)
@@ -833,13 +868,67 @@ public class HNSWIndex : IVectorIndex
         return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
     }
 
-    private int ResolveInsertionCandidateLimit(int level, int efConstruction)
+    private int ResolveInsertionCandidateLimit(int level, int efConstruction, IReadOnlyCollection<long> insertionSeeds)
     {
         int maxAllowed = Math.Max(1, Entries.Count);
         int minRequired = Math.Min(maxAllowed, Math.Max(ResolveNeighborLimit(level), Math.Max(1, efConstruction)));
-        int scaled = (int)Math.Ceiling(minRequired * Math.Max(1d, InsertionCandidateExpansionFactor));
+        double expansionFactor = ResolveEffectiveInsertionExpansionFactor(level, insertionSeeds);
+        int scaled = (int)Math.Ceiling(minRequired * expansionFactor);
         int baseline = Math.Max(minRequired, ResolveNeighborLimit(level) * 4);
         return Math.Clamp(Math.Max(baseline, scaled), minRequired, maxAllowed);
+    }
+
+    private double ResolveEffectiveInsertionExpansionFactor(int level, IReadOnlyCollection<long> insertionSeeds)
+    {
+        double baseFactor = Math.Max(1d, InsertionCandidateExpansionFactor);
+        if (!EnableAdaptiveInsertionCandidateExpansion || insertionSeeds.Count == 0)
+        {
+            return baseFactor;
+        }
+
+        double minFactor = Math.Max(1d, Math.Min(AdaptiveInsertionExpansionMinFactor, AdaptiveInsertionExpansionMaxFactor));
+        double maxFactor = Math.Max(minFactor, AdaptiveInsertionExpansionMaxFactor);
+        int neighborLimit = ResolveNeighborLimit(level);
+        if (neighborLimit <= 0)
+        {
+            return Math.Clamp(baseFactor, minFactor, maxFactor);
+        }
+
+        double localDegree = CalculateAverageDegree(level, insertionSeeds);
+        if (localDegree <= 0d)
+        {
+            return maxFactor;
+        }
+
+        double densityRatio = Math.Clamp(localDegree / neighborLimit, 0d, 2d);
+        double adaptiveMultiplier = 1d + ((1d - densityRatio) * 0.75d);
+        double adaptiveFactor = baseFactor * adaptiveMultiplier;
+
+        return Math.Clamp(adaptiveFactor, minFactor, maxFactor);
+    }
+
+    private double CalculateAverageDegree(int level, IReadOnlyCollection<long> nodeIds)
+    {
+        int totalDegree = 0;
+        int counted = 0;
+
+        foreach (long nodeId in nodeIds)
+        {
+            if (!NodeExistsAtLevel(nodeId, level))
+            {
+                continue;
+            }
+
+            totalDegree += GetNeighbors(level, nodeId).Count;
+            counted++;
+        }
+
+        if (counted == 0)
+        {
+            return 0d;
+        }
+
+        return (double)totalDegree / counted;
     }
 
     private List<(long RowId, float Distance)> ExpandInsertionCandidates(
@@ -901,6 +990,111 @@ public class HNSWIndex : IVectorIndex
             .Take(Math.Max(1, candidateLimit))
             .Select(pair => (pair.Key, pair.Value))
             .ToList();
+    }
+
+    private void StabilizeNeighborhoodAfterInsert(int level, long nodeId, IReadOnlyCollection<long> connectedNeighbors)
+    {
+        if (!Layers.TryGetValue(level, out var levelGraph))
+        {
+            return;
+        }
+
+        int maxNeighbors = ResolveNeighborLimit(level);
+        if (maxNeighbors <= 0)
+        {
+            return;
+        }
+
+        double pruneThreshold = Math.Clamp(InsertionNeighborhoodPruningThreshold, 0.25d, 1.0d);
+
+        var anchors = new HashSet<long> { nodeId };
+        foreach (long neighbor in connectedNeighbors)
+        {
+            anchors.Add(neighbor);
+        }
+
+        foreach (long anchor in anchors)
+        {
+            if (!levelGraph.TryGetValue(anchor, out var currentNeighbors))
+            {
+                continue;
+            }
+
+            double degreeRatio = currentNeighbors.Count / (double)maxNeighbors;
+            if (degreeRatio < pruneThreshold)
+            {
+                continue;
+            }
+
+            RebuildNodeNeighborhood(level, anchor, maxNeighbors);
+        }
+
+        foreach (long anchor in anchors)
+        {
+            if (!levelGraph.TryGetValue(anchor, out var neighbors))
+            {
+                continue;
+            }
+
+            foreach (long neighbor in neighbors)
+            {
+                if (neighbor != anchor && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
+                {
+                    AddNeighbor(level, neighbor, anchor);
+                }
+            }
+        }
+    }
+
+    private void RebuildNodeNeighborhood(int level, long source, int maxNeighbors)
+    {
+        if (!Layers.TryGetValue(level, out var levelGraph)
+            || !levelGraph.TryGetValue(source, out var sourceNeighbors)
+            || !Entries.TryGetValue(source, out var sourceVector))
+        {
+            return;
+        }
+
+        int hops = Math.Clamp(InsertionNeighborhoodPruneHops, 1, 2);
+        var candidateSet = new HashSet<long>(sourceNeighbors.Where(Entries.ContainsKey));
+        var frontier = new HashSet<long>(candidateSet);
+
+        for (int hop = 0; hop < hops; hop++)
+        {
+            var nextFrontier = new HashSet<long>();
+            foreach (long node in frontier)
+            {
+                foreach (long neighbor in GetNeighbors(level, node))
+                {
+                    if (neighbor == source || !Entries.ContainsKey(neighbor) || !NodeExistsAtLevel(neighbor, level))
+                    {
+                        continue;
+                    }
+
+                    if (candidateSet.Add(neighbor))
+                    {
+                        nextFrontier.Add(neighbor);
+                    }
+                }
+            }
+
+            if (nextFrontier.Count == 0)
+            {
+                break;
+            }
+
+            frontier = nextFrontier;
+        }
+
+        List<(long RowId, float Distance)> rankedCandidates = candidateSet
+            .Where(candidate => candidate != source && Entries.ContainsKey(candidate) && NodeExistsAtLevel(candidate, level))
+            .Select(candidate => (RowId: candidate, Distance: Distance(sourceVector, Entries[candidate])))
+            .OrderBy(candidate => candidate.Distance)
+            .ThenBy(candidate => candidate.RowId)
+            .ToList();
+
+        List<long> selected = SelectNeighbors(rankedCandidates, source, maxNeighbors);
+        levelGraph[source] = selected;
     }
 
     private int ResolveNeighborLimit(int level)
