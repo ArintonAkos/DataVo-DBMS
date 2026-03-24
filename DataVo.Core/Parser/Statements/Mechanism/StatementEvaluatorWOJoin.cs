@@ -4,6 +4,7 @@ using DataVo.Core.Enums;
 using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.Utils;
+using DataVo.Core.Utils;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism
@@ -173,6 +174,50 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         }
 
         /// <summary>
+        /// Handles predicates of the form <c>distance(vector_column, literal_vector) &lt;op&gt; threshold</c>.
+        /// </summary>
+        protected override HashSet<long> HandleDistanceThresholdExpression(BinaryExpressionNode distanceExpression, string comparisonOperator, object? thresholdLiteral)
+        {
+            if (distanceExpression.Left is not ResolvedColumnRefNode vectorColumn
+                || distanceExpression.Right is not LiteralNode vectorLiteral)
+            {
+                return [];
+            }
+
+            if (!VectorParser.TryCoerceToVector(vectorLiteral.Value, out float[] queryVector))
+            {
+                return [];
+            }
+
+            double threshold;
+            if (!TryConvertThreshold(thresholdLiteral, out threshold))
+            {
+                return [];
+            }
+
+            return [.. _table.TableContent!
+                .Where(entry =>
+                {
+                    if (!VectorParser.TryCoerceToVector(entry.Value[vectorColumn.Column], out float[] rowVector))
+                    {
+                        return false;
+                    }
+
+                    if (rowVector.Length != queryVector.Length)
+                    {
+                        return false;
+                    }
+
+                    double distance = distanceExpression.Operator == Operators.VECTOR_DISTANCE_COSINE
+                        ? ComputeCosineDistance(queryVector, rowVector)
+                        : ComputeEuclideanDistance(queryVector, rowVector);
+
+                    return EvaluateDistanceComparison(distance, threshold, comparisonOperator);
+                })
+                .Select(entry => entry.Key)];
+        }
+
+        /// <summary>
         /// Builds a row-filtering predicate based on the specified relational operator.
         /// The predicate reads the value of <paramref name="leftValue"/> from each row and compares it to <paramref name="rightVal"/>.
         /// </summary>
@@ -326,6 +371,84 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         {
             if (left == null || right == null) return null;
             return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
+        }
+
+        private static bool TryConvertThreshold(object? rawValue, out double threshold)
+        {
+            threshold = 0d;
+            if (rawValue is null)
+            {
+                return false;
+            }
+
+            return rawValue switch
+            {
+                byte v => Assign(v, out threshold),
+                sbyte v => Assign(v, out threshold),
+                short v => Assign(v, out threshold),
+                ushort v => Assign(v, out threshold),
+                int v => Assign(v, out threshold),
+                uint v => Assign(v, out threshold),
+                long v => Assign(v, out threshold),
+                ulong v => Assign(v, out threshold),
+                float v => Assign(v, out threshold),
+                double v => Assign(v, out threshold),
+                decimal v => Assign((double)v, out threshold),
+                string s => double.TryParse(s, out threshold),
+                _ => false
+            };
+
+            static bool Assign(double value, out double output)
+            {
+                output = value;
+                return true;
+            }
+        }
+
+        private static bool EvaluateDistanceComparison(double distance, double threshold, string comparisonOperator)
+        {
+            return comparisonOperator switch
+            {
+                Operators.LESS_THAN => distance < threshold,
+                Operators.LESS_THAN_OR_EQUAL_TO => distance <= threshold,
+                Operators.GREATER_THAN => distance > threshold,
+                Operators.GREATER_THAN_OR_EQUAL_TO => distance >= threshold,
+                _ => false
+            };
+        }
+
+        private static double ComputeEuclideanDistance(float[] left, float[] right)
+        {
+            double sum = 0d;
+            for (int i = 0; i < left.Length; i++)
+            {
+                double diff = left[i] - right[i];
+                sum += diff * diff;
+            }
+
+            return Math.Sqrt(sum);
+        }
+
+        private static double ComputeCosineDistance(float[] left, float[] right)
+        {
+            double dot = 0d;
+            double magLeft = 0d;
+            double magRight = 0d;
+
+            for (int i = 0; i < left.Length; i++)
+            {
+                dot += left[i] * right[i];
+                magLeft += left[i] * left[i];
+                magRight += right[i] * right[i];
+            }
+
+            if (magLeft == 0d || magRight == 0d)
+            {
+                return 1d;
+            }
+
+            double similarity = dot / (Math.Sqrt(magLeft) * Math.Sqrt(magRight));
+            return 1d - similarity;
         }
     }
 }

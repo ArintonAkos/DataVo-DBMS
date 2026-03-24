@@ -15,6 +15,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Execution.Volcano;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 
 namespace DataVo.Core.Parser.DQL;
@@ -433,6 +434,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// <returns>A <see cref="ListedTable"/> containing the initial matched rows.</returns>
     private ListedTable EvaluateStatements()
     {
+        ListedTable? vectorPredicateFastPath = TryEvaluateVectorPredicateUsingVectorIndex();
+        if (vectorPredicateFastPath != null)
+        {
+            return vectorPredicateFastPath;
+        }
+
         ListedTable? nearestNeighborFastPath = TryEvaluateNearestNeighborUsingVectorIndex();
         if (nearestNeighborFastPath != null)
         {
@@ -857,6 +864,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
+        tableName = ResolveRealTableName(tableName);
+
         string columnType = Catalog.GetTableColumnType(tableName, _model.Database, columnName);
         if (!columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase)
             && !columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase))
@@ -864,16 +873,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             throw new Exception($"Vector operator '{distanceExpression.Operator}' can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
         }
 
-        if (!_model.FromTable.IndexedColumns!.TryGetValue(columnName, out string? indexName))
-        {
-            return null;
-        }
-
-        IndexFile? indexMetadata = Catalog
-            .GetTableIndexes(tableName, _model.Database)
-            .FirstOrDefault(index => index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase));
-
-        if (indexMetadata == null || !indexMetadata.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+        if (!TryResolveVectorIndex(tableName, columnName, _model.Database, out string indexName, out IndexFile indexMetadata))
         {
             return null;
         }
@@ -890,7 +890,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
-        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database);
+        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database, indexMetadata.IndexKind);
         if (rowIds.Count == 0)
         {
             return new ListedTable();
@@ -912,7 +912,19 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             if (!IsNearestJoinTwoPhaseEligible(materializedWhere, out var embeddingFilter))
             {
-                return null;
+                if (materializedWhere == null || !ReferencesOnlyFromTable(materializedWhere, _model.FromTable.TableName))
+                {
+                    try
+                    {
+                        return EvaluateJoinFromSeed(seedRows, materializedWhere);
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+
+                embeddingFilter = materializedWhere;
             }
 
             return EvaluateJoinFromSeed(seedRows, embeddingFilter);
@@ -955,6 +967,256 @@ internal class Select(SelectStatement ast) : BaseDbAction
     {
         return expression is LiteralNode literal
             && literal.Value?.ToString() == SqlLiterals.TrueExpression;
+    }
+
+    private ListedTable? TryEvaluateVectorPredicateUsingVectorIndex()
+    {
+        if (_model.Database is null)
+        {
+            return null;
+        }
+
+        ExpressionNode? materializedWhere = MaterializeWhereForFastPath();
+        if (materializedWhere == null)
+        {
+            return null;
+        }
+
+        if (!TryExtractVectorDistancePredicate(
+                materializedWhere,
+                out string tableName,
+                out string columnName,
+                out float[] queryVector,
+                out _,
+                out _))
+        {
+            return null;
+        }
+
+        tableName = ResolveRealTableName(tableName);
+
+        string columnType = Catalog.GetTableColumnType(tableName, _model.Database, columnName);
+        if (!columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase)
+            && !columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new Exception($"Vector distance predicate can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
+        }
+
+        if (!TryResolveVectorIndex(tableName, columnName, _model.Database, out string indexName, out IndexFile indexMetadata))
+        {
+            return null;
+        }
+
+        int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
+        if (totalRows <= 0)
+        {
+            return new ListedTable();
+        }
+
+        int topK = ResolveVectorPredicateTopK(totalRows);
+        List<long> rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database, indexMetadata.IndexKind);
+        if (rowIds.Count == 0)
+        {
+            return new ListedTable();
+        }
+
+        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        TableData seedRows = [];
+        foreach (long rowId in rowIds)
+        {
+            if (!rows.TryGetValue(rowId, out var rowValues))
+            {
+                continue;
+            }
+
+            seedRows[rowId] = new Record(rowId, rowValues);
+        }
+
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            if (!IsNearestJoinTwoPhaseEligible(materializedWhere, out var embeddingFilter))
+            {
+                return null;
+            }
+
+            return EvaluateJoinFromSeed(seedRows, embeddingFilter);
+        }
+
+        TableData filtered = ApplyPredicateToSeedRows(seedRows, materializedWhere);
+        return new ListedTable(filtered.Values
+            .Select(record => new JoinedRow(_model.FromTable.TableName, record.ToRow()))
+            .ToList());
+    }
+
+    private int ResolveVectorPredicateTopK(int totalRows)
+    {
+        if (totalRows <= 0)
+        {
+            return 0;
+        }
+
+        if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
+        {
+            return totalRows;
+        }
+
+        int requested = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
+        if (requested <= 0)
+        {
+            return totalRows;
+        }
+
+        return Math.Min(totalRows, requested);
+    }
+
+    private bool TryExtractVectorDistancePredicate(
+        ExpressionNode expression,
+        out string tableName,
+        out string columnName,
+        out float[] queryVector,
+        out string comparisonOperator,
+        out double threshold)
+    {
+        tableName = string.Empty;
+        columnName = string.Empty;
+        queryVector = [];
+        comparisonOperator = string.Empty;
+        threshold = 0d;
+
+        if (expression is not BinaryExpressionNode binary)
+        {
+            return false;
+        }
+
+        if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase))
+        {
+            return TryExtractVectorDistancePredicate(binary.Left, out tableName, out columnName, out queryVector, out comparisonOperator, out threshold)
+                || TryExtractVectorDistancePredicate(binary.Right, out tableName, out columnName, out queryVector, out comparisonOperator, out threshold);
+        }
+
+        if (!TryGetDistanceComparison(binary, out var distanceExpression, out comparisonOperator, out threshold))
+        {
+            return false;
+        }
+
+        return TryResolveVectorDistanceExpression(distanceExpression, out tableName, out columnName, out queryVector);
+    }
+
+    private static bool TryGetDistanceComparison(
+        BinaryExpressionNode expression,
+        out BinaryExpressionNode distanceExpression,
+        out string comparisonOperator,
+        out double threshold)
+    {
+        distanceExpression = null!;
+        comparisonOperator = string.Empty;
+        threshold = 0d;
+
+        if (!IsDistanceComparisonOperator(expression.Operator))
+        {
+            return false;
+        }
+
+        if (TryResolveDistanceComparisonParts(expression.Left, expression.Right, out distanceExpression, out threshold, out bool reversed))
+        {
+            comparisonOperator = reversed
+                ? InvertComparisonOperator(expression.Operator)
+                : expression.Operator;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveDistanceComparisonParts(
+        ExpressionNode left,
+        ExpressionNode right,
+        out BinaryExpressionNode distanceExpression,
+        out double threshold,
+        out bool reversed)
+    {
+        distanceExpression = null!;
+        threshold = 0d;
+        reversed = false;
+
+        if (left is BinaryExpressionNode leftDistance
+            && IsVectorDistanceOperator(leftDistance.Operator)
+            && TryResolveNumericLiteral(right, out threshold))
+        {
+            distanceExpression = leftDistance;
+            return true;
+        }
+
+        if (right is BinaryExpressionNode rightDistance
+            && IsVectorDistanceOperator(rightDistance.Operator)
+            && TryResolveNumericLiteral(left, out threshold))
+        {
+            distanceExpression = rightDistance;
+            reversed = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsDistanceComparisonOperator(string op)
+    {
+        return op == Operators.LESS_THAN
+            || op == Operators.LESS_THAN_OR_EQUAL_TO
+            || op == Operators.GREATER_THAN
+            || op == Operators.GREATER_THAN_OR_EQUAL_TO;
+    }
+
+    private static bool IsVectorDistanceOperator(string op)
+    {
+        return op == Operators.VECTOR_DISTANCE_COSINE
+            || op == Operators.VECTOR_DISTANCE_L2;
+    }
+
+    private static string InvertComparisonOperator(string op)
+    {
+        return op switch
+        {
+            Operators.LESS_THAN => Operators.GREATER_THAN,
+            Operators.LESS_THAN_OR_EQUAL_TO => Operators.GREATER_THAN_OR_EQUAL_TO,
+            Operators.GREATER_THAN => Operators.LESS_THAN,
+            Operators.GREATER_THAN_OR_EQUAL_TO => Operators.LESS_THAN_OR_EQUAL_TO,
+            _ => op
+        };
+    }
+
+    private static bool TryResolveNumericLiteral(ExpressionNode expression, out double value)
+    {
+        value = 0d;
+
+        if (expression is not LiteralNode literal || literal.Value is null)
+        {
+            return false;
+        }
+
+        return literal.Value switch
+        {
+            byte v => Assign(v, out value),
+            sbyte v => Assign(v, out value),
+            short v => Assign(v, out value),
+            ushort v => Assign(v, out value),
+            int v => Assign(v, out value),
+            uint v => Assign(v, out value),
+            long v => Assign(v, out value),
+            ulong v => Assign(v, out value),
+            float v => Assign(v, out value),
+            double v => Assign(v, out value),
+            decimal v => Assign((double)v, out value),
+            string s => double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value)
+                || double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out value),
+            _ => false
+        };
+
+        static bool Assign(double input, out double output)
+        {
+            output = input;
+            return true;
+        }
     }
 
     private ExpressionNode? MaterializeWhereForFastPath()
@@ -1001,6 +1263,54 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return topK <= threshold || complexity <= 6;
     }
 
+    private bool TryResolveVectorIndex(string tableName, string columnName, string databaseName, out string indexName, out IndexFile indexMetadata)
+    {
+        indexName = string.Empty;
+        indexMetadata = null!;
+
+        if (_model.FromTable.IndexedColumns is not null
+            && _model.FromTable.IndexedColumns.TryGetValue(columnName, out string? mappedName)
+            && !string.IsNullOrWhiteSpace(mappedName))
+        {
+            IndexFile? mappedMetadata = Catalog
+                .GetTableIndexes(tableName, databaseName)
+                .FirstOrDefault(index => index.IndexFileName.Equals(mappedName, StringComparison.OrdinalIgnoreCase));
+
+            if (mappedMetadata is not null && Indexes.SupportsVectorIndexType(mappedMetadata.IndexKind))
+            {
+                indexName = mappedName;
+                indexMetadata = mappedMetadata;
+                return true;
+            }
+        }
+
+        IndexFile? matched = Catalog
+            .GetTableIndexes(tableName, databaseName)
+            .FirstOrDefault(index => Indexes.SupportsVectorIndexType(index.IndexKind)
+                && index.AttributeNames.Any(attr => attr.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                && !string.IsNullOrWhiteSpace(index.IndexFileName));
+
+        if (matched is null)
+        {
+            return false;
+        }
+
+        indexName = matched.IndexFileName;
+        indexMetadata = matched;
+        return true;
+    }
+
+    private string ResolveRealTableName(string tableName)
+    {
+        if (_model.TableService == null || string.IsNullOrWhiteSpace(tableName))
+        {
+            return tableName;
+        }
+
+        string resolved = _model.TableService.GetRealTableName(tableName);
+        return string.IsNullOrWhiteSpace(resolved) ? tableName : resolved;
+    }
+
     private static int EstimatePredicateComplexity(ExpressionNode node)
     {
         return node switch
@@ -1011,6 +1321,38 @@ internal class Select(SelectStatement ast) : BaseDbAction
             ScalarFunctionExpressionNode scalar => 2 + scalar.Arguments.Sum(EstimatePredicateComplexity),
             _ => 1
         };
+    }
+
+    private bool ReferencesOnlyFromTable(ExpressionNode expression, string fromTableName)
+    {
+        return expression switch
+        {
+            BinaryExpressionNode binary => ReferencesOnlyFromTable(binary.Left, fromTableName)
+                && ReferencesOnlyFromTable(binary.Right, fromTableName),
+            ScalarFunctionExpressionNode scalar => scalar.Arguments.All(arg => ReferencesOnlyFromTable(arg, fromTableName)),
+            WindowFunctionExpressionNode window => ReferencesOnlyFromTable(window.OrderByColumn, fromTableName)
+                && window.PartitionByColumns.All(col => ReferencesOnlyFromTable(col, fromTableName)),
+            ResolvedColumnRefNode resolved => resolved.TableName.Equals(fromTableName, StringComparison.OrdinalIgnoreCase),
+            ColumnRefNode colRef => IsFromTableReference(colRef, fromTableName),
+            _ => true
+        };
+    }
+
+    private bool IsFromTableReference(ColumnRefNode columnRef, string fromTableName)
+    {
+        if (string.IsNullOrWhiteSpace(columnRef.TableOrAlias))
+        {
+            return true;
+        }
+
+        if (_model.TableService == null)
+        {
+            return columnRef.TableOrAlias.Equals(fromTableName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        string resolvedName = _model.TableService.GetRealTableName(columnRef.TableOrAlias);
+        return resolvedName.Equals(fromTableName, StringComparison.OrdinalIgnoreCase)
+            || columnRef.TableOrAlias.Equals(fromTableName, StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ShouldAvoidSortPushdownForSpillRisk(ExpressionNode? whereExpression, bool hasJoin)

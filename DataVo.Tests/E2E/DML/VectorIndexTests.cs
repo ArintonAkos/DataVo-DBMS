@@ -260,6 +260,61 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         Assert.NotEmpty(result.Data);
     }
+
+    [Fact]
+    public void Select_VectorDistanceWherePredicate_UsesPrefilterAndReturnsMatchingRows()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (4, '[0.8,0.2,0]', 'inactive')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_where ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT Id
+            FROM Embeddings
+            WHERE Emb <=> '[0.95,0.05,0]' < 0.2 AND Status = 'active'
+            ORDER BY Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, result.Data[0]["Id"]);
+        Assert.Equal(3, result.Data[1]["Id"]);
+    }
+
+    [Fact]
+    public void Select_VectorDistanceWherePredicate_WithJoin_DoesNotFailAndReturnsMatches()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR)");
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (4, '[0.8,0.2,0]', 'inactive')");
+
+        Execute("INSERT INTO Items (Id, Name) VALUES (1, 'Item1')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (3, 'Item3')");
+        Execute("INSERT INTO Items (Id, Name) VALUES (4, 'Item4')");
+
+        ExecuteAndReturn("CREATE INDEX idx_vec_where_join ON Embeddings (Emb) USING HNSW");
+
+        var result = ExecuteAndReturn(@"
+            SELECT e.Id, i.Name
+            FROM Embeddings e
+            WHERE e.Emb <=> '[0.95,0.05,0]' < 0.2 AND e.Status = 'active'
+            JOIN Items i ON e.Id = i.Id
+            ORDER BY e.Id ASC");
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(2, result.Data.Count);
+        Assert.Equal(1, result.Data[0]["e.Id"]);
+        Assert.Equal("Item1", result.Data[0]["i.Name"]);
+        Assert.Equal(3, result.Data[1]["e.Id"]);
+        Assert.Equal("Item3", result.Data[1]["i.Name"]);
+    }
+
 }
 
 public class InMemoryVectorIndexTests : VectorIndexTestsBase
