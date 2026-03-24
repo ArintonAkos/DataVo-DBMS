@@ -15,6 +15,8 @@ public class HNSWIndexPersistence : IIndexPersistence
         public int EfConstruction { get; set; } = 64;
         public bool EnableAdaptiveEfConstruction { get; set; } = true;
         public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
+        public bool EnableInsertionCandidateExpansion { get; set; } = true;
+        public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
         public int EfSearch { get; set; } = 64;
         public bool EnableDiversityHeuristic { get; set; } = true;
         public bool EnableDeleteGraphRepair { get; set; } = true;
@@ -52,6 +54,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfConstruction = hnsw.EfConstruction,
             EnableAdaptiveEfConstruction = hnsw.EnableAdaptiveEfConstruction,
             AdaptiveEfConstructionMultiplier = hnsw.AdaptiveEfConstructionMultiplier,
+            EnableInsertionCandidateExpansion = hnsw.EnableInsertionCandidateExpansion,
+            InsertionCandidateExpansionFactor = hnsw.InsertionCandidateExpansionFactor,
             EfSearch = hnsw.EfSearch,
             EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = hnsw.EnableDeleteGraphRepair,
@@ -97,6 +101,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
             EnableAdaptiveEfConstruction = snapshot.EnableAdaptiveEfConstruction,
             AdaptiveEfConstructionMultiplier = snapshot.AdaptiveEfConstructionMultiplier > 0d ? snapshot.AdaptiveEfConstructionMultiplier : 1.25d,
+            EnableInsertionCandidateExpansion = snapshot.EnableInsertionCandidateExpansion,
+            InsertionCandidateExpansionFactor = snapshot.InsertionCandidateExpansionFactor > 0d ? snapshot.InsertionCandidateExpansionFactor : 1.5d,
             EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
             EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = snapshot.EnableDeleteGraphRepair,

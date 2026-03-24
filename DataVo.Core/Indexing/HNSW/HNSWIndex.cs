@@ -75,6 +75,16 @@ public class HNSWIndex : IVectorIndex
     public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
 
     /// <summary>
+    /// Gets or sets a value indicating whether insertion candidate sets should be expanded using local graph neighborhoods.
+    /// </summary>
+    public bool EnableInsertionCandidateExpansion { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets multiplier used to size the expanded insertion candidate budget.
+    /// </summary>
+    public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
+
+    /// <summary>
     /// Gets or sets candidate breadth used during querying.
     /// </summary>
     public int EfSearch { get; set; } = DefaultEfSearch;
@@ -143,6 +153,8 @@ public class HNSWIndex : IVectorIndex
             List<long> insertionSeeds = BuildInsertionSeeds(entryPoint, efConstruction, currentLevel);
             List<(long RowId, float Distance)> candidates = SearchLayer(vector, insertionSeeds, efConstruction, currentLevel);
             int neighborLimit = ResolveNeighborLimit(currentLevel);
+            int candidateLimit = ResolveInsertionCandidateLimit(currentLevel, efConstruction);
+            candidates = ExpandInsertionCandidates(vector, candidates, currentLevel, candidateLimit);
             List<long> neighbors = SelectNeighbors(candidates, rowId, neighborLimit);
 
             if (neighbors.Count == 0 && entryPoint != rowId && NodeExistsAtLevel(entryPoint, currentLevel))
@@ -819,6 +831,76 @@ public class HNSWIndex : IVectorIndex
         int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, breadth));
 
         return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
+    }
+
+    private int ResolveInsertionCandidateLimit(int level, int efConstruction)
+    {
+        int maxAllowed = Math.Max(1, Entries.Count);
+        int minRequired = Math.Min(maxAllowed, Math.Max(ResolveNeighborLimit(level), Math.Max(1, efConstruction)));
+        int scaled = (int)Math.Ceiling(minRequired * Math.Max(1d, InsertionCandidateExpansionFactor));
+        int baseline = Math.Max(minRequired, ResolveNeighborLimit(level) * 4);
+        return Math.Clamp(Math.Max(baseline, scaled), minRequired, maxAllowed);
+    }
+
+    private List<(long RowId, float Distance)> ExpandInsertionCandidates(
+        float[] vector,
+        List<(long RowId, float Distance)> baseCandidates,
+        int level,
+        int candidateLimit)
+    {
+        if (!EnableInsertionCandidateExpansion || baseCandidates.Count == 0)
+        {
+            return baseCandidates
+                .OrderBy(candidate => candidate.Distance)
+                .ThenBy(candidate => candidate.RowId)
+                .Take(Math.Max(1, candidateLimit))
+                .ToList();
+        }
+
+        var merged = new Dictionary<long, float>();
+        foreach (var candidate in baseCandidates)
+        {
+            if (!merged.ContainsKey(candidate.RowId))
+            {
+                merged[candidate.RowId] = candidate.Distance;
+            }
+        }
+
+        int seedBudget = Math.Clamp(Math.Max(2, candidateLimit / 4), 2, 16);
+        foreach (var seed in baseCandidates
+            .OrderBy(candidate => candidate.Distance)
+            .ThenBy(candidate => candidate.RowId)
+            .Take(seedBudget))
+        {
+            foreach (long neighbor in GetNeighbors(level, seed.RowId))
+            {
+                if (merged.Count >= candidateLimit)
+                {
+                    break;
+                }
+
+                if (merged.ContainsKey(neighbor)
+                    || !Entries.TryGetValue(neighbor, out var neighborVector)
+                    || !NodeExistsAtLevel(neighbor, level))
+                {
+                    continue;
+                }
+
+                merged[neighbor] = Distance(vector, neighborVector);
+            }
+
+            if (merged.Count >= candidateLimit)
+            {
+                break;
+            }
+        }
+
+        return merged
+            .OrderBy(pair => pair.Value)
+            .ThenBy(pair => pair.Key)
+            .Take(Math.Max(1, candidateLimit))
+            .Select(pair => (pair.Key, pair.Value))
+            .ToList();
     }
 
     private int ResolveNeighborLimit(int level)
