@@ -42,6 +42,12 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (TryReadBool(@params, "enableDeleteGraphRepair", out bool enableDeleteGraphRepair))
             index.EnableDeleteGraphRepair = enableDeleteGraphRepair;
 
+        if (TryReadBool(@params, "enableAdaptiveEfSearch", out bool enableAdaptiveEfSearch))
+            index.EnableAdaptiveEfSearch = enableAdaptiveEfSearch;
+
+        if (TryReadDouble(@params, "adaptiveEfSearchMultiplier", out double adaptiveEfSearchMultiplier) && adaptiveEfSearchMultiplier > 0d)
+            index.AdaptiveEfSearchMultiplier = adaptiveEfSearchMultiplier;
+
         return index;
     }
 
@@ -103,6 +109,30 @@ public class HNSWIndexFactory : IVectorIndexFactory
         };
 
         static bool Assign(bool source, out bool target)
+        {
+            target = source;
+            return true;
+        }
+    }
+
+    private static bool TryReadDouble(Dictionary<string, object> parameters, string key, out double value)
+    {
+        value = 0d;
+
+        if (!parameters.TryGetValue(key, out var raw) || raw is null)
+            return false;
+
+        return raw switch
+        {
+            double d => Assign(d, out value),
+            float f => Assign(f, out value),
+            int i => Assign(i, out value),
+            long l => Assign(l, out value),
+            string s => double.TryParse(s, out value),
+            _ => false
+        };
+
+        static bool Assign(double source, out double target)
         {
             target = source;
             return true;

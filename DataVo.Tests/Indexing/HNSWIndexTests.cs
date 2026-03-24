@@ -80,7 +80,9 @@ public class HNSWIndexTests : IDisposable
             M = 10,
             EfConstruction = 40,
             EfSearch = 30,
-            EnableDiversityHeuristic = false
+            EnableDiversityHeuristic = false,
+            EnableAdaptiveEfSearch = false,
+            AdaptiveEfSearchMultiplier = 2.25d
         };
 
         index.Insert(1, [1f, 0f, 0f]);
@@ -99,6 +101,8 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal(40, loaded.EfConstruction);
         Assert.Equal(30, loaded.EfSearch);
         Assert.False(loaded.EnableDiversityHeuristic);
+        Assert.False(loaded.EnableAdaptiveEfSearch);
+        Assert.Equal(2.25d, loaded.AdaptiveEfSearchMultiplier);
         Assert.Equal(index.Count, loaded.Count);
         Assert.NotNull(loaded.EntryPointId);
         Assert.NotEmpty(loaded.NodeLevels);
@@ -211,6 +215,110 @@ public class HNSWIndexTests : IDisposable
 
         double avgRecall = totalRecall / queries;
         Assert.True(avgRecall >= 0.60d, $"Expected avg recall@10 >= 0.60, got {avgRecall:F3}");
+    }
+
+    [Fact]
+    public void Benchmark_RecallTrend_ImprovesWithEfSearchAndM_Matrix()
+    {
+        const int dimension = 12;
+        const int vectors = 500;
+        const int queries = 30;
+        const int topK = 10;
+
+        var dataset = BuildDataset(seed: 20260324, vectors, dimension);
+        var querySet = BuildQueries(seed: 20260325, queries, dimension);
+
+        double recallLowEf = EvaluateRecallAtK(dataset, querySet, topK, m: 8, efConstruction: 64, efSearch: 16);
+        double recallMidEf = EvaluateRecallAtK(dataset, querySet, topK, m: 8, efConstruction: 64, efSearch: 48);
+        double recallHighEf = EvaluateRecallAtK(dataset, querySet, topK, m: 8, efConstruction: 64, efSearch: 96);
+
+        Assert.True(recallMidEf >= recallLowEf - 1e-6, $"Expected mid efSearch recall >= low recall. low={recallLowEf:F3}, mid={recallMidEf:F3}");
+        Assert.True(recallHighEf >= recallMidEf - 1e-6, $"Expected high efSearch recall >= mid recall. mid={recallMidEf:F3}, high={recallHighEf:F3}");
+
+        double recallLowM = EvaluateRecallAtK(dataset, querySet, topK, m: 8, efConstruction: 96, efSearch: 96);
+        double recallHighM = EvaluateRecallAtK(dataset, querySet, topK, m: 16, efConstruction: 96, efSearch: 96);
+
+        Assert.True(recallHighM >= recallLowM - 1e-6, $"Expected higher M not to reduce recall. m8={recallLowM:F3}, m16={recallHighM:F3}");
+    }
+
+    private static List<(long RowId, float[] Vector)> BuildDataset(int seed, int vectors, int dimension)
+    {
+        var random = new Random(seed);
+        var dataset = new List<(long RowId, float[] Vector)>(vectors);
+
+        for (int id = 1; id <= vectors; id++)
+        {
+            float[] vector = new float[dimension];
+            for (int i = 0; i < dimension; i++)
+            {
+                vector[i] = (float)random.NextDouble();
+            }
+
+            dataset.Add((id, vector));
+        }
+
+        return dataset;
+    }
+
+    private static List<float[]> BuildQueries(int seed, int queries, int dimension)
+    {
+        var random = new Random(seed);
+        var querySet = new List<float[]>(queries);
+
+        for (int q = 0; q < queries; q++)
+        {
+            float[] query = new float[dimension];
+            for (int i = 0; i < dimension; i++)
+            {
+                query[i] = (float)random.NextDouble();
+            }
+
+            querySet.Add(query);
+        }
+
+        return querySet;
+    }
+
+    private static double EvaluateRecallAtK(
+        List<(long RowId, float[] Vector)> dataset,
+        List<float[]> querySet,
+        int topK,
+        int m,
+        int efConstruction,
+        int efSearch)
+    {
+        var index = new HNSWIndex
+        {
+            Metric = "cosine",
+            M = m,
+            EfConstruction = efConstruction,
+            EfSearch = efSearch,
+            EnableDiversityHeuristic = true,
+            EnableDeleteGraphRepair = true
+        };
+
+        foreach (var (rowId, vector) in dataset)
+        {
+            index.Insert(rowId, vector);
+        }
+
+        double totalRecall = 0d;
+        foreach (float[] query in querySet)
+        {
+            List<long> ann = index.SearchTopK(query, topK);
+            List<long> exact = dataset
+                .Select(entry => (entry.RowId, DistanceCosine(query, entry.Vector)))
+                .OrderBy(item => item.Item2)
+                .ThenBy(item => item.RowId)
+                .Take(topK)
+                .Select(item => item.RowId)
+                .ToList();
+
+            int overlap = ann.Intersect(exact).Count();
+            totalRecall += (double)overlap / topK;
+        }
+
+        return totalRecall / querySet.Count;
     }
 
     private static float DistanceCosine(float[] a, float[] b)

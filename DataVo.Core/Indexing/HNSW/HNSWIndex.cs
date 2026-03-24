@@ -72,6 +72,16 @@ public class HNSWIndex : IVectorIndex
     public int EfSearch { get; set; } = DefaultEfSearch;
 
     /// <summary>
+    /// Gets or sets a value indicating whether query-time efSearch is adaptively scaled by graph size and requested topK.
+    /// </summary>
+    public bool EnableAdaptiveEfSearch { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets multiplier used for adaptive efSearch calculation.
+    /// </summary>
+    public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
+
+    /// <summary>
     /// Gets or sets a value indicating whether heuristic diversified neighbor selection is enabled.
     /// </summary>
     public bool EnableDiversityHeuristic { get; set; } = true;
@@ -192,7 +202,7 @@ public class HNSWIndex : IVectorIndex
             entryPoint = SearchLayerGreedy(queryVector, entryPoint, level);
         }
 
-        int ef = Math.Max(topK, Math.Max(1, EfSearch));
+        int ef = ResolveEffectiveEfSearch(topK);
         List<long> seeds = BuildLevelZeroSeeds(entryPoint, ef);
         List<(long RowId, float Distance)> candidates = SearchLayer(queryVector, seeds, ef, 0);
 
@@ -684,6 +694,22 @@ public class HNSWIndex : IVectorIndex
         Layers.Clear();
         EntryPointId = null;
         MaxLevel = -1;
+    }
+
+    private int ResolveEffectiveEfSearch(int topK)
+    {
+        int maxAllowedEf = Math.Max(1, Entries.Count);
+        int baseEf = Math.Min(maxAllowedEf, Math.Max(topK, Math.Max(1, EfSearch)));
+        if (!EnableAdaptiveEfSearch || Entries.Count <= 1)
+        {
+            return baseEf;
+        }
+
+        double graphFactor = Math.Log2(Entries.Count + 1);
+        double topKFactor = Math.Max(1d, topK * AdaptiveEfSearchMultiplier);
+        int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, graphFactor * topKFactor));
+
+        return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
     }
 
     private void RepairNeighborhoodAfterDelete(int level, IReadOnlyCollection<long> removedNeighbors, long removedNodeId)

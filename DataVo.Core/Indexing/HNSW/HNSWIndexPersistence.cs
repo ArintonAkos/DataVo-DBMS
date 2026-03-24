@@ -16,6 +16,8 @@ public class HNSWIndexPersistence : IIndexPersistence
         public int EfSearch { get; set; } = 64;
         public bool EnableDiversityHeuristic { get; set; } = true;
         public bool EnableDeleteGraphRepair { get; set; } = true;
+        public bool EnableAdaptiveEfSearch { get; set; } = true;
+        public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
         public long? EntryPointId { get; set; }
         public int MaxLevel { get; set; } = -1;
         public Dictionary<long, int> NodeLevels { get; set; } = [];
@@ -49,6 +51,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfSearch = hnsw.EfSearch,
             EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = hnsw.EnableDeleteGraphRepair,
+            EnableAdaptiveEfSearch = hnsw.EnableAdaptiveEfSearch,
+            AdaptiveEfSearchMultiplier = hnsw.AdaptiveEfSearchMultiplier,
             EntryPointId = hnsw.EntryPointId,
             MaxLevel = hnsw.MaxLevel,
             NodeLevels = hnsw.NodeLevels,
@@ -90,6 +94,8 @@ public class HNSWIndexPersistence : IIndexPersistence
             EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
             EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
             EnableDeleteGraphRepair = snapshot.EnableDeleteGraphRepair,
+            EnableAdaptiveEfSearch = snapshot.EnableAdaptiveEfSearch,
+            AdaptiveEfSearchMultiplier = snapshot.AdaptiveEfSearchMultiplier > 0d ? snapshot.AdaptiveEfSearchMultiplier : 1.5d,
             EntryPointId = snapshot.EntryPointId,
             MaxLevel = snapshot.MaxLevel,
             Entries = snapshot.Entries ?? [],
