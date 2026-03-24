@@ -1,4 +1,5 @@
 using DataVo.Core.StorageEngine.Config;
+using System.Diagnostics;
 
 namespace DataVo.Tests.E2E.DML;
 
@@ -557,6 +558,111 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         Assert.Equal(2, result.Data.Count);
         Assert.Equal(1, Engine.Config.GetHybridRoutingCounter("hybrid.orderby.initial_topk.adaptive"));
+    }
+
+    [Fact]
+    public void Select_HybridRoutingTelemetry_AggregatesPerQueryAndPeriodicSnapshot()
+    {
+        Engine.Config.EnableHybridRoutingTelemetryCounters = true;
+        Engine.Config.EnableHybridRoutingPerQueryTelemetry = true;
+        Engine.Config.HybridRoutingTelemetrySnapshotIntervalQueries = 2;
+        Engine.Config.EnableHybridOrderByAdaptiveInitialTopK = true;
+        Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 6;
+        Engine.Config.VectorPredicateFastPathExpansionFactor = 2;
+        Engine.Config.ResetHybridRoutingCounters();
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        for (int id = 1; id <= 120; id++)
+        {
+            Execute($"INSERT INTO Embeddings (Id, Emb, Status) VALUES ({id}, '[1,0,0]', 'inactive')");
+        }
+
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (121, '[0.95,0.05,0]', 'active')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (122, '[0.95,0.05,0]', 'active')");
+        ExecuteAndReturn("CREATE INDEX idx_vec_hybrid_snapshot ON Embeddings (Emb) USING HNSW");
+
+        const string query = @"
+            SELECT Id, Emb <=> '[1,0,0]' AS rank
+            FROM Embeddings
+            WHERE Status = 'active'
+            ORDER BY rank ASC
+            LIMIT 2";
+
+        var first = ExecuteAndReturn(query);
+        var second = ExecuteAndReturn(query);
+
+        Assert.False(first.IsError, string.Join(" | ", first.Messages));
+        Assert.False(second.IsError, string.Join(" | ", second.Messages));
+        Assert.Equal(2, first.Data.Count);
+        Assert.Equal(2, second.Data.Count);
+
+        Assert.Equal(2, Engine.Config.GetHybridRoutingProcessedQueryCount());
+        Assert.Equal(2, Engine.Config.GetHybridRoutingUsedQueryCount());
+        Assert.True(Engine.Config.GetHybridRoutingTotalExpansionPasses() > 0);
+        Assert.Equal(1, Engine.Config.GetHybridRoutingSnapshotEmissions());
+        Assert.True(Engine.Config.GetHybridRoutingCounter("hybrid.orderby.accept") >= 2);
+    }
+
+    [Fact]
+    public void Benchmark_HybridOrderByAdaptiveInitialTopK_ReducesExpansionPasses_OnMixedWorkload()
+    {
+        Engine.Config.EnableHybridRoutingTelemetryCounters = true;
+        Engine.Config.EnableHybridRoutingPerQueryTelemetry = false;
+        Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 8;
+        Engine.Config.VectorPredicateFastPathExpansionFactor = 2;
+
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+        for (int id = 1; id <= 480; id++)
+        {
+            Execute($"INSERT INTO Embeddings (Id, Emb, Status) VALUES ({id}, '[1,0,0]', 'inactive')");
+        }
+
+        for (int id = 481; id <= 500; id++)
+        {
+            Execute($"INSERT INTO Embeddings (Id, Emb, Status) VALUES ({id}, '[0.95,0.05,0]', 'active')");
+        }
+
+        ExecuteAndReturn("CREATE INDEX idx_vec_hybrid_bench ON Embeddings (Emb) USING HNSW");
+
+        const string query = @"
+            SELECT Id, Emb <=> '[1,0,0]' AS rank
+            FROM Embeddings
+            WHERE Status = 'active'
+            ORDER BY rank ASC
+            LIMIT 5";
+
+        const int iterations = 40;
+
+        Engine.Config.EnableHybridOrderByAdaptiveInitialTopK = false;
+        Engine.Config.HybridRoutingTelemetrySnapshotIntervalQueries = iterations;
+        Engine.Config.ResetHybridRoutingCounters();
+        var baselineStopwatch = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            var result = ExecuteAndReturn(query);
+            Assert.False(result.IsError, string.Join(" | ", result.Messages));
+            Assert.Equal(5, result.Data.Count);
+        }
+        baselineStopwatch.Stop();
+        long baselineExpansionPasses = Engine.Config.GetHybridRoutingTotalExpansionPasses();
+
+        Engine.Config.EnableHybridOrderByAdaptiveInitialTopK = true;
+        Engine.Config.HybridRoutingTelemetrySnapshotIntervalQueries = iterations;
+        Engine.Config.ResetHybridRoutingCounters();
+        var adaptiveStopwatch = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            var result = ExecuteAndReturn(query);
+            Assert.False(result.IsError, string.Join(" | ", result.Messages));
+            Assert.Equal(5, result.Data.Count);
+        }
+        adaptiveStopwatch.Stop();
+        long adaptiveExpansionPasses = Engine.Config.GetHybridRoutingTotalExpansionPasses();
+
+        Assert.Equal(iterations, Engine.Config.GetHybridRoutingUsedQueryCount());
+        Assert.True(
+            adaptiveExpansionPasses < baselineExpansionPasses,
+            $"Expected adaptive initial topK to reduce expansion passes. Baseline={baselineExpansionPasses}, Adaptive={adaptiveExpansionPasses}, BaselineMs={baselineStopwatch.ElapsedMilliseconds}, AdaptiveMs={adaptiveStopwatch.ElapsedMilliseconds}");
     }
 
 }

@@ -207,8 +207,29 @@ public class DataVoConfig
     /// </summary>
     public bool EnableHybridRoutingTelemetryCounters { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether planner should emit per-query hybrid routing telemetry.
+    /// </summary>
+    public bool EnableHybridRoutingPerQueryTelemetry { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets query interval for periodic aggregated hybrid telemetry snapshots.
+    /// A value less than or equal to zero disables periodic snapshots.
+    /// </summary>
+    public int HybridRoutingTelemetrySnapshotIntervalQueries { get; set; } = 25;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether hybrid ORDER BY path should use selectivity-informed initial top-K sizing.
+    /// </summary>
+    public bool EnableHybridOrderByAdaptiveInitialTopK { get; set; } = true;
+
     private readonly object _hybridRoutingTelemetrySync = new();
     private readonly Dictionary<string, int> _hybridRoutingTelemetryCounters = new(StringComparer.OrdinalIgnoreCase);
+    private int _hybridRoutingProcessedQueries;
+    private int _hybridRoutingUsedQueries;
+    private long _hybridRoutingTotalExpansionPasses;
+    private int _hybridRoutingLastSnapshotAtQueryCount;
+    private int _hybridRoutingSnapshotEmissions;
 
     private bool? _walEnabled;
 
@@ -313,6 +334,128 @@ public class DataVoConfig
         lock (_hybridRoutingTelemetrySync)
         {
             _hybridRoutingTelemetryCounters.Clear();
+            _hybridRoutingProcessedQueries = 0;
+            _hybridRoutingUsedQueries = 0;
+            _hybridRoutingTotalExpansionPasses = 0;
+            _hybridRoutingLastSnapshotAtQueryCount = 0;
+            _hybridRoutingSnapshotEmissions = 0;
+        }
+    }
+
+    /// <summary>
+    /// Records a query-level hybrid routing telemetry sample and optionally emits a periodic aggregated snapshot.
+    /// </summary>
+    /// <param name="queryBuckets">Query-scoped bucket counts.</param>
+    /// <param name="expansionPasses">Expansion pass count observed for the query.</param>
+    /// <param name="snapshotMessage">When emitted, contains a preformatted aggregate snapshot message.</param>
+    /// <returns><see langword="true"/> when a periodic snapshot should be emitted; otherwise <see langword="false"/>.</returns>
+    public bool RecordHybridRoutingQueryAndTryBuildSnapshot(
+        IReadOnlyDictionary<string, int> queryBuckets,
+        int expansionPasses,
+        out string? snapshotMessage)
+    {
+        snapshotMessage = null;
+
+        if (!EnableHybridRoutingTelemetryCounters)
+        {
+            return false;
+        }
+
+        int safeExpansionPasses = Math.Max(0, expansionPasses);
+
+        lock (_hybridRoutingTelemetrySync)
+        {
+            _hybridRoutingProcessedQueries++;
+            _hybridRoutingTotalExpansionPasses += safeExpansionPasses;
+
+            if (queryBuckets.Count > 0)
+            {
+                _hybridRoutingUsedQueries++;
+            }
+
+            foreach (var entry in queryBuckets)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Key) || entry.Value <= 0)
+                {
+                    continue;
+                }
+
+                _hybridRoutingTelemetryCounters.TryGetValue(entry.Key, out int current);
+                _hybridRoutingTelemetryCounters[entry.Key] = current + entry.Value;
+            }
+
+            int interval = HybridRoutingTelemetrySnapshotIntervalQueries;
+            if (interval <= 0)
+            {
+                return false;
+            }
+
+            int deltaSinceSnapshot = _hybridRoutingProcessedQueries - _hybridRoutingLastSnapshotAtQueryCount;
+            if (deltaSinceSnapshot < interval)
+            {
+                return false;
+            }
+
+            _hybridRoutingLastSnapshotAtQueryCount = _hybridRoutingProcessedQueries;
+            _hybridRoutingSnapshotEmissions++;
+
+            double avgExpansionPasses = _hybridRoutingProcessedQueries == 0
+                ? 0d
+                : (double)_hybridRoutingTotalExpansionPasses / _hybridRoutingProcessedQueries;
+
+            string bucketSummary = _hybridRoutingTelemetryCounters.Count == 0
+                ? "none"
+                : string.Join(", ", _hybridRoutingTelemetryCounters
+                    .OrderByDescending(pair => pair.Value)
+                    .Take(8)
+                    .Select(pair => $"{pair.Key}={pair.Value}"));
+
+            snapshotMessage = $"queries={_hybridRoutingProcessedQueries}; used={_hybridRoutingUsedQueries}; avgExpansionPasses={avgExpansionPasses:F3}; buckets={bucketSummary}";
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Gets the total number of SELECT queries recorded by hybrid routing telemetry.
+    /// </summary>
+    public int GetHybridRoutingProcessedQueryCount()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return _hybridRoutingProcessedQueries;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of queries that actually used a hybrid route bucket.
+    /// </summary>
+    public int GetHybridRoutingUsedQueryCount()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return _hybridRoutingUsedQueries;
+        }
+    }
+
+    /// <summary>
+    /// Gets the total expansion pass count accumulated across recorded queries.
+    /// </summary>
+    public long GetHybridRoutingTotalExpansionPasses()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return _hybridRoutingTotalExpansionPasses;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of periodic snapshot emissions.
+    /// </summary>
+    public int GetHybridRoutingSnapshotEmissions()
+    {
+        lock (_hybridRoutingTelemetrySync)
+        {
+            return _hybridRoutingSnapshotEmissions;
         }
     }
 }
