@@ -23,6 +23,9 @@ features:
   - title: SELECT and Querying
     details: Browse filtering, joins, grouping, ordering, limits, predicates, set operations, and subquery support.
     link: /features/select-and-querying
+  - title: Volcano Planner and Execution
+    details: Understand how the planner chooses Volcano vs legacy paths, with operator-pipeline diagrams and fallback rules.
+    link: /features/volcano-planner-and-execution
   - title: Data Modification
     details: Learn how INSERT, UPDATE, DELETE, and VACUUM behave with constraints, rewrites, and physical cleanup.
     link: /features/data-modification
@@ -51,10 +54,11 @@ It is separate from the `DataVo.Core` module reference on purpose:
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
 3. [SELECT and Query Features](./select-and-querying.md)
-4. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
-5. [DDL and Schema Changes](./schema-and-ddl.md)
-6. [Transactions](./transactions.md)
-7. [Roadmap and Integrations](./roadmap-and-integrations.md)
+4. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
+5. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
+6. [DDL and Schema Changes](./schema-and-ddl.md)
+7. [Transactions](./transactions.md)
+8. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ## Audience
 
