@@ -7,8 +7,14 @@ namespace DataVo.Core.Indexing.HNSW;
 /// </summary>
 public class HNSWIndexPersistence : IIndexPersistence
 {
+    /// <summary>
+    /// Gets the serialized file extension for vector index files.
+    /// </summary>
     public string FileExtension => ".vector.json";
 
+    /// <summary>
+    /// Persists a vector index instance.
+    /// </summary>
     public void SaveIndex(object index, string filePath)
     {
         if (index is not HNSWIndex hnsw)
@@ -33,6 +39,9 @@ public class HNSWIndexPersistence : IIndexPersistence
         File.WriteAllText(filePath, json);
     }
 
+    /// <summary>
+    /// Loads a vector index instance from storage.
+    /// </summary>
     public object LoadIndex(string filePath)
     {
         if (!File.Exists(filePath))
@@ -72,13 +81,69 @@ public class HNSWIndexPersistence : IIndexPersistence
         return index;
     }
 
+    /// <summary>
+    /// Flushes any pending state for vector index persistence.
+    /// </summary>
     public void Flush(object index)
     {
         // JSON-based HNSW has no additional flushing needed beyond Save
     }
 
+    /// <summary>
+    /// Returns whether the backing file exists.
+    /// </summary>
     public bool FileExists(string filePath)
     {
         return File.Exists(filePath);
+    }
+
+    /// <summary>
+    /// Ensures the specified directory exists.
+    /// </summary>
+    public void EnsureDirectory(string directoryPath)
+    {
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to delete the backing index file.
+    /// </summary>
+    public bool TryDeleteFile(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                return true;
+            }
+
+            File.Delete(filePath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool TryDeleteDirectory(string directoryPath)
+    {
+        try
+        {
+            if (!Directory.Exists(directoryPath))
+            {
+                return true;
+            }
+
+            Directory.Delete(directoryPath, recursive: true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

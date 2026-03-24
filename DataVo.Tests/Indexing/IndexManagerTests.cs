@@ -59,6 +59,34 @@ public class IndexManagerTests : IDisposable
         Assert.Equal(1L, nearestAfterDelete[0]);
     }
 
+    [Fact]
+    public void SupportsVectorIndexType_ReturnsExpectedCapabilities()
+    {
+        Assert.True(_manager.SupportsVectorIndexType("HNSW"));
+        Assert.False(_manager.SupportsVectorIndexType("BTREE"));
+        Assert.False(_manager.SupportsVectorIndexType(""));
+    }
+
+    [Fact]
+    public void VectorIndex_WithExplicitIndexType_RoundTrips()
+    {
+        _manager.CreateVectorIndex(
+            [
+                (10L, new[] { 1f, 0f, 0f }),
+                (20L, new[] { 0f, 1f, 0f })
+            ],
+            "idx_v2_typed",
+            "Embeddings",
+            "DbV2",
+            metric: "cosine",
+            indexType: "HNSW");
+
+        List<long> rowIds = _manager.SearchVector([0.9f, 0.1f, 0f], 1, "idx_v2_typed", "Embeddings", "DbV2", indexType: "HNSW");
+
+        Assert.Single(rowIds);
+        Assert.Equal(10L, rowIds[0]);
+    }
+
     public void Dispose()
     {
         _manager.Dispose();

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DataVo.Core.BTree;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.StorageEngine.Config;
@@ -127,6 +126,23 @@ public class IndexManager : IDisposable
         {
             _factories[indexType.ToUpper()] = factory;
             _persistenceHandlers[indexType.ToUpper()] = persistence;
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the provided index type is registered and supports vector search capabilities.
+    /// </summary>
+    public bool SupportsVectorIndexType(string indexType)
+    {
+        if (string.IsNullOrWhiteSpace(indexType))
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            return _factories.TryGetValue(indexType.ToUpperInvariant(), out var factory)
+                && factory is IVectorIndexFactory;
         }
     }
 
@@ -271,6 +287,8 @@ public class IndexManager : IDisposable
     {
         lock (_lock)
         {
+            _metadata.TryGetValue(cacheKey, out var metadata);
+
             _cache.Remove(cacheKey);
             _metadata.Remove(cacheKey);
             _dirtyIndices.Remove(cacheKey);
@@ -278,8 +296,17 @@ public class IndexManager : IDisposable
 
             if (deleteFile && _cachePaths.TryGetValue(cacheKey, out var path))
             {
-                try { File.Delete(path); }
-                catch { /* Ignore deletion errors */ }
+                string? indexType = metadata?.IndexType;
+                if (!string.IsNullOrWhiteSpace(indexType)
+                    && _persistenceHandlers.TryGetValue(indexType.ToUpperInvariant(), out var persistence))
+                {
+                    _ = persistence.TryDeleteFile(path);
+                }
+                else
+                {
+                    try { File.Delete(path); }
+                    catch { /* Ignore deletion errors */ }
+                }
             }
 
             _cachePaths.Remove(cacheKey);
@@ -345,22 +372,10 @@ public class IndexManager : IDisposable
         string tableDirectory = Path.Combine(_indexRootDirectory, databaseName, tableName);
         if (Directory.Exists(tableDirectory))
         {
-            foreach (string extension in _persistenceHandlers.Values.Select(handler => handler.FileExtension).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var persistence in _persistenceHandlers.Values.Distinct())
             {
-                string filePath = Path.Combine(tableDirectory, $"{indexName}{extension}");
-                if (!File.Exists(filePath))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    File.Delete(filePath);
-                }
-                catch
-                {
-                    // Keep legacy compatibility behavior: best-effort cleanup.
-                }
+                string filePath = Path.Combine(tableDirectory, $"{indexName}{persistence.FileExtension}");
+                _ = persistence.TryDeleteFile(filePath);
             }
         }
 
@@ -387,13 +402,26 @@ public class IndexManager : IDisposable
         string databaseDirectory = Path.Combine(_indexRootDirectory, databaseName);
         if (Directory.Exists(databaseDirectory))
         {
-            try
+            bool deleted = false;
+            foreach (var persistence in _persistenceHandlers.Values.Distinct())
             {
-                Directory.Delete(databaseDirectory, recursive: true);
+                if (persistence.TryDeleteDirectory(databaseDirectory))
+                {
+                    deleted = true;
+                    break;
+                }
             }
-            catch
+
+            if (!deleted)
             {
-                // Keep cache cleanup even if directory deletion fails.
+                try
+                {
+                    Directory.Delete(databaseDirectory, recursive: true);
+                }
+                catch
+                {
+                    // Keep cache cleanup even if directory deletion fails.
+                }
             }
         }
 
@@ -463,7 +491,7 @@ public class IndexManager : IDisposable
             throw new NotSupportedException($"Unknown index type: {type}");
 
         var dir = Path.Combine(_indexRootDirectory, metadata.DatabaseName, metadata.TableName);
-        Directory.CreateDirectory(dir);
+        persistence.EnsureDirectory(dir);
 
         var filename = $"{metadata.IndexName}{persistence.FileExtension}";
         return Path.Combine(dir, filename);
@@ -505,29 +533,35 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Compatibility API: creates or replaces a vector index.
     /// </summary>
-    public void CreateVectorIndex(IEnumerable<(long RowId, float[] Vector)> vectors, string indexName, string tableName, string databaseName, string metric = "cosine")
+    public void CreateVectorIndex(
+        IEnumerable<(long RowId, float[] Vector)> vectors,
+        string indexName,
+        string tableName,
+        string databaseName,
+        string metric = "cosine",
+        string indexType = "HNSW")
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        var metadata = new IndexMetadata
-        {
-            IndexName = indexName,
-            DatabaseName = databaseName,
-            TableName = tableName,
-            ColumnName = string.Empty,
-            IndexType = "HNSW",
-            PersistenceFormat = "json",
-            Parameters = new Dictionary<string, object> { ["metric"] = metric }
-        };
+        var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric);
 
-        var hnsw = (HNSWIndex)CreateIndex("HNSW", metadata, metadata.Parameters);
-        hnsw.Metric = metric.Equals("l2", StringComparison.OrdinalIgnoreCase) || metric.Equals("euclidean", StringComparison.OrdinalIgnoreCase)
-            ? "euclidean"
-            : "cosine";
-        hnsw.Clear();
+        if (!SupportsVectorIndexType(metadata.IndexType))
+        {
+            throw new NotSupportedException($"Index type '{metadata.IndexType}' is not registered as a vector index type.");
+        }
+
+        var vectorIndex = (IVectorIndex)CreateIndex(metadata.IndexType, metadata, metadata.Parameters);
+        if (vectorIndex is HNSWIndex hnsw)
+        {
+            hnsw.Metric = metric.Equals("l2", StringComparison.OrdinalIgnoreCase) || metric.Equals("euclidean", StringComparison.OrdinalIgnoreCase)
+                ? "euclidean"
+                : "cosine";
+        }
+
+        vectorIndex.Clear();
 
         foreach (var (rowId, vector) in vectors)
         {
-            hnsw.Insert(rowId, [.. vector]);
+            vectorIndex.Insert(rowId, [.. vector]);
         }
 
         _cachePaths[cacheKey] = BuildIndexPath(metadata);
@@ -538,11 +572,11 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Inserts or updates a single vector in an existing vector index.
     /// </summary>
-    public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName)
+    public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
-        hnsw.Insert(rowId, [.. vector]);
+        var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
+        vectorIndex.Insert(rowId, [.. vector]);
         MarkDirty(cacheKey);
         FlushInternal(cacheKey);
     }
@@ -550,11 +584,11 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Deletes vectors by row IDs.
     /// </summary>
-    public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
-        hnsw.Delete(toBeDeletedIds);
+        var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
+        vectorIndex.Delete(toBeDeletedIds);
         MarkDirty(cacheKey);
         FlushInternal(cacheKey);
     }
@@ -562,15 +596,15 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Performs nearest-neighbor vector search.
     /// </summary>
-    public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName)
+    public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         if (topK <= 0)
         {
             return [];
         }
 
-        var hnsw = GetOrLoadVectorIndex(indexName, tableName, databaseName);
-        return hnsw.SearchTopK(queryVector, topK);
+        var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
+        return vectorIndex.SearchTopK(queryVector, topK);
     }
 
     /// <summary>
@@ -655,31 +689,48 @@ public class IndexManager : IDisposable
         };
     }
 
-    private HNSWIndex GetOrLoadVectorIndex(string indexName, string tableName, string databaseName)
+    private IVectorIndex GetOrLoadVectorIndex(string indexName, string tableName, string databaseName, string indexType)
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_cache.TryGetValue(cacheKey, out var cached) && cached is HNSWIndex cachedIndex)
+        if (_cache.TryGetValue(cacheKey, out var cached) && cached is IVectorIndex cachedIndex)
         {
             return cachedIndex;
         }
 
-        var metadata = new IndexMetadata
+        if (!SupportsVectorIndexType(indexType))
+        {
+            throw new NotSupportedException($"Index type '{indexType}' is not registered as a vector index type.");
+        }
+
+        var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric: null);
+
+        var loaded = TryLoadIndex(metadata);
+        if (loaded is IVectorIndex vectorIndex)
+        {
+            return vectorIndex;
+        }
+
+        throw new Exception($"Vector index {indexName} on table {tableName} does not exist or is incompatible with type '{indexType}'.");
+    }
+
+    private static IndexMetadata CreateVectorMetadata(string indexName, string tableName, string databaseName, string indexType, string? metric)
+    {
+        Dictionary<string, object> parameters = [];
+        if (!string.IsNullOrWhiteSpace(metric))
+        {
+            parameters["metric"] = metric;
+        }
+
+        return new IndexMetadata
         {
             IndexName = indexName,
             DatabaseName = databaseName,
             TableName = tableName,
             ColumnName = string.Empty,
-            IndexType = "HNSW",
+            IndexType = indexType.ToUpperInvariant(),
             PersistenceFormat = "json",
+            Parameters = parameters,
         };
-
-        var loaded = TryLoadIndex(metadata);
-        if (loaded is HNSWIndex hnsw)
-        {
-            return hnsw;
-        }
-
-        throw new Exception($"Vector index {indexName} on table {tableName} does not exist!");
     }
 }
 

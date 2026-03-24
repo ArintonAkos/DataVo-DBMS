@@ -15,7 +15,7 @@ namespace DataVo.Core.Parser.DDL;
 /// <para>
 /// Registers a new index in the system catalog and populates it with data from
 /// all existing rows in the target table. The index is backed by a B-Tree structure
-/// managed by <see cref="IndexManager"/>.
+/// managed by <see cref="DataVo.Core.Indexing.IndexManager"/>.
 /// </para>
 /// <para>
 /// For composite indexes (multiple columns), the key is formed by concatenating
@@ -45,7 +45,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     ///   <item><description>Registers the index definition in the system catalog.</description></item>
     ///   <item><description>Reads all existing rows from the target table via the storage engine.</description></item>
     ///   <item><description>Builds the index key-to-rowID mapping from the existing data.</description></item>
-    ///   <item><description>Creates the B-Tree index file via <see cref="IndexManager"/>.</description></item>
+    ///   <item><description>Creates the B-Tree index file via <see cref="DataVo.Core.Indexing.IndexManager"/>.</description></item>
     /// </list>
     /// </summary>
     /// <param name="session">The session identifier used to resolve the active database from the cache.</param>
@@ -61,11 +61,11 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
             var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
-            if (_model.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+            if (Indexes.SupportsVectorIndexType(_model.IndexKind))
             {
                 if (_model.Attributes.Count != 1)
                 {
-                    throw new Exception("HNSW index currently supports exactly one VECTOR column.");
+                    throw new Exception($"Vector index type '{_model.IndexKind}' currently supports exactly one VECTOR column.");
                 }
 
                 string vectorColumnName = _model.Attributes[0];
@@ -90,7 +90,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                     }
                 }
 
-                Indexes.CreateVectorIndex(vectors, _model.IndexName, _model.TableName, databaseName);
+                Indexes.CreateVectorIndex(vectors, _model.IndexName, _model.TableName, databaseName, indexType: _model.IndexKind);
             }
             else
             {

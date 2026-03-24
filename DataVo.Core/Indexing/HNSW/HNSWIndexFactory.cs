@@ -3,10 +3,16 @@ namespace DataVo.Core.Indexing.HNSW;
 /// <summary>
 /// Factory for creating HNSW (vector) index instances.
 /// </summary>
-public class HNSWIndexFactory : IIndexFactory
+public class HNSWIndexFactory : IVectorIndexFactory
 {
+    /// <summary>
+    /// Gets the index type identifier handled by this factory.
+    /// </summary>
     public string IndexType => "HNSW";
 
+    /// <summary>
+    /// Creates a new HNSW index instance.
+    /// </summary>
     public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
     {
         var index = new HNSWIndex();
@@ -24,6 +30,9 @@ public class HNSWIndexFactory : IIndexFactory
         return index;
     }
 
+    /// <summary>
+    /// Loads an existing HNSW index instance via the configured persistence handler.
+    /// </summary>
     public object LoadIndex(string filePath, IIndexPersistence persistence)
     {
         // Delegate to persistence handler

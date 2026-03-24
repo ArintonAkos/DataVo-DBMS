@@ -350,13 +350,21 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
         foreach (var index in indexFiles)
         {
-            if (index.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+            string indexName = index.IndexFileName ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(indexName))
             {
-                Indexes.DeleteFromVectorIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+                continue;
+            }
+
+            string indexKind = index.IndexKind ?? string.Empty;
+
+            if (Indexes.SupportsVectorIndexType(indexKind))
+            {
+                Indexes.DeleteFromVectorIndex(oldRowIds, indexName, _model.TableName, databaseName, indexKind);
             }
             else
             {
-                Indexes.DeleteFromIndex(oldRowIds, index.IndexFileName, _model.TableName, databaseName);
+                Indexes.DeleteFromIndex(oldRowIds, indexName, _model.TableName, databaseName);
             }
         }
 
@@ -370,25 +378,33 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             {
                 if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
 
-                if (index.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase))
+                string indexName = index.IndexFileName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(indexName))
+                {
+                    continue;
+                }
+
+                string indexKind = index.IndexKind ?? string.Empty;
+
+                if (Indexes.SupportsVectorIndexType(indexKind))
                 {
                     if (index.AttributeNames.Count != 1)
                     {
-                        throw new Exception($"HNSW index '{index.IndexFileName}' must reference exactly one VECTOR column.");
+                        throw new Exception($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
                     }
 
                     string vectorColumn = index.AttributeNames[0];
                     if (!VectorParser.TryCoerceToVector(newRow[vectorColumn], out float[] vector))
                     {
-                        throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{index.IndexFileName}'.");
+                        throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
                     }
 
-                    Indexes.InsertIntoVectorIndex(vector, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+                    Indexes.InsertIntoVectorIndex(vector, assignedRowId, indexName, _model.TableName, databaseName, indexKind);
                     continue;
                 }
 
                 string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                Indexes.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, _model.TableName, databaseName);
+                Indexes.InsertIntoIndex(indexValue, assignedRowId, indexName, _model.TableName, databaseName);
             }
         }
     }
