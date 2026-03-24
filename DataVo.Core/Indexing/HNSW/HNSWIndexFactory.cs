@@ -27,6 +27,15 @@ public class HNSWIndexFactory : IVectorIndexFactory
             // Could validate or store dimension when inserting vectors
         }
 
+        if (TryReadInt(@params, "m", out int m) && m > 0)
+            index.M = m;
+
+        if (TryReadInt(@params, "efConstruction", out int efConstruction) && efConstruction > 0)
+            index.EfConstruction = efConstruction;
+
+        if (TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
+            index.EfSearch = efSearch;
+
         return index;
     }
 
@@ -47,5 +56,29 @@ public class HNSWIndexFactory : IVectorIndexFactory
             "l2" or "euclidean" => "euclidean",
             _ => "cosine" // Default
         };
+    }
+
+    private static bool TryReadInt(Dictionary<string, object> parameters, string key, out int value)
+    {
+        value = 0;
+
+        if (!parameters.TryGetValue(key, out var raw) || raw is null)
+            return false;
+
+        return raw switch
+        {
+            int i => Assign(i, out value),
+            long l when l is >= int.MinValue and <= int.MaxValue => Assign((int)l, out value),
+            double d when d is >= int.MinValue and <= int.MaxValue => Assign((int)d, out value),
+            float f when f is >= int.MinValue and <= int.MaxValue => Assign((int)f, out value),
+            string s => int.TryParse(s, out value),
+            _ => false
+        };
+
+        static bool Assign(int source, out int target)
+        {
+            target = source;
+            return true;
+        }
     }
 }
