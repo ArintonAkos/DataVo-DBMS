@@ -808,6 +808,18 @@ public class VolcanoExternalSpillExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void ExternalSpillConfig_IsPreservedByTestBaseClone()
+    {
+        Assert.True(Config.EnableVolcanoExternalSortSpill);
+        Assert.Equal(2, Config.VolcanoExternalSortThresholdRows);
+        Assert.Equal(2, Config.VolcanoExternalSortRunSizeRows);
+
+        Assert.True(Config.EnableVolcanoExternalAggregateSpill);
+        Assert.Equal(2, Config.VolcanoExternalAggregateThresholdRows);
+        Assert.Equal(2, Config.VolcanoExternalAggregatePartitionCount);
+    }
+
+    [Fact]
     public void Select_NoJoin_OrderBy_ExternalSortSpillEnabled_PreservesResultSemantics()
     {
         Execute("CREATE TABLE Scores (Id INT PRIMARY KEY, Score INT)");

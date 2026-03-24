@@ -359,7 +359,7 @@ public sealed class SortOperator : IQueryOperator
             keys = new object?[_sortKeys.Count];
             for (int i = 0; i < _sortKeys.Count; i++)
             {
-                keys[i] = _sortKeys[i].KeySelector(row);
+                keys[i] = ResolveSortKeyValue(_sortKeys[i], row);
             }
         }
 
