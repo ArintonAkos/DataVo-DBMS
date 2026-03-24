@@ -36,6 +36,9 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
             index.EfSearch = efSearch;
 
+        if (TryReadBool(@params, "enableDiversityHeuristic", out bool enableDiversityHeuristic))
+            index.EnableDiversityHeuristic = enableDiversityHeuristic;
+
         return index;
     }
 
@@ -76,6 +79,27 @@ public class HNSWIndexFactory : IVectorIndexFactory
         };
 
         static bool Assign(int source, out int target)
+        {
+            target = source;
+            return true;
+        }
+    }
+
+    private static bool TryReadBool(Dictionary<string, object> parameters, string key, out bool value)
+    {
+        value = false;
+
+        if (!parameters.TryGetValue(key, out var raw) || raw is null)
+            return false;
+
+        return raw switch
+        {
+            bool b => Assign(b, out value),
+            string s => bool.TryParse(s, out value),
+            _ => false
+        };
+
+        static bool Assign(bool source, out bool target)
         {
             target = source;
             return true;

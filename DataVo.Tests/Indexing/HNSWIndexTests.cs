@@ -37,6 +37,16 @@ public class HNSWIndexTests : IDisposable
         {
             Assert.True(neighbors.Count <= index.M);
         });
+
+        Assert.True(index.Layers.TryGetValue(0, out var levelZero));
+        Assert.NotNull(levelZero);
+        Assert.All(levelZero!, pair =>
+        {
+            if (index.Count > 1)
+            {
+                Assert.NotEmpty(pair.Value);
+            }
+        });
     }
 
     [Fact]
@@ -56,6 +66,9 @@ public class HNSWIndexTests : IDisposable
 
         Assert.Equal(2, nearest.Count);
         Assert.Equal(10, nearest[0]);
+
+        List<long> mismatch = index.SearchTopK([1f, 0f], 2);
+        Assert.Empty(mismatch);
     }
 
     [Fact]
@@ -66,7 +79,8 @@ public class HNSWIndexTests : IDisposable
             Metric = "euclidean",
             M = 10,
             EfConstruction = 40,
-            EfSearch = 30
+            EfSearch = 30,
+            EnableDiversityHeuristic = false
         };
 
         index.Insert(1, [1f, 0f, 0f]);
@@ -84,6 +98,7 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal(10, loaded.M);
         Assert.Equal(40, loaded.EfConstruction);
         Assert.Equal(30, loaded.EfSearch);
+        Assert.False(loaded.EnableDiversityHeuristic);
         Assert.Equal(index.Count, loaded.Count);
         Assert.NotNull(loaded.EntryPointId);
         Assert.NotEmpty(loaded.NodeLevels);

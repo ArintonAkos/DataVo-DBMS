@@ -14,6 +14,7 @@ public class HNSWIndexPersistence : IIndexPersistence
         public int M { get; set; } = 16;
         public int EfConstruction { get; set; } = 64;
         public int EfSearch { get; set; } = 64;
+        public bool EnableDiversityHeuristic { get; set; } = true;
         public long? EntryPointId { get; set; }
         public int MaxLevel { get; set; } = -1;
         public Dictionary<long, int> NodeLevels { get; set; } = [];
@@ -45,6 +46,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             M = hnsw.M,
             EfConstruction = hnsw.EfConstruction,
             EfSearch = hnsw.EfSearch,
+            EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
             EntryPointId = hnsw.EntryPointId,
             MaxLevel = hnsw.MaxLevel,
             NodeLevels = hnsw.NodeLevels,
@@ -52,11 +54,11 @@ public class HNSWIndexPersistence : IIndexPersistence
             Entries = hnsw.Entries
         };
 
-        string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions 
-        { 
-            WriteIndented = true 
+        string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            WriteIndented = true
         });
-        
+
         File.WriteAllText(filePath, json);
     }
 
@@ -84,6 +86,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             M = snapshot.M > 0 ? snapshot.M : 16,
             EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
             EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
+            EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
             EntryPointId = snapshot.EntryPointId,
             MaxLevel = snapshot.MaxLevel,
             Entries = snapshot.Entries ?? [],
