@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+const strictBrowserParityGate =
+  process.env.DATAVO_STRICT_BROWSER_PARITY === "1";
+
 type QueryResult = {
   Messages: string[];
   Data: Record<string, unknown>[];
@@ -115,5 +118,14 @@ test.describe("DataVo WASM browser runtime", () => {
     );
     expect(selectMessages.length).toBeGreaterThanOrEqual(0);
     expect(typeof selectResult.ExecutionTime).toBe("string");
+
+    if (strictBrowserParityGate) {
+      const names = selectResult.Data
+        .map((row) => row.Name)
+        .filter((value): value is string => typeof value === "string");
+
+      expect(selectResult.Data.length).toBeGreaterThanOrEqual(2);
+      expect(names).toEqual(expect.arrayContaining(["Alice", "Bob"]));
+    }
   });
 });
