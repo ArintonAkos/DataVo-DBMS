@@ -127,7 +127,7 @@ public static class IndexKeyEncoder
 
     /// <summary>
     /// Encodes a single logical value into the destination buffer starting at the specified offset.
-    /// Integer values are encoded numerically; all other values are encoded as UTF-8.
+    /// Numeric values are encoded as signed 64-bit values; all other values are encoded as UTF-8.
     /// </summary>
     /// <param name="value">The logical value to encode.</param>
     /// <param name="dest">The destination buffer.</param>
@@ -137,19 +137,13 @@ public static class IndexKeyEncoder
     {
         if (offset >= KeySize) return 0;
 
-        if (long.TryParse(value, out long longVal) && (longVal > int.MaxValue || longVal < int.MinValue))
+        // Encode all parseable integer-like values as Int64 so mixed int/long ranges
+        // preserve one consistent byte-wise ordering.
+        if (long.TryParse(value, out long longVal))
         {
             if (offset + 8 > KeySize) return 0;
             EncodeLong(longVal, dest, offset);
             return 8;
-        }
-
-        // Try integer encoding first (preserves numeric sort order)
-        if (int.TryParse(value, out int intVal))
-        {
-            if (offset + 4 > KeySize) return 0;
-            EncodeInt(intVal, dest, offset);
-            return 4;
         }
 
         // Fall back to UTF-8 string encoding (preserves lexicographic order)
@@ -160,26 +154,6 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
-    /// Encodes a 32-bit integer using sign-flip plus big-endian byte order so byte comparison preserves numeric ordering.
-    /// </summary>
-    /// <param name="value">The integer value to encode.</param>
-    /// <param name="dest">The destination buffer.</param>
-    /// <param name="offset">The offset at which to write the 4-byte encoded value.</param>
-    private static void EncodeInt(int value, byte[] dest, int offset)
-    {
-        // XOR with MinValue flips the sign bit:
-        // int.MinValue (-2B) → 0x00000000 (sorts first)
-        // -1              → 0x7FFFFFFF
-        // 0               → 0x80000000
-        // int.MaxValue (2B) → 0xFFFFFFFF (sorts last)
-        uint flipped = unchecked((uint)(value ^ int.MinValue));
-
-        dest[offset] = (byte)(flipped >> 24);
-        dest[offset + 1] = (byte)(flipped >> 16);
-        dest[offset + 2] = (byte)(flipped >> 8);
-        dest[offset + 3] = (byte)flipped;
-    }
-
     private static void EncodeLong(long value, byte[] dest, int offset)
     {
         ulong flipped = unchecked((ulong)(value ^ long.MinValue));

@@ -30,4 +30,22 @@ public class IndexKeyEncoderTests
 
         Assert.True(IndexKeyEncoder.CompareKeys(left, right) < 0);
     }
+
+    [Fact]
+    public void CompareKeys_IntMaxAndLongBoundary_PreserveNumericOrdering()
+    {
+        byte[] left = IndexKeyEncoder.Encode("2147483647");
+        byte[] right = IndexKeyEncoder.Encode("2147483648");
+
+        Assert.True(IndexKeyEncoder.CompareKeys(left, right) < 0);
+    }
+
+    [Fact]
+    public void CompareKeys_LongBoundaryAndIntMin_PreserveNumericOrdering()
+    {
+        byte[] left = IndexKeyEncoder.Encode("-2147483649");
+        byte[] right = IndexKeyEncoder.Encode("-2147483648");
+
+        Assert.True(IndexKeyEncoder.CompareKeys(left, right) < 0);
+    }
 }
