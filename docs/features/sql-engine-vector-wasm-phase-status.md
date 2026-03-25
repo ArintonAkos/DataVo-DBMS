@@ -11,7 +11,7 @@ Percentages are practical delivery estimates (implementation + test confidence),
 | 1.2 | Set operations | 100 | 0 | `UNION` / `UNION ALL` implemented with coverage. |
 | 1.3 | Subqueries | 100 | 0 | Uncorrelated + scalar/EXISTS supported; correlated paths explicitly rejected. |
 | 1.4 | Schema evolution | 100 | 0 | `ALTER TABLE ADD/DROP/MODIFY` supported with intentional safety guardrails. |
-| 1.5 | Publishability hardening | 65 | 35 | Pack flow works for `DataVo.Core` + `DataVo.Data`; remaining API polish + external consumer validation. |
+| 1.5 | Publishability hardening | 78 | 22 | Pack flow works for `DataVo.Core` + `DataVo.Data`; local consumer smoke-check script now validates install/build from artifacts. Remaining API polish + sample app validation. |
 | 2 | Relational hardening | 45 | 55 | Major isolation improvements landed; remaining concurrency and index-ordering hardening passes needed. |
 | 3.1 | Vector type + storage | 95 | 5 | Core vector storage/query path in place. |
 | 3.2 | SIMD distance kernels | 85 | 15 | SIMD path is present; remaining validation/benchmark maturity work. |
