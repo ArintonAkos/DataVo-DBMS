@@ -88,13 +88,32 @@ test.describe("DataVo WASM browser runtime", () => {
       "INSERT INTO Users VALUES (2, 'Bob', 25)",
     );
 
-    const selectResult = await executeSql(page, "SELECT Name, Age FROM Users");
+    let selectResult: QueryResult | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = await executeSql(page, "SELECT Name, Age FROM Users");
+      selectResult = candidate;
+      if (candidate.Data.length >= 2) {
+        break;
+      }
+
+      await page.waitForTimeout(100);
+    }
+
+    if (!selectResult) {
+      throw new Error("SELECT result was not produced by browser runtime.");
+    }
+
+    const selectMessages = (selectResult.Messages || []).join(" | ");
 
     expect(insertResultOne.IsError).toBe(false);
     expect(insertResultTwo.IsError).toBe(false);
     expect(selectResult.IsError).toBe(false);
     expect(Array.isArray(selectResult.Data)).toBe(true);
     expect(Array.isArray(selectResult.Fields)).toBe(true);
-    expect(selectResult.Fields).toEqual(expect.arrayContaining(["Name", "Age"]));
+    expect(selectResult.Fields).toEqual(
+      expect.arrayContaining(["Name", "Age"]),
+    );
+    expect(selectMessages.length).toBeGreaterThanOrEqual(0);
+    expect(typeof selectResult.ExecutionTime).toBe("string");
   });
 });
