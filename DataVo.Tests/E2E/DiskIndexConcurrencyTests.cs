@@ -105,6 +105,86 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         }
     }
 
+    [Fact]
+    public async Task SeededFuzzLite_ConcurrentIndexMutations_PreserveDeterministicOutcome()
+    {
+        string table = $"IndexedUsersFuzz_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+        var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_name_fuzz ON {table} (Name);");
+        Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+        const int seedRows = 200;
+        for (int i = 1; i <= seedRows; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, Name) VALUES ({i}, 'Seed{i}');");
+        }
+
+        // Fuzz-lite: deterministic random mix keeps the test reproducible.
+        var rng = new Random(20260325);
+        var deletePool = Enumerable.Range(1, seedRows).OrderBy(_ => rng.Next()).Take(80).ToList();
+        var deletedIds = new HashSet<int>();
+        var insertedIds = new HashSet<int>();
+        var operations = new List<(bool IsDelete, int Id)>(160);
+        int nextInsertId = 10_000;
+
+        while (operations.Count < 160)
+        {
+            bool canDelete = deletePool.Count > 0;
+            bool doDelete = canDelete && rng.NextDouble() < 0.5d;
+
+            if (doDelete)
+            {
+                int pick = deletePool[^1];
+                deletePool.RemoveAt(deletePool.Count - 1);
+                deletedIds.Add(pick);
+                operations.Add((true, pick));
+                continue;
+            }
+
+            int insertId = nextInsertId++;
+            insertedIds.Add(insertId);
+            operations.Add((false, insertId));
+        }
+
+        Guid[] sessions = Enumerable.Range(0, operations.Count)
+            .Select(_ =>
+            {
+                Guid session = Guid.NewGuid();
+                ExecuteForSession(session, $"USE {TestDb};");
+                return session;
+            })
+            .ToArray();
+
+        await Task.WhenAll(operations.Select((op, i) => Task.Run(() =>
+        {
+            string sql = op.IsDelete
+                ? $"DELETE FROM {table} WHERE Id = {op.Id};"
+                : $"INSERT INTO {table} (Id, Name) VALUES ({op.Id}, 'Fuzz{op.Id}');";
+
+            ExecuteForSession(sessions[i], sql);
+        })));
+
+        int expectedCount = seedRows - deletedIds.Count + insertedIds.Count;
+
+        var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(expectedCount, result.Data.Count);
+
+        foreach (int deletedId in deletedIds)
+        {
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_fuzz", table, TestDb),
+                $"Expected deleted key Seed{deletedId} to be absent in idx_name_fuzz for {table}.");
+        }
+
+        foreach (int insertedId in insertedIds)
+        {
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Fuzz{insertedId}", "idx_name_fuzz", table, TestDb),
+                $"Expected inserted key Fuzz{insertedId} to be present in idx_name_fuzz for {table}.");
+        }
+    }
+
     private void ExecuteForSession(Guid session, string sql)
     {
         var engine = new QueryEngine(sql, session, Engine);
