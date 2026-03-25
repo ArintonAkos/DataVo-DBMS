@@ -488,6 +488,149 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             seed: seed);
     }
 
+    [Theory]
+    [InlineData(20260332, 300, 75, 75, 75, 80_000)]
+    [InlineData(20260333, 350, 85, 80, 85, 90_000)]
+    [InlineData(20260334, 400, 100, 95, 100, 100_000)]
+    public async Task SeededFuzzLite_WithLargeVolumeOperations_MultiSeedMatrixPreservesInvariants(
+        int seed,
+        int seedRows,
+        int deleteCount,
+        int updateCount,
+        int insertStartId,
+        int insertStartIdOffset)
+    {
+        await RunLargeVolumeFuzzScenario(
+            tablePrefix: "IndexedUsersLargeVolume",
+            seedRows: seedRows,
+            deleteCount: deleteCount,
+            updateCount: updateCount,
+            insertStartId: insertStartId,
+            insertStartIdOffset: insertStartIdOffset,
+            seed: seed);
+    }
+
+    private async Task RunLargeVolumeFuzzScenario(
+        string tablePrefix,
+        int seedRows,
+        int deleteCount,
+        int updateCount,
+        int insertStartId,
+        int insertStartIdOffset,
+        int seed)
+    {
+        if (seedRows <= 0 || deleteCount < 0 || updateCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(seedRows), "Scenario counts must be non-negative and seedRows must be > 0.");
+        }
+
+        if (deleteCount > seedRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deleteCount), "deleteCount cannot exceed seedRows.");
+        }
+
+        if (updateCount > (seedRows - deleteCount))
+        {
+            throw new ArgumentOutOfRangeException(nameof(updateCount), "updateCount cannot exceed surviving rows after delete.");
+        }
+
+        string table = $"{tablePrefix}_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+        var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_name_large_vol ON {table} (Name);");
+        Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+        for (int i = 1; i <= seedRows; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, Name) VALUES ({i}, 'Seed{i}');");
+        }
+
+        var rng = new Random(seed);
+        var deletePool = Enumerable.Range(1, seedRows).OrderBy(_ => rng.Next()).Take(deleteCount).ToList();
+        var updatePool = Enumerable.Range(1, seedRows).Where(id => !deletePool.Contains(id)).OrderBy(_ => rng.Next()).Take(updateCount).ToList();
+
+        var deletedIds = new HashSet<int>();
+        var insertedIds = new HashSet<int>();
+        var updatedIds = new HashSet<int>();
+
+        var operations = new List<(string Kind, int Id)>(deleteCount + updateCount + insertStartIdOffset);
+
+        foreach (int id in deletePool)
+        {
+            deletedIds.Add(id);
+            operations.Add(("delete", id));
+        }
+
+        foreach (int id in updatePool)
+        {
+            updatedIds.Add(id);
+            operations.Add(("update", id));
+        }
+
+        int nextInsertId = insertStartId;
+        for (int i = 0; i < insertStartIdOffset; i++)
+        {
+            int id = nextInsertId++;
+            insertedIds.Add(id);
+            operations.Add(("insert", id));
+        }
+
+        operations = [.. operations.OrderBy(_ => rng.Next())];
+
+        Guid[] sessions = Enumerable.Range(0, operations.Count)
+            .Select(_ =>
+            {
+                Guid session = Guid.NewGuid();
+                ExecuteForSession(session, $"USE {TestDb};");
+                return session;
+            })
+            .ToArray();
+
+        await Task.WhenAll(operations.Select((op, i) => Task.Run(() =>
+        {
+            string sql = op.Kind switch
+            {
+                "delete" => $"DELETE FROM {table} WHERE Id = {op.Id};",
+                "insert" => $"INSERT INTO {table} (Id, Name) VALUES ({op.Id}, 'Fuzz{op.Id}');",
+                "update" => $"UPDATE {table} SET Name = 'Upd{op.Id}' WHERE Id = {op.Id};",
+                _ => throw new InvalidOperationException($"Unknown large-vol operation kind: {op.Kind}")
+            };
+
+            ExecuteForSession(sessions[i], sql);
+        })));
+
+        int expectedCount = seedRows - deletedIds.Count + insertedIds.Count;
+        var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(expectedCount, result.Data.Count);
+
+        foreach (int deletedId in deletedIds)
+        {
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected deleted key Seed{deletedId} to be absent in idx_name_large_vol for {table}.");
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Upd{deletedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected updated key Upd{deletedId} to be absent for deleted row in {table}.");
+        }
+
+        foreach (int insertedId in insertedIds)
+        {
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Fuzz{insertedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected inserted key Fuzz{insertedId} to be present in idx_name_large_vol for {table}.");
+        }
+
+        foreach (int updatedId in updatedIds)
+        {
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{updatedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected old key Seed{updatedId} to be absent after update in {table}.");
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Upd{updatedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected updated key Upd{updatedId} to be present in idx_name_large_vol for {table}.");
+        }
+    }
+
     private async Task RunOverlapUpdateDeleteScenario(
         string tablePrefix,
         int seedRows,
