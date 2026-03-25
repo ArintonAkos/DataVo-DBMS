@@ -14,6 +14,32 @@ const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB per sync call buffer
 const STORAGE_FORCE_BACKEND_GLOBAL_KEY = "__datavoForceStorageBackend";
 const STORAGE_BACKEND_SINGLETON_KEY = "__datavoStorageBackendSingleton";
 const STORAGE_BACKEND_DIAGNOSTICS_KEY = "__datavoStorageBackendDiagnostics";
+const STORAGE_OPERATION_COUNTERS_KEY = "__datavoStorageOperationCounters";
+
+if (!globalThis[STORAGE_OPERATION_COUNTERS_KEY]) {
+    globalThis[STORAGE_OPERATION_COUNTERS_KEY] = {
+        insertRow: 0,
+        readRow: 0,
+        readAllRows: 0,
+        deleteRow: 0,
+        dropTable: 0,
+        dropDatabase: 0,
+        readCatalog: 0,
+        writeCatalog: 0,
+        readSelectedDatabase: 0,
+        writeSelectedDatabase: 0,
+        clearAllStorage: 0
+    };
+}
+
+function bumpCounter(name) {
+    const counters = globalThis[STORAGE_OPERATION_COUNTERS_KEY];
+    if (!counters || typeof counters[name] !== "number") {
+        return;
+    }
+
+    counters[name] += 1;
+}
 
 function bytesToBase64(bytes) {
     let binary = "";
@@ -430,46 +456,57 @@ function selectStorageBackend() {
 const StorageBackend = selectStorageBackend();
 
 export function insertRow(databaseName, tableName, rowBytes) {
+    bumpCounter("insertRow");
     return StorageBackend.insertRow(databaseName, tableName, rowBytes);
 }
 
 export function readRow(databaseName, tableName, rowId) {
+    bumpCounter("readRow");
     return StorageBackend.readRow(databaseName, tableName, rowId);
 }
 
 export function readAllRows(databaseName, tableName) {
+    bumpCounter("readAllRows");
     return StorageBackend.readAllRows(databaseName, tableName);
 }
 
 export function deleteRow(databaseName, tableName, rowId) {
+    bumpCounter("deleteRow");
     StorageBackend.deleteRow(databaseName, tableName, rowId);
 }
 
 export function dropTable(databaseName, tableName) {
+    bumpCounter("dropTable");
     StorageBackend.dropTable(databaseName, tableName);
 }
 
 export function dropDatabase(databaseName) {
+    bumpCounter("dropDatabase");
     StorageBackend.dropDatabase(databaseName);
 }
 
 export function readCatalog() {
+    bumpCounter("readCatalog");
     return StorageBackend.readCatalog();
 }
 
 export function writeCatalog(xml) {
+    bumpCounter("writeCatalog");
     StorageBackend.writeCatalog(xml);
 }
 
 export function readSelectedDatabase() {
+    bumpCounter("readSelectedDatabase");
     return StorageBackend.readSelectedDatabase();
 }
 
 export function writeSelectedDatabase(databaseName) {
+    bumpCounter("writeSelectedDatabase");
     StorageBackend.writeSelectedDatabase(databaseName);
 }
 
 export function clearAllStorage() {
+    bumpCounter("clearAllStorage");
     StorageBackend.clearAllStorage();
 }
 
@@ -488,6 +525,7 @@ export function getStorageCapabilities() {
         };
 
     capabilities.selectionDiagnostics = globalThis[STORAGE_BACKEND_DIAGNOSTICS_KEY] || null;
+    capabilities.operationCounters = globalThis[STORAGE_OPERATION_COUNTERS_KEY] || null;
 
     return JSON.stringify(capabilities);
 }

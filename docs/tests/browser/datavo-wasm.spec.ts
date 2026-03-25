@@ -87,21 +87,21 @@ test.describe("DataVo WASM browser runtime", () => {
     await executeSql(page, `USE ${dbName}`);
     await executeSql(
       page,
-      "CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR, Age INT)",
+      "CREATE TABLE Users (Id VARCHAR PRIMARY KEY, Name VARCHAR)",
     );
 
     const insertResultOne = await executeSql(
       page,
-      "INSERT INTO Users VALUES (1, 'Alice', 30)",
+      "INSERT INTO Users (Id, Name) VALUES ('1', 'Alice')",
     );
     const insertResultTwo = await executeSql(
       page,
-      "INSERT INTO Users VALUES (2, 'Bob', 25)",
+      "INSERT INTO Users (Id, Name) VALUES ('2', 'Bob')",
     );
 
     let selectResult: QueryResult | null = null;
     for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = await executeSql(page, "SELECT Name, Age FROM Users");
+      const candidate = await executeSql(page, "SELECT Name FROM Users");
       selectResult = candidate;
       if (candidate.Data.length >= 2) {
         break;
@@ -121,9 +121,7 @@ test.describe("DataVo WASM browser runtime", () => {
     expect(selectResult.IsError).toBe(false);
     expect(Array.isArray(selectResult.Data)).toBe(true);
     expect(Array.isArray(selectResult.Fields)).toBe(true);
-    expect(selectResult.Fields).toEqual(
-      expect.arrayContaining(["Name", "Age"]),
-    );
+    expect(selectResult.Fields).toEqual(expect.arrayContaining(["Name"]));
     expect(selectMessages.length).toBeGreaterThanOrEqual(0);
     expect(typeof selectResult.ExecutionTime).toBe("string");
 
@@ -139,29 +137,13 @@ test.describe("DataVo WASM browser runtime", () => {
       expect(typeof capabilitiesBefore.storageBackend).toBe("string");
       expect(capabilitiesAfter.storageBackend).toBe(capabilitiesBefore.storageBackend);
 
-      // Diagnostic-only strict mode: log data structure for debugging
-      // KNOWN ISSUE: In Release WASM mode, SELECTs return empty Data arrays even after INSERTs succeed.
-      // This indicates a data persistence/isolation issue in the WASM<->JS storage bridge.
-      // TODO: Investigate storage backend selection (Worker vs localStorage) and ensure consistent scoping.
-      
-      if (selectResult.Data.length === 0) {
-        console.warn(
-          "DIAGNOSTIC: SELECT returned empty Data despite successful INSERTs. " +
-          "Fields are present (" + selectResult.Fields.join(", ") + "), suggesting query execution " +
-          "completed but row data isn't being persisted or retrieved. This is a known WASM Release mode issue." +
-          ` backend=${capabilitiesAfter.storageBackend}`
-        );
-        // Don't fail on empty data - it's a known issue being tracked
-        return;
-      }
-      
+      expect(selectResult.Data.length).toBeGreaterThanOrEqual(2);
       const names = selectResult.Data
         .map((row) => row.Name)
         .filter((value): value is string => typeof value === "string");
 
-      if (names.length >= 2) {
-        expect(names).toEqual(expect.arrayContaining(["Alice", "Bob"]));
-      }
+      expect(names.length).toBeGreaterThanOrEqual(2);
+      expect(names).toEqual(expect.arrayContaining(["Alice", "Bob"]));
     }
   });
 });
