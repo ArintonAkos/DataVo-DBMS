@@ -15,7 +15,6 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Execution.Volcano;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -140,7 +139,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// </exception>
     public override void PerformAction(Guid session)
     {
-        var queryStopwatch = Stopwatch.StartNew();
+        long queryStartTick = Environment.TickCount64;
         ResetQueryHybridTelemetry();
 
         try
@@ -194,7 +193,8 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 Logger.Info($"Rows selected: {Data.Count}");
                 Messages.Add($"Rows selected: {Data.Count}");
 
-                ReportHybridRoutingTelemetry(queryStopwatch.ElapsedMilliseconds, Data.Count);
+                long queryElapsedMs = Math.Max(0, Environment.TickCount64 - queryStartTick);
+                ReportHybridRoutingTelemetry(queryElapsedMs, Data.Count);
             }
             finally
             {
@@ -657,7 +657,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             double left = EstimatePredicateSelectivity(binary.Left);
             double right = EstimatePredicateSelectivity(binary.Right);
-            return Math.Clamp(left * right, 0.01d, 1d);
+            return ClampDouble(left * right, 0.01d, 1d);
         }
 
         if (binary.Operator.Equals(Operators.OR, StringComparison.OrdinalIgnoreCase))
@@ -665,7 +665,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             double left = EstimatePredicateSelectivity(binary.Left);
             double right = EstimatePredicateSelectivity(binary.Right);
             double combined = left + right - (left * right);
-            return Math.Clamp(combined, 0.01d, 1d);
+            return ClampDouble(combined, 0.01d, 1d);
         }
 
         if (binary.Operator.Equals(Operators.EQUALS, StringComparison.OrdinalIgnoreCase))
@@ -1118,7 +1118,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 ? Engine.Config.VectorPredicateFastPathMaxTopK
                 : totalRows;
 
-            int estimatedMatches = Math.Max(1, (int)Math.Ceiling(totalRows * Math.Clamp(estimatedSelectivity, 0.01d, 1d)));
+            int estimatedMatches = Math.Max(1, (int)Math.Ceiling(totalRows * ClampDouble(estimatedSelectivity, 0.01d, 1d)));
             int adaptiveTopK = Math.Max(64, estimatedMatches * multiplier);
             return Math.Min(totalRows, Math.Min(adaptiveTopK, cap));
         }
@@ -1185,7 +1185,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         int initialTopK,
         ExpressionNode? whereExpression)
     {
-        int topK = Math.Clamp(initialTopK, 1, totalRows);
+        int topK = ClampInt(initialTopK, 1, totalRows);
         int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
         int requiredRows = (_model.LimitTake ?? 0) + (_model.LimitSkip ?? 0);
@@ -1277,7 +1277,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return Math.Min(totalRows, requestedTopK);
         }
 
-        double selectivity = Math.Clamp(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
+        double selectivity = ClampDouble(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
         if (selectivity >= 0.95d)
         {
             return Math.Min(totalRows, requestedTopK);
@@ -1287,7 +1287,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             ? Engine.Config.VectorPredicateFastPathMaxTopK
             : totalRows;
 
-        int capByRatio = (int)Math.Ceiling(totalRows * Math.Clamp(Engine.Config.VectorPredicateFastPathMaxTopKRatio, 0.01d, 1d));
+        int capByRatio = (int)Math.Ceiling(totalRows * ClampDouble(Engine.Config.VectorPredicateFastPathMaxTopKRatio, 0.01d, 1d));
         int effectiveCap = Math.Min(totalRows, Math.Max(requestedTopK, Math.Min(capByConfig, capByRatio)));
 
         int estimatedRequired = Math.Max(requestedTopK, (int)Math.Ceiling(requestedTopK / selectivity));
@@ -1307,7 +1307,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
-        double selectivity = seedPredicate == null ? 1d : Math.Clamp(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
+        double selectivity = seedPredicate == null ? 1d : ClampDouble(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
         Logger.Info($"Planner(hybrid-route): {outcome}; requestedTopK={requestedTopK}; initialTopK={initialTopK}; seedSelectivity={selectivity:F3}");
     }
 
@@ -1379,7 +1379,37 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
 
         double selectivity = lessStyle ? baseSelectivity : (1d - baseSelectivity);
-        return Math.Clamp(selectivity, 0.01d, 0.99d);
+        return ClampDouble(selectivity, 0.01d, 0.99d);
+    }
+
+    private static int ClampInt(int value, int minValue, int maxValue)
+    {
+        if (value < minValue)
+        {
+            return minValue;
+        }
+
+        if (value > maxValue)
+        {
+            return maxValue;
+        }
+
+        return value;
+    }
+
+    private static double ClampDouble(double value, double minValue, double maxValue)
+    {
+        if (value < minValue)
+        {
+            return minValue;
+        }
+
+        if (value > maxValue)
+        {
+            return maxValue;
+        }
+
+        return value;
     }
 
     private bool TryExtractVectorDistancePredicate(
@@ -1613,7 +1643,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
-        int usedBuckets = _queryHybridRoutingCounters.Values.Sum();
+        int usedBuckets = 0;
+        foreach (int count in _queryHybridRoutingCounters.Values)
+        {
+            usedBuckets += count;
+        }
+
         bool usedHybridRoute = usedBuckets > 0;
 
         if (Engine.Config.EnableHybridRoutingPerQueryTelemetry && usedHybridRoute)
@@ -1691,9 +1726,20 @@ internal class Select(SelectStatement ast) : BaseDbAction
             BinaryExpressionNode binary when binary.Operator == Operators.AND || binary.Operator == Operators.OR
                 => 1 + EstimatePredicateComplexity(binary.Left) + EstimatePredicateComplexity(binary.Right),
             BinaryExpressionNode => 1,
-            ScalarFunctionExpressionNode scalar => 2 + scalar.Arguments.Sum(EstimatePredicateComplexity),
+            ScalarFunctionExpressionNode scalar => 2 + EstimateScalarArgumentComplexity(scalar),
             _ => 1
         };
+    }
+
+    private static int EstimateScalarArgumentComplexity(ScalarFunctionExpressionNode scalar)
+    {
+        int complexity = 0;
+        foreach (ExpressionNode argument in scalar.Arguments)
+        {
+            complexity += EstimatePredicateComplexity(argument);
+        }
+
+        return complexity;
     }
 
     private bool ReferencesOnlyFromTable(ExpressionNode expression, string fromTableName)

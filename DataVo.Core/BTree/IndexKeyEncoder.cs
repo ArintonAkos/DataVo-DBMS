@@ -137,6 +137,13 @@ public static class IndexKeyEncoder
     {
         if (offset >= KeySize) return 0;
 
+        if (long.TryParse(value, out long longVal) && (longVal > int.MaxValue || longVal < int.MinValue))
+        {
+            if (offset + 8 > KeySize) return 0;
+            EncodeLong(longVal, dest, offset);
+            return 8;
+        }
+
         // Try integer encoding first (preserves numeric sort order)
         if (int.TryParse(value, out int intVal))
         {
@@ -171,5 +178,19 @@ public static class IndexKeyEncoder
         dest[offset + 1] = (byte)(flipped >> 16);
         dest[offset + 2] = (byte)(flipped >> 8);
         dest[offset + 3] = (byte)flipped;
+    }
+
+    private static void EncodeLong(long value, byte[] dest, int offset)
+    {
+        ulong flipped = unchecked((ulong)(value ^ long.MinValue));
+
+        dest[offset] = (byte)(flipped >> 56);
+        dest[offset + 1] = (byte)(flipped >> 48);
+        dest[offset + 2] = (byte)(flipped >> 40);
+        dest[offset + 3] = (byte)(flipped >> 32);
+        dest[offset + 4] = (byte)(flipped >> 24);
+        dest[offset + 5] = (byte)(flipped >> 16);
+        dest[offset + 6] = (byte)(flipped >> 8);
+        dest[offset + 7] = (byte)flipped;
     }
 }

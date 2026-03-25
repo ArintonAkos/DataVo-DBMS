@@ -5,7 +5,7 @@ namespace DataVo.Core.StorageEngine.Disk;
 public class DiskStorageEngine : IStorageEngine
 {
     private readonly string _storageDirectory;
-    private readonly ConcurrentDictionary<string, object> _fileLocks = new();
+    private static readonly ConcurrentDictionary<string, object> GlobalFileLocks = new();
 
     // 8-byte file header: [4 bytes magic "DaVo"] + [4 bytes version].
     // This ensures the first row's byte offset is >= 8, never 0.
@@ -32,7 +32,7 @@ public class DiskStorageEngine : IStorageEngine
 
     private object GetFileLock(string filePath)
     {
-        return _fileLocks.GetOrAdd(filePath, _ => new object());
+        return GlobalFileLocks.GetOrAdd(filePath, _ => new object());
     }
 
     /// <summary>
@@ -192,15 +192,6 @@ public class DiskStorageEngine : IStorageEngine
     public void DropDatabase(string databaseName)
     {
         string dbPath = Path.Combine(_storageDirectory, databaseName);
-
-        // Remove file locks for this database
-        var locksToRemove = _fileLocks.Keys
-            .Where(k => k.StartsWith(dbPath, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        foreach (var key in locksToRemove)
-        {
-            _fileLocks.TryRemove(key, out _);
-        }
 
         // Delete the entire database directory
         if (Directory.Exists(dbPath))
