@@ -188,37 +188,97 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [Fact]
     public async Task SeededFuzzLite_WithBoundedUpdates_PreserveStableIndexMembership()
     {
-        string table = $"IndexedUsersFuzzUpd_{Guid.NewGuid():N}";
+        await RunBoundedUpdateFuzzScenario(
+            tablePrefix: "IndexedUsersFuzzUpd",
+            seedRows: 180,
+            deleteCount: 40,
+            updateCount: 40,
+            insertStartId: 20_000,
+            seed: 20260326);
+    }
+
+    [Theory]
+    [InlineData(20260327, 180, 36, 36, 30_000)]
+    [InlineData(20260328, 180, 40, 32, 40_000)]
+    [InlineData(20260329, 220, 44, 44, 50_000)]
+    public async Task SeededFuzzLite_WithBoundedUpdates_MultiSeedMatrixPreservesInvariants(
+        int seed,
+        int seedRows,
+        int deleteCount,
+        int updateCount,
+        int insertStartId)
+    {
+        await RunBoundedUpdateFuzzScenario(
+            tablePrefix: "IndexedUsersFuzzUpdMatrix",
+            seedRows: seedRows,
+            deleteCount: deleteCount,
+            updateCount: updateCount,
+            insertStartId: insertStartId,
+            seed: seed);
+    }
+
+    private async Task RunBoundedUpdateFuzzScenario(
+        string tablePrefix,
+        int seedRows,
+        int deleteCount,
+        int updateCount,
+        int insertStartId,
+        int seed)
+    {
+        if (deleteCount < 0 || updateCount < 0 || seedRows <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(seedRows), "Seed rows and operation counts must be non-negative with seedRows > 0.");
+        }
+
+        if (deleteCount > seedRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deleteCount), "deleteCount cannot exceed seedRows.");
+        }
+
+        if (updateCount > (seedRows - deleteCount))
+        {
+            throw new ArgumentOutOfRangeException(nameof(updateCount), "updateCount cannot exceed surviving pre-delete candidate rows.");
+        }
+
+        string table = $"{tablePrefix}_{Guid.NewGuid():N}";
         Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
         var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_name_fuzz_upd ON {table} (Name);");
         Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
 
-        const int seedRows = 180;
         for (int i = 1; i <= seedRows; i++)
         {
             Execute($"INSERT INTO {table} (Id, Name) VALUES ({i}, 'Seed{i}');");
         }
 
-        var rng = new Random(20260326);
-        var deletePool = Enumerable.Range(1, seedRows).OrderBy(_ => rng.Next()).Take(40).ToList();
-        var updatePool = Enumerable.Range(1, seedRows).Where(id => !deletePool.Contains(id)).OrderBy(_ => rng.Next()).Take(40).ToList();
+        var rng = new Random(seed);
+        var deletePool = Enumerable.Range(1, seedRows).OrderBy(_ => rng.Next()).Take(deleteCount).ToList();
+        var updatePool = Enumerable.Range(1, seedRows).Where(id => !deletePool.Contains(id)).OrderBy(_ => rng.Next()).Take(updateCount).ToList();
 
         var deletedIds = new HashSet<int>();
         var insertedIds = new HashSet<int>();
         var updatedIds = new HashSet<int>();
-        var operations = new List<(string Kind, int Id)>(120);
-        int nextInsertId = 20_000;
+        int operationCount = deleteCount + updateCount + Math.Max(deleteCount, updateCount);
+        var operations = new List<(string Kind, int Id)>(operationCount);
+        int nextInsertId = insertStartId;
 
-        for (int i = 0; i < 40; i++)
+        int insertCount = Math.Max(deleteCount, updateCount);
+
+        for (int i = 0; i < deleteCount; i++)
         {
             int deleteId = deletePool[i];
             deletedIds.Add(deleteId);
             operations.Add(("delete", deleteId));
+        }
 
+        for (int i = 0; i < insertCount; i++)
+        {
             int insertId = nextInsertId++;
             insertedIds.Add(insertId);
             operations.Add(("insert", insertId));
+        }
 
+        for (int i = 0; i < updateCount; i++)
+        {
             int updateId = updatePool[i];
             updatedIds.Add(updateId);
             operations.Add(("update", updateId));
@@ -336,13 +396,37 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [Fact]
     public async Task ConcurrentDuplicatePrimaryKeyInserts_RepeatedRounds_AlwaysSingleWinner()
     {
-        const int rounds = 3;
-        const int contenderCount = 12;
-        const int duplicateId = 7_777;
+        await RunDuplicateRaceRounds(
+            tablePrefix: "IndexedUsersDupRound",
+            rounds: 3,
+            contenderCount: 12,
+            duplicateId: 7_777);
+    }
 
+    [Theory]
+    [InlineData(2, 8, 8_001)]
+    [InlineData(4, 10, 8_002)]
+    public async Task ConcurrentDuplicatePrimaryKeyInserts_MultiRoundMatrix_PreservesSingleWinnerInvariant(
+        int rounds,
+        int contenderCount,
+        int duplicateId)
+    {
+        await RunDuplicateRaceRounds(
+            tablePrefix: "IndexedUsersDupMatrix",
+            rounds: rounds,
+            contenderCount: contenderCount,
+            duplicateId: duplicateId);
+    }
+
+    private async Task RunDuplicateRaceRounds(
+        string tablePrefix,
+        int rounds,
+        int contenderCount,
+        int duplicateId)
+    {
         for (int round = 1; round <= rounds; round++)
         {
-            string table = $"IndexedUsersDupRound{round}_{Guid.NewGuid():N}";
+            string table = $"{tablePrefix}{round}_{Guid.NewGuid():N}";
             Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
             var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_name_dup_round ON {table} (Name);");
             Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
