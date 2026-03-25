@@ -860,6 +860,66 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         }
     }
 
+    [Fact]
+    public async Task HighContention_ManyWorkersTargetSameKey_MaintainIndexIntegrity()
+    {
+        string table = $"HighContentionUsers_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Status VARCHAR(50));");
+        var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_status ON {table} (Status);");
+        Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+        const int hotKeyCount = 5;
+        for (int i = 1; i <= hotKeyCount; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, Status) VALUES ({i}, 'Initial{i}');");
+        }
+
+        // 64 workers, each updating the same 5 hot keys multiple times
+        const int workerCount = 64;
+        const int updatesPerWorker = 8;
+        var tasks = new List<Task>(workerCount);
+
+        for (int w = 0; w < workerCount; w++)
+        {
+            int workerId = w;
+            tasks.Add(Task.Run(() =>
+            {
+                Guid session = Guid.NewGuid();
+                ExecuteForSession(session, $"USE {TestDb};");
+
+                for (int u = 0; u < updatesPerWorker; u++)
+                {
+                    int keyId = (u % hotKeyCount) + 1;
+                    string newStatus = $"W{workerId}_U{u}";
+                    ExecuteForSession(session, $"UPDATE {table} SET Status = '{newStatus}' WHERE Id = {keyId};");
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Verify all hot keys still exist
+        var result = ExecuteAndReturn($"SELECT Id, Status FROM {table};");
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(hotKeyCount, result.Data.Count);
+
+        // Verify index is consistent with table
+        for (int i = 1; i <= hotKeyCount; i++)
+        {
+            var statusResult = ExecuteAndReturn($"SELECT Status FROM {table} WHERE Id = {i};");
+            Assert.False(statusResult.IsError, string.Join(" | ", statusResult.Messages));
+            Assert.Single(statusResult.Data);
+
+            string actualStatus = statusResult.Data[0]["Status"]?.ToString() ?? "";
+            Assert.NotEmpty(actualStatus);
+
+            // Verify the final status exists in the index
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey(actualStatus, "idx_status", table, TestDb),
+                $"HighContention: Final status '{actualStatus}' for Id {i} should be in idx_status.");
+        }
+    }
+
     private void ExecuteForSession(Guid session, string sql)
     {
         var results = ExecuteForSessionRaw(session, sql);
