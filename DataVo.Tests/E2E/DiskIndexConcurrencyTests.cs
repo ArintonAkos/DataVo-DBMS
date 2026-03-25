@@ -333,6 +333,56 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             $"Expected persisted key {persistedName} to be present in idx_name_dup for {table}.");
     }
 
+    [Fact]
+    public async Task ConcurrentDuplicatePrimaryKeyInserts_RepeatedRounds_AlwaysSingleWinner()
+    {
+        const int rounds = 3;
+        const int contenderCount = 12;
+        const int duplicateId = 7_777;
+
+        for (int round = 1; round <= rounds; round++)
+        {
+            string table = $"IndexedUsersDupRound{round}_{Guid.NewGuid():N}";
+            Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+            var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_name_dup_round ON {table} (Name);");
+            Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+            Guid[] sessions = Enumerable.Range(0, contenderCount)
+                .Select(_ =>
+                {
+                    Guid session = Guid.NewGuid();
+                    ExecuteForSession(session, $"USE {TestDb};");
+                    return session;
+                })
+                .ToArray();
+
+            var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tasks = sessions.Select((session, i) => Task.Run(async () =>
+            {
+                await startGate.Task;
+                string name = $"Round{round}_Dup{i + 1}";
+                var results = ExecuteForSessionRaw(session, $"INSERT INTO {table} (Id, Name) VALUES ({duplicateId}, '{name}');");
+                return (name, Last: results.Last());
+            })).ToArray();
+
+            startGate.SetResult();
+            var outcomes = await Task.WhenAll(tasks);
+
+            int successCount = outcomes.Count(o =>
+                !o.Last.IsError && !(o.Last.Messages?.Any(m => m.Contains("Primary key violation", StringComparison.OrdinalIgnoreCase)) ?? false));
+            int duplicateRejectCount = outcomes.Count(o =>
+                (o.Last.Messages?.Any(m => m.Contains("Primary key violation", StringComparison.OrdinalIgnoreCase)) ?? false)
+                || o.Last.IsError);
+
+            Assert.Equal(1, successCount);
+            Assert.Equal(contenderCount - 1, duplicateRejectCount);
+
+            var rows = ExecuteAndReturn($"SELECT Id, Name FROM {table} WHERE Id = {duplicateId};");
+            Assert.False(rows.IsError, string.Join(" | ", rows.Messages));
+            Assert.Single(rows.Data);
+        }
+    }
+
     private void ExecuteForSession(Guid session, string sql)
     {
         var results = ExecuteForSessionRaw(session, sql);
