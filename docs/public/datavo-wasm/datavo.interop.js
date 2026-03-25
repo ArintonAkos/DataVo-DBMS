@@ -11,6 +11,35 @@ const SEQ_ROWID_KEY = "datavo:seq:rowid";
 const CATALOG_KEY = "datavo:catalog";
 const SELECTED_DATABASE_KEY = "datavo:selectedDatabase";
 const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB per sync call buffer
+const STORAGE_FORCE_BACKEND_GLOBAL_KEY = "__datavoForceStorageBackend";
+const STORAGE_BACKEND_SINGLETON_KEY = "__datavoStorageBackendSingleton";
+const STORAGE_BACKEND_DIAGNOSTICS_KEY = "__datavoStorageBackendDiagnostics";
+const STORAGE_OPERATION_COUNTERS_KEY = "__datavoStorageOperationCounters";
+
+if (!globalThis[STORAGE_OPERATION_COUNTERS_KEY]) {
+    globalThis[STORAGE_OPERATION_COUNTERS_KEY] = {
+        insertRow: 0,
+        readRow: 0,
+        readAllRows: 0,
+        deleteRow: 0,
+        dropTable: 0,
+        dropDatabase: 0,
+        readCatalog: 0,
+        writeCatalog: 0,
+        readSelectedDatabase: 0,
+        writeSelectedDatabase: 0,
+        clearAllStorage: 0
+    };
+}
+
+function bumpCounter(name) {
+    const counters = globalThis[STORAGE_OPERATION_COUNTERS_KEY];
+    if (!counters || typeof counters[name] !== "number") {
+        return;
+    }
+
+    counters[name] += 1;
+}
 
 function bytesToBase64(bytes) {
     let binary = "";
@@ -48,6 +77,134 @@ function canBlockCurrentThread() {
     } catch {
         return false;
     }
+}
+
+function isWorkerThread() {
+    return typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+}
+
+function readForcedBackend() {
+    const globalOverride = globalThis[STORAGE_FORCE_BACKEND_GLOBAL_KEY];
+    if (globalOverride === "worker-opfs" || globalOverride === "localStorage" || globalOverride === "worker-memory-fallback") {
+        return globalOverride;
+    }
+
+    try {
+        if (typeof location !== "undefined" && typeof location.search === "string") {
+            const params = new URLSearchParams(location.search);
+            const queryOverride = params.get("datavoStorageBackend");
+            if (queryOverride === "worker-opfs" || queryOverride === "localStorage" || queryOverride === "worker-memory-fallback") {
+                return queryOverride;
+            }
+        }
+    } catch {
+        // Ignore URL parsing failures.
+    }
+
+    return null;
+}
+
+function setBackendDiagnostics(selectedKind, requestedKind, reason) {
+    globalThis[STORAGE_BACKEND_DIAGNOSTICS_KEY] = {
+        selectedKind,
+        requestedKind,
+        reason,
+        canBlockCurrentThread: canBlockCurrentThread(),
+        isWorkerThread: isWorkerThread(),
+        hasWorker: typeof Worker !== "undefined",
+        hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+        timestamp: Date.now()
+    };
+}
+
+function createMemoryFallbackBackend() {
+    const store = new Map();
+
+    function getNextRowId() {
+        let currentId = parseInt(store.get(SEQ_ROWID_KEY) || "0", 10);
+        currentId++;
+        store.set(SEQ_ROWID_KEY, currentId.toString());
+        return currentId.toString();
+    }
+
+    return {
+        kind: "worker-memory-fallback",
+        insertRow(databaseName, tableName, rowBytes) {
+            const rowId = getNextRowId();
+            store.set(getStorageKey(databaseName, tableName, rowId), bytesToBase64(rowBytes));
+            return rowId;
+        },
+        readRow(databaseName, tableName, rowId) {
+            const payload = store.get(getStorageKey(databaseName, tableName, rowId));
+            return payload ? base64ToBytes(payload) : null;
+        },
+        readAllRows(databaseName, tableName) {
+            const prefix = `datavo:data:${databaseName}:${tableName}:`;
+            const rows = [];
+
+            for (const [key, value] of store.entries()) {
+                if (key.startsWith(prefix)) {
+                    rows.push([key.substring(prefix.length), value]);
+                }
+            }
+
+            return JSON.stringify(rows);
+        },
+        deleteRow(databaseName, tableName, rowId) {
+            store.delete(getStorageKey(databaseName, tableName, rowId));
+        },
+        dropTable(databaseName, tableName) {
+            const prefix = `datavo:data:${databaseName}:${tableName}:`;
+            for (const key of [...store.keys()]) {
+                if (key.startsWith(prefix)) {
+                    store.delete(key);
+                }
+            }
+        },
+        dropDatabase(databaseName) {
+            const prefix = `datavo:data:${databaseName}:`;
+            for (const key of [...store.keys()]) {
+                if (key.startsWith(prefix)) {
+                    store.delete(key);
+                }
+            }
+        },
+        readCatalog() {
+            return store.get(CATALOG_KEY) || null;
+        },
+        writeCatalog(xml) {
+            store.set(CATALOG_KEY, xml);
+        },
+        readSelectedDatabase() {
+            return store.get(SELECTED_DATABASE_KEY) || null;
+        },
+        writeSelectedDatabase(databaseName) {
+            if (!databaseName) {
+                store.delete(SELECTED_DATABASE_KEY);
+                return;
+            }
+
+            store.set(SELECTED_DATABASE_KEY, databaseName);
+        },
+        clearAllStorage() {
+            for (const key of [...store.keys()]) {
+                if (key.startsWith(STORAGE_PREFIX)) {
+                    store.delete(key);
+                }
+            }
+        },
+        getCapabilities() {
+            return {
+                storageBackend: "worker-memory-fallback",
+                mode: "fallback",
+                hasWorker: typeof Worker !== "undefined",
+                hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+                canBlockCurrentThread: canBlockCurrentThread(),
+                isWorkerThread: isWorkerThread(),
+                opfsAvailable: false
+            };
+        }
+    };
 }
 
 function createLocalStorageBackend() {
@@ -256,49 +413,100 @@ function createWorkerBackendOrNull() {
     };
 }
 
-const StorageBackend = createWorkerBackendOrNull() || createLocalStorageBackend();
+function selectStorageBackend() {
+    const existing = globalThis[STORAGE_BACKEND_SINGLETON_KEY];
+    if (existing) {
+        setBackendDiagnostics(existing.kind || "unknown", readForcedBackend(), "reused-singleton");
+        return existing;
+    }
+
+    const forced = readForcedBackend();
+    let backend = null;
+
+    if (forced === "worker-opfs") {
+        backend = createWorkerBackendOrNull();
+        if (!backend) {
+            backend = isWorkerThread() ? createMemoryFallbackBackend() : createLocalStorageBackend();
+            setBackendDiagnostics(backend.kind, forced, "forced-worker-opfs-fallback");
+        } else {
+            setBackendDiagnostics(backend.kind, forced, "forced-worker-opfs");
+        }
+    } else if (forced === "localStorage") {
+        backend = createLocalStorageBackend();
+        setBackendDiagnostics(backend.kind, forced, "forced-localStorage");
+    } else if (forced === "worker-memory-fallback") {
+        backend = createMemoryFallbackBackend();
+        setBackendDiagnostics(backend.kind, forced, "forced-memory-fallback");
+    } else {
+        // Default selection keeps worker contexts away from localStorage-only paths,
+        // avoiding accidental context isolation between worker and window storage scopes.
+        backend = createWorkerBackendOrNull();
+        if (!backend) {
+            backend = isWorkerThread() ? createMemoryFallbackBackend() : createLocalStorageBackend();
+            setBackendDiagnostics(backend.kind, null, "auto-fallback");
+        } else {
+            setBackendDiagnostics(backend.kind, null, "auto-worker");
+        }
+    }
+
+    globalThis[STORAGE_BACKEND_SINGLETON_KEY] = backend;
+    return backend;
+}
+
+const StorageBackend = selectStorageBackend();
 
 export function insertRow(databaseName, tableName, rowBytes) {
+    bumpCounter("insertRow");
     return StorageBackend.insertRow(databaseName, tableName, rowBytes);
 }
 
 export function readRow(databaseName, tableName, rowId) {
+    bumpCounter("readRow");
     return StorageBackend.readRow(databaseName, tableName, rowId);
 }
 
 export function readAllRows(databaseName, tableName) {
+    bumpCounter("readAllRows");
     return StorageBackend.readAllRows(databaseName, tableName);
 }
 
 export function deleteRow(databaseName, tableName, rowId) {
+    bumpCounter("deleteRow");
     StorageBackend.deleteRow(databaseName, tableName, rowId);
 }
 
 export function dropTable(databaseName, tableName) {
+    bumpCounter("dropTable");
     StorageBackend.dropTable(databaseName, tableName);
 }
 
 export function dropDatabase(databaseName) {
+    bumpCounter("dropDatabase");
     StorageBackend.dropDatabase(databaseName);
 }
 
 export function readCatalog() {
+    bumpCounter("readCatalog");
     return StorageBackend.readCatalog();
 }
 
 export function writeCatalog(xml) {
+    bumpCounter("writeCatalog");
     StorageBackend.writeCatalog(xml);
 }
 
 export function readSelectedDatabase() {
+    bumpCounter("readSelectedDatabase");
     return StorageBackend.readSelectedDatabase();
 }
 
 export function writeSelectedDatabase(databaseName) {
+    bumpCounter("writeSelectedDatabase");
     StorageBackend.writeSelectedDatabase(databaseName);
 }
 
 export function clearAllStorage() {
+    bumpCounter("clearAllStorage");
     StorageBackend.clearAllStorage();
 }
 
@@ -315,6 +523,9 @@ export function getStorageCapabilities() {
             storageBackend: getStorageBackendKind(),
             mode: "unknown"
         };
+
+    capabilities.selectionDiagnostics = globalThis[STORAGE_BACKEND_DIAGNOSTICS_KEY] || null;
+    capabilities.operationCounters = globalThis[STORAGE_OPERATION_COUNTERS_KEY] || null;
 
     return JSON.stringify(capabilities);
 }

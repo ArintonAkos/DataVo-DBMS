@@ -1,6 +1,6 @@
 # SQL -> Vector -> WASM Phase Status
 
-_Last updated: 2026-03-25_ (session: composite-key seed variance investigation + deterministic WASM backend selection)
+_Last updated: 2026-03-25_ (session: strict parity enforcement pass + runtime insert-path blocker isolated)
 
 This status table tracks the active multi-phase plan execution in one place.
 Percentages are practical delivery estimates (implementation + test confidence), not formal completion gates.
@@ -19,7 +19,7 @@ Percentages are practical delivery estimates (implementation + test confidence),
 | 3.4   | ANN indexing (HNSW)         |     90 |          10 | Strongly implemented; final production hardening/tuning still ongoing.                                                                                                                                                                                                                                |
 | 4.1   | WASM runtime baseline       |     95 |           5 | Browser runtime works and is testable.                                                                                                                                                                                                                                                                |
 | 4.2   | Browser storage abstraction |     90 |          10 | Worker/fallback abstraction is implemented; remaining cleanup and stabilization.                                                                                                                                                                                                                      |
-| 4.3   | Persistent browser storage  |     93 |           7 | Release crash path was stabilized and browser flow passes in Release with worker runtime checks plus stable CRUD result-shape assertions. Strict parity mode now asserts backend-kind stability and logs diagnostics when row payloads are empty. Implemented deterministic storage backend selection in JS interop: singleton backend reuse, explicit force override (`datavoStorageBackend` / global override), worker-safe memory fallback, and selection diagnostics exported through capabilities. Remaining: eliminate empty-row payload behavior in Release mode and restore strict row-value assertions without diagnostic fallback. |
+| 4.3   | Persistent browser storage  |     93 |           7 | Release crash path was stabilized and browser flow passes in Release with worker runtime checks plus stable CRUD result-shape assertions. Strict parity mode now enforces backend-kind stability and row-value parity assertions (`Alice`/`Bob`) under `DATAVO_STRICT_BROWSER_PARITY=1` (no diagnostic bypass). Current blocker isolated: inserts emit `Method not found: void System.IO.BinaryWriter.Write(single)` and persist no row payloads in strict path, causing hard parity failure. Added deterministic storage backend selection and diagnostics in JS interop; remaining work is resolving the runtime insert-path error so strict parity can pass consistently. |
 
 ## Deferred automation reminder
 

@@ -135,34 +135,36 @@ public static class RowSerializer
     /// </summary>
     private static void WriteNonNullValue(BinaryWriter writer, Column column, dynamic value)
     {
+        object boxed = (object)value;
         string type = column.Type.ToUpperInvariant();
         if (type == "INT")
         {
-            writer.Write(Convert.ToInt32(value));
+            writer.Write(Convert.ToInt32(boxed));
             return;
         }
 
         if (type == "FLOAT")
         {
-            writer.Write(Convert.ToSingle(value));
+            float floatValue = Convert.ToSingle(boxed);
+            writer.Write(floatValue);
             return;
         }
 
         if (type == "BIT")
         {
-            writer.Write(Convert.ToBoolean(value));
+            writer.Write(Convert.ToBoolean(boxed));
             return;
         }
 
         if (type == "DATE" || type == "DATETIME")
         {
-            writer.Write(ToBinaryDateValue(value));
+            writer.Write(ToBinaryDateValue(boxed));
             return;
         }
 
         if (type == "VECTOR")
         {
-            if (!VectorParser.TryCoerceToVector(value, out float[] vector))
+            if (!VectorParser.TryCoerceToVector(boxed, out float[] vector))
             {
                 throw new InvalidOperationException($"Column '{column.Name}' expects VECTOR data.");
             }
@@ -175,7 +177,7 @@ public static class RowSerializer
             return;
         }
 
-        writer.Write(value?.ToString() ?? string.Empty);
+        writer.Write(boxed.ToString() ?? string.Empty);
     }
 
     /// <summary>
@@ -227,7 +229,7 @@ public static class RowSerializer
     /// <summary>
     /// Converts supported date representations to the binary format used by the serializer.
     /// </summary>
-    private static long ToBinaryDateValue(dynamic value)
+    private static long ToBinaryDateValue(object value)
     {
         if (value is DateOnly dateOnly)
         {
