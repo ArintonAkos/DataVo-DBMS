@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const strictBrowserParityGate =
-  process.env.DATAVO_STRICT_BROWSER_PARITY === "1";
+  (globalThis as any)?.process?.env?.DATAVO_STRICT_BROWSER_PARITY === "1";
 
 type QueryResult = {
   Messages: string[];
@@ -75,6 +75,14 @@ test.describe("DataVo WASM browser runtime", () => {
   test("executes CRUD flow in Chromium", async ({ page }) => {
     const dbName = `BrowserDb_${Date.now()}`;
 
+    const capabilitiesBefore = await page.evaluate(async () => {
+      const moduleUrl = "/src/DataVoClient.ts";
+      const { DataVoClient } = await import(moduleUrl);
+      const client = DataVoClient.getInstance();
+      await client.initialize();
+      return await client.runtimeCapabilities();
+    });
+
     await executeSql(page, `CREATE DATABASE ${dbName}`);
     await executeSql(page, `USE ${dbName}`);
     await executeSql(
@@ -119,7 +127,18 @@ test.describe("DataVo WASM browser runtime", () => {
     expect(selectMessages.length).toBeGreaterThanOrEqual(0);
     expect(typeof selectResult.ExecutionTime).toBe("string");
 
+    const capabilitiesAfter = await page.evaluate(async () => {
+      const moduleUrl = "/src/DataVoClient.ts";
+      const { DataVoClient } = await import(moduleUrl);
+      const client = DataVoClient.getInstance();
+      await client.initialize();
+      return await client.runtimeCapabilities();
+    });
+
     if (strictBrowserParityGate) {
+      expect(typeof capabilitiesBefore.storageBackend).toBe("string");
+      expect(capabilitiesAfter.storageBackend).toBe(capabilitiesBefore.storageBackend);
+
       // Diagnostic-only strict mode: log data structure for debugging
       // KNOWN ISSUE: In Release WASM mode, SELECTs return empty Data arrays even after INSERTs succeed.
       // This indicates a data persistence/isolation issue in the WASM<->JS storage bridge.
@@ -129,7 +148,8 @@ test.describe("DataVo WASM browser runtime", () => {
         console.warn(
           "DIAGNOSTIC: SELECT returned empty Data despite successful INSERTs. " +
           "Fields are present (" + selectResult.Fields.join(", ") + "), suggesting query execution " +
-          "completed but row data isn't being persisted or retrieved. This is a known WASM Release mode issue."
+          "completed but row data isn't being persisted or retrieved. This is a known WASM Release mode issue." +
+          ` backend=${capabilitiesAfter.storageBackend}`
         );
         // Don't fail on empty data - it's a known issue being tracked
         return;
