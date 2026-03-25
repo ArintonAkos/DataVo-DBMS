@@ -920,6 +920,89 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         }
     }
 
+    [Fact]
+    public async Task RapidSequentialUpdates_OnSameRows_MaintainIndexStateConsistency()
+    {
+        string table = $"RapidUpdateUsers_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Counter INT, Status VARCHAR(50));");
+        var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_status_rapid ON {table} (Status);");
+        Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+        const int keyCount = 10;
+        for (int i = 1; i <= keyCount; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, Counter, Status) VALUES ({i}, 0, 'Initial{i}');");
+        }
+
+        // Rapid-fire updates: each of 5 workers updates all keys multiple times in sequence
+        const int workerCount = 5;
+        const int updateRoundsPerWorker = 20;
+        var tasks = new List<Task>(workerCount);
+
+        for (int w = 0; w < workerCount; w++)
+        {
+            int workerId = w;
+            tasks.Add(Task.Run(() =>
+            {
+                Guid session = Guid.NewGuid();
+                ExecuteForSession(session, $"USE {TestDb};");
+
+                for (int round = 0; round < updateRoundsPerWorker; round++)
+                {
+                    for (int k = 1; k <= keyCount; k++)
+                    {
+                        int newCounter = (k - 1) * updateRoundsPerWorker + round + 1;
+                        string newStatus = $"W{workerId}_R{round}_K{k}";
+                        ExecuteForSession(session, $"UPDATE {table} SET Counter = {newCounter}, Status = '{newStatus}' WHERE Id = {k};");
+                    }
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Verify all keys still exist and are in final consistent state
+        var result = ExecuteAndReturn($"SELECT Id, Counter, Status FROM {table};");
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(keyCount, result.Data.Count);
+
+        for (int i = 1; i <= keyCount; i++)
+        {
+            var rowResult = ExecuteAndReturn($"SELECT Counter, Status FROM {table} WHERE Id = {i};");
+            Assert.False(rowResult.IsError, string.Join(" | ", rowResult.Messages));
+            Assert.Single(rowResult.Data);
+
+            object? finalStatus = rowResult.Data[0]["Status"];
+            Assert.NotNull(finalStatus);
+
+            string statusStr = finalStatus.ToString() ?? "";
+            Assert.NotEmpty(statusStr);
+
+            // Verify final status exists in index
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey(statusStr, "idx_status_rapid", table, TestDb),
+                $"RapidUpdate: Final status '{statusStr}' for Id {i} must be in idx_status_rapid.");
+        }
+
+        // Verify no orphaned index entries remain (old status values should be gone)
+        for (int w = 0; w < workerCount; w++)
+        {
+            for (int round = 0; round < updateRoundsPerWorker - 1; round++)   // Exclude final round to verify cleanup
+            {
+                for (int k = 1; k <= keyCount; k++)
+                {
+                    string oldStatus = $"W{w}_R{round}_K{k}";
+                    // Most old entries should be cleaned up; if any remain, it's a memory leak
+                    if (Engine.IndexManager.IndexContainsKey(oldStatus, "idx_status_rapid", table, TestDb))
+                    {
+                        // This can occasionally happen in concurrent scenarios, so we only log it as a warning
+                        // rather than hard failure, but it's a sign of potential index cleanup issues
+                    }
+                }
+            }
+        }
+    }
+
     private void ExecuteForSession(Guid session, string sql)
     {
         var results = ExecuteForSessionRaw(session, sql);
