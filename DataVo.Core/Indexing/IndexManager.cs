@@ -612,11 +612,14 @@ public class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        index.Insert(value, rowId);
-        MarkDirty(cacheKey);
-        FlushInternal(cacheKey);
+        lock (_lock)
+        {
+            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            index.Insert(value, rowId);
+            MarkDirty(cacheKey);
+            FlushInternal(cacheKey);
+        }
     }
 
     /// <summary>
@@ -624,11 +627,14 @@ public class IndexManager : IDisposable
     /// </summary>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        index.DeleteValues(toBeDeletedIds);
-        MarkDirty(cacheKey);
-        FlushInternal(cacheKey);
+        lock (_lock)
+        {
+            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            index.DeleteValues(toBeDeletedIds);
+            MarkDirty(cacheKey);
+            FlushInternal(cacheKey);
+        }
     }
 
     /// <summary>
