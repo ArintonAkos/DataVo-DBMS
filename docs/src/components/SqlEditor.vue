@@ -259,7 +259,7 @@ const executeSql = async () => {
     const client = DataVoClient.getInstance();
     await client.initialize();
 
-    const parsedResults = client.execute(sqlQuery.value);
+    const parsedResults = await client.execute(sqlQuery.value);
     results.value = parsedResults;
     applyErrorMarkerFromResults(parsedResults);
     hasExecuted.value = true;
@@ -288,7 +288,7 @@ const resetPlayground = async () => {
   try {
     const client = DataVoClient.getInstance();
     await client.initialize();
-    client.reset();
+    await client.reset();
     results.value = [
       {
         IsError: false,

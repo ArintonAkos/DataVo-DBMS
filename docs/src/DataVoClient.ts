@@ -13,11 +13,36 @@ export interface QueryResult {
   ErrorColumn?: number;
 }
 
+type WorkerMethod = "initialize" | "execute" | "reset" | "runtimeCapabilities";
+
+type WorkerRequest = {
+  id: number;
+  method: WorkerMethod;
+  payload?: any;
+};
+
+type WorkerResponse = {
+  id: number;
+  ok: boolean;
+  result?: any;
+  error?: string;
+};
+
 export class DataVoClient {
   private static instance: DataVoClient;
   private isInitialized = false;
   private dotnetRuntime: any;
   private initializePromise: Promise<void> | null = null;
+  private runtimeWorker: Worker | null = null;
+  private workerMode = false;
+  private workerRequestId = 0;
+  private pendingWorkerRequests = new Map<
+    number,
+    {
+      resolve: (result: any) => void;
+      reject: (error: Error) => void;
+    }
+  >();
 
   private constructor() {}
 
@@ -50,6 +75,12 @@ export class DataVoClient {
     }
 
     this.initializePromise = (async () => {
+      const workerInitialized = await this.tryInitializeWorkerRuntime();
+      if (workerInitialized) {
+        this.isInitialized = true;
+        return;
+      }
+
       const debugEnabled = this.isDebugEnabled();
 
       // 1. Load the DataVoStorage interop module into globalThis so [JSImport] can find it
@@ -100,10 +131,83 @@ export class DataVoClient {
     }
   }
 
+  private async tryInitializeWorkerRuntime(): Promise<boolean> {
+    if (typeof Worker === "undefined") {
+      return false;
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(
+        new URL("./DataVoRuntimeWorker.ts", import.meta.url),
+        {
+          type: "module",
+        },
+      );
+    } catch {
+      return false;
+    }
+
+    this.runtimeWorker = worker;
+
+    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      const message = event.data;
+      const pending = this.pendingWorkerRequests.get(message.id);
+      if (!pending) {
+        return;
+      }
+
+      this.pendingWorkerRequests.delete(message.id);
+      if (message.ok) {
+        pending.resolve(message.result);
+      } else {
+        pending.reject(
+          new Error(message.error || "Runtime worker request failed."),
+        );
+      }
+    };
+
+    worker.onerror = (event: ErrorEvent) => {
+      const error = new Error(
+        event.message || "Runtime worker encountered an error.",
+      );
+      for (const pending of this.pendingWorkerRequests.values()) {
+        pending.reject(error);
+      }
+      this.pendingWorkerRequests.clear();
+    };
+
+    try {
+      await this.callRuntimeWorker("initialize");
+      this.workerMode = true;
+      return true;
+    } catch (error) {
+      console.warn("Falling back to main-thread DataVo runtime.", error);
+      worker.terminate();
+      this.runtimeWorker = null;
+      this.workerMode = false;
+      return false;
+    }
+  }
+
+  private callRuntimeWorker(method: WorkerMethod, payload?: any): Promise<any> {
+    if (!this.runtimeWorker) {
+      return Promise.reject(new Error("Runtime worker is not available."));
+    }
+
+    const id = ++this.workerRequestId;
+    const request: WorkerRequest = { id, method, payload };
+
+    return new Promise((resolve, reject) => {
+      this.pendingWorkerRequests.set(id, { resolve, reject });
+      this.runtimeWorker!.postMessage(request);
+    });
+  }
+
   /**
    * Executes a SQL command or query against the DataVo database.
    */
-  public execute(sql: string): QueryResult[] {
+  public async execute(sql: string): Promise<QueryResult[]> {
     if (!this.isInitialized) {
       throw new Error(
         "DataVo WASM Engine is not initialized. Call initialize() first.",
@@ -111,9 +215,11 @@ export class DataVoClient {
     }
 
     try {
-      const rawJson =
-        this.dotnetRuntime.DataVo.Browser.DataVoInterop.ExecuteSql(sql);
-      const parsed = JSON.parse(rawJson);
+      const parsed = this.workerMode
+        ? await this.callRuntimeWorker("execute", { sql })
+        : JSON.parse(
+            this.dotnetRuntime.DataVo.Browser.DataVoInterop.ExecuteSql(sql),
+          );
 
       if (
         parsed &&
@@ -145,6 +251,18 @@ export class DataVoClient {
       console.error("Error executing SQL:", error);
 
       try {
+        if (this.workerMode) {
+          return [
+            this.attachErrorLocationToResult({
+              IsError: true,
+              Messages: [error.message || "Unknown execution error"],
+              Data: [],
+              Fields: [],
+              ExecutionTime: "",
+            }),
+          ];
+        }
+
         const interop = this.dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
         if (interop && typeof interop.DiagnoseLexer === "function") {
           const diagnosticJson = interop.DiagnoseLexer(sql);
@@ -233,11 +351,64 @@ export class DataVoClient {
     return { line, column };
   }
 
-  public reset(): void {
-    const interop = this.dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
-    if (interop && typeof interop.ResetStorage === "function") {
-      interop.ResetStorage();
+  public async runtimeCapabilities(): Promise<Record<string, any>> {
+    if (this.workerMode) {
+      const workerCapabilities =
+        (await this.callRuntimeWorker("runtimeCapabilities")) || {};
+      if (typeof workerCapabilities.storageBackend !== "string") {
+        return {
+          ...workerCapabilities,
+          storageBackend: "unknown",
+        };
+      }
+
+      return workerCapabilities;
     }
+
+    const interop = this.dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
+    if (interop && typeof interop.RuntimeCapabilities === "function") {
+      const raw = interop.RuntimeCapabilities();
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return { storageBackend: "unknown", raw };
+      }
+    }
+
+    const backendKindFn = (globalThis as any).DataVoStorage
+      ?.getStorageBackendKind;
+    if (typeof backendKindFn === "function") {
+      try {
+        return {
+          storageBackend: backendKindFn(),
+        };
+      } catch {
+        // Continue to unknown fallback.
+      }
+    }
+
+    return { storageBackend: "unknown" };
+  }
+
+  public async reset(): Promise<void> {
+    if (this.workerMode) {
+      await this.callRuntimeWorker("reset");
+      this.runtimeWorker?.terminate();
+      this.runtimeWorker = null;
+      this.workerMode = false;
+    } else {
+      const interop = this.dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
+      if (interop && typeof interop.ResetStorage === "function") {
+        interop.ResetStorage();
+      }
+    }
+
+    for (const pending of this.pendingWorkerRequests.values()) {
+      pending.reject(
+        new Error("DataVo client reset interrupted pending worker request."),
+      );
+    }
+    this.pendingWorkerRequests.clear();
 
     this.isInitialized = false;
     this.initializePromise = null;

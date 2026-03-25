@@ -22,12 +22,12 @@ At this moment, the optimizer/planner side is significantly advanced, while the 
   - Adaptive topK sizing and expansion passes
   - Per-query and periodic telemetry snapshots
 - Implemented now in HNSW core:
-    - Layered graph connectivity with persisted tuning parameters
-    - Multi-seed search and diversity-aware neighbor selection
-    - Adaptive efSearch and adaptive efConstruction
-    - Insertion candidate expansion (fixed + adaptive density-driven mode)
-    - Insertion-time local neighborhood pruning (high-degree pressure)
-    - Delete-time local graph repair
+  - Layered graph connectivity with persisted tuning parameters
+  - Multi-seed search and diversity-aware neighbor selection
+  - Adaptive efSearch and adaptive efConstruction
+  - Insertion candidate expansion (fixed + adaptive density-driven mode)
+  - Insertion-time local neighborhood pruning (high-degree pressure)
+  - Delete-time local graph repair
 
 ## End-to-end execution flow
 
@@ -160,11 +160,11 @@ Typical bucket names:
 Insertion path now has two additional controls:
 
 - Adaptive insertion expansion policy:
-    - Expands insertion candidate budget based on local graph density near insertion seeds.
-    - Sparser regions receive broader candidate budgets, denser regions stay tighter.
+  - Expands insertion candidate budget based on local graph density near insertion seeds.
+  - Sparser regions receive broader candidate budgets, denser regions stay tighter.
 - Canonical-style local pruning after insert:
-    - After connecting a node, touched neighborhoods can be rebuilt from local candidate pools.
-    - This reduces degree-pressure artifacts under insert/delete churn.
+  - After connecting a node, touched neighborhoods can be rebuilt from local candidate pools.
+  - This reduces degree-pressure artifacts under insert/delete churn.
 
 Key tuning parameters now persisted in index snapshots:
 

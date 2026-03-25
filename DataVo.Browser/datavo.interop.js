@@ -138,6 +138,17 @@ function createLocalStorageBackend() {
             }
 
             keys.forEach((key) => localStorage.removeItem(key));
+        },
+        getCapabilities() {
+            return {
+                storageBackend: "localStorage",
+                mode: "fallback",
+                hasWorker: typeof Worker !== "undefined",
+                hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+                canBlockCurrentThread: canBlockCurrentThread(),
+                isWorkerThread: typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope,
+                opfsAvailable: false
+            };
         }
     };
 }
@@ -238,6 +249,9 @@ function createWorkerBackendOrNull() {
         },
         backendKind() {
             return invokeSync("getBackendKind", null);
+        },
+        getCapabilities() {
+            return invokeSync("getCapabilities", null);
         }
     };
 }
@@ -294,6 +308,17 @@ export function getStorageBackendKind() {
         : StorageBackend.kind;
 }
 
+export function getStorageCapabilities() {
+    const capabilities = typeof StorageBackend.getCapabilities === "function"
+        ? StorageBackend.getCapabilities()
+        : {
+            storageBackend: getStorageBackendKind(),
+            mode: "unknown"
+        };
+
+    return JSON.stringify(capabilities);
+}
+
 globalThis.DataVoStorage = {
     insertRow,
     readRow,
@@ -306,5 +331,6 @@ globalThis.DataVoStorage = {
     readSelectedDatabase,
     writeSelectedDatabase,
     clearAllStorage,
-    getStorageBackendKind
+    getStorageBackendKind,
+    getStorageCapabilities
 };

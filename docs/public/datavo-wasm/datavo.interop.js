@@ -1,151 +1,322 @@
 /**
  * datavo.interop.js
- * 
- * Provides synchronous Javascript interop functions for the WebAssembly DataVo Engine.
- * Since WASM [JSImport] calls are synchronous on the main thread, we use localStorage 
- * (which is also synchronous) to physically persist byte arrays between browser sessions.
- * 
- * Note: localStorage has limits (typically 5-10MB). For larger datasets, developers
- * should run DataVo in a Web Worker and use SharedArrayBuffers/Atomics to block 
- * synchronously and use IndexedDB under the hood. For this package baseline, 
- * standard Window localStorage ensures maximum compatibility out of the box.
+ *
+ * Storage backend order:
+ * 1) Worker + OPFS bridge (sync surface for JSImport via SharedArrayBuffer + Atomics)
+ * 2) localStorage fallback for broad compatibility
  */
 
-// Helper: Convert Uint8Array to Base64
+const STORAGE_PREFIX = "datavo:";
+const SEQ_ROWID_KEY = "datavo:seq:rowid";
+const CATALOG_KEY = "datavo:catalog";
+const SELECTED_DATABASE_KEY = "datavo:selectedDatabase";
+const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB per sync call buffer
+
 function bytesToBase64(bytes) {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
         binary += String.fromCharCode(bytes[i]);
     }
+
     return btoa(binary);
 }
 
-// Helper: Convert Base64 to Uint8Array
 function base64ToBytes(base64) {
     const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
     }
-    return bytes;
-}
 
-// Global row counter state synced with localStorage
-function getNextRowId() {
-    let currentId = parseInt(localStorage.getItem('datavo:seq:rowid') || '0', 10);
-    currentId++;
-    localStorage.setItem('datavo:seq:rowid', currentId.toString());
-    return currentId.toString();
+    return bytes;
 }
 
 function getStorageKey(databaseName, tableName, rowId) {
     return `datavo:data:${databaseName}:${tableName}:${rowId}`;
 }
 
-function getCatalogKey() {
-    return "datavo:catalog";
+function canBlockCurrentThread() {
+    if (typeof SharedArrayBuffer === "undefined" || typeof Atomics === "undefined" || typeof Atomics.wait !== "function") {
+        return false;
+    }
+
+    // Atomics.wait throws on browser main thread.
+    try {
+        const control = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(control, 0, 0, 0);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
-function getSelectedDatabaseKey() {
-    return "datavo:selectedDatabase";
+function createLocalStorageBackend() {
+    function getNextRowId() {
+        let currentId = parseInt(localStorage.getItem(SEQ_ROWID_KEY) || "0", 10);
+        currentId++;
+        localStorage.setItem(SEQ_ROWID_KEY, currentId.toString());
+        return currentId.toString();
+    }
+
+    return {
+        kind: "localStorage",
+        insertRow(databaseName, tableName, rowBytes) {
+            const rowId = getNextRowId();
+            localStorage.setItem(getStorageKey(databaseName, tableName, rowId), bytesToBase64(rowBytes));
+            return rowId;
+        },
+        readRow(databaseName, tableName, rowId) {
+            const payload = localStorage.getItem(getStorageKey(databaseName, tableName, rowId));
+            return payload ? base64ToBytes(payload) : null;
+        },
+        readAllRows(databaseName, tableName) {
+            const prefix = `datavo:data:${databaseName}:${tableName}:`;
+            const rows = [];
+
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    rows.push([key.substring(prefix.length), localStorage.getItem(key)]);
+                }
+            }
+
+            return JSON.stringify(rows);
+        },
+        deleteRow(databaseName, tableName, rowId) {
+            localStorage.removeItem(getStorageKey(databaseName, tableName, rowId));
+        },
+        dropTable(databaseName, tableName) {
+            const prefix = `datavo:data:${databaseName}:${tableName}:`;
+            const keys = [];
+
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    keys.push(key);
+                }
+            }
+
+            keys.forEach((key) => localStorage.removeItem(key));
+        },
+        dropDatabase(databaseName) {
+            const prefix = `datavo:data:${databaseName}:`;
+            const keys = [];
+
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    keys.push(key);
+                }
+            }
+
+            keys.forEach((key) => localStorage.removeItem(key));
+        },
+        readCatalog() {
+            return localStorage.getItem(CATALOG_KEY);
+        },
+        writeCatalog(xml) {
+            localStorage.setItem(CATALOG_KEY, xml);
+        },
+        readSelectedDatabase() {
+            return localStorage.getItem(SELECTED_DATABASE_KEY);
+        },
+        writeSelectedDatabase(databaseName) {
+            if (!databaseName) {
+                localStorage.removeItem(SELECTED_DATABASE_KEY);
+                return;
+            }
+
+            localStorage.setItem(SELECTED_DATABASE_KEY, databaseName);
+        },
+        clearAllStorage() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(STORAGE_PREFIX)) {
+                    keys.push(key);
+                }
+            }
+
+            keys.forEach((key) => localStorage.removeItem(key));
+        },
+        getCapabilities() {
+            return {
+                storageBackend: "localStorage",
+                mode: "fallback",
+                hasWorker: typeof Worker !== "undefined",
+                hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+                canBlockCurrentThread: canBlockCurrentThread(),
+                isWorkerThread: typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope,
+                opfsAvailable: false
+            };
+        }
+    };
 }
+
+function createWorkerBackendOrNull() {
+    if (typeof Worker === "undefined" || !canBlockCurrentThread()) {
+        return null;
+    }
+
+    let worker;
+    try {
+        worker = new Worker(new URL("./datavo.storage.worker.js", import.meta.url), { type: "module" });
+    } catch {
+        return null;
+    }
+
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+
+    function invokeSync(command, payload) {
+        const controlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3);
+        const control = new Int32Array(controlBuffer);
+        const responseBuffer = new SharedArrayBuffer(WORKER_RESPONSE_BYTES);
+
+        worker.postMessage({ command, payload, controlBuffer, responseBuffer });
+
+        // Wait until worker marks command as complete.
+        Atomics.wait(control, 0, 0);
+
+        const status = Atomics.load(control, 1);
+        const length = Atomics.load(control, 2);
+
+        if (length < 0 || length > WORKER_RESPONSE_BYTES) {
+            throw new Error("Worker response payload length out of range.");
+        }
+
+        const bytes = new Uint8Array(responseBuffer, 0, length);
+        const text = decoder.decode(bytes);
+
+        if (status !== 0) {
+            throw new Error(text || "Storage worker command failed.");
+        }
+
+        if (!text) {
+            return null;
+        }
+
+        return JSON.parse(text);
+    }
+
+    // Probe backend once so we can gracefully fallback if worker initialization fails.
+    try {
+        invokeSync("getBackendKind", null);
+    } catch {
+        worker.terminate();
+        return null;
+    }
+
+    return {
+        kind: "worker-opfs",
+        insertRow(databaseName, tableName, rowBytes) {
+            return invokeSync("insertRow", {
+                databaseName,
+                tableName,
+                rowBase64: bytesToBase64(rowBytes)
+            });
+        },
+        readRow(databaseName, tableName, rowId) {
+            const rowBase64 = invokeSync("readRow", { databaseName, tableName, rowId });
+            return rowBase64 ? base64ToBytes(rowBase64) : null;
+        },
+        readAllRows(databaseName, tableName) {
+            return invokeSync("readAllRows", { databaseName, tableName }) || "[]";
+        },
+        deleteRow(databaseName, tableName, rowId) {
+            invokeSync("deleteRow", { databaseName, tableName, rowId });
+        },
+        dropTable(databaseName, tableName) {
+            invokeSync("dropTable", { databaseName, tableName });
+        },
+        dropDatabase(databaseName) {
+            invokeSync("dropDatabase", { databaseName });
+        },
+        readCatalog() {
+            return invokeSync("readCatalog", null);
+        },
+        writeCatalog(xml) {
+            invokeSync("writeCatalog", { xml });
+        },
+        readSelectedDatabase() {
+            return invokeSync("readSelectedDatabase", null);
+        },
+        writeSelectedDatabase(databaseName) {
+            invokeSync("writeSelectedDatabase", { databaseName });
+        },
+        clearAllStorage() {
+            invokeSync("clearAllStorage", null);
+        },
+        backendKind() {
+            return invokeSync("getBackendKind", null);
+        },
+        getCapabilities() {
+            return invokeSync("getCapabilities", null);
+        }
+    };
+}
+
+const StorageBackend = createWorkerBackendOrNull() || createLocalStorageBackend();
 
 export function insertRow(databaseName, tableName, rowBytes) {
-    const rowId = getNextRowId();
-    const b64 = bytesToBase64(rowBytes);
-    localStorage.setItem(getStorageKey(databaseName, tableName, rowId), b64);
-    return rowId;
+    return StorageBackend.insertRow(databaseName, tableName, rowBytes);
 }
 
 export function readRow(databaseName, tableName, rowId) {
-    const b64 = localStorage.getItem(getStorageKey(databaseName, tableName, rowId));
-    if (!b64) return null;
-    return base64ToBytes(b64);
+    return StorageBackend.readRow(databaseName, tableName, rowId);
 }
 
-// Returns a stringified JSON array of [rowId, bytesBase64] tuples
 export function readAllRows(databaseName, tableName) {
-    const prefix = `datavo:data:${databaseName}:${tableName}:`;
-    const results = [];
-    
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key.startsWith(prefix)) {
-            const rowId = key.substring(prefix.length);
-            const b64 = localStorage.getItem(key);
-            results.push([rowId, b64]);
-        }
-    }
-    
-    return JSON.stringify(results);
+    return StorageBackend.readAllRows(databaseName, tableName);
 }
 
 export function deleteRow(databaseName, tableName, rowId) {
-    localStorage.removeItem(getStorageKey(databaseName, tableName, rowId));
+    StorageBackend.deleteRow(databaseName, tableName, rowId);
 }
 
 export function dropTable(databaseName, tableName) {
-    const prefix = `datavo:data:${databaseName}:${tableName}:`;
-    const keysToRemove = [];
-    
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key.startsWith(prefix)) {
-            keysToRemove.push(key);
-        }
-    }
-    
-    keysToRemove.forEach(k => localStorage.removeItem(k));
+    StorageBackend.dropTable(databaseName, tableName);
 }
 
 export function dropDatabase(databaseName) {
-    const prefix = `datavo:data:${databaseName}:`;
-    const keysToRemove = [];
-    
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key.startsWith(prefix)) {
-            keysToRemove.push(key);
-        }
-    }
-    
-    keysToRemove.forEach(k => localStorage.removeItem(k));
+    StorageBackend.dropDatabase(databaseName);
 }
 
 export function readCatalog() {
-    return localStorage.getItem(getCatalogKey());
+    return StorageBackend.readCatalog();
 }
 
 export function writeCatalog(xml) {
-    localStorage.setItem(getCatalogKey(), xml);
+    StorageBackend.writeCatalog(xml);
 }
 
 export function readSelectedDatabase() {
-    return localStorage.getItem(getSelectedDatabaseKey());
+    return StorageBackend.readSelectedDatabase();
 }
 
 export function writeSelectedDatabase(databaseName) {
-    if (!databaseName) {
-        localStorage.removeItem(getSelectedDatabaseKey());
-        return;
-    }
-
-    localStorage.setItem(getSelectedDatabaseKey(), databaseName);
+    StorageBackend.writeSelectedDatabase(databaseName);
 }
 
 export function clearAllStorage() {
-    const keysToRemove = [];
+    StorageBackend.clearAllStorage();
+}
 
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("datavo:")) {
-            keysToRemove.push(key);
-        }
-    }
+export function getStorageBackendKind() {
+    return typeof StorageBackend.backendKind === "function"
+        ? StorageBackend.backendKind()
+        : StorageBackend.kind;
+}
 
-    keysToRemove.forEach(key => localStorage.removeItem(key));
+export function getStorageCapabilities() {
+    const capabilities = typeof StorageBackend.getCapabilities === "function"
+        ? StorageBackend.getCapabilities()
+        : {
+            storageBackend: getStorageBackendKind(),
+            mode: "unknown"
+        };
+
+    return JSON.stringify(capabilities);
 }
 
 globalThis.DataVoStorage = {
@@ -159,5 +330,7 @@ globalThis.DataVoStorage = {
     writeCatalog,
     readSelectedDatabase,
     writeSelectedDatabase,
-    clearAllStorage
+    clearAllStorage,
+    getStorageBackendKind,
+    getStorageCapabilities
 };
