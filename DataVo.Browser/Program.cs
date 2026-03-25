@@ -50,6 +50,12 @@ public partial class DataVoInterop
     [JSImport("globalThis.DataVoStorage.clearAllStorage")]
     internal static partial void ClearAllStorage();
 
+    [JSImport("globalThis.DataVoStorage.getStorageBackendKind")]
+    internal static partial string? GetStorageBackendKind();
+
+    [JSImport("globalThis.DataVoStorage.getStorageCapabilities")]
+    internal static partial string? GetStorageCapabilities();
+
     [JSExport]
     public static void Initialize()
     {
@@ -146,6 +152,42 @@ public partial class DataVoInterop
         ClearAllStorage();
         _engine?.Dispose();
         _engine = null;
+    }
+
+    [JSExport]
+    public static string RuntimeCapabilities()
+    {
+        string backendKind = "unknown";
+        string? capabilitiesJson = null;
+
+        try
+        {
+            backendKind = GetStorageBackendKind() ?? "unknown";
+        }
+        catch
+        {
+            // Keep unknown fallback for hosts without the capability API.
+        }
+
+        try
+        {
+            capabilitiesJson = GetStorageCapabilities();
+        }
+        catch
+        {
+            // Optional API - continue with minimum capability payload.
+        }
+
+        if (!string.IsNullOrWhiteSpace(capabilitiesJson))
+        {
+            return capabilitiesJson!;
+        }
+
+        return JsonConvert.SerializeObject(new
+        {
+            storageBackend = backendKind,
+            engineInitialized = _engine != null
+        });
     }
 
     private static object BuildLexerEnvironment()
