@@ -740,6 +740,126 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         }
     }
 
+    [Fact]
+    public async Task ConcurrentMutations_WithMultipleIndices_MaintainCrossIndexConsistency()
+    {
+        string table = $"MultiIndexUsers_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, FirstName VARCHAR(50), LastName VARCHAR(50), Email VARCHAR(100));");
+        
+        var idx1Result = ExecuteAndReturn($"CREATE INDEX idx_fname ON {table} (FirstName);");
+        Assert.False(idx1Result.IsError, string.Join(" | ", idx1Result.Messages));
+        
+        var idx2Result = ExecuteAndReturn($"CREATE INDEX idx_lname ON {table} (LastName);");
+        Assert.False(idx2Result.IsError, string.Join(" | ", idx2Result.Messages));
+        
+        var idx3Result = ExecuteAndReturn($"CREATE INDEX idx_email ON {table} (Email);");
+        Assert.False(idx3Result.IsError, string.Join(" | ", idx3Result.Messages));
+
+        const int seedRows = 150;
+        for (int i = 1; i <= seedRows; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, FirstName, LastName, Email) VALUES ({i}, 'First{i}', 'Last{i}', 'user{i}@test.com');");
+        }
+
+        var rng = new Random(20260336);
+        var deleteIds = Enumerable.Range(1, seedRows).OrderBy(_ => rng.Next()).Take(40).ToList();
+        var updateIds = Enumerable.Range(1, seedRows).Where(id => !deleteIds.Contains(id)).OrderBy(_ => rng.Next()).Take(40).ToList();
+        var insertIds = new List<int>();
+
+        var operations = new List<(string Kind, int Id)>(120);
+        foreach (int id in deleteIds)
+            operations.Add(("delete", id));
+        foreach (int id in updateIds)
+            operations.Add(("update", id));
+        for (int i = 0; i < 40; i++)
+        {
+            int id = 5000 + i;
+            insertIds.Add(id);
+            operations.Add(("insert", id));
+        }
+
+        operations = [.. operations.OrderBy(_ => rng.Next())];
+
+        Guid[] sessions = Enumerable.Range(0, operations.Count)
+            .Select(_ =>
+            {
+                Guid session = Guid.NewGuid();
+                ExecuteForSession(session, $"USE {TestDb};");
+                return session;
+            })
+            .ToArray();
+
+        await Task.WhenAll(operations.Select((op, i) => Task.Run(() =>
+        {
+            string sql = op.Kind switch
+            {
+                "delete" => $"DELETE FROM {table} WHERE Id = {op.Id};",
+                "update" => $"UPDATE {table} SET FirstName = 'UpFirst{op.Id}', LastName = 'UpLast{op.Id}', Email = 'updated{op.Id}@test.com' WHERE Id = {op.Id};",
+                "insert" => $"INSERT INTO {table} (Id, FirstName, LastName, Email) VALUES ({op.Id}, 'InsFirst{op.Id}', 'InsLast{op.Id}', 'inserted{op.Id}@test.com');",
+                _ => throw new InvalidOperationException($"Unknown multi-index operation: {op.Kind}")
+            };
+
+            ExecuteForSession(sessions[i], sql);
+        })));
+
+        int expectedCount = seedRows - deleteIds.Count + insertIds.Count;
+        var result = ExecuteAndReturn($"SELECT Id, FirstName, LastName, Email FROM {table};");
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(expectedCount, result.Data.Count);
+
+        // Verify deleted rows are absent from all indices
+        foreach (int deletedId in deleteIds)
+        {
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"First{deletedId}", "idx_fname", table, TestDb),
+                $"MultiIndex: Deleted FirstName key First{deletedId} should be absent from idx_fname.");
+            
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Last{deletedId}", "idx_lname", table, TestDb),
+                $"MultiIndex: Deleted LastName key Last{deletedId} should be absent from idx_lname.");
+            
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"user{deletedId}@test.com", "idx_email", table, TestDb),
+                $"MultiIndex: Deleted Email key user{deletedId}@test.com should be absent from idx_email.");
+        }
+
+        // Verify updated rows have new keys in all indices
+        foreach (int updatedId in updateIds)
+        {
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"First{updatedId}", "idx_fname", table, TestDb),
+                $"MultiIndex: Old FirstName key First{updatedId} should be absent after update.");
+            
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"UpFirst{updatedId}", "idx_fname", table, TestDb),
+                $"MultiIndex: Updated FirstName key UpFirst{updatedId} should be present in idx_fname.");
+            
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"UpLast{updatedId}", "idx_lname", table, TestDb),
+                $"MultiIndex: Updated LastName key UpLast{updatedId} should be present in idx_lname.");
+            
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"updated{updatedId}@test.com", "idx_email", table, TestDb),
+                $"MultiIndex: Updated Email key should be present in idx_email.");
+        }
+
+        // Verify inserted rows are present in all indices
+        foreach (int insertedId in insertIds)
+        {
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"InsFirst{insertedId}", "idx_fname", table, TestDb),
+                $"MultiIndex: Inserted FirstName key should be present in idx_fname.");
+            
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"InsLast{insertedId}", "idx_lname", table, TestDb),
+                $"MultiIndex: Inserted LastName key should be present in idx_lname.");
+            
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"inserted{insertedId}@test.com", "idx_email", table, TestDb),
+                $"MultiIndex: Inserted Email key should be present in idx_email.");
+        }
+    }
+
     private void ExecuteForSession(Guid session, string sql)
     {
         var results = ExecuteForSessionRaw(session, sql);
