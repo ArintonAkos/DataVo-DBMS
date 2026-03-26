@@ -55,7 +55,7 @@ public static class RowSerializer
             }
 
             writer.Write(false);
-            WriteNonNullValue(writer, column, value);
+            WriteNonNullValue(writer, column, (object)value);
         }
 
         writer.Flush();
@@ -133,9 +133,9 @@ public static class RowSerializer
     /// <summary>
     /// Writes a non-null value using the column type encoding.
     /// </summary>
-    private static void WriteNonNullValue(BinaryWriter writer, Column column, dynamic value)
+    private static void WriteNonNullValue(BinaryWriter writer, Column column, object value)
     {
-        object boxed = (object)value;
+        object boxed = value;
         string type = column.Type.ToUpperInvariant();
         if (type == "INT")
         {
@@ -146,7 +146,7 @@ public static class RowSerializer
         if (type == "FLOAT")
         {
             float floatValue = Convert.ToSingle(boxed);
-            writer.Write(floatValue);
+            writer.Write(BitConverter.SingleToInt32Bits(floatValue));
             return;
         }
 
@@ -172,7 +172,7 @@ public static class RowSerializer
             writer.Write(vector.Length);
             foreach (float item in vector)
             {
-                writer.Write(item);
+                writer.Write(BitConverter.SingleToInt32Bits(item));
             }
             return;
         }
@@ -193,7 +193,7 @@ public static class RowSerializer
 
         if (type == "FLOAT")
         {
-            return reader.ReadSingle();
+            return BitConverter.Int32BitsToSingle(reader.ReadInt32());
         }
 
         if (type == "BIT")
@@ -217,7 +217,7 @@ public static class RowSerializer
             float[] vector = new float[count];
             for (int i = 0; i < count; i++)
             {
-                vector[i] = reader.ReadSingle();
+                vector[i] = BitConverter.Int32BitsToSingle(reader.ReadInt32());
             }
 
             return vector;
