@@ -1,6 +1,6 @@
 # SQL -> Vector -> WASM Phase Status
 
-_Last updated: 2026-03-25_ (session: strict parity enforcement pass + runtime insert-path blocker isolated)
+_Last updated: 2026-03-26_ (session: strict parity fix completed via WASM-safe float serialization)
 
 This status table tracks the active multi-phase plan execution in one place.
 Percentages are practical delivery estimates (implementation + test confidence), not formal completion gates.
@@ -19,7 +19,7 @@ Percentages are practical delivery estimates (implementation + test confidence),
 | 3.4   | ANN indexing (HNSW)         |     90 |          10 | Strongly implemented; final production hardening/tuning still ongoing.                                                                                                                                                                                                                                |
 | 4.1   | WASM runtime baseline       |     95 |           5 | Browser runtime works and is testable.                                                                                                                                                                                                                                                                |
 | 4.2   | Browser storage abstraction |     90 |          10 | Worker/fallback abstraction is implemented; remaining cleanup and stabilization.                                                                                                                                                                                                                      |
-| 4.3   | Persistent browser storage  |     93 |           7 | Release crash path was stabilized and browser flow passes in Release with worker runtime checks plus stable CRUD result-shape assertions. Strict parity mode now enforces backend-kind stability and row-value parity assertions (`Alice`/`Bob`) under `DATAVO_STRICT_BROWSER_PARITY=1` (no diagnostic bypass). Current blocker isolated: inserts emit `Method not found: void System.IO.BinaryWriter.Write(single)` and persist no row payloads in strict path, causing hard parity failure. Added deterministic storage backend selection and diagnostics in JS interop; remaining work is resolving the runtime insert-path error so strict parity can pass consistently. |
+| 4.3   | Persistent browser storage  |     96 |           4 | Release crash path stabilized; browser flow now passes in Release under both default and strict parity modes. Strict gate (`DATAVO_STRICT_BROWSER_PARITY=1`) enforces backend-kind stability and row-value parity assertions (`Alice`/`Bob`) with no diagnostic bypass. Root runtime blocker fixed by replacing WASM-incompatible float binary writes with bit-pattern int serialization in `RowSerializer`, eliminating `BinaryWriter.Write(single)` insert-path failures. Remaining work: broader strict-mode repetitions/stress loops and worker-opfs parity coverage. |
 
 ## Deferred automation reminder
 
