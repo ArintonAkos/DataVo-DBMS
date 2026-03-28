@@ -1,4 +1,5 @@
 using System.IO.MemoryMappedFiles;
+using System.Threading;
 
 namespace DataVo.Core.BTree.BPlus;
 
@@ -14,6 +15,7 @@ public class BPlusDiskPager : IDisposable
     private readonly FileStream _fs;
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
+    private readonly ReaderWriterLockSlim _mapLatch = new(LockRecursionPolicy.NoRecursion);
     private const long InitialCapacity = 10L * 1024 * 1024; // 10MB init map
 
     /// <summary>
@@ -67,10 +69,18 @@ public class BPlusDiskPager : IDisposable
     /// </summary>
     public void ReadMetadata()
     {
-        byte[] meta = new byte[BPlusTreePage.PageSize];
-        _accessor!.ReadArray(0, meta, 0, BPlusTreePage.PageSize);
-        RootPageId = BitConverter.ToInt32(meta, 0);
-        NumPages = BitConverter.ToInt32(meta, 4);
+        _mapLatch.EnterReadLock();
+        try
+        {
+            byte[] meta = new byte[BPlusTreePage.PageSize];
+            _accessor!.ReadArray(0, meta, 0, BPlusTreePage.PageSize);
+            RootPageId = BitConverter.ToInt32(meta, 0);
+            NumPages = BitConverter.ToInt32(meta, 4);
+        }
+        finally
+        {
+            _mapLatch.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -78,12 +88,20 @@ public class BPlusDiskPager : IDisposable
     /// </summary>
     public void WriteMetadata()
     {
-        byte[] meta = new byte[BPlusTreePage.PageSize];
-        byte[] rootBytes = BitConverter.GetBytes(RootPageId);
-        byte[] numBytes = BitConverter.GetBytes(NumPages);
-        Array.Copy(rootBytes, 0, meta, 0, 4);
-        Array.Copy(numBytes, 0, meta, 4, 4);
-        _accessor!.WriteArray(0, meta, 0, BPlusTreePage.PageSize);
+        _mapLatch.EnterReadLock();
+        try
+        {
+            byte[] meta = new byte[BPlusTreePage.PageSize];
+            byte[] rootBytes = BitConverter.GetBytes(RootPageId);
+            byte[] numBytes = BitConverter.GetBytes(NumPages);
+            Array.Copy(rootBytes, 0, meta, 0, 4);
+            Array.Copy(numBytes, 0, meta, 4, 4);
+            _accessor!.WriteArray(0, meta, 0, BPlusTreePage.PageSize);
+        }
+        finally
+        {
+            _mapLatch.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -92,19 +110,35 @@ public class BPlusDiskPager : IDisposable
     /// <returns>The newly allocated page.</returns>
     public BPlusTreePage AllocatePage()
     {
-        int pageId = NumPages++;
-
-        long requiredOffset = (long)NumPages * BPlusTreePage.PageSize;
-        if (requiredOffset >= _accessor!.Capacity)
+        _mapLatch.EnterWriteLock();
+        try
         {
-            // Expand mapping by 10MB
-            GrowMap(requiredOffset + InitialCapacity);
-        }
+            int pageId = NumPages++;
 
-        var page = new BPlusTreePage { PageId = pageId };
-        WritePage(page);
-        WriteMetadata();
-        return page;
+            long requiredOffset = (long)NumPages * BPlusTreePage.PageSize;
+            if (requiredOffset >= _accessor!.Capacity)
+            {
+                // Expand mapping by 10MB
+                GrowMap(requiredOffset + InitialCapacity);
+            }
+
+            var page = new BPlusTreePage { PageId = pageId };
+            long offset = (long)page.PageId * BPlusTreePage.PageSize;
+            _accessor!.WriteArray(offset, page.Serialize(), 0, BPlusTreePage.PageSize);
+
+            byte[] meta = new byte[BPlusTreePage.PageSize];
+            byte[] rootBytes = BitConverter.GetBytes(RootPageId);
+            byte[] numBytes = BitConverter.GetBytes(NumPages);
+            Array.Copy(rootBytes, 0, meta, 0, 4);
+            Array.Copy(numBytes, 0, meta, 4, 4);
+            _accessor.WriteArray(0, meta, 0, BPlusTreePage.PageSize);
+
+            return page;
+        }
+        finally
+        {
+            _mapLatch.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -128,8 +162,16 @@ public class BPlusDiskPager : IDisposable
     /// <param name="page">The page to write.</param>
     public void WritePage(BPlusTreePage page)
     {
-        long offset = (long)page.PageId * BPlusTreePage.PageSize;
-        _accessor!.WriteArray(offset, page.Serialize(), 0, BPlusTreePage.PageSize);
+        _mapLatch.EnterReadLock();
+        try
+        {
+            long offset = (long)page.PageId * BPlusTreePage.PageSize;
+            _accessor!.WriteArray(offset, page.Serialize(), 0, BPlusTreePage.PageSize);
+        }
+        finally
+        {
+            _mapLatch.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -139,10 +181,18 @@ public class BPlusDiskPager : IDisposable
     /// <returns>The deserialized <see cref="BPlusTreePage"/>.</returns>
     public BPlusTreePage ReadPage(int pageId)
     {
-        long offset = (long)pageId * BPlusTreePage.PageSize;
-        byte[] data = new byte[BPlusTreePage.PageSize];
-        _accessor!.ReadArray(offset, data, 0, BPlusTreePage.PageSize);
-        return BPlusTreePage.Deserialize(data);
+        _mapLatch.EnterReadLock();
+        try
+        {
+            long offset = (long)pageId * BPlusTreePage.PageSize;
+            byte[] data = new byte[BPlusTreePage.PageSize];
+            _accessor!.ReadArray(offset, data, 0, BPlusTreePage.PageSize);
+            return BPlusTreePage.Deserialize(data);
+        }
+        finally
+        {
+            _mapLatch.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -150,10 +200,25 @@ public class BPlusDiskPager : IDisposable
     /// </summary>
     public void Dispose()
     {
-        WriteMetadata();
-        _accessor?.Flush();
-        _accessor?.Dispose();
-        _mmf?.Dispose();
-        _fs.Dispose();
+        _mapLatch.EnterWriteLock();
+        try
+        {
+            byte[] meta = new byte[BPlusTreePage.PageSize];
+            byte[] rootBytes = BitConverter.GetBytes(RootPageId);
+            byte[] numBytes = BitConverter.GetBytes(NumPages);
+            Array.Copy(rootBytes, 0, meta, 0, 4);
+            Array.Copy(numBytes, 0, meta, 4, 4);
+            _accessor!.WriteArray(0, meta, 0, BPlusTreePage.PageSize);
+
+            _accessor.Flush();
+            _accessor.Dispose();
+            _mmf?.Dispose();
+            _fs.Dispose();
+        }
+        finally
+        {
+            _mapLatch.ExitWriteLock();
+            _mapLatch.Dispose();
+        }
     }
 }
