@@ -32,7 +32,7 @@ internal class Commit : BaseDbAction
 
             string databaseName = GetDatabaseName(session);
 
-            var lockedTables = AcquireWriteLocks(databaseName, context);
+            var lockedResources = AcquireWriteLocks(databaseName, context);
             DataVoConfig config = Context.Config;
             bool walEnabled = config.StorageMode == StorageMode.Disk && config.WalEnabled;
             WalEntry? walEntry = walEnabled ? WalEntry.FromTransactionContext(databaseName, context) : null;
@@ -54,7 +54,7 @@ internal class Commit : BaseDbAction
             }
             finally
             {
-                ReleaseWriteLocks(databaseName, lockedTables);
+                ReleaseWriteLocks(databaseName, lockedResources);
             }
 
             Messages.Add("Transaction committed.");
@@ -76,8 +76,14 @@ internal class Commit : BaseDbAction
         FlushUpdates(context, databaseName, activeEngine);
     }
 
-    private static List<string> AcquireWriteLocks(string databaseName, TransactionContext context)
+    private readonly record struct LockedResources(
+        List<string> TableNames,
+        Dictionary<string, List<long>> RowWriteLocksByTable);
+
+    private static LockedResources AcquireWriteLocks(string databaseName, TransactionContext context)
     {
+        var lockManager = Runtime.DataVoEngine.Current().LockManager;
+
         var tableNames = context.InsertedRows.Keys
             .Concat(context.DeletedRowIds.Keys)
             .Concat(context.UpdatedRows.Keys)
@@ -85,19 +91,44 @@ internal class Commit : BaseDbAction
             .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var rowWriteLocksByTable = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
+
         foreach (string tableName in tableNames)
         {
-            Runtime.DataVoEngine.Current().LockManager.AcquireWriteLock(databaseName, tableName);
+            lockManager.AcquireWriteLock(databaseName, tableName);
+
+            IEnumerable<long> rowIds = Enumerable.Empty<long>();
+            if (context.DeletedRowIds.TryGetValue(tableName, out HashSet<long>? deleted))
+            {
+                rowIds = rowIds.Concat(deleted);
+            }
+
+            if (context.UpdatedRows.TryGetValue(tableName, out List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>? updated))
+            {
+                rowIds = rowIds.Concat(updated.Select(entry => entry.RowId));
+            }
+
+            List<long> acquiredRowLocks = lockManager.AcquireRowWriteLocks(databaseName, tableName, rowIds);
+            rowWriteLocksByTable[tableName] = acquiredRowLocks;
         }
 
-        return tableNames;
+        return new LockedResources(tableNames, rowWriteLocksByTable);
     }
 
-    private static void ReleaseWriteLocks(string databaseName, List<string> tableNames)
+    private static void ReleaseWriteLocks(string databaseName, LockedResources lockedResources)
     {
-        for (int i = tableNames.Count - 1; i >= 0; i--)
+        var lockManager = Runtime.DataVoEngine.Current().LockManager;
+
+        for (int i = lockedResources.TableNames.Count - 1; i >= 0; i--)
         {
-            Runtime.DataVoEngine.Current().LockManager.ReleaseWriteLock(databaseName, tableNames[i]);
+            string tableName = lockedResources.TableNames[i];
+
+            if (lockedResources.RowWriteLocksByTable.TryGetValue(tableName, out List<long>? rowLocks) && rowLocks.Count > 0)
+            {
+                lockManager.ReleaseRowWriteLocks(databaseName, tableName, rowLocks);
+            }
+
+            lockManager.ReleaseWriteLock(databaseName, tableName);
         }
     }
 
