@@ -1,4 +1,5 @@
 using DataVo.Core.Transactions;
+using System.Reflection;
 
 namespace DataVo.Tests.Transactions;
 
@@ -12,11 +13,13 @@ public class LockManagerRowLevelTests
         const string table = "users";
 
         var gate = new ManualResetEventSlim(false);
+        var start = new ManualResetEventSlim(false);
         var firstAcquired = new ManualResetEventSlim(false);
         var secondAcquired = new ManualResetEventSlim(false);
 
         Task first = Task.Run(() =>
         {
+            start.Wait();
             locks.AcquireRowWriteLock(db, table, 1);
             try
             {
@@ -31,6 +34,7 @@ public class LockManagerRowLevelTests
 
         Task second = Task.Run(() =>
         {
+            start.Wait();
             locks.AcquireRowWriteLock(db, table, 2);
             try
             {
@@ -43,7 +47,9 @@ public class LockManagerRowLevelTests
             }
         });
 
-        bool bothAcquired = firstAcquired.Wait(250) && secondAcquired.Wait(250);
+        start.Set();
+
+        bool bothAcquired = firstAcquired.Wait(1000) && secondAcquired.Wait(1000);
         Assert.True(bothAcquired, "Expected both disjoint row write locks to be acquired without serialization.");
 
         gate.Set();
@@ -86,6 +92,22 @@ public class LockManagerRowLevelTests
         Assert.True(writerDone.Wait(1000), "Writer should finish after acquiring and releasing row write lock.");
 
         await writer;
+    }
+
+    [Fact]
+    public void RowLocks_AreCleanedUp_WhenNoLongerInUse()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+
+        for (int i = 1; i <= 32; i++)
+        {
+            locks.AcquireRowReadLock(db, table, i);
+            locks.ReleaseRowReadLock(db, table, i);
+        }
+
+        Assert.Equal(0, GetPrivateRowLockCount(locks));
     }
 
     [Fact]
@@ -150,5 +172,22 @@ public class LockManagerRowLevelTests
 
         Assert.Same(all, completed);
         await all;
+    }
+
+    private static int GetPrivateRowLockCount(LockManager locks)
+    {
+        var field = typeof(LockManager).GetField("_rowLocks", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+
+        object? value = field!.GetValue(locks);
+        Assert.NotNull(value);
+
+        var countProperty = value!.GetType().GetProperty("Count");
+        Assert.NotNull(countProperty);
+
+        object? count = countProperty!.GetValue(value);
+        Assert.NotNull(count);
+
+        return (int)count!;
     }
 }
