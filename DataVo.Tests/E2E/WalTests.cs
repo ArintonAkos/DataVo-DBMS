@@ -1,6 +1,7 @@
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E;
 
@@ -18,6 +19,7 @@ public class DiskWalTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("WAL file and entry checkpoint persistence validation is disk-specific and outside browser SQL scenario parity")]
     public void Commit_WritesCheckpointedEntryToWal()
     {
         string table = $"WalCommit_{Guid.NewGuid():N}";
@@ -38,6 +40,7 @@ public class DiskWalTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("WAL replay + engine reinitialization flow depends on disk WAL internals not representable in browser SQL fixture model")]
     public void Recovery_ReplaysUncheckpointedWalEntries()
     {
         string table = $"WalRecovery_{Guid.NewGuid():N}";
@@ -79,6 +82,7 @@ public class DiskWalTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("WAL truncation threshold behavior depends on local file state not represented in browser fixture model")]
     public void CheckpointThreshold_TruncatesCheckpointedWalEntries()
     {
         var thresholdConfig = new DataVoConfig
@@ -120,6 +124,7 @@ public class InMemoryWalTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("In-memory WAL file absence assertion is filesystem-specific and not a browser SQL scenario")]
     public void InMemoryMode_DoesNotCreateWalFile()
     {
         string walPath = Config.ResolveWalFilePath();

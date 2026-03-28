@@ -1,8 +1,10 @@
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E;
 
+[BrowserTranslateIgnore("DataVoContext.SearchNearest API behavior is validated outside SQL scenario translation")]
 public class VectorContextTests
 {
     [Fact]

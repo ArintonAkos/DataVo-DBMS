@@ -6,9 +6,11 @@
   "scripts": {
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
+    "test:browser:generate": "bash ../scripts/generate-wasm-browser-scenarios.sh",
     "test:browser:install": "playwright install chromium",
-    "test:browser": "playwright test",
-    "test:browser:strict": "DATAVO_STRICT_BROWSER_PARITY=1 playwright test"
+    "test:browser": "npm run test:browser:generate && playwright test",
+    "test:browser:strict": "npm run test:browser:generate && DATAVO_STRICT_BROWSER_PARITY=1 playwright test",
+    "test:browser:strict:stress": "DATAVO_STRICT_BROWSER_PARITY=1 playwright test -g \"strict parity remains stable across repeated loops|strict parity backend matrix\""
   },
   "keywords": [],
   "author": "",

@@ -1,4 +1,5 @@
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E.DQL;
 
@@ -832,6 +833,7 @@ public class VolcanoExternalSpillExecutionTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Configuration clone behavior assertion; not a browser SQL scenario")]
     public void ExternalSpillConfig_IsPreservedByTestBaseClone()
     {
         Assert.True(Config.EnableVolcanoExternalSortSpill);

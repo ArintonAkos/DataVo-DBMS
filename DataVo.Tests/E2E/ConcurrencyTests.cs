@@ -2,12 +2,14 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E;
 
 public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbName) : SqlExecutionTestsBase(config, testDbName)
 {
     [Fact]
+    [BrowserTranslateIgnore("Lock-manager concurrency orchestration test; not expressible as a single browser SQL scenario")]
     public async Task ConcurrentSelects_OnSameTable_DoNotBlockEachOther()
     {
         string table = $"Readers_{Guid.NewGuid():N}";
@@ -58,6 +60,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Session-lock orchestration test is not representable as a single generated browser SQL scenario")]
     public async Task AutoCommitWrite_WaitsForExistingWriteLock_ThenSucceeds()
     {
         string table = $"Writers_{Guid.NewGuid():N}";
@@ -107,6 +110,7 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Multi-session concurrent write orchestration is outside generated browser SQL fixture scope")]
     public async Task ConcurrentAutoCommitWrites_DoNotCorruptTable()
     {
         string table = $"BulkWrites_{Guid.NewGuid():N}";
