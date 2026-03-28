@@ -7,6 +7,7 @@ using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Parser.DML;
@@ -52,14 +53,15 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
                 try
                 {
-                    ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+                    List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
+                    ExecuteDelete(revalidatedRowIds, _model.TableName, databaseName);
+
+                    Messages.Add($"Rows affected: {revalidatedRowIds.Count}");
                 }
                 finally
                 {
                     Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
                 }
-
-                Messages.Add($"Rows affected: {toBeDeleted.Count}");
             }
         }
         catch (Exception ex)
@@ -67,6 +69,60 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             Logger.Error(ex.Message);
             Messages.Add(ex.Message);
         }
+    }
+
+    private List<long> RevalidateRowsAfterLock(
+        string databaseName,
+        IReadOnlyList<long> originalCandidates,
+        IReadOnlyList<long> lockCoveredRowIds)
+    {
+        if (originalCandidates.Count == 0)
+        {
+            return [];
+        }
+
+        HashSet<long> lockCovered = [.. lockCoveredRowIds];
+        HashSet<long> originalSet = [.. originalCandidates];
+
+        ExpressionNode whereExpression = _model.WhereStatement.GetExpression()!;
+        if (IsTriviallyTrueWhere(whereExpression))
+        {
+            return [.. originalCandidates];
+        }
+
+        return _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName)
+            .Where(rowId => originalSet.Contains(rowId))
+            .Where(rowId => rowId <= 0 || lockCovered.Count == 0 || lockCovered.Contains(rowId))
+            .ToList();
+    }
+
+    private static bool IsTriviallyTrueWhere(ExpressionNode expression)
+    {
+        if (expression is LiteralNode literal)
+        {
+            string? value = literal.Value?.ToString();
+            return value != null && value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is ColumnRefNode columnRef)
+        {
+            return columnRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is ResolvedColumnRefNode resolved)
+        {
+            return resolved.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is BinaryExpressionNode binary
+            && binary.Operator == "="
+            && binary.Left is LiteralNode leftLiteral
+            && binary.Right is LiteralNode rightLiteral)
+        {
+            return string.Equals(leftLiteral.Value?.ToString(), rightLiteral.Value?.ToString(), StringComparison.Ordinal);
+        }
+
+        return false;
     }
 
     private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName)
