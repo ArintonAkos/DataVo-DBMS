@@ -11,7 +11,8 @@ namespace DataVo.Core.Parser.Transactions;
 internal class BeginTransaction : BaseDbAction
 {
     /// <summary>
-    /// Opens a new transaction context for the given session.
+    /// Opens a new transaction context for the given session with MVCC support.
+    /// Allocates a transaction ID and creates a snapshot for snapshot isolation.
     /// If a transaction is already active, the error is caught and reported to the caller.
     /// </summary>
     /// <param name="session">The unique session identifier.</param>
@@ -19,7 +20,8 @@ internal class BeginTransaction : BaseDbAction
     {
         try
         {
-            Transactions.Begin(session);
+            var allocator = Engine.TransactionIdAllocator;
+            Transactions.Begin(session, allocator);
             Messages.Add("Transaction started.");
         }
         catch (Exception ex)
