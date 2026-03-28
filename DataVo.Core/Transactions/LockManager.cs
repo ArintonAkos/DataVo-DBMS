@@ -12,12 +12,24 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 public sealed class LockManager
 {
+    private sealed class RowLockEntry
+    {
+        public RowLockEntry()
+        {
+            Lock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
+        }
+
+        public ReaderWriterLockSlim Lock { get; }
+        public int ActiveUsers;
+    }
+
     private static readonly Lazy<LockManager> _instance = new(() => new LockManager());
 
     private readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _tableLocks =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _rowLocks =
+    private readonly ConcurrentDictionary<string, RowLockEntry> _rowLocks =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _rowLockLifecycleSync = new();
 
     public static LockManager Instance => _instance.Value;
 
@@ -52,22 +64,40 @@ public sealed class LockManager
 
     public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
     {
-        GetRowLock(databaseName, tableName, rowId).EnterReadLock();
+        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        RowLockEntry rowLock = RetainRowLock(rowKey);
+        rowLock.Lock.EnterReadLock();
     }
 
     public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
     {
-        GetRowLock(databaseName, tableName, rowId).EnterWriteLock();
+        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        RowLockEntry rowLock = RetainRowLock(rowKey);
+        rowLock.Lock.EnterWriteLock();
     }
 
     public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
     {
-        GetRowLock(databaseName, tableName, rowId).ExitReadLock();
+        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
+        {
+            throw new SynchronizationLockException($"Row read lock not found for key '{rowKey}'.");
+        }
+
+        rowLock.Lock.ExitReadLock();
+        ReleaseRowLock(rowKey, rowLock);
     }
 
     public void ReleaseRowWriteLock(string databaseName, string tableName, long rowId)
     {
-        GetRowLock(databaseName, tableName, rowId).ExitWriteLock();
+        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
+        {
+            throw new SynchronizationLockException($"Row write lock not found for key '{rowKey}'.");
+        }
+
+        rowLock.Lock.ExitWriteLock();
+        ReleaseRowLock(rowKey, rowLock);
     }
 
     public List<long> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
@@ -140,10 +170,35 @@ public sealed class LockManager
         return _tableLocks.GetOrAdd(tableKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
     }
 
-    private ReaderWriterLockSlim GetRowLock(string databaseName, string tableName, long rowId)
+    private RowLockEntry RetainRowLock(string rowKey)
     {
-        string rowKey = BuildRowKey(databaseName, tableName, rowId);
-        return _rowLocks.GetOrAdd(rowKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+        lock (_rowLockLifecycleSync)
+        {
+            RowLockEntry rowLock = _rowLocks.GetOrAdd(rowKey, _ => new RowLockEntry());
+            rowLock.ActiveUsers++;
+            return rowLock;
+        }
+    }
+
+    private void ReleaseRowLock(string rowKey, RowLockEntry rowLock)
+    {
+        lock (_rowLockLifecycleSync)
+        {
+            if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? current)
+                || !ReferenceEquals(current, rowLock))
+            {
+                return;
+            }
+
+            current.ActiveUsers--;
+            if (current.ActiveUsers > 0)
+            {
+                return;
+            }
+
+            _rowLocks.TryRemove(rowKey, out _);
+            current.Lock.Dispose();
+        }
     }
 
     private static List<long> BuildOrderedRowLockList(IEnumerable<long> rowIds)
