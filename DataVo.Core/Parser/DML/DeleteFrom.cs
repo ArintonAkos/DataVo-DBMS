@@ -53,7 +53,16 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                         return;
                     }
 
-                    ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+                    List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
+                    try
+                    {
+                        ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
+                    }
+                    finally
+                    {
+                        Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
+                    }
+
                     Messages.Add($"Rows affected: {toBeDeleted.Count}");
                 }
                 finally

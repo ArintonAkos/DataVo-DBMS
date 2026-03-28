@@ -76,13 +76,24 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                         return;
                     }
 
-                    var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+                    List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
+                    int rowsAffected;
 
-                    (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+                    try
+                    {
+                        var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
 
-                    ExecuteUpdate(newRows, oldRowIds, databaseName);
+                        (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
-                    Messages.Add($"Rows affected: {newRows.Count}");
+                        ExecuteUpdate(newRows, oldRowIds, databaseName);
+                        rowsAffected = newRows.Count;
+                    }
+                    finally
+                    {
+                        Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
+                    }
+
+                    Messages.Add($"Rows affected: {rowsAffected}");
                 }
                 finally
                 {
