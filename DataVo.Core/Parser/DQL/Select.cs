@@ -38,7 +38,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
     private string? _activeDatabaseName;
 
     private readonly record struct LockedReadResources(
-        List<string> TableNames,
         Dictionary<string, List<long>> RowReadLocksByTable);
 
     private enum LogicalPlanKind
@@ -264,29 +263,28 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         foreach (string tableName in tableNames)
         {
-            Locks.AcquireReadLock(databaseName, tableName);
-
             IEnumerable<long> rowIds = GetKnownRowIdsForTable(tableName);
             List<long> rowLocks = Locks.AcquireRowReadLocks(databaseName, tableName, rowIds);
             rowReadLocksByTable[tableName] = rowLocks;
         }
 
-        return new LockedReadResources(tableNames, rowReadLocksByTable);
+        return new LockedReadResources(rowReadLocksByTable);
     }
 
     private void ReleaseReadLocks(string databaseName, LockedReadResources lockedResources)
     {
-        for (int i = lockedResources.TableNames.Count - 1; i >= 0; i--)
+        List<string> tableNames = [.. lockedResources.RowReadLocksByTable.Keys
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)];
+
+        for (int i = tableNames.Count - 1; i >= 0; i--)
         {
-            string tableName = lockedResources.TableNames[i];
+            string tableName = tableNames[i];
 
             if (lockedResources.RowReadLocksByTable.TryGetValue(tableName, out List<long>? rowLocks)
                 && rowLocks.Count > 0)
             {
                 Locks.ReleaseRowReadLocks(databaseName, tableName, rowLocks);
             }
-
-            Locks.ReleaseReadLock(databaseName, tableName);
         }
     }
 
