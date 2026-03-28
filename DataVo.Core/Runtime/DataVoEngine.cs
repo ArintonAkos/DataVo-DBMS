@@ -1,6 +1,7 @@
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
+using DataVo.Core.MVCC;
 using PolyIndexManager = DataVo.Core.Indexing.IndexManager;
 
 namespace DataVo.Core.Runtime;
@@ -36,6 +37,7 @@ public sealed class DataVoEngine : IDisposable
         TransactionManager = new TransactionManager();
         LockManager = new LockManager();
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
+        VersionStorageManager = new VersionStorageManager();
     }
 
     public Guid Id { get; }
@@ -74,6 +76,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the primary polymorphic index manager owned by this engine.
     /// </summary>
     public PolyIndexManager IndexManager { get; }
+
+    /// <summary>
+    /// Gets the version storage manager owned by this engine for MVCC support.
+    /// </summary>
+    public VersionStorageManager VersionStorageManager { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
@@ -158,5 +165,6 @@ public sealed class DataVoEngine : IDisposable
     public void Dispose()
     {
         IndexManager.Dispose();
+        VersionStorageManager.Dispose();
     }
 }
