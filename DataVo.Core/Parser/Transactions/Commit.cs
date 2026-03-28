@@ -77,15 +77,19 @@ internal class Commit : BaseDbAction
     }
 
     private readonly record struct LockedResources(
-        List<string> TableNames,
+        List<string> TableWriteLocks,
         Dictionary<string, List<long>> RowWriteLocksByTable);
 
     private static LockedResources AcquireWriteLocks(string databaseName, TransactionContext context)
     {
         var lockManager = Runtime.DataVoEngine.Current().LockManager;
 
-        var tableNames = context.InsertedRows.Keys
-            .Concat(context.DeletedRowIds.Keys)
+        var tableWriteLocks = context.InsertedRows.Keys
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var rowLockTables = context.DeletedRowIds.Keys
             .Concat(context.UpdatedRows.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
@@ -93,10 +97,13 @@ internal class Commit : BaseDbAction
 
         var rowWriteLocksByTable = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (string tableName in tableNames)
+        foreach (string tableName in tableWriteLocks)
         {
             lockManager.AcquireWriteLock(databaseName, tableName);
+        }
 
+        foreach (string tableName in rowLockTables)
+        {
             IEnumerable<long> rowIds = Enumerable.Empty<long>();
             if (context.DeletedRowIds.TryGetValue(tableName, out HashSet<long>? deleted))
             {
@@ -112,22 +119,29 @@ internal class Commit : BaseDbAction
             rowWriteLocksByTable[tableName] = acquiredRowLocks;
         }
 
-        return new LockedResources(tableNames, rowWriteLocksByTable);
+        return new LockedResources(tableWriteLocks, rowWriteLocksByTable);
     }
 
     private static void ReleaseWriteLocks(string databaseName, LockedResources lockedResources)
     {
         var lockManager = Runtime.DataVoEngine.Current().LockManager;
 
-        for (int i = lockedResources.TableNames.Count - 1; i >= 0; i--)
+        List<string> rowLockTables = [.. lockedResources.RowWriteLocksByTable.Keys
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)];
+
+        for (int i = rowLockTables.Count - 1; i >= 0; i--)
         {
-            string tableName = lockedResources.TableNames[i];
+            string tableName = rowLockTables[i];
 
             if (lockedResources.RowWriteLocksByTable.TryGetValue(tableName, out List<long>? rowLocks) && rowLocks.Count > 0)
             {
                 lockManager.ReleaseRowWriteLocks(databaseName, tableName, rowLocks);
             }
+        }
 
+        for (int i = lockedResources.TableWriteLocks.Count - 1; i >= 0; i--)
+        {
+            string tableName = lockedResources.TableWriteLocks[i];
             lockManager.ReleaseWriteLock(databaseName, tableName);
         }
     }
