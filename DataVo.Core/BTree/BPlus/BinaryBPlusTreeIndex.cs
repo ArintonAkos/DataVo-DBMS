@@ -1,4 +1,6 @@
 using DataVo.Core.BTree.Core;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace DataVo.Core.BTree.BPlus;
 
@@ -12,6 +14,8 @@ namespace DataVo.Core.BTree.BPlus;
 public class BinaryBPlusTreeIndex : IIndex, IDisposable
 {
     private BPlusDiskPager _pager = null!;
+    private readonly object _writerGate = new();
+    private readonly ConcurrentDictionary<int, ReaderWriterLockSlim> _pageLatches = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BinaryBPlusTreeIndex"/> class.
@@ -27,39 +31,58 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     {
         byte[] encodedKey = IndexKeyEncoder.Encode(key);
 
-        if (_pager.RootPageId == -1)
+        lock (_writerGate)
         {
-            var root = _pager.AllocatePage();
-            root.IsLeaf = true;
-            root.NextPageId = -1;
-            root.Keys[0] = encodedKey;
-            root.SetValue(0, rowId);
-            root.NumKeys = 1;
+            if (_pager.RootPageId == -1)
+            {
+                var root = _pager.AllocatePage();
+                EnsurePageLatch(root.PageId);
 
-            _pager.RootPageId = root.PageId;
-            _pager.WritePage(root);
-            _pager.WriteMetadata();
-            return;
-        }
+                using (EnterWriteLatch(root.PageId))
+                {
+                    root.IsLeaf = true;
+                    root.NextPageId = -1;
+                    root.Keys[0] = encodedKey;
+                    root.SetValue(0, rowId);
+                    root.NumKeys = 1;
 
-        var rootPage = _pager.ReadPage(_pager.RootPageId);
-        if (rootPage.NumKeys == BPlusTreePage.MaxKeys)
-        {
-            var newRoot = _pager.AllocatePage();
-            newRoot.IsLeaf = false;
-            newRoot.Children[0] = rootPage.PageId;
+                    _pager.RootPageId = root.PageId;
+                    _pager.WritePage(root);
+                    _pager.WriteMetadata();
+                }
 
-            SplitChild(newRoot, 0, rootPage);
+                return;
+            }
 
-            _pager.RootPageId = newRoot.PageId;
-            _pager.WritePage(newRoot);
-            _pager.WriteMetadata();
+            int rootPageId = _pager.RootPageId;
+            EnsurePageLatch(rootPageId);
 
-            InsertNonFull(newRoot, encodedKey, rowId);
-        }
-        else
-        {
-            InsertNonFull(rootPage, encodedKey, rowId);
+            IDisposable? rootLatch = EnterWriteLatch(rootPageId);
+            BPlusTreePage rootPage = _pager.ReadPage(rootPageId);
+
+            if (rootPage.NumKeys == BPlusTreePage.MaxKeys)
+            {
+                var newRoot = _pager.AllocatePage();
+                EnsurePageLatch(newRoot.PageId);
+
+                using (EnterWriteLatch(newRoot.PageId))
+                {
+                    newRoot.IsLeaf = false;
+                    newRoot.Children[0] = rootPage.PageId;
+
+                    SplitChild(newRoot, 0, rootPage);
+
+                    _pager.RootPageId = newRoot.PageId;
+                    _pager.WritePage(newRoot);
+                    _pager.WriteMetadata();
+                }
+
+                rootLatch.Dispose();
+                rootLatch = EnterWriteLatch(newRoot.PageId);
+                rootPage = _pager.ReadPage(newRoot.PageId);
+            }
+
+            InsertNonFullWithLatchCrabbing(rootPage, rootLatch, encodedKey, rowId);
         }
     }
 
@@ -69,42 +92,68 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     /// <param name="node">The page that will receive the insertion.</param>
     /// <param name="key">The encoded key to insert.</param>
     /// <param name="value">The row ID associated with the key.</param>
-    private void InsertNonFull(BPlusTreePage node, byte[] key, long value)
+    private void InsertNonFullWithLatchCrabbing(BPlusTreePage node, IDisposable nodeWriteLatch, byte[] key, long value)
     {
-        if (node.IsLeaf)
-        {
-            int insertIdx = node.FindIndex(key);
-            // Shift right to make room
-            for (int j = node.NumKeys - 1; j >= insertIdx; j--)
-            {
-                node.Keys[j + 1] = node.Keys[j];
-                node.SetValue(j + 1, node.GetValue(j));
-            }
-            node.Keys[insertIdx] = key;
-            node.SetValue(insertIdx, value);
-            node.NumKeys++;
-            _pager.WritePage(node);
-        }
-        else
-        {
-            int i = node.FindIndex(key);
-            if (i < node.NumKeys && IndexKeyEncoder.CompareKeys(node.Keys[i], key) == 0)
-            {
-                i++; // For B+Tree, internal node keys are <= right child's min
-            }
+        BPlusTreePage current = node;
+        IDisposable currentLatch = nodeWriteLatch;
 
-            var child = _pager.ReadPage(node.Children[i]);
-
-            if (child.NumKeys == BPlusTreePage.MaxKeys)
+        try
+        {
+            while (true)
             {
-                SplitChild(node, i, child);
-                if (IndexKeyEncoder.CompareKeys(key, node.Keys[i]) >= 0)
+                if (current.IsLeaf)
                 {
-                    i++;
+                    int insertIdx = current.FindIndex(key);
+                    // Shift right to make room
+                    for (int j = current.NumKeys - 1; j >= insertIdx; j--)
+                    {
+                        current.Keys[j + 1] = current.Keys[j];
+                        current.SetValue(j + 1, current.GetValue(j));
+                    }
+
+                    current.Keys[insertIdx] = key;
+                    current.SetValue(insertIdx, value);
+                    current.NumKeys++;
+                    _pager.WritePage(current);
+                    return;
                 }
-                child = _pager.ReadPage(node.Children[i]);
+
+                int i = current.FindIndex(key);
+                if (i < current.NumKeys && IndexKeyEncoder.CompareKeys(current.Keys[i], key) == 0)
+                {
+                    i++; // For B+Tree, internal node keys are <= right child's min
+                }
+
+                int childPageId = current.Children[i];
+                EnsurePageLatch(childPageId);
+                IDisposable childLatch = EnterWriteLatch(childPageId);
+                BPlusTreePage child = _pager.ReadPage(childPageId);
+
+                if (child.NumKeys == BPlusTreePage.MaxKeys)
+                {
+                    SplitChild(current, i, child);
+
+                    childLatch.Dispose();
+
+                    if (IndexKeyEncoder.CompareKeys(key, current.Keys[i]) >= 0)
+                    {
+                        i++;
+                    }
+
+                    childPageId = current.Children[i];
+                    EnsurePageLatch(childPageId);
+                    childLatch = EnterWriteLatch(childPageId);
+                    child = _pager.ReadPage(childPageId);
+                }
+
+                currentLatch.Dispose();
+                currentLatch = childLatch;
+                current = child;
             }
-            InsertNonFull(child, key, value);
+        }
+        finally
+        {
+            currentLatch.Dispose();
         }
     }
 
@@ -117,6 +166,7 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     private void SplitChild(BPlusTreePage parent, int i, BPlusTreePage child)
     {
         var newNode = _pager.AllocatePage();
+        EnsurePageLatch(newNode.PageId);
         newNode.IsLeaf = child.IsLeaf;
 
         int t = BPlusTreePage.T;
@@ -189,46 +239,70 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
         if (_pager.RootPageId == -1) return results;
 
         byte[] encodedKey = IndexKeyEncoder.Encode(key);
-        var current = _pager.ReadPage(_pager.RootPageId);
+        int rootPageId = _pager.RootPageId;
+        EnsurePageLatch(rootPageId);
 
-        // Traverse to the FIRST LEAF where key COULD exist
-        while (!current.IsLeaf)
-        {
-            int i = current.FindIndex(encodedKey);
-            current = _pager.ReadPage(current.Children[i]);
-        }
+        IDisposable? currentLatch = EnterReadLatch(rootPageId);
+        BPlusTreePage current = _pager.ReadPage(rootPageId);
 
-        // Scan linearly across linked leaves
-        bool stop = false;
-        while (current != null && !stop)
+        try
         {
-            for (int i = 0; i < current.NumKeys; i++)
+            // Traverse to the first leaf where key could exist using read-latch coupling.
+            while (!current.IsLeaf)
             {
-                int cmp = IndexKeyEncoder.CompareKeys(current.Keys[i], encodedKey);
-                if (cmp == 0)
+                int i = current.FindIndex(encodedKey);
+                int childPageId = current.Children[i];
+
+                EnsurePageLatch(childPageId);
+                IDisposable childLatch = EnterReadLatch(childPageId);
+                BPlusTreePage child = _pager.ReadPage(childPageId);
+
+                currentLatch.Dispose();
+                currentLatch = childLatch;
+                current = child;
+            }
+
+            // Scan linearly across linked leaves using latch crabbing across sibling leaves.
+            bool stop = false;
+            while (!stop)
+            {
+                for (int i = 0; i < current.NumKeys; i++)
                 {
-                    long val = current.GetValue(i);
-                    if (val != 0) // 0 = empty/tombstone sentinel
+                    int cmp = IndexKeyEncoder.CompareKeys(current.Keys[i], encodedKey);
+                    if (cmp == 0)
                     {
-                        results.Add(val);
+                        long val = current.GetValue(i);
+                        if (val != 0) // 0 = empty/tombstone sentinel
+                        {
+                            results.Add(val);
+                        }
+                    }
+                    else if (cmp > 0)
+                    {
+                        // Sorted: any key > target means we're done
+                        stop = true;
+                        break;
                     }
                 }
-                else if (cmp > 0)
+
+                if (stop || current.NextPageId == -1)
                 {
-                    // Sorted: any key > target means we're done
-                    stop = true;
                     break;
                 }
-            }
 
-            if (!stop && current.NextPageId != -1)
-            {
-                current = _pager.ReadPage(current.NextPageId);
+                int nextLeafPageId = current.NextPageId;
+                EnsurePageLatch(nextLeafPageId);
+                IDisposable nextLeafLatch = EnterReadLatch(nextLeafPageId);
+                BPlusTreePage nextLeaf = _pager.ReadPage(nextLeafPageId);
+
+                currentLatch.Dispose();
+                currentLatch = nextLeafLatch;
+                current = nextLeaf;
             }
-            else
-            {
-                current = null!;
-            }
+        }
+        finally
+        {
+            currentLatch.Dispose();
         }
 
         return results;
@@ -243,6 +317,8 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     {
         for (int i = 1; i < _pager.NumPages; i++)
         {
+            EnsurePageLatch(i);
+            using var pageLatch = EnterReadLatch(i);
             var page = _pager.ReadPage(i);
             if (!page.IsLeaf) continue;
 
@@ -274,23 +350,29 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
         if (_pager == null) return;
         var idsSet = new HashSet<long>(valuesToDelete);
 
-        for (int i = 1; i < _pager.NumPages; i++)
+        lock (_writerGate)
         {
-            var page = _pager.ReadPage(i);
-            if (!page.IsLeaf) continue;
+            for (int i = 1; i < _pager.NumPages; i++)
+            {
+                EnsurePageLatch(i);
+                using var pageLatch = EnterWriteLatch(i);
 
-            bool pageChanged = false;
-            for (int k = 0; k < page.NumKeys; k++)
-            {
-                if (idsSet.Contains(page.GetValue(k)))
+                var page = _pager.ReadPage(i);
+                if (!page.IsLeaf) continue;
+
+                bool pageChanged = false;
+                for (int k = 0; k < page.NumKeys; k++)
                 {
-                    page.SetValue(k, 0); // Tombstone with sentinel 0
-                    pageChanged = true;
+                    if (idsSet.Contains(page.GetValue(k)))
+                    {
+                        page.SetValue(k, 0); // Tombstone with sentinel 0
+                        pageChanged = true;
+                    }
                 }
-            }
-            if (pageChanged)
-            {
-                _pager.WritePage(page);
+                if (pageChanged)
+                {
+                    _pager.WritePage(page);
+                }
             }
         }
     }
@@ -318,6 +400,7 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     public void Load(string filePath)
     {
         _pager = new BPlusDiskPager(filePath);
+        _pageLatches.Clear();
     }
 
     /// <summary>
@@ -339,5 +422,63 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     {
         _pager?.Dispose();
         _pager = null!;
+
+        foreach (ReaderWriterLockSlim latch in _pageLatches.Values)
+        {
+            latch.Dispose();
+        }
+
+        _pageLatches.Clear();
+    }
+
+    private void EnsurePageLatch(int pageId)
+    {
+        _pageLatches.GetOrAdd(pageId, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+    }
+
+    private IDisposable EnterReadLatch(int pageId)
+    {
+        ReaderWriterLockSlim pageLatch = _pageLatches.GetOrAdd(pageId, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+        pageLatch.EnterReadLock();
+        return new PageLatchScope(pageLatch, isWrite: false);
+    }
+
+    private IDisposable EnterWriteLatch(int pageId)
+    {
+        ReaderWriterLockSlim pageLatch = _pageLatches.GetOrAdd(pageId, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+        pageLatch.EnterWriteLock();
+        return new PageLatchScope(pageLatch, isWrite: true);
+    }
+
+    private sealed class PageLatchScope : IDisposable
+    {
+        private readonly ReaderWriterLockSlim _latch;
+        private readonly bool _isWrite;
+        private bool _disposed;
+
+        public PageLatchScope(ReaderWriterLockSlim latch, bool isWrite)
+        {
+            _latch = latch;
+            _isWrite = isWrite;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_isWrite)
+            {
+                _latch.ExitWriteLock();
+            }
+            else
+            {
+                _latch.ExitReadLock();
+            }
+
+            _disposed = true;
+        }
     }
 }
