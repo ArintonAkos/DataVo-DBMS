@@ -87,4 +87,22 @@ public class LockManagerRowLevelTests
 
         writer.Wait(1000);
     }
+
+    [Fact]
+    public void AcquireRowReadLocks_ReturnsDeterministicOrderedDistinctIds()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+
+        List<long> acquired = locks.AcquireRowReadLocks(db, table, [5, 2, 2, 9, 5, 3]);
+        try
+        {
+            Assert.Equal([2, 3, 5, 9], acquired);
+        }
+        finally
+        {
+            locks.ReleaseRowReadLocks(db, table, acquired);
+        }
+    }
 }
