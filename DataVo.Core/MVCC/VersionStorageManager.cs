@@ -1,5 +1,5 @@
-using DataVo.Core.StorageEngine;
 using System.Collections.Concurrent;
+using DataVo.Core.StorageEngine;
 
 namespace DataVo.Core.MVCC;
 
@@ -159,6 +159,42 @@ public class VersionStorageManager
         {
             _versionLock.ExitWriteLock();
         }
+    }
+
+    /// <summary>
+    /// Removes version metadata entries whose backing physical rows no longer exist.
+    /// </summary>
+    public int VacuumTable(string databaseName, StorageContext storageContext)
+    {
+        if (storageContext == null)
+        {
+            throw new ArgumentNullException(nameof(storageContext));
+        }
+
+        int removed = 0;
+
+        _versionLock.EnterWriteLock();
+        try
+        {
+            var keysToRemove = _versionMetadata.Keys
+                .Where(k => k.Item1 == databaseName)
+                .Where(k => !storageContext.TableContainsRow(k.Item3, k.Item2, databaseName))
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                if (_versionMetadata.TryRemove(key, out _))
+                {
+                    removed++;
+                }
+            }
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+
+        return removed;
     }
 
     /// <summary>

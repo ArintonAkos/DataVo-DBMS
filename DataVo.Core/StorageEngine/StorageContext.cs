@@ -4,6 +4,7 @@ using DataVo.Core.StorageEngine.Backends;
 using DataVo.Core.StorageEngine.Backends.Abstractions;
 using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
+using DataVo.Core.MVCC;
 
 namespace DataVo.Core.StorageEngine;
 
@@ -198,9 +199,47 @@ public class StorageContext(DataVoConfig config)
     public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(List<long>? rowIds, string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        return rowIds != null
+        Dictionary<long, Dictionary<string, dynamic>> rows = rowIds != null
             ? ReadRowsById(rowIds, tableName, databaseName, selectedColumns)
             : ReadAllRows(tableName, databaseName, selectedColumns);
+
+        return ApplyMvccVisibilityFilter(rows, tableName, databaseName);
+    }
+
+    private static Dictionary<long, Dictionary<string, dynamic>> ApplyMvccVisibilityFilter(
+        Dictionary<long, Dictionary<string, dynamic>> rows,
+        string tableName,
+        string databaseName)
+    {
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot == null || rows.Count == 0)
+        {
+            return rows;
+        }
+
+        DataVoEngine engine = DataVoEngine.Current();
+        List<long> toRemove = [];
+
+        foreach (long rowId in rows.Keys)
+        {
+            RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+            if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
+            {
+                toRemove.Add(rowId);
+            }
+        }
+
+        if (toRemove.Count == 0)
+        {
+            return rows;
+        }
+
+        foreach (long rowId in toRemove)
+        {
+            rows.Remove(rowId);
+        }
+
+        return rows;
     }
 
     /// <summary>

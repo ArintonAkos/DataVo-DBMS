@@ -12,6 +12,7 @@ using DataVo.Core.Parser.Statements.Mechanism;
 using DataVo.Core.Services;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
+using DataVo.Core.MVCC;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -43,6 +44,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             _ = GetMaterializedSetExpressions(databaseName);
 
             var txContext = Transactions.GetContext(session);
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
                 List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
@@ -53,6 +55,11 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
 
                 var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+
+                foreach (long rowId in toBeUpdated)
+                {
+                    MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "UPDATE");
+                }
 
                 (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
@@ -88,7 +95,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     {
                         (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
 
-                        ExecuteUpdate(newRows, oldRowIds, databaseName);
+                        foreach (long rowId in oldRowIds)
+                        {
+                            MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "UPDATE");
+                        }
+
+                        ExecuteUpdate(newRows, oldRowIds, databaseName, statementTxId);
                         rowsAffected = newRows.Count;
                     }
                 }
@@ -407,7 +419,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Old records are deleted, and new records are inserted with identical RowIds or newly allocated ones.
     /// Index structures are purged and updated as well.
     /// </summary>
-    private void ExecuteUpdate(List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds, string databaseName)
+    private void ExecuteUpdate(List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds, string databaseName, long statementTxId)
     {
         var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
 
@@ -437,7 +449,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         for (int i = 0; i < newRows.Count; i++)
         {
             var newRow = newRows[i];
+            long oldRowId = oldRowIds[i];
             long assignedRowId = Context.InsertOneIntoTable(newRow, _model.TableName, databaseName);
+            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId);
 
             foreach (var index in indexFiles)
             {

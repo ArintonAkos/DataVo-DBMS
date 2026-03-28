@@ -111,6 +111,7 @@ public class SnapshotVisibilityEvaluatorTests
 
         manager.AllocateVersion("testdb", "testtable", rowId: 1, xmin: 50);  // visible
         manager.AllocateVersion("testdb", "testtable", rowId: 2, xmin: 150); // future
+        manager.AllocateVersion("testdb", "testtable", rowId: 3, xmin: 10);
         manager.MarkVersionObsolete("testdb", "testtable", rowId: 3, xmax: 80); // deleted
 
         var rowIds = new[] { 1L, 2L, 3L };

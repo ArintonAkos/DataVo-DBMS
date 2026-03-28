@@ -52,10 +52,16 @@ public struct RowVersion
     /// </summary>
     public bool IsVisibleTo(TransactionSnapshot snapshot)
     {
-        // If xmin >= snapshot's read timestamp, this version wasn't created when the snapshot was taken
-        if (Xmin >= snapshot.SnapshotTimestamp)
+        // Versions from future transactions are not visible.
+        if (Xmin > snapshot.SnapshotTimestamp)
         {
             return false;
+        }
+
+        // Read-your-own-writes: versions created by the current transaction are visible.
+        if (Xmin == snapshot.TransactionId)
+        {
+            return Xmax != snapshot.TransactionId;
         }
 
         // If xmax is 0, the version is still valid (not deleted/superseded)
@@ -64,8 +70,14 @@ public struct RowVersion
             return true;
         }
 
+        // If current transaction deleted/superseded it, it is not visible to itself.
+        if (Xmax == snapshot.TransactionId)
+        {
+            return false;
+        }
+
         // If xmax >= snapshot's read timestamp, it wasn't deleted when snapshot was taken
-        if (Xmax >= snapshot.SnapshotTimestamp)
+        if (Xmax > snapshot.SnapshotTimestamp)
         {
             return true;
         }
