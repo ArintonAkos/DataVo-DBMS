@@ -5,7 +5,7 @@ namespace DataVo.Tests.Transactions;
 public class LockManagerRowLevelTests
 {
     [Fact]
-    public void RowWriteLocks_DifferentRows_DoNotSerialize()
+    public async Task RowWriteLocks_DifferentRows_DoNotSerialize()
     {
         var locks = new LockManager();
         const string db = "db";
@@ -47,11 +47,11 @@ public class LockManagerRowLevelTests
         Assert.True(bothAcquired, "Expected both disjoint row write locks to be acquired without serialization.");
 
         gate.Set();
-        Task.WaitAll(first, second);
+        await Task.WhenAll(first, second);
     }
 
     [Fact]
-    public void RowWriteLock_BlocksBehindRowReadLock_OnSameRow()
+    public async Task RowWriteLock_BlocksBehindRowReadLock_OnSameRow()
     {
         var locks = new LockManager();
         const string db = "db";
@@ -85,7 +85,7 @@ public class LockManagerRowLevelTests
         Assert.True(writerAcquired.Wait(1000), "Writer should acquire after reader releases lock.");
         Assert.True(writerDone.Wait(1000), "Writer should finish after acquiring and releasing row write lock.");
 
-        writer.Wait(1000);
+        await writer;
     }
 
     [Fact]
@@ -104,5 +104,51 @@ public class LockManagerRowLevelTests
         {
             locks.ReleaseRowReadLocks(db, table, acquired);
         }
+    }
+
+    [Fact]
+    public async Task AcquireRowWriteLocks_OpposingOrders_AvoidsDeadlock()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+
+        var start = new ManualResetEventSlim(false);
+
+        Task first = Task.Run(() =>
+        {
+            start.Wait();
+            List<long> acquired = locks.AcquireRowWriteLocks(db, table, new long[] { 2, 1 });
+            try
+            {
+                Thread.Sleep(40);
+            }
+            finally
+            {
+                locks.ReleaseRowWriteLocks(db, table, acquired);
+            }
+        });
+
+        Task second = Task.Run(() =>
+        {
+            start.Wait();
+            List<long> acquired = locks.AcquireRowWriteLocks(db, table, new long[] { 1, 2 });
+            try
+            {
+                Thread.Sleep(40);
+            }
+            finally
+            {
+                locks.ReleaseRowWriteLocks(db, table, acquired);
+            }
+        });
+
+        start.Set();
+
+        Task all = Task.WhenAll(first, second);
+        Task completed = await Task.WhenAny(all, Task.Delay(1500));
+
+        Assert.Same(all, completed);
+        await all;
     }
 }
