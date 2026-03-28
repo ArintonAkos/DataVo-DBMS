@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
+using DataVo.Core.MVCC;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -38,11 +39,12 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             string databaseName = GetDatabaseName(session);
 
             var txContext = Transactions.GetContext(session);
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             int rowsAffected;
 
             if (txContext != null)
             {
-                rowsAffected = ProcessAndInsertTableRows(databaseName, txContext);
+                rowsAffected = ProcessAndInsertTableRows(databaseName, txContext, statementTxId);
             }
             else
             {
@@ -50,7 +52,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
                 try
                 {
-                    rowsAffected = ProcessAndInsertTableRows(databaseName, null);
+                    rowsAffected = ProcessAndInsertTableRows(databaseName, null, statementTxId);
                 }
                 finally
                 {
@@ -72,8 +74,10 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// Verifies SQL constraints (UNIQUE, PRIMARY, FOREIGN KEY) dynamically during mapping.
     /// </summary>
     /// <param name="databaseName">The current active context database name.</param>
+    /// <param name="txContext">The active transaction context, or <c>null</c> for auto-commit mode.</param>
+    /// <param name="statementTxId">The MVCC transaction identifier for this statement.</param>
     /// <returns>The total number of rows securely pushed to the database.</returns>
-    private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext)
+    private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext, long statementTxId)
     {
         List<string> primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
         List<string> uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
@@ -123,7 +127,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                     }
                     else
                     {
-                        MakeInsertion(rowDict, indexFiles, databaseName);
+                        MakeInsertion(rowDict, indexFiles, databaseName, statementTxId);
                     }
                     rowsAffected++;
                 }
@@ -325,9 +329,10 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// <summary>
     /// Dispatches the final, validated row structure to the physical storage engine and linked B-Tree indexes.
     /// </summary>
-    private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, string databaseName)
+    private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, string databaseName, long statementTxId)
     {
         long assignedRowId = Context.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
+        MvccCoordinator.RegisterInsertVersion(Engine, databaseName, _model.TableName, assignedRowId, statementTxId);
 
         foreach (var index in indexFiles)
         {

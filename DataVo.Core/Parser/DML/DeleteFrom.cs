@@ -9,6 +9,7 @@ using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Transactions;
+using DataVo.Core.MVCC;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -23,6 +24,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             string databaseName = GetDatabaseName(session);
 
             var txContext = Transactions.GetContext(session);
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
                 List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
@@ -35,6 +37,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                 foreach (long rowId in toBeDeleted)
                 {
+                    MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "DELETE");
                     txContext.BufferDelete(_model.TableName, rowId);
                 }
 
@@ -54,7 +57,12 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 try
                 {
                     List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
-                    ExecuteDelete(revalidatedRowIds, _model.TableName, databaseName);
+                    foreach (long rowId in revalidatedRowIds)
+                    {
+                        MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "DELETE");
+                    }
+
+                    ExecuteDelete(revalidatedRowIds, _model.TableName, databaseName, statementTxId);
 
                     Messages.Add($"Rows affected: {revalidatedRowIds.Count}");
                 }
@@ -125,7 +133,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         return false;
     }
 
-    private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName)
+    private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName, long statementTxId)
     {
         if (toBeDeleted.Count == 0) return;
 
@@ -179,10 +187,15 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                     if (childFk.OnDeleteAction == "CASCADE")
                     {
                         // Cascade delete: recursively clean up children -> grandchildren etc.
-                        ExecuteDelete(childRowIds, childFk.ChildTable, databaseName);
+                        ExecuteDelete(childRowIds, childFk.ChildTable, databaseName, statementTxId);
                     }
                 }
             }
+        }
+
+        foreach (long rowId in toBeDeleted)
+        {
+            MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId);
         }
 
         // Delete entries from the main table

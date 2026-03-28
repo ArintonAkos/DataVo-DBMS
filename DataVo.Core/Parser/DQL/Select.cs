@@ -14,6 +14,7 @@ using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Execution.Volcano;
+using DataVo.Core.MVCC;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
@@ -36,6 +37,7 @@ namespace DataVo.Core.Parser.DQL;
 internal class Select(SelectStatement ast) : BaseDbAction
 {
     private string? _activeDatabaseName;
+    private TransactionSnapshot? _activeSnapshot;
 
     private readonly record struct LockedReadResources(
         Dictionary<string, List<long>> RowReadLocksByTable);
@@ -157,6 +159,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
             string database = ValidateDatabase(session);
             _activeDatabaseName = database;
 
+            TransactionContext? txContext = Transactions.GetContext(session);
+            _activeSnapshot = txContext?.Snapshot;
+
+            using IDisposable mvccScope = MvccExecutionScope.PushSnapshot(_activeSnapshot);
+
             LockedReadResources lockedResources = AcquireReadLocks(database);
 
             try
@@ -258,6 +265,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private LockedReadResources AcquireReadLocks(string databaseName)
     {
+        if (_activeSnapshot != null)
+        {
+            // MVCC snapshot reads are non-blocking; visibility is enforced by snapshot filtering.
+            return new LockedReadResources(new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase));
+        }
+
         var tableNames = GetReferencedTableNames();
         var rowReadLocksByTable = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
 
