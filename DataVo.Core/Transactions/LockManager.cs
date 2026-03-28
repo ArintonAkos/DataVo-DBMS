@@ -16,6 +16,8 @@ public sealed class LockManager
 
     private readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _tableLocks =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _rowLocks =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public static LockManager Instance => _instance.Value;
 
@@ -30,56 +32,110 @@ public sealed class LockManager
 
     public void AcquireReadLock(string databaseName, string tableName)
     {
-        GetLock(databaseName, tableName).EnterReadLock();
+        GetTableLock(databaseName, tableName).EnterReadLock();
     }
 
     public void AcquireWriteLock(string databaseName, string tableName)
     {
-        GetLock(databaseName, tableName).EnterWriteLock();
+        GetTableLock(databaseName, tableName).EnterWriteLock();
     }
 
     public void ReleaseReadLock(string databaseName, string tableName)
     {
-        GetLock(databaseName, tableName).ExitReadLock();
+        GetTableLock(databaseName, tableName).ExitReadLock();
     }
 
     public void ReleaseWriteLock(string databaseName, string tableName)
     {
-        GetLock(databaseName, tableName).ExitWriteLock();
+        GetTableLock(databaseName, tableName).ExitWriteLock();
+    }
+
+    public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
+    {
+        GetRowLock(databaseName, tableName, rowId).EnterReadLock();
+    }
+
+    public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
+    {
+        GetRowLock(databaseName, tableName, rowId).EnterWriteLock();
+    }
+
+    public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
+    {
+        GetRowLock(databaseName, tableName, rowId).ExitReadLock();
+    }
+
+    public void ReleaseRowWriteLock(string databaseName, string tableName, long rowId)
+    {
+        GetRowLock(databaseName, tableName, rowId).ExitWriteLock();
+    }
+
+    public List<long> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
+    {
+        List<long> ordered = rowIds
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            AcquireRowWriteLock(databaseName, tableName, ordered[i]);
+        }
+
+        return ordered;
+    }
+
+    public void ReleaseRowWriteLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
+    {
+        for (int i = rowIds.Count - 1; i >= 0; i--)
+        {
+            ReleaseRowWriteLock(databaseName, tableName, rowIds[i]);
+        }
     }
 
     public void AcquireReadLock(string tableKey)
     {
-        GetLock(tableKey).EnterReadLock();
+        GetTableLock(tableKey).EnterReadLock();
     }
 
     public void AcquireWriteLock(string tableKey)
     {
-        GetLock(tableKey).EnterWriteLock();
+        GetTableLock(tableKey).EnterWriteLock();
     }
 
     public void ReleaseReadLock(string tableKey)
     {
-        GetLock(tableKey).ExitReadLock();
+        GetTableLock(tableKey).ExitReadLock();
     }
 
     public void ReleaseWriteLock(string tableKey)
     {
-        GetLock(tableKey).ExitWriteLock();
+        GetTableLock(tableKey).ExitWriteLock();
     }
 
-    private ReaderWriterLockSlim GetLock(string databaseName, string tableName)
+    private ReaderWriterLockSlim GetTableLock(string databaseName, string tableName)
     {
-        return GetLock(BuildTableKey(databaseName, tableName));
+        return GetTableLock(BuildTableKey(databaseName, tableName));
     }
 
-    private ReaderWriterLockSlim GetLock(string tableKey)
+    private ReaderWriterLockSlim GetTableLock(string tableKey)
     {
         return _tableLocks.GetOrAdd(tableKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+    }
+
+    private ReaderWriterLockSlim GetRowLock(string databaseName, string tableName, long rowId)
+    {
+        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        return _rowLocks.GetOrAdd(rowKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
     }
 
     private static string BuildTableKey(string databaseName, string tableName)
     {
         return $"{databaseName}.{tableName}";
+    }
+
+    private static string BuildRowKey(string databaseName, string tableName, long rowId)
+    {
+        return $"{databaseName}.{tableName}#row:{rowId}";
     }
 }
