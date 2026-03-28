@@ -72,10 +72,7 @@ public sealed class LockManager
 
     public List<long> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
     {
-        List<long> ordered = rowIds
-            .Distinct()
-            .OrderBy(id => id)
-            .ToList();
+        List<long> ordered = BuildOrderedRowLockList(rowIds);
 
         for (int i = 0; i < ordered.Count; i++)
         {
@@ -90,6 +87,26 @@ public sealed class LockManager
         for (int i = rowIds.Count - 1; i >= 0; i--)
         {
             ReleaseRowWriteLock(databaseName, tableName, rowIds[i]);
+        }
+    }
+
+    public List<long> AcquireRowReadLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
+    {
+        List<long> ordered = BuildOrderedRowLockList(rowIds);
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            AcquireRowReadLock(databaseName, tableName, ordered[i]);
+        }
+
+        return ordered;
+    }
+
+    public void ReleaseRowReadLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
+    {
+        for (int i = rowIds.Count - 1; i >= 0; i--)
+        {
+            ReleaseRowReadLock(databaseName, tableName, rowIds[i]);
         }
     }
 
@@ -127,6 +144,15 @@ public sealed class LockManager
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         return _rowLocks.GetOrAdd(rowKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+    }
+
+    private static List<long> BuildOrderedRowLockList(IEnumerable<long> rowIds)
+    {
+        return rowIds
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
     }
 
     private static string BuildTableKey(string databaseName, string tableName)

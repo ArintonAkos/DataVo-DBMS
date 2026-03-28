@@ -35,6 +35,7 @@ namespace DataVo.Core.Parser.DQL;
 /// <param name="ast">The parsed <see cref="SelectStatement"/> AST node representing the SELECT query.</param>
 internal class Select(SelectStatement ast) : BaseDbAction
 {
+    private string? _activeDatabaseName;
     private enum LogicalPlanKind
     {
         LegacyWhereJoin,
@@ -150,6 +151,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
 
             string database = ValidateDatabase(session);
+            _activeDatabaseName = database;
 
             var lockedTables = AcquireReadLocks(database);
 
@@ -718,17 +720,20 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable BuildLegacyNoJoinScan()
     {
-        var sourceRows = _model.FromTable!.TableContentValues!
-            .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
-            .ToList();
+        return ExecuteWithSingleTableRowReadLocks(() =>
+        {
+            var sourceRows = _model.FromTable!.TableContentValues!
+                .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+                .ToList();
 
-        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(new TableScanOperator(sourceRows));
+            List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(new TableScanOperator(sourceRows));
 
-        var listResult = rows
-            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
-            .ToList();
+            var listResult = rows
+                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                .ToList();
 
-        return new ListedTable(listResult);
+            return new ListedTable(listResult);
+        });
     }
 
     private bool ShouldUseVolcanoInnerJoinPath(ExpressionNode? whereExpression)
@@ -1942,20 +1947,23 @@ internal class Select(SelectStatement ast) : BaseDbAction
     {
         if (!_model.JoinStatement.ContainsJoin())
         {
-            var sourceRows = _model.FromTable!.TableContentValues!
-                .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
-                .ToList();
-
-            IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), (ExecutionRow row) =>
+            return ExecuteWithSingleTableRowReadLocks(() =>
             {
-                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values)));
-                return EvaluatePredicate(whereExpression, joinedRow);
-            });
+                var sourceRows = _model.FromTable!.TableContentValues!
+                    .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
+                    .ToList();
 
-            List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
-            return new ListedTable(filteredRows
-                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
-                .ToList());
+                IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), (ExecutionRow row) =>
+                {
+                    var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values)));
+                    return EvaluatePredicate(whereExpression, joinedRow);
+                });
+
+                List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
+                return new ListedTable(filteredRows
+                    .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                    .ToList());
+            });
         }
 
         ListedTable source = _model.JoinStatement.ContainsJoin()
@@ -1973,21 +1981,23 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateNoJoinWithVolcano(ExpressionNode? whereExpression)
     {
-        Logger.Info("Planner: using Volcano no-join pipeline.");
+        return ExecuteWithSingleTableRowReadLocks(() =>
+        {
+            Logger.Info("Planner: using Volcano no-join pipeline.");
 
-        var sourceRows = _model.FromTable!.TableContentValues!
-            .Select((record, index) =>
-            {
-                var row = record.ToRow();
-                var values = new Dictionary<string, dynamic>();
-                foreach (string key in row.Keys)
+            var sourceRows = _model.FromTable!.TableContentValues!
+                .Select((record, index) =>
                 {
-                    values[key] = row[key];
-                }
+                    var row = record.ToRow();
+                    var values = new Dictionary<string, dynamic>();
+                    foreach (string key in row.Keys)
+                    {
+                        values[key] = row[key];
+                    }
 
-                return new ExecutionRow(index + 1, values);
-            })
-            .ToList();
+                    return new ExecutionRow(index + 1, values);
+                })
+                .ToList();
 
         IQueryOperator root = new TableScanOperator(sourceRows);
         if (whereExpression != null)
@@ -2123,7 +2133,36 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 .ToList();
         }
 
-        return new ListedTable(listed);
+            return new ListedTable(listed);
+        });
+    }
+
+    private ListedTable ExecuteWithSingleTableRowReadLocks(Func<ListedTable> action)
+    {
+        string? databaseName = _activeDatabaseName;
+        TableDetail? fromTable = _model.FromTable;
+
+        if (string.IsNullOrWhiteSpace(databaseName)
+            || fromTable?.TableContentValues == null
+            || _model.JoinStatement.ContainsJoin())
+        {
+            return action();
+        }
+
+        List<long> rowIds = fromTable.TableContentValues
+            .Select(record => record.RowId)
+            .Where(rowId => rowId > 0)
+            .ToList();
+
+        List<long> readLocks = Locks.AcquireRowReadLocks(databaseName, fromTable.TableName, rowIds);
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            Locks.ReleaseRowReadLocks(databaseName, fromTable.TableName, readLocks);
+        }
     }
 
     private ListedTable EvaluateInnerJoinWithVolcano(ExpressionNode? whereExpression)
