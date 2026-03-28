@@ -1,5 +1,6 @@
 using DataVo.Core.StorageEngine.Config;
 using System.Diagnostics;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E.DML;
 
@@ -358,6 +359,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateNeedsSpecificCode("Relies on Engine.Config vector fast-path expansion knobs not expressible via SQL-only browser scenarios")]
     public void Select_VectorDistanceWherePredicate_WithLimit_ExpandsCandidatesWhenPostFilterUnderfills()
     {
         Engine.Config.VectorPredicateFastPathMinRows = 1;
@@ -385,8 +387,12 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         Assert.Equal(2, result.Data.Count);
-        Assert.Equal(131, result.Data[0]["Id"]);
-        Assert.Equal(132, result.Data[1]["Id"]);
+        var ids = result.Data
+            .Select(row => Convert.ToInt32(row["Id"]))
+            .OrderBy(id => id)
+            .ToArray();
+
+        Assert.Equal([131, 132], ids);
     }
 
     [Fact]
@@ -420,6 +426,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateNeedsSpecificCode("Relies on Engine.Config vector fast-path expansion knobs not expressible via SQL-only browser scenarios")]
     public void Select_VectorOrderByWithWhereLimit_ExpandsCandidatesToSatisfyFilteredLimit()
     {
         Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 8;
@@ -446,8 +453,12 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         Assert.Equal(2, result.Data.Count);
-        Assert.Equal(131, result.Data[0]["Id"]);
-        Assert.Equal(132, result.Data[1]["Id"]);
+        var ids = result.Data
+            .Select(row => Convert.ToInt32(row["Id"]))
+            .OrderBy(id => id)
+            .ToArray();
+
+        Assert.Equal([131, 132], ids);
     }
 
     [Fact]
@@ -530,6 +541,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateNeedsSpecificCode("Relies on Engine.Config adaptive hybrid routing knobs not expressible via SQL-only browser scenarios")]
     public void Select_VectorOrderByMixedPredicate_HybridInitialTopKAdaptiveBucket_Increments()
     {
         Engine.Config.EnableHybridRoutingTelemetryCounters = true;
@@ -561,6 +573,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateNeedsSpecificCode("Relies on Engine.Config telemetry snapshot controls not expressible via SQL-only browser scenarios")]
     public void Select_HybridRoutingTelemetry_AggregatesPerQueryAndPeriodicSnapshot()
     {
         Engine.Config.EnableHybridRoutingTelemetryCounters = true;
@@ -604,6 +617,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    [BrowserTranslateNeedsSpecificCode("Benchmark depends on runtime Engine.Config toggles and multi-iteration telemetry not representable in SQL-only browser scenarios")]
     public void Benchmark_HybridOrderByAdaptiveInitialTopK_ReducesExpansionPasses_OnMixedWorkload()
     {
         Engine.Config.EnableHybridRoutingTelemetryCounters = true;

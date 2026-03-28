@@ -2,6 +2,7 @@ using System.Diagnostics;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 using Xunit.Abstractions;
 
 namespace DataVo.Tests.E2E;
@@ -93,6 +94,7 @@ public class SqlBenchmarkTests : IDisposable
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Benchmark + engine reinitialization flow is not a deterministic browser SQL parity scenario")]
     public void E2E_Benchmark_WhereFilter_InMemory_vs_Disk()
     {
         int employees = 5_000;

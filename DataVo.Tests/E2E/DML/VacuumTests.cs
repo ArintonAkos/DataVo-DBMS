@@ -1,4 +1,5 @@
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E.DML;
 
@@ -31,6 +32,7 @@ public abstract class VacuumTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Multi-step vacuum + duplicate-key assertion flow is not faithfully representable as a single generated browser SQL assertion")]
     public void Vacuum_IndexesStillWork_PKDuplicateCheck()
     {
         Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR)");

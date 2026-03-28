@@ -1,10 +1,12 @@
 using DataVo.Data;
 using DataVo.EntityFrameworkCore;
+using DataVo.Tests.BrowserParity;
 using Microsoft.EntityFrameworkCore;
 using System.IO;
 
 namespace DataVo.Tests.EntityFramework;
 
+[BrowserTranslateIgnore("EntityFramework provider-bridge tests rely on EF runtime semantics and are validated in .NET lane.")]
 public class DataVoEfCrudBridgeTests
 {
     [Fact]

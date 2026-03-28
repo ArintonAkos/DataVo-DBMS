@@ -1,4 +1,5 @@
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E.DML;
 
@@ -60,6 +61,7 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Smoke insert without terminal query assertion; covered by other browser insert parity tests")]
     public void Insert_WithoutSpecifyingColumns_AssumesAll()
     {
         Execute("CREATE TABLE Products (Id INT, Name VARCHAR, Price FLOAT)");
@@ -67,6 +69,7 @@ public abstract class InsertTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Exception-shape assertion around direct Execute throw is not modeled in SQL scenario fixtures")]
     public void Insert_MismatchedColumnsAndValues_Throws()
     {
         Execute("CREATE TABLE Products (Id INT, Name VARCHAR, Price FLOAT)");
