@@ -77,12 +77,20 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 try
                 {
-                    var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+                    List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
+                    Dictionary<long, Dictionary<string, dynamic>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
 
-                    (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+                    if (revalidatedRows.Count == 0)
+                    {
+                        rowsAffected = 0;
+                    }
+                    else
+                    {
+                        (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
 
-                    ExecuteUpdate(newRows, oldRowIds, databaseName);
-                    rowsAffected = newRows.Count;
+                        ExecuteUpdate(newRows, oldRowIds, databaseName);
+                        rowsAffected = newRows.Count;
+                    }
                 }
                 finally
                 {
@@ -108,6 +116,60 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         var whereStatement = new Statements.Where(_model.WhereExpression);
         return whereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+    }
+
+    private List<long> RevalidateRowsAfterLock(
+        string databaseName,
+        IReadOnlyList<long> lockCoveredRowIds,
+        IReadOnlyList<long> originalCandidates)
+    {
+        if (originalCandidates.Count == 0)
+        {
+            return [];
+        }
+
+        if (IsTriviallyTrueWhere(_model.WhereExpression))
+        {
+            return [.. originalCandidates];
+        }
+
+        HashSet<long> lockCovered = [.. lockCoveredRowIds];
+
+        HashSet<long> originalSet = [.. originalCandidates];
+
+        return IdentifyRowsToUpdate(databaseName)
+            .Where(rowId => originalSet.Contains(rowId))
+            .Where(rowId => rowId <= 0 || lockCovered.Count == 0 || lockCovered.Contains(rowId))
+            .ToList();
+    }
+
+    private static bool IsTriviallyTrueWhere(ExpressionNode expression)
+    {
+        if (expression is LiteralNode literal)
+        {
+            string? value = literal.Value?.ToString();
+            return value != null && value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is ColumnRefNode columnRef)
+        {
+            return columnRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is ResolvedColumnRefNode resolved)
+        {
+            return resolved.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (expression is BinaryExpressionNode binary
+            && binary.Operator == "="
+            && binary.Left is LiteralNode leftLiteral
+            && binary.Right is LiteralNode rightLiteral)
+        {
+            return string.Equals(leftLiteral.Value?.ToString(), rightLiteral.Value?.ToString(), StringComparison.Ordinal);
+        }
+
+        return false;
     }
 
     private Dictionary<string, ExpressionNode> GetMaterializedSetExpressions(string databaseName)
@@ -184,6 +246,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Applies the SQL SET expressions to the old row to calculate its new modified state.
     /// </summary>
     /// <param name="oldRow">The original row record.</param>
+    /// <param name="databaseName">The active database name used for subquery materialization in SET expressions.</param>
     /// <returns>A new dictionary representing the modified row.</returns>
     private Dictionary<string, dynamic> ApplySetExpressions(Dictionary<string, dynamic> oldRow, string databaseName)
     {
@@ -378,7 +441,10 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
             foreach (var index in indexFiles)
             {
-                if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;
+                if (index.AttributeNames.Any(attr => !newRow.TryGetValue(attr, out var attrValue) || attrValue == null))
+                {
+                    continue;
+                }
 
                 string indexName = index.IndexFileName ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(indexName))
