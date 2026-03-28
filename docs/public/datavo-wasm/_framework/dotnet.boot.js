@@ -1,7 +1,7 @@
 export const config = /*json-start*/{
   "mainAssemblyName": "DataVo.Browser.dll",
   "resources": {
-    "hash": "sha256-KFaoEQjO8FjdrfI8i9FHe9i1CJ0clTtJMo8CmSuTRBI=",
+    "hash": "sha256-CHALA3XUEGIgFk/ZGawijMdNyktSzlcISJV/CssLGnA=",
     "jsModuleNative": [
       {
         "name": "dotnet.native.js"
@@ -39,12 +39,12 @@ export const config = /*json-start*/{
       {
         "virtualPath": "DataVo.Browser.wasm",
         "name": "DataVo.Browser.wasm",
-        "integrity": "sha256-YM+CF+cS39DGEPuUEV9s6s283+R4zLuSKCMWqgII/7Q="
+        "integrity": "sha256-cBd+rOsmkZ7OpZE2ayytrTgdmCcxVNzMY5OZSqjp+9c="
       },
       {
         "virtualPath": "DataVo.Core.wasm",
         "name": "DataVo.Core.wasm",
-        "integrity": "sha256-nemEm7r6EvQg9l16qS45r8C7hPRqL3P3jAjnYq43ru4="
+        "integrity": "sha256-eY2ymZsfDOTGjbgAclmVki5TJrRfKrPUERsODfPWgMk="
       },
       {
         "virtualPath": "Microsoft.CSharp.wasm",
