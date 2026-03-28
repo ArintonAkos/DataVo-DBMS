@@ -253,7 +253,14 @@ public class Parser(List<Token> tokens)
             Consume(TokenType.Keyword, SqlKeywords.ON);
             stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
-            stmt.ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value);
+            stmt.ColumnNames.Add(new IdentifierNode(Consume(TokenType.Identifier, "column name").Value));
+
+            while (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+            {
+                Advance();
+                stmt.ColumnNames.Add(new IdentifierNode(Consume(TokenType.Identifier, "column name").Value));
+            }
+
             Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
 
             if (Match(TokenType.Keyword, SqlKeywords.USING))

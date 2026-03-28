@@ -7,6 +7,7 @@ using DataVo.Core.StorageEngine;
 using DataVo.Core.Services;
 using DataVo.Core.Utils;
 using DataVo.Core.Parser.Utils;
+using System.Globalization;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism;
@@ -75,6 +76,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     {
         var leftCol = (ResolvedColumnRefNode)root.Left;
         var rightLit = (LiteralNode)root.Right;
+
+        // SQL three-valued logic: "column = NULL" is always unknown/false in WHERE filtering.
+        if (rightLit.Value == null)
+        {
+            return [];
+        }
 
         string tableName = leftCol.TableName;
         string leftValue = leftCol.Column;
@@ -171,9 +178,18 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     private HashedTable EvaluateUsingFullScan(TableDetail table, string leftValue, string rightValue)
     {
         TableData tableRows = [];
-        foreach (var entry in table.TableContent!.Where(entry => entry.Value[leftValue].ToString() == rightValue))
+
+        foreach (var entry in table.TableContent!)
         {
-            tableRows.Add(entry.Key, entry.Value);
+            if (!entry.Value.Values.TryGetValue(leftValue, out dynamic? candidate) || candidate == null)
+            {
+                continue;
+            }
+
+            if (ExpressionValueComparer.AreEqual(candidate, rightValue, trimQuotedStrings: true))
+            {
+                tableRows.Add(entry.Key, entry.Value);
+            }
         }
 
         return GetJoinedTableContent(tableRows, table.TableName);
@@ -515,7 +531,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             float v => Assign(v, out threshold),
             double v => Assign(v, out threshold),
             decimal v => Assign((double)v, out threshold),
-            string s => double.TryParse(s, out threshold),
+            string s => TryParseInvariantDouble(s, out threshold),
             _ => false
         };
 
@@ -523,6 +539,15 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         {
             output = value;
             return true;
+        }
+
+        static bool TryParseInvariantDouble(string value, out double output)
+        {
+            return double.TryParse(
+                value.AsSpan(),
+                NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture,
+                out output);
         }
     }
 

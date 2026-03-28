@@ -70,8 +70,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
 
                 string vectorColumnName = _model.Attributes[0];
                 string columnType = Catalog.GetTableColumnType(_model.TableName, databaseName, vectorColumnName);
-                if (!columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase)
-                    && !columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase))
+                if (!columnType.StartsWith("VECTOR", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new Exception("HNSW index can only be created on VECTOR columns.");
                 }
@@ -104,7 +103,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add(ex.Message);
+            Messages.Add($"Error: {ex.Message}");
         }
     }
 
@@ -149,21 +148,11 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     /// </returns>
     private string ExtractIndexKeyFromRow(Dictionary<string, dynamic> rowColumns)
     {
-        string key = string.Empty;
-
-        foreach (KeyValuePair<string, dynamic> col in rowColumns)
+        if (_model.Attributes.Any(attr => !rowColumns.ContainsKey(attr) || rowColumns[attr] == null))
         {
-            if (_model.Attributes.Contains(col.Key))
-            {
-                key += col.Value + "##";
-            }
+            return string.Empty;
         }
 
-        if (key.Length > 0)
-        {
-            key = key.Remove(key.Length - 2, count: 2);
-        }
-
-        return key;
+        return IndexKeyEncoder.BuildKeyString(rowColumns, _model.Attributes);
     }
 }

@@ -8,6 +8,8 @@ using DataVo.Core.Constants;
 using DataVo.Core.Enums;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.BTree;
+using DataVo.Core.Indexing.HNSW;
+using System.Globalization;
 
 namespace DataVo.Browser;
 
@@ -60,6 +62,8 @@ public partial class DataVoInterop
     public static void Initialize()
     {
         if (_engine != null) return;
+
+        BrowserRuntimeFlags.ForceVectorFallback = true;
 
         var config = new DataVoConfig
         {
@@ -232,6 +236,39 @@ public partial class DataVoInterop
 
                 foreach (IndexFile index in indexes)
                 {
+                    if (_engine.IndexManager.SupportsVectorIndexType(index.IndexKind))
+                    {
+                        if (index.AttributeNames.Count != 1)
+                        {
+                            continue;
+                        }
+
+                        string vectorColumn = index.AttributeNames[0];
+                        List<(long RowId, float[] Vector)> vectors = [];
+
+                        foreach (var rowEntry in rows)
+                        {
+                            if (!rowEntry.Value.TryGetValue(vectorColumn, out dynamic? rawValue) || rawValue == null)
+                            {
+                                continue;
+                            }
+
+                            if (TryCoerceVector(rawValue, out float[] vector))
+                            {
+                                vectors.Add((rowEntry.Key, vector));
+                            }
+                        }
+
+                        _engine.IndexManager.CreateVectorIndex(
+                            vectors,
+                            index.IndexFileName,
+                            tableName,
+                            databaseName,
+                            indexType: index.IndexKind);
+
+                        continue;
+                    }
+
                     var values = new Dictionary<string, List<long>>();
 
                     foreach (var rowEntry in rows)
@@ -256,6 +293,47 @@ public partial class DataVoInterop
                 }
             }
         }
+    }
+
+    private static bool TryCoerceVector(object? value, out float[] vector)
+    {
+        if (value is float[] typed)
+        {
+            vector = [.. typed];
+            return true;
+        }
+
+        if (value is IEnumerable<float> floatEnumerable)
+        {
+            vector = [.. floatEnumerable];
+            return true;
+        }
+
+        if (value is string text)
+        {
+            string trimmed = text.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']') && trimmed.Length >= 2)
+            {
+                string[] parts = trimmed[1..^1]
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                float[] parsed = new float[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[i]))
+                    {
+                        vector = [];
+                        return false;
+                    }
+                }
+
+                vector = parsed;
+                return true;
+            }
+        }
+
+        vector = [];
+        return false;
     }
 
     private static ExceptionDetails BuildExceptionDetails(Exception ex)

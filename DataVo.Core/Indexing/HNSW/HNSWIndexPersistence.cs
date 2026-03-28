@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Newtonsoft.Json;
 
 namespace DataVo.Core.Indexing.HNSW;
 
@@ -10,29 +10,20 @@ public class HNSWIndexPersistence : IIndexPersistence
     private sealed class HnswSnapshot
     {
         public string IndexType { get; set; } = "HNSW";
+        public required HNSWIndex.FlatState State { get; set; }
+    }
+
+    private sealed class FallbackSnapshot
+    {
+        public string IndexType { get; set; } = "HNSW";
         public string Metric { get; set; } = "cosine";
-        public int M { get; set; } = 16;
-        public int EfConstruction { get; set; } = 64;
-        public bool EnableAdaptiveEfConstruction { get; set; } = true;
-        public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
-        public bool EnableInsertionCandidateExpansion { get; set; } = true;
-        public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
-        public bool EnableAdaptiveInsertionCandidateExpansion { get; set; } = true;
-        public double AdaptiveInsertionExpansionMinFactor { get; set; } = 1.0d;
-        public double AdaptiveInsertionExpansionMaxFactor { get; set; } = 2.5d;
-        public bool EnableInsertionNeighborhoodPruning { get; set; } = true;
-        public double InsertionNeighborhoodPruningThreshold { get; set; } = 0.85d;
-        public int InsertionNeighborhoodPruneHops { get; set; } = 1;
-        public int EfSearch { get; set; } = 64;
-        public bool EnableDiversityHeuristic { get; set; } = true;
-        public bool EnableDeleteGraphRepair { get; set; } = true;
-        public bool EnableAdaptiveEfSearch { get; set; } = true;
-        public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
-        public long? EntryPointId { get; set; }
-        public int MaxLevel { get; set; } = -1;
-        public Dictionary<long, int> NodeLevels { get; set; } = [];
-        public Dictionary<int, Dictionary<long, List<long>>> Layers { get; set; } = [];
-        public Dictionary<long, float[]> Entries { get; set; } = [];
+        public List<FallbackEntry> Entries { get; set; } = [];
+    }
+
+    private sealed class FallbackEntry
+    {
+        public long RowId { get; set; }
+        public float[] Vector { get; set; } = [];
     }
 
     /// <summary>
@@ -45,45 +36,37 @@ public class HNSWIndexPersistence : IIndexPersistence
     /// </summary>
     public void SaveIndex(object index, string filePath)
     {
-        if (index is not HNSWIndex hnsw)
-            throw new ArgumentException($"Expected HNSWIndex but got {index?.GetType().Name}", nameof(index));
-
         var directory = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
-        var payload = new HnswSnapshot
+        if (index is BrowserFallbackVectorIndex fallback)
+        {
+            var payload = new FallbackSnapshot
+            {
+                IndexType = "HNSW",
+                Metric = fallback.Metric,
+                Entries = fallback
+                    .ExportEntries()
+                    .Select(entry => new FallbackEntry { RowId = entry.RowId, Vector = entry.Vector })
+                    .ToList()
+            };
+
+            string fallbackJson = JsonConvert.SerializeObject(payload);
+            File.WriteAllText(filePath, fallbackJson);
+            return;
+        }
+
+        if (index is not HNSWIndex hnsw)
+            throw new ArgumentException($"Expected HNSWIndex or BrowserFallbackVectorIndex but got {index?.GetType().Name}", nameof(index));
+
+        var hnswPayload = new HnswSnapshot
         {
             IndexType = "HNSW",
-            Metric = hnsw.Metric,
-            M = hnsw.M,
-            EfConstruction = hnsw.EfConstruction,
-            EnableAdaptiveEfConstruction = hnsw.EnableAdaptiveEfConstruction,
-            AdaptiveEfConstructionMultiplier = hnsw.AdaptiveEfConstructionMultiplier,
-            EnableInsertionCandidateExpansion = hnsw.EnableInsertionCandidateExpansion,
-            InsertionCandidateExpansionFactor = hnsw.InsertionCandidateExpansionFactor,
-            EnableAdaptiveInsertionCandidateExpansion = hnsw.EnableAdaptiveInsertionCandidateExpansion,
-            AdaptiveInsertionExpansionMinFactor = hnsw.AdaptiveInsertionExpansionMinFactor,
-            AdaptiveInsertionExpansionMaxFactor = hnsw.AdaptiveInsertionExpansionMaxFactor,
-            EnableInsertionNeighborhoodPruning = hnsw.EnableInsertionNeighborhoodPruning,
-            InsertionNeighborhoodPruningThreshold = hnsw.InsertionNeighborhoodPruningThreshold,
-            InsertionNeighborhoodPruneHops = hnsw.InsertionNeighborhoodPruneHops,
-            EfSearch = hnsw.EfSearch,
-            EnableDiversityHeuristic = hnsw.EnableDiversityHeuristic,
-            EnableDeleteGraphRepair = hnsw.EnableDeleteGraphRepair,
-            EnableAdaptiveEfSearch = hnsw.EnableAdaptiveEfSearch,
-            AdaptiveEfSearchMultiplier = hnsw.AdaptiveEfSearchMultiplier,
-            EntryPointId = hnsw.EntryPointId,
-            MaxLevel = hnsw.MaxLevel,
-            NodeLevels = hnsw.NodeLevels,
-            Layers = hnsw.Layers,
-            Entries = hnsw.Entries
+            State = hnsw.ExportFlatState()
         };
 
-        string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
+        string json = JsonConvert.SerializeObject(hnswPayload);
 
         File.WriteAllText(filePath, json);
     }
@@ -97,47 +80,35 @@ public class HNSWIndexPersistence : IIndexPersistence
             throw new FileNotFoundException($"Vector index file not found: {filePath}");
 
         string json = File.ReadAllText(filePath);
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
 
-        HnswSnapshot? snapshot = JsonSerializer.Deserialize<HnswSnapshot>(json, options);
+        if (IsBrowserRuntime())
+        {
+            FallbackSnapshot? fallbackSnapshot = JsonConvert.DeserializeObject<FallbackSnapshot>(json);
+            if (fallbackSnapshot != null)
+            {
+                var fallback = new BrowserFallbackVectorIndex
+                {
+                    Metric = string.IsNullOrWhiteSpace(fallbackSnapshot.Metric)
+                        ? "cosine"
+                        : fallbackSnapshot.Metric
+                };
+
+                fallback.ImportEntries(fallbackSnapshot.Entries.Select(entry => (entry.RowId, entry.Vector)));
+                return fallback;
+            }
+        }
+
+        HnswSnapshot? snapshot = JsonConvert.DeserializeObject<HnswSnapshot>(json);
         if (snapshot == null)
             throw new InvalidOperationException($"Failed to deserialize HNSW index payload: {filePath}");
 
-        var index = new HNSWIndex
+        if (snapshot.State == null)
         {
-            Metric = string.IsNullOrWhiteSpace(snapshot.Metric) ? "cosine" : snapshot.Metric,
-            M = snapshot.M > 0 ? snapshot.M : 16,
-            EfConstruction = snapshot.EfConstruction > 0 ? snapshot.EfConstruction : 64,
-            EnableAdaptiveEfConstruction = snapshot.EnableAdaptiveEfConstruction,
-            AdaptiveEfConstructionMultiplier = snapshot.AdaptiveEfConstructionMultiplier > 0d ? snapshot.AdaptiveEfConstructionMultiplier : 1.25d,
-            EnableInsertionCandidateExpansion = snapshot.EnableInsertionCandidateExpansion,
-            InsertionCandidateExpansionFactor = snapshot.InsertionCandidateExpansionFactor > 0d ? snapshot.InsertionCandidateExpansionFactor : 1.5d,
-            EnableAdaptiveInsertionCandidateExpansion = snapshot.EnableAdaptiveInsertionCandidateExpansion,
-            AdaptiveInsertionExpansionMinFactor = snapshot.AdaptiveInsertionExpansionMinFactor > 0d ? snapshot.AdaptiveInsertionExpansionMinFactor : 1.0d,
-            AdaptiveInsertionExpansionMaxFactor = snapshot.AdaptiveInsertionExpansionMaxFactor > 0d ? snapshot.AdaptiveInsertionExpansionMaxFactor : 2.5d,
-            EnableInsertionNeighborhoodPruning = snapshot.EnableInsertionNeighborhoodPruning,
-            InsertionNeighborhoodPruningThreshold = snapshot.InsertionNeighborhoodPruningThreshold > 0d ? snapshot.InsertionNeighborhoodPruningThreshold : 0.85d,
-            InsertionNeighborhoodPruneHops = snapshot.InsertionNeighborhoodPruneHops > 0 ? snapshot.InsertionNeighborhoodPruneHops : 1,
-            EfSearch = snapshot.EfSearch > 0 ? snapshot.EfSearch : 64,
-            EnableDiversityHeuristic = snapshot.EnableDiversityHeuristic,
-            EnableDeleteGraphRepair = snapshot.EnableDeleteGraphRepair,
-            EnableAdaptiveEfSearch = snapshot.EnableAdaptiveEfSearch,
-            AdaptiveEfSearchMultiplier = snapshot.AdaptiveEfSearchMultiplier > 0d ? snapshot.AdaptiveEfSearchMultiplier : 1.5d,
-            EntryPointId = snapshot.EntryPointId,
-            MaxLevel = snapshot.MaxLevel,
-            Entries = snapshot.Entries ?? [],
-            NodeLevels = snapshot.NodeLevels ?? [],
-            Layers = snapshot.Layers ?? []
-        };
-
-        // Backward compatibility: legacy snapshots only had Entries + Metric.
-        if (index.Entries.Count > 0 && (index.NodeLevels.Count == 0 || index.Layers.Count == 0))
-        {
-            index.RebuildGraphFromEntries();
+            throw new InvalidOperationException($"HNSW snapshot does not contain flat state payload: {filePath}");
         }
+
+        var index = new HNSWIndex();
+        index.ImportFlatState(snapshot.State);
 
         return index;
     }
@@ -209,5 +180,10 @@ public class HNSWIndexPersistence : IIndexPersistence
         {
             return false;
         }
+    }
+
+    private static bool IsBrowserRuntime()
+    {
+        return BrowserRuntimeFlags.ForceVectorFallback;
     }
 }

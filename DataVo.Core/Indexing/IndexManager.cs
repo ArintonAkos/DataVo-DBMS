@@ -1,9 +1,11 @@
 using DataVo.Core.BTree;
 using DataVo.Core.BTree.Core;
+using System.Globalization;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
 using DataVo.Core.Indexing.HNSW;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Indexing;
 
@@ -42,6 +44,11 @@ public enum IndexPersistenceMode
 /// </remarks>
 public class IndexManager : IDisposable
 {
+    private static readonly HashSet<string> KnownVectorTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "HNSW"
+    };
+
     private static IndexManager? _instance;
     private readonly string _indexRootDirectory;
 
@@ -58,27 +65,27 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Unified index cache: maps CacheKey -> loaded index instance.
     /// </summary>
-    private readonly Dictionary<string, object> _cache = [];
+    private readonly Dictionary<string, object> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Metadata storage: maps CacheKey -> index metadata.
     /// </summary>
-    private readonly Dictionary<string, IndexMetadata> _metadata = [];
+    private readonly Dictionary<string, IndexMetadata> _metadata = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Tracks paths for cache entries: maps CacheKey -> file path.
     /// </summary>
-    private readonly Dictionary<string, string> _cachePaths = [];
+    private readonly Dictionary<string, string> _cachePaths = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Tracks dirty (modified) indices that need flushing.
     /// </summary>
-    private readonly HashSet<string> _dirtyIndices = [];
+    private readonly HashSet<string> _dirtyIndices = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Tracks mutation count per index for buffered persistence.
     /// </summary>
-    private readonly Dictionary<string, int> _pendingMutations = [];
+    private readonly Dictionary<string, int> _pendingMutations = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Lock _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
@@ -141,8 +148,16 @@ public class IndexManager : IDisposable
 
         lock (_lock)
         {
-            return _factories.TryGetValue(indexType.ToUpperInvariant(), out var factory)
-                && factory is IVectorIndexFactory;
+            string normalizedType = indexType.ToUpperInvariant();
+            if (!_factories.TryGetValue(normalizedType, out var factory))
+            {
+                return false;
+            }
+
+            return factory is IVectorIndexFactory
+                || KnownVectorTypes.Contains(normalizedType)
+                || string.Equals(factory.IndexType, normalizedType, StringComparison.OrdinalIgnoreCase)
+                    && KnownVectorTypes.Contains(factory.IndexType);
         }
     }
 
@@ -369,20 +384,48 @@ public class IndexManager : IDisposable
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         RemoveIndex(cacheKey);
 
-        string tableDirectory = Path.Combine(_indexRootDirectory, databaseName, tableName);
-        if (Directory.Exists(tableDirectory))
+        string[] tableDirectories =
+        [
+            Path.Combine(_indexRootDirectory, databaseName, tableName),
+            Path.Combine(_indexRootDirectory, databaseName.ToLowerInvariant(), tableName.ToLowerInvariant())
+        ];
+
+        foreach (string tableDirectory in tableDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            if (!Directory.Exists(tableDirectory))
+            {
+                continue;
+            }
+
             foreach (var persistence in _persistenceHandlers.Values.Distinct())
             {
-                string filePath = Path.Combine(tableDirectory, $"{indexName}{persistence.FileExtension}");
-                _ = persistence.TryDeleteFile(filePath);
+                string[] candidatePaths =
+                [
+                    Path.Combine(tableDirectory, $"{indexName}{persistence.FileExtension}"),
+                    Path.Combine(tableDirectory, $"{indexName.ToLowerInvariant()}{persistence.FileExtension}")
+                ];
+
+                foreach (string filePath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    _ = persistence.TryDeleteFile(filePath);
+                }
             }
         }
 
         // Delete legacy-formatted scalar index files if they exist.
-        string legacyScalarPath = Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree");
-        if (File.Exists(legacyScalarPath))
+        string[] legacyScalarPaths =
+        [
+            Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree"),
+            Path.Combine(_indexRootDirectory, databaseName.ToLowerInvariant(), $"{tableName.ToLowerInvariant()}_{indexName.ToLowerInvariant()}_index.btree")
+        ];
+
+        foreach (string legacyScalarPath in legacyScalarPaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            if (!File.Exists(legacyScalarPath))
+            {
+                continue;
+            }
+
             try
             {
                 File.Delete(legacyScalarPath);
@@ -490,10 +533,14 @@ public class IndexManager : IDisposable
         if (!_persistenceHandlers.TryGetValue(type, out var persistence))
             throw new NotSupportedException($"Unknown index type: {type}");
 
-        var dir = Path.Combine(_indexRootDirectory, metadata.DatabaseName, metadata.TableName);
+        string normalizedDatabase = metadata.DatabaseName.ToLowerInvariant();
+        string normalizedTable = metadata.TableName.ToLowerInvariant();
+        string normalizedIndexName = metadata.IndexName.ToLowerInvariant();
+
+        var dir = Path.Combine(_indexRootDirectory, normalizedDatabase, normalizedTable);
         persistence.EnsureDirectory(dir);
 
-        var filename = $"{metadata.IndexName}{persistence.FileExtension}";
+        var filename = $"{normalizedIndexName}{persistence.FileExtension}";
         return Path.Combine(dir, filename);
     }
 
@@ -527,7 +574,7 @@ public class IndexManager : IDisposable
 
     private static string GetCacheKey(string indexName, string tableName, string databaseName)
     {
-        return $"{databaseName}/{tableName}_{indexName}";
+        return $"{databaseName}/{tableName}_{indexName}".ToLowerInvariant();
     }
 
     /// <summary>
@@ -716,7 +763,103 @@ public class IndexManager : IDisposable
             return vectorIndex;
         }
 
+        if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt))
+        {
+            return rebuilt;
+        }
+
         throw new Exception($"Vector index {indexName} on table {tableName} does not exist or is incompatible with type '{indexType}'.");
+    }
+
+    private bool TryRebuildVectorIndexFromStorage(string indexName, string tableName, string databaseName, string indexType, out IVectorIndex? rebuilt)
+    {
+        rebuilt = null;
+
+        try
+        {
+            DataVoEngine engine = DataVoEngine.Current();
+            var catalogIndex = engine.Catalog
+                .GetTableIndexes(tableName, databaseName)
+                .FirstOrDefault(index => index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase));
+
+            if (catalogIndex == null || !SupportsVectorIndexType(catalogIndex.IndexKind) || catalogIndex.AttributeNames.Count != 1)
+            {
+                return false;
+            }
+
+            string vectorColumn = catalogIndex.AttributeNames[0];
+            var rows = engine.StorageContext.GetTableContents(tableName, databaseName);
+            List<(long RowId, float[] Vector)> vectors = [];
+
+            foreach (var row in rows)
+            {
+                if (!row.Value.TryGetValue(vectorColumn, out dynamic? rawValue) || rawValue == null)
+                {
+                    continue;
+                }
+
+                if (TryCoerceVector(rawValue, out float[] vector))
+                {
+                    vectors.Add((row.Key, vector));
+                }
+            }
+
+            CreateVectorIndex(vectors, indexName, tableName, databaseName, indexType: catalogIndex.IndexKind);
+
+            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            if (_cache.TryGetValue(cacheKey, out object? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)
+            {
+                rebuilt = rebuiltVector;
+                return true;
+            }
+        }
+        catch
+        {
+            // Fallback is best-effort; keep original lookup failure if rebuild fails.
+        }
+
+        return false;
+    }
+
+    private static bool TryCoerceVector(object value, out float[] vector)
+    {
+        if (value is float[] typed)
+        {
+            vector = [.. typed];
+            return true;
+        }
+
+        if (value is IEnumerable<float> floatEnumerable)
+        {
+            vector = [.. floatEnumerable];
+            return true;
+        }
+
+        if (value is string text)
+        {
+            string trimmed = text.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']') && trimmed.Length >= 2)
+            {
+                string[] parts = trimmed[1..^1]
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                float[] parsed = new float[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[i]))
+                    {
+                        vector = [];
+                        return false;
+                    }
+                }
+
+                vector = parsed;
+                return true;
+            }
+        }
+
+        vector = [];
+        return false;
     }
 
     private static IndexMetadata CreateVectorMetadata(string indexName, string tableName, string databaseName, string indexType, string? metric)

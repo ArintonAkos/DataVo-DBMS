@@ -140,7 +140,8 @@ internal static class ExpressionExtractor
             // Otherwise, resolve the column through the table service
             try
             {
-                (string resolvedTable, _) = tableService.ParseAndFindTableNameByColumn(colRef.Column);
+                var resolvedTuple = tableService.ParseAndFindTableNameByColumn(colRef.Column);
+                string resolvedTable = resolvedTuple.Item1;
                 return resolvedTable.Equals(tableName, StringComparison.OrdinalIgnoreCase);
             }
             catch

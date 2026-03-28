@@ -1,147 +1,250 @@
+using DataVo.Core.Utils;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
+
 namespace DataVo.Core.Indexing.HNSW;
 
-/// <summary>
-/// HNSW (Hierarchical Navigable Small World) index backend.
-/// Implements approximate nearest-neighbor search for vector data.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Current implementation maintains layered graph connectivity with configurable M / ef parameters,
-/// adaptive search breadth, diversified neighbor selection, and local delete repair.
-///
-/// The implementation keeps exact-search fallback paths where needed to preserve correctness.
-/// </para>
-/// </remarks>
 public class HNSWIndex : IVectorIndex
 {
     private const int DefaultM = 16;
     private const int DefaultEfConstruction = 64;
     private const int DefaultEfSearch = 64;
-    private readonly Random _random = new(1337);
+    private const int MaxSupportedLevels = 33;
 
-    /// <summary>
-    /// Gets the index type identifier.
-    /// </summary>
+    private readonly Random _random = Random.Shared;
+    private readonly Dictionary<long, int> _rowIdToOrdinal = [];
+    private readonly Stack<int> _freeOrdinals = [];
+    private readonly object _stateGate = new();
+
+    [ThreadStatic] private static SearchWorkspace? _threadSearchWorkspace;
+    [ThreadStatic] private static SelectionWorkspace? _threadSelectionWorkspace;
+
+    private float[] _vectorData = [];
+    private long[] _rowIdByOrdinal = [];
+    private bool[] _isActive = [];
+    private int[] _nodeLevels = [];
+    private int[] _graphLinks = [];
+
+    private int[] _levelStrides = [];
+    private int[] _levelOffsets = [];
+    private int _nodeGraphStride;
+    private object[] _nodeLocks = [];
+
+    private int _vectorDimension = -1;
+    private int _ordinalCapacity;
+    private int _nextOrdinal;
+    private int _count;
+
+    private sealed class SearchWorkspace
+    {
+        public PriorityQueue<(int Ordinal, float Distance), float> CandidateQueue { get; } = new();
+        public PriorityQueue<(int Ordinal, float Distance), float> ResultQueue { get; } = new();
+        public int[] VisitedEpochByOrdinal = [];
+        public int Epoch { get; set; } = 1;
+
+        public int[] ResultOrdinals = [];
+        public float[] ResultDistances = [];
+
+        public void EnsureVisitedCapacity(int capacity)
+        {
+            if (VisitedEpochByOrdinal.Length < capacity)
+            {
+                Array.Resize(ref VisitedEpochByOrdinal, Math.Max(capacity, VisitedEpochByOrdinal.Length * 2 + 64));
+            }
+        }
+
+        public void EnsureResultCapacity(int capacity)
+        {
+            if (ResultOrdinals.Length < capacity)
+            {
+                Array.Resize(ref ResultOrdinals, Math.Max(capacity, ResultOrdinals.Length * 2 + 16));
+                Array.Resize(ref ResultDistances, ResultOrdinals.Length);
+            }
+        }
+
+        public void Begin()
+        {
+            Epoch++;
+            if (Epoch == int.MaxValue)
+            {
+                Array.Clear(VisitedEpochByOrdinal);
+                Epoch = 1;
+            }
+
+            CandidateQueue.Clear();
+            ResultQueue.Clear();
+        }
+    }
+
+    private sealed class SelectionWorkspace
+    {
+        public int[] CandidateOrdinals = [];
+        public float[] CandidateDistances = [];
+        public int[] ExistingNeighbors = [];
+
+        public int[] SeenEpochByOrdinal = [];
+        public int SeenEpoch { get; set; } = 1;
+
+        public void EnsureCandidateCapacity(int capacity)
+        {
+            if (CandidateOrdinals.Length < capacity)
+            {
+                int newSize = Math.Max(capacity, CandidateOrdinals.Length * 2 + 16);
+                Array.Resize(ref CandidateOrdinals, newSize);
+                Array.Resize(ref CandidateDistances, newSize);
+                Array.Resize(ref ExistingNeighbors, newSize);
+            }
+        }
+
+        public void EnsureSeenCapacity(int capacity)
+        {
+            if (SeenEpochByOrdinal.Length < capacity)
+            {
+                Array.Resize(ref SeenEpochByOrdinal, Math.Max(capacity, SeenEpochByOrdinal.Length * 2 + 64));
+            }
+        }
+
+        public void BeginSeenPass()
+        {
+            SeenEpoch++;
+            if (SeenEpoch == int.MaxValue)
+            {
+                Array.Clear(SeenEpochByOrdinal);
+                SeenEpoch = 1;
+            }
+        }
+    }
+
+    internal sealed class FlatState
+    {
+        public required string Metric { get; init; }
+        public required int M { get; init; }
+        public required int EfConstruction { get; init; }
+        public required bool EnableAdaptiveEfConstruction { get; init; }
+        public required double AdaptiveEfConstructionMultiplier { get; init; }
+        public required bool EnableInsertionCandidateExpansion { get; init; }
+        public required double InsertionCandidateExpansionFactor { get; init; }
+        public required bool EnableAdaptiveInsertionCandidateExpansion { get; init; }
+        public required double AdaptiveInsertionExpansionMinFactor { get; init; }
+        public required double AdaptiveInsertionExpansionMaxFactor { get; init; }
+        public required bool EnableInsertionNeighborhoodPruning { get; init; }
+        public required double InsertionNeighborhoodPruningThreshold { get; init; }
+        public required int InsertionNeighborhoodPruneHops { get; init; }
+        public required int EfSearch { get; init; }
+        public required bool EnableDiversityHeuristic { get; init; }
+        public required bool EnableDeleteGraphRepair { get; init; }
+        public required bool EnableAdaptiveEfSearch { get; init; }
+        public required double AdaptiveEfSearchMultiplier { get; init; }
+        public required long? EntryPointId { get; init; }
+        public required int MaxLevel { get; init; }
+        public required int Count { get; init; }
+
+        public required int VectorDimension { get; init; }
+        public required int OrdinalCapacity { get; init; }
+        public required int NextOrdinal { get; init; }
+
+        public required float[] VectorData { get; init; }
+        public required long[] RowIdByOrdinal { get; init; }
+        public required bool[] IsActive { get; init; }
+        public required int[] NodeLevels { get; init; }
+        public required int[] GraphLinks { get; init; }
+        public required int[] LevelStrides { get; init; }
+        public required int[] LevelOffsets { get; init; }
+
+        public required long[] RowIds { get; init; }
+        public required int[] Ordinals { get; init; }
+    }
+
     public string IndexType => "HNSW";
-
-    /// <summary>
-    /// Gets the distance metric used for this index ("cosine" or "euclidean").
-    /// </summary>
     public string Metric { get; set; } = "cosine";
 
-    /// <summary>
-    /// Gets the vector entries: rowId -> float array.
-    /// </summary>
-    public Dictionary<long, float[]> Entries { get; set; } = [];
-
-    /// <summary>
-    /// Gets or sets node levels for the HNSW hierarchy.
-    /// </summary>
-    public Dictionary<long, int> NodeLevels { get; set; } = [];
-
-    /// <summary>
-    /// Gets or sets adjacency lists grouped by level, then by node.
-    /// </summary>
-    public Dictionary<int, Dictionary<long, List<long>>> Layers { get; set; } = [];
-
-    /// <summary>
-    /// Gets or sets the current HNSW entry point node identifier.
-    /// </summary>
-    public long? EntryPointId { get; set; }
-
-    /// <summary>
-    /// Gets or sets the highest populated level.
-    /// </summary>
-    public int MaxLevel { get; set; } = -1;
-
-    /// <summary>
-    /// Gets or sets the maximum number of bidirectional neighbors per node and level.
-    /// </summary>
     public int M { get; set; } = DefaultM;
-
-    /// <summary>
-    /// Gets or sets candidate breadth used during insertion.
-    /// </summary>
     public int EfConstruction { get; set; } = DefaultEfConstruction;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether insertion-time efConstruction is adaptively scaled.
-    /// </summary>
     public bool EnableAdaptiveEfConstruction { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets multiplier used for adaptive efConstruction calculation.
-    /// </summary>
     public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether insertion candidate sets should be expanded using local graph neighborhoods.
-    /// </summary>
     public bool EnableInsertionCandidateExpansion { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets multiplier used to size the expanded insertion candidate budget.
-    /// </summary>
     public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether insertion candidate expansion factor should be adapted by local graph density.
-    /// </summary>
     public bool EnableAdaptiveInsertionCandidateExpansion { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets minimum adaptive insertion expansion factor.
-    /// </summary>
     public double AdaptiveInsertionExpansionMinFactor { get; set; } = 1.0d;
-
-    /// <summary>
-    /// Gets or sets maximum adaptive insertion expansion factor.
-    /// </summary>
     public double AdaptiveInsertionExpansionMaxFactor { get; set; } = 2.5d;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether local neighborhoods should be rebuilt after insertion when degree pressure is high.
-    /// </summary>
     public bool EnableInsertionNeighborhoodPruning { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets activation threshold for insertion neighborhood pruning expressed as degree ratio to max degree.
-    /// </summary>
     public double InsertionNeighborhoodPruningThreshold { get; set; } = 0.85d;
-
-    /// <summary>
-    /// Gets or sets how many neighborhood hops should be considered during insertion-time local rewiring.
-    /// </summary>
     public int InsertionNeighborhoodPruneHops { get; set; } = 1;
 
-    /// <summary>
-    /// Gets or sets candidate breadth used during querying.
-    /// </summary>
     public int EfSearch { get; set; } = DefaultEfSearch;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether query-time efSearch is adaptively scaled by graph size and requested topK.
-    /// </summary>
     public bool EnableAdaptiveEfSearch { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets multiplier used for adaptive efSearch calculation.
-    /// </summary>
     public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether heuristic diversified neighbor selection is enabled.
-    /// </summary>
     public bool EnableDiversityHeuristic { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether delete operations should repair local graph neighborhoods.
-    /// </summary>
     public bool EnableDeleteGraphRepair { get; set; } = true;
 
-    /// <summary>
-    /// Inserts or updates a vector entry.
-    /// </summary>
+    public long? EntryPointId { get; private set; }
+    public int MaxLevel { get; private set; } = -1;
+    public int Count => _count;
+
+    public void Reserve(int expectedCount, int vectorDimension)
+    {
+        if (expectedCount <= 0)
+        {
+            return;
+        }
+
+        lock (_stateGate)
+        {
+            EnsureVectorDimension(vectorDimension);
+            EnsureCapacity(expectedCount);
+        }
+
+        // Warm up current-thread scratch buffers once so insert hot path does not resize repeatedly.
+        var searchWorkspace = GetSearchWorkspace();
+        searchWorkspace.EnsureVisitedCapacity(expectedCount + 1);
+        searchWorkspace.EnsureResultCapacity(Math.Max(16, Math.Max(EfSearch, EfConstruction) * 4));
+
+        var selectionWorkspace = GetSelectionWorkspace();
+        selectionWorkspace.EnsureSeenCapacity(expectedCount + 1);
+        selectionWorkspace.EnsureCandidateCapacity(Math.Max(64, ResolveNeighborLimit(0) * 4));
+    }
+
+    public void InsertBatchParallel(long[] rowIds, float[] vectors, int vectorDimension, int maxDegreeOfParallelism = 0)
+    {
+        if (rowIds == null)
+        {
+            throw new ArgumentNullException(nameof(rowIds));
+        }
+
+        if (vectors == null)
+        {
+            throw new ArgumentNullException(nameof(vectors));
+        }
+
+        if (vectorDimension <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vectorDimension));
+        }
+
+        if (rowIds.Length * vectorDimension != vectors.Length)
+        {
+            throw new ArgumentException("Vector buffer length does not match rowId count * vectorDimension.", nameof(vectors));
+        }
+
+        Reserve(_count + rowIds.Length, vectorDimension);
+
+        var options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = maxDegreeOfParallelism > 0
+                ? maxDegreeOfParallelism
+                : Environment.ProcessorCount
+        };
+
+        Parallel.For(0, rowIds.Length, options, i =>
+        {
+            int offset = i * vectorDimension;
+            InsertCore(rowIds[i], vectors.AsSpan(offset, vectorDimension));
+        });
+    }
+
     public void Insert(long rowId, float[] vector)
     {
         if (vector == null || vector.Length == 0)
@@ -149,191 +252,442 @@ public class HNSWIndex : IVectorIndex
             throw new ArgumentException("Vector cannot be null or empty", nameof(vector));
         }
 
-        ValidateDimension(vector);
+        ValidateFiniteVector(vector, nameof(vector));
+        InsertCore(rowId, vector);
+    }
 
-        if (Entries.ContainsKey(rowId))
+    private void InsertCore(long rowId, ReadOnlySpan<float> vector)
+    {
+        lock (_stateGate)
         {
-            RemoveNode(rowId);
+            EnsureVectorDimension(vector.Length);
         }
 
-        Entries[rowId] = [.. vector];
+        int ordinal;
+        int sampledLevel;
 
-        int level = SampleLevel();
-        NodeLevels[rowId] = level;
-        EnsureNodeInLayers(rowId, level);
-
-        if (EntryPointId is null)
+        lock (_stateGate)
         {
-            EntryPointId = rowId;
-            MaxLevel = level;
+            if (_rowIdToOrdinal.ContainsKey(rowId))
+            {
+                Delete([rowId]);
+            }
+
+            ordinal = AcquireOrdinal(rowId);
+            _isActive[ordinal] = true;
+            _count++;
+
+            sampledLevel = SampleLevel();
+            _nodeLevels[ordinal] = sampledLevel;
+            WriteVector(ordinal, vector);
+            ClearNodeLinks(ordinal);
+
+            if (!EntryPointId.HasValue)
+            {
+                EntryPointId = rowId;
+                MaxLevel = sampledLevel;
+                return;
+            }
+        }
+
+        int entryOrdinal = TryGetEntryOrdinal();
+        if (entryOrdinal < 0)
+        {
             return;
         }
 
-        long entryPoint = EntryPointId.Value;
-
-        for (int currentLevel = MaxLevel; currentLevel > level; currentLevel--)
+        int topLevel;
+        lock (_stateGate)
         {
-            entryPoint = SearchLayerGreedy(vector, entryPoint, currentLevel);
+            topLevel = MaxLevel;
+        }
+        int targetLevel = sampledLevel;
+
+        for (int level = topLevel; level > targetLevel; level--)
+        {
+            entryOrdinal = SearchGreedy(vector, entryOrdinal, level);
         }
 
-        int maxConnectLevel = Math.Min(level, MaxLevel);
-        for (int currentLevel = maxConnectLevel; currentLevel >= 0; currentLevel--)
-        {
-            int efConstruction = ResolveEffectiveEfConstruction(currentLevel);
-            List<long> insertionSeeds = BuildInsertionSeeds(entryPoint, efConstruction, currentLevel);
-            List<(long RowId, float Distance)> candidates = SearchLayer(vector, insertionSeeds, efConstruction, currentLevel);
-            int neighborLimit = ResolveNeighborLimit(currentLevel);
-            int candidateLimit = ResolveInsertionCandidateLimit(currentLevel, efConstruction, insertionSeeds);
-            candidates = ExpandInsertionCandidates(vector, candidates, currentLevel, candidateLimit);
-            List<long> neighbors = SelectNeighbors(candidates, rowId, neighborLimit);
+        var selectWorkspace = GetSelectionWorkspace();
+        int maxStride = ResolveNeighborLimit(0);
+        selectWorkspace.EnsureCandidateCapacity(Math.Max(64, maxStride * 4));
 
-            if (neighbors.Count == 0 && entryPoint != rowId && NodeExistsAtLevel(entryPoint, currentLevel))
+        for (int level = Math.Min(targetLevel, topLevel); level >= 0; level--)
+        {
+            int ef = ResolveEffectiveEfConstruction(level);
+            var searchWorkspace = GetSearchWorkspace();
+            int candidateCount = SearchLayer(vector, entryOrdinal, ef, level, searchWorkspace);
+
+            int neighborLimit = ResolveNeighborLimit(level);
+            Span<int> destination = stackalloc int[Math.Min(128, Math.Max(2, neighborLimit))];
+            if (destination.Length < neighborLimit)
             {
-                neighbors.Add(entryPoint);
+                int[] temp = new int[neighborLimit];
+                SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), temp.AsSpan(0, neighborLimit));
+                int selected = CountSelected(temp);
+                ConnectBidirectional(ordinal, temp.AsSpan(0, selected), level);
+            }
+            else
+            {
+                SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), destination.Slice(0, neighborLimit));
+                int selected = CountSelected(destination);
+                ConnectBidirectional(ordinal, destination.Slice(0, selected), level);
             }
 
-            ConnectNode(rowId, neighbors, currentLevel);
-            if (neighbors.Count > 0)
+            if (candidateCount > 0)
             {
-                entryPoint = neighbors[0];
+                entryOrdinal = searchWorkspace.ResultOrdinals[0];
             }
         }
 
-        if (level > MaxLevel)
+        lock (_stateGate)
         {
-            EntryPointId = rowId;
-            MaxLevel = level;
+            if (sampledLevel > MaxLevel)
+            {
+                EntryPointId = rowId;
+                MaxLevel = sampledLevel;
+            }
         }
     }
 
-    /// <summary>
-    /// Deletes vector entries by row IDs.
-    /// </summary>
     public void Delete(List<long> rowIds)
     {
+        if (rowIds == null || rowIds.Count == 0)
+        {
+            return;
+        }
+
         foreach (long rowId in rowIds)
         {
-            RemoveNode(rowId);
+            if (!_rowIdToOrdinal.TryGetValue(rowId, out int ordinal) || !_isActive[ordinal])
+            {
+                continue;
+            }
+
+            int nodeLevel = _nodeLevels[ordinal];
+            for (int level = 0; level <= nodeLevel; level++)
+            {
+                Span<int> neighbors = GetNeighborSpan(ordinal, level);
+                for (int i = 0; i < neighbors.Length; i++)
+                {
+                    int neighbor = neighbors[i];
+                    if (neighbor < 0)
+                    {
+                        break;
+                    }
+
+                    RemoveEdgeOneWay(neighbor, ordinal, level);
+                }
+            }
+
+            _isActive[ordinal] = false;
+            _nodeLevels[ordinal] = 0;
+            _rowIdByOrdinal[ordinal] = 0;
+            _rowIdToOrdinal.Remove(rowId);
+            _freeOrdinals.Push(ordinal);
+            _count--;
+            ClearNodeLinks(ordinal);
+        }
+
+        if (_count == 0)
+        {
+            EntryPointId = null;
+            MaxLevel = -1;
+            return;
+        }
+
+        if (!EntryPointId.HasValue || !_rowIdToOrdinal.TryGetValue(EntryPointId.Value, out int epOrd) || !_isActive[epOrd])
+        {
+            ResolveFallbackEntryPoint();
         }
     }
 
-    /// <summary>
-    /// Searches for the top-k nearest vectors.
-    /// </summary>
     public List<long> SearchTopK(float[] queryVector, int topK)
     {
-        if (topK <= 0)
-        {
-            return [];
-        }
-
         if (queryVector == null || queryVector.Length == 0)
         {
             throw new ArgumentException("Query vector cannot be null or empty", nameof(queryVector));
         }
 
-        if (Entries.Count == 0)
+        ValidateFiniteVector(queryVector, nameof(queryVector));
+
+        if (_count == 0 || topK <= 0)
         {
             return [];
         }
 
-        int expectedDimension = Entries.First().Value.Length;
-        if (queryVector.Length != expectedDimension)
+        if (_vectorDimension != queryVector.Length)
         {
             return [];
         }
 
-        if (topK >= Entries.Count)
+        if (topK >= _count)
         {
-            return ExactSearchTopK(queryVector, topK);
+            return ExactSearch(queryVector, topK);
         }
 
-        long entryPoint = ResolveEntryPoint(queryVector);
+        if (!EntryPointId.HasValue || !_rowIdToOrdinal.TryGetValue(EntryPointId.Value, out int entryOrdinal))
+        {
+            return ExactSearch(queryVector, topK);
+        }
 
+        int current = entryOrdinal;
         for (int level = MaxLevel; level > 0; level--)
         {
-            entryPoint = SearchLayerGreedy(queryVector, entryPoint, level);
+            current = SearchGreedy(queryVector, current, level);
         }
 
         int ef = ResolveEffectiveEfSearch(topK);
-        List<long> seeds = BuildLevelZeroSeeds(entryPoint, ef);
-        List<(long RowId, float Distance)> candidates = SearchLayer(queryVector, seeds, ef, 0);
+        var workspace = GetSearchWorkspace();
+        int resultCount = SearchLayer(queryVector, current, ef, 0, workspace);
 
-        if (candidates.Count < topK)
+        int take = Math.Min(topK, resultCount);
+        var result = new List<long>(take);
+        for (int i = 0; i < take; i++)
         {
-            return ExactSearchTopK(queryVector, topK);
+            int ordinal = workspace.ResultOrdinals[i];
+            if ((uint)ordinal < (uint)_rowIdByOrdinal.Length)
+            {
+                long rowId = _rowIdByOrdinal[ordinal];
+                if (rowId != 0)
+                {
+                    result.Add(rowId);
+                }
+            }
         }
 
-        return candidates
-            .OrderBy(item => item.Distance)
-            .ThenBy(item => item.RowId)
-            .Take(topK)
-            .Select(item => item.RowId)
-            .ToList();
+        return result;
     }
 
-    private List<long> ExactSearchTopK(float[] queryVector, int topK)
-    {
-        return Entries
-            .Where(entry => entry.Value.Length == queryVector.Length)
-            .Select(entry => (entry.Key, Distance(queryVector, entry.Value)))
-            .OrderBy(item => item.Item2)
-            .ThenBy(item => item.Key)
-            .Take(Math.Min(topK, Entries.Count))
-            .Select(item => item.Key)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Rebuilds graph layers from current entries.
-    /// Useful for loading legacy snapshots that only contain vector payloads.
-    /// </summary>
-    public void RebuildGraphFromEntries()
-    {
-        var snapshot = Entries
-            .Select(pair => (pair.Key, pair.Value))
-            .ToList();
-
-        ResetGraphState();
-
-        foreach (var (rowId, vector) in snapshot)
-        {
-            Insert(rowId, vector);
-        }
-    }
-
-    /// <summary>
-    /// Gets the count of vectors in this index.
-    /// </summary>
-    public int Count => Entries.Count;
-
-    /// <summary>
-    /// Clears all entries from this index.
-    /// </summary>
     public void Clear()
     {
-        Entries.Clear();
-        ResetGraphState();
+        _rowIdToOrdinal.Clear();
+        _freeOrdinals.Clear();
+
+        _vectorData = [];
+        _rowIdByOrdinal = [];
+        _isActive = [];
+        _nodeLevels = [];
+        _graphLinks = [];
+
+        _vectorDimension = -1;
+        _ordinalCapacity = 0;
+        _nextOrdinal = 0;
+        _count = 0;
+
+        _levelOffsets = [];
+        _levelStrides = [];
+        _nodeGraphStride = 0;
+        _nodeLocks = [];
+
+        EntryPointId = null;
+        MaxLevel = -1;
     }
 
-    private void ValidateDimension(float[] vector)
+    internal FlatState ExportFlatState()
     {
-        if (Entries.Count == 0)
+        long[] rowIds = new long[_rowIdToOrdinal.Count];
+        int[] ordinals = new int[_rowIdToOrdinal.Count];
+        int idx = 0;
+        foreach (var pair in _rowIdToOrdinal)
+        {
+            rowIds[idx] = pair.Key;
+            ordinals[idx] = pair.Value;
+            idx++;
+        }
+
+        return new FlatState
+        {
+            Metric = Metric,
+            M = M,
+            EfConstruction = EfConstruction,
+            EnableAdaptiveEfConstruction = EnableAdaptiveEfConstruction,
+            AdaptiveEfConstructionMultiplier = AdaptiveEfConstructionMultiplier,
+            EnableInsertionCandidateExpansion = EnableInsertionCandidateExpansion,
+            InsertionCandidateExpansionFactor = InsertionCandidateExpansionFactor,
+            EnableAdaptiveInsertionCandidateExpansion = EnableAdaptiveInsertionCandidateExpansion,
+            AdaptiveInsertionExpansionMinFactor = AdaptiveInsertionExpansionMinFactor,
+            AdaptiveInsertionExpansionMaxFactor = AdaptiveInsertionExpansionMaxFactor,
+            EnableInsertionNeighborhoodPruning = EnableInsertionNeighborhoodPruning,
+            InsertionNeighborhoodPruningThreshold = InsertionNeighborhoodPruningThreshold,
+            InsertionNeighborhoodPruneHops = InsertionNeighborhoodPruneHops,
+            EfSearch = EfSearch,
+            EnableDiversityHeuristic = EnableDiversityHeuristic,
+            EnableDeleteGraphRepair = EnableDeleteGraphRepair,
+            EnableAdaptiveEfSearch = EnableAdaptiveEfSearch,
+            AdaptiveEfSearchMultiplier = AdaptiveEfSearchMultiplier,
+            EntryPointId = EntryPointId,
+            MaxLevel = MaxLevel,
+            Count = _count,
+            VectorDimension = _vectorDimension,
+            OrdinalCapacity = _ordinalCapacity,
+            NextOrdinal = _nextOrdinal,
+            VectorData = [.. _vectorData],
+            RowIdByOrdinal = [.. _rowIdByOrdinal],
+            IsActive = [.. _isActive],
+            NodeLevels = [.. _nodeLevels],
+            GraphLinks = [.. _graphLinks],
+            LevelStrides = [.. _levelStrides],
+            LevelOffsets = [.. _levelOffsets],
+            RowIds = rowIds,
+            Ordinals = ordinals
+        };
+    }
+
+    internal void ImportFlatState(FlatState state)
+    {
+        Metric = string.IsNullOrWhiteSpace(state.Metric) ? "cosine" : state.Metric;
+        M = Math.Max(1, state.M);
+        EfConstruction = Math.Max(1, state.EfConstruction);
+        EnableAdaptiveEfConstruction = state.EnableAdaptiveEfConstruction;
+        AdaptiveEfConstructionMultiplier = state.AdaptiveEfConstructionMultiplier > 0d ? state.AdaptiveEfConstructionMultiplier : 1.25d;
+        EnableInsertionCandidateExpansion = state.EnableInsertionCandidateExpansion;
+        InsertionCandidateExpansionFactor = state.InsertionCandidateExpansionFactor > 0d ? state.InsertionCandidateExpansionFactor : 1.5d;
+        EnableAdaptiveInsertionCandidateExpansion = state.EnableAdaptiveInsertionCandidateExpansion;
+        AdaptiveInsertionExpansionMinFactor = state.AdaptiveInsertionExpansionMinFactor > 0d ? state.AdaptiveInsertionExpansionMinFactor : 1.0d;
+        AdaptiveInsertionExpansionMaxFactor = state.AdaptiveInsertionExpansionMaxFactor > 0d ? state.AdaptiveInsertionExpansionMaxFactor : 2.5d;
+        EnableInsertionNeighborhoodPruning = state.EnableInsertionNeighborhoodPruning;
+        InsertionNeighborhoodPruningThreshold = state.InsertionNeighborhoodPruningThreshold > 0d ? state.InsertionNeighborhoodPruningThreshold : 0.85d;
+        InsertionNeighborhoodPruneHops = Math.Max(1, state.InsertionNeighborhoodPruneHops);
+        EfSearch = Math.Max(1, state.EfSearch);
+        EnableDiversityHeuristic = state.EnableDiversityHeuristic;
+        EnableDeleteGraphRepair = state.EnableDeleteGraphRepair;
+        EnableAdaptiveEfSearch = state.EnableAdaptiveEfSearch;
+        AdaptiveEfSearchMultiplier = state.AdaptiveEfSearchMultiplier > 0d ? state.AdaptiveEfSearchMultiplier : 1.5d;
+
+        _vectorDimension = state.VectorDimension;
+        _ordinalCapacity = state.OrdinalCapacity;
+        _nextOrdinal = state.NextOrdinal;
+        _count = state.Count;
+
+        _vectorData = state.VectorData ?? [];
+        _rowIdByOrdinal = state.RowIdByOrdinal ?? [];
+        _isActive = state.IsActive ?? [];
+        _nodeLevels = state.NodeLevels ?? [];
+        _graphLinks = state.GraphLinks ?? [];
+        _levelStrides = state.LevelStrides ?? [];
+        _levelOffsets = state.LevelOffsets ?? [];
+        _nodeGraphStride = _levelStrides.Sum();
+
+        _rowIdToOrdinal.Clear();
+        if (state.RowIds != null && state.Ordinals != null)
+        {
+            int mapCount = Math.Min(state.RowIds.Length, state.Ordinals.Length);
+            for (int i = 0; i < mapCount; i++)
+            {
+                _rowIdToOrdinal[state.RowIds[i]] = state.Ordinals[i];
+            }
+        }
+
+        _freeOrdinals.Clear();
+        for (int ordinal = _nextOrdinal - 1; ordinal >= 0; ordinal--)
+        {
+            if ((uint)ordinal < (uint)_isActive.Length && !_isActive[ordinal])
+            {
+                _freeOrdinals.Push(ordinal);
+            }
+        }
+
+        EntryPointId = state.EntryPointId;
+        MaxLevel = state.MaxLevel;
+    }
+
+    private void EnsureVectorDimension(int dimension)
+    {
+        if (_vectorDimension < 0)
+        {
+            _vectorDimension = dimension;
+            RecomputeGraphLayout();
+            return;
+        }
+
+        if (_vectorDimension != dimension)
+        {
+            throw new ArgumentException($"Vector dimension mismatch. Expected {_vectorDimension}, got {dimension}.");
+        }
+    }
+
+    private void RecomputeGraphLayout()
+    {
+        int safeM = Math.Max(1, M);
+        _levelStrides = new int[MaxSupportedLevels];
+        _levelOffsets = new int[MaxSupportedLevels];
+
+        int offset = 0;
+        for (int level = 0; level < MaxSupportedLevels; level++)
+        {
+            _levelOffsets[level] = offset;
+            _levelStrides[level] = level == 0 ? Math.Max(2, safeM * 2) : safeM;
+            offset += _levelStrides[level];
+        }
+
+        _nodeGraphStride = offset;
+    }
+
+    private int AcquireOrdinal(long rowId)
+    {
+        int ordinal = _freeOrdinals.Count > 0 ? _freeOrdinals.Pop() : _nextOrdinal++;
+        EnsureCapacity(ordinal + 1);
+        _rowIdToOrdinal[rowId] = ordinal;
+        _rowIdByOrdinal[ordinal] = rowId;
+        return ordinal;
+    }
+
+    private void EnsureCapacity(int requiredOrdinals)
+    {
+        if (requiredOrdinals <= _ordinalCapacity)
         {
             return;
         }
 
-        int expected = Entries.First().Value.Length;
-        if (vector.Length != expected)
+        int newCapacity = Math.Max(requiredOrdinals, Math.Max(256, _ordinalCapacity * 2));
+        int previousCapacity = _ordinalCapacity;
+        _ordinalCapacity = newCapacity;
+
+        Array.Resize(ref _rowIdByOrdinal, newCapacity);
+        Array.Resize(ref _isActive, newCapacity);
+        Array.Resize(ref _nodeLevels, newCapacity);
+        Array.Resize(ref _nodeLocks, newCapacity);
+
+        for (int i = previousCapacity; i < newCapacity; i++)
         {
-            throw new ArgumentException($"Vector dimension mismatch. Expected {expected}, got {vector.Length}.", nameof(vector));
+            _nodeLocks[i] = new object();
         }
+
+        if (_vectorDimension > 0)
+        {
+            Array.Resize(ref _vectorData, newCapacity * _vectorDimension);
+        }
+
+        int oldGraphLength = _graphLinks.Length;
+        Array.Resize(ref _graphLinks, newCapacity * _nodeGraphStride);
+        if (_graphLinks.Length > oldGraphLength)
+        {
+            Array.Fill(_graphLinks, -1, oldGraphLength, _graphLinks.Length - oldGraphLength);
+        }
+
+        if (oldGraphLength == 0 && _graphLinks.Length > 0)
+        {
+            Array.Fill(_graphLinks, -1);
+        }
+    }
+
+    private void WriteVector(int ordinal, ReadOnlySpan<float> vector)
+    {
+        int offset = ordinal * _vectorDimension;
+        vector.CopyTo(_vectorData.AsSpan(offset, _vectorDimension));
+    }
+
+    private ReadOnlySpan<float> GetVector(int ordinal)
+    {
+        int offset = ordinal * _vectorDimension;
+        return _vectorData.AsSpan(offset, _vectorDimension);
     }
 
     private int SampleLevel()
     {
         int level = 0;
-        while (_random.NextDouble() < 1.0 / Math.E && level < 32)
+        while (_random.NextDouble() < 1.0 / Math.E && level < MaxSupportedLevels - 1)
         {
             level++;
         }
@@ -341,307 +695,396 @@ public class HNSWIndex : IVectorIndex
         return level;
     }
 
-    private void EnsureNodeInLayers(long rowId, int level)
+    private Span<int> GetNeighborSpan(int ordinal, int level)
     {
-        for (int currentLevel = 0; currentLevel <= level; currentLevel++)
-        {
-            if (!Layers.TryGetValue(currentLevel, out var levelGraph))
-            {
-                levelGraph = [];
-                Layers[currentLevel] = levelGraph;
-            }
+        int offset = (ordinal * _nodeGraphStride) + _levelOffsets[level];
+        int stride = _levelStrides[level];
+        return _graphLinks.AsSpan(offset, stride);
+    }
 
-            if (!levelGraph.ContainsKey(rowId))
+    private void ClearNodeLinks(int ordinal)
+    {
+        int offset = ordinal * _nodeGraphStride;
+        _graphLinks.AsSpan(offset, _nodeGraphStride).Fill(-1);
+    }
+
+    private int ResolveNeighborLimit(int level)
+    {
+        return level == 0 ? Math.Max(2, M * 2) : Math.Max(1, M);
+    }
+
+    private int ResolveEffectiveEfSearch(int topK)
+    {
+        int baseEf = Math.Max(topK, Math.Max(1, EfSearch));
+        if (!EnableAdaptiveEfSearch)
+        {
+            return Math.Max(1, baseEf);
+        }
+
+        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Math.Log2(_count + 1) * topK * AdaptiveEfSearchMultiplier));
+        return Math.Clamp(adaptive, baseEf, Math.Max(baseEf, _count));
+    }
+
+    private int ResolveEffectiveEfConstruction(int level)
+    {
+        int baseEf = Math.Max(ResolveNeighborLimit(level), Math.Max(1, EfConstruction));
+        if (!EnableAdaptiveEfConstruction)
+        {
+            return baseEf;
+        }
+
+        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Math.Log2(_count + 1) * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier));
+        return Math.Clamp(adaptive, baseEf, Math.Max(baseEf, _count));
+    }
+
+    private static void ValidateFiniteVector(ReadOnlySpan<float> vector, string parameter)
+    {
+        for (int i = 0; i < vector.Length; i++)
+        {
+            if (!float.IsFinite(vector[i]))
             {
-                levelGraph[rowId] = [];
+                throw new ArgumentException($"Vector contains non-finite value at index {i}.", parameter);
             }
         }
     }
 
-    private long ResolveEntryPoint(float[] queryVector)
+    private SearchWorkspace GetSearchWorkspace()
     {
-        if (EntryPointId.HasValue && Entries.ContainsKey(EntryPointId.Value))
-        {
-            return EntryPointId.Value;
-        }
-
-        long fallback = Entries
-            .Select(pair => (pair.Key, Distance(queryVector, pair.Value)))
-            .OrderBy(item => item.Item2)
-            .ThenBy(item => item.Key)
-            .First()
-            .Key;
-
-        EntryPointId = fallback;
-        MaxLevel = NodeLevels.TryGetValue(fallback, out int level) ? level : 0;
-        return fallback;
+        _threadSearchWorkspace ??= new SearchWorkspace();
+        _threadSearchWorkspace.EnsureVisitedCapacity(_nextOrdinal + 1);
+        _threadSearchWorkspace.EnsureResultCapacity(Math.Max(16, Math.Min(_count + 8, Math.Max(1, EfSearch) * 4)));
+        return _threadSearchWorkspace;
     }
 
-    private long SearchLayerGreedy(float[] query, long entryPoint, int level)
+    private SelectionWorkspace GetSelectionWorkspace()
     {
-        long current = entryPoint;
-        float currentDistance = Distance(query, Entries[current]);
+        _threadSelectionWorkspace ??= new SelectionWorkspace();
+        _threadSelectionWorkspace.EnsureSeenCapacity(_nextOrdinal + 1);
+        return _threadSelectionWorkspace;
+    }
 
-        bool changed;
+    private int SearchGreedy(ReadOnlySpan<float> query, int entryOrdinal, int level)
+    {
+        int current = entryOrdinal;
+        float currentDistance = Distance(query, GetVector(current));
+
+        bool moved;
         do
         {
-            changed = false;
-
-            foreach (long neighbor in GetNeighbors(level, current))
+            moved = false;
+            Span<int> neighbors = GetNeighborSpan(current, level);
+            for (int i = 0; i < neighbors.Length; i++)
             {
-                if (!Entries.TryGetValue(neighbor, out var neighborVector))
+                int neighbor = neighbors[i];
+                if (neighbor < 0)
+                {
+                    break;
+                }
+
+                if (i + 1 < neighbors.Length)
+                {
+                    PrefetchOrdinalVector(neighbors[i + 1]);
+                }
+
+                if (!_isActive[neighbor] || _nodeLevels[neighbor] < level)
                 {
                     continue;
                 }
 
-                float candidateDistance = Distance(query, neighborVector);
-                if (candidateDistance < currentDistance)
+                float distance = Distance(query, GetVector(neighbor));
+                if (distance < currentDistance)
                 {
                     current = neighbor;
-                    currentDistance = candidateDistance;
-                    changed = true;
+                    currentDistance = distance;
+                    moved = true;
                 }
             }
-        } while (changed);
+        } while (moved);
 
         return current;
     }
 
-    private List<long> BuildLevelZeroSeeds(long entryPoint, int ef)
+    private int SearchLayer(ReadOnlySpan<float> query, int entryOrdinal, int ef, int level, SearchWorkspace workspace)
     {
-        int maxSeeds = Math.Clamp(Math.Max(2, ef / 8), 2, 16);
-        var seeds = new List<long> { entryPoint };
+        workspace.Begin();
+        workspace.EnsureVisitedCapacity(_nextOrdinal + 1);
+        workspace.EnsureResultCapacity(Math.Max(ef, 16));
 
-        foreach (long neighbor in GetNeighbors(0, entryPoint))
+        if (entryOrdinal < 0 || entryOrdinal >= _nextOrdinal || !_isActive[entryOrdinal])
         {
-            if (seeds.Count >= maxSeeds)
-            {
-                break;
-            }
-
-            if (Entries.ContainsKey(neighbor) && !seeds.Contains(neighbor))
-            {
-                seeds.Add(neighbor);
-            }
+            return 0;
         }
 
-        if (seeds.Count >= maxSeeds)
+        float startDistance = Distance(query, GetVector(entryOrdinal));
+        workspace.CandidateQueue.Enqueue((entryOrdinal, startDistance), startDistance);
+        workspace.ResultQueue.Enqueue((entryOrdinal, startDistance), -startDistance);
+        workspace.VisitedEpochByOrdinal[entryOrdinal] = workspace.Epoch;
+
+        while (workspace.CandidateQueue.TryDequeue(out var current, out float currentDistance))
         {
-            return seeds;
-        }
-
-        foreach (long candidate in NodeLevels.Keys.OrderBy(key => key))
-        {
-            if (seeds.Count >= maxSeeds)
+            if (workspace.ResultQueue.Count >= ef && workspace.ResultQueue.TryPeek(out _, out float worstPriority))
             {
-                break;
+                float worstDistance = -worstPriority;
+                if (currentDistance > worstDistance)
+                {
+                    break;
+                }
             }
 
-            if (NodeExistsAtLevel(candidate, 0) && !seeds.Contains(candidate))
+            Span<int> neighbors = GetNeighborSpan(current.Ordinal, level);
+            for (int i = 0; i < neighbors.Length; i++)
             {
-                seeds.Add(candidate);
-            }
-        }
+                int neighbor = neighbors[i];
+                if (neighbor < 0)
+                {
+                    break;
+                }
 
-        return seeds;
-    }
+                if (i + 1 < neighbors.Length)
+                {
+                    PrefetchOrdinalVector(neighbors[i + 1]);
+                }
 
-    private List<long> BuildInsertionSeeds(long entryPoint, int ef, int level)
-    {
-        int seedBudget = level == 0
-            ? Math.Clamp(Math.Max(4, ef / 8), 4, 24)
-            : Math.Clamp(Math.Max(2, ef / 16), 2, 12);
-
-        var seeds = new List<long> { entryPoint };
-
-        foreach (long neighbor in GetNeighbors(level, entryPoint))
-        {
-            if (seeds.Count >= seedBudget)
-            {
-                break;
-            }
-
-            if (Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level) && !seeds.Contains(neighbor))
-            {
-                seeds.Add(neighbor);
-            }
-        }
-
-        if (seeds.Count >= seedBudget)
-        {
-            return seeds;
-        }
-
-        IEnumerable<long> fallbackPool = NodeLevels
-            .Where(pair => pair.Value >= level)
-            .OrderByDescending(pair => pair.Value)
-            .ThenBy(pair => pair.Key)
-            .Select(pair => pair.Key);
-
-        foreach (long candidate in fallbackPool)
-        {
-            if (seeds.Count >= seedBudget)
-            {
-                break;
-            }
-
-            if (Entries.ContainsKey(candidate) && !seeds.Contains(candidate))
-            {
-                seeds.Add(candidate);
-            }
-        }
-
-        return seeds;
-    }
-
-    private List<(long RowId, float Distance)> SearchLayer(float[] query, long entryPoint, int ef, int level)
-    {
-        return SearchLayer(query, [entryPoint], ef, level);
-    }
-
-    private List<(long RowId, float Distance)> SearchLayer(float[] query, IReadOnlyCollection<long> entryPoints, int ef, int level)
-    {
-        ef = Math.Max(1, ef);
-
-        var visited = new HashSet<long>();
-        var candidateQueue = new PriorityQueue<(long RowId, float Distance), float>();
-        var resultQueue = new PriorityQueue<(long RowId, float Distance), float>();
-
-        bool TryGetWorstResultDistance(out float worstDistance)
-        {
-            if (resultQueue.TryPeek(out _, out float worstPriority))
-            {
-                worstDistance = -worstPriority;
-                return true;
-            }
-
-            worstDistance = float.PositiveInfinity;
-            return false;
-        }
-
-        void AddResult(long rowId, float distance)
-        {
-            if (resultQueue.Count < ef)
-            {
-                resultQueue.Enqueue((rowId, distance), -distance);
-                return;
-            }
-
-            if (!resultQueue.TryPeek(out _, out float worstPriority))
-            {
-                return;
-            }
-
-            float worstDistance = -worstPriority;
-            if (distance >= worstDistance)
-            {
-                return;
-            }
-
-            resultQueue.Dequeue();
-            resultQueue.Enqueue((rowId, distance), -distance);
-        }
-
-        foreach (long entryPoint in entryPoints)
-        {
-            if (!Entries.TryGetValue(entryPoint, out var vector))
-            {
-                continue;
-            }
-
-            if (!visited.Add(entryPoint))
-            {
-                continue;
-            }
-
-            float startDistance = Distance(query, vector);
-            candidateQueue.Enqueue((entryPoint, startDistance), startDistance);
-            AddResult(entryPoint, startDistance);
-        }
-
-        if (candidateQueue.Count == 0)
-        {
-            return [];
-        }
-
-        while (candidateQueue.TryDequeue(out var current, out float currentDistance))
-        {
-            if (resultQueue.Count >= ef
-                && TryGetWorstResultDistance(out float currentWorstDistance)
-                && currentDistance > currentWorstDistance)
-            {
-                break;
-            }
-
-            foreach (long neighbor in GetNeighbors(level, current.RowId))
-            {
-                if (!visited.Add(neighbor))
+                if (!_isActive[neighbor] || _nodeLevels[neighbor] < level)
                 {
                     continue;
                 }
 
-                if (!Entries.TryGetValue(neighbor, out var neighborVector))
+                if (neighbor >= workspace.VisitedEpochByOrdinal.Length)
+                {
+                    workspace.EnsureVisitedCapacity(neighbor + 1);
+                }
+
+                if (workspace.VisitedEpochByOrdinal[neighbor] == workspace.Epoch)
                 {
                     continue;
                 }
 
-                float distance = Distance(query, neighborVector);
+                workspace.VisitedEpochByOrdinal[neighbor] = workspace.Epoch;
+                float distance = Distance(query, GetVector(neighbor));
 
-                if (resultQueue.Count >= ef
-                    && TryGetWorstResultDistance(out float worstDistance)
-                    && distance >= worstDistance)
+                if (workspace.ResultQueue.Count >= ef && workspace.ResultQueue.TryPeek(out _, out float worst))
                 {
-                    continue;
+                    if (distance >= -worst)
+                    {
+                        continue;
+                    }
                 }
 
-                candidateQueue.Enqueue((neighbor, distance), distance);
-                AddResult(neighbor, distance);
+                workspace.CandidateQueue.Enqueue((neighbor, distance), distance);
+                workspace.ResultQueue.Enqueue((neighbor, distance), -distance);
+                if (workspace.ResultQueue.Count > ef)
+                {
+                    workspace.ResultQueue.Dequeue();
+                }
             }
         }
 
-        return resultQueue.UnorderedItems
-            .Select(item => item.Element)
-            .OrderBy(item => item.Distance)
-            .ThenBy(item => item.RowId)
-            .ToList();
-    }
-
-    private List<long> SelectNeighbors(List<(long RowId, float Distance)> candidates, long targetNode, int neighborLimit)
-    {
-        var ordered = candidates
-            .Where(candidate => candidate.RowId != targetNode)
-            .OrderBy(candidate => candidate.Distance)
-            .ThenBy(candidate => candidate.RowId)
-            .ToList();
-
-        int limit = Math.Max(1, neighborLimit);
-        if (!EnableDiversityHeuristic || ordered.Count <= 1)
+        int resultCount = workspace.ResultQueue.Count;
+        workspace.EnsureResultCapacity(resultCount);
+        int idx = 0;
+        while (workspace.ResultQueue.TryDequeue(out var element, out _))
         {
-            return ordered
-                .Take(limit)
-                .Select(candidate => candidate.RowId)
-                .ToList();
+            workspace.ResultOrdinals[idx] = element.Ordinal;
+            workspace.ResultDistances[idx] = element.Distance;
+            idx++;
         }
 
-        var selected = new List<(long RowId, float Distance)>(limit);
-        foreach (var candidate in ordered)
+        Array.Sort(workspace.ResultDistances, workspace.ResultOrdinals, 0, idx);
+        return idx;
+    }
+
+    private void ConnectBidirectional(int source, ReadOnlySpan<int> neighbors, int level)
+    {
+        for (int i = 0; i < neighbors.Length; i++)
         {
-            if (!Entries.TryGetValue(candidate.RowId, out var candidateVector)
-                || !Entries.TryGetValue(targetNode, out var targetVector))
+            int neighbor = neighbors[i];
+            if (neighbor < 0 || neighbor == source)
             {
                 continue;
             }
+
+            AddEdgeOneWay(source, neighbor, level);
+            AddEdgeOneWay(neighbor, source, level);
+        }
+    }
+
+    private void AddEdgeOneWay(int source, int target, int level)
+    {
+        if (!_isActive[source] || !_isActive[target] || _nodeLevels[source] < level || _nodeLevels[target] < level)
+        {
+            return;
+        }
+
+        WithNodeLock(source, () =>
+        {
+            Span<int> neighbors = GetNeighborSpan(source, level);
+            for (int i = 0; i < neighbors.Length; i++)
+            {
+                if (neighbors[i] == target)
+                {
+                    return;
+                }
+
+                if (neighbors[i] < 0)
+                {
+                    neighbors[i] = target;
+                    return;
+                }
+            }
+
+            var workspace = GetSelectionWorkspace();
+            workspace.EnsureCandidateCapacity(neighbors.Length + 1);
+
+            int candidateCount = 0;
+            for (int i = 0; i < neighbors.Length; i++)
+            {
+                int neighbor = neighbors[i];
+                if (neighbor < 0)
+                {
+                    break;
+                }
+
+                workspace.ExistingNeighbors[candidateCount++] = neighbor;
+            }
+
+            workspace.ExistingNeighbors[candidateCount++] = target;
+
+            SelectNeighbors(level, source, workspace.ExistingNeighbors.AsSpan(0, candidateCount), neighbors);
+        });
+    }
+
+    private void RemoveEdgeOneWay(int source, int target, int level)
+    {
+        WithNodeLock(source, () =>
+        {
+            Span<int> neighbors = GetNeighborSpan(source, level);
+            int foundAt = -1;
+            int count = 0;
+
+            for (int i = 0; i < neighbors.Length; i++)
+            {
+                if (neighbors[i] < 0)
+                {
+                    break;
+                }
+
+                if (neighbors[i] == target)
+                {
+                    foundAt = i;
+                }
+
+                count++;
+            }
+
+            if (foundAt < 0)
+            {
+                return;
+            }
+
+            for (int i = foundAt; i < count - 1; i++)
+            {
+                neighbors[i] = neighbors[i + 1];
+            }
+
+            neighbors[count - 1] = -1;
+        });
+    }
+
+    // Zero-allocation selection path over spans. It writes the selected ordinals directly to destination.
+    private void SelectNeighbors(int level, int targetOrdinal, ReadOnlySpan<int> candidates, Span<int> destination)
+    {
+        destination.Fill(-1);
+        if (destination.Length == 0)
+        {
+            return;
+        }
+
+        var workspace = GetSelectionWorkspace();
+        workspace.EnsureCandidateCapacity(candidates.Length);
+        workspace.EnsureSeenCapacity(_nextOrdinal + 1);
+        workspace.BeginSeenPass();
+
+        int uniqueCount = 0;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            int candidate = candidates[i];
+            if (candidate < 0 || candidate == targetOrdinal)
+            {
+                continue;
+            }
+
+            if ((uint)candidate >= (uint)_isActive.Length || !_isActive[candidate] || _nodeLevels[candidate] < level)
+            {
+                continue;
+            }
+
+            if (candidate >= workspace.SeenEpochByOrdinal.Length)
+            {
+                workspace.EnsureSeenCapacity(candidate + 1);
+            }
+
+            if (workspace.SeenEpochByOrdinal[candidate] == workspace.SeenEpoch)
+            {
+                continue;
+            }
+
+            workspace.SeenEpochByOrdinal[candidate] = workspace.SeenEpoch;
+            workspace.CandidateOrdinals[uniqueCount] = candidate;
+            workspace.CandidateDistances[uniqueCount] = Distance(GetVector(targetOrdinal), GetVector(candidate));
+            uniqueCount++;
+        }
+
+        if (uniqueCount == 0)
+        {
+            return;
+        }
+
+        // In-place insertion sort in workspace arrays (stable enough for tiny M-sized neighborhoods).
+        for (int i = 1; i < uniqueCount; i++)
+        {
+            int ord = workspace.CandidateOrdinals[i];
+            float dist = workspace.CandidateDistances[i];
+            int j = i - 1;
+            while (j >= 0 && workspace.CandidateDistances[j] > dist)
+            {
+                workspace.CandidateOrdinals[j + 1] = workspace.CandidateOrdinals[j];
+                workspace.CandidateDistances[j + 1] = workspace.CandidateDistances[j];
+                j--;
+            }
+
+            workspace.CandidateOrdinals[j + 1] = ord;
+            workspace.CandidateDistances[j + 1] = dist;
+        }
+
+        int selectedCount = 0;
+
+        if (!EnableDiversityHeuristic)
+        {
+            int toTake = Math.Min(destination.Length, uniqueCount);
+            for (int i = 0; i < toTake; i++)
+            {
+                destination[i] = workspace.CandidateOrdinals[i];
+            }
+
+            return;
+        }
+
+        for (int i = 0; i < uniqueCount && selectedCount < destination.Length; i++)
+        {
+            int candidate = workspace.CandidateOrdinals[i];
+            float candidateToTarget = workspace.CandidateDistances[i];
 
             bool occluded = false;
-            foreach (var existing in selected)
+            for (int s = 0; s < selectedCount; s++)
             {
-                if (!Entries.TryGetValue(existing.RowId, out var existingVector))
+                int existing = destination[s];
+                if (existing < 0)
                 {
                     continue;
                 }
 
-                float candidateToExisting = Distance(candidateVector, existingVector);
-                float candidateToTarget = Distance(candidateVector, targetVector);
+                float candidateToExisting = Distance(GetVector(candidate), GetVector(existing));
                 if (candidateToExisting < candidateToTarget)
                 {
                     occluded = true;
@@ -654,562 +1097,212 @@ public class HNSWIndex : IVectorIndex
                 continue;
             }
 
-            selected.Add(candidate);
-            if (selected.Count >= limit)
-            {
-                break;
-            }
+            destination[selectedCount++] = candidate;
         }
 
-        if (selected.Count < limit)
+        if (selectedCount >= destination.Length)
         {
-            foreach (var candidate in ordered)
-            {
-                if (selected.Any(item => item.RowId == candidate.RowId))
-                {
-                    continue;
-                }
+            return;
+        }
 
-                selected.Add(candidate);
-                if (selected.Count >= limit)
+        for (int i = 0; i < uniqueCount && selectedCount < destination.Length; i++)
+        {
+            int candidate = workspace.CandidateOrdinals[i];
+            bool alreadySelected = false;
+            for (int s = 0; s < selectedCount; s++)
+            {
+                if (destination[s] == candidate)
                 {
+                    alreadySelected = true;
                     break;
                 }
             }
-        }
 
-        return selected.Select(item => item.RowId).ToList();
-    }
-
-    private void ConnectNode(long nodeId, List<long> neighbors, int level)
-    {
-        List<long> uniqueNeighbors = neighbors
-            .Where(neighbor => neighbor != nodeId && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
-            .Distinct()
-            .ToList();
-
-        foreach (long neighbor in uniqueNeighbors)
-        {
-            AddNeighbor(level, nodeId, neighbor);
-            AddNeighbor(level, neighbor, nodeId);
-        }
-
-        if (EnableInsertionNeighborhoodPruning)
-        {
-            StabilizeNeighborhoodAfterInsert(level, nodeId, uniqueNeighbors);
-        }
-    }
-
-    private void AddNeighbor(int level, long source, long target)
-    {
-        if (!Layers.TryGetValue(level, out var levelGraph))
-        {
-            levelGraph = [];
-            Layers[level] = levelGraph;
-        }
-
-        if (!levelGraph.TryGetValue(source, out var sourceNeighbors))
-        {
-            sourceNeighbors = [];
-            levelGraph[source] = sourceNeighbors;
-        }
-
-        if (source == target || sourceNeighbors.Contains(target))
-        {
-            return;
-        }
-
-        sourceNeighbors.Add(target);
-
-        int maxNeighbors = ResolveNeighborLimit(level);
-        if (sourceNeighbors.Count <= maxNeighbors)
-        {
-            return;
-        }
-
-        if (!Entries.TryGetValue(source, out var sourceVector))
-        {
-            return;
-        }
-
-        List<(long RowId, float Distance)> rankedCandidates = sourceNeighbors
-            .Where(neighbor => Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
-            .Select(neighbor => (RowId: neighbor, Distance: Distance(sourceVector, Entries[neighbor])))
-            .OrderBy(candidate => candidate.Distance)
-            .ThenBy(candidate => candidate.RowId)
-            .ToList();
-
-        List<long> pruned = SelectNeighbors(rankedCandidates, source, maxNeighbors)
-            .Take(maxNeighbors)
-            .ToList();
-
-        levelGraph[source] = pruned;
-    }
-
-    private IReadOnlyList<long> GetNeighbors(int level, long nodeId)
-    {
-        if (Layers.TryGetValue(level, out var levelGraph)
-            && levelGraph.TryGetValue(nodeId, out var neighbors))
-        {
-            return neighbors;
-        }
-
-        return [];
-    }
-
-    private bool NodeExistsAtLevel(long nodeId, int level)
-    {
-        return NodeLevels.TryGetValue(nodeId, out int nodeLevel) && nodeLevel >= level;
-    }
-
-    private void RemoveNode(long rowId)
-    {
-        if (!Entries.ContainsKey(rowId))
-        {
-            return;
-        }
-
-        if (NodeLevels.TryGetValue(rowId, out int level))
-        {
-            for (int currentLevel = 0; currentLevel <= level; currentLevel++)
-            {
-                if (!Layers.TryGetValue(currentLevel, out var levelGraph))
-                {
-                    continue;
-                }
-
-                if (levelGraph.TryGetValue(rowId, out var neighbors))
-                {
-                    List<long> removedNeighbors = [.. neighbors];
-
-                    foreach (long neighbor in neighbors)
-                    {
-                        if (levelGraph.TryGetValue(neighbor, out var neighborList))
-                        {
-                            neighborList.Remove(rowId);
-                        }
-                    }
-
-                    levelGraph.Remove(rowId);
-
-                    if (EnableDeleteGraphRepair)
-                    {
-                        RepairNeighborhoodAfterDelete(currentLevel, removedNeighbors, rowId);
-                    }
-                }
-
-                if (levelGraph.Count == 0)
-                {
-                    Layers.Remove(currentLevel);
-                }
-            }
-        }
-
-        Entries.Remove(rowId);
-        NodeLevels.Remove(rowId);
-
-        if (EntryPointId == rowId)
-        {
-            if (Entries.Count == 0)
-            {
-                EntryPointId = null;
-                MaxLevel = -1;
-                return;
-            }
-
-            var nextEntry = NodeLevels
-                .OrderByDescending(pair => pair.Value)
-                .ThenBy(pair => pair.Key)
-                .First();
-
-            EntryPointId = nextEntry.Key;
-            MaxLevel = nextEntry.Value;
-        }
-    }
-
-    private void ResetGraphState()
-    {
-        NodeLevels.Clear();
-        Layers.Clear();
-        EntryPointId = null;
-        MaxLevel = -1;
-    }
-
-    private int ResolveEffectiveEfSearch(int topK)
-    {
-        int maxAllowedEf = Math.Max(1, Entries.Count);
-        int baseEf = Math.Min(maxAllowedEf, Math.Max(topK, Math.Max(1, EfSearch)));
-        if (!EnableAdaptiveEfSearch || Entries.Count <= 1)
-        {
-            return baseEf;
-        }
-
-        double graphFactor = Math.Log2(Entries.Count + 1);
-        double topKFactor = Math.Max(1d, topK * AdaptiveEfSearchMultiplier);
-        int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, graphFactor * topKFactor));
-
-        return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
-    }
-
-    private int ResolveEffectiveEfConstruction(int level)
-    {
-        int maxAllowedEf = Math.Max(1, Entries.Count);
-        int baseEf = Math.Min(maxAllowedEf, Math.Max(ResolveNeighborLimit(level), Math.Max(1, EfConstruction)));
-        if (!EnableAdaptiveEfConstruction || Entries.Count <= 1)
-        {
-            return baseEf;
-        }
-
-        double graphFactor = Math.Log2(Entries.Count + 1);
-        double levelFactor = level == 0 ? 1d : 0.75d;
-        double breadth = graphFactor * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier * levelFactor;
-        int adaptiveEf = (int)Math.Ceiling(Math.Max(baseEf, breadth));
-
-        return Math.Clamp(adaptiveEf, baseEf, maxAllowedEf);
-    }
-
-    private int ResolveInsertionCandidateLimit(int level, int efConstruction, IReadOnlyCollection<long> insertionSeeds)
-    {
-        int maxAllowed = Math.Max(1, Entries.Count);
-        int minRequired = Math.Min(maxAllowed, Math.Max(ResolveNeighborLimit(level), Math.Max(1, efConstruction)));
-        double expansionFactor = ResolveEffectiveInsertionExpansionFactor(level, insertionSeeds);
-        int scaled = (int)Math.Ceiling(minRequired * expansionFactor);
-        int baseline = Math.Max(minRequired, ResolveNeighborLimit(level) * 4);
-        return Math.Clamp(Math.Max(baseline, scaled), minRequired, maxAllowed);
-    }
-
-    private double ResolveEffectiveInsertionExpansionFactor(int level, IReadOnlyCollection<long> insertionSeeds)
-    {
-        double baseFactor = Math.Max(1d, InsertionCandidateExpansionFactor);
-        if (!EnableAdaptiveInsertionCandidateExpansion || insertionSeeds.Count == 0)
-        {
-            return baseFactor;
-        }
-
-        double minFactor = Math.Max(1d, Math.Min(AdaptiveInsertionExpansionMinFactor, AdaptiveInsertionExpansionMaxFactor));
-        double maxFactor = Math.Max(minFactor, AdaptiveInsertionExpansionMaxFactor);
-        int neighborLimit = ResolveNeighborLimit(level);
-        if (neighborLimit <= 0)
-        {
-            return Math.Clamp(baseFactor, minFactor, maxFactor);
-        }
-
-        double localDegree = CalculateAverageDegree(level, insertionSeeds);
-        if (localDegree <= 0d)
-        {
-            return maxFactor;
-        }
-
-        double densityRatio = Math.Clamp(localDegree / neighborLimit, 0d, 2d);
-        double adaptiveMultiplier = 1d + ((1d - densityRatio) * 0.75d);
-        double adaptiveFactor = baseFactor * adaptiveMultiplier;
-
-        return Math.Clamp(adaptiveFactor, minFactor, maxFactor);
-    }
-
-    private double CalculateAverageDegree(int level, IReadOnlyCollection<long> nodeIds)
-    {
-        int totalDegree = 0;
-        int counted = 0;
-
-        foreach (long nodeId in nodeIds)
-        {
-            if (!NodeExistsAtLevel(nodeId, level))
+            if (alreadySelected)
             {
                 continue;
             }
 
-            totalDegree += GetNeighbors(level, nodeId).Count;
-            counted++;
-        }
-
-        if (counted == 0)
-        {
-            return 0d;
-        }
-
-        return (double)totalDegree / counted;
-    }
-
-    private List<(long RowId, float Distance)> ExpandInsertionCandidates(
-        float[] vector,
-        List<(long RowId, float Distance)> baseCandidates,
-        int level,
-        int candidateLimit)
-    {
-        if (!EnableInsertionCandidateExpansion || baseCandidates.Count == 0)
-        {
-            return baseCandidates
-                .OrderBy(candidate => candidate.Distance)
-                .ThenBy(candidate => candidate.RowId)
-                .Take(Math.Max(1, candidateLimit))
-                .ToList();
-        }
-
-        var merged = new Dictionary<long, float>();
-        foreach (var candidate in baseCandidates)
-        {
-            if (!merged.ContainsKey(candidate.RowId))
-            {
-                merged[candidate.RowId] = candidate.Distance;
-            }
-        }
-
-        int seedBudget = Math.Clamp(Math.Max(2, candidateLimit / 4), 2, 16);
-        foreach (var seed in baseCandidates
-            .OrderBy(candidate => candidate.Distance)
-            .ThenBy(candidate => candidate.RowId)
-            .Take(seedBudget))
-        {
-            foreach (long neighbor in GetNeighbors(level, seed.RowId))
-            {
-                if (merged.Count >= candidateLimit)
-                {
-                    break;
-                }
-
-                if (merged.ContainsKey(neighbor)
-                    || !Entries.TryGetValue(neighbor, out var neighborVector)
-                    || !NodeExistsAtLevel(neighbor, level))
-                {
-                    continue;
-                }
-
-                merged[neighbor] = Distance(vector, neighborVector);
-            }
-
-            if (merged.Count >= candidateLimit)
-            {
-                break;
-            }
-        }
-
-        return merged
-            .OrderBy(pair => pair.Value)
-            .ThenBy(pair => pair.Key)
-            .Take(Math.Max(1, candidateLimit))
-            .Select(pair => (pair.Key, pair.Value))
-            .ToList();
-    }
-
-    private void StabilizeNeighborhoodAfterInsert(int level, long nodeId, IReadOnlyCollection<long> connectedNeighbors)
-    {
-        if (!Layers.TryGetValue(level, out var levelGraph))
-        {
-            return;
-        }
-
-        int maxNeighbors = ResolveNeighborLimit(level);
-        if (maxNeighbors <= 0)
-        {
-            return;
-        }
-
-        double pruneThreshold = Math.Clamp(InsertionNeighborhoodPruningThreshold, 0.25d, 1.0d);
-
-        var anchors = new HashSet<long> { nodeId };
-        foreach (long neighbor in connectedNeighbors)
-        {
-            anchors.Add(neighbor);
-        }
-
-        foreach (long anchor in anchors)
-        {
-            if (!levelGraph.TryGetValue(anchor, out var currentNeighbors))
-            {
-                continue;
-            }
-
-            double degreeRatio = currentNeighbors.Count / (double)maxNeighbors;
-            if (degreeRatio < pruneThreshold)
-            {
-                continue;
-            }
-
-            RebuildNodeNeighborhood(level, anchor, maxNeighbors);
-        }
-
-        foreach (long anchor in anchors)
-        {
-            if (!levelGraph.TryGetValue(anchor, out var neighbors))
-            {
-                continue;
-            }
-
-            foreach (long neighbor in neighbors)
-            {
-                if (neighbor != anchor && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
-                {
-                    AddNeighbor(level, neighbor, anchor);
-                }
-            }
+            destination[selectedCount++] = candidate;
         }
     }
 
-    private void RebuildNodeNeighborhood(int level, long source, int maxNeighbors)
+    private static int CountSelected(ReadOnlySpan<int> selected)
     {
-        if (!Layers.TryGetValue(level, out var levelGraph)
-            || !levelGraph.TryGetValue(source, out var sourceNeighbors)
-            || !Entries.TryGetValue(source, out var sourceVector))
+        int count = 0;
+        for (int i = 0; i < selected.Length; i++)
         {
-            return;
-        }
-
-        int hops = Math.Clamp(InsertionNeighborhoodPruneHops, 1, 2);
-        var candidateSet = new HashSet<long>(sourceNeighbors.Where(Entries.ContainsKey));
-        var frontier = new HashSet<long>(candidateSet);
-
-        for (int hop = 0; hop < hops; hop++)
-        {
-            var nextFrontier = new HashSet<long>();
-            foreach (long node in frontier)
-            {
-                foreach (long neighbor in GetNeighbors(level, node))
-                {
-                    if (neighbor == source || !Entries.ContainsKey(neighbor) || !NodeExistsAtLevel(neighbor, level))
-                    {
-                        continue;
-                    }
-
-                    if (candidateSet.Add(neighbor))
-                    {
-                        nextFrontier.Add(neighbor);
-                    }
-                }
-            }
-
-            if (nextFrontier.Count == 0)
+            if (selected[i] < 0)
             {
                 break;
             }
 
-            frontier = nextFrontier;
+            count++;
         }
 
-        List<(long RowId, float Distance)> rankedCandidates = candidateSet
-            .Where(candidate => candidate != source && Entries.ContainsKey(candidate) && NodeExistsAtLevel(candidate, level))
-            .Select(candidate => (RowId: candidate, Distance: Distance(sourceVector, Entries[candidate])))
-            .OrderBy(candidate => candidate.Distance)
-            .ThenBy(candidate => candidate.RowId)
-            .ToList();
-
-        List<long> selected = SelectNeighbors(rankedCandidates, source, maxNeighbors);
-        levelGraph[source] = selected;
+        return count;
     }
 
-    private int ResolveNeighborLimit(int level)
+    private List<long> ExactSearch(ReadOnlySpan<float> query, int topK)
     {
-        int m = Math.Max(1, M);
-        return level == 0 ? Math.Max(2, m * 2) : m;
-    }
+        int take = Math.Min(topK, _count);
+        var maxHeap = new PriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
 
-    private void RepairNeighborhoodAfterDelete(int level, IReadOnlyCollection<long> removedNeighbors, long removedNodeId)
-    {
-        if (removedNeighbors.Count < 2)
+        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
         {
-            return;
-        }
+            PrefetchOrdinalVector(ordinal + 1);
 
-        if (!Layers.TryGetValue(level, out var levelGraph))
-        {
-            return;
-        }
-
-        List<long> candidates = removedNeighbors
-            .Where(nodeId => nodeId != removedNodeId && Entries.ContainsKey(nodeId) && NodeExistsAtLevel(nodeId, level))
-            .Distinct()
-            .ToList();
-
-        if (candidates.Count < 2)
-        {
-            return;
-        }
-
-        foreach (long source in candidates)
-        {
-            if (!levelGraph.TryGetValue(source, out var sourceNeighbors))
-            {
-                sourceNeighbors = [];
-                levelGraph[source] = sourceNeighbors;
-            }
-
-            List<long> mergeCandidates = sourceNeighbors
-                .Where(nodeId => nodeId != removedNodeId && Entries.ContainsKey(nodeId) && NodeExistsAtLevel(nodeId, level))
-                .Concat(candidates.Where(nodeId => nodeId != source))
-                .Distinct()
-                .ToList();
-
-            List<(long RowId, float Distance)> rankedCandidates = mergeCandidates
-                .Select(nodeId => (RowId: nodeId, Distance: Distance(Entries[source], Entries[nodeId])))
-                .OrderBy(item => item.Distance)
-                .ThenBy(item => item.RowId)
-                .ToList();
-
-            List<long> selected = SelectNeighbors(rankedCandidates, source, M);
-            levelGraph[source] = selected;
-        }
-
-        // Ensure bidirectional consistency after local rewiring.
-        foreach (long source in candidates)
-        {
-            if (!levelGraph.TryGetValue(source, out var sourceNeighbors))
+            if ((uint)ordinal >= (uint)_isActive.Length || !_isActive[ordinal])
             {
                 continue;
             }
 
-            foreach (long neighbor in sourceNeighbors)
+            float distance = Distance(query, GetVector(ordinal));
+            if (maxHeap.Count < take)
             {
-                if (neighbor != removedNodeId && Entries.ContainsKey(neighbor) && NodeExistsAtLevel(neighbor, level))
-                {
-                    AddNeighbor(level, neighbor, source);
-                }
+                maxHeap.Enqueue((ordinal, distance), (-distance, -ordinal));
+                continue;
             }
+
+            if (!maxHeap.TryPeek(out _, out var worst))
+            {
+                continue;
+            }
+
+            float worstDistance = -worst.NegDistance;
+            if (distance >= worstDistance)
+            {
+                continue;
+            }
+
+            maxHeap.Dequeue();
+            maxHeap.Enqueue((ordinal, distance), (-distance, -ordinal));
         }
+
+        var ordinals = new List<int>(maxHeap.Count);
+        var distances = new List<float>(maxHeap.Count);
+        while (maxHeap.TryDequeue(out var item, out _))
+        {
+            ordinals.Add(item.Ordinal);
+            distances.Add(item.Distance);
+        }
+
+        for (int i = 1; i < ordinals.Count; i++)
+        {
+            int ord = ordinals[i];
+            float dist = distances[i];
+            int j = i - 1;
+            while (j >= 0 && distances[j] > dist)
+            {
+                ordinals[j + 1] = ordinals[j];
+                distances[j + 1] = distances[j];
+                j--;
+            }
+
+            ordinals[j + 1] = ord;
+            distances[j + 1] = dist;
+        }
+
+        var result = new List<long>(ordinals.Count);
+        for (int i = 0; i < ordinals.Count; i++)
+        {
+            result.Add(_rowIdByOrdinal[ordinals[i]]);
+        }
+
+        return result;
     }
 
-    private float Distance(float[] a, float[] b)
+    private void ResolveFallbackEntryPoint()
+    {
+        int bestOrdinal = -1;
+        int bestLevel = -1;
+        long bestRowId = long.MaxValue;
+
+        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
+        {
+            if ((uint)ordinal >= (uint)_isActive.Length || !_isActive[ordinal])
+            {
+                continue;
+            }
+
+            int level = _nodeLevels[ordinal];
+            long rowId = _rowIdByOrdinal[ordinal];
+            if (level > bestLevel || (level == bestLevel && rowId < bestRowId))
+            {
+                bestOrdinal = ordinal;
+                bestLevel = level;
+                bestRowId = rowId;
+            }
+        }
+
+        if (bestOrdinal < 0)
+        {
+            EntryPointId = null;
+            MaxLevel = -1;
+            return;
+        }
+
+        EntryPointId = _rowIdByOrdinal[bestOrdinal];
+        MaxLevel = bestLevel;
+    }
+
+    private float Distance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         return Metric == "cosine"
-            ? ComputeCosineDistance(a, b)
-            : ComputeEuclideanDistance(a, b);
+            ? SimdDistanceKernels.CosineDistance(a, b)
+            : SimdDistanceKernels.EuclideanDistance(a, b);
     }
 
-    // Distance metrics (local implementations to avoid external dependencies)
-
-    private static float ComputeCosineDistance(float[] a, float[] b)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int TryGetEntryOrdinal()
     {
-        float dotProduct = 0f;
-        float magnitudeA = 0f;
-        float magnitudeB = 0f;
-
-        for (int i = 0; i < a.Length; i++)
+        lock (_stateGate)
         {
-            dotProduct += a[i] * b[i];
-            magnitudeA += a[i] * a[i];
-            magnitudeB += b[i] * b[i];
+            if (!EntryPointId.HasValue)
+            {
+                return -1;
+            }
+
+            return _rowIdToOrdinal.TryGetValue(EntryPointId.Value, out int ordinal) ? ordinal : -1;
         }
-
-        magnitudeA = MathF.Sqrt(magnitudeA);
-        magnitudeB = MathF.Sqrt(magnitudeB);
-
-        if (magnitudeA == 0 || magnitudeB == 0)
-        {
-            return 1f; // Maximum distance (no similarity)
-        }
-
-        float similarity = dotProduct / (magnitudeA * magnitudeB);
-        return 1f - similarity; // Convert to distance (0 = identical, 2 = opposite)
     }
 
-    private static float ComputeEuclideanDistance(float[] a, float[] b)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private unsafe void PrefetchOrdinalVector(int ordinal)
     {
-        float sum = 0f;
-        for (int i = 0; i < a.Length; i++)
+        if (!Sse.IsSupported || _vectorDimension <= 0 || ordinal < 0 || ordinal >= _nextOrdinal)
         {
-            float diff = a[i] - b[i];
-            sum += diff * diff;
+            return;
         }
 
-        return MathF.Sqrt(sum);
+        int offset = ordinal * _vectorDimension;
+        if ((uint)offset >= (uint)_vectorData.Length)
+        {
+            return;
+        }
+
+        fixed (float* ptr = &_vectorData[offset])
+        {
+            Sse.Prefetch0(ptr);
+        }
+    }
+
+    private void WithNodeLock(int ordinal, Action action)
+    {
+        if ((uint)ordinal >= (uint)_nodeLocks.Length)
+        {
+            return;
+        }
+
+        object? nodeLock = _nodeLocks[ordinal];
+        if (nodeLock == null)
+        {
+            return;
+        }
+
+        lock (nodeLock)
+        {
+            action();
+        }
     }
 }
