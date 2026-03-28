@@ -65,40 +65,31 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
             else
             {
-                Locks.AcquireWriteLock(databaseName, _model.TableName);
+                List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                if (toBeUpdated.Count == 0)
+                {
+                    Messages.Add("Rows affected: 0");
+                    return;
+                }
+
+                List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
+                int rowsAffected;
 
                 try
                 {
-                    List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
-                    if (toBeUpdated.Count == 0)
-                    {
-                        Messages.Add("Rows affected: 0");
-                        return;
-                    }
+                    var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
 
-                    List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
-                    int rowsAffected;
+                    (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
-                    try
-                    {
-                        var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
-
-                        (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
-
-                        ExecuteUpdate(newRows, oldRowIds, databaseName);
-                        rowsAffected = newRows.Count;
-                    }
-                    finally
-                    {
-                        Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
-                    }
-
-                    Messages.Add($"Rows affected: {rowsAffected}");
+                    ExecuteUpdate(newRows, oldRowIds, databaseName);
+                    rowsAffected = newRows.Count;
                 }
                 finally
                 {
-                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
+                    Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
                 }
+
+                Messages.Add($"Rows affected: {rowsAffected}");
             }
         }
         catch (Exception ex)
