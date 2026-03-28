@@ -38,6 +38,7 @@ public sealed class DataVoEngine : IDisposable
         LockManager = new LockManager();
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
         VersionStorageManager = new VersionStorageManager();
+        TransactionIdAllocator = new TransactionIdAllocator();
     }
 
     public Guid Id { get; }
@@ -81,6 +82,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the version storage manager owned by this engine for MVCC support.
     /// </summary>
     public VersionStorageManager VersionStorageManager { get; }
+
+    /// <summary>
+    /// Gets the transaction ID allocator that assigns globally unique transaction IDs.
+    /// </summary>
+    public TransactionIdAllocator TransactionIdAllocator { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.

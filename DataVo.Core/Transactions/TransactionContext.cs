@@ -1,5 +1,7 @@
 namespace DataVo.Core.Transactions;
 
+using DataVo.Core.MVCC;
+
 /// <summary>
 /// A volatile in-memory buffer that accumulates DML operations (inserts, updates, deletes)
 /// within an explicit transaction boundary. Changes stored here are invisible to other sessions
@@ -10,6 +12,16 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 public class TransactionContext
 {
+    /// <summary>
+    /// Unique transaction ID assigned at BEGIN time. Used for MVCC versioning.
+    /// </summary>
+    public long TransactionId { get; set; }
+
+    /// <summary>
+    /// The snapshot created at BEGIN time. Defines which row versions are visible to this transaction.
+    /// </summary>
+    public TransactionSnapshot? Snapshot { get; set; }
+
     /// <summary>
     /// Buffered INSERT operations grouped by table name.
     /// Each entry maps a table name to a list of row dictionaries awaiting physical insertion.

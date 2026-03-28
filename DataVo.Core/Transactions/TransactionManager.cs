@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DataVo.Core.Logging;
+using DataVo.Core.MVCC;
 
 namespace DataVo.Core.Transactions;
 
@@ -39,19 +40,29 @@ public sealed class TransactionManager
     public TransactionManager() { }
 
     /// <summary>
-    /// Opens a new explicit transaction for the given session.
+    /// Opens a new explicit transaction for the given session with MVCC support.
+    /// Allocates a transaction ID and creates a snapshot that defines visibility.
     /// Throws if the session already has an active transaction.
     /// </summary>
     /// <param name="session">The unique session identifier.</param>
+    /// <param name="idAllocator">The transaction ID allocator for assigning globally unique IDs.</param>
     /// <exception cref="InvalidOperationException">Thrown when a transaction is already active for this session.</exception>
-    public void Begin(Guid session)
+    public void Begin(Guid session, TransactionIdAllocator idAllocator)
     {
-        if (!_activeTransactions.TryAdd(session, new TransactionContext()))
+        long txId = idAllocator.AllocateTransactionId();
+        var snapshot = new TransactionSnapshot(snapshotTimestamp: txId, transactionId: txId);
+        var context = new TransactionContext 
+        { 
+            TransactionId = txId,
+            Snapshot = snapshot 
+        };
+
+        if (!_activeTransactions.TryAdd(session, context))
         {
             throw new InvalidOperationException("A transaction is already active for this session.");
         }
 
-        Logger.Info("Transaction started.");
+        Logger.Info($"Transaction started with ID {txId}.");
     }
 
     /// <summary>
