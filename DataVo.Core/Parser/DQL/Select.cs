@@ -36,6 +36,11 @@ namespace DataVo.Core.Parser.DQL;
 internal class Select(SelectStatement ast) : BaseDbAction
 {
     private string? _activeDatabaseName;
+
+    private readonly record struct LockedReadResources(
+        List<string> TableNames,
+        Dictionary<string, List<long>> RowReadLocksByTable);
+
     private enum LogicalPlanKind
     {
         LegacyWhereJoin,
@@ -153,7 +158,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             string database = ValidateDatabase(session);
             _activeDatabaseName = database;
 
-            var lockedTables = AcquireReadLocks(database);
+            LockedReadResources lockedResources = AcquireReadLocks(database);
 
             try
             {
@@ -200,7 +205,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             }
             finally
             {
-                ReleaseReadLocks(database, lockedTables);
+                ReleaseReadLocks(database, lockedResources);
             }
         }
         catch (Exception ex)
@@ -252,23 +257,36 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return materialized;
     }
 
-    private List<string> AcquireReadLocks(string databaseName)
+    private LockedReadResources AcquireReadLocks(string databaseName)
     {
         var tableNames = GetReferencedTableNames();
+        var rowReadLocksByTable = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (string tableName in tableNames)
         {
             Locks.AcquireReadLock(databaseName, tableName);
+
+            IEnumerable<long> rowIds = GetKnownRowIdsForTable(tableName);
+            List<long> rowLocks = Locks.AcquireRowReadLocks(databaseName, tableName, rowIds);
+            rowReadLocksByTable[tableName] = rowLocks;
         }
 
-        return tableNames;
+        return new LockedReadResources(tableNames, rowReadLocksByTable);
     }
 
-    private void ReleaseReadLocks(string databaseName, List<string> tableNames)
+    private void ReleaseReadLocks(string databaseName, LockedReadResources lockedResources)
     {
-        for (int i = tableNames.Count - 1; i >= 0; i--)
+        for (int i = lockedResources.TableNames.Count - 1; i >= 0; i--)
         {
-            Locks.ReleaseReadLock(databaseName, tableNames[i]);
+            string tableName = lockedResources.TableNames[i];
+
+            if (lockedResources.RowReadLocksByTable.TryGetValue(tableName, out List<long>? rowLocks)
+                && rowLocks.Count > 0)
+            {
+                Locks.ReleaseRowReadLocks(databaseName, tableName, rowLocks);
+            }
+
+            Locks.ReleaseReadLock(databaseName, tableName);
         }
     }
 
@@ -286,6 +304,28 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .Where(table => !string.IsNullOrWhiteSpace(table))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private IEnumerable<long> GetKnownRowIdsForTable(string tableName)
+    {
+        if (_model.TableService?.TableDetails == null)
+        {
+            return Enumerable.Empty<long>();
+        }
+
+        if (!_model.TableService.TableDetails.TryGetValue(tableName, out TableDetail? tableDetail)
+            || tableDetail.TableContentValues == null)
+        {
+            tableDetail = _model.TableService.TableDetails.Values
+                .FirstOrDefault(detail => string.Equals(detail.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (tableDetail?.TableContentValues == null)
+        {
+            return Enumerable.Empty<long>();
+        }
+
+        return tableDetail.TableContentValues.Select(record => record.RowId);
     }
 
     /// <summary>
