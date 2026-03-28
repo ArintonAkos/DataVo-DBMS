@@ -6,7 +6,7 @@ using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.DQL;
 using DataVo.Core.Runtime;
 using DataVo.Core.Services;
-using System.Text.Json;
+using System.Globalization;
 
 namespace DataVo.Core.Parser.Statements.Mechanism;
 
@@ -131,7 +131,28 @@ internal static class SubqueryExpressionMaterializer
 
     private static string BuildValueSignature(object value)
     {
-        return $"{value.GetType().FullName}:{JsonSerializer.Serialize(value)}";
+        return value switch
+        {
+            string s => $"System.String:{s}",
+            char c => $"System.Char:{c}",
+            bool b => $"System.Boolean:{(b ? "1" : "0")}",
+            byte v => $"System.Byte:{v}",
+            sbyte v => $"System.SByte:{v}",
+            short v => $"System.Int16:{v}",
+            ushort v => $"System.UInt16:{v}",
+            int v => $"System.Int32:{v}",
+            uint v => $"System.UInt32:{v}",
+            long v => $"System.Int64:{v}",
+            ulong v => $"System.UInt64:{v}",
+            float v => $"System.Single:{v.ToString(CultureInfo.InvariantCulture)}",
+            double v => $"System.Double:{v.ToString(CultureInfo.InvariantCulture)}",
+            decimal v => $"System.Decimal:{v.ToString(CultureInfo.InvariantCulture)}",
+            DateTime v => $"System.DateTime:{v.ToUniversalTime():O}",
+            DateTimeOffset v => $"System.DateTimeOffset:{v.ToUniversalTime():O}",
+            Guid v => $"System.Guid:{v}",
+            byte[] bytes => $"System.Byte[]:{Convert.ToBase64String(bytes)}",
+            _ => $"{value.GetType().FullName}:{Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty}"
+        };
     }
 
     private static void RejectCorrelatedSubquery(SqlStatement subquery, string databaseName, TableService? outerScope)

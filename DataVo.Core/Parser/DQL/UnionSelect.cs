@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Globalization;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Parser.Actions;
@@ -272,13 +272,45 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
 
     private static string BuildRowSignature(Dictionary<string, dynamic> row, List<string> fields)
     {
-        object?[] values = new object?[fields.Count];
+        string[] values = new string[fields.Count];
 
         for (int i = 0; i < fields.Count; i++)
         {
-            values[i] = row.TryGetValue(fields[i], out var value) ? value : null;
+            object? value = row.TryGetValue(fields[i], out var candidate) ? candidate : null;
+            values[i] = BuildValueSignature(value);
         }
 
-        return JsonSerializer.Serialize(values);
+        return string.Join("|", values);
+    }
+
+    private static string BuildValueSignature(object? value)
+    {
+        if (value == null)
+        {
+            return "<null>";
+        }
+
+        return value switch
+        {
+            string s => $"System.String:{s}",
+            char c => $"System.Char:{c}",
+            bool b => $"System.Boolean:{(b ? "1" : "0")}",
+            byte v => $"System.Byte:{v}",
+            sbyte v => $"System.SByte:{v}",
+            short v => $"System.Int16:{v}",
+            ushort v => $"System.UInt16:{v}",
+            int v => $"System.Int32:{v}",
+            uint v => $"System.UInt32:{v}",
+            long v => $"System.Int64:{v}",
+            ulong v => $"System.UInt64:{v}",
+            float v => $"System.Single:{v.ToString(CultureInfo.InvariantCulture)}",
+            double v => $"System.Double:{v.ToString(CultureInfo.InvariantCulture)}",
+            decimal v => $"System.Decimal:{v.ToString(CultureInfo.InvariantCulture)}",
+            DateTime v => $"System.DateTime:{v.ToUniversalTime():O}",
+            DateTimeOffset v => $"System.DateTimeOffset:{v.ToUniversalTime():O}",
+            Guid v => $"System.Guid:{v}",
+            byte[] bytes => $"System.Byte[]:{Convert.ToBase64String(bytes)}",
+            _ => $"{value.GetType().FullName}:{Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty}"
+        };
     }
 }

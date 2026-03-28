@@ -1,6 +1,7 @@
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Parser;
 using DataVo.Core.BTree;
+using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E;
 
@@ -16,6 +17,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Concurrent multi-session orchestration test is outside linear browser SQL fixture model")]
     public async Task ConcurrentInserts_WithSecondaryIndex_PreserveRowsAndIndexMembership()
     {
         string table = $"IndexedUsers_{Guid.NewGuid():N}";
@@ -187,6 +189,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Concurrency fuzz helper scenario using per-session orchestration outside browser SQL fixture model")]
     public async Task SeededFuzzLite_WithBoundedUpdates_PreserveStableIndexMembership()
     {
         await RunBoundedUpdateFuzzScenario(
@@ -202,6 +205,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [InlineData(20260327, 180, 36, 36, 30_000)]
     [InlineData(20260328, 180, 40, 32, 40_000)]
     [InlineData(20260329, 220, 44, 44, 50_000)]
+    [BrowserTranslateIgnore("Multi-seed concurrency matrix relies on helper orchestration not representable as a single browser SQL scenario")]
     public async Task SeededFuzzLite_WithBoundedUpdates_MultiSeedMatrixPreservesInvariants(
         int seed,
         int seedRows,
@@ -343,6 +347,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Concurrent multi-session delete/insert orchestration is outside linear browser SQL fixture model")]
     public async Task ConcurrentDuplicatePrimaryKeyInserts_RejectDuplicatesAndKeepSingleRow()
     {
         string table = $"IndexedUsersDup_{Guid.NewGuid():N}";
@@ -395,6 +400,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     }
 
     [Fact]
+    [BrowserTranslateIgnore("Repeated concurrent duplicate-key race harness uses session-level synchronization outside browser SQL fixture model")]
     public async Task ConcurrentDuplicatePrimaryKeyInserts_RepeatedRounds_AlwaysSingleWinner()
     {
         await RunDuplicateRaceRounds(
@@ -407,6 +413,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [Theory]
     [InlineData(2, 8, 8_001)]
     [InlineData(4, 10, 8_002)]
+    [BrowserTranslateIgnore("Duplicate-key race matrix depends on concurrent session choreography not supported by generated browser scenarios")]
     public async Task ConcurrentDuplicatePrimaryKeyInserts_MultiRoundMatrix_PreservesSingleWinnerInvariant(
         int rounds,
         int contenderCount,
@@ -471,6 +478,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [Theory]
     [InlineData(20260330, 320, 72, 72, 72, 60_000)]
     [InlineData(20260331, 420, 96, 96, 96, 70_000)]
+    [BrowserTranslateIgnore("Overlap update/delete fuzz matrix requires session-level deterministic race orchestration")]
     public async Task SeededFuzzLite_WithUpdateDeleteOverlap_MultiSeed_PreservesOverlapInvariants(
         int seed,
         int seedRows,
@@ -493,21 +501,22 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [InlineData(20260332, 300, 75, 75, 75, 80_000)]
     [InlineData(20260333, 350, 85, 80, 85, 90_000)]
     [InlineData(20260334, 400, 100, 95, 100, 100_000)]
+    [BrowserTranslateIgnore("Large-volume concurrent operation matrix is a lock/contention harness outside browser SQL fixture scope")]
     public async Task SeededFuzzLite_WithLargeVolumeOperations_MultiSeedMatrixPreservesInvariants(
         int seed,
         int seedRows,
         int deleteCount,
         int updateCount,
-        int insertStartId,
-        int insertStartIdOffset)
+        int insertCount,
+        int insertStartId)
     {
         await RunLargeVolumeFuzzScenario(
             tablePrefix: "IndexedUsersLargeVolume",
             seedRows: seedRows,
             deleteCount: deleteCount,
             updateCount: updateCount,
+            insertCount: insertCount,
             insertStartId: insertStartId,
-            insertStartIdOffset: insertStartIdOffset,
             seed: seed);
     }
 
@@ -516,11 +525,11 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int seedRows,
         int deleteCount,
         int updateCount,
+        int insertCount,
         int insertStartId,
-        int insertStartIdOffset,
         int seed)
     {
-        if (seedRows <= 0 || deleteCount < 0 || updateCount < 0)
+        if (seedRows <= 0 || deleteCount < 0 || updateCount < 0 || insertCount < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(seedRows), "Scenario counts must be non-negative and seedRows must be > 0.");
         }
@@ -553,7 +562,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         var insertedIds = new HashSet<int>();
         var updatedIds = new HashSet<int>();
 
-        var operations = new List<(string Kind, int Id)>(deleteCount + updateCount + insertStartIdOffset);
+        var operations = new List<(string Kind, int Id)>(deleteCount + updateCount + insertCount);
 
         foreach (int id in deletePool)
         {
@@ -568,7 +577,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         }
 
         int nextInsertId = insertStartId;
-        for (int i = 0; i < insertStartIdOffset; i++)
+        for (int i = 0; i < insertCount; i++)
         {
             int id = nextInsertId++;
             insertedIds.Add(id);
@@ -637,6 +646,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     [InlineData(20260341, 220, 48, 0, 41_000)]
     [InlineData(20260342, 300, 66, 0, 51_000)]
     [InlineData(20260343, 360, 72, 0, 61_000)]
+    [BrowserTranslateIgnore("Composite-index concurrent fuzz matrix depends on per-session orchestration not expressible in generated browser fixtures")]
     public async Task SeededFuzzLite_WithCompositeIndex_MultiSeedMatrixPreservesCompositeMembership(
         int seed,
         int seedRows,
@@ -680,6 +690,12 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, FirstName VARCHAR(50), LastName VARCHAR(50));");
         var createIndexResult = ExecuteAndReturn($"CREATE INDEX idx_full_name ON {table} (FirstName, LastName);");
         Assert.False(createIndexResult.IsError, string.Join(" | ", createIndexResult.Messages));
+
+        var createdIndex = Engine.Catalog.GetTableIndexes(table, TestDb)
+            .Single(index => index.IndexFileName == "idx_full_name");
+        Assert.Equal(2, createdIndex.AttributeNames.Count);
+        Assert.Equal("FirstName", createdIndex.AttributeNames[0]);
+        Assert.Equal("LastName", createdIndex.AttributeNames[1]);
 
         for (int i = 1; i <= seedRows; i++)
         {
@@ -762,13 +778,9 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
                 },
                 ["FirstName", "LastName"]);
 
-            string insertedPrefixKey = $"InsFirst{insertedId}";
-            bool hasCompositeKey = Engine.IndexManager.IndexContainsKey(insertedCompositeKey, "idx_full_name", table, TestDb);
-            bool hasPrefixFallbackKey = Engine.IndexManager.IndexContainsKey(insertedPrefixKey, "idx_full_name", table, TestDb);
-
             Assert.True(
-                hasCompositeKey || hasPrefixFallbackKey,
-                $"Composite: Inserted key ({insertedCompositeKey}) or fallback first-component key ({insertedPrefixKey}) should be present in idx_full_name for {table}.");
+                Engine.IndexManager.IndexContainsKey(insertedCompositeKey, "idx_full_name", table, TestDb),
+                $"Composite: Inserted key ({insertedCompositeKey}) should be present in idx_full_name for {table}.");
         }
     }
 
@@ -886,13 +898,13 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
     {
         string table = $"MultiIndexUsers_{Guid.NewGuid():N}";
         Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, FirstName VARCHAR(50), LastName VARCHAR(50), Email VARCHAR(100));");
-        
+
         var idx1Result = ExecuteAndReturn($"CREATE INDEX idx_fname ON {table} (FirstName);");
         Assert.False(idx1Result.IsError, string.Join(" | ", idx1Result.Messages));
-        
+
         var idx2Result = ExecuteAndReturn($"CREATE INDEX idx_lname ON {table} (LastName);");
         Assert.False(idx2Result.IsError, string.Join(" | ", idx2Result.Messages));
-        
+
         var idx3Result = ExecuteAndReturn($"CREATE INDEX idx_email ON {table} (Email);");
         Assert.False(idx3Result.IsError, string.Join(" | ", idx3Result.Messages));
 
@@ -954,11 +966,11 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             Assert.False(
                 Engine.IndexManager.IndexContainsKey($"First{deletedId}", "idx_fname", table, TestDb),
                 $"MultiIndex: Deleted FirstName key First{deletedId} should be absent from idx_fname.");
-            
+
             Assert.False(
                 Engine.IndexManager.IndexContainsKey($"Last{deletedId}", "idx_lname", table, TestDb),
                 $"MultiIndex: Deleted LastName key Last{deletedId} should be absent from idx_lname.");
-            
+
             Assert.False(
                 Engine.IndexManager.IndexContainsKey($"user{deletedId}@test.com", "idx_email", table, TestDb),
                 $"MultiIndex: Deleted Email key user{deletedId}@test.com should be absent from idx_email.");
@@ -970,15 +982,15 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             Assert.False(
                 Engine.IndexManager.IndexContainsKey($"First{updatedId}", "idx_fname", table, TestDb),
                 $"MultiIndex: Old FirstName key First{updatedId} should be absent after update.");
-            
+
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"UpFirst{updatedId}", "idx_fname", table, TestDb),
                 $"MultiIndex: Updated FirstName key UpFirst{updatedId} should be present in idx_fname.");
-            
+
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"UpLast{updatedId}", "idx_lname", table, TestDb),
                 $"MultiIndex: Updated LastName key UpLast{updatedId} should be present in idx_lname.");
-            
+
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"updated{updatedId}@test.com", "idx_email", table, TestDb),
                 $"MultiIndex: Updated Email key should be present in idx_email.");
@@ -990,11 +1002,11 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"InsFirst{insertedId}", "idx_fname", table, TestDb),
                 $"MultiIndex: Inserted FirstName key should be present in idx_fname.");
-            
+
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"InsLast{insertedId}", "idx_lname", table, TestDb),
                 $"MultiIndex: Inserted LastName key should be present in idx_lname.");
-            
+
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"inserted{insertedId}@test.com", "idx_email", table, TestDb),
                 $"MultiIndex: Inserted Email key should be present in idx_email.");

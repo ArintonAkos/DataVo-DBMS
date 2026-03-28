@@ -251,7 +251,7 @@ public class CreateIndexStatement : SqlStatement
 {
     public IdentifierNode IndexName { get; set; } = null!;
     public IdentifierNode TableName { get; set; } = null!;
-    public IdentifierNode ColumnName { get; set; } = null!;
+    public List<IdentifierNode> ColumnNames { get; set; } = [];
     public IdentifierNode? UsingMethod { get; set; }
 }
 

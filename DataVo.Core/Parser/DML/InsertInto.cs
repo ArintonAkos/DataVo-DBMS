@@ -307,6 +307,18 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     private void LogInsertError(string message)
     {
         Messages.Add(message);
+
+        // Constraint rejections are expected outcomes in contention/fuzz scenarios
+        // and should not flood logs as hard errors.
+        if (message.Contains("Primary key violation", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Unique key violation", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Foreign key violation", StringComparison.OrdinalIgnoreCase))
+        {
+            // Expected business-rule rejection paths can be very frequent in contention tests.
+            // Keep them in action messages but avoid console spam.
+            return;
+        }
+
         Logger.Error(message);
     }
 

@@ -15,7 +15,7 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
     public static CreateIndexModel FromAst(CreateIndexStatement ast) => new(
         ast.IndexName.Name,
         ast.TableName.Name,
-        [ast.ColumnName.Name],
+        ast.ColumnNames.Select(c => c.Name).ToList(),
         ast.UsingMethod?.Name.ToUpperInvariant() ?? "BTREE");
 
     public IndexFile ToIndexFile() =>

@@ -1912,7 +1912,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
                 ? colRef.Column
                 : $"{colRef.TableOrAlias}.{colRef.Column}";
 
-            (tableName, columnName) = _model.TableService!.ParseAndFindTableNameByColumn(reference);
+            var resolvedTuple = _model.TableService!.ParseAndFindTableNameByColumn(reference);
+            tableName = resolvedTuple.Item1;
+            columnName = resolvedTuple.Item2;
             return true;
         }
 

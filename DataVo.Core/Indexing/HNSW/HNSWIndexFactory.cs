@@ -1,5 +1,7 @@
 namespace DataVo.Core.Indexing.HNSW;
 
+using System.Globalization;
+
 /// <summary>
 /// Factory for creating HNSW (vector) index instances.
 /// </summary>
@@ -15,11 +17,20 @@ public class HNSWIndexFactory : IVectorIndexFactory
     /// </summary>
     public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
     {
-        var index = new HNSWIndex();
+        object index = IsBrowserRuntime()
+            ? new BrowserFallbackVectorIndex()
+            : new HNSWIndex();
 
         // Extract metric parameter (cosine or euclidean)
         if (@params.TryGetValue("metric", out var val) && val is string metric)
-            index.Metric = NormalizeMetric(metric);
+        {
+            string normalizedMetric = NormalizeMetric(metric);
+            if (index is HNSWIndex hnswWithMetric)
+                hnswWithMetric.Metric = normalizedMetric;
+
+            if (index is BrowserFallbackVectorIndex fallbackWithMetric)
+                fallbackWithMetric.Metric = normalizedMetric;
+        }
 
         // Extract vector dimension for validation (future use)
         if (@params.TryGetValue("dimension", out var dimVal) && dimVal is int dimension)
@@ -27,58 +38,63 @@ public class HNSWIndexFactory : IVectorIndexFactory
             // Could validate or store dimension when inserting vectors
         }
 
-        if (TryReadInt(@params, "m", out int m) && m > 0)
-            index.M = m;
+        if (index is HNSWIndex hnsw && TryReadInt(@params, "m", out int m) && m > 0)
+            hnsw.M = m;
 
-        if (TryReadInt(@params, "efConstruction", out int efConstruction) && efConstruction > 0)
-            index.EfConstruction = efConstruction;
+        if (index is HNSWIndex hnswEfConstruction && TryReadInt(@params, "efConstruction", out int efConstruction) && efConstruction > 0)
+            hnswEfConstruction.EfConstruction = efConstruction;
 
-        if (TryReadBool(@params, "enableAdaptiveEfConstruction", out bool enableAdaptiveEfConstruction))
-            index.EnableAdaptiveEfConstruction = enableAdaptiveEfConstruction;
+        if (index is HNSWIndex hnswAdaptiveConstruction && TryReadBool(@params, "enableAdaptiveEfConstruction", out bool enableAdaptiveEfConstruction))
+            hnswAdaptiveConstruction.EnableAdaptiveEfConstruction = enableAdaptiveEfConstruction;
 
-        if (TryReadDouble(@params, "adaptiveEfConstructionMultiplier", out double adaptiveEfConstructionMultiplier) && adaptiveEfConstructionMultiplier > 0d)
-            index.AdaptiveEfConstructionMultiplier = adaptiveEfConstructionMultiplier;
+        if (index is HNSWIndex hnswAdaptiveMultiplier && TryReadDouble(@params, "adaptiveEfConstructionMultiplier", out double adaptiveEfConstructionMultiplier) && adaptiveEfConstructionMultiplier > 0d)
+            hnswAdaptiveMultiplier.AdaptiveEfConstructionMultiplier = adaptiveEfConstructionMultiplier;
 
-        if (TryReadBool(@params, "enableInsertionCandidateExpansion", out bool enableInsertionCandidateExpansion))
-            index.EnableInsertionCandidateExpansion = enableInsertionCandidateExpansion;
+        if (index is HNSWIndex hnswInsertionExpansion && TryReadBool(@params, "enableInsertionCandidateExpansion", out bool enableInsertionCandidateExpansion))
+            hnswInsertionExpansion.EnableInsertionCandidateExpansion = enableInsertionCandidateExpansion;
 
-        if (TryReadDouble(@params, "insertionCandidateExpansionFactor", out double insertionCandidateExpansionFactor) && insertionCandidateExpansionFactor > 0d)
-            index.InsertionCandidateExpansionFactor = insertionCandidateExpansionFactor;
+        if (index is HNSWIndex hnswInsertionFactor && TryReadDouble(@params, "insertionCandidateExpansionFactor", out double insertionCandidateExpansionFactor) && insertionCandidateExpansionFactor > 0d)
+            hnswInsertionFactor.InsertionCandidateExpansionFactor = insertionCandidateExpansionFactor;
 
-        if (TryReadBool(@params, "enableAdaptiveInsertionCandidateExpansion", out bool enableAdaptiveInsertionCandidateExpansion))
-            index.EnableAdaptiveInsertionCandidateExpansion = enableAdaptiveInsertionCandidateExpansion;
+        if (index is HNSWIndex hnswAdaptiveInsertion && TryReadBool(@params, "enableAdaptiveInsertionCandidateExpansion", out bool enableAdaptiveInsertionCandidateExpansion))
+            hnswAdaptiveInsertion.EnableAdaptiveInsertionCandidateExpansion = enableAdaptiveInsertionCandidateExpansion;
 
-        if (TryReadDouble(@params, "adaptiveInsertionExpansionMinFactor", out double adaptiveInsertionExpansionMinFactor) && adaptiveInsertionExpansionMinFactor > 0d)
-            index.AdaptiveInsertionExpansionMinFactor = adaptiveInsertionExpansionMinFactor;
+        if (index is HNSWIndex hnswAdaptiveInsertionMin && TryReadDouble(@params, "adaptiveInsertionExpansionMinFactor", out double adaptiveInsertionExpansionMinFactor) && adaptiveInsertionExpansionMinFactor > 0d)
+            hnswAdaptiveInsertionMin.AdaptiveInsertionExpansionMinFactor = adaptiveInsertionExpansionMinFactor;
 
-        if (TryReadDouble(@params, "adaptiveInsertionExpansionMaxFactor", out double adaptiveInsertionExpansionMaxFactor) && adaptiveInsertionExpansionMaxFactor > 0d)
-            index.AdaptiveInsertionExpansionMaxFactor = adaptiveInsertionExpansionMaxFactor;
+        if (index is HNSWIndex hnswAdaptiveInsertionMax && TryReadDouble(@params, "adaptiveInsertionExpansionMaxFactor", out double adaptiveInsertionExpansionMaxFactor) && adaptiveInsertionExpansionMaxFactor > 0d)
+            hnswAdaptiveInsertionMax.AdaptiveInsertionExpansionMaxFactor = adaptiveInsertionExpansionMaxFactor;
 
-        if (TryReadBool(@params, "enableInsertionNeighborhoodPruning", out bool enableInsertionNeighborhoodPruning))
-            index.EnableInsertionNeighborhoodPruning = enableInsertionNeighborhoodPruning;
+        if (index is HNSWIndex hnswPruning && TryReadBool(@params, "enableInsertionNeighborhoodPruning", out bool enableInsertionNeighborhoodPruning))
+            hnswPruning.EnableInsertionNeighborhoodPruning = enableInsertionNeighborhoodPruning;
 
-        if (TryReadDouble(@params, "insertionNeighborhoodPruningThreshold", out double insertionNeighborhoodPruningThreshold) && insertionNeighborhoodPruningThreshold > 0d)
-            index.InsertionNeighborhoodPruningThreshold = insertionNeighborhoodPruningThreshold;
+        if (index is HNSWIndex hnswPruningThreshold && TryReadDouble(@params, "insertionNeighborhoodPruningThreshold", out double insertionNeighborhoodPruningThreshold) && insertionNeighborhoodPruningThreshold > 0d)
+            hnswPruningThreshold.InsertionNeighborhoodPruningThreshold = insertionNeighborhoodPruningThreshold;
 
-        if (TryReadInt(@params, "insertionNeighborhoodPruneHops", out int insertionNeighborhoodPruneHops) && insertionNeighborhoodPruneHops > 0)
-            index.InsertionNeighborhoodPruneHops = insertionNeighborhoodPruneHops;
+        if (index is HNSWIndex hnswPruneHops && TryReadInt(@params, "insertionNeighborhoodPruneHops", out int insertionNeighborhoodPruneHops) && insertionNeighborhoodPruneHops > 0)
+            hnswPruneHops.InsertionNeighborhoodPruneHops = insertionNeighborhoodPruneHops;
 
-        if (TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
-            index.EfSearch = efSearch;
+        if (index is HNSWIndex hnswEfSearch && TryReadInt(@params, "efSearch", out int efSearch) && efSearch > 0)
+            hnswEfSearch.EfSearch = efSearch;
 
-        if (TryReadBool(@params, "enableDiversityHeuristic", out bool enableDiversityHeuristic))
-            index.EnableDiversityHeuristic = enableDiversityHeuristic;
+        if (index is HNSWIndex hnswDiversity && TryReadBool(@params, "enableDiversityHeuristic", out bool enableDiversityHeuristic))
+            hnswDiversity.EnableDiversityHeuristic = enableDiversityHeuristic;
 
-        if (TryReadBool(@params, "enableDeleteGraphRepair", out bool enableDeleteGraphRepair))
-            index.EnableDeleteGraphRepair = enableDeleteGraphRepair;
+        if (index is HNSWIndex hnswDeleteRepair && TryReadBool(@params, "enableDeleteGraphRepair", out bool enableDeleteGraphRepair))
+            hnswDeleteRepair.EnableDeleteGraphRepair = enableDeleteGraphRepair;
 
-        if (TryReadBool(@params, "enableAdaptiveEfSearch", out bool enableAdaptiveEfSearch))
-            index.EnableAdaptiveEfSearch = enableAdaptiveEfSearch;
+        if (index is HNSWIndex hnswAdaptiveSearch && TryReadBool(@params, "enableAdaptiveEfSearch", out bool enableAdaptiveEfSearch))
+            hnswAdaptiveSearch.EnableAdaptiveEfSearch = enableAdaptiveEfSearch;
 
-        if (TryReadDouble(@params, "adaptiveEfSearchMultiplier", out double adaptiveEfSearchMultiplier) && adaptiveEfSearchMultiplier > 0d)
-            index.AdaptiveEfSearchMultiplier = adaptiveEfSearchMultiplier;
+        if (index is HNSWIndex hnswAdaptiveSearchMultiplier && TryReadDouble(@params, "adaptiveEfSearchMultiplier", out double adaptiveEfSearchMultiplier) && adaptiveEfSearchMultiplier > 0d)
+            hnswAdaptiveSearchMultiplier.AdaptiveEfSearchMultiplier = adaptiveEfSearchMultiplier;
 
         return index;
+    }
+
+    private static bool IsBrowserRuntime()
+    {
+        return BrowserRuntimeFlags.ForceVectorFallback;
     }
 
     /// <summary>
@@ -113,7 +129,11 @@ public class HNSWIndexFactory : IVectorIndexFactory
             long l when l is >= int.MinValue and <= int.MaxValue => Assign((int)l, out value),
             double d when d is >= int.MinValue and <= int.MaxValue => Assign((int)d, out value),
             float f when f is >= int.MinValue and <= int.MaxValue => Assign((int)f, out value),
-            string s => int.TryParse(s, out value),
+            string s => int.TryParse(
+                s.AsSpan(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out value),
             _ => false
         };
 
@@ -158,7 +178,11 @@ public class HNSWIndexFactory : IVectorIndexFactory
             float f => Assign(f, out value),
             int i => Assign(i, out value),
             long l => Assign(l, out value),
-            string s => double.TryParse(s, out value),
+            string s => double.TryParse(
+                s.AsSpan(),
+                NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture,
+                out value),
             _ => false
         };
 
