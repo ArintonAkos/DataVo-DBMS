@@ -109,6 +109,50 @@ dotnet build
 dotnet test
 ```
 
+HNSW-specific test lanes:
+
+```bash
+# Fast local correctness lane (default benchmark tests remain disabled)
+bash ./scripts/test-hnsw-fast.sh
+
+# Performance lane (enables HNSW benchmark tests)
+bash ./scripts/test-hnsw-perf.sh
+
+# Performance lane with long build-scaling checkpoints (up to 1M)
+bash ./scripts/test-hnsw-perf.sh --long
+
+# One-command final-mile validation (fast + perf)
+bash ./scripts/final-mile-validate.sh
+```
+
+HNSW perf artifacts are emitted under:
+
+```bash
+artifacts/perf/hnsw/<timestamp>/
+artifacts/perf/hnsw/latest-build-scaling-summary.csv
+artifacts/perf/hnsw/latest-insert-checkpoints.csv
+artifacts/perf/hnsw/latest-raw.log
+```
+
+Remaining-phase closeout lanes:
+
+```bash
+# Relational hardening
+bash ./scripts/test-relational-hardening.sh
+
+# Browser strict stress and parity matrix lane
+bash ./scripts/test-browser-strict-stress.sh
+
+# Full non-CI closeout runner for remaining phases
+bash ./scripts/phase-closeout.sh
+```
+
+Strict closeout checklist for non-100% phase rows:
+
+```bash
+local-docs/planning/phase-remaining-dod-checklist.md
+```
+
 Run the docs site (includes the integrated SQL playground):
 
 ```bash
@@ -117,6 +161,16 @@ cd docs
 npm install
 npm run docs:dev   # or `npm run docs:build` to build static site
 ```
+
+Generate browser WASM scenarios directly from selected .NET E2E test source:
+
+```bash
+bash ./scripts/generate-wasm-browser-scenarios.sh
+# or
+cd docs && npm run test:browser:generate
+```
+
+This keeps browser parity tests aligned with .NET source cases and reduces duplicate test authoring.
 
 Notes: the `deploy-browser-wasm` script publishes the browser-wasm project and copies the runtime files and `datavo.interop.js` into the docs site.
 

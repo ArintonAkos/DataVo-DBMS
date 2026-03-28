@@ -1,0 +1,5 @@
+# Generated browser parity artifacts
+*.json
+
+# Keep this directory in git
+!.gitignore

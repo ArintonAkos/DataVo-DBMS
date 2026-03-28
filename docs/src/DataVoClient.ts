@@ -53,6 +53,23 @@ export class DataVoClient {
     return debugValue === "1" || debugValue === "true";
   }
 
+  private shouldUseRuntimeWorker(): boolean {
+    const runtimeWorkerValue = new URLSearchParams(window.location.search).get(
+      "datavoRuntimeWorker",
+    );
+
+    if (!runtimeWorkerValue) {
+      return true;
+    }
+
+    const normalized = runtimeWorkerValue.toLowerCase();
+    return !(
+      normalized === "0" ||
+      normalized === "false" ||
+      normalized === "off"
+    );
+  }
+
   public static getInstance(): DataVoClient {
     if (!DataVoClient.instance) {
       DataVoClient.instance = new DataVoClient();
@@ -75,7 +92,9 @@ export class DataVoClient {
     }
 
     this.initializePromise = (async () => {
-      const workerInitialized = await this.tryInitializeWorkerRuntime();
+      const workerInitialized = this.shouldUseRuntimeWorker()
+        ? await this.tryInitializeWorkerRuntime()
+        : false;
       if (workerInitialized) {
         this.isInitialized = true;
         return;
