@@ -41,34 +41,25 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
             else
             {
-                Locks.AcquireWriteLock(databaseName, _model.TableName);
+                List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
 
+                if (toBeDeleted.Count == 0)
+                {
+                    Messages.Add("Rows affected: 0");
+                    return;
+                }
+
+                List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
                 try
                 {
-                    List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
-
-                    if (toBeDeleted.Count == 0)
-                    {
-                        Messages.Add("Rows affected: 0");
-                        return;
-                    }
-
-                    List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
-                    try
-                    {
-                        ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
-                    }
-                    finally
-                    {
-                        Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
-                    }
-
-                    Messages.Add($"Rows affected: {toBeDeleted.Count}");
+                    ExecuteDelete(toBeDeleted, _model.TableName, databaseName);
                 }
                 finally
                 {
-                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
+                    Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
                 }
+
+                Messages.Add($"Rows affected: {toBeDeleted.Count}");
             }
         }
         catch (Exception ex)
