@@ -96,6 +96,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
         {
             StorageMode = config.StorageMode,
             DiskStoragePath = diskPath,
+            LockAcquireTimeoutMs = config.LockAcquireTimeoutMs,
             WalEnabled = config.WalEnabled,
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,
@@ -129,6 +130,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
         {
             StorageMode = config.StorageMode,
             DiskStoragePath = config.DiskStoragePath,
+            LockAcquireTimeoutMs = config.LockAcquireTimeoutMs,
             WalEnabled = config.WalEnabled,
             WalFilePath = config.WalFilePath,
             WalCheckpointThreshold = config.WalCheckpointThreshold,

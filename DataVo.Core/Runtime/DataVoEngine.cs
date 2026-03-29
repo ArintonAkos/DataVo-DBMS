@@ -36,7 +36,7 @@ public sealed class DataVoEngine : IDisposable
         Sessions = new SessionDatabaseStore();
         Catalog = new EngineCatalog(Config);
         TransactionManager = new TransactionManager();
-        LockManager = new LockManager();
+        LockManager = new LockManager(Config.LockAcquireTimeoutMs);
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();

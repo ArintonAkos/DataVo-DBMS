@@ -240,6 +240,12 @@ public class DataVoConfig
     public string? DiskStoragePath { get; set; }
 
     /// <summary>
+    /// Gets or sets lock acquisition timeout in milliseconds.
+    /// Use -1 for infinite wait.
+    /// </summary>
+    public int LockAcquireTimeoutMs { get; set; } = 30000;
+
+    /// <summary>
     /// Gets or sets a value indicating whether write-ahead logging is enabled.
     /// </summary>
     public bool WalEnabled
