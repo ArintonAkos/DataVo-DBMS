@@ -144,6 +144,54 @@ ALTER TABLE Users MODIFY COLUMN Score FLOAT DEFAULT 0;
 
 ## Summary table
 
+## Supported column types
+
+### Scalar types
+
+| Type       | Example                 | Notes                  |
+| :--------- | :---------------------- | :--------------------- |
+| `INT`      | `123`                   | 32-bit integer         |
+| `BIGINT`   | `9223372036854775807`   | 64-bit integer         |
+| `FLOAT`    | `3.14`, `2.71e-1`       | 32-bit floating-point  |
+| `DOUBLE`   | `3.141592653589793`     | 64-bit floating-point  |
+| `DECIMAL`  | `123.45`                | Fixed-point decimal    |
+| `VARCHAR`  | `'hello'`               | Variable-length string |
+| `CHAR`     | `'A'`                   | Fixed-length character |
+| `DATETIME` | `'2026-03-24T10:30:00'` | ISO 8601 timestamp     |
+| `BOOLEAN`  | `true`, `false`         | Boolean value          |
+| `BINARY`   | Binary data             | Uninterpreted bytes    |
+
+### Vector type
+
+`VECTOR(dimension)` stores fixed-size floating-point vectors for vector database operations:
+
+```sql
+CREATE TABLE Embeddings (
+  Id INT PRIMARY KEY,
+  Content VARCHAR(500),
+  ContentVector VECTOR(768),
+  Metadata VARCHAR(200)
+);
+```
+
+**Specification**:
+
+- Fixed dimension: Once defined, dimension is immutable
+- Storage: Each component is 32-bit float (4 bytes per element)
+- Constraints: All values must be finite (no NaN or Infinity)
+- Indexing: Supports HNSW vector indexes for approximate nearest-neighbor search
+- Query: Use distance functions (`COSINE_DISTANCE`, `L2_DISTANCE`) in `ORDER BY`
+
+**Common dimensions**:
+
+- 384 – Lightweight embeddings (e.g., all-MiniLM-L6-v2)
+- 768 – Standard embeddings (e.g., sentence-transformers, OpenAI)
+- 1536 – Large embeddings (e.g., OpenAI text-embedding-3-large)
+
+For comprehensive vector search examples and indexing patterns, see [Vector Queries Guide](./vector-queries-guide.md).
+
+## Summary table
+
 | Operation                   | Implemented | Notes               |
 | :-------------------------- | :---------: | :------------------ |
 | `CREATE DATABASE`           |     Yes     | supported           |

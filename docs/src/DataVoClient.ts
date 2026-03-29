@@ -63,8 +63,8 @@ export class DataVoClient {
 
   /**
    * Determines whether runtime debug tracing is enabled via query string.
-    *
-    * @returns True when `datavoDebug=1|true` is present.
+   *
+   * @returns True when `datavoDebug=1|true` is present.
    */
   private isDebugEnabled(): boolean {
     const debugValue = new URLSearchParams(window.location.search).get(
@@ -75,8 +75,8 @@ export class DataVoClient {
 
   /**
    * Determines whether runtime worker mode should be used.
-    *
-    * @returns True when worker mode is enabled or unspecified.
+   *
+   * @returns True when worker mode is enabled or unspecified.
    */
   private shouldUseRuntimeWorker(): boolean {
     const runtimeWorkerValue = new URLSearchParams(window.location.search).get(
@@ -97,12 +97,12 @@ export class DataVoClient {
 
   /**
    * Gets the process-wide client singleton.
-    *
-    * @returns Shared client instance.
-    *
-    * @example
-    * const client = DataVoClient.getInstance();
-    * await client.initialize();
+   *
+   * @returns Shared client instance.
+   *
+   * @example
+   * const client = DataVoClient.getInstance();
+   * await client.initialize();
    */
   public static getInstance(): DataVoClient {
     if (!DataVoClient.instance) {
@@ -118,12 +118,12 @@ export class DataVoClient {
    * _framework directory and let it automatically discover its own boot config
    * (dotnet.boot.js) which contains assembly references, integrity hashes, etc.
    * We only need to tell it the correct base URL for resolving assets.
-  *
-  * @returns Promise that resolves when runtime is ready.
-  *
-  * @example
-  * const client = DataVoClient.getInstance();
-  * await client.initialize();
+   *
+   * @returns Promise that resolves when runtime is ready.
+   *
+   * @example
+   * const client = DataVoClient.getInstance();
+   * await client.initialize();
    */
   public async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -193,8 +193,8 @@ export class DataVoClient {
   /**
    * Attempts to bootstrap DataVo runtime in a dedicated Web Worker.
    * Falls back to main-thread runtime when worker startup fails.
-    *
-    * @returns True when worker runtime initialization succeeds.
+   *
+   * @returns True when worker runtime initialization succeeds.
    */
   private async tryInitializeWorkerRuntime(): Promise<boolean> {
     if (typeof Worker === "undefined") {
@@ -260,10 +260,10 @@ export class DataVoClient {
    *
    * @param method Worker operation to execute.
    * @param payload Optional request payload.
-    * @returns Worker result payload.
-    *
-    * @example
-    * const capabilities = await this.callRuntimeWorker("runtimeCapabilities");
+   * @returns Worker result payload.
+   *
+   * @example
+   * const capabilities = await this.callRuntimeWorker("runtimeCapabilities");
    */
   private callRuntimeWorker(method: WorkerMethod, payload?: any): Promise<any> {
     if (!this.runtimeWorker) {
@@ -281,15 +281,15 @@ export class DataVoClient {
 
   /**
    * Executes a SQL command or query against the DataVo database.
-    *
-    * @param sql SQL command text.
-    * @returns Query result batch returned by the runtime.
-    *
-    * @example
-    * const results = await client.execute("CREATE TABLE T (Id INT)");
-    * if (results[0]?.IsError) {
-    *   console.error(results[0].Messages);
-    * }
+   *
+   * @param sql SQL command text.
+   * @returns Query result batch returned by the runtime.
+   *
+   * @example
+   * const results = await client.execute("CREATE TABLE T (Id INT)");
+   * if (results[0]?.IsError) {
+   *   console.error(results[0].Messages);
+   * }
    */
   public async execute(sql: string): Promise<QueryResult[]> {
     if (!this.isInitialized) {
@@ -397,9 +397,9 @@ export class DataVoClient {
 
   /**
    * Adds parsed line/column metadata to each failed result when available.
-    *
-    * @param results Raw query results.
-    * @returns Results annotated with line/column when parseable.
+   *
+   * @param results Raw query results.
+   * @returns Results annotated with line/column when parseable.
    */
   private attachErrorLocations(results: QueryResult[]): QueryResult[] {
     return results.map((result) => this.attachErrorLocationToResult(result));
@@ -407,9 +407,9 @@ export class DataVoClient {
 
   /**
    * Adds parsed line/column metadata to a single failed result when available.
-    *
-    * @param result Single query result.
-    * @returns Annotated result.
+   *
+   * @param result Single query result.
+   * @returns Annotated result.
    */
   private attachErrorLocationToResult(result: QueryResult): QueryResult {
     if (!result.IsError || !result.Messages || result.Messages.length === 0) {
@@ -455,12 +455,12 @@ export class DataVoClient {
 
   /**
    * Returns runtime capability metadata for the active backend.
-    *
-    * @returns Capability object including `storageBackend`.
-    *
-    * @example
-    * const caps = await client.runtimeCapabilities();
-    * console.log(caps.storageBackend);
+   *
+   * @returns Capability object including `storageBackend`.
+   *
+   * @example
+   * const caps = await client.runtimeCapabilities();
+   * console.log(caps.storageBackend);
    */
   public async runtimeCapabilities(): Promise<Record<string, any>> {
     if (this.workerMode) {
@@ -503,12 +503,12 @@ export class DataVoClient {
 
   /**
    * Resets runtime state and storage, then clears all initialization state.
-    *
-    * @returns Promise that resolves when reset is complete.
-    *
-    * @example
-    * await client.reset();
-    * await client.initialize();
+   *
+   * @returns Promise that resolves when reset is complete.
+   *
+   * @example
+   * await client.reset();
+   * await client.initialize();
    */
   public async reset(): Promise<void> {
     if (this.workerMode) {

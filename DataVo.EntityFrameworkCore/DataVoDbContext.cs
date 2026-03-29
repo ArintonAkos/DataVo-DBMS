@@ -58,6 +58,7 @@ public abstract class DataVoDbContext : DbContext
         "OrderByDescending",
         "ThenBy",
         "ThenByDescending",
+        "DataVoVectorDbFunctions.CosineDistance",
         "Skip",
         "Take",
         "Include",
@@ -234,6 +235,12 @@ public abstract class DataVoDbContext : DbContext
     /// <summary>
     /// Returns structured diagnostics describing whether the provided shape will execute through
     /// native translation preview, guarded fallback, or be blocked.
+    ///
+    /// <para>
+    /// For vector predicates/orderings in LINQ, use <see cref="DataVoVectorDbFunctions"/> methods
+    /// (for example, <c>DataVoVectorDbFunctions.CosineDistance(EF.Functions, x.Vector, q)</c>).
+    /// In native preview mode, supported vector function calls can translate to SQL distance functions.
+    /// </para>
     /// </summary>
     public DataVoQueryTranslationDiagnostics ExplainQueryFromDataVo<TEntity>(
         Func<IQueryable<TEntity>, IQueryable<TEntity>>? queryShape = null,

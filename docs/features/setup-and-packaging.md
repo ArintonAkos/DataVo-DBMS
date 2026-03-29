@@ -1,128 +1,91 @@
 # Setup and Packaging
 
-This page explains how to consume `DataVo` today from a .NET project.
+This page gives end users a clear install path for .NET and JavaScript ecosystems.
 
-## Current distribution model
+## Distribution channels
 
-`DataVo` is currently intended to be consumed through **local packages built from this repository**.
+DataVo has two packaging tracks:
 
-At the moment:
+- local package workflows available now
+- public feed workflows (NuGet and npm) in deployment preparation
 
-- packaging is ready locally
-- packages are produced from the solution
-- public NuGet publication is planned, but not enabled yet
+## NuGet
 
-## What gets packaged today
+### Planned public install flow
 
-The local packaging workflow currently produces:
+When public packages are published:
 
-| Package       | Purpose                                                                              |
-| :------------ | :----------------------------------------------------------------------------------- |
-| `DataVo.Core` | Core engine runtime, parser, storage, indexing, transactions, and execution pipeline |
-| `DataVo.Data` | Data-access-facing layer and the natural foundation for ADO.NET-style integration    |
+```bash
+dotnet add package DataVo.Core
+dotnet add package DataVo.Data
+dotnet add package DataVo.EntityFrameworkCore
+```
 
-Applications and non-library projects are intentionally not packaged:
-
-- test project
-- server app
-- frontend app
-
-## Build local packages
-
-From the repository root:
+### Local install flow available today
 
 ```bash
 dotnet pack DataVo.sln -c Release
+dotnet add package DataVo.Core --source ./artifacts/packages
+dotnet add package DataVo.Data --source ./artifacts/packages
+dotnet add package DataVo.EntityFrameworkCore --source ./artifacts/packages
 ```
 
-Generated artifacts are written to:
+## npm
 
-- `artifacts/packages`
-
-Typical output files:
-
-- `DataVo.Core.<version>.nupkg`
-- `DataVo.Core.<version>.snupkg`
-- `DataVo.Data.<version>.nupkg`
-- `DataVo.Data.<version>.snupkg`
-
-## Install into another .NET project
-
-### Option 1: local package source
-
-Suppose your consuming project is outside this repository.
-
-1. Build the packages.
-2. Point NuGet at the local package folder.
-3. Add the package reference.
-
-Example `NuGet.Config`:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <add key="local-datavo" value="/absolute/path/to/DataVo-DBMS/artifacts/packages" />
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-  </packageSources>
-</configuration>
-```
-
-Then add the package:
+### Planned public install flow
 
 ```bash
-dotnet add package DataVo.Core --source /absolute/path/to/DataVo-DBMS/artifacts/packages
+npm install @datavo/wasm
 ```
 
-## Minimal embedded usage in a .NET app
+### Browser runtime flow available today
+
+```bash
+bash ./scripts/deploy-browser-wasm.sh
+cd docs
+npm install
+npm run docs:dev
+```
+
+This is the current customer-ready path for browser-based DataVo experiences while npm publication is finalized.
+
+## Package map
+
+| Package                    | Purpose                                             |
+| :------------------------- | :-------------------------------------------------- |
+| DataVo.Core                | Core SQL runtime, storage, indexing, transactions   |
+| DataVo.Data                | Data-access integration surface                     |
+| DataVo.EntityFrameworkCore | Entity Framework integration path                   |
+| @datavo/wasm (planned)     | JavaScript/TypeScript distribution for WASM runtime |
+
+## Minimal .NET embedding sample
 
 ```csharp
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
-using var context = new DataVoContext(new DataVoConfig
+using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.InMemory
 });
 
-context.Execute("CREATE DATABASE Demo");
-context.Execute("USE Demo");
-context.Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR(50))");
-context.Execute("INSERT INTO Users VALUES (1, 'Alice')");
-
-var results = context.Execute("SELECT * FROM Users");
+db.Execute("CREATE DATABASE Demo");
+db.Execute("USE Demo");
+db.Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR(50))");
+db.Execute("INSERT INTO Users VALUES (1, 'Alice')");
+var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 ```
 
-## ADO.NET status
+## End-user guidance by stack
 
-ADO.NET is part of the product direction, but the polished provider story is still evolving.
+- .NET app teams: start with DataVo.Core and DataVo.Data
+- Unity and Godot teams: use disk mode for persistent save/profile data
+- Browser teams: deploy WASM runtime assets and follow npm rollout updates
+- EF teams: adopt DataVo.EntityFrameworkCore in bounded integration slices
 
-The repository already contains `DataVo.Data`, which is the natural home for the ADO.NET-facing surface, but the project should currently be viewed as:
+## Related pages
 
-- **packaged locally today**
-- **provider ergonomics still evolving**
-- **full public documentation for the ADO.NET experience still in progress**
-
-So the recommended setup today is:
-
-- use `DataVo.Core` directly for embedding
-- treat `DataVo.Data` as part of the integration surface under active development
-
-## VS Code task shortcuts
-
-The repository also defines task runner entries:
-
-| Task         | What it does                               |
-| :----------- | :----------------------------------------- |
-| `pack`       | Packs both `DataVo.Core` and `DataVo.Data` |
-| `pack: core` | Packs only `DataVo.Core`                   |
-| `pack: data` | Packs only `DataVo.Data`                   |
-
-## Recommended developer workflow today
-
-| Step                         | Command                               |
-| :--------------------------- | :------------------------------------ |
-| Build and test               | `dotnet test DataVo.sln`              |
-| Produce packages             | `dotnet pack DataVo.sln -c Release`   |
-| Inspect packages             | `ls artifacts/packages`               |
-| Consume from another project | `dotnet add package ... --source ...` |
+- [WebAssembly and npm](./wasm-and-npm.md)
+- [Unity and Godot](./unity-and-godot.md)
+- [Entity Framework Integration](./entity-framework.md)
+- [Roadmap and Integrations](./roadmap-and-integrations.md)

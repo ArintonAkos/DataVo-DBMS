@@ -82,7 +82,7 @@ var similar = db.ExecuteWithParams(@"
 
 ### Entity Framework (example)
 
-You can run vector queries via Entity Framework using raw SQL translation when necessary:
+DataVo supports regular LINQ for non-vector queries and now supports vector distance translation in native preview via `DataVoVectorDbFunctions`:
 
 ```csharp
 using DataVo.EntityFrameworkCore;
@@ -105,15 +105,19 @@ public class ItemEmbedding
 
 using var ef = new AppDbContext();
 float[] q = new float[384] { /* query vector */ };
-var results = ef.Items.FromSqlRaw(
-  @"SELECT Id, Name, COSINE_DISTANCE(Vector, {0}) AS similarity
-    FROM Items
-    ORDER BY similarity ASC
-    LIMIT 10",
-  q
-).ToList();
 
-foreach (var r in results)
+// Normal LINQ (non-vector)
+var activeNames = ef.Items
+  .Where(x => x.Id > 0)
+  .Select(x => x.Name)
+  .ToList();
+
+// LINQ vector distance (native translation preview)
+var similar = ef.QueryFromDataVo<ItemEmbedding>(s => s
+  .OrderBy(x => DataVoVectorDbFunctions.CosineDistance(EF.Functions, x.Vector, q))
+  .Take(5));
+
+foreach (var r in similar)
   Console.WriteLine($"{r.Id}: {r.Name}");
 ```
 
@@ -170,11 +174,13 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 ### .NET application teams
 
 - Embed SQL capabilities directly into services and desktop applications.
-  @@### AI and ML applications
-  @@- Semantic search on document embeddings (RAG, LLM applications)
-  @@- Vector-based recommendation engines
-  @@- Similarity matching without external vector databases
-  @@- Hybrid neural-lexical search combining text and vector similarity
+
+### AI and ML applications
+
+- Semantic search on document embeddings (RAG, LLM applications)
+- Vector-based recommendation engines
+- Similarity matching without external vector databases
+- Hybrid neural-lexical search combining text and vector similarity
 
 ### Unity and Godot developers
 

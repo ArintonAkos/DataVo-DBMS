@@ -380,25 +380,23 @@ using var db = new AppDbContext();
 
 float[] queryVector = new float[768] { /* ... */ };
 
-// Note: EF translation support depends on extension implementation
-// For now, use raw SQL for full vector functionality:
-var results = db.Items.FromSqlRaw(
-    @"SELECT Id, Name, COSINE_DISTANCE(Vector, {0}) AS similarity
-      FROM Items
-      ORDER BY similarity ASC
-      LIMIT 10",
-    queryVector
-).ToList();
+// Normal LINQ for non-vector expressions:
+var names = db.Items.Where(x => x.Id > 0).Select(x => x.Name).ToList();
+
+// LINQ vector expression translated in native preview:
+var nearest = db.QueryFromDataVo<ItemEmbedding>(q => q
+        .OrderBy(x => DataVoVectorDbFunctions.CosineDistance(EF.Functions, x.Vector, queryVector))
+        .Take(10));
 ```
 
 ## Entity Framework — End-to-end example
 
 This section provides a complete EF Core setup showing project init, `DbContext` configuration, schema creation, inserting vectors, and two query approaches:
 
-- Raw SQL via `FromSqlRaw` (recommended for vector expressions)
-- Guarded LINQ via `QueryFromDataVo` for simple shapes
+- Native LINQ vector expressions via `DataVoVectorDbFunctions`
+- Raw SQL via `FromSqlRaw` for advanced/custom SQL shapes
 
-1) Project setup
+1. Project setup
 
 ```bash
 dotnet new console -n VectorEfDemo
@@ -408,7 +406,7 @@ dotnet add package DataVo.Data
 dotnet add package DataVo.EntityFrameworkCore
 ```
 
-2) Model and `DbContext`
+2. Model and `DbContext`
 
 Create `ItemEmbedding.cs`:
 
@@ -449,7 +447,7 @@ public class AppDbContext : DataVoDbContext
 }
 ```
 
-3) Program example (DDL, insert, query)
+3. Program example (DDL, insert, query)
 
 ```csharp
 using DataVo.Core;
@@ -482,19 +480,14 @@ using (var ctx = new AppDbContext())
     // Ensure DataVo schema exists and mirror current rows into EF change tracker
     ctx.EnsureCreatedAndLoad();
 
-    // A) Raw SQL vector query (explicit vector functions)
+    // A) LINQ vector query translated by DataVo native preview
     float[] q = new float[384]; // query embedding
-    var nearest = ctx.Items.FromSqlRaw(
-        @"SELECT Id, Name, Vector, COSINE_DISTANCE(Vector, {0}) AS similarity
-          FROM Items
-          WHERE CreatedAt >= {1}
-          ORDER BY similarity ASC
-          LIMIT 10",
-        q,
-        DateTime.UtcNow.AddMonths(-1)
-    ).AsNoTracking().ToList();
+    var nearest = ctx.QueryFromDataVo<ItemEmbedding>(s => s
+        .Where(e => e.CreatedAt >= DateTime.UtcNow.AddMonths(-1))
+        .OrderBy(e => DataVoVectorDbFunctions.CosineDistance(EF.Functions, e.Vector, q))
+        .Take(10));
 
-    // B) Guarded LINQ using QueryFromDataVo for supported shapes
+    // B) Guarded LINQ using QueryFromDataVo for simple non-vector shapes
     var recent = ctx.QueryFromDataVo<ItemEmbedding>(q => q
         .Where(e => e.CreatedAt >= DateTime.UtcNow.AddMonths(-1))
         .OrderBy(e => e.Id)
@@ -506,8 +499,10 @@ using (var ctx = new AppDbContext())
 
 Guidance:
 
-- Use `FromSqlRaw` for vector distance expressions (`COSINE_DISTANCE`, `L2_DISTANCE`, or the `<=>` operator).
-- Use `QueryFromDataVo` for simple LINQ shapes; the provider will either translate natively or refresh EF state and run the shape in-memory.
+- Use `DataVoVectorDbFunctions.CosineDistance` with `EF.Functions` for LINQ vector queries in native translation preview.
+- `DataVoVectorDbFunctions.L2Distance` is exposed as a typed API surface, but native LINQ translation for L2 is not enabled yet.
+- Use `FromSqlRaw` for advanced/custom SQL surfaces, or when you need SQL-only syntax.
+- `QueryFromDataVo` remains the guarded bridge entrypoint; it will run native translation when eligible and fall back safely otherwise.
 - Map `float[]` -> `VECTOR(n)` with `.HasColumnType("VECTOR(n)")`.
 - For production-sized datasets, create the HNSW index to enable ANN performance.
 

@@ -33,8 +33,17 @@ features:
     details: Review CREATE TABLE, CREATE INDEX, and guarded ALTER TABLE support for adding, dropping, and modifying columns.
     link: /features/schema-and-ddl
   - title: Packaging and Embedding
-    details: Start with local packages today, embed DataVo in a .NET app, and prepare for future publication workflows.
+    details: Start with local packages today, adopt NuGet publication flows when available, and structure customer delivery paths.
     link: /features/setup-and-packaging
+  - title: WebAssembly and npm
+    details: Integrate browser runtime workflows now and prepare for public npm package distribution.
+    link: /features/wasm-and-npm
+  - title: Game Development (Unity and Godot)
+    details: Embed DataVo for local gameplay data, profiles, and deterministic tool pipelines.
+    link: /features/unity-and-godot
+  - title: Entity Framework Integration
+    details: Follow the EF adoption path and understand current capability boundaries and rollout posture.
+    link: /features/entity-framework
   - title: Runtime Architecture
     details: Move from feature docs into parser, runtime, storage, and indexing internals when contributing to the engine.
     link: /DataVo.Core/
@@ -56,9 +65,12 @@ features:
 This documentation tracks implemented behavior first, then roadmap areas.
 
 - local packaging and embedding workflows
+- NuGet and npm publication-ready adoption guidance
 - SQL surface area by feature
 - auth/session SQL operations and grant inspection
 - browser WASM runtime and parity test workflows
+- Unity and Godot integration patterns
+- Entity Framework integration path
 - architecture references for contributors
 
 ## Start here
@@ -67,6 +79,9 @@ If you are new to the project, the best sequence is:
 
 1. [Getting Started](./features/getting-started.md)
 2. [Setup and Packaging](./features/setup-and-packaging.md)
-3. [SELECT and Query Features](./features/select-and-querying.md)
-4. [Security and Authentication](./features/security-and-authentication.md)
-5. [Roadmap and Integrations](./features/roadmap-and-integrations.md)
+3. [WebAssembly and npm](./features/wasm-and-npm.md)
+4. [Unity and Godot](./features/unity-and-godot.md)
+5. [Entity Framework Integration](./features/entity-framework.md)
+6. [SELECT and Query Features](./features/select-and-querying.md)
+7. [Security and Authentication](./features/security-and-authentication.md)
+8. [Roadmap and Integrations](./features/roadmap-and-integrations.md)

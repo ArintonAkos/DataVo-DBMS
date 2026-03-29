@@ -1,6 +1,6 @@
 # Roadmap and Integrations
 
-This page explains the integration direction around ADO.NET, Entity Framework, vector embeddings, and WebAssembly.
+This page explains the integration direction around NuGet, npm, Unity/Godot, Entity Framework, vector features, and WebAssembly.
 
 ## Current state vs roadmap
 
@@ -34,6 +34,7 @@ What this enables today:
 - interactive SQL execution in the docs site
 - browser parity scenarios generated from .NET E2E inputs
 - strict parity test lanes for browser execution
+- end-user documentation path for browser deployment
 
 Primary workflow:
 
@@ -48,6 +49,12 @@ npm run docs:dev
 Principal, grant, and session auth SQL command families are implemented.
 
 See [Security and Authentication](./security-and-authentication.md) for command examples and inspection flows.
+
+### Unity and Godot scenarios
+
+DataVo is suitable for game-development local data workflows where deterministic behavior and embedded runtime control matter.
+
+See [Unity and Godot](./unity-and-godot.md) for adoption guidance.
 
 ## ADO.NET direction
 
@@ -83,6 +90,8 @@ The long-term goal is that `DataVo` should be approachable from mainstream .NET 
 - not documented as fully production-ready yet
 - additional provider hardening/documentation remains on the roadmap
 
+See [Entity Framework Integration](./entity-framework.md).
+
 ## Vector embedding support
 
 Vector embedding support is explicitly part of the product direction.
@@ -116,21 +125,24 @@ WebAssembly support is available today for docs/playground scenarios, with furth
 - strict browser parity testing is available
 - additional packaging/distribution polish remains planned
 
+See [WebAssembly and npm](./wasm-and-npm.md).
+
 ## NuGet publication status
 
 | Distribution mode        | Status        |
 | :----------------------- | :------------ |
 | local packaging          | available now |
 | public NuGet publication | planned       |
+| public npm publication   | planned       |
 
 ## Recommended message to developers right now
 
 If you are evaluating `DataVo` today, the clearest statement is:
 
-> `DataVo` can already be packaged and consumed locally as `DataVo.Core` and `DataVo.Data`. Public NuGet publication, a polished ADO.NET story, Entity Framework integration, vector embedding features, and WebAssembly support are part of the active roadmap.
+> DataVo can already be packaged and consumed locally as DataVo.Core and DataVo.Data. Public NuGet publication, npm distribution, provider polishing, and broader framework integrations are part of the active roadmap.
 
 ## Updated practical message
 
 Use this summary when introducing the project today:
 
-> `DataVo` supports local packaging, direct embedding via `DataVo.Core`, browser/WASM playground execution, and principal/auth SQL commands today. Public package distribution and broader provider-level production polish remain active roadmap items.
+> DataVo supports local packaging, direct embedding via DataVo.Core, browser/WASM execution support, and principal/auth SQL commands today. Public NuGet and npm distribution are in deployment preparation.
