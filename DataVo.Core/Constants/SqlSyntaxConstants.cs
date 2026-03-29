@@ -295,6 +295,18 @@ public static class SqlKeywords
     /// Represents the SQL ROLLBACK keyword.
     /// </summary>
     public const string ROLLBACK = "ROLLBACK";
+    /// <summary>
+    /// Represents the SQL SAVEPOINT keyword.
+    /// </summary>
+    public const string SAVEPOINT = "SAVEPOINT";
+    /// <summary>
+    /// Represents the SQL RELEASE keyword.
+    /// </summary>
+    public const string RELEASE = "RELEASE";
+    /// <summary>
+    /// Represents the SQL TO keyword.
+    /// </summary>
+    public const string TO = "TO";
 
     /// <summary>
     /// Represents the SQL USING keyword.
@@ -319,7 +331,7 @@ public static class SqlKeywords
         JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, DISTINCT,
         LIMIT, OFFSET, IN, BETWEEN, LIKE, UNION, ALL, IF, EXISTS, COLUMN,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL,
-        BEGIN, TRANSACTION, COMMIT, ROLLBACK,
+        BEGIN, TRANSACTION, COMMIT, ROLLBACK, SAVEPOINT, RELEASE, TO,
         USING, HNSW
     ];
 }

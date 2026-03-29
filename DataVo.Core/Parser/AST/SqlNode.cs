@@ -313,3 +313,31 @@ public class CommitStatement : SqlStatement { }
 /// in the active transaction and restores the session to auto-commit mode.
 /// </summary>
 public class RollbackStatement : SqlStatement { }
+
+/// <summary>
+/// Represents a <c>SAVEPOINT name</c> statement that captures the current
+/// transaction buffer state under the provided savepoint name.
+/// </summary>
+public class SavepointStatement : SqlStatement
+{
+    public string SavepointName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents a <c>ROLLBACK TO [SAVEPOINT] name</c> statement that restores
+/// buffered transaction state to a named savepoint while keeping the
+/// transaction active.
+/// </summary>
+public class RollbackToSavepointStatement : SqlStatement
+{
+    public string SavepointName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents a <c>RELEASE [SAVEPOINT] name</c> statement that removes a named
+/// savepoint from the active transaction.
+/// </summary>
+public class ReleaseSavepointStatement : SqlStatement
+{
+    public string SavepointName { get; set; } = string.Empty;
+}

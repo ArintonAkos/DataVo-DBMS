@@ -110,6 +110,18 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             {
                 currentQueue.Enqueue(BindEngine(new Rollback()));
             }
+            else if (statement is SavepointStatement savepointAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Savepoint(savepointAst.SavepointName)));
+            }
+            else if (statement is RollbackToSavepointStatement rollbackToSavepointAst)
+            {
+                currentQueue.Enqueue(BindEngine(new RollbackToSavepoint(rollbackToSavepointAst.SavepointName)));
+            }
+            else if (statement is ReleaseSavepointStatement releaseSavepointAst)
+            {
+                currentQueue.Enqueue(BindEngine(new ReleaseSavepoint(releaseSavepointAst.SavepointName)));
+            }
             else
             {
                 throw new Exception($"Evaluator Error: Unsupported AST Node type '{statement.GetType().Name}'.");

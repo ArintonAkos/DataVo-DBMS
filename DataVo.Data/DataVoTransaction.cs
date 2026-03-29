@@ -43,9 +43,43 @@ public class DataVoTransaction(DataVoConnection connection) : DbTransaction
         _completed = true;
     }
 
+    /// <inheritdoc />
+    public override void Save(string savepointName)
+    {
+        EnsureNotCompleted();
+        string normalizedName = NormalizeSavepointName(savepointName);
+        connection.ExecuteInternal($"SAVEPOINT {normalizedName};");
+    }
+
+    /// <inheritdoc />
+    public override void Rollback(string savepointName)
+    {
+        EnsureNotCompleted();
+        string normalizedName = NormalizeSavepointName(savepointName);
+        connection.ExecuteInternal($"ROLLBACK TO SAVEPOINT {normalizedName};");
+    }
+
+    /// <inheritdoc />
+    public override void Release(string savepointName)
+    {
+        EnsureNotCompleted();
+        string normalizedName = NormalizeSavepointName(savepointName);
+        connection.ExecuteInternal($"RELEASE SAVEPOINT {normalizedName};");
+    }
+
     private void EnsureNotCompleted()
     {
         if (_completed)
             throw new InvalidOperationException("This transaction has already been completed.");
+    }
+
+    private static string NormalizeSavepointName(string savepointName)
+    {
+        if (string.IsNullOrWhiteSpace(savepointName))
+        {
+            throw new ArgumentException("Savepoint name is required.", nameof(savepointName));
+        }
+
+        return savepointName;
     }
 }
