@@ -1,4 +1,5 @@
 using DataVo.Core.StorageEngine.Config;
+using System.Text.Json;
 
 namespace DataVo.Tests.E2E.DQL;
 
@@ -45,6 +46,53 @@ public class VolcanoJoinFeedbackPersistenceTests : SqlExecutionTestsBase
             if (File.Exists(_feedbackPath))
             {
                 File.Delete(_feedbackPath);
+            }
+        }
+    }
+
+    [Fact]
+    public void Select_Join_FeedbackPersistence_TrimsToConfiguredMaxEntries()
+    {
+        string cappedPath = Path.Combine(Path.GetTempPath(), $"datavo-join-feedback-capped-{Guid.NewGuid():N}.json");
+
+        ReinitializeEngine(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory,
+            EnableVolcanoExecution = true,
+            EnableVolcanoJoinCardinalityFeedback = true,
+            EnableVolcanoJoinCardinalityFeedbackPersistence = true,
+            VolcanoJoinCardinalityFeedbackPersistenceFile = cappedPath,
+            VolcanoJoinCardinalityFeedbackMaxEntries = 16
+        });
+
+        try
+        {
+            Execute($"CREATE DATABASE {TestDb}");
+            Execute($"USE {TestDb}");
+
+            Execute("CREATE TABLE Hub (Id INT PRIMARY KEY)");
+            Execute("INSERT INTO Hub (Id) VALUES (1)");
+
+            for (int i = 1; i <= 24; i++)
+            {
+                string tableName = $"Leaf{i}";
+                Execute($"CREATE TABLE {tableName} (Id INT PRIMARY KEY)");
+                Execute($"INSERT INTO {tableName} (Id) VALUES (1)");
+                Execute($"SELECT h.Id FROM Hub h JOIN {tableName} l ON h.Id = l.Id");
+            }
+
+            Assert.True(File.Exists(cappedPath));
+            string json = File.ReadAllText(cappedPath);
+            var persisted = JsonSerializer.Deserialize<Dictionary<string, double>>(json);
+
+            Assert.NotNull(persisted);
+            Assert.True(persisted!.Count <= 16, $"Expected <= 16 feedback entries but found {persisted.Count}.");
+        }
+        finally
+        {
+            if (File.Exists(cappedPath))
+            {
+                File.Delete(cappedPath);
             }
         }
     }

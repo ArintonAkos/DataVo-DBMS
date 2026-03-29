@@ -3,6 +3,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.StorageEngine.Backends;
 using DataVo.Core.StorageEngine.Backends.Abstractions;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
@@ -28,6 +29,8 @@ public class StorageContext(DataVoConfig config)
     public DataVoConfig Config { get; } = config;
 
     private readonly IStorageEngine _storageEngine = ResolveStorageEngine(config);
+    private EngineCatalog? _runtimeCatalog;
+    private string _serializerSchemaScopeKey = "storage-context";
     private static StorageContext? _instance;
 
     /// <summary>
@@ -62,6 +65,12 @@ public class StorageContext(DataVoConfig config)
         }
     }
 
+    internal void AttachRuntimeCatalog(EngineCatalog catalog, Guid engineId)
+    {
+        _runtimeCatalog = catalog;
+        _serializerSchemaScopeKey = engineId.ToString("N");
+    }
+
     private static IStorageEngine ResolveStorageEngine(DataVoConfig config)
     {
         return config.StorageMode switch
@@ -81,9 +90,10 @@ public class StorageContext(DataVoConfig config)
     /// <param name="databaseName">The owning database.</param>
     public void CreateTable(string tableName, string databaseName)
     {
-        // For purely binary engines without explicit Schema-file logic yet, 
-        // creating a table doesn't mandate allocating a physical file immediately.
-        // It will be lazily created on the first INSERT inside DiskStorageEngine.
+        if (_storageEngine is DiskStorageBackend diskBackend)
+        {
+            diskBackend.CreateTable(databaseName, tableName);
+        }
     }
 
     /// <summary>
@@ -105,7 +115,12 @@ public class StorageContext(DataVoConfig config)
     /// <returns>The assigned row identifier.</returns>
     public long InsertOneIntoTable(Dictionary<string, dynamic> row, string tableName, string databaseName)
     {
-        byte[] serializedData = RowSerializer.Serialize(databaseName, tableName, row);
+        byte[] serializedData = RowSerializer.Serialize(
+            databaseName,
+            tableName,
+            row,
+            ResolveCatalog(),
+            ResolveSerializerSchemaScopeKey());
         return _storageEngine.InsertRow(databaseName, tableName, serializedData);
     }
 
@@ -267,21 +282,37 @@ public class StorageContext(DataVoConfig config)
     /// </summary>
     /// <param name="tableName">The table to compact.</param>
     /// <param name="databaseName">The owning database.</param>
+    /// <param name="allowIndexedCompaction">
+    /// Set to <see langword="true"/> only when the caller also rebuilds all table indexes from the returned row mapping.
+    /// </param>
     /// <returns>The rewritten rows paired with their new identifiers.</returns>
-    public List<(long NewRowId, byte[] RawRow)> CompactTable(string tableName, string databaseName)
+    public List<(long NewRowId, byte[] RawRow)> CompactTable(string tableName, string databaseName, bool allowIndexedCompaction = false)
     {
+        if (!allowIndexedCompaction)
+        {
+            EngineCatalog catalog = ResolveCatalog();
+            List<IndexFile> tableIndexes = catalog.GetTableIndexes(tableName, databaseName);
+            if (tableIndexes.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Compacting indexed table '{databaseName}.{tableName}' requires index rebuild. Use VACUUM or pass allowIndexedCompaction=true and rebuild indexes.");
+            }
+        }
+
         return _storageEngine.CompactTable(databaseName, tableName);
     }
 
     /// <summary>
     /// Serializes a row batch before insertion.
     /// </summary>
-    private static List<byte[]> SerializeRows(List<Dictionary<string, dynamic>> rows, string tableName, string databaseName)
+    private List<byte[]> SerializeRows(List<Dictionary<string, dynamic>> rows, string tableName, string databaseName)
     {
+        EngineCatalog catalog = ResolveCatalog();
+        string schemaScopeKey = ResolveSerializerSchemaScopeKey();
         var serializedRows = new List<byte[]>(rows.Count);
         foreach (var row in rows)
         {
-            serializedRows.Add(RowSerializer.Serialize(databaseName, tableName, row));
+            serializedRows.Add(RowSerializer.Serialize(databaseName, tableName, row, catalog, schemaScopeKey));
         }
 
         return serializedRows;
@@ -316,7 +347,13 @@ public class StorageContext(DataVoConfig config)
         foreach (long rowId in rowIds)
         {
             byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
-            parsedTableData[rowId] = RowSerializer.Deserialize(databaseName, tableName, rawRow, selectedColumns);
+            parsedTableData[rowId] = RowSerializer.Deserialize(
+                databaseName,
+                tableName,
+                rawRow,
+                selectedColumns,
+                ResolveCatalog(),
+                ResolveSerializerSchemaScopeKey());
         }
 
         return parsedTableData;
@@ -332,9 +369,30 @@ public class StorageContext(DataVoConfig config)
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(databaseName, tableName, rowTuple.RawRow, selectedColumns);
+            parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(
+                databaseName,
+                tableName,
+                rowTuple.RawRow,
+                selectedColumns,
+                ResolveCatalog(),
+                ResolveSerializerSchemaScopeKey());
         }
 
         return parsedTableData;
+    }
+
+    private EngineCatalog ResolveCatalog()
+    {
+        return _runtimeCatalog ?? DataVoEngine.Current().Catalog;
+    }
+
+    private string ResolveSerializerSchemaScopeKey()
+    {
+        if (_runtimeCatalog != null)
+        {
+            return _serializerSchemaScopeKey;
+        }
+
+        return DataVoEngine.Current().Id.ToString("N");
     }
 }

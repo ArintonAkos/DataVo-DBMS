@@ -1,5 +1,4 @@
 using DataVo.Core.BTree;
-using DataVo.Core.Enums;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -29,7 +28,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
 
                 var indexes = Catalog.GetTableIndexes(tableName, databaseName);
                 Field field = ToField(ast.Column, tableName);
-                dynamic? defaultValue = ToColumn(field).ParsedDefaultValue;
+                dynamic? defaultValue = ColumnDefinitionParser.ToColumn(field).ParsedDefaultValue;
 
                 Catalog.AddColumn(tableName, databaseName, field);
 
@@ -109,79 +108,14 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
         return new Field
         {
             Name = column.ColumnName.Name,
-            Type = ParseType(column.DataType),
-            Length = ParseLength(column.DataType),
+            Type = ColumnDefinitionParser.ParseType(column.DataType),
+            Length = ColumnDefinitionParser.ParseLength(column.DataType),
             Table = tableName,
             IsPrimaryKey = false,
             IsUnique = false,
             IsNull = -1,
-            DefaultValue = EvaluateDefaultExpression(column.DefaultExpression),
+            DefaultValue = ColumnDefinitionParser.EvaluateDefaultExpression(column.DefaultExpression, "ALTER TABLE ADD COLUMN"),
             ForeignKey = null
         };
-    }
-
-    private static Column ToColumn(Field field)
-    {
-        return new Column
-        {
-            Name = field.Name,
-            Type = field.Type.ToString().ToUpperInvariant(),
-            Length = field.Length,
-            DefaultValue = field.DefaultValue
-        };
-    }
-
-    private static string? EvaluateDefaultExpression(ExpressionNode? expr)
-    {
-        if (expr == null)
-        {
-            return null;
-        }
-
-        if (expr is NullLiteralNode)
-        {
-            return "NULL";
-        }
-
-        if (expr is LiteralNode literal)
-        {
-            string value = literal.Value?.ToString() ?? "NULL";
-            if (value.StartsWith("'") && value.EndsWith("'"))
-            {
-                value = value[1..^1];
-            }
-
-            return value;
-        }
-
-        if (expr is ColumnRefNode colRef &&
-            (colRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase)
-             || colRef.Column.Equals("false", StringComparison.OrdinalIgnoreCase)))
-        {
-            return colRef.Column.ToLowerInvariant();
-        }
-
-        throw new Exception("ALTER TABLE ADD COLUMN default must be a constant literal value.");
-    }
-
-    private static DataTypes ParseType(string typeStr)
-    {
-        string t = typeStr.ToLowerInvariant();
-        if (t.Contains("int")) return DataTypes.Int;
-        if (t.Contains("float")) return DataTypes.Float;
-        if (t.Contains("bit")) return DataTypes.Bit;
-        if (t.Contains("date")) return DataTypes.Date;
-        return DataTypes.Varchar;
-    }
-
-    private static int ParseLength(string typeStr)
-    {
-        int start = typeStr.IndexOf('(');
-        if (start > -1 && int.TryParse(typeStr[(start + 1)..].TrimEnd(')'), out int len))
-        {
-            return len;
-        }
-
-        return 0;
     }
 }

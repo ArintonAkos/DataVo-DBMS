@@ -115,7 +115,8 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
 
     private ExecutionRow MergeRows(TypedExecutionRow leftRow, TypedExecutionRow rightRow)
     {
-        var values = new Dictionary<string, dynamic>();
+        int estimatedCapacity = leftRow.Values.Count + rightRow.Values.Count;
+        var values = new Dictionary<string, dynamic>(Math.Max(estimatedCapacity, 1));
 
         foreach (var cell in leftRow.Values)
         {

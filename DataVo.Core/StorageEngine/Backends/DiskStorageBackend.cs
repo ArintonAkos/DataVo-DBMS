@@ -14,6 +14,8 @@ internal sealed class DiskStorageBackend : IStorageBackend
 
     public string BackendKind => "Disk";
 
+    public void CreateTable(string databaseName, string tableName) => _inner.CreateTable(databaseName, tableName);
+
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => _inner.InsertRows(databaseName, tableName, rowsBytes);
     public byte[] ReadRow(string databaseName, string tableName, long rowId) => _inner.ReadRow(databaseName, tableName, rowId);

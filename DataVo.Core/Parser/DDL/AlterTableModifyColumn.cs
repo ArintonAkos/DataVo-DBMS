@@ -1,6 +1,5 @@
 using System.Globalization;
 using DataVo.Core.BTree;
-using DataVo.Core.Enums;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -136,14 +135,14 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         return new Field
         {
             Name = column.ColumnName.Name,
-            Type = ParseType(column.DataType),
-            Length = ParseLength(column.DataType),
+            Type = ColumnDefinitionParser.ParseType(column.DataType),
+            Length = ColumnDefinitionParser.ParseLength(column.DataType),
             Table = tableName,
             IsPrimaryKey = false,
             IsUnique = false,
             IsNull = -1,
             DefaultValue = column.DefaultExpression != null
-                ? EvaluateDefaultExpression(column.DefaultExpression)
+                ? ColumnDefinitionParser.EvaluateDefaultExpression(column.DefaultExpression, "ALTER TABLE MODIFY COLUMN")
                 : existingColumn.DefaultValue,
             ForeignKey = null
         };
@@ -156,7 +155,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             return;
         }
 
-        var column = ToColumn(field);
+        var column = ColumnDefinitionParser.ToColumn(field);
         if (column.ParsedDefaultValue == null)
         {
             throw new Exception($"ALTER TABLE MODIFY COLUMN default value for {field.Name} is incompatible with type {column.Type}.");
@@ -170,7 +169,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             return null;
         }
 
-        var column = ToColumn(field);
+        var column = ColumnDefinitionParser.ToColumn(field);
         column.Value = ToRawValue(value);
 
         dynamic? parsedValue = column.ParsedValue;
@@ -180,17 +179,6 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         }
 
         return parsedValue;
-    }
-
-    private static Column ToColumn(Field field)
-    {
-        return new Column
-        {
-            Name = field.Name,
-            Type = field.Type.ToString().ToUpperInvariant(),
-            Length = field.Length,
-            DefaultValue = field.DefaultValue
-        };
     }
 
     private static string ToRawValue(dynamic value)
@@ -204,57 +192,4 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         };
     }
 
-    private static string? EvaluateDefaultExpression(ExpressionNode? expr)
-    {
-        if (expr == null)
-        {
-            return null;
-        }
-
-        if (expr is NullLiteralNode)
-        {
-            return "NULL";
-        }
-
-        if (expr is LiteralNode literal)
-        {
-            string value = literal.Value?.ToString() ?? "NULL";
-            if (value.StartsWith("'") && value.EndsWith("'"))
-            {
-                value = value[1..^1];
-            }
-
-            return value;
-        }
-
-        if (expr is ColumnRefNode colRef &&
-            (colRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase)
-             || colRef.Column.Equals("false", StringComparison.OrdinalIgnoreCase)))
-        {
-            return colRef.Column.ToLowerInvariant();
-        }
-
-        throw new Exception("ALTER TABLE MODIFY COLUMN default must be a constant literal value.");
-    }
-
-    private static DataTypes ParseType(string typeStr)
-    {
-        string t = typeStr.ToLowerInvariant();
-        if (t.Contains("int")) return DataTypes.Int;
-        if (t.Contains("float")) return DataTypes.Float;
-        if (t.Contains("bit")) return DataTypes.Bit;
-        if (t.Contains("date")) return DataTypes.Date;
-        return DataTypes.Varchar;
-    }
-
-    private static int ParseLength(string typeStr)
-    {
-        int start = typeStr.IndexOf('(');
-        if (start > -1 && int.TryParse(typeStr[(start + 1)..].TrimEnd(')'), out int len))
-        {
-            return len;
-        }
-
-        return 0;
-    }
 }

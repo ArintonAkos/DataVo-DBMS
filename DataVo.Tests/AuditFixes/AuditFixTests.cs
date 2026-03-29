@@ -1,6 +1,7 @@
 using DataVo.Core.Cache;
 using DataVo.Core.Exceptions;
 using DataVo.Core.MVCC;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.Services;
@@ -8,6 +9,7 @@ using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Disk;
+using DataVo.Core.Enums;
 using System.Collections.Concurrent;
 using System.Reflection;
 using Xunit;
@@ -318,6 +320,29 @@ public class AuditFixTests
     }
 
     [Fact]
+    public void EngineCatalog_DatabaseAndTableLookups_AreCaseInsensitive()
+    {
+        var catalog = new EngineCatalog(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        var database = new Database { DatabaseName = "CaseDb", Tables = [] };
+        catalog.CreateDatabase(database);
+
+        var table = new Table
+        {
+            TableName = "Users",
+            Fields = [],
+            PrimaryKeys = [],
+            ForeignKeys = [],
+            UniqueAttributes = [],
+            IndexFiles = []
+        };
+
+        catalog.CreateTable(table, "CaseDb");
+
+        Assert.True(catalog.DatabaseExists("casedb"));
+        Assert.True(catalog.TableExists("users", "CASEDB"));
+    }
+
+    [Fact]
     public void IndexManager_MissingIndexLookup_ThrowsIndexException()
     {
         string root = Path.Combine(Path.GetTempPath(), $"datavo_index_tests_{Guid.NewGuid():N}");
@@ -336,6 +361,166 @@ public class AuditFixTests
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void StorageContext_SerializerBinding_RemainsEngineScoped_WhenFallbackEngineChanges()
+    {
+        DataVoEngine engineA = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        DataVoEngine engineB = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+        try
+        {
+            var dbA = new Database { DatabaseName = "ScopedDb", Tables = [] };
+            engineA.Catalog.CreateDatabase(dbA);
+            engineA.Catalog.CreateTable(new Table
+            {
+                TableName = "ScopedTable",
+                Fields =
+                [
+                    new Field { Name = "Value", Table = "ScopedTable", Type = DataTypes.Int }
+                ],
+                PrimaryKeys = [],
+                ForeignKeys = [],
+                UniqueAttributes = [],
+                IndexFiles = []
+            }, "ScopedDb");
+
+            var dbB = new Database { DatabaseName = "ScopedDb", Tables = [] };
+            engineB.Catalog.CreateDatabase(dbB);
+            engineB.Catalog.CreateTable(new Table
+            {
+                TableName = "ScopedTable",
+                Fields =
+                [
+                    new Field { Name = "Value", Table = "ScopedTable", Type = DataTypes.Bit }
+                ],
+                PrimaryKeys = [],
+                ForeignKeys = [],
+                UniqueAttributes = [],
+                IndexFiles = []
+            }, "ScopedDb");
+
+            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, dynamic> { ["Value"] = 123 }, "ScopedTable", "ScopedDb");
+            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, dynamic> { ["Value"] = 456 }, "ScopedTable", "ScopedDb");
+
+            Dictionary<long, Dictionary<string, dynamic>> rows = engineA.StorageContext.GetTableContents("ScopedTable", "ScopedDb");
+            List<int> values = rows.Values.Select(r => (int)r["Value"]).OrderBy(v => v).ToList();
+
+            Assert.Equal([123, 456], values);
+        }
+        finally
+        {
+            engineA.Dispose();
+            engineB.Dispose();
+        }
+    }
+
+    [Fact]
+    public void StorageContext_Initialize_DisposesPreviousFallbackEngine()
+    {
+        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_engine_reset_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(storagePath);
+
+        var diskConfig = new DataVoConfig
+        {
+            StorageMode = StorageMode.Disk,
+            DiskStoragePath = storagePath,
+            WalEnabled = false,
+            TransactionIdStateFilePath = "tx-state.dat"
+        };
+
+        string txStatePath = diskConfig.ResolveTransactionIdStateFilePath();
+
+        try
+        {
+            DataVoEngine engine = DataVoEngine.Initialize(diskConfig);
+            engine.TransactionIdAllocator.AllocateTransactionId();
+            engine.TransactionIdAllocator.AllocateTransactionId();
+
+            StorageContext.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+            Assert.True(File.Exists(txStatePath));
+            string persisted = File.ReadAllText(txStatePath).Trim();
+            Assert.Equal("2", persisted);
+        }
+        finally
+        {
+            // Restore a fresh fallback engine for subsequent tests that rely on global defaults.
+            DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+            if (Directory.Exists(storagePath))
+            {
+                Directory.Delete(storagePath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void StorageContext_CompactTable_RejectsIndexedTableWithoutExplicitRebuildOptIn()
+    {
+        DataVoEngine engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+        try
+        {
+            engine.Catalog.CreateDatabase(new Database { DatabaseName = "CompactGuardDb", Tables = [] });
+            engine.Catalog.CreateTable(new Table
+            {
+                TableName = "Users",
+                Fields =
+                [
+                    new Field { Name = "Id", Table = "Users", Type = DataTypes.Int }
+                ],
+                PrimaryKeys = [],
+                ForeignKeys = [],
+                UniqueAttributes = [],
+                IndexFiles =
+                [
+                    new IndexFile { IndexFileName = "idx_users_id", AttributeNames = ["Id"] }
+                ]
+            }, "CompactGuardDb");
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                engine.StorageContext.CompactTable("Users", "CompactGuardDb"));
+
+            Assert.Contains("requires index rebuild", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+            var compacted = engine.StorageContext.CompactTable("Users", "CompactGuardDb", allowIndexedCompaction: true);
+            Assert.Empty(compacted);
+        }
+        finally
+        {
+            engine.Dispose();
+        }
+    }
+
+    [Fact]
+    public void StorageContext_CreateTable_DiskMode_CreatesPhysicalTableFile()
+    {
+        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_create_table_{Guid.NewGuid():N}");
+
+        try
+        {
+            var context = new StorageContext(new DataVoConfig
+            {
+                StorageMode = StorageMode.Disk,
+                DiskStoragePath = storagePath,
+                WalEnabled = false
+            });
+
+            context.CreateTable("Users", "CreateTableDb");
+
+            string tablePath = Path.Combine(storagePath, "CreateTableDb", "Users.dat");
+            Assert.True(File.Exists(tablePath));
+            Assert.True(new FileInfo(tablePath).Length >= 8);
+        }
+        finally
+        {
+            if (Directory.Exists(storagePath))
+            {
+                Directory.Delete(storagePath, recursive: true);
             }
         }
     }

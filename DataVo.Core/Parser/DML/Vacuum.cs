@@ -51,7 +51,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
             string tableName = ast.TableName.Name;
 
             // 1. Compact the storage: remove tombstoned rows, get surviving rows with new IDs
-            var compactedRows = Context.CompactTable(tableName, databaseName);
+            var compactedRows = Context.CompactTable(tableName, databaseName, allowIndexedCompaction: true);
 
             // 2. Rebuild all indexes for this table from scratch
             var indexes = Catalog.GetTableIndexes(tableName, databaseName);
@@ -66,7 +66,13 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
 
                 foreach (var (newRowId, rawRow) in compactedRows)
                 {
-                    var row = RowSerializer.Deserialize(databaseName, tableName, rawRow, null);
+                    var row = RowSerializer.Deserialize(
+                        databaseName,
+                        tableName,
+                        rawRow,
+                        null,
+                        Catalog,
+                        Engine.Id.ToString("N"));
                     string indexKey = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
 
                     if (!indexData.ContainsKey(indexKey))

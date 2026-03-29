@@ -57,6 +57,15 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    public void CreateTable(string databaseName, string tableName)
+    {
+        string filePath = GetFilePath(databaseName, tableName);
+        lock (GetFileLock(filePath))
+        {
+            EnsureFileHeader(filePath);
+        }
+    }
+
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         string filePath = GetFilePath(databaseName, tableName);

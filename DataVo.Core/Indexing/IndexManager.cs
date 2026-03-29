@@ -219,9 +219,14 @@ public class IndexManager : IDisposable
     public void MarkDirty(string cacheKey)
     {
         lock (_lock)
-            _dirtyIndices.Add(cacheKey);
+            MarkDirtyNoLock(cacheKey);
 
         TrackMutation(cacheKey);
+    }
+
+    private void MarkDirtyNoLock(string cacheKey)
+    {
+        _dirtyIndices.Add(cacheKey);
     }
 
     /// <summary>
@@ -665,9 +670,11 @@ public class IndexManager : IDisposable
             string cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.Insert(value, rowId);
-            MarkDirty(cacheKey);
+            MarkDirtyNoLock(cacheKey);
             FlushInternal(cacheKey);
         }
+
+        TrackMutation(GetCacheKey(indexName, tableName, databaseName));
     }
 
     /// <summary>
@@ -680,9 +687,11 @@ public class IndexManager : IDisposable
             string cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.DeleteValues(toBeDeletedIds);
-            MarkDirty(cacheKey);
+            MarkDirtyNoLock(cacheKey);
             FlushInternal(cacheKey);
         }
+
+        TrackMutation(GetCacheKey(indexName, tableName, databaseName));
     }
 
     /// <summary>

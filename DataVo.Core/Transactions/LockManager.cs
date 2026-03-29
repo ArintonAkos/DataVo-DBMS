@@ -224,21 +224,36 @@ public sealed class LockManager
         }
     }
 
+    /// <summary>
+    /// Acquires a table-scoped read lock using a pre-composed lock key in the form <c>{database}.{table}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Use this overload when the caller already normalized the table identity and wants to avoid key recomposition.
+    /// </remarks>
     public void AcquireReadLock(string tableKey)
     {
         AcquireTableLock(tableKey, write: false);
     }
 
+    /// <summary>
+    /// Acquires a table-scoped write lock using a pre-composed lock key in the form <c>{database}.{table}</c>.
+    /// </summary>
     public void AcquireWriteLock(string tableKey)
     {
         AcquireTableLock(tableKey, write: true);
     }
 
+    /// <summary>
+    /// Releases a table-scoped read lock acquired through the table-key overloads.
+    /// </summary>
     public void ReleaseReadLock(string tableKey)
     {
         ReleaseTableLock(tableKey, write: false);
     }
 
+    /// <summary>
+    /// Releases a table-scoped write lock acquired through the table-key overloads.
+    /// </summary>
     public void ReleaseWriteLock(string tableKey)
     {
         ReleaseTableLock(tableKey, write: true);
