@@ -4,7 +4,8 @@ namespace DataVo.Core.MVCC;
 
 /// <summary>
 /// Allocates globally unique transaction IDs in strictly increasing order.
-/// Used by MVCC to assign timestamps to transactions and row versions.
+/// Uses lock-free <see cref="Interlocked"/> operations for single-ID allocation
+/// and a lightweight <see cref="SpinLock"/> for batch range allocation.
 /// </summary>
 public class TransactionIdAllocator
 {
@@ -14,26 +15,37 @@ public class TransactionIdAllocator
     private long _nextTransactionId = 1;
 
     /// <summary>
-    /// Lock for ensuring thread-safe allocation.
+    /// Lightweight spinlock used only by <see cref="AllocateRange"/> which must atomically
+    /// advance the counter by an arbitrary stride.
     /// </summary>
-    private readonly object _lock = new object();
+    private SpinLock _rangeLock = new(enableThreadOwnerTracking: false);
+    private Action<long>? _highWaterMarkObserver;
+
+    /// <summary>
+    /// Registers an observer invoked when the high-water mark advances.
+    /// </summary>
+    public void SetHighWaterMarkObserver(Action<long>? observer)
+    {
+        _highWaterMarkObserver = observer;
+    }
 
     /// <summary>
     /// Allocates and returns the next transaction ID in sequence.
-    /// IDs are strictly increasing and unique across all allocations.
+    /// Lock-free via <see cref="Interlocked.Increment(ref long)"/>.
     /// </summary>
     public long AllocateTransactionId()
     {
-        lock (_lock)
-        {
-            return _nextTransactionId++;
-        }
+        long id = Interlocked.Increment(ref _nextTransactionId) - 1;
+        _highWaterMarkObserver?.Invoke(id);
+        return id;
     }
 
     /// <summary>
     /// Allocates and returns a batch of N consecutive transaction IDs.
-    /// Useful for pre-allocating multiple IDs at once.
+    /// Uses a <see cref="SpinLock"/> to atomically advance the counter by the requested count.
     /// </summary>
+    /// <param name="count">The number of consecutive IDs to allocate. Must be positive.</param>
+    /// <returns>The inclusive start and end of the allocated range.</returns>
     public (long Start, long End) AllocateRange(int count)
     {
         if (count <= 0)
@@ -41,11 +53,19 @@ public class TransactionIdAllocator
             throw new ArgumentException("Count must be positive.", nameof(count));
         }
 
-        lock (_lock)
+        bool lockTaken = false;
+        try
         {
+            _rangeLock.Enter(ref lockTaken);
             long start = _nextTransactionId;
             _nextTransactionId += count;
-            return (start, _nextTransactionId - 1);
+            long end = _nextTransactionId - 1;
+            _highWaterMarkObserver?.Invoke(end);
+            return (start, end);
+        }
+        finally
+        {
+            if (lockTaken) _rangeLock.Exit();
         }
     }
 
@@ -54,9 +74,23 @@ public class TransactionIdAllocator
     /// </summary>
     public long GetCurrentHighWaterMark()
     {
-        lock (_lock)
+        return Interlocked.Read(ref _nextTransactionId) - 1;
+    }
+
+    /// <summary>
+    /// Advances the allocator so the next issued ID is at least <paramref name="minimumNextId"/>.
+    /// Used during recovery to restore the high-water mark from a persisted value.
+    /// </summary>
+    /// <param name="minimumNextId">The floor for the next transaction ID.</param>
+    public void RestoreHighWaterMark(long minimumNextId)
+    {
+        SpinWait spinner = default;
+        while (true)
         {
-            return _nextTransactionId - 1;
+            long current = Interlocked.Read(ref _nextTransactionId);
+            if (current >= minimumNextId) return;
+            if (Interlocked.CompareExchange(ref _nextTransactionId, minimumNextId, current) == current) return;
+            spinner.SpinOnce();
         }
     }
 
@@ -65,9 +99,8 @@ public class TransactionIdAllocator
     /// </summary>
     public void Reset()
     {
-        lock (_lock)
-        {
-            _nextTransactionId = 1;
-        }
+        Interlocked.Exchange(ref _nextTransactionId, 1);
+        _highWaterMarkObserver?.Invoke(0);
     }
 }
+

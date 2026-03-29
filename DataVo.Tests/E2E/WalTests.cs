@@ -1,6 +1,7 @@
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
+using DataVo.Core.Runtime;
 using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E;
@@ -109,6 +110,62 @@ public class DiskWalTests : SqlExecutionTestsBase
 
         string walPath = thresholdConfig.ResolveWalFilePath();
         Assert.True(!File.Exists(walPath) || new FileInfo(walPath).Length == 0);
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("WAL corruption checksum validation is disk-file specific and outside browser fixture semantics")]
+    public void Reader_ThrowsOnChecksumMismatch()
+    {
+        var writer = new WalWriter(Config);
+        var entry = new WalEntry
+        {
+            TransactionId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow.Ticks,
+            DatabaseName = TestDb,
+            IsCheckpointed = false,
+            Operations =
+            [
+                new WalOperation
+                {
+                    OperationType = WalOperationType.Insert,
+                    TableName = "T",
+                    RowData = new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Alice" }
+                }
+            ]
+        };
+
+        writer.Append(entry);
+
+        string walPath = Config.ResolveWalFilePath();
+        string line = File.ReadAllLines(walPath).Single();
+        string tampered = line.Replace("Alice", "Alicf", StringComparison.Ordinal);
+        File.WriteAllText(walPath, tampered + Environment.NewLine);
+
+        Assert.Throws<InvalidDataException>(() => new WalReader(Config).ReadAll());
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("Transaction ID state persistence requires disk-backed runtime lifecycle")]
+    public void TransactionIdAllocator_PersistsHighWaterMarkAcrossRestart()
+    {
+        var txConfig = new DataVoConfig
+        {
+            StorageMode = StorageMode.Disk,
+            DiskStoragePath = Config.DiskStoragePath,
+            WalFilePath = Config.WalFilePath,
+            TransactionIdStateFilePath = "datavo.txid"
+        };
+
+        using (var engine1 = DataVoEngine.Initialize(txConfig))
+        {
+            Assert.Equal(1, engine1.TransactionIdAllocator.AllocateTransactionId());
+            Assert.Equal(2, engine1.TransactionIdAllocator.AllocateTransactionId());
+            Assert.Equal(3, engine1.TransactionIdAllocator.AllocateTransactionId());
+        }
+
+        using var engine2 = DataVoEngine.Initialize(txConfig);
+        long next = engine2.TransactionIdAllocator.AllocateTransactionId();
+        Assert.Equal(4, next);
     }
 }
 
