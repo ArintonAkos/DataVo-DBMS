@@ -12,6 +12,17 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 public sealed class LockManager
 {
+    private sealed class TableLockEntry
+    {
+        public TableLockEntry()
+        {
+            Lock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
+        }
+
+        public ReaderWriterLockSlim Lock { get; }
+        public int ActiveUsers;
+    }
+
     private sealed class RowLockEntry
     {
         public RowLockEntry()
@@ -25,10 +36,11 @@ public sealed class LockManager
 
     private static readonly Lazy<LockManager> _instance = new(() => new LockManager());
 
-    private readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _tableLocks =
+    private readonly ConcurrentDictionary<string, TableLockEntry> _tableLocks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RowLockEntry> _rowLocks =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _tableLockLifecycleSync = new();
     private readonly object _rowLockLifecycleSync = new();
 
     public static LockManager Instance => _instance.Value;
@@ -44,22 +56,22 @@ public sealed class LockManager
 
     public void AcquireReadLock(string databaseName, string tableName)
     {
-        GetTableLock(databaseName, tableName).EnterReadLock();
+        AcquireTableLock(BuildTableKey(databaseName, tableName), write: false);
     }
 
     public void AcquireWriteLock(string databaseName, string tableName)
     {
-        GetTableLock(databaseName, tableName).EnterWriteLock();
+        AcquireTableLock(BuildTableKey(databaseName, tableName), write: true);
     }
 
     public void ReleaseReadLock(string databaseName, string tableName)
     {
-        GetTableLock(databaseName, tableName).ExitReadLock();
+        ReleaseTableLock(BuildTableKey(databaseName, tableName), write: false);
     }
 
     public void ReleaseWriteLock(string databaseName, string tableName)
     {
-        GetTableLock(databaseName, tableName).ExitWriteLock();
+        ReleaseTableLock(BuildTableKey(databaseName, tableName), write: true);
     }
 
     public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
@@ -142,32 +154,93 @@ public sealed class LockManager
 
     public void AcquireReadLock(string tableKey)
     {
-        GetTableLock(tableKey).EnterReadLock();
+        AcquireTableLock(tableKey, write: false);
     }
 
     public void AcquireWriteLock(string tableKey)
     {
-        GetTableLock(tableKey).EnterWriteLock();
+        AcquireTableLock(tableKey, write: true);
     }
 
     public void ReleaseReadLock(string tableKey)
     {
-        GetTableLock(tableKey).ExitReadLock();
+        ReleaseTableLock(tableKey, write: false);
     }
 
     public void ReleaseWriteLock(string tableKey)
     {
-        GetTableLock(tableKey).ExitWriteLock();
+        ReleaseTableLock(tableKey, write: true);
     }
 
-    private ReaderWriterLockSlim GetTableLock(string databaseName, string tableName)
+    private void AcquireTableLock(string tableKey, bool write)
     {
-        return GetTableLock(BuildTableKey(databaseName, tableName));
+        TableLockEntry tableLock = RetainTableLock(tableKey);
+        try
+        {
+            if (write)
+            {
+                tableLock.Lock.EnterWriteLock();
+            }
+            else
+            {
+                tableLock.Lock.EnterReadLock();
+            }
+        }
+        catch
+        {
+            ReleaseTableLockEntry(tableKey, tableLock);
+            throw;
+        }
     }
 
-    private ReaderWriterLockSlim GetTableLock(string tableKey)
+    private void ReleaseTableLock(string tableKey, bool write)
     {
-        return _tableLocks.GetOrAdd(tableKey, _ => new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion));
+        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
+        {
+            throw new SynchronizationLockException($"Table {(write ? "write" : "read")} lock not found for key '{tableKey}'.");
+        }
+
+        if (write)
+        {
+            tableLock.Lock.ExitWriteLock();
+        }
+        else
+        {
+            tableLock.Lock.ExitReadLock();
+        }
+
+        ReleaseTableLockEntry(tableKey, tableLock);
+    }
+
+    private TableLockEntry RetainTableLock(string tableKey)
+    {
+        lock (_tableLockLifecycleSync)
+        {
+            TableLockEntry tableLock = _tableLocks.GetOrAdd(tableKey, _ => new TableLockEntry());
+            tableLock.ActiveUsers++;
+            return tableLock;
+        }
+    }
+
+    private void ReleaseTableLockEntry(string tableKey, TableLockEntry tableLock)
+    {
+        lock (_tableLockLifecycleSync)
+        {
+            if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? current)
+                || !ReferenceEquals(current, tableLock))
+            {
+                return;
+            }
+
+            current.ActiveUsers--;
+            if (current.ActiveUsers > 0)
+            {
+                return;
+            }
+
+            _tableLocks.TryRemove(tableKey, out _);
+            current.Lock.Dispose();
+        }
     }
 
     private RowLockEntry RetainRowLock(string rowKey)
