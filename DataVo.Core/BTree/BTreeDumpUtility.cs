@@ -24,7 +24,7 @@ namespace DataVo.Core.BTree;
 public static class BTreeDumpUtility
 {
     /// <summary>
-    /// Loads an index through <see cref="IndexManager"/> and returns a formatted textual dump of its backing B+Tree file.
+    /// Loads an index through <see cref="DataVo.Core.Indexing.IndexManager"/> and returns a formatted textual dump of its backing B+Tree file.
     /// </summary>
     /// <param name="indexName">The logical index name, such as <c>_PK_Users</c> or a user-defined index name.</param>
     /// <param name="tableName">The table that owns the index.</param>

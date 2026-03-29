@@ -8,12 +8,23 @@ public class DataVoEfException : Exception
     /// <summary>The operation that was being performed when the failure occurred.</summary>
     public DataVoEfOperation Operation { get; }
 
+    /// <summary>
+    /// Initializes a new exception for a failed EF bridge operation.
+    /// </summary>
+    /// <param name="operation">The operation being performed when the error occurred.</param>
+    /// <param name="message">Error details.</param>
     public DataVoEfException(DataVoEfOperation operation, string message)
         : base(message)
     {
         Operation = operation;
     }
 
+    /// <summary>
+    /// Initializes a new exception for a failed EF bridge operation with an inner exception.
+    /// </summary>
+    /// <param name="operation">The operation being performed when the error occurred.</param>
+    /// <param name="message">Error details.</param>
+    /// <param name="inner">The originating exception.</param>
     public DataVoEfException(DataVoEfOperation operation, string message, Exception inner)
         : base(message, inner)
     {

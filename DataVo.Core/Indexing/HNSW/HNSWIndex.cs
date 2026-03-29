@@ -4,6 +4,9 @@ using System.Runtime.Intrinsics.X86;
 
 namespace DataVo.Core.Indexing.HNSW;
 
+/// <summary>
+/// Implements an in-memory HNSW (Hierarchical Navigable Small World) vector index.
+/// </summary>
 public class HNSWIndex : IVectorIndex
 {
     private const int DefaultM = 16;
@@ -155,35 +158,122 @@ public class HNSWIndex : IVectorIndex
         public required int[] Ordinals { get; init; }
     }
 
+    /// <summary>
+    /// Gets the index family identifier.
+    /// </summary>
     public string IndexType => "HNSW";
+
+    /// <summary>
+    /// Gets or sets the distance metric used by the index (for example, <c>cosine</c> or <c>euclidean</c>).
+    /// </summary>
     public string Metric { get; set; } = "cosine";
 
+    /// <summary>
+    /// Gets or sets the maximum number of neighbors per node for upper layers.
+    /// Layer 0 uses up to <c>2 * M</c> neighbors.
+    /// </summary>
     public int M { get; set; } = DefaultM;
+
+    /// <summary>
+    /// Gets or sets the base construction search width used while inserting vectors.
+    /// </summary>
     public int EfConstruction { get; set; } = DefaultEfConstruction;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether insertion uses an adaptive construction search width.
+    /// </summary>
     public bool EnableAdaptiveEfConstruction { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the multiplier used when adaptive construction search width is enabled.
+    /// </summary>
     public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether insertion candidate sets are expanded before neighbor selection.
+    /// </summary>
     public bool EnableInsertionCandidateExpansion { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the fixed expansion factor for insertion candidates when adaptive expansion is disabled.
+    /// </summary>
     public double InsertionCandidateExpansionFactor { get; set; } = 1.5d;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether insertion candidate expansion is computed adaptively.
+    /// </summary>
     public bool EnableAdaptiveInsertionCandidateExpansion { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the lower bound for adaptive insertion expansion.
+    /// </summary>
     public double AdaptiveInsertionExpansionMinFactor { get; set; } = 1.0d;
+
+    /// <summary>
+    /// Gets or sets the upper bound for adaptive insertion expansion.
+    /// </summary>
     public double AdaptiveInsertionExpansionMaxFactor { get; set; } = 2.5d;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether neighborhood pruning runs during insertion.
+    /// </summary>
     public bool EnableInsertionNeighborhoodPruning { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the pruning threshold used by insertion neighborhood pruning.
+    /// </summary>
     public double InsertionNeighborhoodPruningThreshold { get; set; } = 0.85d;
+
+    /// <summary>
+    /// Gets or sets how many graph hops are considered during insertion neighborhood pruning.
+    /// </summary>
     public int InsertionNeighborhoodPruneHops { get; set; } = 1;
 
+    /// <summary>
+    /// Gets or sets the base search width used for query-time exploration.
+    /// </summary>
     public int EfSearch { get; set; } = DefaultEfSearch;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether query-time search width is adapted to query demand.
+    /// </summary>
     public bool EnableAdaptiveEfSearch { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the multiplier used when adaptive query-time search width is enabled.
+    /// </summary>
     public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether diversity-aware neighbor selection is enabled.
+    /// </summary>
     public bool EnableDiversityHeuristic { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether graph repair heuristics run after deletions.
+    /// </summary>
     public bool EnableDeleteGraphRepair { get; set; } = true;
 
+    /// <summary>
+    /// Gets the current entry-point row id used for top-layer navigation.
+    /// </summary>
     public long? EntryPointId { get; private set; }
+
+    /// <summary>
+    /// Gets the highest level currently present in the graph.
+    /// </summary>
     public int MaxLevel { get; private set; } = -1;
+
+    /// <summary>
+    /// Gets the number of active vectors currently indexed.
+    /// </summary>
     public int Count => _count;
 
+    /// <summary>
+    /// Pre-allocates storage and thread-local scratch buffers for an expected index size.
+    /// </summary>
+    /// <param name="expectedCount">Expected number of indexed vectors.</param>
+    /// <param name="vectorDimension">Dimension of each vector.</param>
     public void Reserve(int expectedCount, int vectorDimension)
     {
         if (expectedCount <= 0)
@@ -207,6 +297,13 @@ public class HNSWIndex : IVectorIndex
         selectionWorkspace.EnsureCandidateCapacity(Math.Max(64, ResolveNeighborLimit(0) * 4));
     }
 
+    /// <summary>
+    /// Inserts a batch of vectors using parallel workers.
+    /// </summary>
+    /// <param name="rowIds">Row ids mapped one-to-one to vectors.</param>
+    /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
+    /// <param name="vectorDimension">Dimension of each vector.</param>
+    /// <param name="maxDegreeOfParallelism">Optional parallelism override; when zero or negative, processor count is used.</param>
     public void InsertBatchParallel(long[] rowIds, float[] vectors, int vectorDimension, int maxDegreeOfParallelism = 0)
     {
         if (rowIds == null)
@@ -245,6 +342,11 @@ public class HNSWIndex : IVectorIndex
         });
     }
 
+    /// <summary>
+    /// Inserts or replaces a single vector for a row id.
+    /// </summary>
+    /// <param name="rowId">Row id to associate with the vector.</param>
+    /// <param name="vector">Vector payload to index.</param>
     public void Insert(long rowId, float[] vector)
     {
         if (vector == null || vector.Length == 0)
@@ -350,6 +452,10 @@ public class HNSWIndex : IVectorIndex
         }
     }
 
+    /// <summary>
+    /// Deletes indexed vectors for the provided row ids.
+    /// </summary>
+    /// <param name="rowIds">Row ids to remove.</param>
     public void Delete(List<long> rowIds)
     {
         if (rowIds == null || rowIds.Count == 0)
@@ -402,6 +508,12 @@ public class HNSWIndex : IVectorIndex
         }
     }
 
+    /// <summary>
+    /// Returns the nearest row ids for the supplied query vector.
+    /// </summary>
+    /// <param name="queryVector">Query vector.</param>
+    /// <param name="topK">Maximum number of matches to return.</param>
+    /// <returns>A list of row ids ordered from nearest to farthest.</returns>
     public List<long> SearchTopK(float[] queryVector, int topK)
     {
         if (queryVector == null || queryVector.Length == 0)
@@ -459,6 +571,9 @@ public class HNSWIndex : IVectorIndex
         return result;
     }
 
+    /// <summary>
+    /// Removes all vectors and graph state from the index.
+    /// </summary>
     public void Clear()
     {
         _rowIdToOrdinal.Clear();
