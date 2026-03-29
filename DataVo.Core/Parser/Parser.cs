@@ -111,8 +111,7 @@ public class Parser(List<Token> tokens)
                 statements.Add(new RollbackStatement());
             else
             {
-                // Advance unknown tokens to avoid infinite loops
-                Advance();
+                throw new ParserException($"Parser Error: Unexpected token {Current}.");
             }
         }
 
