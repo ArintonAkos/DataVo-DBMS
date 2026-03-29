@@ -13,6 +13,11 @@ namespace DataVo.EntityFrameworkCore;
 /// </summary>
 public static class DataVoDbContextExtensions
 {
+    /// <summary>
+    /// Generates DataVo <c>CREATE TABLE</c> statements from the current EF Core model.
+    /// </summary>
+    /// <param name="context">The EF Core context whose model is inspected.</param>
+    /// <returns>An ordered list of DataVo DDL statements.</returns>
     public static IReadOnlyList<string> GenerateDataVoCreateStatements(this DbContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -41,11 +46,21 @@ public static class DataVoDbContextExtensions
             .ToList();
     }
 
+    /// <summary>
+    /// Generates a single DataVo schema script from the current EF Core model.
+    /// </summary>
+    /// <param name="context">The EF Core context whose model is inspected.</param>
+    /// <returns>A newline-delimited script containing DataVo <c>CREATE TABLE</c> statements.</returns>
     public static string GenerateDataVoCreateScript(this DbContext context)
     {
         return string.Join(Environment.NewLine, context.GenerateDataVoCreateStatements());
     }
 
+    /// <summary>
+    /// Creates DataVo tables for the EF Core model using the supplied DataVo connection string.
+    /// </summary>
+    /// <param name="context">The EF Core context whose model is inspected.</param>
+    /// <param name="connectionString">Connection string used to execute generated DDL.</param>
     public static void EnsureDataVoCreated(this DbContext context, string connectionString)
     {
         ArgumentNullException.ThrowIfNull(context);

@@ -90,6 +90,7 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
     /// Inserts a key/value pair into a page that is known not to be full.
     /// </summary>
     /// <param name="node">The page that will receive the insertion.</param>
+    /// <param name="nodeWriteLatch">Write latch currently held for <paramref name="node"/>.</param>
     /// <param name="key">The encoded key to insert.</param>
     /// <param name="value">The row ID associated with the key.</param>
     private void InsertNonFullWithLatchCrabbing(BPlusTreePage node, IDisposable nodeWriteLatch, byte[] key, long value)
