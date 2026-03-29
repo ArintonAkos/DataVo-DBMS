@@ -413,6 +413,7 @@ public class HNSWIndex : IVectorIndex
         var selectWorkspace = GetSelectionWorkspace();
         int maxStride = ResolveNeighborLimit(0);
         selectWorkspace.EnsureCandidateCapacity(Math.Max(64, maxStride * 4));
+        Span<int> destinationBuffer = stackalloc int[128];
 
         for (int level = Math.Min(targetLevel, topLevel); level >= 0; level--)
         {
@@ -421,8 +422,7 @@ public class HNSWIndex : IVectorIndex
             int candidateCount = SearchLayer(vector, entryOrdinal, ef, level, searchWorkspace);
 
             int neighborLimit = ResolveNeighborLimit(level);
-            Span<int> destination = stackalloc int[Math.Min(128, Math.Max(2, neighborLimit))];
-            if (destination.Length < neighborLimit)
+            if (neighborLimit > destinationBuffer.Length)
             {
                 int[] temp = new int[neighborLimit];
                 SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), temp.AsSpan(0, neighborLimit));
@@ -431,6 +431,7 @@ public class HNSWIndex : IVectorIndex
             }
             else
             {
+                Span<int> destination = destinationBuffer.Slice(0, neighborLimit);
                 SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), destination.Slice(0, neighborLimit));
                 int selected = CountSelected(destination);
                 ConnectBidirectional(ordinal, destination.Slice(0, selected), level);

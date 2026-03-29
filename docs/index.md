@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "DataVo DBMS"
-  text: "Documentation"
-  tagline: "Modern docs for embedding, extending, and understanding a custom C# relational database engine"
+  text: "Production Documentation"
+  tagline: "Embed, operate, and extend a C# SQL engine with local packaging, auth/session SQL, and browser WASM playground support"
   actions:
     - theme: brand
       text: Get Started
@@ -23,6 +23,9 @@ features:
   - title: Querying Guide
     details: Learn the supported SELECT surface with examples for joins, grouping, predicates, ordering, set operations, and subqueries.
     link: /features/select-and-querying
+  - title: Security and Authentication
+    details: Use user/role DDL, grant and revoke permissions, and session login/logout commands with practical SQL examples.
+    link: /features/security-and-authentication
   - title: Data Changes
     details: Understand INSERT, UPDATE, DELETE, and VACUUM with before-and-after table examples.
     link: /features/data-modification
@@ -48,20 +51,22 @@ features:
 - **DataVo.Core Modules**: use this when you want to understand implementation details, extension points, or subsystem responsibilities.
 - **Architecture**: use this when you want design-level context, storage/indexing rationale, and internal structure notes.
 
-## What makes these docs different now
+## Current documentation focus
 
-This site is being shaped more like a product documentation portal rather than a raw project wiki.
+This documentation tracks implemented behavior first, then roadmap areas.
 
-- quick entry points instead of long unstructured pages
-- feature-first guides before internal code reference
-- examples with input tables and output tables
-- roadmap visibility for what exists now versus what is planned
+- local packaging and embedding workflows
+- SQL surface area by feature
+- auth/session SQL operations and grant inspection
+- browser WASM runtime and parity test workflows
+- architecture references for contributors
 
 ## Start here
 
 If you are new to the project, the best sequence is:
 
 1. [Getting Started](./features/getting-started.md)
-2. [SELECT and Query Features](./features/select-and-querying.md)
-3. [Setup and Packaging](./features/setup-and-packaging.md)
-4. [Roadmap and Integrations](./features/roadmap-and-integrations.md)
+2. [Setup and Packaging](./features/setup-and-packaging.md)
+3. [SELECT and Query Features](./features/select-and-querying.md)
+4. [Security and Authentication](./features/security-and-authentication.md)
+5. [Roadmap and Integrations](./features/roadmap-and-integrations.md)
