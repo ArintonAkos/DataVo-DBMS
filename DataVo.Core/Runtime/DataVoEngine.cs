@@ -26,6 +26,7 @@ public sealed class DataVoEngine : IDisposable
     private static readonly AsyncLocal<DataVoEngine?> ScopedCurrent = new();
     private static readonly object SyncRoot = new();
     private static DataVoEngine? _fallbackCurrent;
+    private readonly TransactionIdStateStore? _transactionIdStateStore;
 
     private DataVoEngine(StorageContext storageContext)
     {
@@ -39,6 +40,19 @@ public sealed class DataVoEngine : IDisposable
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();
+
+        if (Config.StorageMode == StorageMode.Disk)
+        {
+            _transactionIdStateStore = new TransactionIdStateStore(Config);
+            long? persistedHighWaterMark = _transactionIdStateStore.TryReadHighWaterMark();
+            if (persistedHighWaterMark.HasValue)
+            {
+                TransactionIdAllocator.RestoreHighWaterMark(persistedHighWaterMark.Value + 1);
+            }
+
+            TransactionIdAllocator.SetHighWaterMarkObserver(highWaterMark =>
+                _transactionIdStateStore.PersistHighWaterMark(highWaterMark));
+        }
     }
 
     public Guid Id { get; }
@@ -170,6 +184,11 @@ public sealed class DataVoEngine : IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (_transactionIdStateStore != null)
+        {
+            _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
+        }
+
         IndexManager.Dispose();
         VersionStorageManager.Dispose();
     }

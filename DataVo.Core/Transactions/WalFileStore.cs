@@ -21,6 +21,14 @@ namespace DataVo.Core.Transactions;
 /// </example>
 internal sealed class WalFileStore
 {
+    private sealed class WalRecordEnvelope
+    {
+        public int Version { get; set; }
+        public int PayloadLength { get; set; }
+        public uint PayloadCrc32 { get; set; }
+        public string Payload { get; set; } = string.Empty;
+    }
+
     private static readonly ConcurrentDictionary<string, object> FileLocks =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -62,7 +70,7 @@ internal sealed class WalFileStore
 
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
             {
-                writer.WriteLine(JsonConvert.SerializeObject(entry));
+                writer.WriteLine(SerializeWalEntry(entry));
                 writer.Flush();
             }
 
@@ -121,14 +129,16 @@ internal sealed class WalFileStore
         }
 
         var entries = new List<WalEntry>();
+        int lineNumber = 0;
         foreach (var line in File.ReadLines(FilePath))
         {
+            lineNumber++;
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
             }
 
-            var entry = JsonConvert.DeserializeObject<WalEntry>(line);
+            WalEntry entry = DeserializeWalEntry(line, lineNumber);
             if (entry != null)
             {
                 entries.Add(entry);
@@ -148,18 +158,28 @@ internal sealed class WalFileStore
 
         EnsureDirectoryExists();
 
-        using var stream = new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        string tmpPath = FilePath + ".tmp";
+        using var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
         using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
         {
             foreach (var entry in entries)
             {
-                writer.WriteLine(JsonConvert.SerializeObject(entry));
+                writer.WriteLine(SerializeWalEntry(entry));
             }
 
             writer.Flush();
         }
 
         stream.Flush(true);
+
+        if (File.Exists(FilePath))
+        {
+            File.Replace(tmpPath, FilePath, null);
+        }
+        else
+        {
+            File.Move(tmpPath, FilePath, overwrite: true);
+        }
     }
 
     private void EnsureDirectoryExists()
@@ -182,5 +202,92 @@ internal sealed class WalFileStore
     private object GetLock()
     {
         return FileLocks.GetOrAdd(FilePath, _ => new object());
+    }
+
+    private static string SerializeWalEntry(WalEntry entry)
+    {
+        string payload = JsonConvert.SerializeObject(entry);
+        byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
+
+        var envelope = new WalRecordEnvelope
+        {
+            Version = 1,
+            PayloadLength = payloadBytes.Length,
+            PayloadCrc32 = ComputeCrc32(payloadBytes),
+            Payload = payload,
+        };
+
+        return JsonConvert.SerializeObject(envelope);
+    }
+
+    private static WalEntry DeserializeWalEntry(string line, int lineNumber)
+    {
+        WalRecordEnvelope? envelope = null;
+        try
+        {
+            envelope = JsonConvert.DeserializeObject<WalRecordEnvelope>(line);
+        }
+        catch
+        {
+            // Legacy format fallback handled below.
+        }
+
+        if (envelope != null && !string.IsNullOrWhiteSpace(envelope.Payload) && envelope.Version > 0)
+        {
+            byte[] payloadBytes = Encoding.UTF8.GetBytes(envelope.Payload);
+            if (payloadBytes.Length != envelope.PayloadLength)
+            {
+                throw new InvalidDataException($"WAL corruption at line {lineNumber}: payload length mismatch.");
+            }
+
+            uint actualChecksum = ComputeCrc32(payloadBytes);
+            if (actualChecksum != envelope.PayloadCrc32)
+            {
+                throw new InvalidDataException($"WAL corruption at line {lineNumber}: checksum mismatch.");
+            }
+
+            WalEntry? entry = JsonConvert.DeserializeObject<WalEntry>(envelope.Payload);
+            if (entry == null)
+            {
+                throw new InvalidDataException($"WAL corruption at line {lineNumber}: invalid payload JSON.");
+            }
+
+            return entry;
+        }
+
+        WalEntry? legacyEntry = null;
+        try
+        {
+            legacyEntry = JsonConvert.DeserializeObject<WalEntry>(line);
+        }
+        catch
+        {
+            // Handled below.
+        }
+
+        if (legacyEntry != null)
+        {
+            return legacyEntry;
+        }
+
+        throw new InvalidDataException($"WAL corruption at line {lineNumber}: unrecognized record format.");
+    }
+
+    private static uint ComputeCrc32(ReadOnlySpan<byte> data)
+    {
+        const uint polynomial = 0xEDB88320u;
+        uint crc = 0xFFFFFFFFu;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            crc ^= data[i];
+            for (int bit = 0; bit < 8; bit++)
+            {
+                uint mask = (uint)-(int)(crc & 1);
+                crc = (crc >> 1) ^ (polynomial & mask);
+            }
+        }
+
+        return ~crc;
     }
 }

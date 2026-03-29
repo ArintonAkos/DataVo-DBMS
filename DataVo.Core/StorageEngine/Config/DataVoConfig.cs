@@ -259,6 +259,11 @@ public class DataVoConfig
     public int WalCheckpointThreshold { get; set; } = 1000;
 
     /// <summary>
+    /// Gets or sets the file name or path used to persist MVCC transaction ID high-water mark.
+    /// </summary>
+    public string TransactionIdStateFilePath { get; set; } = "datavo.txid";
+
+    /// <summary>
     /// Resolves the effective WAL file path for the current configuration.
     /// </summary>
     /// <returns>An absolute or base-directory-relative path to the WAL file.</returns>
@@ -274,6 +279,24 @@ public class DataVoConfig
             : Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, WalFilePath);
+    }
+
+    /// <summary>
+    /// Resolves the effective transaction-ID state file path for the current configuration.
+    /// </summary>
+    /// <returns>An absolute or base-directory-relative path to the transaction ID state file.</returns>
+    public string ResolveTransactionIdStateFilePath()
+    {
+        if (Path.IsPathRooted(TransactionIdStateFilePath))
+        {
+            return TransactionIdStateFilePath;
+        }
+
+        string baseDirectory = StorageMode == StorageMode.Disk
+            ? (DiskStoragePath ?? "./datavo_data")
+            : Directory.GetCurrentDirectory();
+
+        return Path.Combine(baseDirectory, TransactionIdStateFilePath);
     }
 
     /// <summary>
