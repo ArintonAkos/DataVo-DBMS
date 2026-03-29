@@ -3,69 +3,69 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 16 exception-hardening expansion
+> **Last updated:** 2026-03-29 — Phase 17 typed transaction row-buffer foundation
 
 ---
 
 ## Implementation Progress
 
-| #    | Severity    | Title                                                        | Status         | Notes                                                                                                              |
-| ---- | ----------- | ------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 2.1  | 🔴 Critical | WAL: no per-record checksum                                  | ✅ **Fixed**   | Checksum-protected WAL envelopes + corruption hard-fail                                                            |
-| 2.2  | 🔴 Critical | WAL rewrite is non-atomic                                    | ✅ **Fixed**   | Atomic `.tmp` + `File.Replace()` WAL rewrite                                                                       |
-| 2.3  | 🔴 Critical | Catalog XML in-place overwrite                               | ✅ **Fixed**   | Atomic write-to-tmp + `File.Replace()`                                                                             |
-| 2.4  | 🔴 Critical | `TableContainsRow` swallows all exceptions                   | ✅ **Fixed**   | Catches only expected row-miss exceptions (`RowDeletedException`, `RowNotFoundException`, `FileNotFoundException`) |
-| 2.5  | 🔴 Critical | Global static file-lock dict grows without bound             | ✅ **Fixed**   | File-lock entries removed on `DropTable`/`DropDatabase`                                                            |
-| 2.6  | 🔴 Critical | `CacheStorage` non-thread-safe `Dictionary`                  | ✅ **Fixed**   | Replaced with `ConcurrentDictionary`                                                                               |
-| 2.7  | 🔴 Critical | ABBA deadlock between version lock and file lock             | ✅ **Fixed**   | `VacuumTable` no longer holds version write lock during storage lookups                                            |
-| 2.8  | 🔴 Critical | Transaction IDs reset to 1 on restart                        | ✅ **Fixed**   | High-water mark persisted/restored via state file                                                                  |
-| 2.9  | 🔴 Critical | `CreateTable` is a no-op                                     | ✅ **Fixed**   | Disk mode now eagerly materializes table file/header during `CreateTable`                                         |
-| 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ⬜ Pending     | Large-scale refactor                                                                                               |
-| 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ⬜ Pending     | Large-scale refactor                                                                                               |
-| 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ✅ **Fixed**   | Production scope audit shows no bare catches in `DataVo.Core` / `DataVo.Data` / `DataVo.EntityFrameworkCore`     |
+| #    | Severity    | Title                                                        | Status         | Notes                                                                                                                   |
+| ---- | ----------- | ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 2.1  | 🔴 Critical | WAL: no per-record checksum                                  | ✅ **Fixed**   | Checksum-protected WAL envelopes + corruption hard-fail                                                                 |
+| 2.2  | 🔴 Critical | WAL rewrite is non-atomic                                    | ✅ **Fixed**   | Atomic `.tmp` + `File.Replace()` WAL rewrite                                                                            |
+| 2.3  | 🔴 Critical | Catalog XML in-place overwrite                               | ✅ **Fixed**   | Atomic write-to-tmp + `File.Replace()`                                                                                  |
+| 2.4  | 🔴 Critical | `TableContainsRow` swallows all exceptions                   | ✅ **Fixed**   | Catches only expected row-miss exceptions (`RowDeletedException`, `RowNotFoundException`, `FileNotFoundException`)      |
+| 2.5  | 🔴 Critical | Global static file-lock dict grows without bound             | ✅ **Fixed**   | File-lock entries removed on `DropTable`/`DropDatabase`                                                                 |
+| 2.6  | 🔴 Critical | `CacheStorage` non-thread-safe `Dictionary`                  | ✅ **Fixed**   | Replaced with `ConcurrentDictionary`                                                                                    |
+| 2.7  | 🔴 Critical | ABBA deadlock between version lock and file lock             | ✅ **Fixed**   | `VacuumTable` no longer holds version write lock during storage lookups                                                 |
+| 2.8  | 🔴 Critical | Transaction IDs reset to 1 on restart                        | ✅ **Fixed**   | High-water mark persisted/restored via state file                                                                       |
+| 2.9  | 🔴 Critical | `CreateTable` is a no-op                                     | ✅ **Fixed**   | Disk mode now eagerly materializes table file/header during `CreateTable`                                               |
+| 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ✅ **Started** | Transaction buffer/WAL pipeline now uses typed `Dictionary<string, object?>` row maps as first migration slice         |
+| 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ⬜ Pending     | Large-scale refactor                                                                                                    |
+| 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ✅ **Fixed**   | Production scope audit shows no bare catches in `DataVo.Core` / `DataVo.Data` / `DataVo.EntityFrameworkCore`            |
 | 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Expanded migration across parser/DDL/evaluator hot paths to `CatalogException`/`BindingException`/`EvaluationException` |
-| 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ✅ **Fixed**   | Cache now stores `IIndexBase` and validates factory/persistence outputs                                            |
-| 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                      |
-| 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                   |
-| 3.8  | 🟠 Major    | `CompactTable` hardcodes file-header magic                   | ✅ **Fixed**   | Uses `FileHeaderMagic` / `FileHeaderVersion` constants                                                             |
-| 3.9  | 🟠 Major    | VECTOR columns bloat WAL with JSON                           | ✅ **Fixed**   | WAL now stores vector payloads as compact base64 float envelopes with replay normalization                         |
-| 3.10 | 🟠 Major    | `RowSerializer` uses static ambient `DataVoEngine.Current()` | ✅ **Fixed**   | Serializer now accepts explicit catalog/scope context; storage paths bind to engine-scoped catalog                |
-| 3.11 | 🟠 Major    | `StorageContext.Initialize` leaks previous engine            | ✅ **Fixed**   | Global reset now disposes prior fallback engine on explicit `ResetCurrent` replacement                            |
-| 3.12 | 🟠 Major    | Case sensitivity mismatch catalog vs. files                  | ✅ **Fixed**   | Catalog database/table/column/index lookups now normalize comparisons case-insensitively                         |
-| 4.1  | 🟡 Minor    | Duplicate column-parse logic                                 | ✅ **Fixed**   | Shared DDL column-definition parser now centralizes type/length/default parsing                                   |
-| 4.2  | 🟡 Minor    | `VersionStorageManager.Dispose()` missing `IDisposable`      | ✅ **Fixed**   | `IDisposable` declared                                                                                             |
-| 4.3  | 🟡 Minor    | `TransactionIdAllocator` uses `lock`                         | ✅ **Fixed**   | Replaced with `Interlocked.Increment` + `SpinLock` for ranges                                                      |
-| 4.4  | 🟡 Minor    | Join operators missing dictionary capacity                   | ✅ **Fixed**   | Join row merge dictionaries now pre-size based on left/right row width                                            |
-| 4.5  | 🟡 Minor    | `Lock` re-entrancy in `IndexManager.MarkDirty`               | ✅ **Fixed**   | Nested lock acquisition removed in scalar index mutation paths via no-lock dirty-mark helper                      |
-| 4.6  | 🟡 Minor    | Duplicate `Touch`/`Invalidate` schema version methods        | ✅ **Fixed**   | Consolidated into `BumpTableSchemaVersion`                                                                         |
-| 4.7  | 🟡 Minor    | Undocumented `tableKey` overloads                            | ✅ **Fixed**   | Added XML docs clarifying pre-composed `{database}.{table}` overload contract                                      |
-| 4.8  | 🟡 Minor    | Parser silently skips unknown tokens                         | ✅ **Fixed**   | Unexpected tokens now throw `ParserException`                                                                      |
-| 4.9  | 🟡 Minor    | `CompactTable` resets RowIds without enforcing rebuild       | ✅ **Fixed**   | Compaction now blocks indexed tables unless caller explicitly opts in and rebuilds indexes                        |
-| 4.10 | 🟡 Minor    | No authentication/authorization                              | ⬜ Pending     | Feature-level effort                                                                                               |
-| 4.11 | 🟡 Minor    | `DataVoTransaction` missing savepoint support                | ✅ **Fixed**   | SQL savepoint grammar + transaction snapshots + ADO transaction savepoint APIs                                    |
-| 4.12 | 🟡 Minor    | WAL `TransactionId` (Guid) disconnected from MVCC (long)     | ✅ **Fixed**   | WAL now carries/replays `MvccTransactionId` and restores allocator floor                                           |
-| 4.13 | 🟡 Minor    | Static cardinality feedback dict grows without eviction      | ✅ **Fixed**   | Join-cardinality feedback now trims to configured max entries before persistence                                  |
-| 4.14 | 🟡 Minor    | Index persistence silently drops I/O errors                  | ✅ **Fixed**   | Flush/delete paths now surface persistence failures as exceptions                                                   |
+| 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ✅ **Fixed**   | Cache now stores `IIndexBase` and validates factory/persistence outputs                                                 |
+| 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                          |
+| 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                        |
+| 3.8  | 🟠 Major    | `CompactTable` hardcodes file-header magic                   | ✅ **Fixed**   | Uses `FileHeaderMagic` / `FileHeaderVersion` constants                                                                  |
+| 3.9  | 🟠 Major    | VECTOR columns bloat WAL with JSON                           | ✅ **Fixed**   | WAL now stores vector payloads as compact base64 float envelopes with replay normalization                              |
+| 3.10 | 🟠 Major    | `RowSerializer` uses static ambient `DataVoEngine.Current()` | ✅ **Fixed**   | Serializer now accepts explicit catalog/scope context; storage paths bind to engine-scoped catalog                      |
+| 3.11 | 🟠 Major    | `StorageContext.Initialize` leaks previous engine            | ✅ **Fixed**   | Global reset now disposes prior fallback engine on explicit `ResetCurrent` replacement                                  |
+| 3.12 | 🟠 Major    | Case sensitivity mismatch catalog vs. files                  | ✅ **Fixed**   | Catalog database/table/column/index lookups now normalize comparisons case-insensitively                                |
+| 4.1  | 🟡 Minor    | Duplicate column-parse logic                                 | ✅ **Fixed**   | Shared DDL column-definition parser now centralizes type/length/default parsing                                         |
+| 4.2  | 🟡 Minor    | `VersionStorageManager.Dispose()` missing `IDisposable`      | ✅ **Fixed**   | `IDisposable` declared                                                                                                  |
+| 4.3  | 🟡 Minor    | `TransactionIdAllocator` uses `lock`                         | ✅ **Fixed**   | Replaced with `Interlocked.Increment` + `SpinLock` for ranges                                                           |
+| 4.4  | 🟡 Minor    | Join operators missing dictionary capacity                   | ✅ **Fixed**   | Join row merge dictionaries now pre-size based on left/right row width                                                  |
+| 4.5  | 🟡 Minor    | `Lock` re-entrancy in `IndexManager.MarkDirty`               | ✅ **Fixed**   | Nested lock acquisition removed in scalar index mutation paths via no-lock dirty-mark helper                            |
+| 4.6  | 🟡 Minor    | Duplicate `Touch`/`Invalidate` schema version methods        | ✅ **Fixed**   | Consolidated into `BumpTableSchemaVersion`                                                                              |
+| 4.7  | 🟡 Minor    | Undocumented `tableKey` overloads                            | ✅ **Fixed**   | Added XML docs clarifying pre-composed `{database}.{table}` overload contract                                           |
+| 4.8  | 🟡 Minor    | Parser silently skips unknown tokens                         | ✅ **Fixed**   | Unexpected tokens now throw `ParserException`                                                                           |
+| 4.9  | 🟡 Minor    | `CompactTable` resets RowIds without enforcing rebuild       | ✅ **Fixed**   | Compaction now blocks indexed tables unless caller explicitly opts in and rebuilds indexes                              |
+| 4.10 | 🟡 Minor    | No authentication/authorization                              | ⬜ Pending     | Feature-level effort                                                                                                    |
+| 4.11 | 🟡 Minor    | `DataVoTransaction` missing savepoint support                | ✅ **Fixed**   | SQL savepoint grammar + transaction snapshots + ADO transaction savepoint APIs                                          |
+| 4.12 | 🟡 Minor    | WAL `TransactionId` (Guid) disconnected from MVCC (long)     | ✅ **Fixed**   | WAL now carries/replays `MvccTransactionId` and restores allocator floor                                                |
+| 4.13 | 🟡 Minor    | Static cardinality feedback dict grows without eviction      | ✅ **Fixed**   | Join-cardinality feedback now trims to configured max entries before persistence                                        |
+| 4.14 | 🟡 Minor    | Index persistence silently drops I/O errors                  | ✅ **Fixed**   | Flush/delete paths now surface persistence failures as exceptions                                                       |
 
 ### Summary
 
-| Metric                    | Value                                                      |
-| ------------------------- | ---------------------------------------------------------- |
-| **Total issues**          | 33                                                         |
-| **Fixed**                 | 30 (91%)                                                   |
-| **Partially fixed**       | 1 (3%)                                                     |
-| **Pending**               | 2 (6%)                                                     |
+| Metric                    | Value                                                                  |
+| ------------------------- | ---------------------------------------------------------------------- |
+| **Total issues**          | 33                                                                     |
+| **Fixed**                 | 30 (91%)                                                               |
+| **Partially fixed**       | 2 (6%)                                                                 |
+| **Pending**               | 1 (3%)                                                                 |
 | **New tests added**       | Audit-focused + lock/WAL/index/deadlock regression tests (all passing) |
 | **Current full test run** | ✅ 699/699 passing (`dotnet test DataVo.Tests`)                        |
 
 ### Epic Progress Overview
 
-| Epic | Scope | Fixed | Started | Pending | Completion |
-| ---- | ----- | ----- | ------- | ------- | ---------- |
-| **Epic 2** | Critical Issues (`2.x`) | 9/9 | 0/9 | 0/9 | **100%** |
-| **Epic 3** | Major Issues (`3.x`) | 9/12 | 1/12 | 2/12 | **75% fully fixed** |
-| **Epic 4** | Minor Issues (`4.x`) | 13/14 | 0/14 | 1/14 | **93%** |
-| **Overall** | Audit Issues (`2.x-4.x`) | 30/33 | 1/33 | 2/33 | **91% fully fixed** |
+| Epic        | Scope                    | Fixed | Started | Pending | Completion          |
+| ----------- | ------------------------ | ----- | ------- | ------- | ------------------- |
+| **Epic 2**  | Critical Issues (`2.x`)  | 9/9   | 0/9     | 0/9     | **100%**            |
+| **Epic 3**  | Major Issues (`3.x`)     | 9/12  | 2/12    | 1/12    | **75% fully fixed** |
+| **Epic 4**  | Minor Issues (`4.x`)     | 13/14 | 0/14    | 1/14    | **93%**             |
+| **Overall** | Audit Issues (`2.x-4.x`) | 30/33 | 2/33    | 1/33    | **91% fully fixed** |
 
 ---
 
@@ -175,9 +175,16 @@ DataVo is an impressively structured database engine for a learning/research pro
 
 ## 3. Major Issues
 
-### 3.1 — Pervasive use of `dynamic` as the row representation ⬜
+### 3.1 — Pervasive use of `dynamic` as the row representation ✅ STARTED
 
-`Dictionary<string, dynamic>` is the fundamental row type. Needs a strongly-typed `DbValue` discriminated union.
+`Dictionary<string, dynamic>` remains widespread, but the migration has begun with a typed foundation in the transaction path.
+
+**Phase 17 slice:**
+- `TransactionContext` buffered insert/update maps now use `Dictionary<string, object?>`
+- transactional DML buffering paths now normalize dynamic rows into typed object maps
+- commit/WAL replay paths now consume typed row maps and adapt at storage/index boundaries
+
+Remaining work still requires introducing a canonical typed value abstraction (for example `DbValue`) and incrementally migrating planner/executor/storage row contracts.
 
 ### 3.2 — `Select.cs` is a 4 410-line god class ⬜
 
@@ -192,6 +199,7 @@ Needs decomposition into separate planner, executor, and optimizer components.
 ### 3.4 — `throw new Exception(...)` used universally ✅ STARTED
 
 **Fix applied:** Domain exception hierarchy now used in additional runtime paths:
+
 - `CatalogStore` migrated generic schema failures to `CatalogException`
 - `TableService` migrated binding failures to `BindingException`
 - `IndexManager` migrated missing-index failures to `IndexException`
@@ -303,6 +311,7 @@ Remaining generic throw sites still need incremental migration.
 **Files:** `DataVo.Core/Parser/Parser.cs`, `DataVo.Core/Parser/AST/SqlNode.cs`, `DataVo.Core/Parser/Evaluator.cs`, `DataVo.Core/Parser/Transactions/*.cs`, `DataVo.Core/Transactions/TransactionContext.cs`, `DataVo.Core/Transactions/TransactionManager.cs`, `DataVo.Data/DataVoTransaction.cs`
 
 **Fix applied:** added full savepoint support for explicit transactions:
+
 - SQL parser/evaluator now supports `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and `RELEASE [SAVEPOINT]`
 - transaction context now snapshots/restores buffered insert/update/delete state for named savepoints
 - ADO transaction wrapper now overrides `Save`, `Rollback(savepointName)`, and `Release`
@@ -553,3 +562,18 @@ Remaining generic throw sites still need incremental migration.
 - `DataVo.Core/Models/Statement/Utils/TableDetails.cs` — Replaced missing-database generic exceptions with `BindingException`
 - `DataVo.Core/Parser/Statements/Mechanism/ExpressionEvaluator.cs` — Replaced unsupported operator/type and invalid operand generic exceptions with `EvaluationException`
 - `docs/audit/production-readiness-audit.md` — Updated 3.4 notes and added Phase 16 progress log
+
+## Changes Made (Phase 17)
+
+### New Files
+
+- `DataVo.Tests/Transactions/TransactionContextTypedRowsTests.cs` — Added typed transaction-row buffer and WAL payload shape regression tests
+
+### Modified Files
+
+- `DataVo.Core/Transactions/TransactionContext.cs` — Replaced buffered insert/update row maps with typed `Dictionary<string, object?>`
+- `DataVo.Core/Transactions/WalEntry.cs` — Updated row clone/normalize helpers to typed object-map buffers
+- `DataVo.Core/Parser/Transactions/Commit.cs` — Updated transactional replay to consume typed row maps and bridge to dynamic storage/index APIs at boundaries
+- `DataVo.Core/Parser/DML/InsertInto.cs` — Converts dynamic parsed row dictionaries to typed object maps before transaction buffering
+- `DataVo.Core/Parser/DML/Update.cs` — Converts dynamic updated row dictionaries to typed object maps before transaction buffering
+- `docs/audit/production-readiness-audit.md` — Marked 3.1 started and refreshed epic/overall started-pending counts

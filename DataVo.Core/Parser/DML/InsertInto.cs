@@ -123,7 +123,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 {
                     if (txContext != null)
                     {
-                        txContext.BufferInsert(_model.TableName, rowDict);
+                        txContext.BufferInsert(
+                            _model.TableName,
+                            rowDict.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, rowDict.Comparer));
                     }
                     else
                     {

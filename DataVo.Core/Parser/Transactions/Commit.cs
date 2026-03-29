@@ -115,7 +115,7 @@ internal class Commit : BaseDbAction
                 rowIds = rowIds.Concat(deleted);
             }
 
-            if (context.UpdatedRows.TryGetValue(tableName, out List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>? updated))
+            if (context.UpdatedRows.TryGetValue(tableName, out List<(long RowId, Dictionary<string, object?> UpdatedColumns)>? updated))
             {
                 rowIds = rowIds.Concat(updated.Select(entry => entry.RowId));
             }
@@ -163,14 +163,15 @@ internal class Commit : BaseDbAction
 
             foreach (var row in rows)
             {
-                long assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
+                var storageRow = ToDynamicRow(row);
+                long assignedRowId = engine.StorageContext.InsertOneIntoTable(storageRow, tableName, databaseName);
                 MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, assignedRowId, txId);
 
                 foreach (var index in indexFiles)
                 {
                     if (index.AttributeNames.Any(attr => row.TryGetValue(attr, out var v) && v == null)) continue;
 
-                    string indexValue = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
+                    string indexValue = IndexKeyEncoder.BuildKeyString(storageRow, index.AttributeNames);
                     engine.IndexManager.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, tableName, databaseName);
                 }
             }
@@ -245,5 +246,10 @@ internal class Commit : BaseDbAction
                 }
             }
         }
+    }
+
+    private static Dictionary<string, dynamic> ToDynamicRow(Dictionary<string, object?> row)
+    {
+        return row.ToDictionary(pair => pair.Key, pair => (dynamic?)pair.Value, row.Comparer);
     }
 }

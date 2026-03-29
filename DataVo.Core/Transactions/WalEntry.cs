@@ -270,7 +270,7 @@ public sealed class WalEntry
     /// </summary>
     /// <param name="row">The row to clone.</param>
     /// <returns>A shallow copy of the row values.</returns>
-    private static Dictionary<string, object?> CloneRow(Dictionary<string, dynamic> row)
+    private static Dictionary<string, object?> CloneRow(Dictionary<string, object?> row)
     {
         return row.ToDictionary(pair => pair.Key, pair => PrepareValueForWalSerialization(pair.Value));
     }
@@ -280,14 +280,14 @@ public sealed class WalEntry
     /// </summary>
     /// <param name="row">The raw row values read from JSON.</param>
     /// <returns>A normalized case-insensitive row dictionary.</returns>
-    private static Dictionary<string, dynamic> NormalizeRow(Dictionary<string, object?>? row)
+    private static Dictionary<string, object?> NormalizeRow(Dictionary<string, object?>? row)
     {
         if (row == null)
         {
             return [];
         }
 
-        var normalized = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        var normalized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in row)
         {
             normalized[key] = NormalizeValue(value)!;

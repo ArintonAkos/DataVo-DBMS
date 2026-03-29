@@ -65,7 +65,10 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 for (int i = 0; i < newRows.Count; i++)
                 {
-                    txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRows[i]);
+                    txContext.BufferUpdate(
+                        _model.TableName,
+                        oldRowIds[i],
+                        newRows[i].ToDictionary(pair => pair.Key, pair => (object?)pair.Value, newRows[i].Comparer));
                 }
 
                 Messages.Add($"Rows affected: {newRows.Count}");
