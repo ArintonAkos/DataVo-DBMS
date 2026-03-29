@@ -200,18 +200,18 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 
 ## Implemented SQL surface (high level)
 
-- Querying and DML: SELECT, INSERT, UPDATE, DELETE
-- DDL: CREATE TABLE, CREATE INDEX, ALTER TABLE (supported operations)
-- Transactions: BEGIN, COMMIT, ROLLBACK
+- Querying and DML: `SELECT`, `INSERT`, `UPDATE`, `DELETE`
+- DDL: `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE` (supported operations)
+- Transactions: `BEGIN`, `COMMIT`, `ROLLBACK`
 - Security/auth:
-  - CREATE USER, CREATE ROLE
-  - GRANT, REVOKE
-  - LOGIN, LOGOUT
-  - SHOW USERS, SHOW ROLES, SHOW GRANTS
+  - `CREATE USER`, `CREATE ROLE`
+  - `GRANT`, `REVOKE`
+  - `LOGIN`, `LOGOUT`
+  - `SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`
 - Vector search and indexing:
-  - VECTOR(n) column type with fixed dimensionality
-  - CREATE VECTOR INDEX ... USING HNSW for approximate nearest-neighbor
-  - Distance functions: L2_DISTANCE, COSINE_DISTANCE
+  - `VECTOR(n)` column type with fixed dimensionality
+  - `CREATE VECTOR INDEX ... USING HNSW` for approximate nearest-neighbor
+  - Distance functions: `L2_DISTANCE`, `COSINE_DISTANCE`
   - Hybrid queries (vector + lexical filters + joins)
   - Exact brute-force and fast ANN modes
 
