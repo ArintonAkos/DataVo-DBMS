@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
@@ -58,12 +59,12 @@ internal class GroupBy
         {
             if (!row.ContainsKey(column.TableName) || row[column.TableName] == null)
             {
-                throw new Exception("Trying to group by inexistent table!");
+                throw new BindingException("Trying to group by inexistent table!");
             }
 
             if (!row[column.TableName].ContainsKey(column.ColumnName))
             {
-                throw new Exception("Trying to group by inexistent column!");
+                throw new BindingException("Trying to group by inexistent column!");
             }
 
             if (row[column.TableName][column.ColumnName] == null)

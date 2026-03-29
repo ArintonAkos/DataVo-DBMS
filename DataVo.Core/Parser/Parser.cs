@@ -133,6 +133,22 @@ public class Parser(List<Token> tokens)
                 var savepointToken = Consume(TokenType.Identifier, "savepoint name");
                 statements.Add(new ReleaseSavepointStatement { SavepointName = savepointToken.Value });
             }
+            else if (Match(TokenType.Keyword, SqlKeywords.GRANT))
+            {
+                statements.Add(ParseGrantStatement());
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.REVOKE))
+            {
+                statements.Add(ParseRevokeStatement());
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.LOGIN))
+            {
+                statements.Add(ParseLoginStatement());
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.LOGOUT))
+            {
+                statements.Add(new LogoutStatement());
+            }
             else
             {
                 throw new ParserException($"Parser Error: Unexpected token {Current}.");
@@ -154,8 +170,40 @@ public class Parser(List<Token> tokens)
             return new ShowDatabasesStatement();
         else if (Match(TokenType.Keyword, SqlKeywords.TABLES))
             return new ShowTablesStatement();
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.USERS))
+            return new ShowUsersStatement();
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLES))
+            return new ShowRolesStatement();
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.GRANTS))
+            return ParseShowGrantsStatement();
 
-        throw new ParserException("Parser Error: Expected DATABASES or TABLES after SHOW.");
+        throw new ParserException("Parser Error: Expected DATABASES, TABLES, USERS, ROLES, or GRANTS after SHOW.");
+    }
+
+    private ShowGrantsStatement ParseShowGrantsStatement()
+    {
+        var statement = new ShowGrantsStatement();
+
+        if (!MatchKeywordOrIdentifierValue(SqlKeywords.FOR))
+        {
+            return statement;
+        }
+
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.USER))
+        {
+            statement.FilterByUser = true;
+            statement.PrincipalName = new IdentifierNode(ConsumeIdentifierOrKeyword("user name").Value);
+            return statement;
+        }
+
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            statement.FilterByRole = true;
+            statement.PrincipalName = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value);
+            return statement;
+        }
+
+        throw new ParserException("Parser Error: Expected USER or ROLE after SHOW GRANTS FOR.");
     }
 
     private DescribeStatement ParseDescribeStatement()
@@ -298,6 +346,35 @@ public class Parser(List<Token> tokens)
             }
 
             return stmt;
+        }
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.USER))
+        {
+            var stmt = new CreateUserStatement
+            {
+                Username = new IdentifierNode(ConsumeIdentifierOrKeyword("user name").Value)
+            };
+
+            ConsumeKeywordOrIdentifierValue(SqlKeywords.IDENTIFIED, "IDENTIFIED");
+            if (Match(TokenType.Keyword, SqlKeywords.BY) || MatchKeywordOrIdentifierValue(SqlKeywords.PASSWORD))
+            {
+                // Optional keyword accepted for compatibility.
+            }
+
+            stmt.PasswordLiteral = Consume(TokenType.StringLiteral, "password literal").Value;
+
+            if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+            {
+                stmt.RoleName = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value);
+            }
+
+            return stmt;
+        }
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            return new CreateRoleStatement
+            {
+                RoleName = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value)
+            };
         }
         throw new ParserException("Parser Error: Unknown CREATE statement type.");
     }
@@ -515,7 +592,151 @@ public class Parser(List<Token> tokens)
             stmt.TableName = new IdentifierNode(Consume(TokenType.Identifier, "table name").Value);
             return stmt;
         }
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.USER))
+        {
+            return new DropUserStatement
+            {
+                Username = new IdentifierNode(ConsumeIdentifierOrKeyword("user name").Value)
+            };
+        }
+        else if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            return new DropRoleStatement
+            {
+                RoleName = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value)
+            };
+        }
         throw new ParserException("Parser Error: Unknown DROP statement type.");
+    }
+
+    private GrantStatement ParseGrantStatement()
+    {
+        var statement = new GrantStatement();
+
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            statement.IsRoleGrant = true;
+            statement.GrantedRole = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value);
+        }
+        else
+        {
+            statement.Permissions.AddRange(ParsePermissionList());
+        }
+
+        Consume(TokenType.Keyword, SqlKeywords.TO);
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            statement.TargetIsRole = true;
+        }
+
+        statement.TargetName = new IdentifierNode(ConsumeIdentifierOrKeyword("target principal").Value);
+        return statement;
+    }
+
+    private RevokeStatement ParseRevokeStatement()
+    {
+        var statement = new RevokeStatement();
+
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            statement.IsRoleRevoke = true;
+            statement.RevokedRole = new IdentifierNode(ConsumeIdentifierOrKeyword("role name").Value);
+        }
+        else
+        {
+            statement.Permissions.AddRange(ParsePermissionList());
+        }
+
+        Consume(TokenType.Keyword, SqlKeywords.FROM);
+        if (MatchKeywordOrIdentifierValue(SqlKeywords.ROLE))
+        {
+            statement.TargetIsRole = true;
+        }
+
+        statement.TargetName = new IdentifierNode(ConsumeIdentifierOrKeyword("target principal").Value);
+        return statement;
+    }
+
+    private LoginStatement ParseLoginStatement()
+    {
+        var statement = new LoginStatement
+        {
+            Username = new IdentifierNode(ConsumeIdentifierOrKeyword("user name").Value)
+        };
+
+        ConsumeKeywordOrIdentifierValue(SqlKeywords.IDENTIFIED, "IDENTIFIED");
+        if (Match(TokenType.Keyword, SqlKeywords.BY) || MatchKeywordOrIdentifierValue(SqlKeywords.PASSWORD))
+        {
+            // Optional keyword accepted for compatibility.
+        }
+
+        statement.PasswordLiteral = Consume(TokenType.StringLiteral, "password literal").Value;
+        return statement;
+    }
+
+    private List<string> ParsePermissionList()
+    {
+        var permissions = new List<string>();
+
+        while (!IsEof())
+        {
+            Token token = Advance();
+            if (token.Type != TokenType.Identifier && token.Type != TokenType.Keyword)
+            {
+                throw new ParserException($"Parser Error: Expected permission token but found {token}.");
+            }
+
+            permissions.Add(token.Value);
+            if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+            {
+                Advance();
+                continue;
+            }
+
+            break;
+        }
+
+        if (permissions.Count == 0)
+        {
+            throw new ParserException("Parser Error: Expected at least one permission in GRANT/REVOKE statement.");
+        }
+
+        return permissions;
+    }
+
+    private Token ConsumeIdentifierOrKeyword(string expectedMessage)
+    {
+        if (Current.Type == TokenType.Identifier || Current.Type == TokenType.Keyword)
+        {
+            return Advance();
+        }
+
+        throw new ParserException($"Parser Error: Expected {expectedMessage} but found {Current}.");
+    }
+
+    private bool MatchKeywordOrIdentifierValue(string value)
+    {
+        if (IsEof())
+        {
+            return false;
+        }
+
+        if ((Current.Type == TokenType.Identifier || Current.Type == TokenType.Keyword)
+            && Current.Value.Equals(value, StringComparison.OrdinalIgnoreCase))
+        {
+            Advance();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ConsumeKeywordOrIdentifierValue(string expectedValue, string expectedLabel)
+    {
+        if (!MatchKeywordOrIdentifierValue(expectedValue))
+        {
+            throw new ParserException($"Parser Error: Expected {expectedLabel} but found {Current}.");
+        }
     }
 
     private SqlStatement ParseDeleteStatement()

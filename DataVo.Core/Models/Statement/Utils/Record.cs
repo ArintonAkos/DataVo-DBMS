@@ -1,11 +1,11 @@
 namespace DataVo.Core.Models.Statement.Utils;
 
-public class Record(long rowId, Dictionary<string, dynamic> values)
+public class Record(long rowId, Dictionary<string, object?> values)
 {
     public long RowId { get; set; } = rowId;
-    public Dictionary<string, dynamic> Values { get; set; } = values;
+    public Dictionary<string, object?> Values { get; set; } = values;
 
-    public dynamic this[string columnName]
+    public object? this[string columnName]
     {
         get => Values[columnName];
         set => Values[columnName] = value;

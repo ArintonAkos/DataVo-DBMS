@@ -25,7 +25,7 @@ public class DataVoDataReader : DbDataReader
     private int _rowIndex = -1;
 
     private QueryResult CurrentResult => _results[_resultIndex];
-    private Dictionary<string, dynamic>? CurrentRow =>
+    private Dictionary<string, object?>? CurrentRow =>
         _rowIndex >= 0 && _rowIndex < CurrentResult.Data.Count ? CurrentResult.Data[_rowIndex] : null;
 
     /// <summary>

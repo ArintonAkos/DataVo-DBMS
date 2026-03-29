@@ -26,7 +26,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             {
                 var existingRows = Context.GetTableContents(tableName, databaseName)
                     .OrderBy(row => row.Key)
-                    .Select(row => new Dictionary<string, dynamic>(row.Value))
+                    .Select(row => new Dictionary<string, object?>(row.Value))
                     .ToList();
 
                 var indexes = Catalog.GetTableIndexes(tableName, databaseName);
@@ -99,7 +99,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         }
     }
 
-    private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, dynamic>> rows, List<IndexFile> indexes)
+    private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, object?>> rows, List<IndexFile> indexes)
     {
         Context.DropTable(tableName, databaseName);
         Context.CreateTable(tableName, databaseName);

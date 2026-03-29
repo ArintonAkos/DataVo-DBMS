@@ -1,5 +1,6 @@
 using DataVo.Core.Logging;
 using DataVo.Core.Models.DQL;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Statements;
@@ -34,39 +35,13 @@ namespace DataVo.Core.Parser.DQL;
 /// </para>
 /// </summary>
 /// <param name="ast">The parsed <see cref="SelectStatement"/> AST node representing the SELECT query.</param>
-internal class Select(SelectStatement ast) : BaseDbAction
+internal partial class Select(SelectStatement ast) : BaseDbAction
 {
     private string? _activeDatabaseName;
     private TransactionSnapshot? _activeSnapshot;
 
     private readonly record struct LockedReadResources(
         Dictionary<string, List<long>> RowReadLocksByTable);
-
-    private enum LogicalPlanKind
-    {
-        LegacyWhereJoin,
-        LegacyWhereExpression,
-        LegacyJoinOnly,
-        LegacyNoJoinScan,
-        VolcanoNoJoin,
-        VolcanoInnerJoin
-    }
-
-    private sealed class PhysicalPlanDecision
-    {
-        public PhysicalPlanDecision(LogicalPlanKind logicalPlan, bool useVolcano, int estimatedCost, string reason)
-        {
-            LogicalPlan = logicalPlan;
-            UseVolcano = useVolcano;
-            EstimatedCost = estimatedCost;
-            Reason = reason;
-        }
-
-        public LogicalPlanKind LogicalPlan { get; }
-        public bool UseVolcano { get; }
-        public int EstimatedCost { get; }
-        public string Reason { get; }
-    }
 
     private enum JoinPhysicalAlgorithm
     {
@@ -221,47 +196,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         }
     }
 
-    private Dictionary<string, TableDetail> MaterializeCtes(List<CteDefinitionNode> ctes, Guid session)
-    {
-        Dictionary<string, TableDetail> materialized = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var cte in ctes)
-        {
-            Dictionary<string, TableDetail> inherited = new(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var table in _model.CteTables)
-            {
-                inherited[table.Key] = table.Value;
-            }
-
-            foreach (var table in materialized)
-            {
-                inherited[table.Key] = table.Value;
-            }
-
-            var cteSelect = new Select(cte.Select);
-            cteSelect.UseEngine(Engine);
-            cteSelect._model.SetCteTables(inherited);
-
-            var cteResult = cteSelect.Perform(session);
-            if (cteResult.IsError)
-            {
-                throw new Exception(cteResult.Messages.FirstOrDefault() ?? $"Failed to materialize CTE '{cte.Name.Name}'.");
-            }
-
-            List<Record> rows = [];
-            long rowId = 1;
-            foreach (var row in cteResult.Data)
-            {
-                var values = row.ToDictionary(k => k.Key, v => (dynamic)v.Value!);
-                rows.Add(new Record(rowId++, values));
-            }
-
-            materialized[cte.Name.Name] = new TableDetail(cte.Name.Name, null, [.. cteResult.Fields], rows);
-        }
-
-        return materialized;
-    }
+    // CTE materialization extracted to Select.Cte.cs partial.
 
     private LockedReadResources AcquireReadLocks(string databaseName)
     {
@@ -345,11 +280,11 @@ internal class Select(SelectStatement ast) : BaseDbAction
     /// </summary>
     /// <param name="data">The unfiltered result rows that may contain duplicates.</param>
     /// <returns>A new list containing only distinct rows.</returns>
-    private static List<Dictionary<string, dynamic>> ApplyDistinct(List<Dictionary<string, dynamic>> data)
+    private static List<Dictionary<string, object?>> ApplyDistinct(List<Dictionary<string, object?>> data)
     {
         return [.. data.Select(d => d.ToDictionary(k => k.Key, v => (object?)v.Value))
                    .Distinct(new DictionaryComparer())
-                   .Select(d => d.ToDictionary(k => k.Key, v => (dynamic)v.Value!))];
+                   .Select(d => d.ToDictionary(k => k.Key, v => (object?)v.Value))];
     }
 
     /// <summary>
@@ -478,7 +413,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
         if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
         {
-            throw new Exception("Invalid columns specified'");
+            throw new BindingException("Invalid columns specified'");
         }
 
         return databaseName;
@@ -526,248 +461,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         };
     }
 
-    private PhysicalPlanDecision BuildPhysicalPlan(ExpressionNode? whereExpression)
-    {
-        if (whereExpression != null)
-        {
-            if (ShouldUseVolcanoInnerJoinPath(whereExpression))
-            {
-                return ChooseCheaperPlan(
-                    volcanoPlan: LogicalPlanKind.VolcanoInnerJoin,
-                    legacyPlan: LogicalPlanKind.LegacyWhereJoin,
-                    whereExpression,
-                    volcanoReason: "JOIN graph is fully INNER and connected",
-                    legacyReason: "legacy join path estimated cheaper for current predicate");
-            }
-
-            if (ShouldUseVolcanoNoJoinPath(whereExpression))
-            {
-                LogicalPlanKind legacyCandidate = RequiresExpressionEvaluation(whereExpression)
-                    ? LogicalPlanKind.LegacyWhereExpression
-                    : LogicalPlanKind.LegacyWhereJoin;
-
-                return ChooseCheaperPlan(
-                    volcanoPlan: LogicalPlanKind.VolcanoNoJoin,
-                    legacyPlan: legacyCandidate,
-                    whereExpression,
-                    volcanoReason: "single-table filter with no subquery",
-                    legacyReason: "legacy filter path estimated cheaper for current predicate");
-            }
-
-            if (RequiresExpressionEvaluation(whereExpression))
-            {
-                return new PhysicalPlanDecision(
-                    LogicalPlanKind.LegacyWhereExpression,
-                    useVolcano: false,
-                    estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereExpression, whereExpression),
-                    reason: "expression predicate requires legacy evaluator");
-            }
-
-            return new PhysicalPlanDecision(
-                LogicalPlanKind.LegacyWhereJoin,
-                useVolcano: false,
-                estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereJoin, whereExpression),
-                reason: "fallback where/join evaluation");
-        }
-
-        if (_model.JoinStatement.ContainsJoin())
-        {
-            if (ShouldUseVolcanoInnerJoinPath(null))
-            {
-                return ChooseCheaperPlan(
-                    volcanoPlan: LogicalPlanKind.VolcanoInnerJoin,
-                    legacyPlan: LogicalPlanKind.LegacyJoinOnly,
-                    whereExpression: null,
-                    volcanoReason: "join-only query has connected INNER JOIN graph",
-                    legacyReason: "legacy join-only path estimated cheaper");
-            }
-
-            return new PhysicalPlanDecision(
-                LogicalPlanKind.LegacyJoinOnly,
-                useVolcano: false,
-                estimatedCost: EstimateCost(LogicalPlanKind.LegacyJoinOnly, null),
-                reason: "join without where uses legacy join strategy");
-        }
-
-        if (ShouldUseVolcanoNoJoinPath(null))
-        {
-            return ChooseCheaperPlan(
-                volcanoPlan: LogicalPlanKind.VolcanoNoJoin,
-                legacyPlan: LogicalPlanKind.LegacyNoJoinScan,
-                whereExpression: null,
-                volcanoReason: "simple no-join scan path",
-                legacyReason: "legacy no-join scan estimated cheaper");
-        }
-
-        return new PhysicalPlanDecision(
-            LogicalPlanKind.LegacyNoJoinScan,
-            useVolcano: false,
-            estimatedCost: EstimateCost(LogicalPlanKind.LegacyNoJoinScan, null),
-            reason: "volcano disabled or unsupported");
-    }
-
-    private PhysicalPlanDecision ChooseCheaperPlan(
-        LogicalPlanKind volcanoPlan,
-        LogicalPlanKind legacyPlan,
-        ExpressionNode? whereExpression,
-        string volcanoReason,
-        string legacyReason)
-    {
-        int volcanoCost = EstimateCost(volcanoPlan, whereExpression);
-        int legacyCost = EstimateCost(legacyPlan, whereExpression);
-
-        if (volcanoCost <= legacyCost)
-        {
-            return new PhysicalPlanDecision(
-                volcanoPlan,
-                useVolcano: true,
-                estimatedCost: volcanoCost,
-                reason: $"{volcanoReason}; compared to {legacyPlan} cost {legacyCost}");
-        }
-
-        return new PhysicalPlanDecision(
-            legacyPlan,
-            useVolcano: false,
-            estimatedCost: legacyCost,
-            reason: $"{legacyReason}; compared to {volcanoPlan} cost {volcanoCost}");
-    }
-
-    private int EstimateCost(LogicalPlanKind plan, ExpressionNode? whereExpression)
-    {
-        int rowCount = plan switch
-        {
-            LogicalPlanKind.VolcanoInnerJoin or LogicalPlanKind.LegacyWhereJoin or LogicalPlanKind.LegacyJoinOnly => EstimateJoinInputRowCount(),
-            _ => _model.FromTable?.TableContentValues?.Count ?? 0
-        };
-
-        int complexity = whereExpression == null ? 1 : EstimatePredicateComplexity(whereExpression);
-        double selectivity = EstimatePredicateSelectivity(whereExpression);
-        int effectiveRows = Math.Max(1, (int)Math.Ceiling(rowCount * selectivity));
-        int pipelineFeatures = EstimatePipelineFeatureCost();
-
-        return plan switch
-        {
-            LogicalPlanKind.VolcanoNoJoin => 8 + complexity + pipelineFeatures + (effectiveRows / 1000),
-            LogicalPlanKind.VolcanoInnerJoin => 14 + complexity + pipelineFeatures + (effectiveRows / 750),
-            LogicalPlanKind.LegacyWhereExpression => 30 + (2 * complexity) + pipelineFeatures + (effectiveRows / 500),
-            LogicalPlanKind.LegacyWhereJoin => 24 + complexity + pipelineFeatures + (effectiveRows / 400),
-            LogicalPlanKind.LegacyJoinOnly => 22 + pipelineFeatures + (effectiveRows / 350),
-            LogicalPlanKind.LegacyNoJoinScan => 16 + pipelineFeatures + (effectiveRows / 450),
-            _ => 100
-        };
-    }
-
-    private int EstimatePipelineFeatureCost()
-    {
-        int score = 0;
-
-        if (_model.GetOrderByExpression()?.Columns.Count > 0)
-        {
-            score += 2;
-        }
-
-        if (_model.IsDistinct)
-        {
-            score += 2;
-        }
-
-        if (_model.GroupByStatement.ContainsGroupBy())
-        {
-            score += 3;
-        }
-
-        if (_model.LimitTake.HasValue || (_model.LimitSkip.HasValue && _model.LimitSkip.Value > 0))
-        {
-            score += 1;
-        }
-
-        return score;
-    }
-
-    private static double EstimatePredicateSelectivity(ExpressionNode? node)
-    {
-        if (node == null)
-        {
-            return 1d;
-        }
-
-        if (node is LiteralNode literal && literal.Value?.ToString() == SqlLiterals.TrueExpression)
-        {
-            return 1d;
-        }
-
-        if (node is ScalarFunctionExpressionNode)
-        {
-            return 0.5d;
-        }
-
-        if (node is not BinaryExpressionNode binary)
-        {
-            return 0.5d;
-        }
-
-        if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase))
-        {
-            double left = EstimatePredicateSelectivity(binary.Left);
-            double right = EstimatePredicateSelectivity(binary.Right);
-            return ClampDouble(left * right, 0.01d, 1d);
-        }
-
-        if (binary.Operator.Equals(Operators.OR, StringComparison.OrdinalIgnoreCase))
-        {
-            double left = EstimatePredicateSelectivity(binary.Left);
-            double right = EstimatePredicateSelectivity(binary.Right);
-            double combined = left + right - (left * right);
-            return ClampDouble(combined, 0.01d, 1d);
-        }
-
-        if (binary.Operator.Equals(Operators.EQUALS, StringComparison.OrdinalIgnoreCase))
-        {
-            return 0.1d;
-        }
-
-        if (binary.Operator.Equals(Operators.NOT_EQUALS, StringComparison.OrdinalIgnoreCase))
-        {
-            return 0.9d;
-        }
-
-        if (binary.Operator.Equals(Operators.GREATER_THAN, StringComparison.OrdinalIgnoreCase)
-            || binary.Operator.Equals(Operators.GREATER_THAN_OR_EQUAL_TO, StringComparison.OrdinalIgnoreCase)
-            || binary.Operator.Equals(Operators.LESS_THAN, StringComparison.OrdinalIgnoreCase)
-            || binary.Operator.Equals(Operators.LESS_THAN_OR_EQUAL_TO, StringComparison.OrdinalIgnoreCase))
-        {
-            return 0.35d;
-        }
-
-        if (binary.Operator.Equals(Operators.LIKE, StringComparison.OrdinalIgnoreCase))
-        {
-            return 0.25d;
-        }
-
-        if (binary.Operator.Equals(Operators.IS_NULL, StringComparison.OrdinalIgnoreCase)
-            || binary.Operator.Equals(Operators.IS_NOT_NULL, StringComparison.OrdinalIgnoreCase))
-        {
-            return 0.1d;
-        }
-
-        return 0.5d;
-    }
-
-    private int EstimateJoinInputRowCount()
-    {
-        int total = _model.FromTable?.TableContentValues?.Count ?? 0;
-        if (_model.TableService == null)
-        {
-            return total;
-        }
-
-        foreach (var detail in _model.JoinStatement.Model.JoinTableDetails.Values)
-        {
-            total += detail.TableContentValues?.Count ?? 0;
-        }
-
-        return total;
-    }
+    // Planner and fast-path decision logic extracted to Select.Planner.cs and Select.FastPathDecisions.cs partials.
 
     private ListedTable BuildLegacyNoJoinScan()
     {
@@ -778,111 +472,12 @@ internal class Select(SelectStatement ast) : BaseDbAction
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(new TableScanOperator(sourceRows));
 
         var listResult = rows
-            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+            .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values))))
             .ToList();
 
         return new ListedTable(listResult);
     }
 
-    private bool ShouldUseVolcanoInnerJoinPath(ExpressionNode? whereExpression)
-    {
-        if (!Engine.Config.EnableVolcanoExecution)
-        {
-            return false;
-        }
-
-        if (!_model.JoinStatement.ContainsJoin())
-        {
-            return false;
-        }
-
-        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
-        {
-            return false;
-        }
-
-        var conditions = _model.JoinStatement.Model.JoinConditions;
-        if (conditions.Count == 0)
-        {
-            return false;
-        }
-
-        if (conditions.Any(c => !c.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        string fromTable = _model.FromTable.TableName;
-        HashSet<string> reachable = [fromTable];
-        int expanded;
-
-        do
-        {
-            expanded = 0;
-            foreach (var condition in conditions)
-            {
-                bool leftIn = reachable.Contains(condition.LeftColumn.TableName);
-                bool rightIn = reachable.Contains(condition.RightColumn.TableName);
-
-                if (leftIn && !rightIn)
-                {
-                    if (reachable.Add(condition.RightColumn.TableName))
-                    {
-                        expanded++;
-                    }
-                }
-                else if (rightIn && !leftIn)
-                {
-                    if (reachable.Add(condition.LeftColumn.TableName))
-                    {
-                        expanded++;
-                    }
-                }
-            }
-        }
-        while (expanded > 0);
-
-        return _model.JoinStatement.Model.JoinTableDetails.Values
-            .All(detail => reachable.Contains(detail.TableName));
-    }
-
-    private bool ShouldUseVolcanoNoJoinPath(ExpressionNode? whereExpression)
-    {
-        if (!Engine.Config.EnableVolcanoExecution)
-        {
-            return false;
-        }
-
-        if (_model.JoinStatement.ContainsJoin())
-        {
-            return false;
-        }
-
-        // Keep ORDER BY after HAVING unless HAVING is also pushed down.
-        if (_model.GetHavingExpression() != null)
-        {
-            return false;
-        }
-
-        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private static bool ContainsSubqueryExpression(ExpressionNode expression)
-    {
-        return expression switch
-        {
-            BinaryExpressionNode binary => ContainsSubqueryExpression(binary.Left)
-                || ContainsSubqueryExpression(binary.Right),
-            ScalarFunctionExpressionNode scalar => scalar.Arguments.Any(ContainsSubqueryExpression),
-            InSubqueryExpressionNode or ExistsSubqueryExpressionNode or ScalarSubqueryExpressionNode => true,
-            _ => false,
-        };
-    }
 
     private ListedTable? TryEvaluateNearestNeighborUsingVectorIndex()
     {
@@ -931,7 +526,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (!columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase)
             && !columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase))
         {
-            throw new Exception($"Vector operator '{distanceExpression.Operator}' can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
+            throw new BindingException($"Vector operator '{distanceExpression.Operator}' can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
         }
 
         if (!TryResolveVectorIndex(tableName, columnName, _model.Database, out string indexName, out IndexFile indexMetadata))
@@ -981,7 +576,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
         foreach (long rowId in rowIds)
         {
@@ -1054,11 +649,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .All(condition => condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool IsAllTrueExpression(ExpressionNode? expression)
-    {
-        return expression is LiteralNode literal
-            && literal.Value?.ToString() == SqlLiterals.TrueExpression;
-    }
 
     private ListedTable? TryEvaluateVectorPredicateUsingVectorIndex()
     {
@@ -1091,7 +681,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         if (!columnType.Equals("VECTOR", StringComparison.OrdinalIgnoreCase)
             && !columnType.Equals("Vector", StringComparison.OrdinalIgnoreCase))
         {
-            throw new Exception($"Vector distance predicate can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
+            throw new BindingException($"Vector distance predicate can only be used with VECTOR columns (found '{tableName}.{columnName}' of type '{columnType}').");
         }
 
         if (!TryResolveVectorIndex(tableName, columnName, _model.Database, out string indexName, out IndexFile indexMetadata))
@@ -1129,7 +719,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
         foreach (long rowId in rowIds)
         {
@@ -1157,77 +747,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .ToList());
     }
 
-    private int ResolveVectorPredicateTopK(int totalRows, double estimatedSelectivity)
-    {
-        if (totalRows <= 0)
-        {
-            return 0;
-        }
-
-        if (!_model.LimitTake.HasValue || _model.LimitTake.Value <= 0)
-        {
-            int multiplier = Math.Max(1, Engine.Config.VectorPredicateFastPathCandidateMultiplier);
-            int cap = Engine.Config.VectorPredicateFastPathMaxTopK > 0
-                ? Engine.Config.VectorPredicateFastPathMaxTopK
-                : totalRows;
-
-            int estimatedMatches = Math.Max(1, (int)Math.Ceiling(totalRows * ClampDouble(estimatedSelectivity, 0.01d, 1d)));
-            int adaptiveTopK = Math.Max(64, estimatedMatches * multiplier);
-            return Math.Min(totalRows, Math.Min(adaptiveTopK, cap));
-        }
-
-        int requested = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
-        if (requested <= 0)
-        {
-            return totalRows;
-        }
-
-        return Math.Min(totalRows, requested);
-    }
-
-    private bool ShouldUseVectorPredicateFastPath(int totalRows, int topK, double estimatedSelectivity, ExpressionNode? whereExpression, out string reason)
-    {
-        reason = "accepted";
-
-        if (!Engine.Config.EnableVectorPredicateFastPath)
-        {
-            reason = "disabled by config";
-            return false;
-        }
-
-        if (totalRows < Engine.Config.VectorPredicateFastPathMinRows)
-        {
-            reason = $"table too small ({totalRows} < {Engine.Config.VectorPredicateFastPathMinRows})";
-            return false;
-        }
-
-        if (topK <= 0 || topK >= totalRows)
-        {
-            reason = $"invalid candidate size ({topK} of {totalRows})";
-            return false;
-        }
-
-        double ratio = (double)topK / totalRows;
-        if (ratio > Engine.Config.VectorPredicateFastPathMaxTopKRatio)
-        {
-            reason = $"candidate ratio too high ({ratio:F3} > {Engine.Config.VectorPredicateFastPathMaxTopKRatio:F3})";
-            return false;
-        }
-
-        if (whereExpression != null && ContainsSubqueryExpression(whereExpression))
-        {
-            reason = "where contains subquery";
-            return false;
-        }
-
-        if (estimatedSelectivity >= 0.85d)
-        {
-            reason = $"low expected gain (selectivity {estimatedSelectivity:F3})";
-            return false;
-        }
-
-        return true;
-    }
 
     private List<long> SearchVectorWithExpansionIfNeeded(
         float[] queryVector,
@@ -1312,46 +831,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _model.TableService);
     }
 
-    private int ResolveHybridOrderByInitialTopK(int totalRows, int requestedTopK, ExpressionNode? seedPredicate, out string sizingMode)
-    {
-        sizingMode = "baseline";
-        if (requestedTopK <= 0)
-        {
-            return 0;
-        }
-
-        if (seedPredicate == null)
-        {
-            return Math.Min(totalRows, requestedTopK);
-        }
-
-        if (!Engine.Config.EnableHybridOrderByAdaptiveInitialTopK)
-        {
-            return Math.Min(totalRows, requestedTopK);
-        }
-
-        double selectivity = ClampDouble(EstimatePredicateSelectivity(seedPredicate), 0.01d, 1d);
-        if (selectivity >= 0.95d)
-        {
-            return Math.Min(totalRows, requestedTopK);
-        }
-
-        int capByConfig = Engine.Config.VectorPredicateFastPathMaxTopK > 0
-            ? Engine.Config.VectorPredicateFastPathMaxTopK
-            : totalRows;
-
-        int capByRatio = (int)Math.Ceiling(totalRows * ClampDouble(Engine.Config.VectorPredicateFastPathMaxTopKRatio, 0.01d, 1d));
-        int effectiveCap = Math.Min(totalRows, Math.Max(requestedTopK, Math.Min(capByConfig, capByRatio)));
-
-        int estimatedRequired = Math.Max(requestedTopK, (int)Math.Ceiling(requestedTopK / selectivity));
-        int initialTopK = Math.Min(effectiveCap, estimatedRequired);
-        if (initialTopK > requestedTopK)
-        {
-            sizingMode = "adaptive";
-        }
-
-        return Math.Max(1, initialTopK);
-    }
 
     private void LogHybridRoutingDecision(string outcome, int requestedTopK, int initialTopK, ExpressionNode? seedPredicate)
     {
@@ -1366,7 +845,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
     {
-        Dictionary<long, Dictionary<string, dynamic>> rows = Context.GetTableContents(candidateRowIds, tableName, _model.Database!);
+        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(candidateRowIds, tableName, _model.Database!);
         int count = 0;
 
         foreach (long rowId in candidateRowIds)
@@ -1406,64 +885,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
         Logger.Info($"Planner(vector-fastpath-expansion): {message}");
     }
 
-    private static double EstimateVectorDistanceSelectivity(string distanceOperator, string comparisonOperator, double threshold)
-    {
-        bool lessStyle = comparisonOperator == Operators.LESS_THAN || comparisonOperator == Operators.LESS_THAN_OR_EQUAL_TO;
-
-        double baseSelectivity = distanceOperator switch
-        {
-            Operators.VECTOR_DISTANCE_COSINE => threshold switch
-            {
-                <= 0.10d => 0.02d,
-                <= 0.20d => 0.05d,
-                <= 0.40d => 0.15d,
-                <= 0.80d => 0.40d,
-                _ => 0.70d
-            },
-            Operators.VECTOR_DISTANCE_L2 => threshold switch
-            {
-                <= 0.25d => 0.05d,
-                <= 0.50d => 0.10d,
-                <= 1.00d => 0.20d,
-                <= 2.00d => 0.45d,
-                _ => 0.75d
-            },
-            _ => 0.50d
-        };
-
-        double selectivity = lessStyle ? baseSelectivity : (1d - baseSelectivity);
-        return ClampDouble(selectivity, 0.01d, 0.99d);
-    }
-
-    private static int ClampInt(int value, int minValue, int maxValue)
-    {
-        if (value < minValue)
-        {
-            return minValue;
-        }
-
-        if (value > maxValue)
-        {
-            return maxValue;
-        }
-
-        return value;
-    }
-
-    private static double ClampDouble(double value, double minValue, double maxValue)
-    {
-        if (value < minValue)
-        {
-            return minValue;
-        }
-
-        if (value > maxValue)
-        {
-            return maxValue;
-        }
-
-        return value;
-    }
 
     private bool TryExtractVectorDistancePredicate(
         ExpressionNode expression,
@@ -1639,38 +1060,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             _model.TableService);
     }
 
-    private bool ShouldUseVectorFastPath(int topK, ExpressionNode? whereExpression, out string reason)
-    {
-        reason = "accepted";
-
-        int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
-        if (totalRows <= 0)
-        {
-            reason = "empty_input";
-            return false;
-        }
-
-        if (topK >= totalRows)
-        {
-            reason = "topk_ge_total_rows";
-            return false;
-        }
-
-        if (whereExpression == null || IsAllTrueExpression(whereExpression))
-        {
-            return true;
-        }
-
-        int complexity = EstimatePredicateComplexity(whereExpression);
-        int threshold = Math.Max(32, totalRows / 3);
-        bool accepted = topK <= threshold || complexity <= 6;
-        if (!accepted)
-        {
-            reason = "complexity_gate";
-        }
-
-        return accepted;
-    }
 
     private void IncrementHybridRoutingCounter(string bucket)
     {
@@ -2001,13 +1390,13 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
             IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), (ExecutionRow row) =>
             {
-                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values)));
+                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values)));
                 return EvaluatePredicate(whereExpression, joinedRow);
             });
 
             List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
             return new ListedTable(filteredRows
-                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values))))
                 .ToList());
         }
 
@@ -2032,7 +1421,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
             .Select((record, index) =>
             {
                 var row = record.ToRow();
-                var values = new Dictionary<string, dynamic>();
+                var values = new Dictionary<string, object?>();
                 foreach (string key in row.Keys)
                 {
                     values[key] = row[key];
@@ -2146,7 +1535,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         {
             listed = filteredRows.Select(row =>
             {
-                var baseValues = new Dictionary<string, dynamic>();
+                var baseValues = new Dictionary<string, object?>();
                 foreach (string key in _volcanoAggregateGroupKeyColumns)
                 {
                     if (row.Values.TryGetValue(key, out var value))
@@ -2155,7 +1544,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                     }
                 }
 
-                var aggValues = new Dictionary<string, dynamic>();
+                var aggValues = new Dictionary<string, object?>();
                 foreach (var entry in row.Values)
                 {
                     if (!_volcanoAggregateGroupKeyColumns.Contains(entry.Key))
@@ -2172,7 +1561,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
         else
         {
             listed = filteredRows
-                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, dynamic>(row.Values))))
+                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values))))
                 .ToList();
         }
 
@@ -2215,7 +1604,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
             if (pickIndex < 0)
             {
-                throw new Exception("Unable to build Volcano join pipeline for disconnected INNER JOIN graph.");
+                throw new EvaluationException("Unable to build Volcano join pipeline for disconnected INNER JOIN graph.");
             }
 
             var picked = remaining[pickIndex];
@@ -2901,9 +2290,9 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return Math.Max(1, (int)Math.Ceiling(baseRowCount * selectivity));
     }
 
-    private static Dictionary<string, dynamic> ToExecutionValues(Row row)
+    private static Dictionary<string, object?> ToExecutionValues(Row row)
     {
-        var values = new Dictionary<string, dynamic>();
+        var values = new Dictionary<string, object?>();
         foreach (string key in row.Keys)
         {
             values[key] = row[key];
@@ -2914,7 +2303,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private static JoinedRow ToJoinedRowFromJoinExecution(ExecutionRow row, IReadOnlyList<string> tableNames)
     {
-        Dictionary<string, Dictionary<string, dynamic>> buckets = [];
+        Dictionary<string, Dictionary<string, object?>> buckets = [];
         foreach (string tableName in tableNames)
         {
             buckets[tableName] = [];
@@ -2956,7 +2345,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
 
     private static JoinedRow BuildSingleTableJoinedRow(string tableName, IReadOnlyDictionary<string, object?> values)
     {
-        var rowValues = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        var rowValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in values)
         {
             rowValues[entry.Key] = entry.Value;
@@ -3474,7 +2863,7 @@ internal class Select(SelectStatement ast) : BaseDbAction
                     : $"{colRef.TableOrAlias}.{colRef.Column}";
                 return ResolveColumnValue(r, reference);
             },
-            (_, _) => throw new Exception("Nested aggregate expression is not supported in aggregate pushdown argument."));
+            (_, _) => throw new EvaluationException("Nested aggregate expression is not supported in aggregate pushdown argument."));
     }
 
     private bool TryBuildNoJoinDistinctPushdown(out List<string> distinctColumns)
@@ -3790,30 +3179,6 @@ internal class Select(SelectStatement ast) : BaseDbAction
             : null;
     }
 
-    private static bool RequiresExpressionEvaluation(ExpressionNode node)
-    {
-        if (node is BinaryExpressionNode binary)
-        {
-            if (binary.Operator is "+" or "-" or "*" or "/" or "ADD" or "SUB" or "MUL" or "DIV")
-            {
-                return true;
-            }
-
-            return RequiresExpressionEvaluation(binary.Left) || RequiresExpressionEvaluation(binary.Right);
-        }
-
-        if (node is ScalarFunctionExpressionNode)
-        {
-            return true;
-        }
-
-        if (node is AggregateExpressionNode aggregate && aggregate.Argument != null)
-        {
-            return RequiresExpressionEvaluation(aggregate.Argument);
-        }
-
-        return false;
-    }
 
     /// <summary>
     /// Converts the FROM table's content into a <see cref="HashedTable"/> and passes it through
@@ -3833,578 +3198,5 @@ internal class Select(SelectStatement ast) : BaseDbAction
         return _model.JoinStatement!.Evaluate(groupedInitialTable, _model.FromTable.TableName).ToListedTable();
     }
 
-    /// <summary>
-    /// Constructs the output field list based on the columns specified in the SELECT clause.
-    /// In a JOIN context, field names are prefixed with the table name or alias (e.g., <c>Users.Name</c>).
-    /// If aggregation results are present (identified by <see cref="GroupBy.HASH_VALUE"/>),
-    /// the aggregated column names are appended to the field list.
-    /// </summary>
-    /// <param name="filteredTable">The fully evaluated result set, used to inspect aggregation metadata.</param>
-    /// <returns>A list of qualified field names representing the output schema.</returns>
-    private List<string> CreateFieldsFromColumns(ListedTable filteredTable)
-    {
-        List<string> selectedColumns = _model.GetSelectedColumns();
-        List<string> fields = [];
-
-        foreach (string column in selectedColumns)
-        {
-            string[] splittedColumn = column.Split('.');
-            string tableName = splittedColumn[0];
-            string columnName = splittedColumn[1];
-
-            if (_model.JoinStatement.ContainsJoin())
-            {
-                string inUseNameOfTable = _model.TableService!.GetTableDetailByAliasOrName(tableName).GetTableNameInUse();
-                fields.Add($"{inUseNameOfTable}.{columnName}");
-            }
-            else
-            {
-                fields.Add(columnName);
-            }
-        }
-
-        JoinedRow? firstRow = filteredTable.FirstOrDefault();
-        if (firstRow != null)
-        {
-            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
-            {
-                fields.Add(expressionColumn.Alias ?? expressionColumn.RawExpression);
-            }
-
-            foreach (var windowColumn in _model.GetWindowFunctionColumns())
-            {
-                fields.Add(windowColumn.Alias ?? windowColumn.RawExpression);
-            }
-        }
-
-        if (firstRow != null && firstRow.ContainsKey(GroupBy.HASH_VALUE))
-        {
-            foreach (var aggregateColumn in _model.GetAggregateColumns())
-            {
-                if (aggregateColumn.Alias != null)
-                {
-                    fields.Add(aggregateColumn.Alias);
-                    continue;
-                }
-
-                if (aggregateColumn.Expression is AggregateExpressionNode aggregateExpression)
-                {
-                    string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggregateExpression);
-                    string outputName = firstRow[GroupBy.HASH_VALUE].ContainsKey(canonicalKey)
-                        ? canonicalKey
-                        : ResolveAggregateKey(aggregateExpression, firstRow);
-
-                    fields.Add(outputName);
-                }
-            }
-        }
-
-        return fields;
-    }
-
-    /// <summary>
-    /// Projects each result row into a dictionary keyed by field name, matching the output schema.
-    /// </summary>
-    /// <param name="filteredTable">The fully evaluated and filtered result set.</param>
-    /// <param name="fieldsList">The ordered list of output field names.</param>
-    /// <returns>A list of dictionaries, each representing one output row mapped by field name to its value.</returns>
-    private List<Dictionary<string, dynamic>> CreateDataFromResult(ListedTable filteredTable, List<string> fieldsList)
-    {
-        List<Dictionary<string, dynamic>> result = new();
-
-        foreach (var row in filteredTable)
-        {
-            result.Add(ExtractRowData(row, fieldsList));
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Extracts column values from a single <see cref="JoinedRow"/> according to the output field list.
-    /// Handles column aliases (split on <c>" AS "</c>) and includes aggregation results when present.
-    /// </summary>
-    /// <param name="row">The joined row containing per-table column dictionaries.</param>
-    /// <param name="fieldsList">The ordered list of output field names.</param>
-    /// <returns>A dictionary mapping each field name to its value for this row.</returns>
-    private Dictionary<string, dynamic> ExtractRowData(JoinedRow row, List<string> fieldsList)
-    {
-        Dictionary<string, dynamic> data = new();
-        int fieldIndex = 0;
-
-        foreach (string nameAssembly in _model.GetSelectedColumns())
-        {
-            string extractedOriginalName = nameAssembly;
-            if (extractedOriginalName.Contains(" AS "))
-            {
-                extractedOriginalName = extractedOriginalName.Split(" AS ")[0];
-            }
-
-            string[] splittedAssembly = extractedOriginalName.Split('.');
-            string tableName = splittedAssembly[0];
-            string columnName = splittedAssembly[1];
-
-            string currentFieldName = fieldsList[fieldIndex++];
-            data[currentFieldName] = row[tableName][columnName];
-        }
-
-        if (row.ContainsKey(GroupBy.HASH_VALUE))
-        {
-            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
-            {
-                string currentFieldName = fieldsList[fieldIndex++];
-                if (expressionColumn.Expression != null)
-                {
-                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
-                }
-            }
-
-            foreach (var aggregateColumn in _model.GetAggregateColumns())
-            {
-                string currentFieldName = fieldsList[fieldIndex++];
-
-                if (aggregateColumn.Expression is AggregateExpressionNode aggregateExpression)
-                {
-                    data[currentFieldName] = ResolveNodeValue(aggregateExpression, row);
-                }
-            }
-
-            foreach (var windowColumn in _model.GetWindowFunctionColumns())
-            {
-                string currentFieldName = fieldsList[fieldIndex++];
-                data[currentFieldName] = ResolveWindowValue(row, currentFieldName);
-            }
-        }
-        else
-        {
-            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
-            {
-                string currentFieldName = fieldsList[fieldIndex++];
-                if (expressionColumn.Expression != null)
-                {
-                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
-                }
-            }
-
-            foreach (var windowColumn in _model.GetWindowFunctionColumns())
-            {
-                string currentFieldName = fieldsList[fieldIndex++];
-                data[currentFieldName] = ResolveWindowValue(row, currentFieldName);
-            }
-        }
-
-        return data;
-    }
-
-    private void ComputeWindowFunctionValues(ListedTable rows)
-    {
-        _windowValues.Clear();
-        List<SelectColumnNode> windowColumns = _model.GetWindowFunctionColumns();
-        if (windowColumns.Count == 0 || rows.Count == 0)
-        {
-            return;
-        }
-
-        Dictionary<JoinedRow, TypedExecutionRow> typedRows = BuildTypedWindowRows(rows);
-
-        foreach (var col in windowColumns)
-        {
-            if (col.Expression is not WindowFunctionExpressionNode windowExpr)
-            {
-                continue;
-            }
-
-            if (!windowExpr.FunctionName.Equals("RANK", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new Exception($"Unsupported window function: {windowExpr.FunctionName}");
-            }
-
-            string outputName = col.Alias ?? col.RawExpression;
-
-            var partitions = rows
-                .GroupBy(row => BuildPartitionSignature(typedRows[row], windowExpr.PartitionByColumns))
-                .ToList();
-
-            foreach (var partition in partitions)
-            {
-                List<JoinedRow> ordered = windowExpr.IsOrderAscending
-                    ? [.. partition.OrderBy(r => ResolveWindowOrderValue(typedRows[r], windowExpr.OrderByColumn), DynamicObjectComparer.Instance)]
-                    : [.. partition.OrderByDescending(r => ResolveWindowOrderValue(typedRows[r], windowExpr.OrderByColumn), DynamicObjectComparer.Instance)];
-
-                object? previousOrderValue = null;
-                long currentRank = 1;
-
-                for (int i = 0; i < ordered.Count; i++)
-                {
-                    var row = ordered[i];
-                    object? currentOrderValue = ResolveWindowOrderValue(typedRows[row], windowExpr.OrderByColumn);
-
-                    if (i == 0)
-                    {
-                        currentRank = 1;
-                    }
-                    else if (DynamicObjectComparer.Instance.Compare(previousOrderValue, currentOrderValue) != 0)
-                    {
-                        currentRank = i + 1;
-                    }
-
-                    if (!_windowValues.TryGetValue(row, out var rowValues))
-                    {
-                        rowValues = [];
-                        _windowValues[row] = rowValues;
-                    }
-
-                    rowValues[outputName] = currentRank;
-                    previousOrderValue = currentOrderValue;
-                }
-            }
-        }
-    }
-
-    private static Dictionary<JoinedRow, TypedExecutionRow> BuildTypedWindowRows(ListedTable rows)
-    {
-        var typed = new Dictionary<JoinedRow, TypedExecutionRow>();
-        long rowId = 1;
-
-        foreach (JoinedRow row in rows)
-        {
-            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            bool singleTable = row.Keys.Count() == 1;
-
-            foreach (string tableName in row.Keys)
-            {
-                Row tableRow = row[tableName];
-                foreach (string column in tableRow.Keys)
-                {
-                    object? value = tableRow[column];
-                    values[$"{tableName}.{column}"] = value;
-                    if (singleTable && !values.ContainsKey(column))
-                    {
-                        values[column] = value;
-                    }
-                }
-            }
-
-            typed[row] = new TypedExecutionRow(rowId++, values);
-        }
-
-        return typed;
-    }
-
-    private string BuildPartitionSignature(TypedExecutionRow row, List<ColumnRefNode> partitionColumns)
-    {
-        if (partitionColumns.Count == 0)
-        {
-            return "__ALL__";
-        }
-
-        var parts = partitionColumns
-            .Select(col => ResolveWindowOrderValue(row, col))
-            .Select(BuildWindowValueSignature);
-
-        return string.Join("|", parts);
-    }
-
-    private static string BuildWindowValueSignature(object? value)
-    {
-        if (value == null)
-        {
-            return "NULL";
-        }
-
-        return value switch
-        {
-            string s => $"System.String:{s}",
-            char c => $"System.Char:{c}",
-            bool b => $"System.Boolean:{b}",
-            DateOnly d => $"System.DateOnly:{d:O}",
-            DateTime dt => $"System.DateTime:{dt:O}",
-            IFormattable formattable => $"{value.GetType().FullName}:{formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture)}",
-            _ => $"{value.GetType().FullName}:{value}"
-        };
-    }
-
-    private object? ResolveWindowOrderValue(TypedExecutionRow row, ColumnRefNode column)
-    {
-        string reference = string.IsNullOrWhiteSpace(column.TableOrAlias)
-            ? column.Column
-            : $"{column.TableOrAlias}.{column.Column}";
-
-        return ResolveTypedColumnValue(row, reference);
-    }
-
-    private object? ResolveTypedColumnValue(TypedExecutionRow row, string columnReference)
-    {
-        string[] referenceParts = columnReference.Split('.');
-
-        if (referenceParts.Length == 1)
-        {
-            if (row.Values.TryGetValue(columnReference, out var directValue))
-            {
-                return directValue;
-            }
-
-            List<string> matchedKeys = [.. row.Values.Keys.Where(k =>
-                k.Equals(columnReference, StringComparison.OrdinalIgnoreCase)
-                || k.EndsWith($".{columnReference}", StringComparison.OrdinalIgnoreCase))];
-
-            if (matchedKeys.Count == 0) throw new Exception($"Column '{columnReference}' not found.");
-            if (matchedKeys.Count > 1) throw new Exception($"Column '{columnReference}' is ambiguous.");
-
-            return row.Values[matchedKeys[0]];
-        }
-
-        string tableOrAlias = referenceParts[0];
-        string colName = referenceParts[1];
-        string resolvedTableName = NormalizeTableIdentifier(tableOrAlias);
-
-        string normalizedKey = $"{resolvedTableName}.{colName}";
-        if (row.Values.TryGetValue(normalizedKey, out var normalizedValue))
-        {
-            return normalizedValue;
-        }
-
-        string aliasKey = $"{tableOrAlias}.{colName}";
-        if (row.Values.TryGetValue(aliasKey, out var aliasValue))
-        {
-            return aliasValue;
-        }
-
-        throw new Exception($"Column '{columnReference}' not found in typed window row.");
-    }
-
-    private object? ResolveWindowValue(JoinedRow row, string outputField)
-    {
-        if (_windowValues.TryGetValue(row, out var values) && values.TryGetValue(outputField, out var value))
-        {
-            return value;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Recursively evaluates a HAVING clause predicate against a specific row.
-    /// Delegates to <see cref="EvaluateLiteralNode"/> for simple literals and
-    /// <see cref="EvaluateBinaryNode"/> for binary expressions.
-    /// </summary>
-    /// <param name="node">The root expression node of the HAVING predicate (or a sub-node during recursion).</param>
-    /// <param name="row">The row to test against the predicate.</param>
-    /// <returns><c>true</c> if the row satisfies the condition; otherwise, <c>false</c>.</returns>
-    /// <exception cref="Exception">Thrown when the node type is not a <see cref="LiteralNode"/> or <see cref="BinaryExpressionNode"/>.</exception>
-    private bool EvaluatePredicate(ExpressionNode node, JoinedRow row)
-    {
-        if (node is LiteralNode literalNode)
-        {
-            return EvaluateLiteralNode(literalNode);
-        }
-
-        if (node is not BinaryExpressionNode binNode)
-        {
-            throw new Exception($"Unsupported HAVING predicate node type: {node.GetType().Name}");
-        }
-
-        return EvaluateBinaryNode(binNode, row);
-    }
-
-    /// <summary>
-    /// Evaluates a standalone literal node as a boolean.
-    /// Returns <c>true</c> for boolean <c>true</c> or the SQL literal <c>TRUE</c> string; <c>false</c> otherwise.
-    /// </summary>
-    /// <param name="literalNode">The literal node to evaluate.</param>
-    /// <returns>The boolean interpretation of the literal value.</returns>
-    private bool EvaluateLiteralNode(LiteralNode literalNode)
-    {
-        if (literalNode.Value is bool b) return b;
-        if (literalNode.Value is string s && s == SqlLiterals.TrueExpression) return true;
-        return false;
-    }
-
-    /// <summary>
-    /// Evaluates a binary expression node within a HAVING predicate.
-    /// For logical operators (<c>AND</c>, <c>OR</c>), recursively evaluates the left and right sub-trees.
-    /// For comparison operators, delegates to <see cref="EvaluateComparisonOperator"/>.
-    /// </summary>
-    /// <param name="binNode">The binary expression node containing the operator and operands.</param>
-    /// <param name="row">The row to test against the condition.</param>
-    /// <returns><c>true</c> if the row satisfies the binary condition; otherwise, <c>false</c>.</returns>
-    private bool EvaluateBinaryNode(BinaryExpressionNode binNode, JoinedRow row)
-    {
-        if (binNode.Operator == Operators.AND)
-        {
-            return EvaluatePredicate(binNode.Left, row) && EvaluatePredicate(binNode.Right, row);
-        }
-
-        if (binNode.Operator == Operators.OR)
-        {
-            return EvaluatePredicate(binNode.Left, row) || EvaluatePredicate(binNode.Right, row);
-        }
-
-        return EvaluateComparisonOperator(binNode, row);
-    }
-
-    /// <summary>
-    /// Evaluates a comparison operator (<c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>, <c>&lt;=</c>, <c>&gt;=</c>)
-    /// by resolving both operand values from the row and applying the operator.
-    /// </summary>
-    /// <param name="binNode">The binary expression containing the comparison operator and operands.</param>
-    /// <param name="row">The row from which operand values are resolved.</param>
-    /// <returns><c>true</c> if the comparison holds; otherwise, <c>false</c>.</returns>
-    /// <exception cref="Exception">Thrown when the operator is not supported in a HAVING context.</exception>
-    private bool EvaluateComparisonOperator(BinaryExpressionNode binNode, JoinedRow row)
-    {
-        object? leftValue = ResolveNodeValue(binNode.Left, row);
-        object? rightValue = ResolveNodeValue(binNode.Right, row);
-        string op = binNode.Operator;
-
-        return op switch
-        {
-            Operators.EQUALS => EvaluateEquality(leftValue, rightValue),
-            Operators.NOT_EQUALS => !EvaluateEquality(leftValue, rightValue),
-            Operators.LESS_THAN => CompareDynamics(leftValue, rightValue) < 0,
-            Operators.GREATER_THAN => CompareDynamics(leftValue, rightValue) > 0,
-            Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) <= 0,
-            Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) >= 0,
-            Operators.LIKE => ExpressionValueComparer.MatchesLike(leftValue, rightValue, trimQuotedStrings: true),
-            Operators.IS_NULL => leftValue == null,
-            Operators.IS_NOT_NULL => leftValue != null,
-            _ => throw new Exception($"Unsupported HAVING operator: {op}")
-        };
-    }
-
-    /// <summary>
-    /// Compares two values for equality. Quoted strings are trimmed before comparison.
-    /// Applies numeric tolerance for floating-point values.
-    /// Returns <c>false</c> if either value is <c>null</c>.
-    /// </summary>
-    /// <param name="val1">The left-hand value.</param>
-    /// <param name="val2">The right-hand value.</param>
-    /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
-    private static bool EvaluateEquality(object? val1, object? val2)
-    {
-        if (val1 == null || val2 == null) return false;
-        return ExpressionValueComparer.AreEqual(val1, val2, trimQuotedStrings: true, useNumericTolerance: true);
-    }
-
-    /// <summary>
-    /// Performs an ordered comparison between two values.
-    /// Quoted strings are trimmed before comparison. Returns <c>null</c> if either value is <c>null</c>.
-    /// </summary>
-    /// <param name="leftVal">The left-hand value.</param>
-    /// <param name="rightVal">The right-hand value.</param>
-    /// <returns>
-    /// A negative integer if <paramref name="leftVal"/> is less than <paramref name="rightVal"/>,
-    /// zero if equal, a positive integer if greater, or <c>null</c> if either operand is <c>null</c>.
-    /// </returns>
-    private static int? CompareDynamics(object? leftVal, object? rightVal)
-    {
-        if (leftVal == null || rightVal == null) return null;
-        return ExpressionValueComparer.Compare(leftVal, rightVal, trimQuotedStrings: true);
-    }
-
-    /// <summary>
-    /// Resolves an expression node to its runtime value. Handles <see cref="LiteralNode"/>,
-    /// <see cref="ResolvedColumnRefNode"/>, and <see cref="ColumnRefNode"/>.
-    /// </summary>
-    /// <param name="node">The expression node to resolve.</param>
-    /// <param name="row">The current row from which column values are extracted.</param>
-    /// <returns>The resolved value, or the literal value directly.</returns>
-    /// <exception cref="Exception">Thrown when the node type is not supported in a HAVING context.</exception>
-    private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
-    {
-        return ExpressionEvaluator.Evaluate(
-            node,
-            row,
-            (colRef, r) =>
-            {
-                string reference = string.IsNullOrEmpty(colRef.TableOrAlias) ? colRef.Column : $"{colRef.TableOrAlias}.{colRef.Column}";
-                return ResolveColumnValue(r, reference);
-            },
-            (aggNode, r) =>
-            {
-                // Aggregates are materialized into the grouped/aggregated row under the HASH_VALUE map.
-                if (!r.ContainsKey(GroupBy.HASH_VALUE)) throw new Exception("Aggregate expression used outside grouped/aggregated context.");
-
-                var aggMap = r[GroupBy.HASH_VALUE];
-
-                string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggNode);
-                if (aggMap.ContainsKey(canonicalKey))
-                {
-                    return aggMap[canonicalKey];
-                }
-
-                string resolvedKey = ResolveAggregateKey(aggNode, r);
-                return aggMap[resolvedKey];
-            }
-        );
-    }
-
-    private string ResolveAggregateKey(AggregateExpressionNode aggNode, JoinedRow row)
-    {
-        var aggMap = row[GroupBy.HASH_VALUE];
-
-        // Try to match by function name and argument if available
-        string funcName = aggNode.FunctionName.ToUpperInvariant();
-
-        // If COUNT(*) style
-        if (aggNode.IsStar)
-        {
-            // Find a key that starts with FUNCNAME(
-            var key = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
-            if (key != null) return key;
-            throw new Exception($"Aggregate result '{funcName}(*)' not found in grouped row.");
-        }
-
-        // If argument is a column reference, try to build the header name
-        if (aggNode.Argument is ColumnRefNode argCol)
-        {
-            string colRefStr = string.IsNullOrEmpty(argCol.TableOrAlias) ? argCol.Column : $"{argCol.TableOrAlias}.{argCol.Column}";
-            // Try keys that contain the column reference
-            var key = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase) && k.Contains(argCol.Column, StringComparison.OrdinalIgnoreCase));
-            if (key != null) return key;
-        }
-
-        // Fallback: return first matching function
-        var anyKey = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
-        if (anyKey != null) return anyKey;
-
-        throw new Exception($"Aggregate result for {funcName} not found in grouped row.");
-    }
-
-    /// <summary>
-    /// Retrieves the value of a column from a <see cref="JoinedRow"/> by its reference string.
-    /// Supports both unqualified column names (e.g., <c>"Name"</c>) and qualified references
-    /// (e.g., <c>"Users.Name"</c>). For unqualified names, the column must exist in exactly one
-    /// table to avoid ambiguity.
-    /// </summary>
-    /// <param name="row">The joined row containing per-table column dictionaries.</param>
-    /// <param name="columnReference">The column reference, optionally prefixed with a table name or alias separated by <c>'.'</c>.</param>
-    /// <returns>The column value from the matched table, or <c>null</c> if the value is null.</returns>
-    /// <exception cref="Exception">Thrown when the column is not found or is ambiguous across multiple tables.</exception>
-    private object? ResolveColumnValue(JoinedRow row, string columnReference)
-    {
-        string[] referenceParts = columnReference.Split('.');
-
-        if (referenceParts.Length == 1)
-        {
-            var matchedTables = row.Keys.Where(t => row[t].ContainsKey(columnReference)).ToList();
-
-            if (matchedTables.Count == 0) throw new Exception($"Column '{columnReference}' not found.");
-            if (matchedTables.Count > 1) throw new Exception($"Column '{columnReference}' is ambiguous.");
-
-            return row[matchedTables.First()][columnReference];
-        }
-
-        string tableOrAlias = referenceParts[0];
-        string colName = referenceParts[1];
-
-        string resolvedTableName = _model.TableService!.GetTableDetailByAliasOrName(tableOrAlias).TableName;
-
-        if (row.ContainsKey(resolvedTableName) && row[resolvedTableName].ContainsKey(colName))
-        {
-            return row[resolvedTableName][colName];
-        }
-
-        throw new Exception($"Column '{columnReference}' not found in the currently resolved JOIN results.");
-    }
+    // Window/HAVING/value-resolution methods moved to Select.WindowHaving.cs partial.
 }

@@ -7,7 +7,7 @@ namespace DataVo.Core.Contracts.Results;
 /// <code>
 /// QueryResult result = QueryResult.Success(
 ///     ["Rows selected: 1"],
-///     [new Dictionary&lt;string, dynamic&gt; { ["Id"] = 1, ["Name"] = "Alice" }],
+///     [new Dictionary&lt;string, object?&gt; { ["Id"] = 1, ["Name"] = "Alice" }],
 ///     ["Id", "Name"]);
 /// </code>
 /// </example>
@@ -21,7 +21,7 @@ public class QueryResult
     /// <summary>
     /// Gets or sets the tabular payload returned by the command.
     /// </summary>
-    public List<Dictionary<string, dynamic>> Data { get; set; } = [];
+    public List<Dictionary<string, object?>> Data { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the ordered field names associated with <see cref="Data"/>.
@@ -52,7 +52,7 @@ public class QueryResult
     /// <param name="data">The result rows.</param>
     /// <param name="fields">The ordered field names.</param>
     /// <returns>A populated successful <see cref="QueryResult"/>.</returns>
-    public static QueryResult Success(List<string> msg, List<Dictionary<string, dynamic>> data, List<string> fields) => new() { Messages = msg, Data = data, Fields = fields };
+    public static QueryResult Success(List<string> msg, List<Dictionary<string, object?>> data, List<string> fields) => new() { Messages = msg, Data = data, Fields = fields };
 
     /// <summary>
     /// Creates an empty successful result.

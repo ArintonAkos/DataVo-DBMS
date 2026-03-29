@@ -1,4 +1,43 @@
+using DataVo.Core.Runtime.Security;
+
 namespace DataVo.Core.StorageEngine.Config;
+
+/// <summary>
+/// Defines a runtime user credential/role entry used by engine authorization.
+/// </summary>
+public sealed class DataVoAuthUser
+{
+    /// <summary>
+    /// Gets or sets the unique login name.
+    /// </summary>
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the plaintext password used for bootstrap configuration.
+    /// Runtime initialization converts this to hash+salt and clears plaintext.
+    /// </summary>
+    public string Password { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the persisted password hash.
+    /// </summary>
+    public string PasswordHash { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the persisted password salt.
+    /// </summary>
+    public string PasswordSalt { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the legacy primary role value for compatibility.
+    /// </summary>
+    public DatabaseRole Role { get; set; } = DatabaseRole.ReadWrite;
+
+    /// <summary>
+    /// Gets or sets explicit role memberships assigned to the user.
+    /// </summary>
+    public List<string> Roles { get; set; } = [];
+}
 
 /// <summary>
 /// Defines the physical storage modes supported by the engine.
@@ -34,6 +73,26 @@ public enum StorageMode
 /// </example>
 public class DataVoConfig
 {
+    /// <summary>
+    /// Gets or sets a value indicating whether runtime authorization is enabled.
+    /// </summary>
+    public bool EnableAuthorization { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether sessions without explicit login are allowed.
+    /// </summary>
+    public bool AllowAnonymousSession { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the role assigned to unauthenticated sessions when anonymous access is enabled.
+    /// </summary>
+    public DatabaseRole AnonymousRole { get; set; } = DatabaseRole.ReadOnly;
+
+    /// <summary>
+    /// Gets or sets configured credential entries available to <c>AuthenticateSession</c>.
+    /// </summary>
+    public List<DataVoAuthUser> AuthorizationUsers { get; set; } = [];
+
     /// <summary>
     /// Gets or sets the active storage mode.
     /// </summary>

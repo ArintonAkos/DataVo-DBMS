@@ -1,10 +1,12 @@
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Enums;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.DQL;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.Services;
 using System.Globalization;
 
@@ -37,7 +39,7 @@ internal static class SubqueryExpressionMaterializer
 
         if (subqueryResult.IsError)
         {
-            throw new Exception(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
+            throw new EvaluationException(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
         }
 
         bool exists = subqueryResult.Data.Count > 0;
@@ -52,17 +54,17 @@ internal static class SubqueryExpressionMaterializer
 
         if (subqueryResult.IsError)
         {
-            throw new Exception(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
+            throw new EvaluationException(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
         }
 
         if (subqueryResult.Fields.Count != 1)
         {
-            throw new Exception("Scalar subquery must return exactly one column.");
+            throw new EvaluationException("Scalar subquery must return exactly one column.");
         }
 
         if (subqueryResult.Data.Count > 1)
         {
-            throw new Exception("Scalar subquery returned more than one row.");
+            throw new EvaluationException("Scalar subquery returned more than one row.");
         }
 
         if (subqueryResult.Data.Count == 0)
@@ -83,12 +85,12 @@ internal static class SubqueryExpressionMaterializer
 
         if (subqueryResult.IsError)
         {
-            throw new Exception(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
+            throw new EvaluationException(subqueryResult.Messages.FirstOrDefault() ?? "Subquery execution failed.");
         }
 
         if (subqueryResult.Fields.Count != 1)
         {
-            throw new Exception("IN subquery must return exactly one column.");
+            throw new EvaluationException("IN subquery must return exactly one column.");
         }
 
         string fieldName = subqueryResult.Fields[0];
@@ -164,7 +166,7 @@ internal static class SubqueryExpressionMaterializer
 
         if (ContainsCorrelatedReference(subquery, databaseName, outerScope))
         {
-            throw new Exception("Correlated subqueries are not supported yet.");
+            throw new EvaluationException("Correlated subqueries are not supported yet.");
         }
     }
 
@@ -294,11 +296,14 @@ internal static class SubqueryExpressionMaterializer
         Guid session = Guid.NewGuid();
         engine.Sessions.Set(session, databaseName);
 
+        SessionPrincipal? ambientPrincipal = engine.SessionSecurity.GetAmbientPrincipal();
+        using IDisposable _ = engine.SessionSecurity.PushAmbientPrincipal(ambientPrincipal);
+
         BaseDbAction action = subquery switch
         {
             SelectStatement selectStatement => new Select(selectStatement),
             UnionSelectStatement unionSelectStatement => new UnionSelect(unionSelectStatement),
-            _ => throw new Exception("Unsupported subquery statement.")
+            _ => throw new EvaluationException("Unsupported subquery statement.")
         };
 
         action.UseEngine(engine);
@@ -329,7 +334,7 @@ internal static class SubqueryExpressionMaterializer
             ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
             InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
             ScalarSubqueryExpressionNode scalar => new ScalarSubqueryExpressionNode { Subquery = scalar.Subquery },
-            _ => throw new Exception($"Unsupported expression node '{node.GetType().Name}' in subquery materialization.")
+            _ => throw new EvaluationException($"Unsupported expression node '{node.GetType().Name}' in subquery materialization.")
         };
     }
 }

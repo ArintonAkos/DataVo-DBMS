@@ -65,12 +65,12 @@ public static class IndexKeyEncoder
     /// <param name="row">The row values keyed by column name.</param>
     /// <param name="attributes">The indexed attributes, in key order.</param>
     /// <returns>A single-column key or a composite key joined with <see cref="CompositeKeySeparator"/>.</returns>
-    public static string BuildKeyString(Dictionary<string, dynamic> row, IEnumerable<string> attributes)
+    public static string BuildKeyString(Dictionary<string, object?> row, IEnumerable<string> attributes)
     {
         return string.Join(CompositeKeySeparator, attributes.Select(attr => NormalizeValue(row[attr])));
     }
 
-    private static string NormalizeValue(dynamic? value)
+    private static string NormalizeValue(object? value)
     {
         if (value == null)
         {

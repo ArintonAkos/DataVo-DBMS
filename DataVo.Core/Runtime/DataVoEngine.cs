@@ -1,5 +1,6 @@
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
 using PolyIndexManager = DataVo.Core.Indexing.IndexManager;
@@ -34,6 +35,7 @@ public sealed class DataVoEngine : IDisposable
         StorageContext = storageContext;
         Config = storageContext.Config;
         Sessions = new SessionDatabaseStore();
+        SessionSecurity = new SessionSecurityStore();
         Catalog = new EngineCatalog(Config);
         StorageContext.AttachRuntimeCatalog(Catalog, Id);
         TransactionManager = new TransactionManager();
@@ -56,6 +58,9 @@ public sealed class DataVoEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets the unique engine instance identifier.
+    /// </summary>
     public Guid Id { get; }
 
     /// <summary>
@@ -72,6 +77,8 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the engine-local session database bindings.
     /// </summary>
     public SessionDatabaseStore Sessions { get; }
+
+    internal SessionSecurityStore SessionSecurity { get; }
 
     /// <summary>
     /// Gets the engine catalog facade used by query execution.
@@ -190,6 +197,134 @@ public sealed class DataVoEngine : IDisposable
         {
             ScopedCurrent.Value = previous;
         }
+    }
+
+    /// <summary>
+    /// Authenticates a logical session using configured credential entries.
+    /// </summary>
+    public bool AuthenticateSession(Guid session, string username, string password)
+    {
+        return SessionSecurity.Authenticate(session, Config, username, password);
+    }
+
+    /// <summary>
+    /// Creates a new logical user with hashed credentials and optional initial role membership.
+    /// </summary>
+    public void CreateUser(string username, string password, string? roleName)
+    {
+        SessionSecurity.CreateUser(Config, username, password, roleName);
+    }
+
+    /// <summary>
+    /// Drops an existing logical user.
+    /// </summary>
+    public void DropUser(string username)
+    {
+        SessionSecurity.DropUser(Config, username);
+    }
+
+    /// <summary>
+    /// Creates a custom role that can receive permission grants.
+    /// </summary>
+    public void CreateRole(string roleName)
+    {
+        SessionSecurity.CreateRole(roleName);
+    }
+
+    /// <summary>
+    /// Drops a custom role and removes it from user memberships.
+    /// </summary>
+    public void DropRole(string roleName)
+    {
+        SessionSecurity.DropRole(roleName);
+    }
+
+    /// <summary>
+    /// Grants one or more permissions directly to a user.
+    /// </summary>
+    public void GrantPermissionsToUser(string username, IEnumerable<DatabasePermission> permissions)
+    {
+        SessionSecurity.GrantPermissionsToUser(username, permissions);
+    }
+
+    /// <summary>
+    /// Revokes one or more direct permissions from a user.
+    /// </summary>
+    public void RevokePermissionsFromUser(string username, IEnumerable<DatabasePermission> permissions)
+    {
+        SessionSecurity.RevokePermissionsFromUser(username, permissions);
+    }
+
+    /// <summary>
+    /// Grants a role membership to a user.
+    /// </summary>
+    public void GrantRoleToUser(string roleName, string username)
+    {
+        SessionSecurity.GrantRoleToUser(roleName, username);
+    }
+
+    /// <summary>
+    /// Revokes a role membership from a user.
+    /// </summary>
+    public void RevokeRoleFromUser(string roleName, string username)
+    {
+        SessionSecurity.RevokeRoleFromUser(roleName, username);
+    }
+
+    /// <summary>
+    /// Grants one or more permissions to a role.
+    /// </summary>
+    public void GrantPermissionsToRole(string roleName, IEnumerable<DatabasePermission> permissions)
+    {
+        SessionSecurity.GrantPermissionsToRole(roleName, permissions);
+    }
+
+    /// <summary>
+    /// Revokes one or more permissions from a role.
+    /// </summary>
+    public void RevokePermissionsFromRole(string roleName, IEnumerable<DatabasePermission> permissions)
+    {
+        SessionSecurity.RevokePermissionsFromRole(roleName, permissions);
+    }
+
+    /// <summary>
+    /// Returns a snapshot of known users with role memberships and direct permissions.
+    /// </summary>
+    internal IReadOnlyList<SecurityUserView> ListUsers()
+    {
+        return SessionSecurity.ListUsers(Config);
+    }
+
+    /// <summary>
+    /// Returns a snapshot of known roles and their permissions.
+    /// </summary>
+    internal IReadOnlyList<SecurityRoleView> ListRoles()
+    {
+        return SessionSecurity.ListRoles(Config);
+    }
+
+    /// <summary>
+    /// Returns a flattened snapshot of explicit grants across users and roles.
+    /// </summary>
+    internal IReadOnlyList<SecurityGrantView> ListGrants()
+    {
+        return SessionSecurity.ListGrants(Config);
+    }
+
+    /// <summary>
+    /// Removes any authenticated identity bound to the logical session.
+    /// </summary>
+    public void LogoutSession(Guid session)
+    {
+        SessionSecurity.Remove(session);
+    }
+
+    /// <summary>
+    /// Gets the principal currently bound to the logical session, if any.
+    /// </summary>
+    public SessionPrincipal? GetSessionPrincipal(Guid session)
+    {
+        return SessionSecurity.Get(session);
     }
 
     /// <summary>

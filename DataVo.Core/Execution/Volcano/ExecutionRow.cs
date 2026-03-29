@@ -8,7 +8,7 @@ public sealed class ExecutionRow
     /// <summary>
     /// Initializes a new streamed execution row.
     /// </summary>
-    public ExecutionRow(long rowId, Dictionary<string, dynamic> values)
+    public ExecutionRow(long rowId, Dictionary<string, object?> values)
     {
         RowId = rowId;
         Values = values;
@@ -22,12 +22,12 @@ public sealed class ExecutionRow
     /// <summary>
     /// Gets the row values.
     /// </summary>
-    public Dictionary<string, dynamic> Values { get; }
+    public Dictionary<string, object?> Values { get; }
 
     /// <summary>
     /// Gets or sets a value by column key.
     /// </summary>
-    public dynamic this[string key]
+    public object? this[string key]
     {
         get => Values[key];
         set => Values[key] = value;
@@ -52,7 +52,7 @@ public sealed class ExecutionRow
     /// </summary>
     public static ExecutionRow FromTyped(TypedExecutionRow typed)
     {
-        var values = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in typed.Values)
         {
             values[entry.Key] = entry.Value;

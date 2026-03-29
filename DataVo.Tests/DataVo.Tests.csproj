@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);CS8600;CS8605</NoWarn>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

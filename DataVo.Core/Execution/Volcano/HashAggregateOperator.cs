@@ -125,7 +125,7 @@ public sealed class HashAggregateOperator : IQueryOperator
         long rowId = 1;
         foreach (GroupAccumulator accumulator in groups.Values)
         {
-            var values = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var key in accumulator.GroupKeys)
             {
                 values[key.Key] = key.Value;

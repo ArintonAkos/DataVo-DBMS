@@ -2,6 +2,7 @@ using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.Utils;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Utils;
 
@@ -53,13 +54,13 @@ internal class LeftJoinStrategy : IJoinStrategy
     /// Performs an optimized Hash-based Left Join lookup handling default outer allocations.
     /// </summary>
     private static HashedTable ExecuteHashJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
-        bool insertHashAfter, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
+        bool insertHashAfter,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -105,13 +106,13 @@ internal class LeftJoinStrategy : IJoinStrategy
     /// Performs a sequential Nested Loop Left Join implementation properly establishing mapping limits safely.
     /// </summary>
     private static HashedTable ExecuteNestedLoopJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
-        bool insertHashAfter, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
+        bool insertHashAfter,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -128,7 +129,8 @@ internal class LeftJoinStrategy : IJoinStrategy
 
             foreach (var rightTableRow in rightTableData)
             {
-                if (!rightTableRow.Value.ContainsKey(rightColumn) || rightTableRow.Value[rightColumn] != leftValue)
+                if (!rightTableRow.Value.ContainsKey(rightColumn)
+                    || !ExpressionValueComparer.AreEqual(rightTableRow.Value[rightColumn], leftValue, trimQuotedStrings: true, useNumericTolerance: true))
                 {
                     continue;
                 }

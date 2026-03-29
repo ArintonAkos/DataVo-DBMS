@@ -403,10 +403,10 @@ public class AuditFixTests
                 IndexFiles = []
             }, "ScopedDb");
 
-            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, dynamic> { ["Value"] = 123 }, "ScopedTable", "ScopedDb");
-            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, dynamic> { ["Value"] = 456 }, "ScopedTable", "ScopedDb");
+            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, object?> { ["Value"] = 123 }, "ScopedTable", "ScopedDb");
+            engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, object?> { ["Value"] = 456 }, "ScopedTable", "ScopedDb");
 
-            Dictionary<long, Dictionary<string, dynamic>> rows = engineA.StorageContext.GetTableContents("ScopedTable", "ScopedDb");
+            Dictionary<long, Dictionary<string, object?>> rows = engineA.StorageContext.GetTableContents("ScopedTable", "ScopedDb");
             List<int> values = rows.Values.Select(r => (int)r["Value"]).OrderBy(v => v).ToList();
 
             Assert.Equal([123, 456], values);

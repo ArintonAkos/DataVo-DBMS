@@ -1,5 +1,6 @@
 ﻿using DataVo.Core.Parser.Aggregations;
 using DataVo.Core.Parser.AST;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.Statements.Mechanism;
 using DataVo.Core.Parser.Types;
@@ -40,7 +41,7 @@ namespace DataVo.Core.Models.Statement
                             aggNode.Argument,
                             row,
                             (colRef, joinedRow) => ResolveColumnValue(joinedRow, colRef, tableService),
-                            (_, _) => throw new Exception("Nested aggregate expressions are not supported.")
+                            (_, _) => throw new EvaluationException("Nested aggregate expressions are not supported.")
                         );
                     };
 
@@ -124,7 +125,7 @@ namespace DataVo.Core.Models.Statement
 
             if (!row.ContainsKey(tableName) || !row[tableName].ContainsKey(columnName))
             {
-                throw new Exception($"Column '{lookup}' not found in aggregate source row.");
+                throw new BindingException($"Column '{lookup}' not found in aggregate source row.");
             }
 
             return row[tableName][columnName];

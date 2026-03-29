@@ -2,6 +2,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Enums;
+using DataVo.Core.Parser.Utils;
 using DataVo.Core.Utils;
 using DataVo.Core.Models.Statement.Utils;
 
@@ -53,12 +54,12 @@ internal class InnerJoinStrategy : IJoinStrategy
     /// Performs an optimized Hash-based Join lookup avoiding sequential iterations.
     /// </summary>
     private static HashedTable ExecuteHashJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
         bool insertHashAfter)
     {
         HashedTable result = [];
@@ -95,12 +96,12 @@ internal class InnerJoinStrategy : IJoinStrategy
     /// Performs a simple structured Nested Loop sequential evaluation.
     /// </summary>
     private static HashedTable ExecuteNestedLoopJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
         bool insertHashAfter)
     {
         HashedTable result = [];
@@ -116,7 +117,8 @@ internal class InnerJoinStrategy : IJoinStrategy
 
             foreach (var rightTableRow in rightTableData)
             {
-                if (!rightTableRow.Value.ContainsKey(rightColumn) || rightTableRow.Value[rightColumn] != leftValue)
+                if (!rightTableRow.Value.ContainsKey(rightColumn)
+                    || !ExpressionValueComparer.AreEqual(rightTableRow.Value[rightColumn], leftValue, trimQuotedStrings: true, useNumericTolerance: true))
                 {
                     continue;
                 }

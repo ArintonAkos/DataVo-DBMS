@@ -3,6 +3,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Indexing;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Transactions;
 
@@ -17,7 +18,7 @@ internal abstract class BaseDbAction : IDbAction
     protected TransactionManager Transactions;
     protected LockManager Locks;
     protected IndexManager Indexes;
-    protected List<Dictionary<string, dynamic>> Data = [];
+    protected List<Dictionary<string, object?>> Data = [];
     protected List<string> Fields = [];
 
     protected List<string> Messages = [];
@@ -55,10 +56,51 @@ internal abstract class BaseDbAction : IDbAction
         Sessions.Set(session, databaseName);
     }
 
+    protected virtual DatabasePermission RequiredPermission => InferRequiredPermission();
+
+    private DatabasePermission InferRequiredPermission()
+    {
+        string? namespaceName = GetType().Namespace;
+        if (string.IsNullOrWhiteSpace(namespaceName))
+        {
+            return DatabasePermission.WriteData;
+        }
+
+        if (namespaceName.Contains(".Parser.DQL", StringComparison.Ordinal))
+        {
+            return DatabasePermission.ReadData;
+        }
+
+        if (namespaceName.Contains(".Parser.DML", StringComparison.Ordinal))
+        {
+            return DatabasePermission.WriteData;
+        }
+
+        if (namespaceName.Contains(".Parser.DDL", StringComparison.Ordinal))
+        {
+            return DatabasePermission.ManageSchema;
+        }
+
+        if (namespaceName.Contains(".Parser.Transactions", StringComparison.Ordinal))
+        {
+            return DatabasePermission.ManageTransactions;
+        }
+
+        if (namespaceName.Contains(".Parser.Commands", StringComparison.Ordinal))
+        {
+            return DatabasePermission.ReadData;
+        }
+
+        return DatabasePermission.WriteData;
+    }
+
     public QueryResult Perform(Guid session)
     {
         try
         {
+            using IDisposable _ = Engine.SessionSecurity.PushAmbientPrincipalForSession(session);
+            Engine.SessionSecurity.Authorize(session, RequiredPermission, Engine.Config);
+
             PerformAction(session);
             if (Messages.Count > 0 && Messages.Any(m => m.Contains("error", StringComparison.CurrentCultureIgnoreCase) || m.Contains("exception", StringComparison.CurrentCultureIgnoreCase)))
             {

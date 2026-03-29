@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Parser.AST;
@@ -83,7 +84,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
             }
         }
 
-        throw new Exception($"DEFAULT expression must be a constant literal value. Actual type: {expr.GetType()}");
+        throw new EvaluationException($"DEFAULT expression must be a constant literal value. Actual type: {expr.GetType()}");
     }
 
     private static DataTypes ParseType(string typeStr)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.Parser.AST;
@@ -67,13 +68,13 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return select.Perform(session);
     }
 
-    private static void EnsureCompatibleShape(QueryResult branchResult, List<string> baseFields, List<Dictionary<string, dynamic>> baseRows)
+    private static void EnsureCompatibleShape(QueryResult branchResult, List<string> baseFields, List<Dictionary<string, object?>> baseRows)
     {
         List<string> branchFields = branchResult.Fields;
 
         if (branchFields.Count != baseFields.Count)
         {
-            throw new Exception("UNION queries must project the same number of columns.");
+            throw new BindingException("UNION queries must project the same number of columns.");
         }
 
         for (int i = 0; i < baseFields.Count; i++)
@@ -88,12 +89,12 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
 
             if (!string.Equals(baseKind, branchKind, StringComparison.Ordinal))
             {
-                throw new Exception($"UNION column {i + 1} has incompatible types: {baseKind} vs {branchKind}.");
+                throw new BindingException($"UNION column {i + 1} has incompatible types: {baseKind} vs {branchKind}.");
             }
         }
     }
 
-    private static string InferColumnKind(List<Dictionary<string, dynamic>> rows, string fieldName)
+    private static string InferColumnKind(List<Dictionary<string, object?>> rows, string fieldName)
     {
         foreach (var row in rows)
         {
@@ -159,13 +160,13 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         public const string Date = "date";
     }
 
-    private static List<Dictionary<string, dynamic>> NormalizeRows(QueryResult result, List<string> baseFields)
+    private static List<Dictionary<string, object?>> NormalizeRows(QueryResult result, List<string> baseFields)
     {
-        var normalized = new List<Dictionary<string, dynamic>>(result.Data.Count);
+        var normalized = new List<Dictionary<string, object?>>(result.Data.Count);
 
         foreach (var row in result.Data)
         {
-            Dictionary<string, dynamic> mapped = [];
+            Dictionary<string, object?> mapped = [];
 
             for (int i = 0; i < baseFields.Count; i++)
             {
@@ -191,19 +192,19 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return field;
     }
 
-    private static List<Dictionary<string, dynamic>> ApplyOrderBy(List<Dictionary<string, dynamic>> rows, List<string> fields, OrderByNode? orderBy)
+    private static List<Dictionary<string, object?>> ApplyOrderBy(List<Dictionary<string, object?>> rows, List<string> fields, OrderByNode? orderBy)
     {
         if (orderBy == null || orderBy.Columns.Count == 0)
         {
             return rows;
         }
 
-        IOrderedEnumerable<Dictionary<string, dynamic>>? ordered = null;
+        IOrderedEnumerable<Dictionary<string, object?>>? ordered = null;
 
         foreach (var orderCol in orderBy.Columns)
         {
             string fieldName = CanonicalizeFieldName(orderCol.Column.Name);
-            Func<Dictionary<string, dynamic>, object?> keySelector = row => ResolveFieldValue(row, fieldName);
+            Func<Dictionary<string, object?>, object?> keySelector = row => ResolveFieldValue(row, fieldName);
 
             ordered = ordered == null
                 ? (orderCol.IsAscending
@@ -217,14 +218,14 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return ordered?.ToList() ?? rows;
     }
 
-    private static List<Dictionary<string, dynamic>> ApplyLimit(List<Dictionary<string, dynamic>> rows, LimitNode? limit)
+    private static List<Dictionary<string, object?>> ApplyLimit(List<Dictionary<string, object?>> rows, LimitNode? limit)
     {
         if (limit == null)
         {
             return rows;
         }
 
-        IEnumerable<Dictionary<string, dynamic>> query = rows;
+        IEnumerable<Dictionary<string, object?>> query = rows;
 
         if (limit.SkipTarget > 0)
         {
@@ -234,7 +235,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return query.Take(limit.TakeTarget).ToList();
     }
 
-    private static object? ResolveFieldValue(Dictionary<string, dynamic> row, string fieldName)
+    private static object? ResolveFieldValue(Dictionary<string, object?> row, string fieldName)
     {
         if (row.TryGetValue(fieldName, out var value))
         {
@@ -250,13 +251,13 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
             }
         }
 
-        throw new Exception($"Compound ORDER BY column '{fieldName}' is not present in the UNION result.");
+        throw new EvaluationException($"Compound ORDER BY column '{fieldName}' is not present in the UNION result.");
     }
 
-    private static List<Dictionary<string, dynamic>> DistinctRows(List<Dictionary<string, dynamic>> rows, List<string> fields)
+    private static List<Dictionary<string, object?>> DistinctRows(List<Dictionary<string, object?>> rows, List<string> fields)
     {
         HashSet<string> seen = [];
-        List<Dictionary<string, dynamic>> distinctRows = [];
+        List<Dictionary<string, object?>> distinctRows = [];
 
         foreach (var row in rows)
         {
@@ -270,7 +271,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         return distinctRows;
     }
 
-    private static string BuildRowSignature(Dictionary<string, dynamic> row, List<string> fields)
+    private static string BuildRowSignature(Dictionary<string, object?> row, List<string> fields)
     {
         string[] values = new string[fields.Count];
 

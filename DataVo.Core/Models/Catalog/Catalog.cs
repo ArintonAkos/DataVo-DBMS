@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using System.Xml.Serialization;
 using System.Collections.Concurrent;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 
 namespace DataVo.Core.Models.Catalog;
@@ -73,7 +74,7 @@ public static class Catalog
 
         if (existingDatabase != null)
         {
-            throw new Exception("Database already exists!");
+            throw new CatalogException("Database already exists!");
         }
 
         var root = _doc.Elements("Databases")
@@ -100,13 +101,13 @@ public static class Catalog
 
         if (rootDatabase == null)
         {
-            throw new Exception($"Database {databaseName} does not exist!");
+            throw new CatalogException($"Database {databaseName} does not exist!");
         }
 
         var existingTable = GetTableElement(rootDatabase, table.TableName);
         if (existingTable != null)
         {
-            throw new Exception($"Table {table.TableName} already exists in database {databaseName}!");
+            throw new CatalogException($"Table {table.TableName} already exists in database {databaseName}!");
         }
 
         ValidateForeignKeys(table, databaseName);
@@ -132,7 +133,7 @@ public static class Catalog
     public static void DropDatabase(string databaseName)
     {
         var database = GetDatabaseElement(databaseName)
-                       ?? throw new Exception($"Database {databaseName} does not exist!");
+                       ?? throw new CatalogException($"Database {databaseName} does not exist!");
 
         RemoveFromXml(database);
         InvalidateDatabaseSchemaVersions(databaseName);
@@ -152,7 +153,7 @@ public static class Catalog
     public static void DropTable(string tableName, string databaseName)
     {
         var table = GetTableElement(databaseName, tableName)
-                    ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+                    ?? throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
 
         RemoveFromXml(table);
         BumpTableSchemaVersion(databaseName, tableName);
@@ -193,19 +194,19 @@ public static class Catalog
 
         if (table == null)
         {
-            throw new Exception("Table referred by index file doesn't exist!");
+            throw new CatalogException("Table referred by index file doesn't exist!");
         }
 
         var indexElement = GetTableIndexElement(table, indexFile.IndexFileName);
         if (indexElement != null)
         {
-            throw new Exception($"Index file {indexFile.IndexFileName} already exists in table {tableName}!");
+            throw new CatalogException($"Index file {indexFile.IndexFileName} already exists in table {tableName}!");
         }
 
         if (indexFile.AttributeNames.Select(columnName => GetTableAttributeElement(table, columnName))
             .Any(column => column == null))
         {
-            throw new Exception("Column referred by index file doesn't exist!");
+            throw new CatalogException("Column referred by index file doesn't exist!");
         }
 
         var root = table.Elements("IndexFiles")
@@ -230,7 +231,7 @@ public static class Catalog
     public static void DropIndex(string indexName, string tableName, string databaseName)
     {
         var indexFile = GetTableIndexElement(indexName, tableName, databaseName)
-                        ?? throw new Exception($"Index file {indexName} doesn't exist!");
+                        ?? throw new CatalogException($"Index file {indexName} doesn't exist!");
 
         RemoveFromXml(indexFile);
     }
@@ -266,7 +267,7 @@ public static class Catalog
     public static List<string> GetTables(string databaseName)
     {
         var rootDatabase = GetDatabaseElement(databaseName)
-                           ?? throw new Exception($"Database {databaseName} does not exist!");
+                           ?? throw new CatalogException($"Database {databaseName} does not exist!");
 
         return rootDatabase.Elements("Tables")
             .Elements("Table")
@@ -438,7 +439,7 @@ public static class Catalog
 
         if (table == null)
         {
-            throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
+            throw new CatalogException($"Table {tableName} doesn't exist in database {databaseName}");
         }
 
         return table.Elements("Structure")
@@ -476,7 +477,7 @@ public static class Catalog
 
         if (column is null)
         {
-            throw new Exception($"Column {columnName} doesn't exist in table {tableName}!");
+            throw new CatalogException($"Column {columnName} doesn't exist in table {tableName}!");
         }
 
         return column!;
@@ -612,14 +613,14 @@ public static class Catalog
 
                 if (refTable == null)
                 {
-                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    throw new CatalogException($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
                 }
 
                 var refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
 
                 if (refAttribute == null)
                 {
-                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    throw new CatalogException($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
                 }
             }
     }

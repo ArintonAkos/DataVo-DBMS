@@ -3,6 +3,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
 using DataVo.Core.BTree;
+using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine;
 using System.Text.RegularExpressions;
 using DataVo.Core.Parser.AST;
@@ -150,7 +151,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         {
             if (!tableColumnNameSet.Contains(columnName))
             {
-                throw new Exception($"Column {columnName} doesn't exist in table {_model.TableName}!");
+                throw new BindingException($"Column {columnName} doesn't exist in table {_model.TableName}!");
             }
         }
     }
@@ -162,13 +163,13 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     {
         if (!hasColumns && rawRow.Count != tableColumnCount)
         {
-            throw new Exception($"The number of values provided in a row must be the same as " +
+            throw new BindingException($"The number of values provided in a row must be the same as " +
                                 $"the number of columns in the table when columns are not specified. (RawRow: {rawRow.Count}, TableColumns: {tableColumnCount})");
         }
 
         if (hasColumns && rawRow.Count != _model.Columns.Count)
         {
-            throw new Exception("The number of values provided in a row must be the same as " +
+            throw new BindingException("The number of values provided in a row must be the same as " +
                                 "the number of columns provided inside the parenthesis after the table name attribute.");
         }
     }
@@ -187,9 +188,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         Dictionary<string, ForeignKey> foreignKeysByAttribute,
         int rowNumber,
         string databaseName,
-        out Dictionary<string, dynamic> rowDict)
+        out Dictionary<string, object?> rowDict)
     {
-        rowDict = new Dictionary<string, dynamic>();
+        rowDict = new Dictionary<string, object?>();
 
         for (int i = 0; i < tableColumns.Count; i++)
         {
@@ -270,7 +271,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// Verifies the completed composite ID string does not collide with preexisting records to preserve Primary Keys.
     /// </summary>
     private bool VerifyPrimaryKeys(
-        Dictionary<string, dynamic> rowDict,
+        Dictionary<string, object?> rowDict,
         List<string> primaryKeys,
         int rowNumber,
         string databaseName)
@@ -331,7 +332,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// <summary>
     /// Dispatches the final, validated row structure to the physical storage engine and linked B-Tree indexes.
     /// </summary>
-    private void MakeInsertion(Dictionary<string, dynamic> rowDict, List<IndexFile> indexFiles, string databaseName, long statementTxId)
+    private void MakeInsertion(Dictionary<string, object?> rowDict, List<IndexFile> indexFiles, string databaseName, long statementTxId)
     {
         long assignedRowId = Context.InsertOneIntoTable(rowDict, _model.TableName, databaseName);
         MvccCoordinator.RegisterInsertVersion(Engine, databaseName, _model.TableName, assignedRowId, statementTxId);
@@ -352,13 +353,13 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             {
                 if (index.AttributeNames.Count != 1)
                 {
-                    throw new Exception($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+                    throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
                 }
 
                 string vectorColumn = index.AttributeNames[0];
                 if (!VectorParser.TryCoerceToVector(rowDict[vectorColumn], out float[] vector))
                 {
-                    throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                    throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
                 }
 
                 Indexes.InsertIntoVectorIndex(vector, assignedRowId, indexName, _model.TableName, databaseName, indexKind);

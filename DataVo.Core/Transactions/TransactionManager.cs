@@ -51,10 +51,10 @@ public sealed class TransactionManager
     {
         long txId = idAllocator.AllocateTransactionId();
         var snapshot = new TransactionSnapshot(snapshotTimestamp: txId, transactionId: txId);
-        var context = new TransactionContext 
-        { 
+        var context = new TransactionContext
+        {
             TransactionId = txId,
-            Snapshot = snapshot 
+            Snapshot = snapshot
         };
 
         if (!_activeTransactions.TryAdd(session, context))

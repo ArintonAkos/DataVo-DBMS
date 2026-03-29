@@ -40,7 +40,7 @@ public static class RowSerializer
     /// Serializes a dictionary of column names and values into a tight binary format
     /// based on the schema order defined in the table's Catalog.
     /// </summary>
-    public static byte[] Serialize(string databaseName, string tableName, Dictionary<string, dynamic> row)
+    public static byte[] Serialize(string databaseName, string tableName, Dictionary<string, object?> row)
     {
         DataVoEngine engine = DataVoEngine.Current();
         return Serialize(databaseName, tableName, row, engine.Catalog, engine.Id.ToString("N"));
@@ -52,7 +52,7 @@ public static class RowSerializer
     public static byte[] Serialize(
         string databaseName,
         string tableName,
-        Dictionary<string, dynamic> row,
+        Dictionary<string, object?> row,
         EngineCatalog catalog,
         string schemaScopeKey)
     {
@@ -80,7 +80,7 @@ public static class RowSerializer
     /// Deserializes a raw binary payload back into a dictionary of column names and typed values
     /// using the schema defined in the table's Catalog.
     /// </summary>
-    public static Dictionary<string, dynamic> Deserialize(string databaseName, string tableName, byte[] data)
+    public static Dictionary<string, object?> Deserialize(string databaseName, string tableName, byte[] data)
     {
         return Deserialize(databaseName, tableName, data, selectedColumns: null);
     }
@@ -89,7 +89,7 @@ public static class RowSerializer
     /// Deserializes a raw binary payload back into a dictionary of column names and typed values,
     /// optionally projecting only selected columns.
     /// </summary>
-    public static Dictionary<string, dynamic> Deserialize(string databaseName, string tableName, byte[] data, HashSet<string>? selectedColumns)
+    public static Dictionary<string, object?> Deserialize(string databaseName, string tableName, byte[] data, HashSet<string>? selectedColumns)
     {
         DataVoEngine engine = DataVoEngine.Current();
         return Deserialize(databaseName, tableName, data, selectedColumns, engine.Catalog, engine.Id.ToString("N"));
@@ -99,7 +99,7 @@ public static class RowSerializer
     /// Deserializes a raw binary payload back into a dictionary of column names and typed values,
     /// optionally projecting only selected columns using an explicit schema context.
     /// </summary>
-    public static Dictionary<string, dynamic> Deserialize(
+    public static Dictionary<string, object?> Deserialize(
         string databaseName,
         string tableName,
         byte[] data,
@@ -108,7 +108,7 @@ public static class RowSerializer
         string schemaScopeKey)
     {
         var columns = GetCachedSchemaColumns(databaseName, tableName, catalog, schemaScopeKey);
-        var row = new Dictionary<string, dynamic>();
+        var row = new Dictionary<string, object?>();
 
         using var memoryStream = new MemoryStream(data);
         using var reader = new BinaryReader(memoryStream, Encoding.UTF8, leaveOpen: true);
@@ -212,7 +212,7 @@ public static class RowSerializer
     /// <summary>
     /// Reads a non-null value using the column type encoding.
     /// </summary>
-    private static dynamic ReadNonNullValue(BinaryReader reader, Column column)
+    private static object ReadNonNullValue(BinaryReader reader, Column column)
     {
         string type = column.Type.ToUpperInvariant();
         if (type == "INT")
