@@ -122,6 +122,28 @@ public class AdoNetTests : IDisposable
     }
 
     [Fact]
+    public void Transaction_SavepointApis_WorkAsExpected()
+    {
+        Execute("CREATE TABLE IF NOT EXISTS TxSavepoint (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        using var tx = _connection.BeginTransaction();
+        Execute("INSERT INTO TxSavepoint (Id, Name) VALUES (1, 'Alice');");
+        tx.Save("sp1");
+        Execute("INSERT INTO TxSavepoint (Id, Name) VALUES (2, 'Bob');");
+        tx.Rollback("sp1");
+        tx.Release("sp1");
+        tx.Commit();
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM TxSavepoint ORDER BY Id;";
+        using var reader = cmd.ExecuteReader();
+
+        Assert.True(reader.Read());
+        Assert.Equal(1, Convert.ToInt32(reader["Id"]));
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
     public void ConnectionStringBuilder_ParsesCorrectly()
     {
         var builder = new DataVoConnectionStringBuilder("StorageMode=Disk;DataSource=./mydb;WalEnabled=false");

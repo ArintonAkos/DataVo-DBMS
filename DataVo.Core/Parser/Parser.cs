@@ -108,7 +108,31 @@ public class Parser(List<Token> tokens)
             else if (Match(TokenType.Keyword, SqlKeywords.COMMIT))
                 statements.Add(new CommitStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.ROLLBACK))
-                statements.Add(new RollbackStatement());
+            {
+                if (Match(TokenType.Keyword, SqlKeywords.TO))
+                {
+                    // Optional SAVEPOINT keyword after ROLLBACK TO
+                    Match(TokenType.Keyword, SqlKeywords.SAVEPOINT);
+                    var savepointToken = Consume(TokenType.Identifier, "savepoint name");
+                    statements.Add(new RollbackToSavepointStatement { SavepointName = savepointToken.Value });
+                }
+                else
+                {
+                    statements.Add(new RollbackStatement());
+                }
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.SAVEPOINT))
+            {
+                var savepointToken = Consume(TokenType.Identifier, "savepoint name");
+                statements.Add(new SavepointStatement { SavepointName = savepointToken.Value });
+            }
+            else if (Match(TokenType.Keyword, SqlKeywords.RELEASE))
+            {
+                // Optional SAVEPOINT keyword after RELEASE
+                Match(TokenType.Keyword, SqlKeywords.SAVEPOINT);
+                var savepointToken = Consume(TokenType.Identifier, "savepoint name");
+                statements.Add(new ReleaseSavepointStatement { SavepointName = savepointToken.Value });
+            }
             else
             {
                 throw new ParserException($"Parser Error: Unexpected token {Current}.");

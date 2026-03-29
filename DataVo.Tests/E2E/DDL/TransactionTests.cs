@@ -185,6 +185,43 @@ public abstract class TransactionTestsBase : SqlExecutionTestsBase
         Assert.Single(result.Data);
         Assert.Equal("Updated", result.Data[0]["Name"]?.ToString());
     }
+
+    [Fact]
+    public void Savepoint_RollbackToSavepoint_DiscardsChangesAfterSavepoint()
+    {
+        string table = $"T_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        Execute("BEGIN;");
+        Execute($"INSERT INTO {table} (Id, Name) VALUES (1, 'Alice');");
+        Execute("SAVEPOINT before_second;");
+        Execute($"INSERT INTO {table} (Id, Name) VALUES (2, 'Bob');");
+        Execute("ROLLBACK TO SAVEPOINT before_second;");
+        Execute("COMMIT;");
+
+        var result = ExecuteAndReturn($"SELECT * FROM {table};");
+        Assert.NotNull(result);
+        Assert.Single(result.Data);
+        Assert.Equal(1, Convert.ToInt32(result.Data[0]["Id"]));
+    }
+
+    [Fact]
+    public void Savepoint_Release_RemovesSavepoint()
+    {
+        string table = $"T_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        Execute("BEGIN;");
+        Execute($"INSERT INTO {table} (Id, Name) VALUES (1, 'Alice');");
+        Execute("SAVEPOINT sp_release;");
+        Execute("RELEASE SAVEPOINT sp_release;");
+
+        var rollbackResult = ExecuteAndReturn("ROLLBACK TO SAVEPOINT sp_release;");
+        Assert.NotNull(rollbackResult);
+        Assert.Contains("does not exist", rollbackResult.Messages.FirstOrDefault() ?? string.Empty);
+
+        Execute("ROLLBACK;");
+    }
 }
 
 public class TransactionTestsMemory : TransactionTestsBase

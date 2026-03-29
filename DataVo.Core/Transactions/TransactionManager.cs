@@ -99,6 +99,39 @@ public sealed class TransactionManager
     }
 
     /// <summary>
+    /// Creates or replaces a named savepoint inside the active transaction for the session.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session.</exception>
+    public void Savepoint(Guid session, string savepointName)
+    {
+        TransactionContext context = GetRequiredContext(session);
+        context.CreateSavepoint(savepointName);
+        Logger.Info($"Savepoint '{savepointName}' created.");
+    }
+
+    /// <summary>
+    /// Restores buffered state to a previously created savepoint while keeping the transaction active.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session or savepoint is missing.</exception>
+    public void RollbackToSavepoint(Guid session, string savepointName)
+    {
+        TransactionContext context = GetRequiredContext(session);
+        context.RollbackToSavepoint(savepointName);
+        Logger.Info($"Rolled back to savepoint '{savepointName}'.");
+    }
+
+    /// <summary>
+    /// Releases a named savepoint from the active transaction.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session or savepoint is missing.</exception>
+    public void ReleaseSavepoint(Guid session, string savepointName)
+    {
+        TransactionContext context = GetRequiredContext(session);
+        context.ReleaseSavepoint(savepointName);
+        Logger.Info($"Savepoint '{savepointName}' released.");
+    }
+
+    /// <summary>
     /// Determines whether the given session has an active explicit transaction.
     /// </summary>
     /// <param name="session">The unique session identifier.</param>
@@ -117,5 +150,15 @@ public sealed class TransactionManager
     public TransactionContext? GetContext(Guid session)
     {
         return _activeTransactions.GetValueOrDefault(session);
+    }
+
+    private TransactionContext GetRequiredContext(Guid session)
+    {
+        if (!_activeTransactions.TryGetValue(session, out TransactionContext? context))
+        {
+            throw new InvalidOperationException("No active transaction.");
+        }
+
+        return context;
     }
 }

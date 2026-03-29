@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 12 audit completion and epic progress dashboard
+> **Last updated:** 2026-03-29 — Phase 15 savepoint support completion
 
 ---
 
@@ -42,7 +42,7 @@
 | 4.8  | 🟡 Minor    | Parser silently skips unknown tokens                         | ✅ **Fixed**   | Unexpected tokens now throw `ParserException`                                                                      |
 | 4.9  | 🟡 Minor    | `CompactTable` resets RowIds without enforcing rebuild       | ✅ **Fixed**   | Compaction now blocks indexed tables unless caller explicitly opts in and rebuilds indexes                        |
 | 4.10 | 🟡 Minor    | No authentication/authorization                              | ⬜ Pending     | Feature-level effort                                                                                               |
-| 4.11 | 🟡 Minor    | `DataVoTransaction` missing savepoint support                | ⬜ Pending     |                                                                                                                    |
+| 4.11 | 🟡 Minor    | `DataVoTransaction` missing savepoint support                | ✅ **Fixed**   | SQL savepoint grammar + transaction snapshots + ADO transaction savepoint APIs                                    |
 | 4.12 | 🟡 Minor    | WAL `TransactionId` (Guid) disconnected from MVCC (long)     | ✅ **Fixed**   | WAL now carries/replays `MvccTransactionId` and restores allocator floor                                           |
 | 4.13 | 🟡 Minor    | Static cardinality feedback dict grows without eviction      | ✅ **Fixed**   | Join-cardinality feedback now trims to configured max entries before persistence                                  |
 | 4.14 | 🟡 Minor    | Index persistence silently drops I/O errors                  | ✅ **Fixed**   | Flush/delete paths now surface persistence failures as exceptions                                                   |
@@ -52,9 +52,9 @@
 | Metric                    | Value                                                      |
 | ------------------------- | ---------------------------------------------------------- |
 | **Total issues**          | 33                                                         |
-| **Fixed**                 | 29 (88%)                                                   |
-| **Partially fixed**       | 0 (0%)                                                     |
-| **Pending**               | 4 (12%)                                                    |
+| **Fixed**                 | 30 (91%)                                                   |
+| **Partially fixed**       | 1 (3%)                                                     |
+| **Pending**               | 2 (6%)                                                     |
 | **New tests added**       | Audit-focused + lock/WAL/index/deadlock regression tests (all passing) |
 | **Current full test run** | ✅ 699/699 passing (`dotnet test DataVo.Tests`)                        |
 
@@ -64,8 +64,8 @@
 | ---- | ----- | ----- | ------- | ------- | ---------- |
 | **Epic 2** | Critical Issues (`2.x`) | 9/9 | 0/9 | 0/9 | **100%** |
 | **Epic 3** | Major Issues (`3.x`) | 9/12 | 1/12 | 2/12 | **75% fully fixed** |
-| **Epic 4** | Minor Issues (`4.x`) | 12/14 | 0/14 | 2/14 | **86%** |
-| **Overall** | Audit Issues (`2.x-4.x`) | 29/33 | 1/33 | 4/33 | **88% fully fixed** |
+| **Epic 4** | Minor Issues (`4.x`) | 13/14 | 0/14 | 1/14 | **93%** |
+| **Overall** | Audit Issues (`2.x-4.x`) | 30/33 | 1/33 | 2/33 | **91% fully fixed** |
 
 ---
 
@@ -298,7 +298,14 @@ Remaining generic throw sites still need incremental migration.
 
 ### 4.10 — No authentication/authorization ⬜
 
-### 4.11 — `DataVoTransaction` missing savepoint support ⬜
+### 4.11 — ~~`DataVoTransaction` missing savepoint support~~ ✅ FIXED
+
+**Files:** `DataVo.Core/Parser/Parser.cs`, `DataVo.Core/Parser/AST/SqlNode.cs`, `DataVo.Core/Parser/Evaluator.cs`, `DataVo.Core/Parser/Transactions/*.cs`, `DataVo.Core/Transactions/TransactionContext.cs`, `DataVo.Core/Transactions/TransactionManager.cs`, `DataVo.Data/DataVoTransaction.cs`
+
+**Fix applied:** added full savepoint support for explicit transactions:
+- SQL parser/evaluator now supports `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and `RELEASE [SAVEPOINT]`
+- transaction context now snapshots/restores buffered insert/update/delete state for named savepoints
+- ADO transaction wrapper now overrides `Save`, `Rollback(savepointName)`, and `Release`
 
 ### 4.12 — ~~WAL `TransactionId` (Guid) disconnected from MVCC (long)~~ ✅ FIXED
 
@@ -329,7 +336,7 @@ Remaining generic throw sites still need incremental migration.
 | Window functions (`RANK`, `DENSE_RANK`, etc.) | ⚠️ Partial       | Only some functions work; `RANK` throws "not supported yet"         |
 | `ON UPDATE` cascades                          | ❌ Not supported | Only `ON DELETE CASCADE/RESTRICT` is modeled                        |
 | Multi-column indexes                          | ⚠️ Partial       | Parser accepts N columns but B+Tree is single-key                   |
-| Transaction savepoints                        | ❌ Not supported |                                                                     |
+| Transaction savepoints                        | ✅ Supported     | SQL and ADO transaction savepoint APIs are now implemented          |
 | `TRUNCATE TABLE`                              | ❌ Not supported |                                                                     |
 | `CHECK` constraints                           | ❌ Not supported |                                                                     |
 | Schema versioning / DDL migrations            | ❌ Not supported |                                                                     |
@@ -509,3 +516,24 @@ Remaining generic throw sites still need incremental migration.
 - `DataVo.Core/Transactions/WalEntry.cs` — Added compact vector WAL envelope encoding/decoding with backward-compatible replay normalization
 - `DataVo.Tests/E2E/WalTests.cs` — Added WAL vector envelope serialization and replay normalization regression tests
 - `docs/audit/production-readiness-audit.md` — Updated 3.9 status and EPIC/overall percentages
+
+## Changes Made (Phase 15)
+
+### New Files
+
+- `DataVo.Core/Parser/Transactions/Savepoint.cs` — Implements `SAVEPOINT name` command action
+- `DataVo.Core/Parser/Transactions/RollbackToSavepoint.cs` — Implements `ROLLBACK TO [SAVEPOINT] name` command action
+- `DataVo.Core/Parser/Transactions/ReleaseSavepoint.cs` — Implements `RELEASE [SAVEPOINT] name` command action
+
+### Modified Files
+
+- `DataVo.Core/Constants/SqlSyntaxConstants.cs` — Added `SAVEPOINT`, `RELEASE`, and `TO` SQL keyword tokens
+- `DataVo.Core/Parser/AST/SqlNode.cs` — Added savepoint-related transaction AST statement nodes
+- `DataVo.Core/Parser/Parser.cs` — Added savepoint grammar support
+- `DataVo.Core/Parser/Evaluator.cs` — Added evaluator dispatch for savepoint statements
+- `DataVo.Core/Transactions/TransactionContext.cs` — Added savepoint snapshot capture/restore/release over buffered DML state
+- `DataVo.Core/Transactions/TransactionManager.cs` — Added savepoint management APIs for active sessions
+- `DataVo.Data/DataVoTransaction.cs` — Added ADO savepoint API overrides (`Save`, `Rollback(name)`, `Release`)
+- `DataVo.Tests/E2E/DDL/TransactionTests.cs` — Added SQL savepoint rollback/release regression tests
+- `DataVo.Tests/ADO/AdoNetTests.cs` — Added ADO transaction savepoint API regression test
+- `docs/audit/production-readiness-audit.md` — Marked 4.11 fixed and refreshed progress metrics
