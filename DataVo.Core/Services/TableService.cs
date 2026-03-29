@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
 
 namespace DataVo.Core.Services
@@ -24,7 +25,7 @@ namespace DataVo.Core.Services
                 }
             }
 
-            throw new Exception("Table name or alias not found");
+            throw new BindingException("Table name or alias not found");
         }
 
         public TableDetail GetTableDetailByColumn(string column)
@@ -42,7 +43,7 @@ namespace DataVo.Core.Services
             {
                 if (!TableDetails.ContainsKey(tableName))
                 {
-                    throw new Exception("Invalid table name");
+                    throw new BindingException("Invalid table name");
                 }
 
                 return TableDetails[tableName];
@@ -60,12 +61,12 @@ namespace DataVo.Core.Services
 
             if (tablesWithThisColumnName.Count > 1)
             {
-                throw new Exception($"Ambiguous column name: {column}");
+                throw new BindingException($"Ambiguous column name: {column}");
             }
 
             if (tablesWithThisColumnName.Count == 0)
             {
-                throw new Exception($"Invalid column name: {column}");
+                throw new BindingException($"Invalid column name: {column}");
             }
 
             tableName = tablesWithThisColumnName[0];
@@ -98,12 +99,12 @@ namespace DataVo.Core.Services
         {
             if (TableDetails.ContainsKey(tableDetail.TableName))
             {
-                throw new Exception("Duplicate table name found");
+                throw new BindingException("Duplicate table name found");
             }
 
             if (tableDetail.TableAlias != null && TableDetails.ContainsKey(tableDetail.TableAlias))
             {
-                throw new Exception("Duplicate table alias found");
+                throw new BindingException("Duplicate table alias found");
             }
 
             tableDetail.DatabaseName = DatabaseName;
@@ -122,7 +123,7 @@ namespace DataVo.Core.Services
 
                 if (splitColumnName.Length != 2)
                 {
-                    throw new Exception("Column names can only contain one '.' character!");
+                    throw new BindingException("Column names can only contain one '.' character!");
                 }
 
                 table = TableDetails[splitColumnName[0]];

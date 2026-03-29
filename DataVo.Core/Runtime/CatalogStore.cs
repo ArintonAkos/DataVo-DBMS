@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Xml.Linq;
 using System.Xml.Serialization;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine.Config;
@@ -50,7 +51,7 @@ internal sealed class CatalogStore
 
             if (existingDatabase != null)
             {
-                throw new Exception("Database already exists!");
+                throw new CatalogException("Database already exists!");
             }
 
             var root = _doc.Elements("Databases").First();
@@ -63,12 +64,12 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var rootDatabase = GetDatabaseElement(databaseName)
-                               ?? throw new Exception($"Database {databaseName} does not exist!");
+                               ?? throw new CatalogException($"Database {databaseName} does not exist!");
 
             var existingTable = GetTableElement(rootDatabase, table.TableName);
             if (existingTable != null)
             {
-                throw new Exception($"Table {table.TableName} already exists in database {databaseName}!");
+                throw new CatalogException($"Table {table.TableName} already exists in database {databaseName}!");
             }
 
             ValidateForeignKeys(table, databaseName);
@@ -84,15 +85,15 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var table = GetTableElement(databaseName, tableName)
-                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+                        ?? throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
 
             if (GetTableAttributeElement(table, field.Name) != null)
             {
-                throw new Exception($"Column {field.Name} already exists in table {tableName}!");
+                throw new CatalogException($"Column {field.Name} already exists in table {tableName}!");
             }
 
             var structure = table.Elements("Structure").FirstOrDefault()
-                            ?? throw new Exception($"Table {tableName} has invalid catalog structure.");
+                            ?? throw new CatalogException($"Table {tableName} has invalid catalog structure.");
 
             using var writer = new StringWriter();
             var namespaces = new XmlSerializerNamespaces();
@@ -112,10 +113,10 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var table = GetTableElement(databaseName, tableName)
-                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+                        ?? throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
 
             var attribute = GetTableAttributeElement(table, columnName)
-                           ?? throw new Exception($"Column {columnName} does not exist in table {tableName}!");
+                           ?? throw new CatalogException($"Column {columnName} does not exist in table {tableName}!");
 
             attribute.Remove();
             SaveDocument();
@@ -128,10 +129,10 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var table = GetTableElement(databaseName, tableName)
-                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+                        ?? throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
 
             var attribute = GetTableAttributeElement(table, field.Name)
-                           ?? throw new Exception($"Column {field.Name} does not exist in table {tableName}!");
+                           ?? throw new CatalogException($"Column {field.Name} does not exist in table {tableName}!");
 
             attribute.SetAttributeValue("Type", field.Type.ToString());
 
@@ -163,7 +164,7 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var database = GetDatabaseElement(databaseName)
-                           ?? throw new Exception($"Database {databaseName} does not exist!");
+                           ?? throw new CatalogException($"Database {databaseName} does not exist!");
 
             RemoveFromXml(database);
             InvalidateDatabaseSchemaVersions(databaseName);
@@ -175,7 +176,7 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var table = GetTableElement(databaseName, tableName)
-                        ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+                        ?? throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
 
             RemoveFromXml(table);
             BumpTableSchemaVersion(databaseName, tableName);
@@ -196,19 +197,19 @@ internal sealed class CatalogStore
 
             if (table == null)
             {
-                throw new Exception("Table referred by index file doesn't exist!");
+                throw new CatalogException("Table referred by index file doesn't exist!");
             }
 
             var indexElement = GetTableIndexElement(table, indexFile.IndexFileName);
             if (indexElement != null)
             {
-                throw new Exception($"Index file {indexFile.IndexFileName} already exists in table {tableName}!");
+                throw new CatalogException($"Index file {indexFile.IndexFileName} already exists in table {tableName}!");
             }
 
             if (indexFile.AttributeNames.Select(columnName => GetTableAttributeElement(table, columnName))
                 .Any(column => column == null))
             {
-                throw new Exception("Column referred by index file doesn't exist!");
+                throw new CatalogException("Column referred by index file doesn't exist!");
             }
 
             var root = table.Elements("IndexFiles").First();
@@ -221,7 +222,7 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var indexFile = GetTableIndexElement(indexName, tableName, databaseName)
-                            ?? throw new Exception($"Index file {indexName} doesn't exist!");
+                            ?? throw new CatalogException($"Index file {indexName} doesn't exist!");
 
             RemoveFromXml(indexFile);
         }
@@ -243,7 +244,7 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             var rootDatabase = GetDatabaseElement(databaseName)
-                               ?? throw new Exception($"Database {databaseName} does not exist!");
+                               ?? throw new CatalogException($"Database {databaseName} does not exist!");
 
             return rootDatabase.Elements("Tables")
                 .Elements("Table")
@@ -366,7 +367,7 @@ internal sealed class CatalogStore
 
             if (table == null)
             {
-                throw new Exception($"Table {tableName} doesn't exist in database {databaseName}");
+                throw new CatalogException($"Table {tableName} doesn't exist in database {databaseName}");
             }
 
             return table.Elements("Structure")
@@ -392,7 +393,7 @@ internal sealed class CatalogStore
 
         if (column is null)
         {
-            throw new Exception($"Column {columnName} doesn't exist in table {tableName}!");
+            throw new CatalogException($"Column {columnName} doesn't exist in table {tableName}!");
         }
 
         return column;
@@ -443,7 +444,7 @@ internal sealed class CatalogStore
             var loaded = XDocument.Parse(xml);
             if (loaded.Root?.Name != "Databases")
             {
-                throw new Exception("Invalid catalog state. Root element 'Databases' was expected.");
+                throw new CatalogException("Invalid catalog state. Root element 'Databases' was expected.");
             }
 
             _doc = loaded;
@@ -530,14 +531,14 @@ internal sealed class CatalogStore
 
                 if (refTable == null)
                 {
-                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    throw new CatalogException($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
                 }
 
                 var refAttribute = GetTableAttributeElement(refTable, reference.ReferenceAttributeName);
 
                 if (refAttribute == null)
                 {
-                    throw new Exception($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
+                    throw new CatalogException($"Foreign key attribute {foreignKey.AttributeName} has invalid references!");
                 }
             }
         }

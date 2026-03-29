@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 6 deadlock detection and lock contention diagnostics
+> **Last updated:** 2026-03-29 — Phase 7 typed index cache and domain exception migration
 
 ---
 
@@ -23,8 +23,8 @@
 | 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ⬜ Pending     | Large-scale refactor                                                                                               |
 | 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ⬜ Pending     | Large-scale refactor                                                                                               |
 | 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ⬜ Pending     | Requires per-file audit                                                                                            |
-| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Domain hierarchy created; `DiskStorageEngine.ReadRow` migrated                                                     |
-| 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ⬜ Pending     |                                                                                                                    |
+| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Migrated key catalog/binding/index manager paths to `CatalogException`/`BindingException`/`IndexException`       |
+| 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ✅ **Fixed**   | Cache now stores `IIndexBase` and validates factory/persistence outputs                                            |
 | 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                      |
 | 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                   |
 | 3.8  | 🟠 Major    | `CompactTable` hardcodes file-header magic                   | ✅ **Fixed**   | Uses `FileHeaderMagic` / `FileHeaderVersion` constants                                                             |
@@ -52,11 +52,11 @@
 | Metric                    | Value                                                      |
 | ------------------------- | ---------------------------------------------------------- |
 | **Total issues**          | 33                                                         |
-| **Fixed**                 | 19 (58%)                                                   |
+| **Fixed**                 | 20 (61%)                                                   |
 | **Partially fixed**       | 0 (0%)                                                     |
-| **Pending**               | 14 (42%)                                                   |
+| **Pending**               | 13 (39%)                                                   |
 | **New tests added**       | Audit-focused + lock/WAL/index/deadlock regression tests (all passing) |
-| **Current full test run** | ✅ 694/694 passing (`dotnet test DataVo.Tests`)                        |
+| **Current full test run** | ✅ 699/699 passing (`dotnet test DataVo.Tests`)                        |
 
 ---
 
@@ -180,9 +180,18 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 
 ### 3.4 — `throw new Exception(...)` used universally ✅ STARTED
 
-**Fix applied:** Domain exception hierarchy created (`DataVoException` → `StorageException` → `RowDeletedException`, `CatalogException`). `DiskStorageEngine.ReadRow` migrated. Remaining ~150 throw sites need incremental migration.
+**Fix applied:** Domain exception hierarchy now used in additional runtime paths:
+- `CatalogStore` migrated generic schema failures to `CatalogException`
+- `TableService` migrated binding failures to `BindingException`
+- `IndexManager` migrated missing-index failures to `IndexException`
 
-### 3.5 — `IndexManager._cache` typed as `Dictionary<string, object>` ⬜
+Remaining generic throw sites still need incremental migration.
+
+### 3.5 — ~~`IndexManager._cache` typed as `Dictionary<string, object>`~~ ✅ FIXED
+
+**Files:** `DataVo.Core/Indexing/IndexManager.cs`, `DataVo.Core/BTree/Core/IIndex.cs`
+
+**Fix applied:** index cache is now strongly typed as `Dictionary<string, IIndexBase>`. Scalar B-Tree interface now participates in `IIndexBase`, and IndexManager validates that factories/persistence return managed index types before caching.
 
 ### 3.6 — ~~`LockManager` has no deadlock detection or timeout~~ ✅ FIXED
 
@@ -366,3 +375,21 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 - `DataVo.Core/Transactions/LockManager.cs` — Added wait-for graph tracking, ownership metadata, cycle detection, and deadlock diagnostic reporting
 - `DataVo.Tests/Transactions/LockManagerRowLevelTests.cs` — Added row/table opposing-order deadlock detection tests with cycle assertions
 - `DataVo.Tests/E2E/ConcurrencyTests.cs` — Added E2E contention tests for row/table deadlock detection and diagnostic message validation
+
+## Changes Made (Phase 7)
+
+### New Files
+
+- `DataVo.Core/Exceptions/IndexException.cs` — Domain exception for index lookup/persistence failures
+
+### Modified Files
+
+- `DataVo.Core/Indexing/IndexManager.cs` — Strongly typed cache (`IIndexBase`) and index-type validation at create/load boundaries
+- `DataVo.Core/BTree/Core/IIndex.cs` — Scalar index interface now implements `IIndexBase`
+- `DataVo.Core/Runtime/CatalogStore.cs` — Migrated generic catalog errors to `CatalogException`
+- `DataVo.Core/Services/TableService.cs` — Migrated generic binding errors to `BindingException`
+- `DataVo.Core/Exceptions/BindingException.cs` — Promoted to domain base (`DataVoException`)
+- `DataVo.Core/Exceptions/EvaluationException.cs` — Promoted to domain base (`DataVoException`)
+- `DataVo.Tests/AuditFixes/AuditFixTests.cs` — Added domain exception regression tests for catalog/binding/index paths
+- `DataVo.Tests/Indexing/IndexManagerTests.cs` — Updated typed-cache reflection tests to `IIndexBase`
+- `DataVo.Tests/BTree/IndexManagerTests.cs` — Updated missing-index assertion to `IndexException`
