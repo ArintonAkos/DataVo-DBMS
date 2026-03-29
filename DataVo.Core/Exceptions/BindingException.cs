@@ -4,6 +4,6 @@ namespace DataVo.Core.Exceptions;
 /// Represents a failure to bind parsed identifiers to concrete schema objects.
 /// </summary>
 /// <param name="message">The binding failure details.</param>
-internal class BindingException(string message) : Exception(message)
+public class BindingException(string message) : DataVoException(message)
 {
 }

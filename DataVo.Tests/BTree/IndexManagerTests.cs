@@ -1,4 +1,5 @@
 using DataVo.Core.Indexing;
+using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.BTree;
@@ -108,7 +109,7 @@ public class IndexManagerTests : IDisposable
         _manager.DropIndex("drop_idx", TestTable, _testDb);
 
         // After dropping, trying to filter should throw because the index no longer exists
-        Assert.Throws<Exception>(() =>
+        Assert.Throws<IndexException>(() =>
             _manager.FilterUsingIndex("50", "drop_idx", TestTable, _testDb));
     }
 }

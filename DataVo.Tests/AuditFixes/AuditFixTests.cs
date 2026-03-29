@@ -3,6 +3,8 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.MVCC;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
+using DataVo.Core.Services;
+using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Disk;
@@ -32,6 +34,20 @@ public class AuditFixTests
     public void DataVoException_IsBaseOfCatalogException()
     {
         var ex = new CatalogException("table not found");
+        Assert.IsAssignableFrom<DataVoException>(ex);
+    }
+
+    [Fact]
+    public void DataVoException_IsBaseOfBindingException()
+    {
+        var ex = new BindingException("binding failed");
+        Assert.IsAssignableFrom<DataVoException>(ex);
+    }
+
+    [Fact]
+    public void DataVoException_IsBaseOfIndexException()
+    {
+        var ex = new IndexException("index failed");
         Assert.IsAssignableFrom<DataVoException>(ex);
     }
 
@@ -277,6 +293,51 @@ public class AuditFixTests
 
         ParserException ex = Assert.Throws<ParserException>(() => parser.Parse());
         Assert.Contains("Unexpected token", ex.Message);
+    }
+
+    [Fact]
+    public void TableService_MissingAlias_ThrowsBindingException()
+    {
+        var tableService = new TableService("db");
+
+        BindingException ex = Assert.Throws<BindingException>(() =>
+            tableService.GetTableDetailByAliasOrName("missing"));
+
+        Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EngineCatalog_DropMissingDatabase_ThrowsCatalogException()
+    {
+        var catalog = new EngineCatalog(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+        CatalogException ex = Assert.Throws<CatalogException>(() =>
+            catalog.DropDatabase("missing_db"));
+
+        Assert.Contains("does not exist", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void IndexManager_MissingIndexLookup_ThrowsIndexException()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"datavo_index_tests_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = root }, root);
+            IndexException ex = Assert.Throws<IndexException>(() =>
+                manager.FilterUsingIndex("Alice", "idx_missing", "Users", "Db"));
+
+            Assert.Contains("does not exist", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     private static ConcurrentDictionary<string, object> GetDiskFileLocks()
