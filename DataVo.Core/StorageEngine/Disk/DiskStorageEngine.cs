@@ -60,22 +60,22 @@ public class DiskStorageEngine : IStorageEngine
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         string filePath = GetFilePath(databaseName, tableName);
-        
+
         lock (GetFileLock(filePath))
         {
             EnsureFileHeader(filePath);
 
             using var fileStream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None);
-            
+
             // The RowId is the exact byte offset into the physical file.
             // With header, first row starts at offset 8 (never 0).
             long rawByteOffsetRowId = fileStream.Position;
-            
+
             // Write length prefix (4 bytes) and then the payload
             using var writer = new BinaryWriter(fileStream);
             writer.Write(rowBytes.Length);
             writer.Write(rowBytes);
-            
+
             return rawByteOffsetRowId;
         }
     }
@@ -84,14 +84,14 @@ public class DiskStorageEngine : IStorageEngine
     {
         var rowIds = new List<long>();
         string filePath = GetFilePath(databaseName, tableName);
-        
+
         lock (GetFileLock(filePath))
         {
             EnsureFileHeader(filePath);
 
             using var fileStream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None);
             using var writer = new BinaryWriter(fileStream);
-            
+
             foreach (var bytes in rowsBytes)
             {
                 long rowId = fileStream.Position;
@@ -106,24 +106,24 @@ public class DiskStorageEngine : IStorageEngine
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
         string filePath = GetFilePath(databaseName, tableName);
-        
-        if (!File.Exists(filePath)) 
+
+        if (!File.Exists(filePath))
             throw new FileNotFoundException($"DiskStorageEngine: Data file for {tableName} does not exist.");
 
         lock (GetFileLock(filePath))
         {
             using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var reader = new BinaryReader(fileStream);
-            
+
             // O(1) instant seek using the RowId coordinate
             fileStream.Seek(rowId, SeekOrigin.Begin);
-            
+
             int length = reader.ReadInt32();
-            
+
             // Tombstone check: A negative length means this row was deleted
-            if (length < 0) 
+            if (length < 0)
                 throw new RowDeletedException(rowId, tableName);
-                
+
             return reader.ReadBytes(length);
         }
     }
@@ -154,7 +154,7 @@ public class DiskStorageEngine : IStorageEngine
                     fileStream.Seek(-length, SeekOrigin.Current);
                     continue;
                 }
-                
+
                 byte[] data = reader.ReadBytes(length);
                 yield return (rowId, data);
             }
@@ -164,13 +164,13 @@ public class DiskStorageEngine : IStorageEngine
     public void DeleteRow(string databaseName, string tableName, long rowId)
     {
         string filePath = GetFilePath(databaseName, tableName);
-        
+
         lock (GetFileLock(filePath))
         {
             using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             using var reader = new BinaryReader(fileStream);
             using var writer = new BinaryWriter(fileStream);
-            
+
             // O(1) instant jump to the row's length prefix
             fileStream.Seek(rowId, SeekOrigin.Begin);
 
@@ -181,7 +181,7 @@ public class DiskStorageEngine : IStorageEngine
             // Rewrite the length as its negation: -(originalLength)
             // This lets ReadAllRows know how many bytes to skip when scanning
             fileStream.Seek(rowId, SeekOrigin.Begin);
-            writer.Write(-originalLength); 
+            writer.Write(-originalLength);
         }
     }
 
