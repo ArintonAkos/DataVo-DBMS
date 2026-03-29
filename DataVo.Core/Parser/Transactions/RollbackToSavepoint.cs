@@ -16,7 +16,7 @@ internal class RollbackToSavepoint(string savepointName) : BaseDbAction
         try
         {
             Transactions.RollbackToSavepoint(session, _savepointName);
-            Messages.Add($"Rolled back to savepoint '{_savepointName}'.");
+            Messages.Add($"Transaction rolled back to savepoint '{_savepointName}'.");
         }
         catch (Exception ex)
         {

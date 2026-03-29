@@ -1,4 +1,5 @@
 using System.Globalization;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Parser.Utils;
@@ -75,11 +76,11 @@ internal static class ExpressionEvaluator
                 case "or":
                     return ToBool(left) || ToBool(right);
                 default:
-                    throw new Exception($"Unsupported operator in expression evaluator: {bin.Operator}");
+                    throw new EvaluationException($"Unsupported operator in expression evaluator: {bin.Operator}");
             }
         }
 
-        throw new Exception($"Unsupported expression node type: {node.GetType().Name}");
+        throw new EvaluationException($"Unsupported expression node type: {node.GetType().Name}");
     }
 
     private static double EvaluateVectorDistance(BinaryExpressionNode node, object? left, object? right, bool useCosine)
@@ -90,18 +91,18 @@ internal static class ExpressionEvaluator
         if (!VectorParser.TryCoerceToVector(left, out float[] leftVector))
         {
             string side = leftFromColumn ? "left VECTOR column" : "left vector operand";
-            throw new Exception($"Vector operator '{node.Operator}' requires {side}.");
+            throw new EvaluationException($"Vector operator '{node.Operator}' requires {side}.");
         }
 
         if (!VectorParser.TryCoerceToVector(right, out float[] rightVector))
         {
             string side = rightFromColumn ? "right VECTOR column" : "right vector operand";
-            throw new Exception($"Vector operator '{node.Operator}' requires {side}.");
+            throw new EvaluationException($"Vector operator '{node.Operator}' requires {side}.");
         }
 
         if (leftVector.Length != rightVector.Length)
         {
-            throw new Exception($"Vector operator '{node.Operator}' requires matching dimensions ({leftVector.Length} != {rightVector.Length}).");
+            throw new EvaluationException($"Vector operator '{node.Operator}' requires matching dimensions ({leftVector.Length} != {rightVector.Length}).");
         }
 
         return useCosine
@@ -117,7 +118,7 @@ internal static class ExpressionEvaluator
     {
         if (scalarFunction.Arguments.Count != 1)
         {
-            throw new Exception($"Scalar function '{scalarFunction.FunctionName}' expects exactly one argument.");
+            throw new EvaluationException($"Scalar function '{scalarFunction.FunctionName}' expects exactly one argument.");
         }
 
         object? value = Evaluate(scalarFunction.Arguments[0], row, resolveColumn, resolveAggregate);
@@ -134,7 +135,7 @@ internal static class ExpressionEvaluator
         {
             "LOWER" => input.ToLowerInvariant(),
             "UPPER" => input.ToUpperInvariant(),
-            _ => throw new Exception($"Unsupported scalar function: {scalarFunction.FunctionName}")
+            _ => throw new EvaluationException($"Unsupported scalar function: {scalarFunction.FunctionName}")
         };
     }
 
@@ -151,7 +152,7 @@ internal static class ExpressionEvaluator
 
     private static int CompareToInt(object? left, object? right)
     {
-        if (left == null || right == null) throw new Exception("Cannot compare null values");
+        if (left == null || right == null) throw new EvaluationException("Cannot compare null values");
         return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
     }
 
@@ -162,7 +163,7 @@ internal static class ExpressionEvaluator
         if (left is string || right is string)
         {
             if (stringConcat != null) return stringConcat(left, right);
-            throw new Exception("Cannot apply numeric operator to string operands");
+            throw new EvaluationException("Cannot apply numeric operator to string operands");
         }
 
         double l = Convert.ToDouble(left, CultureInfo.InvariantCulture);

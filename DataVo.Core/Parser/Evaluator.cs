@@ -1,4 +1,5 @@
 using DataVo.Core.Contracts;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.DQL;
 using DataVo.Core.Parser.Transactions;
@@ -124,7 +125,7 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             }
             else
             {
-                throw new Exception($"Evaluator Error: Unsupported AST Node type '{statement.GetType().Name}'.");
+                throw new EvaluationException($"Evaluator Error: Unsupported AST Node type '{statement.GetType().Name}'.");
             }
         }
 

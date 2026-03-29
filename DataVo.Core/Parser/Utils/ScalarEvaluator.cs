@@ -1,4 +1,5 @@
 using DataVo.Core.Constants;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Enums;
 
@@ -40,10 +41,10 @@ internal static class ScalarEvaluator
                 Operators.SUBTRACT => left - right,
                 Operators.MUL => left * right,
                 Operators.DIVIDE => left / right,
-                _ => throw new Exception($"Operator {binary.Operator} not supported in SET clause scalar evaluation")
+                _ => throw new EvaluationException($"Operator {binary.Operator} not supported in SET clause scalar evaluation")
             };
         }
 
-        throw new Exception($"Expression type {expression.GetType().Name} not supported in scalar evaluation");
+        throw new EvaluationException($"Expression type {expression.GetType().Name} not supported in scalar evaluation");
     }
 }

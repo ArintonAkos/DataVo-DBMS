@@ -16,7 +16,7 @@ internal class ReleaseSavepoint(string savepointName) : BaseDbAction
         try
         {
             Transactions.ReleaseSavepoint(session, _savepointName);
-            Messages.Add($"Savepoint '{_savepointName}' released.");
+            Messages.Add($"Transaction savepoint '{_savepointName}' released.");
         }
         catch (Exception ex)
         {

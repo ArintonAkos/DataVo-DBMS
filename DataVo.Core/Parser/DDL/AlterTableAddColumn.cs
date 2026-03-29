@@ -1,4 +1,5 @@
 using DataVo.Core.BTree;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -57,17 +58,17 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
     {
         if (!Catalog.TableExists(tableName, databaseName))
         {
-            throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+            throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
         }
 
         if (Catalog.GetTableColumns(tableName, databaseName).Any(column => column.Name == ast.Column.ColumnName.Name))
         {
-            throw new Exception($"Column {ast.Column.ColumnName.Name} already exists in table {tableName}!");
+            throw new CatalogException($"Column {ast.Column.ColumnName.Name} already exists in table {tableName}!");
         }
 
         if (ast.Column.IsPrimaryKey || ast.Column.IsUnique || ast.Column.ReferencesTable != null)
         {
-            throw new Exception("ALTER TABLE ADD COLUMN currently supports only nullable/default columns without PK, UNIQUE, or FOREIGN KEY constraints.");
+            throw new CatalogException("ALTER TABLE ADD COLUMN currently supports only nullable/default columns without PK, UNIQUE, or FOREIGN KEY constraints.");
         }
     }
 

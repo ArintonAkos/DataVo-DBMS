@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Statements.Mechanism;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
@@ -31,7 +32,7 @@ internal class Where
     {
         if (_model is null)
         {
-            throw new Exception("Cannot evaluate null where statement.");
+            throw new EvaluationException("Cannot evaluate null where statement.");
         }
 
         var tableService = new TableService(databaseName);
@@ -45,7 +46,7 @@ internal class Where
     {
         if (_model is null)
         {
-            throw new Exception("Cannot evaluate null where statement.");
+            throw new EvaluationException("Cannot evaluate null where statement.");
         }
 
         var boundStatement = BindStatement(tableService);
@@ -69,13 +70,13 @@ internal class Where
 
         if (_model is null)
         {
-            throw new Exception("Cannot bind null where statement.");
+            throw new BindingException("Cannot bind null where statement.");
         }
 
         ExpressionNode materializedStatement = SubqueryExpressionMaterializer.Materialize(_model.Statement, tableService.DatabaseName, DataVoEngine.Current(), tableService);
 
         _boundStatement = SelectBinder.BindWhere(materializedStatement, tableService)
-            ?? throw new Exception("Failed to bind where statement.");
+            ?? throw new BindingException("Failed to bind where statement.");
 
         return _boundStatement;
     }
