@@ -171,19 +171,37 @@ public class VersionStorageManager : IDisposable
             throw new ArgumentNullException(nameof(storageContext));
         }
 
-        int removed = 0;
+        List<(string DatabaseName, string TableName, long RowId)> candidates;
+        _versionLock.EnterReadLock();
+        try
+        {
+            candidates = _versionMetadata.Keys
+                .Where(k => k.Item1 == databaseName)
+                .Select(k => (k.Item1, k.Item2, k.Item3))
+                .ToList();
+        }
+        finally
+        {
+            _versionLock.ExitReadLock();
+        }
 
+        List<(string DatabaseName, string TableName, long RowId)> missingRows = candidates
+            .Where(k => !storageContext.TableContainsRow(k.RowId, k.TableName, databaseName))
+            .ToList();
+
+        if (missingRows.Count == 0)
+        {
+            return 0;
+        }
+
+        int removed = 0;
         _versionLock.EnterWriteLock();
         try
         {
-            var keysToRemove = _versionMetadata.Keys
-                .Where(k => k.Item1 == databaseName)
-                .Where(k => !storageContext.TableContainsRow(k.Item3, k.Item2, databaseName))
-                .ToList();
-
-            foreach (var key in keysToRemove)
+            foreach (var key in missingRows)
             {
-                if (_versionMetadata.TryRemove(key, out _))
+                var metadataKey = (key.DatabaseName, key.TableName, key.RowId);
+                if (_versionMetadata.TryRemove(metadataKey, out _))
                 {
                     removed++;
                 }
