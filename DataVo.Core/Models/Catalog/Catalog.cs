@@ -116,7 +116,7 @@ public static class Catalog
             .First();
 
         InsertIntoXml(table, root);
-        TouchTableSchemaVersion(databaseName, table.TableName);
+        BumpTableSchemaVersion(databaseName, table.TableName);
     }
 
     /// <summary>
@@ -155,7 +155,7 @@ public static class Catalog
                     ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
 
         RemoveFromXml(table);
-        InvalidateTableSchemaVersion(databaseName, tableName);
+        BumpTableSchemaVersion(databaseName, tableName);
     }
 
     /// <summary>
@@ -698,13 +698,10 @@ public static class Catalog
         return $"{databaseName}::{tableName}";
     }
 
-    private static void TouchTableSchemaVersion(string databaseName, string tableName)
-    {
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
-    }
-
-    private static void InvalidateTableSchemaVersion(string databaseName, string tableName)
+    /// <summary>
+    /// Increments the schema version counter for the specified table.
+    /// </summary>
+    private static void BumpTableSchemaVersion(string databaseName, string tableName)
     {
         string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
         _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);

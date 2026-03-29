@@ -75,7 +75,7 @@ internal sealed class CatalogStore
 
             var root = rootDatabase.Elements("Tables").First();
             InsertIntoXml(table, root);
-            TouchTableSchemaVersion(databaseName, table.TableName);
+            BumpTableSchemaVersion(databaseName, table.TableName);
         }
     }
 
@@ -103,7 +103,7 @@ internal sealed class CatalogStore
 
             structure.Add(XElement.Parse(writer.ToString()));
             SaveDocument();
-            TouchTableSchemaVersion(databaseName, tableName);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 
@@ -119,7 +119,7 @@ internal sealed class CatalogStore
 
             attribute.Remove();
             SaveDocument();
-            TouchTableSchemaVersion(databaseName, tableName);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 
@@ -154,7 +154,7 @@ internal sealed class CatalogStore
             }
 
             SaveDocument();
-            TouchTableSchemaVersion(databaseName, tableName);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 
@@ -178,7 +178,7 @@ internal sealed class CatalogStore
                         ?? throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
 
             RemoveFromXml(table);
-            InvalidateTableSchemaVersion(databaseName, tableName);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 
@@ -588,11 +588,30 @@ internal sealed class CatalogStore
         return null;
     }
 
+    /// <summary>
+    /// Persists the catalog XML to disk using an atomic write pattern.
+    /// Writes to a temporary file first, then replaces the target to prevent corruption
+    /// if the process crashes mid-save.
+    /// </summary>
     private void SaveDocument()
     {
-        if (_persistToDisk)
+        if (!_persistToDisk)
         {
-            _doc.Save(_catalogFilePath!);
+            return;
+        }
+
+        string tempPath = _catalogFilePath! + ".tmp";
+        _doc.Save(tempPath);
+
+        // Atomic replace: if the destination exists, swap in the new file.
+        // File.Replace is atomic on NTFS/APFS/ext4.
+        if (File.Exists(_catalogFilePath!))
+        {
+            File.Replace(tempPath, _catalogFilePath!, destinationBackupFileName: null);
+        }
+        else
+        {
+            File.Move(tempPath, _catalogFilePath!);
         }
     }
 
@@ -601,13 +620,11 @@ internal sealed class CatalogStore
         return $"{databaseName}::{tableName}";
     }
 
-    private void TouchTableSchemaVersion(string databaseName, string tableName)
-    {
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
-    }
-
-    private void InvalidateTableSchemaVersion(string databaseName, string tableName)
+    /// <summary>
+    /// Increments the schema version counter for the specified table.
+    /// This invalidates any cached schema snapshots held by the row serializer.
+    /// </summary>
+    private void BumpTableSchemaVersion(string databaseName, string tableName)
     {
         string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
         _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);

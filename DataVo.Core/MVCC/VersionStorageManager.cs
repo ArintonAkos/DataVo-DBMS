@@ -7,7 +7,7 @@ namespace DataVo.Core.MVCC;
 /// Manages version metadata storage for all rows in the database.
 /// Maintains a mapping from row identifiers to RowVersion structures.
 /// </summary>
-public class VersionStorageManager
+public class VersionStorageManager : IDisposable
 {
     /// <summary>
     /// Stores version metadata indexed by row ID.
