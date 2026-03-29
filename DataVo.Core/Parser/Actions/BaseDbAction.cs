@@ -1,5 +1,6 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Indexing;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine;
@@ -46,7 +47,7 @@ internal abstract class BaseDbAction : IDbAction
     protected string GetDatabaseName(Guid session)
     {
         return Sessions.Get(session)
-            ?? throw new Exception("No database in use!");
+            ?? throw new BindingException("No database in use!");
     }
 
     protected void SetDatabaseName(Guid session, string databaseName)

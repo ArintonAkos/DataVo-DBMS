@@ -16,7 +16,7 @@ internal class Savepoint(string savepointName) : BaseDbAction
         try
         {
             Transactions.Savepoint(session, _savepointName);
-            Messages.Add($"Savepoint '{_savepointName}' created.");
+            Messages.Add($"Transaction savepoint '{_savepointName}' created.");
         }
         catch (Exception ex)
         {

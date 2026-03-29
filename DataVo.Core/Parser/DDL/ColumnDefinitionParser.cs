@@ -1,4 +1,5 @@
 using DataVo.Core.Enums;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.AST;
 
@@ -57,7 +58,7 @@ internal static class ColumnDefinitionParser
             return colRef.Column.ToLowerInvariant();
         }
 
-        throw new Exception($"{operationName} default must be a constant literal value.");
+        throw new ParserException($"{operationName} default must be a constant literal value.");
     }
 
     public static Column ToColumn(Field field)

@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 15 savepoint support completion
+> **Last updated:** 2026-03-29 — Phase 16 exception-hardening expansion
 
 ---
 
@@ -23,7 +23,7 @@
 | 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ⬜ Pending     | Large-scale refactor                                                                                               |
 | 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ⬜ Pending     | Large-scale refactor                                                                                               |
 | 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ✅ **Fixed**   | Production scope audit shows no bare catches in `DataVo.Core` / `DataVo.Data` / `DataVo.EntityFrameworkCore`     |
-| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Migrated key catalog/binding/index manager paths to `CatalogException`/`BindingException`/`IndexException`       |
+| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Expanded migration across parser/DDL/evaluator hot paths to `CatalogException`/`BindingException`/`EvaluationException` |
 | 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ✅ **Fixed**   | Cache now stores `IIndexBase` and validates factory/persistence outputs                                            |
 | 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                      |
 | 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                   |
@@ -537,3 +537,19 @@ Remaining generic throw sites still need incremental migration.
 - `DataVo.Tests/E2E/DDL/TransactionTests.cs` — Added SQL savepoint rollback/release regression tests
 - `DataVo.Tests/ADO/AdoNetTests.cs` — Added ADO transaction savepoint API regression test
 - `docs/audit/production-readiness-audit.md` — Marked 4.11 fixed and refreshed progress metrics
+
+## Changes Made (Phase 16)
+
+### Modified Files
+
+- `DataVo.Core/Parser/Actions/BaseDbAction.cs` — Replaced generic missing-database exception with `BindingException`
+- `DataVo.Core/Parser/Evaluator.cs` — Replaced unsupported AST generic exception with `EvaluationException`
+- `DataVo.Core/Parser/DDL/ColumnDefinitionParser.cs` — Replaced non-literal default generic exception with `ParserException`
+- `DataVo.Core/Parser/Utils/ScalarEvaluator.cs` — Replaced unsupported scalar evaluation generic exceptions with `EvaluationException`
+- `DataVo.Core/Parser/Statements/Where.cs` — Replaced bind/evaluate generic exceptions with `BindingException`/`EvaluationException`
+- `DataVo.Core/Parser/DDL/AlterTableAddColumn.cs` — Replaced shape validation generic exceptions with `CatalogException`
+- `DataVo.Core/Parser/DDL/AlterTableModifyColumn.cs` — Replaced shape/default/conversion generic exceptions with `CatalogException`
+- `DataVo.Core/Parser/DDL/AlterTableDropColumn.cs` — Replaced shape validation generic exceptions with `CatalogException`
+- `DataVo.Core/Models/Statement/Utils/TableDetails.cs` — Replaced missing-database generic exceptions with `BindingException`
+- `DataVo.Core/Parser/Statements/Mechanism/ExpressionEvaluator.cs` — Replaced unsupported operator/type and invalid operand generic exceptions with `EvaluationException`
+- `docs/audit/production-readiness-audit.md` — Updated 3.4 notes and added Phase 16 progress log

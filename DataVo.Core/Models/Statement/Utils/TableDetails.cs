@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.StorageEngine;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Models.Statement.Utils
@@ -41,7 +42,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
                 if (DatabaseName is null)
                 {
-                    throw new Exception("Database not selected!");
+                    throw new BindingException("Database not selected!");
                 }
 
                 _columnsCache ??= DataVoEngine.Current().Catalog.GetTableColumns(TableName, DatabaseName)
@@ -64,7 +65,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
                 if (DatabaseName is null)
                 {
-                    throw new Exception("Database not selected!");
+                    throw new BindingException("Database not selected!");
                 }
 
                 _primaryKeysCache ??= DataVoEngine.Current().Catalog.GetTablePrimaryKeys(TableName, DatabaseName);
@@ -85,7 +86,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
                 if (DatabaseName is null)
                 {
-                    throw new Exception("Database not selected!");
+                    throw new BindingException("Database not selected!");
                 }
 
                 _indexedColumnsCache ??= DataVoEngine.Current().Catalog.GetTableIndexedColumns(TableName, DatabaseName);
@@ -107,7 +108,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
                 if (DatabaseName is null)
                 {
-                    throw new Exception("Database not selected!");
+                    throw new BindingException("Database not selected!");
                 }
 
                 if (_tableContentCache == null)
@@ -136,7 +137,7 @@ namespace DataVo.Core.Models.Statement.Utils
 
                 if (DatabaseName is null)
                 {
-                    throw new Exception("Database not selected!");
+                    throw new BindingException("Database not selected!");
                 }
 
                 _tableContentValuesCache ??= TableContent!.Select(row => row.Value).ToList();

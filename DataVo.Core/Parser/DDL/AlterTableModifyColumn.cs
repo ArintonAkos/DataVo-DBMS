@@ -1,5 +1,6 @@
 using System.Globalization;
 using DataVo.Core.BTree;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Actions;
@@ -59,42 +60,42 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
     {
         if (!Catalog.TableExists(tableName, databaseName))
         {
-            throw new Exception($"Table {tableName} does not exist in database {databaseName}!");
+            throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
         }
 
         if (!Catalog.GetTableColumns(tableName, databaseName).Any(column => column.Name == columnName))
         {
-            throw new Exception($"Column {columnName} does not exist in table {tableName}!");
+            throw new CatalogException($"Column {columnName} does not exist in table {tableName}!");
         }
 
         if (ast.Column.IsPrimaryKey || ast.Column.IsUnique || ast.Column.ReferencesTable != null)
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN currently supports only type/length/default changes without PK, UNIQUE, or FOREIGN KEY constraints.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN currently supports only type/length/default changes without PK, UNIQUE, or FOREIGN KEY constraints.");
         }
 
         if (Catalog.GetTablePrimaryKeys(tableName, databaseName).Contains(columnName))
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN cannot modify a PRIMARY KEY column in this version.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a PRIMARY KEY column in this version.");
         }
 
         if (Catalog.GetTableUniqueKeys(tableName, databaseName).Contains(columnName))
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN cannot modify a UNIQUE column in this version.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a UNIQUE column in this version.");
         }
 
         if (Catalog.GetTableForeignKeys(tableName, databaseName).Any(fk => fk.AttributeName == columnName))
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN cannot modify a FOREIGN KEY column in this version.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a FOREIGN KEY column in this version.");
         }
 
         if (Catalog.GetChildForeignKeys(tableName, databaseName).Any(fk => fk.ParentColumn == columnName))
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN cannot modify a referenced column in this version.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a referenced column in this version.");
         }
 
         if (Catalog.GetTableIndexedColumns(tableName, databaseName).ContainsKey(columnName))
         {
-            throw new Exception("ALTER TABLE MODIFY COLUMN cannot modify an indexed column in this version.");
+            throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify an indexed column in this version.");
         }
     }
 
@@ -158,7 +159,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         var column = ColumnDefinitionParser.ToColumn(field);
         if (column.ParsedDefaultValue == null)
         {
-            throw new Exception($"ALTER TABLE MODIFY COLUMN default value for {field.Name} is incompatible with type {column.Type}.");
+            throw new CatalogException($"ALTER TABLE MODIFY COLUMN default value for {field.Name} is incompatible with type {column.Type}.");
         }
     }
 
@@ -175,7 +176,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         dynamic? parsedValue = column.ParsedValue;
         if (parsedValue == null)
         {
-            throw new Exception($"ALTER TABLE MODIFY COLUMN cannot convert existing value '{column.Value}' in column {field.Name} to type {column.Type}.");
+            throw new CatalogException($"ALTER TABLE MODIFY COLUMN cannot convert existing value '{column.Value}' in column {field.Name} to type {column.Type}.");
         }
 
         return parsedValue;
