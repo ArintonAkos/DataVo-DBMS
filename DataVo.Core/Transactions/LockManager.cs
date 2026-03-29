@@ -12,6 +12,8 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 public sealed class LockManager
 {
+    private const int DefaultLockAcquireTimeoutMs = 30000;
+
     private sealed class TableLockEntry
     {
         public TableLockEntry()
@@ -42,6 +44,7 @@ public sealed class LockManager
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _tableLockLifecycleSync = new();
     private readonly object _rowLockLifecycleSync = new();
+    private readonly int _lockAcquireTimeoutMs;
 
     public static LockManager Instance => _instance.Value;
 
@@ -52,7 +55,15 @@ public sealed class LockManager
     /// The legacy process-wide singleton remains available through <see cref="Instance"/>,
     /// while engine-scoped runtimes can create dedicated instances directly.
     /// </remarks>
-    public LockManager() { }
+    public LockManager(int lockAcquireTimeoutMs = DefaultLockAcquireTimeoutMs)
+    {
+        if (lockAcquireTimeoutMs < -1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lockAcquireTimeoutMs), "Timeout must be -1 (infinite) or a non-negative value.");
+        }
+
+        _lockAcquireTimeoutMs = lockAcquireTimeoutMs;
+    }
 
     public void AcquireReadLock(string databaseName, string tableName)
     {
@@ -78,14 +89,22 @@ public sealed class LockManager
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         RowLockEntry rowLock = RetainRowLock(rowKey);
-        rowLock.Lock.EnterReadLock();
+        if (!rowLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
+        {
+            ReleaseRowLock(rowKey, rowLock);
+            throw new TimeoutException($"Timed out acquiring row read lock for '{rowKey}'.");
+        }
     }
 
     public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         RowLockEntry rowLock = RetainRowLock(rowKey);
-        rowLock.Lock.EnterWriteLock();
+        if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
+        {
+            ReleaseRowLock(rowKey, rowLock);
+            throw new TimeoutException($"Timed out acquiring row write lock for '{rowKey}'.");
+        }
     }
 
     public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
@@ -179,11 +198,17 @@ public sealed class LockManager
         {
             if (write)
             {
-                tableLock.Lock.EnterWriteLock();
+                if (!tableLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
+                {
+                    throw new TimeoutException($"Timed out acquiring table write lock for '{tableKey}'.");
+                }
             }
             else
             {
-                tableLock.Lock.EnterReadLock();
+                if (!tableLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
+                {
+                    throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
+                }
             }
         }
         catch

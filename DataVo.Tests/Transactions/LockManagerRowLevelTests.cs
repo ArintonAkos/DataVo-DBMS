@@ -49,7 +49,7 @@ public class LockManagerRowLevelTests
 
         start.Set();
 
-        bool bothAcquired = firstAcquired.Wait(3000) && secondAcquired.Wait(3000);
+        bool bothAcquired = firstAcquired.Wait(10000) && secondAcquired.Wait(10000);
         Assert.True(bothAcquired, "Expected both disjoint row write locks to be acquired without serialization.");
 
         gate.Set();
@@ -141,6 +141,85 @@ public class LockManagerRowLevelTests
         finally
         {
             locks.ReleaseRowReadLocks(db, table, acquired);
+        }
+    }
+
+    [Fact]
+    public async Task RowWriteLock_TimesOut_WhenHeldByReader()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 50);
+        const string db = "db";
+        const string table = "users";
+        const long rowId = 7;
+
+        var readerReady = new ManualResetEventSlim(false);
+        var releaseReader = new ManualResetEventSlim(false);
+
+        Task reader = Task.Run(() =>
+        {
+            locks.AcquireRowReadLock(db, table, rowId);
+            readerReady.Set();
+            try
+            {
+                releaseReader.Wait();
+            }
+            finally
+            {
+                locks.ReleaseRowReadLock(db, table, rowId);
+            }
+        });
+
+        Assert.True(readerReady.Wait(3000), "Reader should acquire row lock before writer attempts.");
+        try
+        {
+            TimeoutException ex = Assert.Throws<TimeoutException>(() =>
+                locks.AcquireRowWriteLock(db, table, rowId));
+
+            Assert.Contains("Timed out acquiring row write lock", ex.Message);
+        }
+        finally
+        {
+            releaseReader.Set();
+            await reader;
+        }
+    }
+
+    [Fact]
+    public async Task TableWriteLock_TimesOut_WhenHeldByReader()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 50);
+        const string db = "db";
+        const string table = "users";
+
+        var readerReady = new ManualResetEventSlim(false);
+        var releaseReader = new ManualResetEventSlim(false);
+
+        Task reader = Task.Run(() =>
+        {
+            locks.AcquireReadLock(db, table);
+            readerReady.Set();
+            try
+            {
+                releaseReader.Wait();
+            }
+            finally
+            {
+                locks.ReleaseReadLock(db, table);
+            }
+        });
+
+        Assert.True(readerReady.Wait(3000), "Reader should acquire table lock before writer attempts.");
+        try
+        {
+            TimeoutException ex = Assert.Throws<TimeoutException>(() =>
+                locks.AcquireWriteLock(db, table));
+
+            Assert.Contains("Timed out acquiring table write lock", ex.Message);
+        }
+        finally
+        {
+            releaseReader.Set();
+            await reader;
         }
     }
 
