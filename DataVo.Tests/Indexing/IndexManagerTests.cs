@@ -1,10 +1,48 @@
 using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine.Config;
+using System.Reflection;
 
 namespace DataVo.Tests.Indexing;
 
 public class IndexManagerTests : IDisposable
 {
+    private sealed class FailingDeleteFactory : IIndexFactory
+    {
+        public string IndexType => "FAIL";
+
+        public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
+        {
+            return new object();
+        }
+
+        public object LoadIndex(string filePath, IIndexPersistence persistence)
+        {
+            return new object();
+        }
+    }
+
+    private sealed class FailingDeletePersistence : IIndexPersistence
+    {
+        public string FileExtension => ".fail";
+
+        public void SaveIndex(object index, string filePath) { }
+
+        public object LoadIndex(string filePath) => new object();
+
+        public void Flush(object index) { }
+
+        public bool FileExists(string filePath) => File.Exists(filePath);
+
+        public void EnsureDirectory(string directoryPath)
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+
+        public bool TryDeleteFile(string filePath) => false;
+
+        public bool TryDeleteDirectory(string directoryPath) => false;
+    }
+
     private readonly string _testDir;
     private readonly IndexManager _manager;
 
@@ -85,6 +123,50 @@ public class IndexManagerTests : IDisposable
 
         Assert.Single(rowIds);
         Assert.Equal(10L, rowIds[0]);
+    }
+
+    [Fact]
+    public void DropIndex_ThrowsWhenPersistenceDeleteFails()
+    {
+        _manager.RegisterIndexType("FAIL", new FailingDeleteFactory(), new FailingDeletePersistence());
+
+        string tableDirectory = Path.Combine(_testDir, "DbFail", "TblFail");
+        Directory.CreateDirectory(tableDirectory);
+        string failingPath = Path.Combine(tableDirectory, "idx_fail.fail");
+        File.WriteAllText(failingPath, "payload");
+
+        IOException ex = Assert.Throws<IOException>(() =>
+            _manager.DropIndex("idx_fail", "TblFail", "DbFail"));
+
+        Assert.Contains("Failed to delete index file", ex.Message);
+    }
+
+    [Fact]
+    public void FlushInternal_ThrowsWhenPersistenceHandlerMissing()
+    {
+        var cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var metadataField = typeof(IndexManager).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var cache = (Dictionary<string, object>)cacheField.GetValue(_manager)!;
+        var metadata = (Dictionary<string, IndexMetadata>)metadataField.GetValue(_manager)!;
+
+        const string cacheKey = "db/table_idx";
+        cache[cacheKey] = new object();
+        metadata[cacheKey] = new IndexMetadata
+        {
+            IndexName = "idx",
+            DatabaseName = "db",
+            TableName = "table",
+            ColumnName = "col",
+            IndexType = "UNREGISTERED",
+            PersistenceFormat = "none"
+        };
+
+        var flushMethod = typeof(IndexManager).GetMethod("FlushInternal", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var ex = Assert.Throws<TargetInvocationException>(() => flushMethod.Invoke(_manager, [cacheKey]));
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
+        Assert.Contains("No persistence handler registered", ex.InnerException!.Message);
     }
 
     public void Dispose()
