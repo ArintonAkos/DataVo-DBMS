@@ -49,6 +49,16 @@ public sealed class RecoveryManager(DataVoConfig config, DataVoEngine? engine = 
 
         List<WalEntry> entries = _reader.ReadUncheckpointed();
 
+        long maxRecoveredTransactionId = entries
+            .Select(entry => entry.MvccTransactionId)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        if (maxRecoveredTransactionId > 0)
+        {
+            _engine.TransactionIdAllocator.RestoreHighWaterMark(maxRecoveredTransactionId + 1);
+        }
+
         foreach (var entry in entries)
         {
             RecoverEntry(entry);

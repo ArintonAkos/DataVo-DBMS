@@ -89,6 +89,11 @@ public sealed class WalEntry
     public Guid TransactionId { get; set; }
 
     /// <summary>
+    /// Gets or sets the MVCC transaction identifier associated with the entry.
+    /// </summary>
+    public long MvccTransactionId { get; set; }
+
+    /// <summary>
     /// Gets or sets the UTC timestamp of the transaction, expressed as <see cref="DateTime.Ticks"/>.
     /// </summary>
     public long Timestamp { get; set; }
@@ -125,6 +130,7 @@ public sealed class WalEntry
         return new WalEntry
         {
             TransactionId = Guid.NewGuid(),
+            MvccTransactionId = context.TransactionId,
             Timestamp = DateTime.UtcNow.Ticks,
             DatabaseName = databaseName,
             Operations = operations,
@@ -138,7 +144,10 @@ public sealed class WalEntry
     /// <returns>A transaction buffer equivalent to the serialized operations.</returns>
     public TransactionContext ToTransactionContext()
     {
-        var context = new TransactionContext();
+        var context = new TransactionContext
+        {
+            TransactionId = MvccTransactionId
+        };
 
         foreach (var operation in Operations)
         {

@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 3 durability fixes implemented and validated
+> **Last updated:** 2026-03-29 — Phase 4 lock-order and WAL/MVCC identity fixes implemented
 
 ---
 
@@ -17,7 +17,7 @@
 | 2.4 | 🔴 Critical | `TableContainsRow` swallows all exceptions | ✅ **Fixed** | Catches only expected row-miss exceptions (`RowDeletedException`, `RowNotFoundException`, `FileNotFoundException`) |
 | 2.5 | 🔴 Critical | Global static file-lock dict grows without bound | ✅ **Fixed** | File-lock entries removed on `DropTable`/`DropDatabase` |
 | 2.6 | 🔴 Critical | `CacheStorage` non-thread-safe `Dictionary` | ✅ **Fixed** | Replaced with `ConcurrentDictionary` |
-| 2.7 | 🔴 Critical | ABBA deadlock between version lock and file lock | ⬜ Pending | Requires lock-ordering redesign |
+| 2.7 | 🔴 Critical | ABBA deadlock between version lock and file lock | ✅ **Fixed** | `VacuumTable` no longer holds version write lock during storage lookups |
 | 2.8 | 🔴 Critical | Transaction IDs reset to 1 on restart | ✅ **Fixed** | High-water mark persisted/restored via state file |
 | 2.9 | 🔴 Critical | `CreateTable` is a no-op | ⬜ Pending | Needs storage backend design decision |
 | 3.1 | 🟠 Major | `dynamic` as universal row type | ⬜ Pending | Large-scale refactor |
@@ -43,7 +43,7 @@
 | 4.9 | 🟡 Minor | `CompactTable` resets RowIds without enforcing rebuild | ⬜ Pending | |
 | 4.10 | 🟡 Minor | No authentication/authorization | ⬜ Pending | Feature-level effort |
 | 4.11 | 🟡 Minor | `DataVoTransaction` missing savepoint support | ⬜ Pending | |
-| 4.12 | 🟡 Minor | WAL `TransactionId` (Guid) disconnected from MVCC (long) | ⬜ Pending | |
+| 4.12 | 🟡 Minor | WAL `TransactionId` (Guid) disconnected from MVCC (long) | ✅ **Fixed** | WAL now carries/replays `MvccTransactionId` and restores allocator floor |
 | 4.13 | 🟡 Minor | Static cardinality feedback dict grows without eviction | ⬜ Pending | |
 | 4.14 | 🟡 Minor | Index persistence silently drops I/O errors | ⬜ Pending | |
 
@@ -52,9 +52,9 @@
 | Metric | Value |
 |---|---|
 | **Total issues** | 33 |
-| **Fixed** | 15 (45%) |
+| **Fixed** | 17 (52%) |
 | **Partially fixed** | 0 (0%) |
-| **Pending** | 18 (55%) |
+| **Pending** | 16 (48%) |
 | **New tests added** | 20 audit-focused + lock/WAL regression tests (all passing) |
 | **Current full test run** | ✅ 684/684 passing (`dotnet test DataVo.Tests`) |
 
@@ -132,10 +132,12 @@ DataVo is an impressively structured database engine for a learning/research pro
 
 ---
 
-### 2.7 — ABBA deadlock: version write-lock held while acquiring per-file lock ⬜
+### 2.7 — ~~ABBA deadlock: version write-lock held while acquiring per-file lock~~ ✅ FIXED
 **File:** `DataVo.Core/MVCC/VersionStorageManager.cs:176-195`
 
-`VacuumTable` enters `_versionLock.EnterWriteLock()`, then calls `storageContext.TableContainsRow(...)`, which acquires a per-file lock in `DiskStorageEngine`. A classic **AB-BA deadlock** with no timeout.
+~~`VacuumTable` used to hold `_versionLock` while calling into storage, creating lock-order inversion risk.~~
+
+**Fix applied:** `VacuumTable` now snapshots candidates under read lock, performs storage existence checks without holding the version write lock, then reacquires write lock only for removals.
 
 ---
 
@@ -208,7 +210,11 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 ### 4.9 — `CompactTable` resets RowIds without enforcing index rebuild ⬜
 ### 4.10 — No authentication/authorization ⬜
 ### 4.11 — `DataVoTransaction` missing savepoint support ⬜
-### 4.12 — WAL `TransactionId` (Guid) disconnected from MVCC (long) ⬜
+### 4.12 — ~~WAL `TransactionId` (Guid) disconnected from MVCC (long)~~ ✅ FIXED
+**Files:** `DataVo.Core/Transactions/WalEntry.cs`, `DataVo.Core/Transactions/RecoveryManager.cs`
+
+**Fix applied:** WAL entries now persist `MvccTransactionId`; replay restores transaction context IDs and recovery advances allocator high-water mark using recovered MVCC IDs.
+
 ### 4.13 — Static cardinality feedback dict grows without eviction ⬜
 ### 4.14 — Index persistence silently drops I/O errors ⬜
 
@@ -281,3 +287,11 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 - `DataVo.Tests/E2E/WalTests.cs` — Added checksum mismatch and tx-id persistence restart tests
 - `DataVo.Tests/E2E/SqlExecutionTestsBase.cs` — Cloned new transaction-id config across reinitializations
 - `DataVo.Tests/Transactions/LockManagerRowLevelTests.cs` — Relaxed timing assertions for full-suite stability
+
+## Changes Made (Phase 4)
+
+### Modified Files
+- `DataVo.Core/MVCC/VersionStorageManager.cs` — Removed lock-order inversion in vacuum path
+- `DataVo.Core/Transactions/WalEntry.cs` — Added persisted `MvccTransactionId` and replay propagation
+- `DataVo.Core/Transactions/RecoveryManager.cs` — Restores allocator high-water mark from WAL MVCC IDs before replay
+- `DataVo.Tests/E2E/WalTests.cs` — Added assertions for MVCC transaction ID WAL continuity and allocator advancement

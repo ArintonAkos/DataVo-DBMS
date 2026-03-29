@@ -37,6 +37,7 @@ public class DiskWalTests : SqlExecutionTestsBase
         Assert.Single(entries);
         Assert.Equal(TestDb, entries[0].DatabaseName);
         Assert.True(entries[0].IsCheckpointed);
+        Assert.True(entries[0].MvccTransactionId > 0);
         Assert.Contains(entries[0].Operations, operation => operation.OperationType == WalOperationType.Insert && operation.TableName == table);
     }
 
@@ -50,6 +51,7 @@ public class DiskWalTests : SqlExecutionTestsBase
         var entry = new WalEntry
         {
             TransactionId = Guid.NewGuid(),
+            MvccTransactionId = 9876,
             Timestamp = DateTime.UtcNow.Ticks,
             DatabaseName = TestDb,
             IsCheckpointed = false,
@@ -80,6 +82,10 @@ public class DiskWalTests : SqlExecutionTestsBase
         Assert.Single(afterRecovery.Data);
         Assert.Equal("Alice", afterRecovery.Data[0]["Name"]?.ToString());
         Assert.False(File.Exists(Config.ResolveWalFilePath()));
+
+        // Ensure allocator was advanced past recovered MVCC transaction IDs.
+        long nextTxId = Engine.TransactionIdAllocator.AllocateTransactionId();
+        Assert.True(nextTxId > 9876);
     }
 
     [Fact]
