@@ -1,4 +1,5 @@
 using DataVo.Core.Transactions;
+using DataVo.Core.Exceptions;
 using System.Reflection;
 
 namespace DataVo.Tests.Transactions;
@@ -267,6 +268,163 @@ public class LockManagerRowLevelTests
 
         Assert.Same(all, completed);
         await all;
+    }
+
+    [Fact]
+    public async Task OpposingRowWriteLocks_DetectDeadlock_WithCycleDiagnostics()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 1000);
+        const string db = "db";
+        const string table = "users";
+
+        var ready = new CountdownEvent(2);
+        var startSecondAcquire = new ManualResetEventSlim(false);
+        Exception? firstError = null;
+        Exception? secondError = null;
+
+        Task first = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            locks.AcquireRowWriteLock(db, table, 1);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                locks.AcquireRowWriteLock(db, table, 2);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                firstError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    locks.ReleaseRowWriteLock(db, table, 2);
+                }
+
+                locks.ReleaseRowWriteLock(db, table, 1);
+            }
+        });
+
+        Task second = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            locks.AcquireRowWriteLock(db, table, 2);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                locks.AcquireRowWriteLock(db, table, 1);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                secondError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    locks.ReleaseRowWriteLock(db, table, 1);
+                }
+
+                locks.ReleaseRowWriteLock(db, table, 2);
+            }
+        });
+
+        Assert.True(ready.Wait(3000), "Both workers should acquire their first row lock.");
+        startSecondAcquire.Set();
+        await Task.WhenAll(first, second);
+
+        List<Exception> errors = new Exception?[] { firstError, secondError }
+            .Where(ex => ex is not null)
+            .Select(ex => ex!)
+            .ToList();
+
+        DeadlockDetectedException deadlock = Assert.Single(errors.OfType<DeadlockDetectedException>());
+        Assert.Contains("Wait-for cycle", deadlock.Message);
+        Assert.Contains("#row:", deadlock.Message);
+    }
+
+    [Fact]
+    public async Task OpposingTableWriteLocks_DetectDeadlock_WithCycleDiagnostics()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 1000);
+        const string db = "db";
+        const string firstTable = "users";
+        const string secondTable = "orders";
+
+        var ready = new CountdownEvent(2);
+        var startSecondAcquire = new ManualResetEventSlim(false);
+        Exception? firstError = null;
+        Exception? secondError = null;
+
+        Task first = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            locks.AcquireWriteLock(db, firstTable);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                locks.AcquireWriteLock(db, secondTable);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                firstError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    locks.ReleaseWriteLock(db, secondTable);
+                }
+
+                locks.ReleaseWriteLock(db, firstTable);
+            }
+        });
+
+        Task second = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            locks.AcquireWriteLock(db, secondTable);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                locks.AcquireWriteLock(db, firstTable);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                secondError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    locks.ReleaseWriteLock(db, firstTable);
+                }
+
+                locks.ReleaseWriteLock(db, secondTable);
+            }
+        });
+
+        Assert.True(ready.Wait(3000), "Both workers should acquire their first table lock.");
+        startSecondAcquire.Set();
+        await Task.WhenAll(first, second);
+
+        List<Exception> errors = new Exception?[] { firstError, secondError }
+            .Where(ex => ex is not null)
+            .Select(ex => ex!)
+            .ToList();
+
+        DeadlockDetectedException deadlock = Assert.Single(errors.OfType<DeadlockDetectedException>());
+        Assert.Contains("Wait-for cycle", deadlock.Message);
+        Assert.Contains($"{db}.{firstTable}", deadlock.Message);
     }
 
     private static int GetPrivateRowLockCount(LockManager locks)

@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 5 lock timeout and index persistence hardening
+> **Last updated:** 2026-03-29 — Phase 6 deadlock detection and lock contention diagnostics
 
 ---
 
@@ -25,7 +25,7 @@
 | 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ⬜ Pending     | Requires per-file audit                                                                                            |
 | 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Domain hierarchy created; `DiskStorageEngine.ReadRow` migrated                                                     |
 | 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ⬜ Pending     |                                                                                                                    |
-| 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | 🟡 Partially fixed | Configurable lock acquisition timeout added; deadlock graph detection still pending                                 |
+| 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                      |
 | 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                   |
 | 3.8  | 🟠 Major    | `CompactTable` hardcodes file-header magic                   | ✅ **Fixed**   | Uses `FileHeaderMagic` / `FileHeaderVersion` constants                                                             |
 | 3.9  | 🟠 Major    | VECTOR columns bloat WAL with JSON                           | ⬜ Pending     | Part of WAL overhaul                                                                                               |
@@ -52,11 +52,11 @@
 | Metric                    | Value                                                      |
 | ------------------------- | ---------------------------------------------------------- |
 | **Total issues**          | 33                                                         |
-| **Fixed**                 | 18 (55%)                                                   |
-| **Partially fixed**       | 1 (3%)                                                     |
+| **Fixed**                 | 19 (58%)                                                   |
+| **Partially fixed**       | 0 (0%)                                                     |
 | **Pending**               | 14 (42%)                                                   |
-| **New tests added**       | Audit-focused + lock/WAL/index regression tests (all passing) |
-| **Current full test run** | ✅ 688/688 passing (`dotnet test DataVo.Tests`)               |
+| **New tests added**       | Audit-focused + lock/WAL/index/deadlock regression tests (all passing) |
+| **Current full test run** | ✅ 694/694 passing (`dotnet test DataVo.Tests`)                        |
 
 ---
 
@@ -184,13 +184,11 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 
 ### 3.5 — `IndexManager._cache` typed as `Dictionary<string, object>` ⬜
 
-### 3.6 — `LockManager` has no deadlock detection or timeout 🟡 PARTIALLY FIXED
+### 3.6 — ~~`LockManager` has no deadlock detection or timeout~~ ✅ FIXED
 
 **Files:** `DataVo.Core/Transactions/LockManager.cs`, `DataVo.Core/Runtime/DataVoEngine.cs`, `DataVo.Core/StorageEngine/Config/DataVoConfig.cs`
 
-**Fix applied (partial):** configurable lock acquisition timeout is now enforced on table and row lock acquisition paths via `TryEnter*Lock(timeout)` with `TimeoutException` propagation.
-
-**Remaining:** cycle-aware deadlock graph detection/diagnostics are still pending.
+**Fix applied:** lock manager now tracks lock ownership and waiter dependencies in an in-memory wait-for graph. When a cycle is detected, acquisition fails fast with `DeadlockDetectedException` that includes cycle details and blocking owners. Timeout-based acquisition remains as fallback.
 
 ### 3.7 — ~~Table lock entries leak from `_tableLocks`~~ ✅ FIXED
 
@@ -356,3 +354,15 @@ Needs per-file audit to replace with domain exceptions or structured logging.
 - `DataVo.Tests/Transactions/LockManagerRowLevelTests.cs` — Added row/table timeout behavior tests using cross-thread contention
 - `DataVo.Tests/Indexing/IndexManagerTests.cs` — Added persistence failure propagation regression tests
 - `DataVo.Tests/E2E/SqlExecutionTestsBase.cs` — Propagates lock timeout config in cloned test configurations
+
+## Changes Made (Phase 6)
+
+### New Files
+
+- `DataVo.Core/Exceptions/DeadlockDetectedException.cs` — Domain exception carrying deadlock scope/key and wait-cycle diagnostics
+
+### Modified Files
+
+- `DataVo.Core/Transactions/LockManager.cs` — Added wait-for graph tracking, ownership metadata, cycle detection, and deadlock diagnostic reporting
+- `DataVo.Tests/Transactions/LockManagerRowLevelTests.cs` — Added row/table opposing-order deadlock detection tests with cycle assertions
+- `DataVo.Tests/E2E/ConcurrencyTests.cs` — Added E2E contention tests for row/table deadlock detection and diagnostic message validation

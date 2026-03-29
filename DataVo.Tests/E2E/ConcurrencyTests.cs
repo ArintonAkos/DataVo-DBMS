@@ -1,4 +1,5 @@
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
@@ -130,6 +131,155 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal(workerCount, result.Data.Select(row => (int)row["Id"]).Distinct().Count());
     }
 
+    [Fact]
+    [BrowserTranslateIgnore("Deadlock orchestration uses direct lock-manager primitives across coordinated tasks")]
+    public async Task OpposingTableWriteLocks_DetectDeadlock_WithDiagnosticMessage()
+    {
+        string firstTable = $"DeadlockA_{Guid.NewGuid():N}";
+        string secondTable = $"DeadlockB_{Guid.NewGuid():N}";
+
+        Execute($"CREATE TABLE {firstTable} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+        Execute($"CREATE TABLE {secondTable} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        var ready = new CountdownEvent(2);
+        var startSecondAcquire = new ManualResetEventSlim(false);
+        Exception? firstError = null;
+        Exception? secondError = null;
+
+        Task first = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            Engine.LockManager.AcquireWriteLock(TestDb, firstTable);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                Engine.LockManager.AcquireWriteLock(TestDb, secondTable);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                firstError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    Engine.LockManager.ReleaseWriteLock(TestDb, secondTable);
+                }
+
+                Engine.LockManager.ReleaseWriteLock(TestDb, firstTable);
+            }
+        });
+
+        Task second = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            Engine.LockManager.AcquireWriteLock(TestDb, secondTable);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                Engine.LockManager.AcquireWriteLock(TestDb, firstTable);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                secondError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    Engine.LockManager.ReleaseWriteLock(TestDb, firstTable);
+                }
+
+                Engine.LockManager.ReleaseWriteLock(TestDb, secondTable);
+            }
+        });
+
+        Assert.True(ready.Wait(3000), "Both workers should acquire first lock before contention phase.");
+        startSecondAcquire.Set();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+
+        DeadlockDetectedException deadlock = Assert.Single(new[] { firstError, secondError }.OfType<DeadlockDetectedException>());
+        Assert.Contains("Wait-for cycle", deadlock.Message);
+        Assert.Contains($"{TestDb}.{firstTable}", deadlock.Message);
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("Deadlock orchestration uses direct lock-manager primitives across coordinated tasks")]
+    public async Task OpposingRowWriteLocks_DetectDeadlock_WithDiagnosticMessage()
+    {
+        string table = $"DeadlockRows_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        var ready = new CountdownEvent(2);
+        var startSecondAcquire = new ManualResetEventSlim(false);
+        Exception? firstError = null;
+        Exception? secondError = null;
+
+        Task first = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            Engine.LockManager.AcquireRowWriteLock(TestDb, table, 1);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                Engine.LockManager.AcquireRowWriteLock(TestDb, table, 2);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                firstError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    Engine.LockManager.ReleaseRowWriteLock(TestDb, table, 2);
+                }
+
+                Engine.LockManager.ReleaseRowWriteLock(TestDb, table, 1);
+            }
+        });
+
+        Task second = Task.Run(() =>
+        {
+            bool acquiredSecond = false;
+            Engine.LockManager.AcquireRowWriteLock(TestDb, table, 2);
+            try
+            {
+                ready.Signal();
+                startSecondAcquire.Wait();
+                Engine.LockManager.AcquireRowWriteLock(TestDb, table, 1);
+                acquiredSecond = true;
+            }
+            catch (Exception ex)
+            {
+                secondError = ex;
+            }
+            finally
+            {
+                if (acquiredSecond)
+                {
+                    Engine.LockManager.ReleaseRowWriteLock(TestDb, table, 1);
+                }
+
+                Engine.LockManager.ReleaseRowWriteLock(TestDb, table, 2);
+            }
+        });
+
+        Assert.True(ready.Wait(3000), "Both workers should acquire first row lock before contention phase.");
+        startSecondAcquire.Set();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+
+        DeadlockDetectedException deadlock = Assert.Single(new[] { firstError, secondError }.OfType<DeadlockDetectedException>());
+        Assert.Contains("Wait-for cycle", deadlock.Message);
+        Assert.Contains("#row:", deadlock.Message);
+    }
+
     private Guid CreateSession()
     {
         Guid session = Guid.NewGuid();
@@ -174,10 +324,10 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
 public class InMemoryConcurrencyTests : ConcurrencyTestsBase
 {
-    public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "ConcurrencyDb_Mem") { }
+    public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory, LockAcquireTimeoutMs = 1000 }, "ConcurrencyDb_Mem") { }
 }
 
 public class DiskConcurrencyTests : ConcurrencyTestsBase
 {
-    public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency" }, "ConcurrencyDb_Disk") { }
+    public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency", LockAcquireTimeoutMs = 1000 }, "ConcurrencyDb_Disk") { }
 }

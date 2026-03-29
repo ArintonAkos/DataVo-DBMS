@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.Transactions;
 
@@ -23,6 +24,9 @@ public sealed class LockManager
 
         public ReaderWriterLockSlim Lock { get; }
         public int ActiveUsers;
+        public readonly object OwnershipSync = new();
+        public readonly HashSet<int> ReadOwnerThreadIds = [];
+        public int? WriteOwnerThreadId;
     }
 
     private sealed class RowLockEntry
@@ -34,6 +38,14 @@ public sealed class LockManager
 
         public ReaderWriterLockSlim Lock { get; }
         public int ActiveUsers;
+        public readonly object OwnershipSync = new();
+        public readonly HashSet<int> ReadOwnerThreadIds = [];
+        public int? WriteOwnerThreadId;
+    }
+
+    private readonly record struct WaitRegistration(int ThreadId, bool Active)
+    {
+        public static readonly WaitRegistration None = new(0, false);
     }
 
     private static readonly Lazy<LockManager> _instance = new(() => new LockManager());
@@ -44,7 +56,10 @@ public sealed class LockManager
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _tableLockLifecycleSync = new();
     private readonly object _rowLockLifecycleSync = new();
+    private readonly object _waitForGraphSync = new();
     private readonly int _lockAcquireTimeoutMs;
+    private readonly Dictionary<int, HashSet<int>> _waitForGraph = [];
+    private readonly Dictionary<int, string> _waitingScopes = [];
 
     public static LockManager Instance => _instance.Value;
 
@@ -89,10 +104,28 @@ public sealed class LockManager
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         RowLockEntry rowLock = RetainRowLock(rowKey);
-        if (!rowLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
+        int threadId = Environment.CurrentManagedThreadId;
+        WaitRegistration waitRegistration = WaitRegistration.None;
+
+        try
+        {
+            waitRegistration = RegisterWaitIfBlocked(rowKey, "row read", GetRowBlockingThreads(rowLock, threadId, write: false), threadId);
+
+            if (!rowLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
+            {
+                throw new TimeoutException($"Timed out acquiring row read lock for '{rowKey}'.");
+            }
+
+            RegisterRowReadOwner(rowLock, threadId);
+        }
+        catch
         {
             ReleaseRowLock(rowKey, rowLock);
-            throw new TimeoutException($"Timed out acquiring row read lock for '{rowKey}'.");
+            throw;
+        }
+        finally
+        {
+            ClearWaitRegistration(waitRegistration);
         }
     }
 
@@ -100,10 +133,28 @@ public sealed class LockManager
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         RowLockEntry rowLock = RetainRowLock(rowKey);
-        if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
+        int threadId = Environment.CurrentManagedThreadId;
+        WaitRegistration waitRegistration = WaitRegistration.None;
+
+        try
+        {
+            waitRegistration = RegisterWaitIfBlocked(rowKey, "row write", GetRowBlockingThreads(rowLock, threadId, write: true), threadId);
+
+            if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
+            {
+                throw new TimeoutException($"Timed out acquiring row write lock for '{rowKey}'.");
+            }
+
+            RegisterRowWriteOwner(rowLock, threadId);
+        }
+        catch
         {
             ReleaseRowLock(rowKey, rowLock);
-            throw new TimeoutException($"Timed out acquiring row write lock for '{rowKey}'.");
+            throw;
+        }
+        finally
+        {
+            ClearWaitRegistration(waitRegistration);
         }
     }
 
@@ -116,6 +167,7 @@ public sealed class LockManager
         }
 
         rowLock.Lock.ExitReadLock();
+        UnregisterRowReadOwner(rowLock, Environment.CurrentManagedThreadId);
         ReleaseRowLock(rowKey, rowLock);
     }
 
@@ -128,6 +180,7 @@ public sealed class LockManager
         }
 
         rowLock.Lock.ExitWriteLock();
+        UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
         ReleaseRowLock(rowKey, rowLock);
     }
 
@@ -194,14 +247,21 @@ public sealed class LockManager
     private void AcquireTableLock(string tableKey, bool write)
     {
         TableLockEntry tableLock = RetainTableLock(tableKey);
+        int threadId = Environment.CurrentManagedThreadId;
+        WaitRegistration waitRegistration = WaitRegistration.None;
+
         try
         {
+            waitRegistration = RegisterWaitIfBlocked(tableKey, write ? "table write" : "table read", GetTableBlockingThreads(tableLock, threadId, write), threadId);
+
             if (write)
             {
                 if (!tableLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
                 {
                     throw new TimeoutException($"Timed out acquiring table write lock for '{tableKey}'.");
                 }
+
+                RegisterTableWriteOwner(tableLock, threadId);
             }
             else
             {
@@ -209,12 +269,18 @@ public sealed class LockManager
                 {
                     throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
                 }
+
+                RegisterTableReadOwner(tableLock, threadId);
             }
         }
         catch
         {
             ReleaseTableLockEntry(tableKey, tableLock);
             throw;
+        }
+        finally
+        {
+            ClearWaitRegistration(waitRegistration);
         }
     }
 
@@ -228,10 +294,12 @@ public sealed class LockManager
         if (write)
         {
             tableLock.Lock.ExitWriteLock();
+            UnregisterTableWriteOwner(tableLock, Environment.CurrentManagedThreadId);
         }
         else
         {
             tableLock.Lock.ExitReadLock();
+            UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
         }
 
         ReleaseTableLockEntry(tableKey, tableLock);
@@ -316,5 +384,298 @@ public sealed class LockManager
     private static string BuildRowKey(string databaseName, string tableName, long rowId)
     {
         return $"{databaseName}.{tableName}#row:{rowId}";
+    }
+
+    private static IReadOnlyCollection<int> GetTableBlockingThreads(TableLockEntry tableLock, int threadId, bool write)
+    {
+        lock (tableLock.OwnershipSync)
+        {
+            HashSet<int> blockers = [];
+
+            if (tableLock.WriteOwnerThreadId.HasValue && tableLock.WriteOwnerThreadId.Value != threadId)
+            {
+                blockers.Add(tableLock.WriteOwnerThreadId.Value);
+            }
+
+            if (write)
+            {
+                foreach (int readerId in tableLock.ReadOwnerThreadIds)
+                {
+                    if (readerId != threadId)
+                    {
+                        blockers.Add(readerId);
+                    }
+                }
+            }
+
+            return blockers;
+        }
+    }
+
+    private static IReadOnlyCollection<int> GetRowBlockingThreads(RowLockEntry rowLock, int threadId, bool write)
+    {
+        lock (rowLock.OwnershipSync)
+        {
+            HashSet<int> blockers = [];
+
+            if (rowLock.WriteOwnerThreadId.HasValue && rowLock.WriteOwnerThreadId.Value != threadId)
+            {
+                blockers.Add(rowLock.WriteOwnerThreadId.Value);
+            }
+
+            if (write)
+            {
+                foreach (int readerId in rowLock.ReadOwnerThreadIds)
+                {
+                    if (readerId != threadId)
+                    {
+                        blockers.Add(readerId);
+                    }
+                }
+            }
+
+            return blockers;
+        }
+    }
+
+    private static void RegisterTableReadOwner(TableLockEntry tableLock, int threadId)
+    {
+        lock (tableLock.OwnershipSync)
+        {
+            tableLock.ReadOwnerThreadIds.Add(threadId);
+        }
+    }
+
+    private static void UnregisterTableReadOwner(TableLockEntry tableLock, int threadId)
+    {
+        lock (tableLock.OwnershipSync)
+        {
+            tableLock.ReadOwnerThreadIds.Remove(threadId);
+        }
+    }
+
+    private static void RegisterTableWriteOwner(TableLockEntry tableLock, int threadId)
+    {
+        lock (tableLock.OwnershipSync)
+        {
+            tableLock.WriteOwnerThreadId = threadId;
+        }
+    }
+
+    private static void UnregisterTableWriteOwner(TableLockEntry tableLock, int threadId)
+    {
+        lock (tableLock.OwnershipSync)
+        {
+            if (tableLock.WriteOwnerThreadId == threadId)
+            {
+                tableLock.WriteOwnerThreadId = null;
+            }
+        }
+    }
+
+    private static void RegisterRowReadOwner(RowLockEntry rowLock, int threadId)
+    {
+        lock (rowLock.OwnershipSync)
+        {
+            rowLock.ReadOwnerThreadIds.Add(threadId);
+        }
+    }
+
+    private static void UnregisterRowReadOwner(RowLockEntry rowLock, int threadId)
+    {
+        lock (rowLock.OwnershipSync)
+        {
+            rowLock.ReadOwnerThreadIds.Remove(threadId);
+        }
+    }
+
+    private static void RegisterRowWriteOwner(RowLockEntry rowLock, int threadId)
+    {
+        lock (rowLock.OwnershipSync)
+        {
+            rowLock.WriteOwnerThreadId = threadId;
+        }
+    }
+
+    private static void UnregisterRowWriteOwner(RowLockEntry rowLock, int threadId)
+    {
+        lock (rowLock.OwnershipSync)
+        {
+            if (rowLock.WriteOwnerThreadId == threadId)
+            {
+                rowLock.WriteOwnerThreadId = null;
+            }
+        }
+    }
+
+    private WaitRegistration RegisterWaitIfBlocked(
+        string lockKey,
+        string lockScope,
+        IReadOnlyCollection<int> blockingThreadIds,
+        int waitingThreadId)
+    {
+        if (blockingThreadIds.Count == 0)
+        {
+            return WaitRegistration.None;
+        }
+
+        lock (_waitForGraphSync)
+        {
+            HashSet<int> edges = GetOrCreateWaitEdges(waitingThreadId);
+            edges.Clear();
+            foreach (int threadId in blockingThreadIds)
+            {
+                if (threadId != waitingThreadId)
+                {
+                    edges.Add(threadId);
+                }
+            }
+
+            if (edges.Count == 0)
+            {
+                RemoveWaitNode(waitingThreadId);
+                return WaitRegistration.None;
+            }
+
+            _waitingScopes[waitingThreadId] = $"{lockScope} lock '{lockKey}'";
+
+            if (TryBuildWaitCycle(waitingThreadId, out List<int>? cycleThreadIds))
+            {
+                string diagnostic = BuildDeadlockDiagnostic(lockScope, lockKey, waitingThreadId, edges, cycleThreadIds!);
+                RemoveWaitNode(waitingThreadId);
+                throw new DeadlockDetectedException(
+                    lockScope,
+                    lockKey,
+                    waitingThreadId,
+                    edges.ToList(),
+                    cycleThreadIds!,
+                    diagnostic);
+            }
+
+            return new WaitRegistration(waitingThreadId, true);
+        }
+    }
+
+    private void ClearWaitRegistration(WaitRegistration waitRegistration)
+    {
+        if (!waitRegistration.Active)
+        {
+            return;
+        }
+
+        lock (_waitForGraphSync)
+        {
+            RemoveWaitNode(waitRegistration.ThreadId);
+        }
+    }
+
+    private bool TryBuildWaitCycle(int startThreadId, out List<int>? cycleThreadIds)
+    {
+        cycleThreadIds = null;
+        if (!_waitForGraph.TryGetValue(startThreadId, out HashSet<int>? edges) || edges.Count == 0)
+        {
+            return false;
+        }
+
+        HashSet<int> visited = [startThreadId];
+        List<int> path = [startThreadId];
+
+        foreach (int next in edges)
+        {
+            path.Add(next);
+            if (FindCycleDfs(next, startThreadId, visited, path, out cycleThreadIds))
+            {
+                return true;
+            }
+
+            path.RemoveAt(path.Count - 1);
+        }
+
+        return false;
+    }
+
+    private bool FindCycleDfs(
+        int current,
+        int target,
+        HashSet<int> visited,
+        List<int> path,
+        out List<int>? cycleThreadIds)
+    {
+        if (current == target)
+        {
+            cycleThreadIds = [.. path];
+            return true;
+        }
+
+        if (!visited.Add(current))
+        {
+            cycleThreadIds = null;
+            return false;
+        }
+
+        if (!_waitForGraph.TryGetValue(current, out HashSet<int>? edges))
+        {
+            cycleThreadIds = null;
+            return false;
+        }
+
+        foreach (int next in edges)
+        {
+            path.Add(next);
+            if (FindCycleDfs(next, target, visited, path, out cycleThreadIds))
+            {
+                return true;
+            }
+
+            path.RemoveAt(path.Count - 1);
+        }
+
+        cycleThreadIds = null;
+        return false;
+    }
+
+    private HashSet<int> GetOrCreateWaitEdges(int waitingThreadId)
+    {
+        if (_waitForGraph.TryGetValue(waitingThreadId, out HashSet<int>? edges))
+        {
+            return edges;
+        }
+
+        edges = [];
+        _waitForGraph[waitingThreadId] = edges;
+        return edges;
+    }
+
+    private void RemoveWaitNode(int waitingThreadId)
+    {
+        _waitForGraph.Remove(waitingThreadId);
+        _waitingScopes.Remove(waitingThreadId);
+    }
+
+    private string BuildDeadlockDiagnostic(
+        string lockScope,
+        string lockKey,
+        int waitingThreadId,
+        HashSet<int> blockingThreadIds,
+        IReadOnlyList<int> cycleThreadIds)
+    {
+        string waitingOn = _waitingScopes.TryGetValue(waitingThreadId, out string? waitingScope)
+            ? waitingScope
+            : $"{lockScope} lock '{lockKey}'";
+
+        string cycle = string.Join(" -> ", cycleThreadIds.Select(FormatThreadNode));
+        string blockers = string.Join(", ", blockingThreadIds.OrderBy(id => id).Select(id => $"T{id}"));
+
+        return $"Deadlock detected while acquiring {waitingOn}. Wait-for cycle: {cycle}. Blocking owners: {blockers}.";
+    }
+
+    private string FormatThreadNode(int threadId)
+    {
+        if (_waitingScopes.TryGetValue(threadId, out string? scope))
+        {
+            return $"T{threadId}({scope})";
+        }
+
+        return $"T{threadId}";
     }
 }
