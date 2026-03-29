@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.StorageEngine.Disk;
 
@@ -32,7 +33,14 @@ public class DiskStorageEngine : IStorageEngine
 
     private object GetFileLock(string filePath)
     {
-        return GlobalFileLocks.GetOrAdd(filePath, _ => new object());
+        string normalizedPath = Path.GetFullPath(filePath);
+        return GlobalFileLocks.GetOrAdd(normalizedPath, _ => new object());
+    }
+
+    private static void RemoveFileLock(string filePath)
+    {
+        string normalizedPath = Path.GetFullPath(filePath);
+        GlobalFileLocks.TryRemove(normalizedPath, out _);
     }
 
     /// <summary>
@@ -114,7 +122,7 @@ public class DiskStorageEngine : IStorageEngine
             
             // Tombstone check: A negative length means this row was deleted
             if (length < 0) 
-                throw new Exception($"DiskStorageEngine: RowId {rowId} was marked as deleted.");
+                throw new RowDeletedException(rowId, tableName);
                 
             return reader.ReadBytes(length);
         }
@@ -187,16 +195,27 @@ public class DiskStorageEngine : IStorageEngine
                 File.Delete(filePath);
             }
         }
+
+        RemoveFileLock(filePath);
     }
 
     public void DropDatabase(string databaseName)
     {
         string dbPath = Path.Combine(_storageDirectory, databaseName);
 
+        string[] tableFiles = Directory.Exists(dbPath)
+            ? Directory.GetFiles(dbPath, "*.dat", SearchOption.TopDirectoryOnly)
+            : [];
+
         // Delete the entire database directory
         if (Directory.Exists(dbPath))
         {
             Directory.Delete(dbPath, recursive: true);
+        }
+
+        foreach (string tableFile in tableFiles)
+        {
+            RemoveFileLock(tableFile);
         }
     }
 
@@ -237,8 +256,8 @@ public class DiskStorageEngine : IStorageEngine
             using (var writer = new BinaryWriter(writeStream))
             {
                 // File header
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("DaVo"));
-                writer.Write(1); // version
+                writer.Write(FileHeaderMagic);
+                writer.Write(FileHeaderVersion);
 
                 foreach (var row in survivors)
                 {

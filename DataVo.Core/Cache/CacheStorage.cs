@@ -1,4 +1,6 @@
-﻿namespace DataVo.Core.Cache;
+using System.Collections.Concurrent;
+
+namespace DataVo.Core.Cache;
 
 /// <summary>
 /// Stores process-local session state used by legacy execution flows.
@@ -12,8 +14,10 @@ internal static class CacheStorage
 {
     /// <summary>
     /// Holds the active database name for each known session.
+    /// Uses <see cref="ConcurrentDictionary{TKey,TValue}"/> to guarantee thread safety
+    /// under concurrent multi-session access.
     /// </summary>
-    private static readonly Dictionary<Guid, string> Cache = [];
+    private static readonly ConcurrentDictionary<Guid, string> Cache = new();
 
     /// <summary>
     /// Gets the active database bound to a session.

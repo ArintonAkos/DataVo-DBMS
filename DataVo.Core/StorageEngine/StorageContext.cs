@@ -1,3 +1,4 @@
+using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.StorageEngine.Backends;
@@ -147,12 +148,22 @@ public class StorageContext(DataVoConfig config)
     {
         try
         {
-            // Simple validation fetch. Memory mapped fetching makes this cheap.
             var bytes = _storageEngine.ReadRow(databaseName, tableName, rowId);
             return bytes.Length > 0;
         }
-        catch (Exception)
+        catch (RowDeletedException)
         {
+            // Row was tombstoned — logically deleted but physically present.
+            return false;
+        }
+        catch (RowNotFoundException)
+        {
+            // Row coordinate is outside current table bounds.
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            // Data file does not exist yet (table is empty or never had an insert).
             return false;
         }
     }

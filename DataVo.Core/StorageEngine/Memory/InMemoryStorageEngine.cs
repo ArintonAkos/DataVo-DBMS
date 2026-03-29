@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.StorageEngine.Memory;
 
@@ -54,9 +55,14 @@ public class InMemoryStorageEngine : IStorageEngine
             {
                 var bytes = table[index];
                 if (bytes != null) return bytes;
+
+                throw new RowDeletedException(rowId, tableName);
             }
+
+            throw new RowNotFoundException(rowId, tableName);
         }
-        throw new Exception($"InMemoryStorageEngine: RowId {rowId} does not exist in {tableName}.");
+
+        throw new RowNotFoundException(rowId, tableName);
     }
 
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
