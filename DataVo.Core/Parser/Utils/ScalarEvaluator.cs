@@ -7,7 +7,7 @@ namespace DataVo.Core.Parser.Utils;
 
 internal static class ScalarEvaluator
 {
-    public static dynamic? Evaluate(ExpressionNode expression, Dictionary<string, dynamic> row)
+    public static dynamic? Evaluate(ExpressionNode expression, Dictionary<string, object?> row)
     {
         if (expression is LiteralNode literal)
         {

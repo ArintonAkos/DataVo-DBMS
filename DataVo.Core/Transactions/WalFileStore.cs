@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using Newtonsoft.Json;
@@ -206,7 +207,10 @@ internal sealed class WalFileStore
 
     private static string SerializeWalEntry(WalEntry entry)
     {
-        string payload = JsonConvert.SerializeObject(entry);
+        // Prepare the entry by wrapping vector arrays in envelopes before JSON serialization.
+        WalEntry prepared = PrepareWalEntryForSerialization(entry);
+
+        string payload = JsonConvert.SerializeObject(prepared);
         byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
 
         var envelope = new WalRecordEnvelope
@@ -218,6 +222,91 @@ internal sealed class WalFileStore
         };
 
         return JsonConvert.SerializeObject(envelope);
+    }
+
+    private static WalEntry PrepareWalEntryForSerialization(WalEntry entry)
+    {
+        var prepared = new WalEntry
+        {
+            TransactionId = entry.TransactionId,
+            MvccTransactionId = entry.MvccTransactionId,
+            Timestamp = entry.Timestamp,
+            DatabaseName = entry.DatabaseName,
+            IsCheckpointed = entry.IsCheckpointed,
+            Operations = entry.Operations.Select(op => new WalOperation
+            {
+                OperationType = op.OperationType,
+                TableName = op.TableName,
+                RowId = op.RowId,
+                RowData = op.RowData != null ? PrepareRowDataForSerialization(op.RowData) : null,
+                UpdatedColumns = op.UpdatedColumns != null ? PrepareRowDataForSerialization(op.UpdatedColumns) : null,
+            }).ToList(),
+        };
+
+        return prepared;
+    }
+
+    private static Dictionary<string, object?> PrepareRowDataForSerialization(Dictionary<string, object?> row)
+    {
+        var prepared = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in row)
+        {
+            prepared[key] = PrepareValueForWalSerialization(value);
+        }
+
+        return prepared;
+    }
+
+    private static object? PrepareValueForWalSerialization(object? value)
+    {
+        if (TryCoerceRuntimeVector(value, out float[] vector))
+        {
+            return CreateVectorEnvelope(vector);
+        }
+
+        return value;
+    }
+
+    private static bool TryCoerceRuntimeVector(object? value, out float[] vector)
+    {
+        vector = [];
+
+        switch (value)
+        {
+            case null:
+                return false;
+            case float[] floatArray:
+                vector = [.. floatArray];
+                return vector.Length > 0;
+            case double[] doubleArray:
+                vector = doubleArray.Select(item => (float)item).ToArray();
+                return vector.Length > 0;
+            case IEnumerable<float> floatEnumerable:
+                vector = floatEnumerable.ToArray();
+                return vector.Length > 0;
+            case IEnumerable<double> doubleEnumerable:
+                vector = doubleEnumerable.Select(item => (float)item).ToArray();
+                return vector.Length > 0;
+            default:
+                return false;
+        }
+    }
+
+    private static Dictionary<string, object> CreateVectorEnvelope(float[] vector)
+    {
+        byte[] payload = new byte[vector.Length * sizeof(int)];
+        for (int i = 0; i < vector.Length; i++)
+        {
+            int bits = BitConverter.SingleToInt32Bits(vector[i]);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(i * sizeof(int), sizeof(int)), bits);
+        }
+
+        return new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["__dvType"] = "vector-f32b64-v1",
+            ["dims"] = vector.Length,
+            ["data"] = Convert.ToBase64String(payload)
+        };
     }
 
     private static WalEntry DeserializeWalEntry(string line, int lineNumber)

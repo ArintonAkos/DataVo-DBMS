@@ -1,4 +1,5 @@
 ﻿using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
@@ -89,7 +90,7 @@ namespace DataVo.Core.Parser.Aggregations
             }
             catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
             {
-                throw new Exception($"Wrong aggregation ({ClassName}) called on {ColumnName} fields data type!");
+                throw new EvaluationException($"Wrong aggregation ({ClassName}) called on {ColumnName} fields data type!");
             }
         }
 
@@ -102,7 +103,7 @@ namespace DataVo.Core.Parser.Aggregations
 
             if (!TableColumnService.IsNumeric(_field))
             {
-                throw new Exception($"Cannot apply {ClassName} aggregation on non numeric column!");
+                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non numeric column!");
             }
         }
 
@@ -115,7 +116,7 @@ namespace DataVo.Core.Parser.Aggregations
 
             if (!TableColumnService.IsString(_field))
             {
-                throw new Exception($"Cannot apply {ClassName} aggregation on non string column!");
+                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non string column!");
             }
         }
 
@@ -128,7 +129,7 @@ namespace DataVo.Core.Parser.Aggregations
 
             if (!TableColumnService.IsDate(_field))
             {
-                throw new Exception($"Cannot apply {ClassName} aggregation on non date column!");
+                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non date column!");
             }
         }
     }

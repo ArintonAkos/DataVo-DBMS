@@ -20,7 +20,7 @@ public class VectorContextTests
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
         context.Execute("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
 
-        List<Dictionary<string, dynamic>> results = context.SearchNearest("Embeddings", "idx_emb", "[0.9,0.1,0]", topK: 1);
+        List<Dictionary<string, object?>> results = context.SearchNearest("Embeddings", "idx_emb", "[0.9,0.1,0]", topK: 1);
 
         Assert.Single(results);
         Assert.Equal("A", results[0]["Label"]);
@@ -46,7 +46,7 @@ public class VectorContextTests
 
         context.Engine.IndexManager.CreateVectorIndex(vectors, "idx_emb_v2", "Embeddings", dbName, "cosine");
 
-        List<Dictionary<string, dynamic>> results = context.SearchNearest("Embeddings", "idx_emb_v2", "[0.9,0.1,0]", topK: 1);
+        List<Dictionary<string, object?>> results = context.SearchNearest("Embeddings", "idx_emb_v2", "[0.9,0.1,0]", topK: 1);
 
         Assert.Single(results);
         Assert.Equal("A", results[0]["Label"]);
@@ -65,7 +65,7 @@ public class VectorContextTests
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
         context.Execute("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
 
-        List<Dictionary<string, dynamic>> results = context.SearchNearest("Embeddings", "idx_emb", "[0.9,0.1,0]", topK: 1);
+        List<Dictionary<string, object?>> results = context.SearchNearest("Embeddings", "idx_emb", "[0.9,0.1,0]", topK: 1);
 
         Assert.Single(results);
         Assert.Equal("A", results[0]["Label"]);

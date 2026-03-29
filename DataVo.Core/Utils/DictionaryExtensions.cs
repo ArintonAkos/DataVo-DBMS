@@ -8,8 +8,8 @@ namespace DataVo.Core.Utils
         {
             return new Row(record.Values);
         }
-        
-        public static Row ToRow(this Dictionary<string, dynamic> dictionary)
+
+        public static Row ToRow(this Dictionary<string, object?> dictionary)
         {
             return new Row(dictionary);
         }

@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.DDL;
 using DataVo.Core.Parser.Actions;
@@ -65,14 +66,14 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             {
                 if (_model.Attributes.Count != 1)
                 {
-                    throw new Exception($"Vector index type '{_model.IndexKind}' currently supports exactly one VECTOR column.");
+                    throw new BindingException($"Vector index type '{_model.IndexKind}' currently supports exactly one VECTOR column.");
                 }
 
                 string vectorColumnName = _model.Attributes[0];
                 string columnType = Catalog.GetTableColumnType(_model.TableName, databaseName, vectorColumnName);
                 if (!columnType.StartsWith("VECTOR", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new Exception("HNSW index can only be created on VECTOR columns.");
+                    throw new BindingException("HNSW index can only be created on VECTOR columns.");
                 }
 
                 List<(long RowId, float[] Vector)> vectors = [];
@@ -116,11 +117,11 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     /// A dictionary where each key is a composite index string (column values joined by <c>"##"</c>)
     /// and each value is a list of row IDs that share that key.
     /// </returns>
-    private Dictionary<string, List<long>> CreateIndexContents(Dictionary<long, Dictionary<string, dynamic>> tableData)
+    private Dictionary<string, List<long>> CreateIndexContents(Dictionary<long, Dictionary<string, object?>> tableData)
     {
         Dictionary<string, List<long>> indexContentDict = [];
 
-        foreach (KeyValuePair<long, Dictionary<string, dynamic>> row in tableData)
+        foreach (KeyValuePair<long, Dictionary<string, object?>> row in tableData)
         {
             string key = ExtractIndexKeyFromRow(row.Value);
 
@@ -146,7 +147,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     /// The composite index key string (e.g., <c>"Smith##John"</c> for a composite index on LastName and FirstName).
     /// Returns an empty string if none of the indexed columns are found in the row.
     /// </returns>
-    private string ExtractIndexKeyFromRow(Dictionary<string, dynamic> rowColumns)
+    private string ExtractIndexKeyFromRow(Dictionary<string, object?> rowColumns)
     {
         if (_model.Attributes.Any(attr => !rowColumns.ContainsKey(attr) || rowColumns[attr] == null))
         {

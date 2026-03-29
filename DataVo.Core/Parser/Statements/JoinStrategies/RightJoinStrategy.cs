@@ -2,6 +2,7 @@ using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Parser.Utils;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Utils;
 using System.Collections.Generic;
@@ -59,13 +60,13 @@ internal class RightJoinStrategy : IJoinStrategy
     /// Performs an optimized Hash-based Right Join lookup handling target map tracking safely.
     /// </summary>
     private static HashedTable ExecuteHashJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
-        bool insertHashAfter, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
+        bool insertHashAfter,
         HashSet<long> matchedRightKeys)
     {
         HashedTable result = [];
@@ -104,13 +105,13 @@ internal class RightJoinStrategy : IJoinStrategy
     /// Performs a simple structured Nested Loop sequential evaluation correctly assigning mapped markers carefully.
     /// </summary>
     private static HashedTable ExecuteNestedLoopJoin(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string leftTable, 
-        string leftColumn, 
-        string rightTable, 
-        string rightColumn, 
-        bool insertHashAfter, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string leftColumn,
+        string rightTable,
+        string rightColumn,
+        bool insertHashAfter,
         HashSet<long> matchedRightKeys)
     {
         HashedTable result = [];
@@ -126,7 +127,8 @@ internal class RightJoinStrategy : IJoinStrategy
 
             foreach (var rightTableRow in rightTableData)
             {
-                if (!rightTableRow.Value.ContainsKey(rightColumn) || rightTableRow.Value[rightColumn] != leftValue)
+                if (!rightTableRow.Value.ContainsKey(rightColumn)
+                    || !ExpressionValueComparer.AreEqual(rightTableRow.Value[rightColumn], leftValue, trimQuotedStrings: true, useNumericTolerance: true))
                 {
                     continue;
                 }
@@ -150,11 +152,11 @@ internal class RightJoinStrategy : IJoinStrategy
     /// Evaluates unmarked target records explicitly building null pointers logically avoiding mapped entries.
     /// </summary>
     private static void ProcessUnmatchedRightRows(
-        HashedTable leftRows, 
-        TableData rightTableData, 
-        string rightTable, 
-        bool insertHashAfter, 
-        HashSet<long> matchedRightKeys, 
+        HashedTable leftRows,
+        TableData rightTableData,
+        string rightTable,
+        bool insertHashAfter,
+        HashSet<long> matchedRightKeys,
         HashedTable result,
         JoinStrategyContext context)
     {

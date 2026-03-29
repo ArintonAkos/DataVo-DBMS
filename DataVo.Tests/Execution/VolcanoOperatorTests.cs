@@ -9,14 +9,14 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Name"] = "A", ["Score"] = 50 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Name"] = "B", ["Score"] = 95 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Name"] = "C", ["Score"] = 99 }),
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "A", ["Score"] = 50 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "B", ["Score"] = 95 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["Name"] = "C", ["Score"] = 99 }),
         };
 
         IQueryOperator scan = new TableScanOperator(input);
         IQueryOperator filtered = new FilterOperator(scan, row => (int)row["Score"] >= 90);
-        IQueryOperator projected = new ProjectOperator(filtered, row => new Dictionary<string, dynamic>
+        IQueryOperator projected = new ProjectOperator(filtered, row => new Dictionary<string, object?>
         {
             ["Id"] = row["Id"],
             ["Name"] = row["Name"]
@@ -37,9 +37,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(10, new Dictionary<string, dynamic> { ["V"] = 1 }),
-            new(11, new Dictionary<string, dynamic> { ["V"] = 2 }),
-            new(12, new Dictionary<string, dynamic> { ["V"] = 3 })
+            new(10, new Dictionary<string, object?> { ["V"] = 1 }),
+            new(11, new Dictionary<string, object?> { ["V"] = 2 }),
+            new(12, new Dictionary<string, object?> { ["V"] = 3 })
         };
 
         IQueryOperator op = new FilterOperator(new TableScanOperator(input), row => (int)row["V"] >= 2);
@@ -68,9 +68,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Score"] = 70 }),
-            new(2, new Dictionary<string, dynamic> { ["Score"] = 90 }),
-            new(3, new Dictionary<string, dynamic> { ["Score"] = 95 })
+            new(1, new Dictionary<string, object?> { ["Score"] = 70 }),
+            new(2, new Dictionary<string, object?> { ["Score"] = 90 }),
+            new(3, new Dictionary<string, object?> { ["Score"] = 95 })
         };
 
         IQueryOperator op = new FilterOperator(
@@ -89,9 +89,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["V"] = 1 }),
-            new(2, new Dictionary<string, dynamic> { ["V"] = 2 }),
-            new(3, new Dictionary<string, dynamic> { ["V"] = 3 })
+            new(1, new Dictionary<string, object?> { ["V"] = 1 }),
+            new(2, new Dictionary<string, object?> { ["V"] = 2 }),
+            new(3, new Dictionary<string, object?> { ["V"] = 3 })
         };
 
         var counter = new CountingPassthroughOperator(new TableScanOperator(input));
@@ -106,9 +106,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["V"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["V"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["V"] = 30 })
+            new(1, new Dictionary<string, object?> { ["V"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["V"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["V"] = 30 })
         };
 
         IQueryOperator op = new TakeOperator(new TableScanOperator(input), 2);
@@ -125,9 +125,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["V"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["V"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["V"] = 30 })
+            new(1, new Dictionary<string, object?> { ["V"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["V"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["V"] = 30 })
         };
 
         IQueryOperator op = new SkipOperator(new TableScanOperator(input), 2);
@@ -143,15 +143,15 @@ public class VolcanoOperatorTests
     {
         var leftRows = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["CustomerId"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["CustomerId"] = 11 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["CustomerId"] = 99 })
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["CustomerId"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["CustomerId"] = 11 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["CustomerId"] = 99 })
         };
 
         var rightRows = new List<ExecutionRow>
         {
-            new(10, new Dictionary<string, dynamic> { ["Id"] = 10, ["Name"] = "Alice" }),
-            new(11, new Dictionary<string, dynamic> { ["Id"] = 11, ["Name"] = "Bob" })
+            new(10, new Dictionary<string, object?> { ["Id"] = 10, ["Name"] = "Alice" }),
+            new(11, new Dictionary<string, object?> { ["Id"] = 11, ["Name"] = "Bob" })
         };
 
         IQueryOperator leftScan = new TableScanOperator(leftRows);
@@ -172,15 +172,15 @@ public class VolcanoOperatorTests
     {
         var leftRows = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["CustomerId"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["CustomerId"] = 11 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["CustomerId"] = 99 })
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["CustomerId"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["CustomerId"] = 11 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["CustomerId"] = 99 })
         };
 
         var rightRows = new List<ExecutionRow>
         {
-            new(10, new Dictionary<string, dynamic> { ["Id"] = 10, ["Name"] = "Alice" }),
-            new(11, new Dictionary<string, dynamic> { ["Id"] = 11, ["Name"] = "Bob" })
+            new(10, new Dictionary<string, object?> { ["Id"] = 10, ["Name"] = "Alice" }),
+            new(11, new Dictionary<string, object?> { ["Id"] = 11, ["Name"] = "Bob" })
         };
 
         IQueryOperator leftScan = new TableScanOperator(leftRows);
@@ -201,9 +201,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 70 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 90 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 80 })
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Score"] = 70 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Score"] = 90 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["Score"] = 80 })
         };
 
         IQueryOperator scan = new TableScanOperator(input);
@@ -222,9 +222,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["A"] = 1, ["B"] = 2, ["Id"] = 1 }),
-            new(2, new Dictionary<string, dynamic> { ["A"] = 1, ["B"] = 1, ["Id"] = 2 }),
-            new(3, new Dictionary<string, dynamic> { ["A"] = 2, ["B"] = 0, ["Id"] = 3 })
+            new(1, new Dictionary<string, object?> { ["A"] = 1, ["B"] = 2, ["Id"] = 1 }),
+            new(2, new Dictionary<string, object?> { ["A"] = 1, ["B"] = 1, ["Id"] = 2 }),
+            new(3, new Dictionary<string, object?> { ["A"] = 2, ["B"] = 0, ["Id"] = 3 })
         };
 
         IQueryOperator sort = new SortOperator(
@@ -247,9 +247,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 40 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 10 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 30 })
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Score"] = 40 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Score"] = 10 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["Score"] = 30 })
         };
 
         IQueryOperator sort = new SortOperator(
@@ -269,10 +269,10 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 40 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 10 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 30 }),
-            new(4, new Dictionary<string, dynamic> { ["Id"] = 4, ["Score"] = 20 }),
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Score"] = 40 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Score"] = 10 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["Score"] = 30 }),
+            new(4, new Dictionary<string, object?> { ["Id"] = 4, ["Score"] = 20 }),
         };
 
         IQueryOperator sort = new SortOperator(
@@ -288,10 +288,10 @@ public class VolcanoOperatorTests
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(sort);
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(2, (int)rows[0]["Id"]);
-        Assert.Equal(4, (int)rows[1]["Id"]);
-        Assert.Equal(3, (int)rows[2]["Id"]);
-        Assert.Equal(1, (int)rows[3]["Id"]);
+        Assert.Equal(2, Convert.ToInt32(rows[0]["Id"]));
+        Assert.Equal(4, Convert.ToInt32(rows[1]["Id"]));
+        Assert.Equal(3, Convert.ToInt32(rows[2]["Id"]));
+        Assert.Equal(1, Convert.ToInt32(rows[3]["Id"]));
     }
 
     [Fact]
@@ -299,10 +299,10 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Score"] = 40 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Score"] = 10 }),
-            new(3, new Dictionary<string, dynamic> { ["Id"] = 3, ["Score"] = 30 }),
-            new(4, new Dictionary<string, dynamic> { ["Id"] = 4, ["Score"] = 20 }),
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Score"] = 40 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Score"] = 10 }),
+            new(3, new Dictionary<string, object?> { ["Id"] = 3, ["Score"] = 30 }),
+            new(4, new Dictionary<string, object?> { ["Id"] = 4, ["Score"] = 20 }),
         };
 
         IQueryOperator sort = new SortOperator(
@@ -318,10 +318,10 @@ public class VolcanoOperatorTests
         List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(sort);
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(2, (int)rows[0]["Id"]);
-        Assert.Equal(4, (int)rows[1]["Id"]);
-        Assert.Equal(3, (int)rows[2]["Id"]);
-        Assert.Equal(1, (int)rows[3]["Id"]);
+        Assert.Equal(2, Convert.ToInt32(rows[0]["Id"]));
+        Assert.Equal(4, Convert.ToInt32(rows[1]["Id"]));
+        Assert.Equal(3, Convert.ToInt32(rows[2]["Id"]));
+        Assert.Equal(1, Convert.ToInt32(rows[3]["Id"]));
     }
 
     [Fact]
@@ -329,9 +329,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 1 }),
-            new(2, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 2 }),
-            new(3, new Dictionary<string, dynamic> { ["Name"] = "B", ["Score"] = 3 })
+            new(1, new Dictionary<string, object?> { ["Name"] = "A", ["Score"] = 1 }),
+            new(2, new Dictionary<string, object?> { ["Name"] = "A", ["Score"] = 2 }),
+            new(3, new Dictionary<string, object?> { ["Name"] = "B", ["Score"] = 3 })
         };
 
         IQueryOperator op = new DistinctOperator(
@@ -350,9 +350,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 1 }),
-            new(2, new Dictionary<string, dynamic> { ["Name"] = "A", ["Score"] = 2 }),
-            new(3, new Dictionary<string, dynamic> { ["Name"] = "B", ["Score"] = 3 })
+            new(1, new Dictionary<string, object?> { ["Name"] = "A", ["Score"] = 1 }),
+            new(2, new Dictionary<string, object?> { ["Name"] = "A", ["Score"] = 2 }),
+            new(3, new Dictionary<string, object?> { ["Name"] = "B", ["Score"] = 3 })
         };
 
         IQueryOperator op = new DistinctOperator(
@@ -371,8 +371,8 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Id"] = 1, ["Name"] = "A", ["Score"] = 50 }),
-            new(2, new Dictionary<string, dynamic> { ["Id"] = 2, ["Name"] = "B", ["Score"] = 95 }),
+            new(1, new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "A", ["Score"] = 50 }),
+            new(2, new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "B", ["Score"] = 95 }),
         };
 
         IQueryOperator op = new ProjectOperator(
@@ -396,9 +396,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
+            new(1, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 7 }),
         };
 
         IQueryOperator op = new HashAggregateOperator(
@@ -431,9 +431,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
+            new(1, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 7 }),
         };
 
         IQueryOperator op = new HashAggregateOperator(
@@ -463,9 +463,9 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["V"] = 42 }),
-            new(2, new Dictionary<string, dynamic> { ["V"] = 5 }),
-            new(3, new Dictionary<string, dynamic> { ["V"] = 19 }),
+            new(1, new Dictionary<string, object?> { ["V"] = 42 }),
+            new(2, new Dictionary<string, object?> { ["V"] = 5 }),
+            new(3, new Dictionary<string, object?> { ["V"] = 19 }),
         };
 
         IQueryOperator op = new HashAggregateOperator(
@@ -488,10 +488,10 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
-            new(4, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 9 }),
+            new(1, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 7 }),
+            new(4, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 9 }),
         };
 
         IQueryOperator op = new HashAggregateOperator(
@@ -530,12 +530,12 @@ public class VolcanoOperatorTests
     {
         var input = new List<ExecutionRow>
         {
-            new(1, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 10 }),
-            new(2, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 20 }),
-            new(3, new Dictionary<string, dynamic> { ["Category"] = "A", ["Amount"] = 30 }),
-            new(4, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 7 }),
-            new(5, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 9 }),
-            new(6, new Dictionary<string, dynamic> { ["Category"] = "B", ["Amount"] = 14 }),
+            new(1, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 10 }),
+            new(2, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 20 }),
+            new(3, new Dictionary<string, object?> { ["Category"] = "A", ["Amount"] = 30 }),
+            new(4, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 7 }),
+            new(5, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 9 }),
+            new(6, new Dictionary<string, object?> { ["Category"] = "B", ["Amount"] = 14 }),
         };
 
         IQueryOperator op = new HashAggregateOperator(
@@ -572,7 +572,7 @@ public class VolcanoOperatorTests
     [Fact]
     public void ExecutionRow_TypedCarrier_RoundTripPreservesValues()
     {
-        var row = new ExecutionRow(7, new Dictionary<string, dynamic>
+        var row = new ExecutionRow(7, new Dictionary<string, object?>
         {
             ["Id"] = 7,
             ["Name"] = "Alice",

@@ -3,7 +3,7 @@
 > **Date:** 2026-03-28  
 > **Scope:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`  
 > **Reviewer:** Antigravity (automated deep-read analysis)  
-> **Last updated:** 2026-03-29 — Phase 17 typed transaction row-buffer foundation
+> **Last updated:** 2026-03-29 — Phase 21 auth/authz baseline + Select decomposition expansion
 
 ---
 
@@ -20,10 +20,10 @@
 | 2.7  | 🔴 Critical | ABBA deadlock between version lock and file lock             | ✅ **Fixed**   | `VacuumTable` no longer holds version write lock during storage lookups                                                 |
 | 2.8  | 🔴 Critical | Transaction IDs reset to 1 on restart                        | ✅ **Fixed**   | High-water mark persisted/restored via state file                                                                       |
 | 2.9  | 🔴 Critical | `CreateTable` is a no-op                                     | ✅ **Fixed**   | Disk mode now eagerly materializes table file/header during `CreateTable`                                               |
-| 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ✅ **Started** | Transaction buffer/WAL pipeline now uses typed `Dictionary<string, object?>` row maps as first migration slice         |
-| 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ⬜ Pending     | Large-scale refactor                                                                                                    |
+| 3.1  | 🟠 Major    | `dynamic` as universal row type                              | ✅ **Fixed**   | Production row-map contracts migrated to `Dictionary<string, object?>` across parser/executor/storage/data boundaries   |
+| 3.2  | 🟠 Major    | `Select.cs` 4 410-line god class                             | ✅ **Started** | Projection plus window/HAVING/value-resolution slices extracted into dedicated partial classes                           |
 | 3.3  | 🟠 Major    | Bare `catch {}` blocks suppress errors                       | ✅ **Fixed**   | Production scope audit shows no bare catches in `DataVo.Core` / `DataVo.Data` / `DataVo.EntityFrameworkCore`            |
-| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Started** | Expanded migration across parser/DDL/evaluator hot paths to `CatalogException`/`BindingException`/`EvaluationException` |
+| 3.4  | 🟠 Major    | `throw new Exception(...)` everywhere                        | ✅ **Fixed**   | Production scope now uses domain exceptions (`CatalogException`/`BindingException`/`EvaluationException`/`IndexException`) |
 | 3.5  | 🟠 Major    | `IndexManager._cache` typed as `object`                      | ✅ **Fixed**   | Cache now stores `IIndexBase` and validates factory/persistence outputs                                                 |
 | 3.6  | 🟠 Major    | No deadlock detection or lock timeout                        | ✅ **Fixed**   | Added wait-for graph cycle detection + deadlock diagnostics + timeout fallback                                          |
 | 3.7  | 🟠 Major    | Table locks never cleaned from `_tableLocks`                 | ✅ **Fixed**   | Reference-counted lifecycle cleanup and disposal                                                                        |
@@ -41,7 +41,7 @@
 | 4.7  | 🟡 Minor    | Undocumented `tableKey` overloads                            | ✅ **Fixed**   | Added XML docs clarifying pre-composed `{database}.{table}` overload contract                                           |
 | 4.8  | 🟡 Minor    | Parser silently skips unknown tokens                         | ✅ **Fixed**   | Unexpected tokens now throw `ParserException`                                                                           |
 | 4.9  | 🟡 Minor    | `CompactTable` resets RowIds without enforcing rebuild       | ✅ **Fixed**   | Compaction now blocks indexed tables unless caller explicitly opts in and rebuilds indexes                              |
-| 4.10 | 🟡 Minor    | No authentication/authorization                              | ⬜ Pending     | Feature-level effort                                                                                                    |
+| 4.10 | 🟡 Minor    | No authentication/authorization                              | ✅ **Started** | Engine/session authz baseline added (roles, login/logout API, central permission gates, regression tests)             |
 | 4.11 | 🟡 Minor    | `DataVoTransaction` missing savepoint support                | ✅ **Fixed**   | SQL savepoint grammar + transaction snapshots + ADO transaction savepoint APIs                                          |
 | 4.12 | 🟡 Minor    | WAL `TransactionId` (Guid) disconnected from MVCC (long)     | ✅ **Fixed**   | WAL now carries/replays `MvccTransactionId` and restores allocator floor                                                |
 | 4.13 | 🟡 Minor    | Static cardinality feedback dict grows without eviction      | ✅ **Fixed**   | Join-cardinality feedback now trims to configured max entries before persistence                                        |
@@ -51,21 +51,21 @@
 
 | Metric                    | Value                                                                  |
 | ------------------------- | ---------------------------------------------------------------------- |
-| **Total issues**          | 33                                                                     |
-| **Fixed**                 | 30 (91%)                                                               |
+| **Total issues**          | 35                                                                     |
+| **Fixed**                 | 32 (91%)                                                               |
 | **Partially fixed**       | 2 (6%)                                                                 |
-| **Pending**               | 1 (3%)                                                                 |
+| **Pending**               | 0 (0%)                                                                 |
 | **New tests added**       | Audit-focused + lock/WAL/index/deadlock regression tests (all passing) |
-| **Current full test run** | ✅ 699/699 passing (`dotnet test DataVo.Tests`)                        |
+| **Current full test run** | ✅ 718/718 passing (`dotnet test DataVo.Tests`)                        |
 
 ### Epic Progress Overview
 
 | Epic        | Scope                    | Fixed | Started | Pending | Completion          |
 | ----------- | ------------------------ | ----- | ------- | ------- | ------------------- |
 | **Epic 2**  | Critical Issues (`2.x`)  | 9/9   | 0/9     | 0/9     | **100%**            |
-| **Epic 3**  | Major Issues (`3.x`)     | 9/12  | 2/12    | 1/12    | **75% fully fixed** |
-| **Epic 4**  | Minor Issues (`4.x`)     | 13/14 | 0/14    | 1/14    | **93%**             |
-| **Overall** | Audit Issues (`2.x-4.x`) | 30/33 | 2/33    | 1/33    | **91% fully fixed** |
+| **Epic 3**  | Major Issues (`3.x`)     | 11/12 | 1/12    | 0/12    | **92% fully fixed** |
+| **Epic 4**  | Minor Issues (`4.x`)     | 13/14 | 1/14    | 0/14    | **93%**             |
+| **Overall** | Audit Issues (`2.x-4.x`) | 32/35 | 2/35    | 0/35    | **91% fully fixed** |
 
 ---
 
@@ -175,20 +175,19 @@ DataVo is an impressively structured database engine for a learning/research pro
 
 ## 3. Major Issues
 
-### 3.1 — Pervasive use of `dynamic` as the row representation ✅ STARTED
+### 3.1 — Pervasive use of `dynamic` as the row representation ✅ FIXED
 
-`Dictionary<string, dynamic>` remains widespread, but the migration has begun with a typed foundation in the transaction path.
+Production row-map contracts have been migrated from `Dictionary<string, dynamic>` to `Dictionary<string, object?>` across query result carriers, parser DML/DQL flows, volcano operators, storage context, serialization, indexing key extraction, transaction buffering, and commit/WAL replay boundaries.
 
-**Phase 17 slice:**
-- `TransactionContext` buffered insert/update maps now use `Dictionary<string, object?>`
-- transactional DML buffering paths now normalize dynamic rows into typed object maps
-- commit/WAL replay paths now consume typed row maps and adapt at storage/index boundaries
+`dynamic` is no longer used as the universal row representation in production scope (`DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`).
 
-Remaining work still requires introducing a canonical typed value abstraction (for example `DbValue`) and incrementally migrating planner/executor/storage row contracts.
+Follow-up hardening (optional, non-blocking): introduce a canonical value wrapper (for example `DbValue`) for stricter semantics and reduced runtime conversion overhead.
 
-### 3.2 — `Select.cs` is a 4 410-line god class ⬜
+### 3.2 — `Select.cs` is a 4 410-line god class ✅ STARTED
 
-Needs decomposition into separate planner, executor, and optimizer components.
+Phase 19-20 decomposition has extracted output projection plus window/HAVING/value-resolution responsibilities into dedicated partials (`Select.Projection.cs`, `Select.WindowHaving.cs`).
+
+Follow-up slices should continue splitting planner selection, predicate evaluation, and volcano pipeline assembly into focused collaborators while preserving current hot-path behavior.
 
 ### 3.3 — ~~Bare `catch {}` blocks suppress real errors~~ ✅ FIXED
 
@@ -196,15 +195,9 @@ Needs decomposition into separate planner, executor, and optimizer components.
 
 **Fix verification:** repository-wide audit confirms no bare `catch {}` blocks remain in production scope. Remaining bare catches are limited to test cleanup code paths.
 
-### 3.4 — `throw new Exception(...)` used universally ✅ STARTED
+### 3.4 — ~~`throw new Exception(...)` used universally~~ ✅ FIXED
 
-**Fix applied:** Domain exception hierarchy now used in additional runtime paths:
-
-- `CatalogStore` migrated generic schema failures to `CatalogException`
-- `TableService` migrated binding failures to `BindingException`
-- `IndexManager` migrated missing-index failures to `IndexException`
-
-Remaining generic throw sites still need incremental migration.
+**Fix applied:** production scope (`DataVo.Core`) no longer uses `throw new Exception(...)` and now routes failures through domain exception types (`CatalogException`, `BindingException`, `EvaluationException`, `IndexException`).
 
 ### 3.5 — ~~`IndexManager._cache` typed as `Dictionary<string, object>`~~ ✅ FIXED
 
@@ -304,7 +297,11 @@ Remaining generic throw sites still need incremental migration.
 
 **Fix applied:** storage compaction now rejects indexed tables unless caller explicitly opts in (`allowIndexedCompaction=true`) and handles rebuild; VACUUM opts in and immediately rebuilds all indexes.
 
-### 4.10 — No authentication/authorization ⬜
+### 4.10 — No authentication/authorization ✅ STARTED
+
+Baseline auth/authz is now present: configuration-driven users/roles, session login/logout API, central permission enforcement in the action execution flow, and principal propagation for internal subquery execution.
+
+Remaining work: SQL-level user/role DDL, secure password hashing/storage, per-database/object grants, and transport/session-boundary integration.
 
 ### 4.11 — ~~`DataVoTransaction` missing savepoint support~~ ✅ FIXED
 

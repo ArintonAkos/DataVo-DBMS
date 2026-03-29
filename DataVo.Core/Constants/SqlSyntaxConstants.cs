@@ -66,6 +66,18 @@ public static class SqlKeywords
     /// </summary>
     public const string TABLES = "TABLES";
     /// <summary>
+    /// Represents the SQL USERS keyword.
+    /// </summary>
+    public const string USERS = "USERS";
+    /// <summary>
+    /// Represents the SQL ROLES keyword.
+    /// </summary>
+    public const string ROLES = "ROLES";
+    /// <summary>
+    /// Represents the SQL GRANTS keyword.
+    /// </summary>
+    public const string GRANTS = "GRANTS";
+    /// <summary>
     /// Represents the SQL DESCRIBE keyword.
     /// </summary>
     public const string DESCRIBE = "DESCRIBE";
@@ -307,11 +319,63 @@ public static class SqlKeywords
     /// Represents the SQL TO keyword.
     /// </summary>
     public const string TO = "TO";
+    /// <summary>
+    /// Represents the SQL FOR keyword.
+    /// </summary>
+    public const string FOR = "FOR";
 
     /// <summary>
     /// Represents the SQL USING keyword.
     /// </summary>
     public const string USING = "USING";
+    /// <summary>
+    /// Represents the SQL USER keyword.
+    /// </summary>
+    public const string USER = "USER";
+    /// <summary>
+    /// Represents the SQL ROLE keyword.
+    /// </summary>
+    public const string ROLE = "ROLE";
+    /// <summary>
+    /// Represents the SQL GRANT keyword.
+    /// </summary>
+    public const string GRANT = "GRANT";
+    /// <summary>
+    /// Represents the SQL REVOKE keyword.
+    /// </summary>
+    public const string REVOKE = "REVOKE";
+    /// <summary>
+    /// Represents the SQL IDENTIFIED keyword.
+    /// </summary>
+    public const string IDENTIFIED = "IDENTIFIED";
+    /// <summary>
+    /// Represents the SQL LOGIN keyword.
+    /// </summary>
+    public const string LOGIN = "LOGIN";
+    /// <summary>
+    /// Represents the SQL LOGOUT keyword.
+    /// </summary>
+    public const string LOGOUT = "LOGOUT";
+    /// <summary>
+    /// Represents the SQL READ keyword.
+    /// </summary>
+    public const string READ = "READ";
+    /// <summary>
+    /// Represents the SQL WRITE keyword.
+    /// </summary>
+    public const string WRITE = "WRITE";
+    /// <summary>
+    /// Represents the SQL SCHEMA keyword.
+    /// </summary>
+    public const string SCHEMA = "SCHEMA";
+    /// <summary>
+    /// Represents the SQL SECURITY keyword.
+    /// </summary>
+    public const string SECURITY = "SECURITY";
+    /// <summary>
+    /// Represents the SQL PASSWORD keyword.
+    /// </summary>
+    public const string PASSWORD = "PASSWORD";
     /// <summary>
     /// Represents the SQL HNSW keyword.
     /// </summary>
@@ -332,7 +396,7 @@ public static class SqlKeywords
         LIMIT, OFFSET, IN, BETWEEN, LIKE, UNION, ALL, IF, EXISTS, COLUMN,
         VACUUM, CASCADE, RESTRICT, IS, NOT_KEYWORD, NULL,
         BEGIN, TRANSACTION, COMMIT, ROLLBACK, SAVEPOINT, RELEASE, TO,
-        USING, HNSW
+        USING, GRANT, REVOKE, LOGIN, LOGOUT, HNSW
     ];
 }
 

@@ -72,12 +72,12 @@ public class Join
 
         if (tableCount == 0)
         {
-            throw new Exception("JOIN expression must contain at least one table! Cannot deduce table origin.");
+            throw new BindingException("JOIN expression must contain at least one table! Cannot deduce table origin.");
         }
 
         if (tableCount > 1)
         {
-            throw new Exception("Couldn't JOIN already joined tables!");
+            throw new BindingException("Couldn't JOIN already joined tables!");
         }
 
         string joinFrom = string.IsNullOrEmpty(baseTableName) ? tableRows.First().Value.Keys.First() : baseTableName;
@@ -120,7 +120,7 @@ public class Join
 
             if (!progressed)
             {
-                throw new Exception("Error while joining tables!");
+                throw new EvaluationException("Error while joining tables!");
             }
         }
 

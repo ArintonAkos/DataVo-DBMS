@@ -1,4 +1,5 @@
 using DataVo.Core.Logging;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
 using DataVo.Core.Parser.Actions;
@@ -178,7 +179,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                     if (childFk.OnDeleteAction == "RESTRICT")
                     {
-                        throw new Exception(
+                        throw new EvaluationException(
                             $"Foreign key violation: Cannot delete from {tableName} — " +
                             $"{childRowIds.Count} row(s) in {childFk.ChildTable}.{childFk.ChildColumn} " +
                             $"reference {childFk.ParentColumn} = {parentKeyStr}.");

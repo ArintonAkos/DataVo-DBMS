@@ -15,10 +15,10 @@ internal class ShowTables : BaseDbAction
             Fields.Add("TableName");
 
             Catalog.GetTables(databaseName)
-                .ForEach(tableName => Data.Add(new Dictionary<string, dynamic>
-                {
-                    ["TableName"] = tableName,
-                }));
+                    .ForEach(tableName => Data.Add(new Dictionary<string, object?>
+                    {
+                        ["TableName"] = tableName,
+                    }));
         }
         catch (Exception ex)
         {

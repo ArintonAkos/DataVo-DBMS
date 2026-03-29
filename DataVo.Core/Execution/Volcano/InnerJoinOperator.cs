@@ -130,7 +130,7 @@ public sealed class InnerJoinOperator : IQueryOperator
     private ExecutionRow MergeRows(TypedExecutionRow leftRow, TypedExecutionRow rightRow)
     {
         int estimatedCapacity = leftRow.Values.Count + rightRow.Values.Count;
-        var values = new Dictionary<string, dynamic>(Math.Max(estimatedCapacity, 1));
+        var values = new Dictionary<string, object?>(Math.Max(estimatedCapacity, 1));
 
         foreach (var cell in leftRow.Values)
         {

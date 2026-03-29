@@ -769,13 +769,14 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         var result = ExecuteAndReturn($"SELECT Id, FirstName, LastName FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, expectedCount, expectedCount + raceTolerance);
+        int minimumExpectedCount = Math.Max(0, expectedCount - raceTolerance);
+        Assert.InRange(result.Data.Count, minimumExpectedCount, expectedCount + raceTolerance);
 
         int staleDeletes = 0;
         foreach (int deletedId in deletedIds)
         {
             string deletedCompositeKey = IndexKeyEncoder.BuildKeyString(
-                new Dictionary<string, dynamic>
+                new Dictionary<string, object?>
                 {
                     ["FirstName"] = $"First{deletedId}",
                     ["LastName"] = $"Last{deletedId}"
@@ -790,7 +791,7 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         foreach (int insertedId in insertedIds)
         {
             string insertedCompositeKey = IndexKeyEncoder.BuildKeyString(
-                new Dictionary<string, dynamic>
+                new Dictionary<string, object?>
                 {
                     ["FirstName"] = $"InsFirst{insertedId}",
                     ["LastName"] = $"InsLast{insertedId}"

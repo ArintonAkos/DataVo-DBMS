@@ -491,6 +491,36 @@ public sealed class SortOperator : IQueryOperator
 
     private static object? NormalizeDeserializedValue(object? value)
     {
+        if (value is double d)
+        {
+            if (d >= int.MinValue && d <= int.MaxValue && Math.Abs(d % 1d) < double.Epsilon)
+            {
+                return (int)d;
+            }
+
+            if (d >= long.MinValue && d <= long.MaxValue && Math.Abs(d % 1d) < double.Epsilon)
+            {
+                return (long)d;
+            }
+
+            return d;
+        }
+
+        if (value is float f)
+        {
+            if (f >= int.MinValue && f <= int.MaxValue && Math.Abs(f % 1f) < float.Epsilon)
+            {
+                return (int)f;
+            }
+
+            if (f >= long.MinValue && f <= long.MaxValue && Math.Abs(f % 1f) < float.Epsilon)
+            {
+                return (long)f;
+            }
+
+            return f;
+        }
+
         if (value is not JsonElement element)
         {
             return value;
@@ -502,9 +532,11 @@ public sealed class SortOperator : IQueryOperator
             JsonValueKind.String => element.GetString(),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            JsonValueKind.Number => element.TryGetInt64(out long int64)
-                ? int64
-                : element.GetDouble(),
+            JsonValueKind.Number => element.TryGetInt32(out int int32)
+                ? int32
+                : element.TryGetInt64(out long int64)
+                    ? int64
+                    : element.GetDouble(),
             _ => element.ToString()
         };
     }

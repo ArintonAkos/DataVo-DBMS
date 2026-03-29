@@ -1,4 +1,5 @@
 using DataVo.Core.BTree;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Models.DML;
@@ -61,7 +62,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "UPDATE");
                 }
 
-                (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+                (List<Dictionary<string, object?>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
                 for (int i = 0; i < newRows.Count; i++)
                 {
@@ -88,7 +89,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 try
                 {
                     List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
-                    Dictionary<long, Dictionary<string, dynamic>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
+                    Dictionary<long, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
 
                     if (revalidatedRows.Count == 0)
                     {
@@ -96,7 +97,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     }
                     else
                     {
-                        (List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
+                        (List<Dictionary<string, object?>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
 
                         foreach (long rowId in oldRowIds)
                         {
@@ -210,11 +211,11 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <param name="existingRows">Dictionary of existing row IDs mapping to old row data.</param>
     /// <param name="databaseName">The active database name.</param>
     /// <returns>A tuple containing the newly evaluated rows and the corresponding old row IDs.</returns>
-    private (List<Dictionary<string, dynamic>> NewRows, List<long> OldRowIds) EvaluateAndVerifyConstraints(
-        Dictionary<long, Dictionary<string, dynamic>> existingRows,
+    private (List<Dictionary<string, object?>> NewRows, List<long> OldRowIds) EvaluateAndVerifyConstraints(
+        Dictionary<long, Dictionary<string, object?>> existingRows,
         string databaseName)
     {
-        List<Dictionary<string, dynamic>> newRows = new(existingRows.Count);
+        List<Dictionary<string, object?>> newRows = new(existingRows.Count);
         List<long> oldRowIds = new(existingRows.Count);
 
         var primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
@@ -263,9 +264,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <param name="oldRow">The original row record.</param>
     /// <param name="databaseName">The active database name used for subquery materialization in SET expressions.</param>
     /// <returns>A new dictionary representing the modified row.</returns>
-    private Dictionary<string, dynamic> ApplySetExpressions(Dictionary<string, dynamic> oldRow, string databaseName)
+    private Dictionary<string, object?> ApplySetExpressions(Dictionary<string, object?> oldRow, string databaseName)
     {
-        var newRow = new Dictionary<string, dynamic>(oldRow);
+        var newRow = new Dictionary<string, object?>(oldRow);
 
         Dictionary<string, ExpressionNode> setExpressions = GetMaterializedSetExpressions(databaseName);
 
@@ -289,8 +290,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Validates that the newly assigned values do not violate Primary Key or Unique Key constraints.
     /// </summary>
     private void ValidatePrimaryAndUniqueConstraints(
-        Dictionary<string, dynamic> newRow,
-        Dictionary<string, dynamic> oldRow,
+        Dictionary<string, object?> newRow,
+        Dictionary<string, object?> oldRow,
         List<string> primaryKeys,
         List<string> uniqueKeys,
         Dictionary<string, HashSet<string>> batchUniqueValues,
@@ -303,7 +304,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             {
                 if (val == null && primaryKeys.Contains(col))
                 {
-                    throw new Exception($"Constraint violation: Primary key column {col} cannot be null in row {rowNumber}.");
+                    throw new EvaluationException($"Constraint violation: Primary key column {col} cannot be null in row {rowNumber}.");
                 }
 
                 if (val == null) continue; // Unique keys can be null
@@ -316,7 +317,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 if (!batchUniqueValues[col].Add(valStr))
                 {
-                    throw new Exception($"Update conflict: Duplicate value '{valStr}' generated within the same batch for unique column {col}.");
+                    throw new EvaluationException($"Update conflict: Duplicate value '{valStr}' generated within the same batch for unique column {col}.");
                 }
 
                 string indexName = primaryKeys.Contains(col) ? $"_PK_{_model.TableName}" : $"_UK_{col}";
@@ -342,7 +343,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 if (duplicateExists)
                 {
-                    throw new Exception($"Constraint violation: Duplicate value '{valStr}' for unique column {col} in row {rowNumber}.");
+                    throw new EvaluationException($"Constraint violation: Duplicate value '{valStr}' for unique column {col} in row {rowNumber}.");
                 }
             }
         }
@@ -352,8 +353,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Validates that any updated foreign key column correctly references an existing parent Primary Key.
     /// </summary>
     private static void ValidateForeignKeyConstraints(
-        Dictionary<string, dynamic> newRow,
-        Dictionary<string, dynamic> oldRow,
+        Dictionary<string, object?> newRow,
+        Dictionary<string, object?> oldRow,
         List<ForeignKey> foreignKeysList,
         int rowNumber,
         string databaseName)
@@ -369,7 +370,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 {
                     if (!CheckForeignKeyConstraint(fk, fkValStr, databaseName))
                     {
-                        throw new Exception($"Foreign key violation: Value '{fkValStr}' perfectly validates against references in row {rowNumber}.");
+                        throw new EvaluationException($"Foreign key violation: Value '{fkValStr}' perfectly validates against references in row {rowNumber}.");
                     }
                 }
             }
@@ -380,8 +381,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Validates that if a Primary Key is modified, it does not orphans records in child tables (RESTRICT enforcement).
     /// </summary>
     private void ValidateChildForeignKeyConstraints(
-        Dictionary<string, dynamic> newRow,
-        Dictionary<string, dynamic> oldRow,
+        Dictionary<string, object?> newRow,
+        Dictionary<string, object?> oldRow,
         List<(string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)> childFks,
         string databaseName)
     {
@@ -411,7 +412,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 if (childRowIds.Count > 0)
                 {
-                    throw new Exception($"Foreign key violation: Cannot update {childFk.ParentColumn} ('{oldParentValStr}' -> '{newParentValStr}') in {_model.TableName} because {childRowIds.Count} row(s) in {childFk.ChildTable} depend on it.");
+                    throw new EvaluationException($"Foreign key violation: Cannot update {childFk.ParentColumn} ('{oldParentValStr}' -> '{newParentValStr}') in {_model.TableName} because {childRowIds.Count} row(s) in {childFk.ChildTable} depend on it.");
                 }
             }
         }
@@ -422,7 +423,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Old records are deleted, and new records are inserted with identical RowIds or newly allocated ones.
     /// Index structures are purged and updated as well.
     /// </summary>
-    private void ExecuteUpdate(List<Dictionary<string, dynamic>> newRows, List<long> oldRowIds, string databaseName, long statementTxId)
+    private void ExecuteUpdate(List<Dictionary<string, object?>> newRows, List<long> oldRowIds, string databaseName, long statementTxId)
     {
         var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
 
@@ -475,13 +476,13 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 {
                     if (index.AttributeNames.Count != 1)
                     {
-                        throw new Exception($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+                        throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
                     }
 
                     string vectorColumn = index.AttributeNames[0];
                     if (!VectorParser.TryCoerceToVector(newRow[vectorColumn], out float[] vector))
                     {
-                        throw new Exception($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                        throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
                     }
 
                     Indexes.InsertIntoVectorIndex(vector, assignedRowId, indexName, _model.TableName, databaseName, indexKind);

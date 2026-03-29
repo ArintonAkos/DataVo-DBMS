@@ -75,6 +75,38 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
+    /// Authenticates the current <see cref="SessionId"/> against configured users.
+    /// </summary>
+    public bool Login(string username, string password)
+    {
+        return Login(username, password, SessionId);
+    }
+
+    /// <summary>
+    /// Authenticates a specific session against configured users.
+    /// </summary>
+    public bool Login(string username, string password, Guid sessionId)
+    {
+        return Engine.AuthenticateSession(sessionId, username, password);
+    }
+
+    /// <summary>
+    /// Clears the authenticated principal bound to the current <see cref="SessionId"/>.
+    /// </summary>
+    public void Logout()
+    {
+        Logout(SessionId);
+    }
+
+    /// <summary>
+    /// Clears the authenticated principal bound to a specific session.
+    /// </summary>
+    public void Logout(Guid sessionId)
+    {
+        Engine.LogoutSession(sessionId);
+    }
+
+    /// <summary>
     /// Executes a nearest-neighbor vector search using an HNSW index in the current session database.
     /// </summary>
     /// <param name="tableName">The table containing the indexed vector column.</param>
@@ -82,7 +114,7 @@ public sealed class DataVoContext : IDisposable
     /// <param name="queryVector">The query vector.</param>
     /// <param name="topK">The number of nearest rows to return.</param>
     /// <returns>The matching table rows in ranked order.</returns>
-    public List<Dictionary<string, dynamic>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
+    public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
     {
         string databaseName = ResolveCurrentDatabase();
         using var _ = DataVoEngine.PushCurrent(Engine);
@@ -94,7 +126,7 @@ public sealed class DataVoContext : IDisposable
             return [];
         }
 
-        Dictionary<long, Dictionary<string, dynamic>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
+        Dictionary<long, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
         return rowIds
             .Where(rows.ContainsKey)
             .Select(id => rows[id])
@@ -104,7 +136,7 @@ public sealed class DataVoContext : IDisposable
     /// <summary>
     /// Executes a nearest-neighbor vector search using a vector literal formatted as <c>[x,y,z]</c>.
     /// </summary>
-    public List<Dictionary<string, dynamic>> SearchNearest(string tableName, string indexName, string queryVector, int topK = 10)
+    public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, string queryVector, int topK = 10)
     {
         if (!VectorParser.TryParseVector(queryVector, out float[] parsedVector))
         {

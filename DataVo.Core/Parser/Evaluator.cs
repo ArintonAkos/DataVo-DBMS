@@ -87,6 +87,18 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             {
                 currentQueue.Enqueue(BindEngine(new Commands.ShowTables(showTablesAst)));
             }
+            else if (statement is ShowUsersStatement showUsersAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.ShowUsers(showUsersAst)));
+            }
+            else if (statement is ShowRolesStatement showRolesAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.ShowRoles(showRolesAst)));
+            }
+            else if (statement is ShowGrantsStatement showGrantsAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.ShowGrants(showGrantsAst)));
+            }
             else if (statement is DescribeStatement describeAst)
             {
                 currentQueue.Enqueue(BindEngine(new Commands.Describe(describeAst)));
@@ -122,6 +134,38 @@ internal class Evaluator(List<SqlStatement> statements, DataVoEngine? engine = n
             else if (statement is ReleaseSavepointStatement releaseSavepointAst)
             {
                 currentQueue.Enqueue(BindEngine(new ReleaseSavepoint(releaseSavepointAst.SavepointName)));
+            }
+            else if (statement is CreateUserStatement createUserAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.CreateUser(createUserAst)));
+            }
+            else if (statement is DropUserStatement dropUserAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.DropUser(dropUserAst)));
+            }
+            else if (statement is CreateRoleStatement createRoleAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.CreateRole(createRoleAst)));
+            }
+            else if (statement is DropRoleStatement dropRoleAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.DropRole(dropRoleAst)));
+            }
+            else if (statement is GrantStatement grantAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.Grant(grantAst)));
+            }
+            else if (statement is RevokeStatement revokeAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.Revoke(revokeAst)));
+            }
+            else if (statement is LoginStatement loginAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.Login(loginAst)));
+            }
+            else if (statement is LogoutStatement logoutAst)
+            {
+                currentQueue.Enqueue(BindEngine(new Commands.Logout(logoutAst)));
             }
             else
             {

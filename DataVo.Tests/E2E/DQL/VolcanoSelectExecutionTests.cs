@@ -858,7 +858,7 @@ public class VolcanoExternalSpillExecutionTests : SqlExecutionTestsBase
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         Assert.Single(result.Data);
-        Assert.Equal(4, (int)result.Data[0]["Id"]);
+        Assert.Equal(4, Convert.ToInt32(result.Data[0]["Id"]));
     }
 
     [Fact]

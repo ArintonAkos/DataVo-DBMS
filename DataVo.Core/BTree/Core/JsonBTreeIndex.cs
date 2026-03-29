@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using DataVo.Core.BTree.Core;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.BTree;
 
@@ -204,6 +205,6 @@ public class JsonBTreeIndex(int minDegree) : IIndex
 
         string json = File.ReadAllText(filePath);
         return JsonConvert.DeserializeObject<JsonBTreeIndex>(json)
-               ?? throw new Exception($"Failed to deserialize B-Tree index from: {filePath}");
+             ?? throw new IndexException($"Failed to deserialize B-Tree index from: {filePath}");
     }
 }

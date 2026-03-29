@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Utils;
 using DataVo.Core.Parser.AST;
 
@@ -21,7 +22,7 @@ internal class InsertIntoModel(string tableName, List<List<string>> rawRows, Lis
         {
             if (columns.Count > 0 && rowAst.Count != columns.Count)
             {
-                throw new Exception("The number of values provided in a row must be the same as " +
+                throw new BindingException("The number of values provided in a row must be the same as " +
                                     "the number of columns provided inside the paranthesis after the table name attribute.");
             }
 

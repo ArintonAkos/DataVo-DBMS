@@ -163,15 +163,14 @@ internal class Commit : BaseDbAction
 
             foreach (var row in rows)
             {
-                var storageRow = ToDynamicRow(row);
-                long assignedRowId = engine.StorageContext.InsertOneIntoTable(storageRow, tableName, databaseName);
+                long assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
                 MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, assignedRowId, txId);
 
                 foreach (var index in indexFiles)
                 {
                     if (index.AttributeNames.Any(attr => row.TryGetValue(attr, out var v) && v == null)) continue;
 
-                    string indexValue = IndexKeyEncoder.BuildKeyString(storageRow, index.AttributeNames);
+                    string indexValue = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
                     engine.IndexManager.InsertIntoIndex(indexValue, assignedRowId, index.IndexFileName, tableName, databaseName);
                 }
             }
@@ -222,7 +221,7 @@ internal class Commit : BaseDbAction
                 var existingRows = engine.StorageContext.GetTableContents([rowId], tableName, databaseName);
                 if (!existingRows.TryGetValue(rowId, out var oldRow)) continue;
 
-                var newRow = new Dictionary<string, dynamic>(oldRow);
+                var newRow = new Dictionary<string, object?>(oldRow);
                 foreach (var (col, val) in updatedColumns)
                 {
                     newRow[col] = val!;
@@ -246,10 +245,5 @@ internal class Commit : BaseDbAction
                 }
             }
         }
-    }
-
-    private static Dictionary<string, dynamic> ToDynamicRow(Dictionary<string, object?> row)
-    {
-        return row.ToDictionary(pair => pair.Key, pair => (dynamic?)pair.Value, row.Comparer);
     }
 }

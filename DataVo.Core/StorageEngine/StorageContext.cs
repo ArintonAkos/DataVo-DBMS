@@ -18,7 +18,7 @@ namespace DataVo.Core.StorageEngine;
 /// <code>
 /// StorageContext.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
 /// StorageContext context = StorageContext.Instance;
-/// context.InsertOneIntoTable(new Dictionary&lt;string, dynamic&gt; { ["Id"] = 1 }, "Users", "DemoDb");
+/// context.InsertOneIntoTable(new Dictionary&lt;string, object?&gt; { ["Id"] = 1 }, "Users", "DemoDb");
 /// </code>
 /// </example>
 public class StorageContext(DataVoConfig config)
@@ -113,7 +113,7 @@ public class StorageContext(DataVoConfig config)
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The assigned row identifier.</returns>
-    public long InsertOneIntoTable(Dictionary<string, dynamic> row, string tableName, string databaseName)
+    public long InsertOneIntoTable(Dictionary<string, object?> row, string tableName, string databaseName)
     {
         byte[] serializedData = RowSerializer.Serialize(
             databaseName,
@@ -131,7 +131,7 @@ public class StorageContext(DataVoConfig config)
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The assigned row identifiers.</returns>
-    public List<long> InsertIntoTable(List<Dictionary<string, dynamic>> rows, string tableName, string databaseName)
+    public List<long> InsertIntoTable(List<Dictionary<string, object?>> rows, string tableName, string databaseName)
     {
         if (rows.Count == 0) return [];
 
@@ -191,7 +191,7 @@ public class StorageContext(DataVoConfig config)
     /// <param name="tableName">The source table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The selected rows keyed by row identifier.</returns>
-    public Dictionary<long, Dictionary<string, dynamic>> SelectFromTable(List<long>? ids, List<string> requestedColumns,
+    public Dictionary<long, Dictionary<string, object?>> SelectFromTable(List<long>? ids, List<string> requestedColumns,
         string tableName, string databaseName)
     {
         return GetTableContents(ids, tableName, databaseName, NormalizeSelectedColumns(requestedColumns));
@@ -200,7 +200,7 @@ public class StorageContext(DataVoConfig config)
     /// <summary>
     /// Fetches all records from a table, decrypting them from bytes back to typed dictionaries.
     /// </summary>
-    public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(string tableName, string databaseName)
+    public Dictionary<long, Dictionary<string, object?>> GetTableContents(string tableName, string databaseName)
     {
         return GetTableContents(null, tableName, databaseName, null);
     }
@@ -209,7 +209,7 @@ public class StorageContext(DataVoConfig config)
     /// Fetches specific records (via IDs/RowIds) from a table, decrypting them from bytes back to typed dictionaries.
     /// Used heavily by Index-driven querying (B+Tree).
     /// </summary>
-    public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(List<long>? rowIds, string tableName, string databaseName)
+    public Dictionary<long, Dictionary<string, object?>> GetTableContents(List<long>? rowIds, string tableName, string databaseName)
     {
         return GetTableContents(rowIds, tableName, databaseName, null);
     }
@@ -222,18 +222,18 @@ public class StorageContext(DataVoConfig config)
     /// <param name="databaseName">The owning database.</param>
     /// <param name="selectedColumns">The projected columns, or <see langword="null"/> for all columns.</param>
     /// <returns>The materialized rows keyed by row identifier.</returns>
-    public Dictionary<long, Dictionary<string, dynamic>> GetTableContents(List<long>? rowIds, string tableName, string databaseName,
+    public Dictionary<long, Dictionary<string, object?>> GetTableContents(List<long>? rowIds, string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        Dictionary<long, Dictionary<string, dynamic>> rows = rowIds != null
+        Dictionary<long, Dictionary<string, object?>> rows = rowIds != null
             ? ReadRowsById(rowIds, tableName, databaseName, selectedColumns)
             : ReadAllRows(tableName, databaseName, selectedColumns);
 
         return ApplyMvccVisibilityFilter(rows, tableName, databaseName);
     }
 
-    private static Dictionary<long, Dictionary<string, dynamic>> ApplyMvccVisibilityFilter(
-        Dictionary<long, Dictionary<string, dynamic>> rows,
+    private static Dictionary<long, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
+        Dictionary<long, Dictionary<string, object?>> rows,
         string tableName,
         string databaseName)
     {
@@ -305,7 +305,7 @@ public class StorageContext(DataVoConfig config)
     /// <summary>
     /// Serializes a row batch before insertion.
     /// </summary>
-    private List<byte[]> SerializeRows(List<Dictionary<string, dynamic>> rows, string tableName, string databaseName)
+    private List<byte[]> SerializeRows(List<Dictionary<string, object?>> rows, string tableName, string databaseName)
     {
         EngineCatalog catalog = ResolveCatalog();
         string schemaScopeKey = ResolveSerializerSchemaScopeKey();
@@ -334,10 +334,10 @@ public class StorageContext(DataVoConfig config)
     /// <summary>
     /// Reads explicit row identifiers from storage.
     /// </summary>
-    private Dictionary<long, Dictionary<string, dynamic>> ReadRowsById(List<long> rowIds, string tableName, string databaseName,
+    private Dictionary<long, Dictionary<string, object?>> ReadRowsById(List<long> rowIds, string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        var parsedTableData = new Dictionary<long, Dictionary<string, dynamic>>();
+        var parsedTableData = new Dictionary<long, Dictionary<string, object?>>();
 
         if (rowIds.Count == 0)
         {
@@ -362,10 +362,10 @@ public class StorageContext(DataVoConfig config)
     /// <summary>
     /// Reads every live row from the target table.
     /// </summary>
-    private Dictionary<long, Dictionary<string, dynamic>> ReadAllRows(string tableName, string databaseName,
+    private Dictionary<long, Dictionary<string, object?>> ReadAllRows(string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        var parsedTableData = new Dictionary<long, Dictionary<string, dynamic>>();
+        var parsedTableData = new Dictionary<long, Dictionary<string, object?>>();
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {

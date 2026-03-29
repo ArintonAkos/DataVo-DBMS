@@ -1,4 +1,5 @@
 using DataVo.Core.BTree.Core;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.BTree.Binary;
 
@@ -72,7 +73,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public void Insert(string key, long rowId)
     {
-        if (_pager == null) throw new Exception("Index not loaded");
+        if (_pager == null) throw new IndexException("Index not loaded");
 
         BTreePage root = _pager.ReadPage(_pager.RootPageId);
 
@@ -103,7 +104,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public List<long> Search(string key)
     {
-        if (_pager == null) throw new Exception("Index not loaded");
+        if (_pager == null) throw new IndexException("Index not loaded");
 
         var results = new List<long>();
         SearchInternal(_pager.RootPageId, key, results);
@@ -158,7 +159,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// </remarks>
     public void DeleteValues(List<long> rowIds)
     {
-        if (_pager == null) throw new Exception("Index not loaded");
+        if (_pager == null) throw new IndexException("Index not loaded");
         var idsSet = new HashSet<long>(rowIds);
 
         // Tombstone deletion algorithm for performance and simplicity in advanced disk I/O
@@ -190,7 +191,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public bool ContainsValue(long rowId)
     {
-        if (_pager == null) throw new Exception("Index not loaded");
+        if (_pager == null) throw new IndexException("Index not loaded");
 
         for (int i = 1; i < _pager.NumPages; i++)
         {

@@ -6,13 +6,13 @@ namespace DataVo.Core.Execution.Volcano;
 public sealed class ProjectOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
-    private readonly Func<ExecutionRow, Dictionary<string, dynamic>>? _projector;
+    private readonly Func<ExecutionRow, Dictionary<string, object?>>? _projector;
     private readonly Func<TypedExecutionRow, Dictionary<string, object?>>? _typedProjector;
 
     /// <summary>
     /// Initializes a projection operator over a source stream.
     /// </summary>
-    public ProjectOperator(IQueryOperator source, Func<ExecutionRow, Dictionary<string, dynamic>> projector)
+    public ProjectOperator(IQueryOperator source, Func<ExecutionRow, Dictionary<string, object?>> projector)
     {
         _source = source;
         _projector = projector;
