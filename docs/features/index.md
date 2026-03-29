@@ -29,6 +29,9 @@ features:
   - title: Data Modification
     details: Learn how INSERT, UPDATE, DELETE, and VACUUM behave with constraints, rewrites, and physical cleanup.
     link: /features/data-modification
+  - title: Security and Authentication
+    details: Learn principal management, grants, login/logout session behavior, and SHOW introspection commands.
+    link: /features/security-and-authentication
   - title: Schema and DDL
     details: Review CREATE TABLE, CREATE INDEX, and ALTER TABLE support with current guardrails and examples.
     link: /features/schema-and-ddl
@@ -54,11 +57,12 @@ It is separate from the `DataVo.Core` module reference on purpose:
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
 3. [SELECT and Query Features](./select-and-querying.md)
-4. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
-5. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
-6. [DDL and Schema Changes](./schema-and-ddl.md)
-7. [Transactions](./transactions.md)
-8. [Roadmap and Integrations](./roadmap-and-integrations.md)
+4. [Security and Authentication](./security-and-authentication.md)
+5. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
+6. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
+7. [DDL and Schema Changes](./schema-and-ddl.md)
+8. [Transactions](./transactions.md)
+9. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ## Audience
 
@@ -79,6 +83,9 @@ The docs below reflect the currently implemented feature set in the engine, incl
 - uncorrelated subqueries: `IN`, `EXISTS`, scalar subqueries
 - `ALTER TABLE ADD COLUMN`, `DROP COLUMN`, `MODIFY COLUMN`
 - explicit transaction commands
+- principal and grant commands (`CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`)
+- auth session commands (`LOGIN`, `LOGOUT`)
+- introspection commands (`SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`, `SHOW GRANTS FOR USER`, `SHOW GRANTS FOR ROLE`)
 
 ## Fast paths
 
@@ -95,8 +102,9 @@ Read:
 Read:
 
 1. [SELECT and Query Features](./select-and-querying.md)
-2. [Data Modification](./data-modification.md)
-3. [Schema and DDL](./schema-and-ddl.md)
+2. [Security and Authentication](./security-and-authentication.md)
+3. [Data Modification](./data-modification.md)
+4. [Schema and DDL](./schema-and-ddl.md)
 
 ### I want to know what is coming next
 

@@ -25,6 +25,30 @@ That means the project is already usable in local development workflows, even th
 
 The clearest integration path today is direct embedding through the core package and `DataVoContext` / `DataVoEngine`.
 
+### Browser and WebAssembly runtime
+
+The repository includes a browser/WASM runtime and docs playground flow.
+
+What this enables today:
+
+- interactive SQL execution in the docs site
+- browser parity scenarios generated from .NET E2E inputs
+- strict parity test lanes for browser execution
+
+Primary workflow:
+
+```bash
+bash ./scripts/deploy-browser-wasm.sh
+cd docs
+npm run docs:dev
+```
+
+### Security and auth command surface
+
+Principal, grant, and session auth SQL command families are implemented.
+
+See [Security and Authentication](./security-and-authentication.md) for command examples and inspection flows.
+
 ## ADO.NET direction
 
 `DataVo.Data` is the natural place for ADO.NET-facing integration.
@@ -55,9 +79,9 @@ The long-term goal is that `DataVo` should be approachable from mainstream .NET 
 
 ### Current status
 
-- not documented as production-ready today
-- should be treated as planned work
-- depends on the ADO.NET/provider story maturing first
+- preview integration package and helpers are present in the repository
+- not documented as fully production-ready yet
+- additional provider hardening/documentation remains on the roadmap
 
 ## Vector embedding support
 
@@ -73,12 +97,12 @@ The project is aiming to reduce the friction of embedding/vector workflows that 
 
 ### Current status
 
-- planned direction
-- not yet documented as a completed public feature
+- implemented indexing foundations exist, including HNSW-related workstreams
+- production hardening and end-user integration guidance are still evolving
 
 ## WebAssembly support
 
-WebAssembly support is also on the roadmap.
+WebAssembly support is available today for docs/playground scenarios, with further hardening still on the roadmap.
 
 ### Why it matters
 
@@ -88,8 +112,9 @@ WebAssembly support is also on the roadmap.
 
 ### Current status
 
-- planned direction
-- not yet documented as a completed public runtime target
+- browser runtime assets and deploy scripts are implemented
+- strict browser parity testing is available
+- additional packaging/distribution polish remains planned
 
 ## NuGet publication status
 
@@ -103,3 +128,9 @@ WebAssembly support is also on the roadmap.
 If you are evaluating `DataVo` today, the clearest statement is:
 
 > `DataVo` can already be packaged and consumed locally as `DataVo.Core` and `DataVo.Data`. Public NuGet publication, a polished ADO.NET story, Entity Framework integration, vector embedding features, and WebAssembly support are part of the active roadmap.
+
+## Updated practical message
+
+Use this summary when introducing the project today:
+
+> `DataVo` supports local packaging, direct embedding via `DataVo.Core`, browser/WASM playground execution, and principal/auth SQL commands today. Public package distribution and broader provider-level production polish remain active roadmap items.

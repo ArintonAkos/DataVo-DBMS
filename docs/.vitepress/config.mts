@@ -28,6 +28,10 @@ export default withMermaid(
               text: "SELECT and Querying",
               link: "/features/select-and-querying",
             },
+            {
+              text: "Security and Authentication",
+              link: "/features/security-and-authentication",
+            },
             { text: "Data Modification", link: "/features/data-modification" },
             { text: "Schema and DDL", link: "/features/schema-and-ddl" },
             { text: "Transactions", link: "/features/transactions" },
