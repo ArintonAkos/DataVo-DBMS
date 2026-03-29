@@ -49,17 +49,44 @@ public sealed class HashAggregateOperator : IQueryOperator
         public int MaxPartitionCount { get; init; } = 128;
     }
 
+    /// <summary>
+    /// Supported aggregate functions.
+    /// </summary>
     public enum AggregateFunction
     {
+        /// <summary>
+        /// Counts input rows.
+        /// </summary>
         Count,
+        /// <summary>
+        /// Sums numeric values.
+        /// </summary>
         Sum,
+        /// <summary>
+        /// Computes average numeric value.
+        /// </summary>
         Avg,
+        /// <summary>
+        /// Selects the minimum comparable value.
+        /// </summary>
         Min,
+        /// <summary>
+        /// Selects the maximum comparable value.
+        /// </summary>
         Max
     }
 
+    /// <summary>
+    /// Defines one aggregate output in the hash-aggregate projection.
+    /// </summary>
     public sealed class AggregateSpec
     {
+        /// <summary>
+        /// Initializes an aggregate specification using an <see cref="ExecutionRow"/> selector.
+        /// </summary>
+        /// <param name="outputColumn">Output column name.</param>
+        /// <param name="function">Aggregate function.</param>
+        /// <param name="argumentSelector">Value selector for aggregation input.</param>
         public AggregateSpec(string outputColumn, AggregateFunction function, Func<ExecutionRow, object?>? argumentSelector = null)
         {
             OutputColumn = outputColumn;
@@ -67,6 +94,12 @@ public sealed class HashAggregateOperator : IQueryOperator
             ArgumentSelector = argumentSelector;
         }
 
+        /// <summary>
+        /// Initializes an aggregate specification using a <see cref="TypedExecutionRow"/> selector.
+        /// </summary>
+        /// <param name="outputColumn">Output column name.</param>
+        /// <param name="function">Aggregate function.</param>
+        /// <param name="typedArgumentSelector">Typed value selector for aggregation input.</param>
         public AggregateSpec(string outputColumn, AggregateFunction function, Func<TypedExecutionRow, object?> typedArgumentSelector)
         {
             OutputColumn = outputColumn;
@@ -74,9 +107,24 @@ public sealed class HashAggregateOperator : IQueryOperator
             TypedArgumentSelector = typedArgumentSelector;
         }
 
+        /// <summary>
+        /// Gets the aggregate output column name.
+        /// </summary>
         public string OutputColumn { get; }
+
+        /// <summary>
+        /// Gets the aggregate function.
+        /// </summary>
         public AggregateFunction Function { get; }
+
+        /// <summary>
+        /// Gets the execution-row selector, when provided.
+        /// </summary>
         public Func<ExecutionRow, object?>? ArgumentSelector { get; }
+
+        /// <summary>
+        /// Gets the typed execution-row selector, when provided.
+        /// </summary>
         public Func<TypedExecutionRow, object?>? TypedArgumentSelector { get; }
     }
 
@@ -96,6 +144,12 @@ public sealed class HashAggregateOperator : IQueryOperator
     private List<ExecutionRow> _rows = [];
     private int _index;
 
+    /// <summary>
+    /// Initializes a hash aggregate operator.
+    /// </summary>
+    /// <param name="source">Input source.</param>
+    /// <param name="groupKeyColumns">Grouping key columns.</param>
+    /// <param name="aggregateSpecs">Aggregate output specifications.</param>
     public HashAggregateOperator(IQueryOperator source, IReadOnlyList<string> groupKeyColumns, IReadOnlyList<AggregateSpec> aggregateSpecs)
         : this(source, groupKeyColumns, aggregateSpecs, options: null)
     {

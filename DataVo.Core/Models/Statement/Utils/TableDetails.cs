@@ -4,14 +4,29 @@ using DataVo.Core.Runtime;
 
 namespace DataVo.Core.Models.Statement.Utils
 {
+    /// <summary>
+    /// Describes a query-visible table, including schema and cached row materialization.
+    /// </summary>
     public class TableDetail
     {
+        /// <summary>
+        /// Initializes a table detail bound to a catalog table and optional alias.
+        /// </summary>
+        /// <param name="tableName">The catalog table name.</param>
+        /// <param name="tableAlias">The query alias, when present.</param>
         public TableDetail(string tableName, string? tableAlias)
         {
             TableName = tableName;
             TableAlias = tableAlias;
         }
 
+        /// <summary>
+        /// Initializes a table detail backed by in-memory schema and rows.
+        /// </summary>
+        /// <param name="tableName">The table name.</param>
+        /// <param name="tableAlias">The query alias, when present.</param>
+        /// <param name="inMemoryColumns">In-memory column names.</param>
+        /// <param name="inMemoryRows">In-memory row records.</param>
         public TableDetail(string tableName, string? tableAlias, List<string> inMemoryColumns, List<Record> inMemoryRows)
         {
             TableName = tableName;
@@ -26,11 +41,26 @@ namespace DataVo.Core.Models.Statement.Utils
             _tableContentValuesCache = [.. inMemoryRows];
         }
 
+        /// <summary>
+        /// Gets or sets the bound database name.
+        /// </summary>
         public string? DatabaseName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the catalog table name.
+        /// </summary>
         public string TableName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the query alias for the table.
+        /// </summary>
         public string? TableAlias { get; set; }
 
         private List<string>? _columnsCache;
+
+        /// <summary>
+        /// Gets table column names, loading from catalog when not already cached.
+        /// </summary>
         public List<string>? Columns
         {
             get
@@ -53,6 +83,10 @@ namespace DataVo.Core.Models.Statement.Utils
         }
 
         private List<string>? _primaryKeysCache;
+
+        /// <summary>
+        /// Gets primary key column names, loading from catalog when not already cached.
+        /// </summary>
         public List<string>? PrimaryKeys
         {
             get
@@ -74,6 +108,10 @@ namespace DataVo.Core.Models.Statement.Utils
         }
 
         private Dictionary<string, string>? _indexedColumnsCache;
+
+        /// <summary>
+        /// Gets indexed columns mapped to index names, loading from catalog when needed.
+        /// </summary>
         public Dictionary<string, string>? IndexedColumns
         {
             get
@@ -97,6 +135,10 @@ namespace DataVo.Core.Models.Statement.Utils
 
         // Stores the table content in the <RowId, Record> format
         private TableData? _tableContentCache;
+
+        /// <summary>
+        /// Gets table content keyed by row identifier, loading from storage context when needed.
+        /// </summary>
         public TableData? TableContent
         {
             get
@@ -126,6 +168,10 @@ namespace DataVo.Core.Models.Statement.Utils
         }
 
         private List<Record>? _tableContentValuesCache;
+
+        /// <summary>
+        /// Gets table content as a row-value list, materialized from <see cref="TableContent"/> when needed.
+        /// </summary>
         public List<Record>? TableContentValues
         {
             get
@@ -145,6 +191,10 @@ namespace DataVo.Core.Models.Statement.Utils
             }
         }
 
+        /// <summary>
+        /// Returns the effective table identifier used in query text (alias when present, otherwise table name).
+        /// </summary>
+        /// <returns>The alias or table name.</returns>
         public string GetTableNameInUse()
         {
             if (TableAlias is not null)

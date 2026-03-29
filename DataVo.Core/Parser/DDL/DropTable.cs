@@ -74,7 +74,7 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
 
     /// <summary>
     /// Retrieves all indexes associated with the table from the system catalog
-    /// and drops each one via <see cref="IndexManager"/>.
+    /// and drops each one via the index manager runtime service.
     /// This prevents orphaned index files from remaining after the table is deleted.
     /// </summary>
     /// <param name="databaseName">The name of the database containing the table.</param>

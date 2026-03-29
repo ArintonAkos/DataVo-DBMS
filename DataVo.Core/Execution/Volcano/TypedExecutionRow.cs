@@ -5,13 +5,24 @@ namespace DataVo.Core.Execution.Volcano;
 /// </summary>
 public sealed class TypedExecutionRow
 {
+    /// <summary>
+    /// Initializes a typed execution row.
+    /// </summary>
+    /// <param name="rowId">The row identifier.</param>
+    /// <param name="values">Row values keyed by column name.</param>
     public TypedExecutionRow(long rowId, Dictionary<string, object?> values)
     {
         RowId = rowId;
         Values = values;
     }
 
+    /// <summary>
+    /// Gets the row identifier.
+    /// </summary>
     public long RowId { get; }
 
+    /// <summary>
+    /// Gets the row values.
+    /// </summary>
     public Dictionary<string, object?> Values { get; }
 }

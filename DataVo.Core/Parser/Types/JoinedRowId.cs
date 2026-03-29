@@ -39,7 +39,7 @@ namespace DataVo.Core.Parser.Types
         /// <param name="rowIds">Ordered row identifiers.</param>
         public JoinedRowId(params long[] rowIds)
         {
-            _rowIds = [..rowIds];
+            _rowIds = [.. rowIds];
         }
 
         /// <summary>

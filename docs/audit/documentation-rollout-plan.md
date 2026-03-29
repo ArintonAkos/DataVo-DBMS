@@ -14,7 +14,7 @@ Current snapshot:
 - DataVo.Core/Runtime/Security/DatabaseRole.cs
 - DataVo.Core/Runtime/Security/SessionPrincipal.cs
 - DataVo.Core/StorageEngine/Config/DataVoConfig.cs (DataVoAuthUser section)
-- DataVo.Core/Parser/AST/SqlNode.cs (SHOW* auth-introspection statements)
+- DataVo.Core/Parser/AST/SqlNode.cs (SHOW\* auth-introspection statements)
 - DataVo.Core/Runtime/DataVoEngine.cs (security management and introspection methods)
 - DataVo.Core/Parser/Types/Row.cs
 - DataVo.Core/Parser/Types/ListedTable.cs

@@ -7,8 +7,18 @@ namespace DataVo.Core.Indexing.BTree;
 /// </summary>
 public class BTreeIndexFactory : IIndexFactory
 {
+    /// <summary>
+    /// Gets the canonical index type handled by this factory.
+    /// </summary>
     public string IndexType => "BTREE";
 
+    /// <summary>
+    /// Creates a new B-Tree index instance.
+    /// </summary>
+    /// <param name="indexName">The logical index name.</param>
+    /// <param name="columnName">The indexed column name.</param>
+    /// <param name="params">Factory parameters such as minDegree.</param>
+    /// <returns>A newly created index instance.</returns>
     public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
     {
         // Default minimum degree for B-Tree
@@ -21,6 +31,12 @@ public class BTreeIndexFactory : IIndexFactory
         return new JsonBTreeIndex(minDegree);
     }
 
+    /// <summary>
+    /// Loads an index instance from persisted storage.
+    /// </summary>
+    /// <param name="filePath">The index file path.</param>
+    /// <param name="persistence">Persistence adapter used for deserialization.</param>
+    /// <returns>The loaded index instance.</returns>
     public object LoadIndex(string filePath, IIndexPersistence persistence)
     {
         // Delegate to persistence handler which knows how to deserialize

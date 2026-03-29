@@ -7,12 +7,26 @@ using DataVo.Core.Enums;
 
 namespace DataVo.Core.Models.DDL;
 
+/// <summary>
+/// Represents the normalized model for a CREATE TABLE statement.
+/// </summary>
+/// <param name="tableName">The table name.</param>
+/// <param name="fields">The table field definitions.</param>
 public class CreateTableModel(string tableName, List<Field> fields)
 {
+    /// <summary>
+    /// Gets or sets the table name.
+    /// </summary>
     public string TableName { get; set; } = tableName;
 
+    /// <summary>
+    /// Gets or sets the field definitions.
+    /// </summary>
     public List<Field> Fields { get; set; } = fields;
 
+    /// <summary>
+    /// Gets primary key column names.
+    /// </summary>
     public List<string> PrimaryKeys
     {
         get
@@ -21,6 +35,9 @@ public class CreateTableModel(string tableName, List<Field> fields)
         }
     }
 
+    /// <summary>
+    /// Gets unique-constraint column names.
+    /// </summary>
     public List<string> UniqueAttributes
     {
         get
@@ -32,6 +49,9 @@ public class CreateTableModel(string tableName, List<Field> fields)
     }
 
 
+    /// <summary>
+    /// Gets foreign key definitions.
+    /// </summary>
     public List<ForeignKey> ForeignKeys
     {
         get
@@ -42,6 +62,11 @@ public class CreateTableModel(string tableName, List<Field> fields)
         }
     }
 
+    /// <summary>
+    /// Builds a create-table model from CREATE TABLE AST.
+    /// </summary>
+    /// <param name="ast">The parsed CREATE TABLE statement.</param>
+    /// <returns>The normalized create-table model.</returns>
     public static CreateTableModel FromAst(CreateTableStatement ast)
     {
         string tableName = ast.TableName.Name;
@@ -106,6 +131,10 @@ public class CreateTableModel(string tableName, List<Field> fields)
         return 0;
     }
 
+    /// <summary>
+    /// Converts the model into catalog table metadata.
+    /// </summary>
+    /// <returns>The catalog table definition.</returns>
     public Table ToTable() =>
         new()
         {

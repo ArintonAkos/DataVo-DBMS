@@ -1,9 +1,11 @@
+/** Request envelope sent from the main thread to the runtime worker. */
 type RuntimeRequest = {
   id: number;
   method: "initialize" | "execute" | "reset" | "runtimeCapabilities";
   payload?: any;
 };
 
+/** Response envelope sent from the runtime worker back to the main thread. */
 type RuntimeResponse = {
   id: number;
   ok: boolean;
@@ -15,6 +17,11 @@ let dotnetRuntime: any = null;
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 
+/**
+ * Determines whether diagnostic tracing is enabled for worker runtime creation.
+ *
+ * @returns True when `datavoDebug=1|true` is present in worker location query.
+ */
 function isDebugEnabled(): boolean {
   try {
     const locationUrl = typeof self !== "undefined" ? (self as any).location?.href : "";
@@ -25,6 +32,11 @@ function isDebugEnabled(): boolean {
   }
 }
 
+/**
+ * Initializes the DataVo .NET runtime inside the worker process.
+ *
+ * @returns Promise that resolves when worker runtime is ready.
+ */
 async function initializeRuntime(): Promise<void> {
   if (initialized) {
     return;
@@ -74,6 +86,11 @@ async function initializeRuntime(): Promise<void> {
   }
 }
 
+/**
+ * Retrieves the generated browser interop export object.
+ *
+ * @returns DataVo interop object.
+ */
 function getInterop(): any {
   const interop = dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
   if (!interop) {
@@ -83,6 +100,12 @@ function getInterop(): any {
   return interop;
 }
 
+/**
+ * Executes a worker request and returns its result payload.
+ *
+ * @param request Runtime request envelope.
+ * @returns Request result payload.
+ */
 async function handleRequest(request: RuntimeRequest): Promise<any> {
   switch (request.method) {
     case "initialize": {
@@ -129,6 +152,11 @@ async function handleRequest(request: RuntimeRequest): Promise<any> {
   }
 }
 
+/**
+ * Dispatches incoming worker messages to runtime handlers and posts structured responses.
+ *
+ * @param event Worker message event containing the runtime request.
+ */
 self.onmessage = async (event: MessageEvent<RuntimeRequest>) => {
   const request = event.data;
   const response: RuntimeResponse = {

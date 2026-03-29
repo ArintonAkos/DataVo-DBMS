@@ -19,6 +19,15 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
     private int _rightIndex;
     private long _outputRowId;
 
+    /// <summary>
+    /// Initializes a nested-loop join operator.
+    /// </summary>
+    /// <param name="left">Left input source.</param>
+    /// <param name="right">Right input source.</param>
+    /// <param name="leftJoinColumn">Left join column key.</param>
+    /// <param name="rightJoinColumn">Right join column key.</param>
+    /// <param name="leftTableName">Left table name for output qualification.</param>
+    /// <param name="rightTableName">Right table name for output qualification.</param>
     public NestedLoopJoinOperator(
         IQueryOperator left,
         IQueryOperator right,
@@ -35,6 +44,7 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
         _rightTableName = rightTableName;
     }
 
+    /// <inheritdoc />
     public void Open()
     {
         _outputRowId = 0;
@@ -64,6 +74,7 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
         _left.Open();
     }
 
+    /// <inheritdoc />
     public ExecutionRow? GetNextRow()
     {
         while (true)
@@ -105,6 +116,7 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
         }
     }
 
+    /// <inheritdoc />
     public void Close()
     {
         _left.Close();

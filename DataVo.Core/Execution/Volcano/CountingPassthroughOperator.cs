@@ -7,6 +7,10 @@ public sealed class CountingPassthroughOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
 
+    /// <summary>
+    /// Initializes a counting pass-through over a source operator.
+    /// </summary>
+    /// <param name="source">The wrapped source operator.</param>
     public CountingPassthroughOperator(IQueryOperator source)
     {
         _source = source;
@@ -17,12 +21,14 @@ public sealed class CountingPassthroughOperator : IQueryOperator
     /// </summary>
     public long EmittedRows { get; private set; }
 
+    /// <inheritdoc />
     public void Open()
     {
         EmittedRows = 0;
         _source.Open();
     }
 
+    /// <inheritdoc />
     public ExecutionRow? GetNextRow()
     {
         ExecutionRow? row = _source.GetNextRow();
@@ -34,6 +40,7 @@ public sealed class CountingPassthroughOperator : IQueryOperator
         return row;
     }
 
+    /// <inheritdoc />
     public void Close()
     {
         _source.Close();

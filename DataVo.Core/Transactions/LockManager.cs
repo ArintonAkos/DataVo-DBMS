@@ -61,6 +61,9 @@ public sealed class LockManager
     private readonly Dictionary<int, HashSet<int>> _waitForGraph = [];
     private readonly Dictionary<int, string> _waitingScopes = [];
 
+    /// <summary>
+    /// Gets the process-wide singleton lock manager instance.
+    /// </summary>
     public static LockManager Instance => _instance.Value;
 
     /// <summary>
@@ -80,26 +83,52 @@ public sealed class LockManager
         _lockAcquireTimeoutMs = lockAcquireTimeoutMs;
     }
 
+    /// <summary>
+    /// Acquires a table-level read lock for a database/table pair.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void AcquireReadLock(string databaseName, string tableName)
     {
         AcquireTableLock(BuildTableKey(databaseName, tableName), write: false);
     }
 
+    /// <summary>
+    /// Acquires a table-level write lock for a database/table pair.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void AcquireWriteLock(string databaseName, string tableName)
     {
         AcquireTableLock(BuildTableKey(databaseName, tableName), write: true);
     }
 
+    /// <summary>
+    /// Releases a table-level read lock for a database/table pair.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void ReleaseReadLock(string databaseName, string tableName)
     {
         ReleaseTableLock(BuildTableKey(databaseName, tableName), write: false);
     }
 
+    /// <summary>
+    /// Releases a table-level write lock for a database/table pair.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void ReleaseWriteLock(string databaseName, string tableName)
     {
         ReleaseTableLock(BuildTableKey(databaseName, tableName), write: true);
     }
 
+    /// <summary>
+    /// Acquires a row-level read lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The row identifier.</param>
     public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
@@ -129,6 +158,12 @@ public sealed class LockManager
         }
     }
 
+    /// <summary>
+    /// Acquires a row-level write lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The row identifier.</param>
     public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
@@ -158,6 +193,12 @@ public sealed class LockManager
         }
     }
 
+    /// <summary>
+    /// Releases a row-level read lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The row identifier.</param>
     public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
@@ -171,6 +212,12 @@ public sealed class LockManager
         ReleaseRowLock(rowKey, rowLock);
     }
 
+    /// <summary>
+    /// Releases a row-level write lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The row identifier.</param>
     public void ReleaseRowWriteLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
@@ -184,6 +231,13 @@ public sealed class LockManager
         ReleaseRowLock(rowKey, rowLock);
     }
 
+    /// <summary>
+    /// Acquires row-level write locks in deterministic order.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowIds">Row identifiers to lock.</param>
+    /// <returns>The ordered lock acquisition list.</returns>
     public List<long> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
     {
         List<long> ordered = BuildOrderedRowLockList(rowIds);
@@ -196,6 +250,12 @@ public sealed class LockManager
         return ordered;
     }
 
+    /// <summary>
+    /// Releases row-level write locks in reverse order.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowIds">Row identifiers to unlock.</param>
     public void ReleaseRowWriteLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
     {
         for (int i = rowIds.Count - 1; i >= 0; i--)
@@ -204,6 +264,13 @@ public sealed class LockManager
         }
     }
 
+    /// <summary>
+    /// Acquires row-level read locks in deterministic order.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowIds">Row identifiers to lock.</param>
+    /// <returns>The ordered lock acquisition list.</returns>
     public List<long> AcquireRowReadLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
     {
         List<long> ordered = BuildOrderedRowLockList(rowIds);
@@ -216,6 +283,12 @@ public sealed class LockManager
         return ordered;
     }
 
+    /// <summary>
+    /// Releases row-level read locks in reverse order.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowIds">Row identifiers to unlock.</param>
     public void ReleaseRowReadLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
     {
         for (int i = rowIds.Count - 1; i >= 0; i--)

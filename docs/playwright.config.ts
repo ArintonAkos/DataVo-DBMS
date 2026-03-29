@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+/**
+ * Playwright configuration for browser-based docs runtime tests.
+ */
 export default defineConfig({
   testDir: "./tests/browser",
   fullyParallel: true,
