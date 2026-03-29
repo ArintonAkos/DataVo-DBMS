@@ -263,7 +263,7 @@ public class IndexManager : IDisposable
 
         var type = metadata.IndexType.ToUpper();
         if (!_persistenceHandlers.TryGetValue(type, out var persistence))
-            return;
+            throw new InvalidOperationException($"No persistence handler registered for index type '{metadata.IndexType}' ({cacheKey}).");
 
         var filePath = _cachePaths.TryGetValue(cacheKey, out var path)
             ? path
@@ -315,12 +315,14 @@ public class IndexManager : IDisposable
                 if (!string.IsNullOrWhiteSpace(indexType)
                     && _persistenceHandlers.TryGetValue(indexType.ToUpperInvariant(), out var persistence))
                 {
-                    _ = persistence.TryDeleteFile(path);
+                    if (!persistence.TryDeleteFile(path) && File.Exists(path))
+                    {
+                        throw new IOException($"Failed to delete index file '{path}'.");
+                    }
                 }
                 else
                 {
-                    try { File.Delete(path); }
-                    catch { /* Ignore deletion errors */ }
+                    File.Delete(path);
                 }
             }
 
@@ -407,7 +409,10 @@ public class IndexManager : IDisposable
 
                 foreach (string filePath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    _ = persistence.TryDeleteFile(filePath);
+                    if (!persistence.TryDeleteFile(filePath) && File.Exists(filePath))
+                    {
+                        throw new IOException($"Failed to delete index file '{filePath}'.");
+                    }
                 }
             }
         }
@@ -430,9 +435,9 @@ public class IndexManager : IDisposable
             {
                 File.Delete(legacyScalarPath);
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort cleanup.
+                throw new IOException($"Failed to delete legacy index file '{legacyScalarPath}'.", ex);
             }
         }
     }
@@ -457,14 +462,7 @@ public class IndexManager : IDisposable
 
             if (!deleted)
             {
-                try
-                {
-                    Directory.Delete(databaseDirectory, recursive: true);
-                }
-                catch
-                {
-                    // Keep cache cleanup even if directory deletion fails.
-                }
+                Directory.Delete(databaseDirectory, recursive: true);
             }
         }
 
