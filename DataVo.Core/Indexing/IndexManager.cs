@@ -1,6 +1,7 @@
 using DataVo.Core.BTree;
 using DataVo.Core.BTree.Core;
 using System.Globalization;
+using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
@@ -65,7 +66,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Unified index cache: maps CacheKey -> loaded index instance.
     /// </summary>
-    private readonly Dictionary<string, object> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IIndexBase> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Metadata storage: maps CacheKey -> index metadata.
@@ -172,7 +173,8 @@ public class IndexManager : IDisposable
             if (!_factories.TryGetValue(type, out var factory))
                 throw new NotSupportedException($"Index type '{indexType}' not registered");
 
-            var index = factory.CreateIndex(metadata.IndexName, metadata.ColumnName, @params);
+            object rawIndex = factory.CreateIndex(metadata.IndexName, metadata.ColumnName, @params);
+            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, metadata.CacheKey);
 
             _cache[metadata.CacheKey] = index;
             _metadata[metadata.CacheKey] = metadata;
@@ -190,7 +192,7 @@ public class IndexManager : IDisposable
         lock (_lock)
         {
             // Check if already loaded
-            if (_cache.TryGetValue(metadata.CacheKey, out var cached))
+            if (_cache.TryGetValue(metadata.CacheKey, out IIndexBase? cached))
                 return cached;
 
             var type = metadata.IndexType.ToUpper();
@@ -201,7 +203,8 @@ public class IndexManager : IDisposable
             if (!persistence.FileExists(filePath))
                 return null;
 
-            var index = persistence.LoadIndex(filePath);
+            object rawIndex = persistence.LoadIndex(filePath);
+            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, metadata.CacheKey);
             _cache[metadata.CacheKey] = index;
             _metadata[metadata.CacheKey] = metadata;
             _cachePaths[metadata.CacheKey] = filePath;
@@ -256,7 +259,7 @@ public class IndexManager : IDisposable
 
     private void FlushInternal(string cacheKey)
     {
-        if (!_cache.TryGetValue(cacheKey, out var index))
+        if (!_cache.TryGetValue(cacheKey, out IIndexBase? index))
             return;
         if (!_metadata.TryGetValue(cacheKey, out var metadata))
             return;
@@ -280,7 +283,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Gets an index from cache (no disk loading).
     /// </summary>
-    public object? TryGetCached(string cacheKey)
+    public IIndexBase? TryGetCached(string cacheKey)
     {
         lock (_lock)
             return _cache.TryGetValue(cacheKey, out var index) ? index : null;
@@ -724,7 +727,7 @@ public class IndexManager : IDisposable
             return loadedScalar;
         }
 
-        throw new Exception($"Index {indexName} on table {tableName} does not exist!");
+        throw new IndexException($"Index {indexName} on table {tableName} does not exist!");
     }
 
     private static IndexMetadata CreateScalarMetadata(string indexName, string tableName, string databaseName)
@@ -766,7 +769,7 @@ public class IndexManager : IDisposable
             return rebuilt;
         }
 
-        throw new Exception($"Vector index {indexName} on table {tableName} does not exist or is incompatible with type '{indexType}'.");
+        throw new IndexException($"Vector index {indexName} on table {tableName} does not exist or is incompatible with type '{indexType}'.");
     }
 
     private bool TryRebuildVectorIndexFromStorage(string indexName, string tableName, string databaseName, string indexType, out IVectorIndex? rebuilt)
@@ -805,7 +808,7 @@ public class IndexManager : IDisposable
             CreateVectorIndex(vectors, indexName, tableName, databaseName, indexType: catalogIndex.IndexKind);
 
             string cacheKey = GetCacheKey(indexName, tableName, databaseName);
-            if (_cache.TryGetValue(cacheKey, out object? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)
+            if (_cache.TryGetValue(cacheKey, out IIndexBase? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)
             {
                 rebuilt = rebuiltVector;
                 return true;
@@ -878,6 +881,16 @@ public class IndexManager : IDisposable
             PersistenceFormat = "json",
             Parameters = parameters,
         };
+    }
+
+    private static IIndexBase EnsureIndexBase(object index, string indexType, string cacheKey)
+    {
+        if (index is IIndexBase typed)
+        {
+            return typed;
+        }
+
+        throw new IndexException($"Index type '{indexType}' returned non-index instance '{index.GetType().FullName}' for cache key '{cacheKey}'.");
     }
 }
 
