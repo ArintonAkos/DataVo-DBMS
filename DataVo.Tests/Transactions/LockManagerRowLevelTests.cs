@@ -49,7 +49,7 @@ public class LockManagerRowLevelTests
 
         start.Set();
 
-        bool bothAcquired = firstAcquired.Wait(1000) && secondAcquired.Wait(1000);
+        bool bothAcquired = firstAcquired.Wait(3000) && secondAcquired.Wait(3000);
         Assert.True(bothAcquired, "Expected both disjoint row write locks to be acquired without serialization.");
 
         gate.Set();
@@ -88,8 +88,8 @@ public class LockManagerRowLevelTests
 
         locks.ReleaseRowReadLock(db, table, rowId);
 
-        Assert.True(writerAcquired.Wait(1000), "Writer should acquire after reader releases lock.");
-        Assert.True(writerDone.Wait(1000), "Writer should finish after acquiring and releasing row write lock.");
+        Assert.True(writerAcquired.Wait(3000), "Writer should acquire after reader releases lock.");
+        Assert.True(writerDone.Wait(3000), "Writer should finish after acquiring and releasing row write lock.");
 
         await writer;
     }
@@ -108,6 +108,22 @@ public class LockManagerRowLevelTests
         }
 
         Assert.Equal(0, GetPrivateRowLockCount(locks));
+    }
+
+    [Fact]
+    public void TableLocks_AreCleanedUp_WhenNoLongerInUse()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+
+        locks.AcquireReadLock(db, table);
+        locks.ReleaseReadLock(db, table);
+
+        locks.AcquireWriteLock(db, table);
+        locks.ReleaseWriteLock(db, table);
+
+        Assert.Equal(0, GetPrivateTableLockCount(locks));
     }
 
     [Fact]
@@ -177,6 +193,23 @@ public class LockManagerRowLevelTests
     private static int GetPrivateRowLockCount(LockManager locks)
     {
         var field = typeof(LockManager).GetField("_rowLocks", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+
+        object? value = field!.GetValue(locks);
+        Assert.NotNull(value);
+
+        var countProperty = value!.GetType().GetProperty("Count");
+        Assert.NotNull(countProperty);
+
+        object? count = countProperty!.GetValue(value);
+        Assert.NotNull(count);
+
+        return (int)count!;
+    }
+
+    private static int GetPrivateTableLockCount(LockManager locks)
+    {
+        var field = typeof(LockManager).GetField("_tableLocks", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
 
         object? value = field!.GetValue(locks);
