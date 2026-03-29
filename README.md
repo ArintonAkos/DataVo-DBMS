@@ -1,260 +1,233 @@
-﻿# DataVo — Embedded SQL Database Engine for .NET
+﻿# DataVo
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![NuGet: DataVo.Core](https://img.shields.io/badge/NuGet-DataVo.Core-blue.svg)](https://www.nuget.org/packages/DataVo.Core)
-[![Status: Active](https://img.shields.io/badge/Status-Active%20Development-green.svg)](#status)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-vitepress-3eaf7c)](docs/index.md)
+[![NuGet](https://img.shields.io/badge/NuGet-coming_soon-004880)](#install-with-nuget)
+[![npm](https://img.shields.io/badge/npm-coming_soon-CB3837)](#install-with-npm)
 
-DataVo is a lightweight, embeddable SQL database engine written in C#. Run full SQL workflows—queries, inserts, transactions, and more—directly in your .NET application without external database dependencies.
+DataVo is an embeddable SQL engine for .NET, designed for local-first applications, game tooling, and browser-native workflows.
 
-**Designed for:**
-- Desktop and mobile applications needing deterministic, fast local data
-- SaaS backends embedding SQL capabilities per-tenant or per-user
-- Testing and CI/CD pipelines (no container overhead)
-- Browser-based SQL playgrounds and educational tools via WebAssembly
+Use DataVo when you want:
 
----
+- predictable in-process SQL execution
+- no mandatory external DB service for local scenarios
+- one engine across desktop, backend, and browser/WebAssembly experiences
 
-## Key Features
+## Why customers use DataVo
 
-✅ **Full SQL Support**  
-Standard `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `CREATE INDEX`, and transaction commands with full ACID guarantees.
+- Embedded SQL runtime with in-memory and disk-backed storage
+- Built in C# with deterministic behavior and testable execution paths
+- Security and auth SQL commands for principal and grant management
+- Browser and WebAssembly support for interactive and local-first applications
+- Integration direction for ADO.NET and Entity Framework workflows
 
-✅ **In-Memory and Disk Storage**  
-Choose between fast in-memory mode for testing or persistent disk-backed storage for production workloads.
+## Install with NuGet
 
-✅ **Zero External Dependencies**  
-Single C# DLL; no server processes, no containers, no external database installations required.
+### Public feed (planned)
 
-✅ **Transaction Support**  
-Explicit `BEGIN`, `COMMIT`, `ROLLBACK` with full MVCC isolation and recovery.
-
-✅ **User and Role Management**  
-Built-in SQL commands for creating users, roles, and managing query-level permissions.
-
-✅ **Indexes and Performance**  
-B-Tree indexes for fast lookups; vector indexing infrastructure for similarity search and semantic applications.
-
-✅ **Browser/WASM Support**  
-Run SQL queries directly in the browser. Try the interactive playground at [**docs/features/getting-started**](https://datavo.dev) (coming soon).
-
----
-
-## Quick Start
-
-### Install via NuGet (Local Packages)
+When published, installation will follow the standard NuGet flow:
 
 ```bash
-dotnet add package DataVo.Core --source /path/to/artifacts/packages
+dotnet add package DataVo.Core
+dotnet add package DataVo.Data
+dotnet add package DataVo.EntityFrameworkCore
 ```
 
-Or build packages locally:
-```bash
-dotnet pack DataVo.sln -c Release
-```
+## Vector search example
 
-### Your First SQL Query
+Get started with similarity search on embeddings:
 
 ```csharp
 using DataVo.Core;
-using DataVo.Core.StorageEngine.Config;
 
-// Create an in-memory database
-using var context = new DataVoContext(new DataVoConfig
+using var db = new DataVoContext(new DataVoConfig
 {
-    StorageMode = StorageMode.InMemory
+  StorageMode = StorageMode.Disk,
+  DatabasePath = "./embeddings.db"
 });
 
-// Run SQL
-context.Execute("CREATE DATABASE Workspace");
-context.Execute("USE Workspace");
-context.Execute("CREATE TABLE Products (Id INT PRIMARY KEY, Name VARCHAR(100), Price FLOAT)");
+db.Execute("CREATE DATABASE Products");
+db.Execute("USE Products");
 
-context.Execute("INSERT INTO Products VALUES (1, 'Widget', 19.99)");
-context.Execute("INSERT INTO Products VALUES (2, 'Gadget', 29.99)");
-
-// Query results
-var result = context.Execute(@"
-    SELECT Name, Price 
-    FROM Products 
-    WHERE Price < 25.00 
-    ORDER BY Name
+db.Execute(@"
+  CREATE TABLE Items (
+    Id INT PRIMARY KEY,
+    Name VARCHAR(100),
+    Vector VECTOR(384)
+  )
 ");
 
-// Access rows
-foreach (var row in result.Data)
+// Create vector index for fast approximate nearest-neighbor search
+db.Execute("CREATE VECTOR INDEX IX_Items_Vector ON Items(Vector) USING HNSW");
+
+// Insert embeddings
+float[] embedding = new float[384] { /* your embedding */ };
+db.ExecuteWithParams("INSERT INTO Items VALUES (@id, @name, @vec)",
+  ("id", 1),
+  ("name", "Widget"),
+  ("vec", embedding)
+);
+
+// Find similar items (automatic HNSW ANN search)
+float[] queryVector = new float[384] { /* query embedding */ };
+var similar = db.ExecuteWithParams(@"
+  SELECT Id, Name, COSINE_DISTANCE(Vector, @query) AS similarity
+  FROM Items
+  ORDER BY similarity ASC
+  LIMIT 10
+",
+  ("query", queryVector)
+);
+```
+
+### Entity Framework (example)
+
+You can run vector queries via Entity Framework using raw SQL translation when necessary:
+
+```csharp
+using DataVo.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+public class AppDbContext : DataVoDbContext
 {
-    Console.WriteLine($"{row[0]}: ${row[1]}");
+  public DbSet<ItemEmbedding> Items { get; set; }
+
+  protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    => optionsBuilder.UseDataVo("./embeddings.db");
 }
-```
 
-### With Persistence (Disk Storage)
-
-```csharp
-using var context = new DataVoContext(new DataVoConfig
+public class ItemEmbedding
 {
-    StorageMode = StorageMode.Disk,
-    DatabasePath = "./my-app-data"
-});
-```
-
----
-
-## Common Use Cases
-
-### 1. **Local-First SaaS**
-Each tenant or user has their own isolated SQL database instance in memory or on disk—no shared backend database needed for small deployments.
-
-```csharp
-// Per-tenant isolation
-var tenantDb = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Disk,
-    DatabasePath = $"./tenants/{tenantId}"
-});
-```
-
-### 2. **Testing and CI/CD**
-Spin up a fresh SQL database in milliseconds for each test run. No Docker containers, no cleanup headaches.
-
-```csharp
-[SetUp]
-public void SetupTestDatabase()
-{
-    _db = new DataVoContext(new DataVoConfig 
-    { 
-        StorageMode = StorageMode.InMemory 
-    });
+  public int Id { get; set; }
+  public string Name { get; set; }
+  public float[] Vector { get; set; } // maps to VECTOR(n)
 }
+
+using var ef = new AppDbContext();
+float[] q = new float[384] { /* query vector */ };
+var results = ef.Items.FromSqlRaw(
+  @"SELECT Id, Name, COSINE_DISTANCE(Vector, {0}) AS similarity
+    FROM Items
+    ORDER BY similarity ASC
+    LIMIT 10",
+  q
+).ToList();
+
+foreach (var r in results)
+  Console.WriteLine($"{r.Id}: {r.Name}");
 ```
 
-### 3. **Educational Tools & SQL Playgrounds**
-Teach SQL in the browser with instant feedback. The DataVo browser build lets anyone write and execute SQL queries without a backend.
-
-### 4. **Edge and Offline-First Apps**
-Embed DataVo in mobile or edge applications that need SQL without external network calls.
-
----
-
-## Supported SQL
-
-- **DQL:** `SELECT` with `WHERE`, `JOIN`, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `UNION`, subqueries  
-- **DML:** `INSERT`, `UPDATE`, `DELETE`, `VACUUM`  
-- **DDL:** `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`, `DROP TABLE`  
-- **DCL:** `CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`, `LOGIN`, `LOGOUT`  
-- **TCL:** `BEGIN`, `COMMIT`, `ROLLBACK`  
-- **Transactions:** Full ACID compliance with MVCC isolation  
-
-See [SQL Features Guide](https://datavo.dev/features/select-and-querying) for more.
-
----
-
-## Browser & Interactive SQL Playground
-
-Try DataVo online without installing anything:
+### Local feed (available now)
 
 ```bash
+dotnet pack DataVo.sln -c Release
+dotnet add package DataVo.Core --source ./artifacts/packages
+dotnet add package DataVo.Data --source ./artifacts/packages
+```
+
+## Install with npm
+
+### Public package (planned)
+
+For JavaScript and TypeScript consumers, the public npm package will follow this flow:
+
+```bash
+npm install @datavo/wasm
+```
+
+### Browser/WASM assets (available now)
+
+```bash
+bash ./scripts/deploy-browser-wasm.sh
 cd docs
 npm install
 npm run docs:dev
 ```
 
-Open `http://localhost:5173` and use the interactive SQL editor to experiment with queries, tables, and transactions in your browser.
+This provides the current browser runtime and playground experience while npm distribution is being finalized.
 
----
+## 60-second example
 
-## Performance Notes
+```csharp
+using DataVo.Core;
+using DataVo.Core.StorageEngine.Config;
 
-- **Lightweight:** Single DLL, ~500 KB, minimal memory footprint  
-- **Fast:** In-memory mode achieves microsecond-level query latency for small datasets  
-- **Disk Storage:** B-Tree indexes provide O(log n) lookups even on large tables  
-- **Concurrency:** MVCC allows multiple readers without blocking  
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.InMemory
+});
 
-Benchmark your workload: see `scripts/test-hnsw-perf.sh` and performance reports under `artifacts/perf/`.
+db.Execute("CREATE DATABASE Demo");
+db.Execute("USE Demo");
+db.Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Name VARCHAR(50))");
+db.Execute("INSERT INTO Users VALUES (1, 'Alice')");
 
----
+var result = db.Execute("SELECT * FROM Users ORDER BY Id");
+```
 
-## When to Use DataVo
+## End-user scenarios
 
-| Use Case                        | Verdict |
-| ------------------------------- | ------- |
-| Small application data          | ✅ Ideal |
-| Single-user/tenant databases    | ✅ Perfect |
-| Testing & CI/CD                 | ✅ Perfect |
-| Educational SQL playgrounds     | ✅ Perfect |
-| Mobile/offline-first apps       | ✅ Good |
-| Data warehousing (100M+ rows)   | ⚠️ Not recommended |
-| High-concurrency multi-tenant   | ⚠️ Consider alternatives |
-| Real-time analytics on petabytes| ⚠️ Not recommended |
+### .NET application teams
 
----
+- Embed SQL capabilities directly into services and desktop applications.
+  @@### AI and ML applications
+  @@- Semantic search on document embeddings (RAG, LLM applications)
+  @@- Vector-based recommendation engines
+  @@- Similarity matching without external vector databases
+  @@- Hybrid neural-lexical search combining text and vector similarity
 
-## How It Works
+### Unity and Godot developers
 
-Unlike embedded SQLite, DataVo is a full SQL engine written entirely in C# with:
+- Use DataVo as a local gameplay/profile/state database.
+- Keep persistence and query behavior deterministic across development environments.
+- Reuse the same SQL surface in tools and runtime workflows.
 
-1. **Lexer** → tokenizes SQL text  
-2. **Parser** → builds abstract syntax tree (AST)  
-3. **Binder** → resolves symbols and validates semantics  
-4. **Optimizer** → chooses execution strategy (join order, indexes, etc.)  
-5. **Executor** → runs SQL using in-memory or disk storage engines  
+### Browser and WebAssembly products
 
-Everything runs in-process with no IPC, no network overhead, and full debugger support.
+- Run DataVo in a browser-backed runtime for demos, sandboxes, and local-first UX.
+- Use the same core SQL workflows in docs, prototypes, and product surfaces.
 
----
+### Entity Framework adopters
 
-## Status & Roadmap
+- Use the DataVo EF integration path for model-driven workflows.
+- Follow the integration docs for current capability boundaries and roadmap status.
 
-**Now:**
-- ✅ Core SQL support (queries, mutations, transactions)
-- ✅ In-memory and disk storage  
-- ✅ Local packaging and embedding  
-- ✅ Browser/WASM playground  
-- ✅ User and role management  
+## Implemented SQL surface (high level)
 
-**Coming Soon:**
-- 📦 Public NuGet distribution  
-- 🔗 ADO.NET provider (standardized .NET database interface)  
-- 🎯 Vector similarity search (semantic applications)  
-- 📊 Query optimizer enhancements  
-- 🔐 Advanced cryptography and audit logging  
-
----
-
-## Contributing
-
-We welcome contributions! Start with:
-
-1. **Report a bug** or suggest a feature via [GitHub Issues](https://github.com/ArintonAkos/DataVo-DBMS/issues)  
-2. **Fork, branch, and submit a PR** with a test case  
-3. **Update docs** if your change affects user-facing behavior  
-
-See [CONTRIBUTING](#) (link to come) for detailed guidelines.
-
----
+- Querying and DML: SELECT, INSERT, UPDATE, DELETE
+- DDL: CREATE TABLE, CREATE INDEX, ALTER TABLE (supported operations)
+- Transactions: BEGIN, COMMIT, ROLLBACK
+- Security/auth:
+  - CREATE USER, CREATE ROLE
+  - GRANT, REVOKE
+  - LOGIN, LOGOUT
+  - SHOW USERS, SHOW ROLES, SHOW GRANTS
+- Vector search and indexing:
+  - VECTOR(n) column type with fixed dimensionality
+  - CREATE VECTOR INDEX ... USING HNSW for approximate nearest-neighbor
+  - Distance functions: L2_DISTANCE, COSINE_DISTANCE
+  - Hybrid queries (vector + lexical filters + joins)
+  - Exact brute-force and fast ANN modes
 
 ## Documentation
 
-- **[Getting Started](https://datavo.dev/features/getting-started)** — First steps with code examples  
-- **[SQL Feature Guide](https://datavo.dev/features/select-and-querying)** — What SQL is supported  
-- **[Setup and Packaging](https://datavo.dev/features/setup-and-packaging)** — How to install and use locally  
-- **[Security & Auth](https://datavo.dev/features/security-and-authentication)** — User/role/grant examples  
-- **[Architecture Reference](https://datavo.dev/DataVo.Core/)** — For contributors and deep dives  
+- Product docs: [docs/index.md](docs/index.md)
+- Setup and packaging: [docs/features/setup-and-packaging.md](docs/features/setup-and-packaging.md)
+- WebAssembly and npm integration: [docs/features/wasm-and-npm.md](docs/features/wasm-and-npm.md)
+- Unity and Godot integration: [docs/features/unity-and-godot.md](docs/features/unity-and-godot.md)
+- Entity Framework integration: [docs/features/entity-framework.md](docs/features/entity-framework.md)
+- Vector search guide: [docs/features/vector-queries-guide.md](docs/features/vector-queries-guide.md) — Complete guide to vector columns, distance metrics, exact vs. ANN search
+- Query features: [docs/features/select-and-querying.md](docs/features/select-and-querying.md)
+- Schema and DDL: [docs/features/schema-and-ddl.md](docs/features/schema-and-ddl.md)
 
----
+## Status
+
+DataVo is production-oriented and actively evolving.
+
+- Local package distribution is available now.
+- Browser/WebAssembly runtime support is available now.
+- Public NuGet and npm publication are in deployment preparation.
 
 ## License
 
-MIT License. Free for commercial and personal use.  
-See [LICENSE](LICENSE) for details.
-
----
-
-## Community
-
-- **Have questions?** Open an issue or discussion on GitHub  
-- **Want to chat?** Contributions and community feedback are always welcome  
-- **Found a bug?** Let us know with a minimal reproduction case  
-
----
-
-**DataVo — Embedded SQL. No containers. No servers. Pure .NET.**
+MIT. See [LICENSE](LICENSE).
