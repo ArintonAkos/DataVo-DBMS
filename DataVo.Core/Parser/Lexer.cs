@@ -80,6 +80,9 @@ public class Token
     /// </summary>
     /// <param name="type">The token category.</param>
     /// <param name="value">The token text.</param>
+    /// <param name="position">The zero-based character position.</param>
+    /// <param name="line">The one-based line number.</param>
+    /// <param name="column">The one-based column number.</param>
     public Token(TokenType type, string value, int position = -1, int line = -1, int column = -1)
     {
         Type = type;

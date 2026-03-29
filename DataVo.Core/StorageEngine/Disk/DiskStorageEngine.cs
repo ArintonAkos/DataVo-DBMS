@@ -3,6 +3,9 @@ using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.StorageEngine.Disk;
 
+/// <summary>
+/// Disk-backed storage engine that persists table rows into .dat files.
+/// </summary>
 public class DiskStorageEngine : IStorageEngine
 {
     private readonly string _storageDirectory;
@@ -15,6 +18,10 @@ public class DiskStorageEngine : IStorageEngine
     private const int FileHeaderVersion = 1;
     private const int FileHeaderSize = 8; // 4 magic + 4 version
 
+    /// <summary>
+    /// Initializes a disk storage engine rooted at the given directory.
+    /// </summary>
+    /// <param name="storageDirectory">The root directory used for database and table files.</param>
     public DiskStorageEngine(string storageDirectory)
     {
         _storageDirectory = storageDirectory;
@@ -57,6 +64,11 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Creates a physical table file and writes a file header if needed.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void CreateTable(string databaseName, string tableName)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -66,6 +78,13 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Appends a serialized row to a table file.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowBytes">The serialized row payload.</param>
+    /// <returns>The byte-offset RowId where the row was written.</returns>
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -89,6 +108,13 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Appends multiple serialized rows to a table file.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowsBytes">The serialized row payloads.</param>
+    /// <returns>The byte-offset RowIds written in insertion order.</returns>
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
         var rowIds = new List<long>();
@@ -112,6 +138,13 @@ public class DiskStorageEngine : IStorageEngine
         return rowIds;
     }
 
+    /// <summary>
+    /// Reads a row payload by byte-offset RowId.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The byte-offset RowId.</param>
+    /// <returns>The serialized row payload.</returns>
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -137,6 +170,12 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Enumerates all non-deleted rows in a table file.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <returns>All surviving row IDs and payloads.</returns>
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -170,6 +209,12 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Tombstones a row by negating its length prefix.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The byte-offset RowId.</param>
     public void DeleteRow(string databaseName, string tableName, long rowId)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -194,6 +239,11 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Deletes the physical table file.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -208,6 +258,10 @@ public class DiskStorageEngine : IStorageEngine
         RemoveFileLock(filePath);
     }
 
+    /// <summary>
+    /// Deletes a database directory and all table files.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
     public void DropDatabase(string databaseName)
     {
         string dbPath = Path.Combine(_storageDirectory, databaseName);
@@ -228,6 +282,12 @@ public class DiskStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Rewrites a table file without tombstoned rows and returns remapped row IDs.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <returns>The new RowId and payload for each surviving row.</returns>
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
         string filePath = GetFilePath(databaseName, tableName);

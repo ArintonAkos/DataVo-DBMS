@@ -9,13 +9,25 @@ using static DataVo.Core.Models.Statement.JoinModel;
 
 namespace DataVo.Core.Parser.Statements;
 
+/// <summary>
+/// Coordinates join evaluation across configured join conditions and strategies.
+/// </summary>
 public class Join
 {
     private readonly bool _containsJoin;
     private readonly JoinStrategyContext _strategyContext;
     private readonly Dictionary<string, IJoinStrategy> _strategies;
+
+    /// <summary>
+    /// Gets the join model backing this evaluator.
+    /// </summary>
     public readonly JoinModel Model;
 
+    /// <summary>
+    /// Initializes a join evaluator for the provided model and table service.
+    /// </summary>
+    /// <param name="model">The join model definition.</param>
+    /// <param name="tableService">The table resolver used by strategies.</param>
     public Join(JoinModel model, TableService tableService)
     {
         Model = model;
@@ -39,8 +51,18 @@ public class Join
         _containsJoin = model.JoinTableDetails.Count > 0;
     }
 
+    /// <summary>
+    /// Indicates whether the model includes joined tables.
+    /// </summary>
+    /// <returns><see langword="true"/> when at least one joined table exists.</returns>
     public bool ContainsJoin() => _containsJoin;
 
+    /// <summary>
+    /// Executes one join condition over the current hashed rows.
+    /// </summary>
+    /// <param name="tableRows">Current left-side hashed rows.</param>
+    /// <param name="joinCondition">The join condition to apply.</param>
+    /// <returns>The joined row set.</returns>
     public HashedTable PerformJoinCondition(HashedTable tableRows, JoinCondition joinCondition)
     {
         IJoinStrategy strategy = ResolveStrategy(joinCondition.JoinType);
@@ -57,6 +79,12 @@ public class Join
         throw new EvaluationException($"Unsupported JOIN type '{joinType}'.");
     }
 
+    /// <summary>
+    /// Evaluates all configured join conditions over an initial row set.
+    /// </summary>
+    /// <param name="tableRows">Initial table rows.</param>
+    /// <param name="baseTableName">Optional explicit base table name.</param>
+    /// <returns>The fully joined row set.</returns>
     public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "")
     {
         int tableCount;

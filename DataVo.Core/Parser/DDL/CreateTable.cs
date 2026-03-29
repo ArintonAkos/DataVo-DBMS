@@ -80,7 +80,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
     /// Creates a B-Tree index on the table's primary key columns.
     /// <para>
     /// The index is named <c>_PK_{TableName}</c> and is registered in both the system catalog
-    /// and the <see cref="IndexManager"/>. If the table has no primary key, this method is a no-op.
+    /// and the index manager runtime service. If the table has no primary key, this method is a no-op.
     /// </para>
     /// </summary>
     /// <param name="databaseName">The name of the database containing the table.</param>
@@ -100,7 +100,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
     /// Creates a separate B-Tree index for each column that has a UNIQUE constraint.
     /// <para>
     /// Each index is named <c>_UK_{ColumnName}</c> and is registered in both the system catalog
-    /// and the <see cref="IndexManager"/>. These indexes are created with empty data since the
+    /// and the index manager runtime service. These indexes are created with empty data since the
     /// table is newly created and contains no rows.
     /// </para>
     /// </summary>

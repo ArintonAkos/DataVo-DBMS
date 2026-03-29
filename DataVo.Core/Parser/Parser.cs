@@ -6,6 +6,10 @@ using DataVo.Core.Parser.Utils;
 
 namespace DataVo.Core.Parser;
 
+/// <summary>
+/// Parses tokenized SQL input into statement AST nodes.
+/// </summary>
+/// <param name="tokens">The token stream to parse.</param>
 public class Parser(List<Token> tokens)
 {
     // The position of the current token being parsed. Initialized to 0, meaning we start parsing from the first token in the list.
@@ -51,6 +55,10 @@ public class Parser(List<Token> tokens)
         throw new ParserException($"Parser Error: Expected {expectedMessage} but found {Current}.");
     }
 
+    /// <summary>
+    /// Parses the token stream into a list of SQL statements.
+    /// </summary>
+    /// <returns>The parsed statements in input order.</returns>
     public List<SqlStatement> Parse()
     {
         var statements = new List<SqlStatement>();

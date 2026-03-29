@@ -49,7 +49,8 @@ internal static class ExpressionValueComparer
     }
 
     /// <summary>
-    /// Compares two expression values with optional trimming of quoted strings and numeric tolerance. Returns -1 if left < right, 0 if equal, and 1 if left > right.
+    /// Compares two expression values with optional trimming of quoted strings and numeric tolerance.
+    /// Returns -1 if left is less than right, 0 if equal, and 1 if left is greater than right.
     /// </summary>
     /// <param name="leftValue">The left value to compare.</param>
     /// <param name="rightValue">The right value to compare.</param>
@@ -90,6 +91,13 @@ internal static class ExpressionValueComparer
         }
     }
 
+    /// <summary>
+    /// Evaluates SQL LIKE pattern matching using '%' and '_' wildcards.
+    /// </summary>
+    /// <param name="inputValue">The input value being tested.</param>
+    /// <param name="patternValue">The SQL LIKE pattern.</param>
+    /// <param name="trimQuotedStrings">Whether to trim single quotes from string values first.</param>
+    /// <returns><see langword="true"/> when the input matches the pattern; otherwise <see langword="false"/>.</returns>
     public static bool MatchesLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false)
     {
         if (inputValue == null || patternValue == null)

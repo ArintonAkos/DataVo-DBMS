@@ -154,6 +154,11 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
+    /// Encodes a signed 64-bit integer into an order-preserving big-endian byte sequence.
+    /// </summary>
+    /// <param name="value">The numeric value to encode.</param>
+    /// <param name="dest">The destination buffer.</param>
+    /// <param name="offset">The starting offset into <paramref name="dest"/>.</param>
     private static void EncodeLong(long value, byte[] dest, int offset)
     {
         ulong flipped = unchecked((ulong)(value ^ long.MinValue));

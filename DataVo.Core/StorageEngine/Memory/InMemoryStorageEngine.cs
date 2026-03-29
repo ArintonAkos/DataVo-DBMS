@@ -3,6 +3,9 @@ using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.StorageEngine.Memory;
 
+/// <summary>
+/// In-memory storage engine used for fast, non-persistent row operations.
+/// </summary>
 public class InMemoryStorageEngine : IStorageEngine
 {
     // A thread-safe, purely RAM-based mapping of DatabaseName.TableName -> List<byte[]>
@@ -15,6 +18,13 @@ public class InMemoryStorageEngine : IStorageEngine
         return _databases.GetOrAdd(GetKey(databaseName, tableName), _ => []);
     }
 
+    /// <summary>
+    /// Inserts one serialized row and returns its 1-based RowId.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowBytes">The serialized row payload.</param>
+    /// <returns>The assigned 1-based RowId.</returns>
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         var table = GetOrAddTable(databaseName, tableName);
@@ -28,6 +38,13 @@ public class InMemoryStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Inserts multiple serialized rows and returns assigned 1-based RowIds.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowsBytes">The serialized row payloads.</param>
+    /// <returns>Assigned row IDs in insertion order.</returns>
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
         var rowIds = new List<long>(rowsBytes.Count);
@@ -45,6 +62,13 @@ public class InMemoryStorageEngine : IStorageEngine
         return rowIds;
     }
 
+    /// <summary>
+    /// Reads a row payload by 1-based RowId.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The 1-based RowId.</param>
+    /// <returns>The serialized row payload.</returns>
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
         if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
@@ -65,6 +89,12 @@ public class InMemoryStorageEngine : IStorageEngine
         throw new RowNotFoundException(rowId, tableName);
     }
 
+    /// <summary>
+    /// Enumerates all non-deleted rows for a table.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <returns>All surviving row IDs and payloads.</returns>
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
@@ -79,6 +109,12 @@ public class InMemoryStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Tombstones a row by replacing its slot with null.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The 1-based RowId.</param>
     public void DeleteRow(string databaseName, string tableName, long rowId)
     {
         if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
@@ -95,11 +131,20 @@ public class InMemoryStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Removes a table from the in-memory store.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
         _databases.TryRemove(GetKey(databaseName, tableName), out _);
     }
 
+    /// <summary>
+    /// Removes all tables belonging to a database from the in-memory store.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
     public void DropDatabase(string databaseName)
     {
         string prefix = $"{databaseName}.";
@@ -110,6 +155,12 @@ public class InMemoryStorageEngine : IStorageEngine
         }
     }
 
+    /// <summary>
+    /// Compacts a table by removing tombstoned rows and reassigning RowIds.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <returns>The new RowId and payload for each surviving row.</returns>
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
         var table = GetOrAddTable(databaseName, tableName);

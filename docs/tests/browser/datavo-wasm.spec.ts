@@ -2,11 +2,20 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
+/** Enables stricter browser parity assertions when set to 1. */
 const strictBrowserParityGate =
   (globalThis as any)?.process?.env?.DATAVO_STRICT_BROWSER_PARITY === "1";
+/** Enforces full generated-scenario translation when set to 1. */
 const requireFullTranslationGate =
   (globalThis as any)?.process?.env?.DATAVO_REQUIRE_FULL_TRANSLATION === "1";
 
+/**
+ * Runtime query result contract returned from browser SQL execution.
+ *
+ * @example
+ * const result: QueryResult = await executeSqlRaw(page, "SELECT 1");
+ * console.log(result.IsError, result.Fields, result.Data);
+ */
 type QueryResult = {
   Messages: string[];
   Data: Record<string, unknown>[];
@@ -15,6 +24,9 @@ type QueryResult = {
   IsError: boolean;
 };
 
+/**
+ * A generated browser scenario emitted by the scenario generation pipeline.
+ */
 type GeneratedScenario = {
   id: string;
   source: string;
@@ -30,6 +42,9 @@ type GeneratedScenario = {
   };
 };
 
+/**
+ * Scenario generation summary report model.
+ */
 type GeneratedScenarioReport = {
   totals?: {
     totalTests?: number;
@@ -40,12 +55,20 @@ type GeneratedScenarioReport = {
   };
 };
 
+/**
+ * Item emitted when a generated scenario requires runtime-specific handling.
+ */
 type RuntimeNeedsSpecificItem = {
   id: string;
   source: string;
   reason: string;
 };
 
+/**
+ * Loads generated browser scenarios from disk.
+ *
+ * @returns Generated scenario list.
+ */
 function loadGeneratedScenarios(): GeneratedScenario[] {
   const filePath = path.join(
     process.cwd(),
@@ -72,6 +95,11 @@ function loadGeneratedScenarios(): GeneratedScenario[] {
   return parsed.scenarios;
 }
 
+/**
+ * Loads the generation report summary, when present.
+ *
+ * @returns Parsed report or null.
+ */
 function loadGeneratedScenarioReport(): GeneratedScenarioReport | null {
   const filePath = path.join(
     process.cwd(),
@@ -90,6 +118,17 @@ function loadGeneratedScenarioReport(): GeneratedScenarioReport | null {
   ) as GeneratedScenarioReport;
 }
 
+/**
+ * Replaces AUTO_* placeholder tokens with deterministic numeric values.
+ *
+ * @param command SQL command template.
+ * @param sequence Deterministic numeric seed.
+ * @returns SQL command with placeholders substituted.
+ *
+ * @example
+ * normalizeGeneratedSql("INSERT INTO T VALUES (AUTO_ID)", 42);
+ * // => INSERT INTO T VALUES (42)
+ */
 function normalizeGeneratedSql(command: string, sequence: number): string {
   const numericToken = String(sequence);
   return command
@@ -98,6 +137,11 @@ function normalizeGeneratedSql(command: string, sequence: number): string {
     .replace(/\bAUTO_DUPLICATEID\b/g, numericToken);
 }
 
+/**
+ * Writes a report of scenarios that still need runtime-specific code paths.
+ *
+ * @param items Runtime-specific scenario report items.
+ */
 function writeRuntimeNeedsSpecificReport(
   items: RuntimeNeedsSpecificItem[],
 ): void {
@@ -130,6 +174,13 @@ function writeRuntimeNeedsSpecificReport(
   );
 }
 
+/**
+ * Executes SQL and asserts success, returning the final result.
+ *
+ * @param page Playwright page.
+ * @param sql SQL command text.
+ * @returns Final query result for the command.
+ */
 async function executeSql(
   page: import("@playwright/test").Page,
   sql: string,
@@ -143,6 +194,12 @@ async function executeSql(
   return last;
 }
 
+/**
+ * Detects suspicious setup messages that should be treated as failures.
+ *
+ * @param messages Result messages.
+ * @returns True when messages indicate likely failure semantics.
+ */
 function hasSuspiciousErrorMessage(messages: string[]): boolean {
   if (!Array.isArray(messages) || messages.length === 0) {
     return false;
@@ -155,6 +212,13 @@ function hasSuspiciousErrorMessage(messages: string[]): boolean {
   );
 }
 
+/**
+ * Executes SQL and returns the final result without applying success assertions.
+ *
+ * @param page Playwright page.
+ * @param sql SQL command text.
+ * @returns Final query result.
+ */
 async function executeSqlRaw(
   page: import("@playwright/test").Page,
   sql: string,
@@ -175,6 +239,12 @@ async function executeSqlRaw(
   }, sql);
 }
 
+/**
+ * Returns runtime capability metadata from the current browser client.
+ *
+ * @param page Playwright page.
+ * @returns Runtime capability object.
+ */
 async function getCapabilities(
   page: import("@playwright/test").Page,
 ): Promise<Record<string, any>> {
@@ -187,6 +257,11 @@ async function getCapabilities(
   });
 }
 
+/**
+ * Resets the browser-side DataVo client runtime and storage state.
+ *
+ * @param page Playwright page.
+ */
 async function resetBrowserClient(
   page: import("@playwright/test").Page,
 ): Promise<void> {
@@ -200,6 +275,17 @@ async function resetBrowserClient(
   });
 }
 
+/**
+ * Executes a strict CRUD parity flow and returns runtime backend and data summary.
+ *
+ * @param page Playwright page.
+ * @param dbName Database name to create for the flow.
+ * @returns Backend info and selected names.
+ *
+ * @example
+ * const parity = await runStrictCrudParity(page, "MyDb");
+ * expect(parity.names).toEqual(expect.arrayContaining(["Alice", "Bob"]));
+ */
 async function runStrictCrudParity(
   page: import("@playwright/test").Page,
   dbName: string,
