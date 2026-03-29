@@ -3,6 +3,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
 using DataVo.Core.Runtime;
 using DataVo.Tests.BrowserParity;
+using Newtonsoft.Json.Linq;
 
 namespace DataVo.Tests.E2E;
 
@@ -148,6 +149,87 @@ public class DiskWalTests : SqlExecutionTestsBase
         File.WriteAllText(walPath, tampered + Environment.NewLine);
 
         Assert.Throws<InvalidDataException>(() => new WalReader(Config).ReadAll());
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("WAL vector envelope serialization requires raw file payload inspection")]
+    public void Wal_VectorRowData_UsesCompactEnvelopeFormat()
+    {
+        var writer = new WalWriter(Config);
+        var entry = new WalEntry
+        {
+            TransactionId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow.Ticks,
+            DatabaseName = TestDb,
+            IsCheckpointed = false,
+            Operations =
+            [
+                new WalOperation
+                {
+                    OperationType = WalOperationType.Insert,
+                    TableName = "VecTable",
+                    RowData = new Dictionary<string, object?>
+                    {
+                        ["Id"] = 1,
+                        ["Emb"] = new float[] { 1f, 0.25f, -2f, 3.5f }
+                    }
+                }
+            ]
+        };
+
+        writer.Append(entry);
+
+        string walPath = Config.ResolveWalFilePath();
+        string line = File.ReadAllLines(walPath).Single();
+        JObject envelope = JObject.Parse(line);
+        string payload = envelope["Payload"]!.Value<string>()!;
+        JObject payloadObj = JObject.Parse(payload);
+
+        JObject rowData = (JObject)payloadObj["Operations"]![0]!["RowData"]!;
+        JObject emb = (JObject)rowData["Emb"]!;
+
+        Assert.Equal("vector-f32b64-v1", emb["__dvType"]!.Value<string>());
+        Assert.Equal(4, emb["dims"]!.Value<int>());
+        Assert.False(string.IsNullOrWhiteSpace(emb["data"]!.Value<string>()));
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("WAL vector envelope replay validation requires disk WAL readback")]
+    public void Wal_VectorRowData_ReplayNormalizesToFloatArray()
+    {
+        var writer = new WalWriter(Config);
+        var entry = new WalEntry
+        {
+            TransactionId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow.Ticks,
+            DatabaseName = TestDb,
+            IsCheckpointed = false,
+            Operations =
+            [
+                new WalOperation
+                {
+                    OperationType = WalOperationType.Insert,
+                    TableName = "VecTable",
+                    RowData = new Dictionary<string, object?>
+                    {
+                        ["Id"] = 1,
+                        ["Emb"] = new float[] { 0.1f, 0.2f, 0.3f }
+                    }
+                }
+            ]
+        };
+
+        writer.Append(entry);
+
+        WalEntry readEntry = new WalReader(Config).ReadAll().Single();
+        TransactionContext replay = readEntry.ToTransactionContext();
+
+        Assert.True(replay.InsertedRows.TryGetValue("VecTable", out var rows));
+        Assert.Single(rows!);
+        Assert.True(rows[0].TryGetValue("Emb", out var embValue));
+
+        float[] vector = Assert.IsType<float[]>(embValue);
+        Assert.Equal([0.1f, 0.2f, 0.3f], vector);
     }
 
     [Fact]

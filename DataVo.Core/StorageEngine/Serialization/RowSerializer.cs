@@ -42,7 +42,21 @@ public static class RowSerializer
     /// </summary>
     public static byte[] Serialize(string databaseName, string tableName, Dictionary<string, dynamic> row)
     {
-        var columns = GetCachedSchemaColumns(databaseName, tableName);
+        DataVoEngine engine = DataVoEngine.Current();
+        return Serialize(databaseName, tableName, row, engine.Catalog, engine.Id.ToString("N"));
+    }
+
+    /// <summary>
+    /// Serializes a dictionary of column names and values using an explicit schema context.
+    /// </summary>
+    public static byte[] Serialize(
+        string databaseName,
+        string tableName,
+        Dictionary<string, dynamic> row,
+        EngineCatalog catalog,
+        string schemaScopeKey)
+    {
+        var columns = GetCachedSchemaColumns(databaseName, tableName, catalog, schemaScopeKey);
         using var memoryStream = new MemoryStream();
         using var writer = new BinaryWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
 
@@ -77,7 +91,23 @@ public static class RowSerializer
     /// </summary>
     public static Dictionary<string, dynamic> Deserialize(string databaseName, string tableName, byte[] data, HashSet<string>? selectedColumns)
     {
-        var columns = GetCachedSchemaColumns(databaseName, tableName);
+        DataVoEngine engine = DataVoEngine.Current();
+        return Deserialize(databaseName, tableName, data, selectedColumns, engine.Catalog, engine.Id.ToString("N"));
+    }
+
+    /// <summary>
+    /// Deserializes a raw binary payload back into a dictionary of column names and typed values,
+    /// optionally projecting only selected columns using an explicit schema context.
+    /// </summary>
+    public static Dictionary<string, dynamic> Deserialize(
+        string databaseName,
+        string tableName,
+        byte[] data,
+        HashSet<string>? selectedColumns,
+        EngineCatalog catalog,
+        string schemaScopeKey)
+    {
+        var columns = GetCachedSchemaColumns(databaseName, tableName, catalog, schemaScopeKey);
         var row = new Dictionary<string, dynamic>();
 
         using var memoryStream = new MemoryStream(data);
@@ -109,10 +139,9 @@ public static class RowSerializer
     /// <summary>
     /// Gets schema columns from the cache or refreshes them from the catalog when the schema version changes.
     /// </summary>
-    private static List<Column> GetCachedSchemaColumns(string databaseName, string tableName)
+    private static List<Column> GetCachedSchemaColumns(string databaseName, string tableName, EngineCatalog catalog, string schemaScopeKey)
     {
-        string cacheKey = BuildSchemaCacheKey(databaseName, tableName);
-        var catalog = DataVoEngine.Current().Catalog;
+        string cacheKey = BuildSchemaCacheKey(schemaScopeKey, databaseName, tableName);
         int currentVersion = catalog.GetTableSchemaVersion(tableName, databaseName);
 
         if (_schemaCache.TryGetValue(cacheKey, out var cachedEntry) && cachedEntry.Version == currentVersion)
@@ -247,8 +276,8 @@ public static class RowSerializer
     /// <summary>
     /// Builds the cache key used for schema caching.
     /// </summary>
-    private static string BuildSchemaCacheKey(string databaseName, string tableName)
+    private static string BuildSchemaCacheKey(string schemaScopeKey, string databaseName, string tableName)
     {
-        return $"{DataVoEngine.Current().Id:N}::{databaseName}::{tableName}";
+        return $"{schemaScopeKey}::{databaseName}::{tableName}";
     }
 }

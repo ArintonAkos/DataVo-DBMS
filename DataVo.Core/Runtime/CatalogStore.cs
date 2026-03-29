@@ -476,7 +476,8 @@ internal sealed class CatalogStore
     private XElement? GetDatabaseElement(string databaseName)
     {
         return _doc.Descendants()
-            .FirstOrDefault(e => e.Name == "Database" && e.Attribute("DatabaseName")?.Value == databaseName);
+            .FirstOrDefault(e => e.Name == "Database"
+                && string.Equals(e.Attribute("DatabaseName")?.Value, databaseName, StringComparison.OrdinalIgnoreCase));
     }
 
     private XElement? GetTableElement(string databaseName, string tableName)
@@ -494,7 +495,8 @@ internal sealed class CatalogStore
     private static XElement? GetTableElement(XElement database, string tableName)
     {
         return database.Descendants()
-            .FirstOrDefault(e => e.Name == "Table" && e.Attribute("TableName")?.Value == tableName);
+            .FirstOrDefault(e => e.Name == "Table"
+                && string.Equals(e.Attribute("TableName")?.Value, tableName, StringComparison.OrdinalIgnoreCase));
     }
 
     private XElement? GetTableIndexElement(string indexName, string tableName, string databaseName)
@@ -512,13 +514,15 @@ internal sealed class CatalogStore
     private static XElement? GetTableAttributeElement(XElement table, string attributeName)
     {
         return table.Descendants()
-            .FirstOrDefault(e => e.Name == "Attribute" && e.Attribute("Name")?.Value == attributeName);
+            .FirstOrDefault(e => e.Name == "Attribute"
+                && string.Equals(e.Attribute("Name")?.Value, attributeName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static XElement? GetTableIndexElement(XContainer table, string indexName)
     {
         return table.Descendants()
-            .FirstOrDefault(e => e.Name == "IndexFile" && e.Attribute("IndexName")?.Value == indexName);
+            .FirstOrDefault(e => e.Name == "IndexFile"
+                && string.Equals(e.Attribute("IndexName")?.Value, indexName, StringComparison.OrdinalIgnoreCase));
     }
 
     private void ValidateForeignKeys(Table table, string databaseName)

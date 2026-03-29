@@ -35,6 +35,7 @@ public sealed class DataVoEngine : IDisposable
         Config = storageContext.Config;
         Sessions = new SessionDatabaseStore();
         Catalog = new EngineCatalog(Config);
+        StorageContext.AttachRuntimeCatalog(Catalog, Id);
         TransactionManager = new TransactionManager();
         LockManager = new LockManager(Config.LockAcquireTimeoutMs);
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
@@ -141,7 +142,19 @@ public sealed class DataVoEngine : IDisposable
 
     internal static void ResetCurrent(StorageContext storageContext)
     {
-        SetFallback(new DataVoEngine(storageContext));
+        var next = new DataVoEngine(storageContext);
+        DataVoEngine? previous;
+
+        lock (SyncRoot)
+        {
+            previous = _fallbackCurrent;
+            _fallbackCurrent = next;
+        }
+
+        if (previous != null && !ReferenceEquals(previous, ScopedCurrent.Value))
+        {
+            previous.Dispose();
+        }
     }
 
     internal static IDisposable PushCurrent(DataVoEngine engine)

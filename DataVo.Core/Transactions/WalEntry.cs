@@ -1,4 +1,5 @@
 using Newtonsoft.Json.Linq;
+using System.Buffers.Binary;
 
 namespace DataVo.Core.Transactions;
 
@@ -83,6 +84,11 @@ public sealed class WalOperation
 /// </example>
 public sealed class WalEntry
 {
+    private const string VectorEnvelopeTypeKey = "__dvType";
+    private const string VectorEnvelopeTypeValue = "vector-f32b64-v1";
+    private const string VectorEnvelopeDimsKey = "dims";
+    private const string VectorEnvelopeDataKey = "data";
+
     /// <summary>
     /// Gets or sets the unique identifier of the committed transaction.
     /// </summary>
@@ -266,7 +272,7 @@ public sealed class WalEntry
     /// <returns>A shallow copy of the row values.</returns>
     private static Dictionary<string, object?> CloneRow(Dictionary<string, dynamic> row)
     {
-        return row.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+        return row.ToDictionary(pair => pair.Key, pair => PrepareValueForWalSerialization(pair.Value));
     }
 
     /// <summary>
@@ -300,11 +306,177 @@ public sealed class WalEntry
         return value switch
         {
             JValue jValue => jValue.Value,
-            JObject jObject => jObject.Properties().ToDictionary(
-                property => property.Name,
-                property => NormalizeValue(property.Value)),
-            JArray jArray => jArray.Select(NormalizeValue).ToList(),
+            JObject jObject => TryDecodeVectorEnvelope(jObject, out float[]? vector)
+                ? vector
+                : jObject.Properties().ToDictionary(
+                    property => property.Name,
+                    property => NormalizeValue(property.Value)),
+            JArray jArray => NormalizeArray(jArray),
             _ => value,
         };
+    }
+
+    private static object? NormalizeArray(JArray array)
+    {
+        List<object?> values = array.Select(NormalizeValue).ToList();
+        return TryConvertNumericSequenceToVector(values, out float[] vector)
+            ? vector
+            : values;
+    }
+
+    private static object? PrepareValueForWalSerialization(object? value)
+    {
+        if (TryCoerceRuntimeVector(value, out float[] vector))
+        {
+            return CreateVectorEnvelope(vector);
+        }
+
+        return value;
+    }
+
+    private static bool TryCoerceRuntimeVector(object? value, out float[] vector)
+    {
+        vector = [];
+
+        switch (value)
+        {
+            case null:
+                return false;
+            case float[] floatArray:
+                vector = [.. floatArray];
+                return vector.Length > 0;
+            case double[] doubleArray:
+                vector = doubleArray.Select(item => (float)item).ToArray();
+                return vector.Length > 0;
+            case IEnumerable<float> floatEnumerable:
+                vector = floatEnumerable.ToArray();
+                return vector.Length > 0;
+            case IEnumerable<double> doubleEnumerable:
+                vector = doubleEnumerable.Select(item => (float)item).ToArray();
+                return vector.Length > 0;
+            default:
+                return false;
+        }
+    }
+
+    private static Dictionary<string, object> CreateVectorEnvelope(float[] vector)
+    {
+        byte[] payload = new byte[vector.Length * sizeof(int)];
+        for (int i = 0; i < vector.Length; i++)
+        {
+            int bits = BitConverter.SingleToInt32Bits(vector[i]);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(i * sizeof(int), sizeof(int)), bits);
+        }
+
+        return new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            [VectorEnvelopeTypeKey] = VectorEnvelopeTypeValue,
+            [VectorEnvelopeDimsKey] = vector.Length,
+            [VectorEnvelopeDataKey] = Convert.ToBase64String(payload)
+        };
+    }
+
+    private static bool TryDecodeVectorEnvelope(JObject node, out float[]? vector)
+    {
+        vector = null;
+
+        string? type = node[VectorEnvelopeTypeKey]?.Value<string>();
+        if (!string.Equals(type, VectorEnvelopeTypeValue, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int? dims = node[VectorEnvelopeDimsKey]?.Value<int>();
+        string? encoded = node[VectorEnvelopeDataKey]?.Value<string>();
+        if (!dims.HasValue || dims.Value <= 0 || string.IsNullOrWhiteSpace(encoded))
+        {
+            return false;
+        }
+
+        byte[] payload;
+        try
+        {
+            payload = Convert.FromBase64String(encoded);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (payload.Length != dims.Value * sizeof(int))
+        {
+            return false;
+        }
+
+        float[] decoded = new float[dims.Value];
+        for (int i = 0; i < decoded.Length; i++)
+        {
+            int bits = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(i * sizeof(int), sizeof(int)));
+            decoded[i] = BitConverter.Int32BitsToSingle(bits);
+        }
+
+        vector = decoded;
+        return true;
+    }
+
+    private static bool TryConvertNumericSequenceToVector(IEnumerable<object?> values, out float[] vector)
+    {
+        List<float> parsed = [];
+        foreach (object? item in values)
+        {
+            if (!TryConvertToFloat(item, out float value))
+            {
+                vector = [];
+                return false;
+            }
+
+            parsed.Add(value);
+        }
+
+        vector = [.. parsed];
+        return vector.Length > 0;
+    }
+
+    private static bool TryConvertToFloat(object? value, out float result)
+    {
+        switch (value)
+        {
+            case null:
+                result = 0;
+                return false;
+            case float f:
+                result = f;
+                return true;
+            case double d:
+                result = (float)d;
+                return true;
+            case decimal m:
+                result = (float)m;
+                return true;
+            case int i:
+                result = i;
+                return true;
+            case long l:
+                result = l;
+                return true;
+            case short s:
+                result = s;
+                return true;
+            case byte b:
+                result = b;
+                return true;
+            case uint ui:
+                result = ui;
+                return true;
+            case ulong ul when ul <= float.MaxValue:
+                result = ul;
+                return true;
+            case string text when float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed):
+                result = parsed;
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
     }
 }
