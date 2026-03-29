@@ -17,9 +17,9 @@ public class TransactionContext
 
     private sealed class BufferedStateSnapshot
     {
-        public required Dictionary<string, List<Dictionary<string, dynamic>>> InsertedRows { get; init; }
+        public required Dictionary<string, List<Dictionary<string, object?>>> InsertedRows { get; init; }
         public required Dictionary<string, HashSet<long>> DeletedRowIds { get; init; }
-        public required Dictionary<string, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>> UpdatedRows { get; init; }
+        public required Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; init; }
     }
 
     /// <summary>
@@ -36,7 +36,7 @@ public class TransactionContext
     /// Buffered INSERT operations grouped by table name.
     /// Each entry maps a table name to a list of row dictionaries awaiting physical insertion.
     /// </summary>
-    public Dictionary<string, List<Dictionary<string, dynamic>>> InsertedRows { get; } = new();
+    public Dictionary<string, List<Dictionary<string, object?>>> InsertedRows { get; } = new();
 
     /// <summary>
     /// Buffered DELETE operations grouped by table name.
@@ -48,14 +48,14 @@ public class TransactionContext
     /// Buffered UPDATE operations grouped by table name.
     /// Each entry maps a table name to a list of (RowId, UpdatedColumns) tuples.
     /// </summary>
-    public Dictionary<string, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>> UpdatedRows { get; } = new();
+    public Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; } = new();
 
     /// <summary>
     /// Appends a row to the insert buffer for the specified table.
     /// </summary>
     /// <param name="tableName">The target table name.</param>
     /// <param name="row">The row data as a column-value dictionary.</param>
-    public void BufferInsert(string tableName, Dictionary<string, dynamic> row)
+    public void BufferInsert(string tableName, Dictionary<string, object?> row)
     {
         if (!InsertedRows.ContainsKey(tableName))
             InsertedRows[tableName] = [];
@@ -82,7 +82,7 @@ public class TransactionContext
     /// <param name="tableName">The target table name.</param>
     /// <param name="rowId">The physical row ID being updated.</param>
     /// <param name="updatedColumns">The column-value pairs to overwrite.</param>
-    public void BufferUpdate(string tableName, long rowId, Dictionary<string, dynamic> updatedColumns)
+    public void BufferUpdate(string tableName, long rowId, Dictionary<string, object?> updatedColumns)
     {
         if (!UpdatedRows.ContainsKey(tableName))
             UpdatedRows[tableName] = [];
@@ -154,7 +154,7 @@ public class TransactionContext
     private void RestoreSnapshot(BufferedStateSnapshot snapshot)
     {
         InsertedRows.Clear();
-        foreach ((string tableName, List<Dictionary<string, dynamic>> rows) in CloneInsertedRows(snapshot.InsertedRows))
+        foreach ((string tableName, List<Dictionary<string, object?>> rows) in CloneInsertedRows(snapshot.InsertedRows))
         {
             InsertedRows[tableName] = rows;
         }
@@ -166,17 +166,17 @@ public class TransactionContext
         }
 
         UpdatedRows.Clear();
-        foreach ((string tableName, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)> rows) in CloneUpdatedRows(snapshot.UpdatedRows))
+        foreach ((string tableName, List<(long RowId, Dictionary<string, object?> UpdatedColumns)> rows) in CloneUpdatedRows(snapshot.UpdatedRows))
         {
             UpdatedRows[tableName] = rows;
         }
     }
 
-    private static Dictionary<string, List<Dictionary<string, dynamic>>> CloneInsertedRows(
-        Dictionary<string, List<Dictionary<string, dynamic>>> source)
+    private static Dictionary<string, List<Dictionary<string, object?>>> CloneInsertedRows(
+        Dictionary<string, List<Dictionary<string, object?>>> source)
     {
-        var clone = new Dictionary<string, List<Dictionary<string, dynamic>>>(source.Comparer);
-        foreach ((string tableName, List<Dictionary<string, dynamic>> rows) in source)
+        var clone = new Dictionary<string, List<Dictionary<string, object?>>>(source.Comparer);
+        foreach ((string tableName, List<Dictionary<string, object?>> rows) in source)
         {
             clone[tableName] = rows.Select(CloneRow).ToList();
         }
@@ -196,11 +196,11 @@ public class TransactionContext
         return clone;
     }
 
-    private static Dictionary<string, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>> CloneUpdatedRows(
-        Dictionary<string, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>> source)
+    private static Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> CloneUpdatedRows(
+        Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> source)
     {
-        var clone = new Dictionary<string, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)>>(source.Comparer);
-        foreach ((string tableName, List<(long RowId, Dictionary<string, dynamic> UpdatedColumns)> updates) in source)
+        var clone = new Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>>(source.Comparer);
+        foreach ((string tableName, List<(long RowId, Dictionary<string, object?> UpdatedColumns)> updates) in source)
         {
             clone[tableName] = updates
                 .Select(update => (update.RowId, CloneRow(update.UpdatedColumns)))
@@ -210,8 +210,8 @@ public class TransactionContext
         return clone;
     }
 
-    private static Dictionary<string, dynamic> CloneRow(Dictionary<string, dynamic> row)
+    private static Dictionary<string, object?> CloneRow(Dictionary<string, object?> row)
     {
-        return new Dictionary<string, dynamic>(row, row.Comparer);
+        return new Dictionary<string, object?>(row, row.Comparer);
     }
 }
