@@ -25,6 +25,18 @@ export default withMermaid(
               link: "/features/setup-and-packaging",
             },
             {
+              text: "WebAssembly and npm",
+              link: "/features/wasm-and-npm",
+            },
+            {
+              text: "Unity and Godot",
+              link: "/features/unity-and-godot",
+            },
+            {
+              text: "Entity Framework",
+              link: "/features/entity-framework",
+            },
+            {
               text: "SELECT and Querying",
               link: "/features/select-and-querying",
             },

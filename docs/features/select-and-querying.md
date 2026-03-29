@@ -168,6 +168,45 @@ FROM Users
 WHERE Name LIKE 'A%';
 ```
 
+## Vector distance and similarity
+
+### `COSINE_DISTANCE`
+
+For embedding vectors, find similar items using cosine similarity:
+
+```sql
+SELECT Id, Content,
+       COSINE_DISTANCE(Vector, @query_vector) AS distance
+FROM Embeddings
+WHERE IsActive = 1
+ORDER BY distance ASC
+LIMIT 10;
+```
+
+Result:
+
+|  Id | Content           | distance |
+| --: | :---------------- | -------: |
+|  42 | "Similar content" |     0.05 |
+|  87 | "Related topic"   |     0.12 |
+|  15 | "Another match"   |     0.18 |
+
+### `L2_DISTANCE`
+
+For Euclidean distance on vector columns:
+
+```sql
+SELECT Id, Name,
+       L2_DISTANCE(Vector, @query_vector) AS distance
+FROM Items
+ORDER BY distance ASC
+LIMIT 5;
+```
+
+**Note**: Vector distance functions are used in `ORDER BY` for nearest-neighbor queries. Lower distances indicate more similar items.
+
+For comprehensive vector search examples, including HNSW indexing and hybrid queries, see [Vector Queries Guide](./vector-queries-guide.md).
+
 Result:
 
 | Name  |

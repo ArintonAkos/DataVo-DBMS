@@ -1,3 +1,4 @@
+using DataVo.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 
@@ -137,9 +138,9 @@ internal static class DataVoQueryTranslationAnalyzer
                     case nameof(Queryable.ThenBy):
                     case nameof(Queryable.ThenByDescending):
                         if (!TryGetLambda(node.Arguments[1], out LambdaExpression? orderingLambda) ||
-                            !IsSimpleMemberAccess(orderingLambda!))
+                            !IsSupportedOrderingSelector(orderingLambda!))
                         {
-                            FallbackReasons.Add($"Operator '{methodName}' requires a simple entity property selector for native preview.");
+                            FallbackReasons.Add($"Operator '{methodName}' requires either a simple entity property selector or DataVo vector distance function selector for native preview.");
                         }
                         break;
 
@@ -204,21 +205,27 @@ internal static class DataVoQueryTranslationAnalyzer
             }
         }
 
-        private static bool IsSimpleMemberAccess(LambdaExpression lambda)
+        private static bool IsSupportedOrderingSelector(LambdaExpression lambda)
         {
             Expression body = UnwrapConvert(lambda.Body);
-            if (body is not MemberExpression memberExpression)
+
+            if (body is MemberExpression memberExpression)
             {
-                return false;
+                Expression? current = memberExpression.Expression;
+                while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
+                {
+                    current = unary.Operand;
+                }
+
+                return current == lambda.Parameters[0];
             }
 
-            Expression? current = memberExpression.Expression;
-            while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
+            if (body is MethodCallExpression methodCall)
             {
-                current = unary.Operand;
+                return IsSupportedVectorDistanceMethodCall(methodCall, lambda.Parameters[0]);
             }
 
-            return current == lambda.Parameters[0];
+            return false;
         }
 
         private static bool IsSupportedWherePredicate(LambdaExpression lambda)
@@ -359,7 +366,8 @@ internal static class DataVoQueryTranslationAnalyzer
             if (expression is MethodCallExpression methodCallExpression)
             {
                 return IsSupportedStringPredicate(methodCallExpression, parameter) ||
-                       IsSupportedStringScalarMethod(methodCallExpression, parameter);
+                       IsSupportedStringScalarMethod(methodCallExpression, parameter) ||
+                       IsSupportedVectorDistanceMethodCall(methodCallExpression, parameter);
             }
 
             return IsClosureEvaluatable(expression);
@@ -368,6 +376,45 @@ internal static class DataVoQueryTranslationAnalyzer
         private static bool IsSupportedSelectProjection(LambdaExpression lambda)
         {
             return IsSupportedSelectNode(UnwrapConvert(lambda.Body), lambda.Parameters[0]);
+        }
+
+        private static bool IsSupportedVectorDistanceMethodCall(MethodCallExpression methodCallExpression, ParameterExpression parameter)
+        {
+            if (methodCallExpression.Method.DeclaringType != typeof(DataVoVectorDbFunctions))
+            {
+                return false;
+            }
+
+            if (methodCallExpression.Method.Name != nameof(DataVoVectorDbFunctions.CosineDistance))
+            {
+                return false;
+            }
+
+            int vectorArgStart = methodCallExpression.Arguments.Count == 3 ? 1 : 0;
+            if (methodCallExpression.Arguments.Count - vectorArgStart != 2)
+            {
+                return false;
+            }
+
+            return IsSupportedVectorOperand(methodCallExpression.Arguments[vectorArgStart], parameter) &&
+                   IsSupportedVectorOperand(methodCallExpression.Arguments[vectorArgStart + 1], parameter);
+        }
+
+        private static bool IsSupportedVectorOperand(Expression expression, ParameterExpression parameter)
+        {
+            expression = UnwrapConvert(expression);
+
+            if (expression is MemberExpression memberExpression)
+            {
+                return IsEntityMember(memberExpression, parameter) || IsClosureMember(memberExpression);
+            }
+
+            if (expression is ConstantExpression)
+            {
+                return true;
+            }
+
+            return IsClosureEvaluatable(expression);
         }
 
         private static bool IsSupportedSelectNode(Expression expression, ParameterExpression parameter)

@@ -23,7 +23,7 @@ public class BTreeIndexFactory : IIndexFactory
     {
         // Default minimum degree for B-Tree
         int minDegree = 3;
-        
+
         if (@params.TryGetValue("minDegree", out var val) && val is int degree)
             minDegree = degree;
 

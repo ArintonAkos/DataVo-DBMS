@@ -1,4 +1,5 @@
 using DataVo.Data;
+using DataVo.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using System.Data.Common;
@@ -218,7 +219,13 @@ internal static class DataVoNativeQueryTranslator
             ? string.Empty
             : $" WHERE {string.Join(" AND ", whereClauses)}";
 
-        string orderSql = BuildOrderBySql(shape.Orderings, entityType, tableIdentifier);
+        var orderBuild = BuildOrderBySql(shape.Orderings, entityType, tableIdentifier);
+        if (orderBuild.AdditionalSelectExpressions.Count > 0)
+        {
+            selectClause = $"{selectClause}, {string.Join(", ", orderBuild.AdditionalSelectExpressions)}";
+        }
+
+        string orderSql = orderBuild.OrderBySql;
 
         string pagingSql = string.Empty;
         if (shape.Skip is int skip)
@@ -234,36 +241,50 @@ internal static class DataVoNativeQueryTranslator
         return $"SELECT {selectClause} FROM {tableName}{whereSql}{orderSql}{pagingSql};";
     }
 
-    private static string BuildOrderBySql(
+    private static OrderByBuildResult BuildOrderBySql(
         IReadOnlyList<OrderingClause> orderings,
         IEntityType entityType,
         StoreObjectIdentifier tableIdentifier)
     {
         if (orderings.Count == 0)
         {
-            return string.Empty;
+            return new OrderByBuildResult(string.Empty, []);
         }
 
+        var additionalSelects = new List<string>();
+
         string[] clauses = orderings
-            .Select(ordering =>
+            .Select((ordering, index) =>
             {
                 Expression keyBody = UnwrapConvert(ordering.KeySelector.Body);
-                if (keyBody is not MemberExpression memberExpression ||
-                    !TryResolveProperty(memberExpression, ordering.KeySelector.Parameters[0], entityType, out IProperty? property))
+
+                string keySql;
+                if (keyBody is MemberExpression memberExpression &&
+                    TryResolveProperty(memberExpression, ordering.KeySelector.Parameters[0], entityType, out IProperty? property))
                 {
-                    throw new NotSupportedException("Native ORDER BY translation supports simple entity property selectors only.");
+                    IProperty resolvedProperty = property
+                        ?? throw new NotSupportedException("Native ORDER BY translation resolved to an unmapped property.");
+
+                    keySql = resolvedProperty.GetColumnName(tableIdentifier) ?? resolvedProperty.Name;
+                }
+                else if (keyBody is MethodCallExpression)
+                {
+                    string expressionSql = TranslateOperand(keyBody, ordering.KeySelector.Parameters[0], entityType, tableIdentifier).Sql;
+                    string alias = $"__ord_{index}";
+                    additionalSelects.Add($"{expressionSql} AS {alias}");
+                    keySql = alias;
+                }
+                else
+                {
+                    throw new NotSupportedException("Native ORDER BY translation supports mapped entity properties and translated scalar method expressions.");
                 }
 
-                IProperty resolvedProperty = property
-                    ?? throw new NotSupportedException("Native ORDER BY translation resolved to an unmapped property.");
-
-                string columnName = resolvedProperty.GetColumnName(tableIdentifier) ?? resolvedProperty.Name;
                 string direction = ordering.Descending ? "DESC" : "ASC";
-                return $"{columnName} {direction}";
+                return $"{keySql} {direction}";
             })
             .ToArray();
 
-        return $" ORDER BY {string.Join(", ", clauses)}";
+        return new OrderByBuildResult($" ORDER BY {string.Join(", ", clauses)}", additionalSelects);
     }
 
     private static string TranslatePredicate(
@@ -418,6 +439,11 @@ internal static class DataVoNativeQueryTranslator
 
         if (expression is MethodCallExpression methodCallExpression)
         {
+            if (TryTranslateVectorDistanceExpression(methodCallExpression, parameter, entityType, tableIdentifier, out string? vectorDistanceSql))
+            {
+                return new SqlOperand(vectorDistanceSql!, IsNullLiteral: false);
+            }
+
             if (methodCallExpression.Method.DeclaringType == typeof(string) && methodCallExpression.Type == typeof(string))
             {
                 return new SqlOperand(
@@ -432,6 +458,48 @@ internal static class DataVoNativeQueryTranslator
 
         object? value = EvaluateExpression(expression);
         return new SqlOperand(DataVoSqlLiteralFormatter.Format(value), value is null);
+    }
+
+    private static bool TryTranslateVectorDistanceExpression(
+        MethodCallExpression expression,
+        ParameterExpression parameter,
+        IEntityType entityType,
+        StoreObjectIdentifier tableIdentifier,
+        out string? sql)
+    {
+        sql = null;
+
+        if (expression.Method.DeclaringType != typeof(DataVoVectorDbFunctions))
+        {
+            return false;
+        }
+
+        bool isCosine = expression.Method.Name == nameof(DataVoVectorDbFunctions.CosineDistance);
+        bool isL2 = expression.Method.Name == nameof(DataVoVectorDbFunctions.L2Distance);
+        if (!isCosine && !isL2)
+        {
+            return false;
+        }
+
+        // Extension-method form includes EF.Functions as the first argument.
+        int vectorArgsStart = expression.Arguments.Count == 3 ? 1 : 0;
+        int vectorArgsCount = expression.Arguments.Count - vectorArgsStart;
+        if (vectorArgsCount != 2)
+        {
+            throw new NotSupportedException($"Native vector translation for '{expression.Method.Name}' requires exactly two vector operands.");
+        }
+
+        var left = TranslateOperand(expression.Arguments[vectorArgsStart], parameter, entityType, tableIdentifier);
+        var right = TranslateOperand(expression.Arguments[vectorArgsStart + 1], parameter, entityType, tableIdentifier);
+
+        if (isL2)
+        {
+            throw new NotSupportedException("Native translation for DataVoVectorDbFunctions.L2Distance is not available yet. Use cosine distance in native preview or raw SQL for custom distance behavior.");
+        }
+
+        // DataVo's vector-distance parser surface currently accepts the cosine operator form.
+        sql = $"({left.Sql} <=> {right.Sql})";
+        return true;
     }
 
     private static bool TryTranslateCoalesceComparison(
@@ -941,6 +1009,10 @@ internal static class DataVoNativeQueryTranslator
         string SelectClause,
         Func<DbDataReader, TDto> Materialize);
 
+    private sealed record OrderByBuildResult(
+        string OrderBySql,
+        IReadOnlyList<string> AdditionalSelectExpressions);
+
 }
 
 internal static class DataVoSqlLiteralFormatter
@@ -952,6 +1024,8 @@ internal static class DataVoSqlLiteralFormatter
             null or DBNull => "NULL",
             bool booleanValue => booleanValue ? "1" : "0",
             string stringValue => $"'{stringValue.Replace("'", "''")}'",
+            float[] floatVector => FormatVector(floatVector),
+            double[] doubleVector => FormatVector(doubleVector),
             DateOnly dateOnlyValue => $"'{dateOnlyValue:yyyy-MM-dd}'",
             DateTime dateTimeValue => $"'{dateTimeValue:yyyy-MM-dd}'",
             DateTimeOffset dateTimeOffsetValue => $"'{dateTimeOffsetValue:yyyy-MM-dd}'",
@@ -960,5 +1034,12 @@ internal static class DataVoSqlLiteralFormatter
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             _ => $"'{value.ToString()?.Replace("'", "''")}'"
         };
+    }
+
+    private static string FormatVector<T>(IEnumerable<T> vector)
+        where T : IFormattable
+    {
+        string joined = string.Join(",", vector.Select(component => component.ToString(null, CultureInfo.InvariantCulture)));
+        return $"'[{joined}]'";
     }
 }

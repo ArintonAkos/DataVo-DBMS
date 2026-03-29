@@ -10,11 +10,11 @@ hero:
       text: Start Here
       link: /features/getting-started
     - theme: alt
-      text: Query Features
-      link: /features/select-and-querying
-    - theme: alt
-      text: Setup and Packaging
+      text: Packaging and Install
       link: /features/setup-and-packaging
+    - theme: alt
+      text: WebAssembly and npm
+      link: /features/wasm-and-npm
 
 features:
   - title: Getting Started
@@ -23,6 +23,18 @@ features:
   - title: SELECT and Querying
     details: Browse filtering, joins, grouping, ordering, limits, predicates, set operations, and subquery support.
     link: /features/select-and-querying
+    - title: Vector Queries Guide
+      details: Create and search vector columns with distance metrics, HNSW indexing, and hybrid queries.
+      link: /features/vector-queries-guide
+  - title: WebAssembly and npm
+    details: Learn browser runtime support today and customer-ready npm package integration planning.
+    link: /features/wasm-and-npm
+  - title: Unity and Godot
+    details: Apply DataVo in game development workflows for local persistence and deterministic SQL behavior.
+    link: /features/unity-and-godot
+  - title: Entity Framework
+    details: Understand the EF integration path and current adoption posture.
+    link: /features/entity-framework
   - title: Volcano Planner and Execution
     details: Understand how the planner chooses Volcano vs legacy paths, with operator-pipeline diagrams and fallback rules.
     link: /features/volcano-planner-and-execution
@@ -45,30 +57,37 @@ features:
 
 # Feature Documentation
 
-This section is the developer-facing feature guide for `DataVo`.
+This section is the end-user and product-facing guide for DataVo.
 
-It is separate from the `DataVo.Core` module reference on purpose:
+It is separate from the DataVo.Core module reference on purpose:
 
-- **Feature docs** explain what the engine supports, how to use it, and what results to expect.
-- **Module docs** explain how the codebase is organized internally for contributors.
+- Feature docs explain integration, behavior, and customer adoption paths.
+- Module docs explain internal implementation details for contributors.
 
 ## Recommended reading order
 
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
-3. [SELECT and Query Features](./select-and-querying.md)
-4. [Security and Authentication](./security-and-authentication.md)
-5. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
-6. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
-7. [DDL and Schema Changes](./schema-and-ddl.md)
-8. [Transactions](./transactions.md)
-9. [Roadmap and Integrations](./roadmap-and-integrations.md)
+3. [WebAssembly and npm](./wasm-and-npm.md)
+4. [Unity and Godot](./unity-and-godot.md)
+5. [Entity Framework Integration](./entity-framework.md)
+6. [SELECT and Query Features](./select-and-querying.md)
+   @@7. [Vector Queries Guide](./vector-queries-guide.md)
+   @@8. [Security and Authentication](./security-and-authentication.md)
+   @@9. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
+   @@10. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
+   @@11. [DDL and Schema Changes](./schema-and-ddl.md)
+   @@12. [Transactions](./transactions.md)
+   @@13. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ## Audience
 
 This section is written for:
 
 - developers embedding `DataVo` in applications
+- product teams planning NuGet and npm rollout
+- Unity and Godot developers building local-first game data flows
+- teams evaluating Entity Framework integration paths
 - contributors extending SQL support
 - maintainers reviewing feature behavior and current limitations
 
@@ -86,6 +105,8 @@ The docs below reflect the currently implemented feature set in the engine, incl
 - principal and grant commands (`CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`)
 - auth session commands (`LOGIN`, `LOGOUT`)
 - introspection commands (`SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`, `SHOW GRANTS FOR USER`, `SHOW GRANTS FOR ROLE`)
+- browser WebAssembly runtime deployment flow
+- customer-facing NuGet and npm publication guidance
 
 ## Fast paths
 
@@ -96,6 +117,22 @@ Read:
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
 3. [Transactions](./transactions.md)
+
+### I want to ship to Unity or Godot
+
+Read:
+
+1. [Unity and Godot](./unity-and-godot.md)
+2. [Setup and Packaging](./setup-and-packaging.md)
+3. [Security and Authentication](./security-and-authentication.md)
+
+### I want browser and npm adoption guidance
+
+Read:
+
+1. [WebAssembly and npm](./wasm-and-npm.md)
+2. [Setup and Packaging](./setup-and-packaging.md)
+3. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ### I want to know what SQL is supported today
 
@@ -124,14 +161,14 @@ Each feature page aims to answer four practical questions:
 
 ## Current packaging status
 
-Today, `DataVo` is packaged **locally** from the repository and is **not yet published to NuGet**.
+Today, DataVo is packaged locally from the repository and public feed publication is in progress.
 
 Current local packages:
 
 - `DataVo.Core`
 - `DataVo.Data`
 
-NuGet publication is planned for a later packaging and distribution slice.
+NuGet and npm publication are part of the active packaging and distribution rollout.
 
 ## Read this together with
 

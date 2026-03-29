@@ -1158,6 +1158,59 @@ public class DataVoEfAdvancedBridgeTests
     }
 
     [Fact]
+    public void ExplainQueryFromDataVo_VectorDistanceWhereOrderBy_WithTranslationPreview_ReportsNativePreviewAndQueryExecutes()
+    {
+        string db = $"datavo_translate_vector_{Guid.NewGuid():N}";
+        string cs = $"StorageMode=Disk;DataSource={db}";
+        string path = Path.Combine(Directory.GetCurrentDirectory(), db);
+
+        try
+        {
+            using (var seed = new DataVoConnection(cs))
+            {
+                seed.Open();
+
+                using var cmd = seed.CreateCommand();
+                cmd.CommandText = "CREATE TABLE IF NOT EXISTS VectorItems (Id INT PRIMARY KEY, Name VARCHAR(120), Embedding VECTOR(3))";
+                cmd.ExecuteNonQuery();
+
+                cmd.CommandText = "INSERT INTO VectorItems VALUES (1, 'Alpha', '[1,0,0]')";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = "INSERT INTO VectorItems VALUES (2, 'Beta', '[0,1,0]')";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = "INSERT INTO VectorItems VALUES (3, 'Gamma', '[0.8,0.2,0]')";
+                cmd.ExecuteNonQuery();
+            }
+
+            using var ctx = CreateVectorContext(cs, o => o.EnableNativeQueryTranslationPreview());
+            float[] queryVector = [1f, 0f, 0f];
+
+            var diagnostics = ctx.ExplainQueryFromDataVo<VectorItem>(q =>
+                q.Where(v => DataVoVectorDbFunctions.CosineDistance(EF.Functions, v.Embedding, queryVector) < 0.3)
+                 .OrderBy(v => DataVoVectorDbFunctions.CosineDistance(EF.Functions, v.Embedding, queryVector))
+                 .Take(2));
+
+            Assert.Equal(DataVoProviderMode.NativeTranslationPreview, diagnostics.ProviderMode);
+            Assert.Equal(DataVoQueryTranslationOutcome.NativeTranslationPreview, diagnostics.Outcome);
+            Assert.Empty(diagnostics.FallbackReasons);
+            Assert.Empty(diagnostics.BlockedReasons);
+
+            var rows = ctx.QueryFromDataVo<VectorItem>(q =>
+                q.Where(v => DataVoVectorDbFunctions.CosineDistance(EF.Functions, v.Embedding, queryVector) < 0.3)
+                 .OrderBy(v => DataVoVectorDbFunctions.CosineDistance(EF.Functions, v.Embedding, queryVector))
+                 .Take(2));
+
+            Assert.Equal(2, rows.Count);
+            Assert.Equal("Alpha", rows[0].Name);
+            Assert.Equal("Gamma", rows[1].Name);
+        }
+        finally
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ExplainQueryFromDataVo_Include_WithTranslationPreview_ReportsGuardedFallbackAndQueryExecutes()
     {
         string db = $"datavo_translate_fallback_{Guid.NewGuid():N}";
@@ -1894,6 +1947,18 @@ public class DataVoEfAdvancedBridgeTests
         return new AdvancedContext(options);
     }
 
+    private static VectorContext CreateVectorContext(
+        string connectionString,
+        Action<DataVoDbContextOptionsBuilder>? dataVoOptionsAction = null)
+    {
+        var options = new DbContextOptionsBuilder<VectorContext>()
+            .UseInMemoryDatabase($"ef_adv_vector_{Guid.NewGuid():N}")
+            .UseDataVo(connectionString, dataVoOptionsAction)
+            .Options;
+
+        return new VectorContext(options);
+    }
+
     private sealed class AdvancedContext(DbContextOptions<AdvancedContext> options) : DataVoDbContext(options)
     {
         public DbSet<Board> Boards => Set<Board>();
@@ -1928,6 +1993,22 @@ public class DataVoEfAdvancedBridgeTests
                 entity.Property(static x => x.Score);
                 entity.Property(static x => x.Level);
                 entity.Property(static x => x.IsActive);
+            });
+        }
+    }
+
+    private sealed class VectorContext(DbContextOptions<VectorContext> options) : DataVoDbContext(options)
+    {
+        public DbSet<VectorItem> VectorItems => Set<VectorItem>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<VectorItem>(entity =>
+            {
+                entity.ToTable("VectorItems");
+                entity.HasKey(static x => x.Id);
+                entity.Property(static x => x.Name).HasMaxLength(120);
+                entity.Property(static x => x.Embedding).HasColumnType("VECTOR(3)");
             });
         }
     }
@@ -1976,6 +2057,13 @@ public class DataVoEfAdvancedBridgeTests
         public double? Score { get; set; }
         public Priority Level { get; set; }
         public bool IsActive { get; set; }
+    }
+
+    private sealed class VectorItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public float[] Embedding { get; set; } = [];
     }
 
     private enum Priority

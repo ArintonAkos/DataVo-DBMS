@@ -24,7 +24,8 @@ let initPromise: Promise<void> | null = null;
  */
 function isDebugEnabled(): boolean {
   try {
-    const locationUrl = typeof self !== "undefined" ? (self as any).location?.href : "";
+    const locationUrl =
+      typeof self !== "undefined" ? (self as any).location?.href : "";
     const debugValue = new URL(locationUrl).searchParams.get("datavoDebug");
     return debugValue === "1" || debugValue === "true";
   } catch {
@@ -114,7 +115,8 @@ async function handleRequest(request: RuntimeRequest): Promise<any> {
     }
     case "execute": {
       await initializeRuntime();
-      const sql = typeof request.payload?.sql === "string" ? request.payload.sql : "";
+      const sql =
+        typeof request.payload?.sql === "string" ? request.payload.sql : "";
       const raw = getInterop().ExecuteSql(sql);
       return JSON.parse(raw);
     }
@@ -161,7 +163,7 @@ self.onmessage = async (event: MessageEvent<RuntimeRequest>) => {
   const request = event.data;
   const response: RuntimeResponse = {
     id: request.id,
-    ok: true
+    ok: true,
   };
 
   try {
