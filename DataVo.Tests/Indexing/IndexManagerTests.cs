@@ -6,18 +6,23 @@ namespace DataVo.Tests.Indexing;
 
 public class IndexManagerTests : IDisposable
 {
+    private sealed class FakeManagedIndex : IIndexBase
+    {
+        public string IndexType => "FAIL";
+    }
+
     private sealed class FailingDeleteFactory : IIndexFactory
     {
         public string IndexType => "FAIL";
 
         public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
         {
-            return new object();
+            return new FakeManagedIndex();
         }
 
         public object LoadIndex(string filePath, IIndexPersistence persistence)
         {
-            return new object();
+            return new FakeManagedIndex();
         }
     }
 
@@ -147,11 +152,11 @@ public class IndexManagerTests : IDisposable
         var cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var metadataField = typeof(IndexManager).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var cache = (Dictionary<string, object>)cacheField.GetValue(_manager)!;
+        var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(_manager)!;
         var metadata = (Dictionary<string, IndexMetadata>)metadataField.GetValue(_manager)!;
 
         const string cacheKey = "db/table_idx";
-        cache[cacheKey] = new object();
+        cache[cacheKey] = new FakeManagedIndex();
         metadata[cacheKey] = new IndexMetadata
         {
             IndexName = "idx",

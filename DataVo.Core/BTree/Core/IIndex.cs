@@ -1,5 +1,7 @@
 namespace DataVo.Core.BTree.Core;
 
+using DataVo.Core.Indexing;
+
 /// <summary>
 /// Represents a B-Tree index that maps string keys to physical row IDs.
 ///
@@ -38,8 +40,10 @@ namespace DataVo.Core.BTree.Core;
 /// define the on-disk layout, node splitting strategy, and serialization format.
 /// </para>
 /// </summary>
-public interface IIndex
+public interface IIndex : IIndexBase
 {
+    string IIndexBase.IndexType => "BTREE";
+
     /// <summary>
     /// Inserts a key → rowId mapping into the index.
     /// If the key already exists, the rowId is appended to its value list.
