@@ -11,15 +11,6 @@ const testRootDir = path.join(rootDir, "DataVo.Tests");
 const ATTR_IGNORE = "BrowserTranslateIgnore";
 const ATTR_NEEDS_SPECIFIC = "BrowserTranslateNeedsSpecificCode";
 
-const DEFAULT_IGNORED_PATH_PREFIXES = [
-  "DataVo.Tests/ADO/",
-  "DataVo.Tests/BTree/",
-  "DataVo.Tests/EntityFramework/",
-  "DataVo.Tests/Execution/",
-  "DataVo.Tests/Indexing/",
-  "DataVo.Tests/StorageEngine/",
-];
-
 function listFilesRecursively(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const files = [];
@@ -237,16 +228,6 @@ function parseAllMethods(content) {
 
 function parseMethods(content) {
   return parseAllMethods(content).filter((method) => isTestAttributes(method.attrs));
-}
-
-function shouldIgnoreByDefaultPath(sourcePath) {
-  for (const prefix of DEFAULT_IGNORED_PATH_PREFIXES) {
-    if (sourcePath.startsWith(prefix)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function collectInvokedHelperSql(helperBody, classHelpers, visited, outputCalls) {
@@ -804,19 +785,6 @@ function main() {
     const allMethods = parseAllMethods(source);
     const methods = allMethods.filter((method) => isTestAttributes(method.attrs));
     const helperMethodsByClass = buildHelperMethodsByClass(allMethods);
-
-    if (shouldIgnoreByDefaultPath(sourcePath)) {
-      for (const method of methods) {
-        totalTests++;
-        ignored.push({
-          id: `${method.className}.${method.name}`,
-          source: sourcePath,
-          reason: "Non-parity unit/integration suite excluded from browser SQL scenario translation",
-        });
-      }
-
-      continue;
-    }
 
     const setupSqlByClass = new Map();
     for (const [className, classHelpers] of helperMethodsByClass.entries()) {
