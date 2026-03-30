@@ -10,6 +10,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.BTree;
 using DataVo.Core.Indexing.HNSW;
 using System.Globalization;
+using System.Runtime.Versioning;
 
 namespace DataVo.Browser;
 
@@ -30,6 +31,7 @@ internal sealed class ExceptionDetails
     public List<object> InnerExceptions { get; init; } = [];
 }
 
+[SupportedOSPlatform("browser")]
 public partial class DataVoInterop
 {
     public static void Main() { }
