@@ -5,7 +5,7 @@ namespace DataVo.Core.MVCC;
 /// <summary>
 /// Allocates globally unique transaction IDs in strictly increasing order.
 /// Uses lock-free <see cref="Interlocked"/> operations for single-ID allocation
-/// and a lightweight <see cref="SpinLock"/> for batch range allocation.
+/// and a monitor lock for batch range allocation.
 /// </summary>
 public class TransactionIdAllocator
 {
@@ -15,10 +15,10 @@ public class TransactionIdAllocator
     private long _nextTransactionId = 1;
 
     /// <summary>
-    /// Lightweight spinlock used only by <see cref="AllocateRange"/> which must atomically
+    /// Lock object used only by <see cref="AllocateRange"/> which must atomically
     /// advance the counter by an arbitrary stride.
     /// </summary>
-    private SpinLock _rangeLock = new(enableThreadOwnerTracking: false);
+    private readonly object _rangeLock = new();
     private Action<long>? _highWaterMarkObserver;
 
     /// <summary>
@@ -42,7 +42,7 @@ public class TransactionIdAllocator
 
     /// <summary>
     /// Allocates and returns a batch of N consecutive transaction IDs.
-    /// Uses a <see cref="SpinLock"/> to atomically advance the counter by the requested count.
+    /// Uses a monitor lock to atomically advance the counter by the requested count.
     /// </summary>
     /// <param name="count">The number of consecutive IDs to allocate. Must be positive.</param>
     /// <returns>The inclusive start and end of the allocated range.</returns>
@@ -53,19 +53,13 @@ public class TransactionIdAllocator
             throw new ArgumentException("Count must be positive.", nameof(count));
         }
 
-        bool lockTaken = false;
-        try
+        lock (_rangeLock)
         {
-            _rangeLock.Enter(ref lockTaken);
             long start = _nextTransactionId;
             _nextTransactionId += count;
             long end = _nextTransactionId - 1;
             _highWaterMarkObserver?.Invoke(end);
             return (start, end);
-        }
-        finally
-        {
-            if (lockTaken) _rangeLock.Exit();
         }
     }
 
