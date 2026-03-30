@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Transactions;
 
@@ -84,14 +85,7 @@ internal sealed class TransactionIdStateStore
                 stream.Flush(true);
             }
 
-            if (File.Exists(FilePath))
-            {
-                File.Replace(tmpPath, FilePath, null);
-            }
-            else
-            {
-                File.Move(tmpPath, FilePath, overwrite: true);
-            }
+            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
 
             _lastPersistedHighWaterMark = highWaterMark;
             _lastPersistTicks = nowTicks;
@@ -120,14 +114,7 @@ internal sealed class TransactionIdStateStore
                 stream.Flush(true);
             }
 
-            if (File.Exists(FilePath))
-            {
-                File.Replace(tmpPath, FilePath, null);
-            }
-            else
-            {
-                File.Move(tmpPath, FilePath, overwrite: true);
-            }
+            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
 
             _lastPersistedHighWaterMark = highWaterMark;
             _lastPersistTicks = DateTime.UtcNow.Ticks;

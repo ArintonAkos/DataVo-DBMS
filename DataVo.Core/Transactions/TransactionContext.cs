@@ -118,7 +118,21 @@ public class TransactionContext
 
         RestoreSnapshot(snapshot);
 
-        int index = _savepointOrder.FindLastIndex(name => string.Equals(name, savepointName, StringComparison.OrdinalIgnoreCase));
+        int index = -1;
+        for (int i = _savepointOrder.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(_savepointOrder[i], savepointName, StringComparison.OrdinalIgnoreCase))
+            {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Savepoint '{savepointName}' order marker was not found.");
+        }
+
         for (int i = _savepointOrder.Count - 1; i > index; i--)
         {
             string trailingSavepoint = _savepointOrder[i];

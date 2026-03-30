@@ -14,8 +14,7 @@ namespace DataVo.Core.BTree;
 public class JsonBTreeIndex(int minDegree) : IIndex
 {
     private const int DefaultMinDegree = 50;
-    [JsonIgnore]
-    private readonly ReaderWriterLockSlim _treeLock = new(LockRecursionPolicy.NoRecursion);
+    private readonly object _treeLock = new();
 
     /// <summary>
     /// Gets or sets the root node of the B-Tree.
@@ -45,14 +44,9 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void Insert(string key, long value)
     {
-        _treeLock.EnterWriteLock();
-        try
+        lock (_treeLock)
         {
             InsertCore(key, value);
-        }
-        finally
-        {
-            _treeLock.ExitWriteLock();
         }
     }
 
@@ -94,14 +88,9 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <returns>A list of matching row IDs, or an empty list if the key is not present.</returns>
     public List<long> Search(string key)
     {
-        _treeLock.EnterReadLock();
-        try
+        lock (_treeLock)
         {
             return Root.Search(key);
-        }
-        finally
-        {
-            _treeLock.ExitReadLock();
         }
     }
 
@@ -112,14 +101,9 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
     public bool ContainsValue(long rowId)
     {
-        _treeLock.EnterReadLock();
-        try
+        lock (_treeLock)
         {
             return Root.ContainsValue(rowId);
-        }
-        finally
-        {
-            _treeLock.ExitReadLock();
         }
     }
 
@@ -134,8 +118,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void Delete(string key, long value)
     {
-        _treeLock.EnterWriteLock();
-        try
+        lock (_treeLock)
         {
             var allEntries = new List<KeyValuePair<string, List<long>>>();
             Root.CollectAll(allEntries);
@@ -167,10 +150,6 @@ public class JsonBTreeIndex(int minDegree) : IIndex
                 }
             }
         }
-        finally
-        {
-            _treeLock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -182,8 +161,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void DeleteValues(List<long> valuesToDelete)
     {
-        _treeLock.EnterWriteLock();
-        try
+        lock (_treeLock)
         {
             var allEntries = new List<KeyValuePair<string, List<long>>>();
             Root.CollectAll(allEntries);
@@ -211,10 +189,6 @@ public class JsonBTreeIndex(int minDegree) : IIndex
                 }
             }
         }
-        finally
-        {
-            _treeLock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -223,8 +197,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <param name="filePath">The destination file path.</param>
     public void Save(string filePath)
     {
-        _treeLock.EnterReadLock();
-        try
+        lock (_treeLock)
         {
             string directory = Path.GetDirectoryName(filePath)!;
             if (!Directory.Exists(directory))
@@ -237,10 +210,6 @@ public class JsonBTreeIndex(int minDegree) : IIndex
                 TypeNameHandling = TypeNameHandling.None
             });
             File.WriteAllText(filePath, json);
-        }
-        finally
-        {
-            _treeLock.ExitReadLock();
         }
     }
 

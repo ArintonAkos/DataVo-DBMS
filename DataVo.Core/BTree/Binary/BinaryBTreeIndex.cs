@@ -13,7 +13,7 @@ namespace DataVo.Core.BTree.Binary;
 public class BinaryBTreeIndex : IIndex, IDisposable
 {
     private DiskPager _pager = null!;
-    private readonly ReaderWriterLockSlim _treeLock = new(LockRecursionPolicy.NoRecursion);
+    private readonly object _treeLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BinaryBTreeIndex"/> class.
@@ -74,8 +74,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public void Insert(string key, long rowId)
     {
-        _treeLock.EnterWriteLock();
-        try
+        lock (_treeLock)
         {
             if (_pager == null) throw new IndexException("Index not loaded");
 
@@ -99,10 +98,6 @@ public class BinaryBTreeIndex : IIndex, IDisposable
                 root.InsertNonFull(key, rowId, _pager);
             }
         }
-        finally
-        {
-            _treeLock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -113,18 +108,13 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public List<long> Search(string key)
     {
-        _treeLock.EnterReadLock();
-        try
+        lock (_treeLock)
         {
             if (_pager == null) throw new IndexException("Index not loaded");
 
             var results = new List<long>();
             SearchInternal(_pager.RootPageId, key, results);
             return results;
-        }
-        finally
-        {
-            _treeLock.ExitReadLock();
         }
     }
 
@@ -176,8 +166,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// </remarks>
     public void DeleteValues(List<long> rowIds)
     {
-        _treeLock.EnterWriteLock();
-        try
+        lock (_treeLock)
         {
             if (_pager == null) throw new IndexException("Index not loaded");
             var idsSet = new HashSet<long>(rowIds);
@@ -202,10 +191,6 @@ public class BinaryBTreeIndex : IIndex, IDisposable
                 }
             }
         }
-        finally
-        {
-            _treeLock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -216,8 +201,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public bool ContainsValue(long rowId)
     {
-        _treeLock.EnterReadLock();
-        try
+        lock (_treeLock)
         {
             if (_pager == null) throw new IndexException("Index not loaded");
 
@@ -231,10 +215,6 @@ public class BinaryBTreeIndex : IIndex, IDisposable
             }
             return false;
         }
-        finally
-        {
-            _treeLock.ExitReadLock();
-        }
     }
 
     /// <summary>
@@ -242,7 +222,6 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// </summary>
     public void Dispose()
     {
-        _treeLock.Dispose();
         _pager?.Dispose();
     }
 }

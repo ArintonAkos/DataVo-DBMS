@@ -5,6 +5,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Runtime;
 
@@ -608,16 +609,8 @@ internal sealed class CatalogStore
         string tempPath = _catalogFilePath! + ".tmp";
         _doc.Save(tempPath);
 
-        // Atomic replace: if the destination exists, swap in the new file.
-        // File.Replace is atomic on NTFS/APFS/ext4.
-        if (File.Exists(_catalogFilePath!))
-        {
-            File.Replace(tempPath, _catalogFilePath!, destinationBackupFileName: null);
-        }
-        else
-        {
-            File.Move(tempPath, _catalogFilePath!);
-        }
+        // Use a browser-safe fallback where File.Replace is unavailable.
+        AtomicFileOperations.ReplaceFromTemp(tempPath, _catalogFilePath!);
     }
 
     private static string GetTableSchemaVersionKey(string databaseName, string tableName)
