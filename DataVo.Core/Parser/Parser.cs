@@ -1891,22 +1891,12 @@ public class Parser(List<Token> tokens)
 
     private static Token? GetPreviousSignificantToken(List<Token> tokens)
     {
-        for (int i = tokens.Count - 1; i >= 0; i--)
-        {
-            return tokens[i];
-        }
-
-        return null;
+        return tokens.Count > 0 ? tokens[^1] : null;
     }
 
     private static Token? GetNextSignificantToken(List<Token> tokens, int startIndex)
     {
-        for (int i = startIndex; i < tokens.Count; i++)
-        {
-            return tokens[i];
-        }
-
-        return null;
+        return startIndex >= 0 && startIndex < tokens.Count ? tokens[startIndex] : null;
     }
 
     private static bool CanEndExpression(Token token)

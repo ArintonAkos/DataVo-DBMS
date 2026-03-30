@@ -109,8 +109,8 @@ public class TransactionTimestampTests
     [Fact]
     public void TransactionContext_WithSnapshot_CanEvaluateVersionVisibility()
     {
-        var context = new TransactionContext 
-        { 
+        var context = new TransactionContext
+        {
             TransactionId = 1,
             Snapshot = new TransactionSnapshot(snapshotTimestamp: 100, transactionId: 1)
         };

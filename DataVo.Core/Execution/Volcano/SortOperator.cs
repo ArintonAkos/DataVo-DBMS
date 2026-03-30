@@ -53,6 +53,7 @@ public sealed class SortOperator : IQueryOperator
         /// </summary>
         public SortKeySpec(Func<TypedExecutionRow, object?> typedKeySelector, bool ascending)
         {
+            KeySelector = _ => null;
             TypedKeySelector = typedKeySelector;
             Ascending = ascending;
         }

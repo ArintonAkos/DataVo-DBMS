@@ -15,9 +15,9 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn("SELECT * FROM Embeddings");
 
         Assert.Single(result.Data);
-        Assert.IsType<float[]>(result.Data[0]["Emb"]);
+        Assert.IsType<float[]>(result.Data[0]["Emb"]!);
 
-        var vector = (float[])result.Data[0]["Emb"];
+        var vector = (float[])result.Data[0]["Emb"]!;
         Assert.Equal(3, vector.Length);
         Assert.Equal(1f, vector[0]);
         Assert.Equal(0f, vector[1]);

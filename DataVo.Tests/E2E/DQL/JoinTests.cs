@@ -22,9 +22,9 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.False(result.IsError);
         Assert.NotNull(result.Data);
         Assert.Equal(3, result.Data.Count);
-        Assert.Contains(result.Data, row => row["Employees.Name"].ToString() == "Alice" && row["Departments.DeptName"].ToString() == "Engineering");
-        Assert.Contains(result.Data, row => row["Employees.Name"].ToString() == "Bob" && row["Departments.DeptName"].ToString() == "Engineering");
-        Assert.Contains(result.Data, row => row["Employees.Name"].ToString() == "Charlie" && row["Departments.DeptName"].ToString() == "HR");
+        Assert.Contains(result.Data, row => row["Employees.Name"]?.ToString() == "Alice" && row["Departments.DeptName"]?.ToString() == "Engineering");
+        Assert.Contains(result.Data, row => row["Employees.Name"]?.ToString() == "Bob" && row["Departments.DeptName"]?.ToString() == "Engineering");
+        Assert.Contains(result.Data, row => row["Employees.Name"]?.ToString() == "Charlie" && row["Departments.DeptName"]?.ToString() == "HR");
     }
 
     [Fact]
@@ -102,10 +102,10 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         Assert.False(result.IsError);
         Assert.NotNull(result.Data);
         Assert.Equal(4, result.Data.Count);
-        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "1" && row["B.Id"].ToString() == "10");
-        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "1" && row["B.Id"].ToString() == "20");
-        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "2" && row["B.Id"].ToString() == "10");
-        Assert.Contains(result.Data, row => row["A.Id"].ToString() == "2" && row["B.Id"].ToString() == "20");
+        Assert.Contains(result.Data, row => row["A.Id"]?.ToString() == "1" && row["B.Id"]?.ToString() == "10");
+        Assert.Contains(result.Data, row => row["A.Id"]?.ToString() == "1" && row["B.Id"]?.ToString() == "20");
+        Assert.Contains(result.Data, row => row["A.Id"]?.ToString() == "2" && row["B.Id"]?.ToString() == "10");
+        Assert.Contains(result.Data, row => row["A.Id"]?.ToString() == "2" && row["B.Id"]?.ToString() == "20");
     }
 
     [Fact]

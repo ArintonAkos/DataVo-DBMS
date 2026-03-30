@@ -73,7 +73,7 @@ internal class GroupBy
             }
             else
             {
-                var columnValue = row[column.TableName][column.ColumnName].ToString();
+                var columnValue = row[column.TableName][column.ColumnName]?.ToString() ?? string.Empty;
                 string hashCode = columnValue.GetHashCode().ToString();
 
                 columnValues.Add(hashCode);

@@ -34,6 +34,7 @@ public class MVCCIntegrationTests
 
         // Get version
         var version = versionStorage.GetVersion("db", "tbl", 1);
+        Assert.True(version.HasValue);
 
         // Both snapshots should see the version (created within both snapshots)
         Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(version.Value, snapshot1));
@@ -66,6 +67,7 @@ public class MVCCIntegrationTests
         var snapshot2 = new TransactionSnapshot(snapshotTimestamp: tx2Id, transactionId: tx2Id);
 
         var version = versionStorage.GetVersion("db", "tbl", 1);
+        Assert.True(version.HasValue);
 
         // Snapshot1 (before delete) should see the row
         Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(version.Value, snapshot1));
@@ -155,17 +157,17 @@ public class MVCCIntegrationTests
         var v2 = versionStorage.GetVersion("db", "tbl", 2);
 
         // TX1 still sees version 1 (created before TX1's snapshot)
-           Assert.True(v1.HasValue);
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot1));
+        Assert.True(v1.HasValue);
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot1));
 
         // TX2 sees the new version (visible at/after TX2's snapshot)
-           Assert.True(v2.HasValue);
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot2));
+        Assert.True(v2.HasValue);
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot2));
 
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot3));
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot3));
 
-           Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot2));
-           Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot3));
+        Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot2));
+        Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot3));
     }
 
     /// <summary>
@@ -197,20 +199,20 @@ public class MVCCIntegrationTests
         var v3 = versionStorage.GetVersion("db", "tbl", 3);
 
         // Each transaction should see its own and prior versions
-           Assert.True(v1.HasValue);
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot1)); // sees its own
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot2)); // sees prior
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot3)); // sees prior
+        Assert.True(v1.HasValue);
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot1)); // sees its own
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot2)); // sees prior
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v1.Value, snapshot3)); // sees prior
 
-           Assert.True(v2.HasValue);
-           Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot1)); // doesn't see future
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot2)); // sees its own
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot3)); // sees prior
+        Assert.True(v2.HasValue);
+        Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot1)); // doesn't see future
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot2)); // sees its own
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v2.Value, snapshot3)); // sees prior
 
-           Assert.True(v3.HasValue);
-           Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot1)); // doesn't see future
-           Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot2)); // doesn't see future
-           Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot3)); // sees its own
+        Assert.True(v3.HasValue);
+        Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot1)); // doesn't see future
+        Assert.False(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot2)); // doesn't see future
+        Assert.True(SnapshotVisibilityEvaluator.IsVersionVisible(v3.Value, snapshot3)); // sees its own
     }
 
     /// <summary>
@@ -270,8 +272,8 @@ public class MVCCIntegrationTests
         var version = versionStorage.GetVersion("db", "tbl", 1);
 
         // Should not be able to update a deleted row
-           Assert.True(version.HasValue);
-           Assert.False(SnapshotVisibilityEvaluator.CanUpdateRow(version.Value, snapshot2));
-           Assert.False(SnapshotVisibilityEvaluator.CanDeleteRow(version.Value, snapshot2));
+        Assert.True(version.HasValue);
+        Assert.False(SnapshotVisibilityEvaluator.CanUpdateRow(version.Value, snapshot2));
+        Assert.False(SnapshotVisibilityEvaluator.CanDeleteRow(version.Value, snapshot2));
     }
 }

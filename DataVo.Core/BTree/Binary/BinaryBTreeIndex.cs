@@ -13,6 +13,7 @@ namespace DataVo.Core.BTree.Binary;
 public class BinaryBTreeIndex : IIndex, IDisposable
 {
     private DiskPager _pager = null!;
+    private readonly ReaderWriterLockSlim _treeLock = new(LockRecursionPolicy.NoRecursion);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BinaryBTreeIndex"/> class.
@@ -73,26 +74,34 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public void Insert(string key, long rowId)
     {
-        if (_pager == null) throw new IndexException("Index not loaded");
-
-        BTreePage root = _pager.ReadPage(_pager.RootPageId);
-
-        if (root.NumKeys == BTreePage.MaxKeys)
+        _treeLock.EnterWriteLock();
+        try
         {
-            BTreePage newRoot = _pager.AllocatePage();
-            newRoot.IsLeaf = false;
-            newRoot.NumKeys = 0;
-            newRoot.Children[0] = root.PageId;
+            if (_pager == null) throw new IndexException("Index not loaded");
 
-            _pager.RootPageId = newRoot.PageId;
-            _pager.WriteMetadata();
+            BTreePage root = _pager.ReadPage(_pager.RootPageId);
 
-            newRoot.SplitChild(0, root, _pager);
-            newRoot.InsertNonFull(key, rowId, _pager);
+            if (root.NumKeys == BTreePage.MaxKeys)
+            {
+                BTreePage newRoot = _pager.AllocatePage();
+                newRoot.IsLeaf = false;
+                newRoot.NumKeys = 0;
+                newRoot.Children[0] = root.PageId;
+
+                _pager.RootPageId = newRoot.PageId;
+                _pager.WriteMetadata();
+
+                newRoot.SplitChild(0, root, _pager);
+                newRoot.InsertNonFull(key, rowId, _pager);
+            }
+            else
+            {
+                root.InsertNonFull(key, rowId, _pager);
+            }
         }
-        else
+        finally
         {
-            root.InsertNonFull(key, rowId, _pager);
+            _treeLock.ExitWriteLock();
         }
     }
 
@@ -104,11 +113,19 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public List<long> Search(string key)
     {
-        if (_pager == null) throw new IndexException("Index not loaded");
+        _treeLock.EnterReadLock();
+        try
+        {
+            if (_pager == null) throw new IndexException("Index not loaded");
 
-        var results = new List<long>();
-        SearchInternal(_pager.RootPageId, key, results);
-        return results;
+            var results = new List<long>();
+            SearchInternal(_pager.RootPageId, key, results);
+            return results;
+        }
+        finally
+        {
+            _treeLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -159,27 +176,35 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// </remarks>
     public void DeleteValues(List<long> rowIds)
     {
-        if (_pager == null) throw new IndexException("Index not loaded");
-        var idsSet = new HashSet<long>(rowIds);
-
-        // Tombstone deletion algorithm for performance and simplicity in advanced disk I/O
-        for (int i = 1; i < _pager.NumPages; i++)
+        _treeLock.EnterWriteLock();
+        try
         {
-            var page = _pager.ReadPage(i);
-            bool pageChanged = false;
+            if (_pager == null) throw new IndexException("Index not loaded");
+            var idsSet = new HashSet<long>(rowIds);
 
-            for (int k = 0; k < page.NumKeys; k++)
+            // Tombstone deletion algorithm for performance and simplicity in advanced disk I/O
+            for (int i = 1; i < _pager.NumPages; i++)
             {
-                if (idsSet.Contains(page.Values[k]))
+                var page = _pager.ReadPage(i);
+                bool pageChanged = false;
+
+                for (int k = 0; k < page.NumKeys; k++)
                 {
-                    page.Values[k] = 0; // Tombstone
-                    pageChanged = true;
+                    if (idsSet.Contains(page.Values[k]))
+                    {
+                        page.Values[k] = 0; // Tombstone
+                        pageChanged = true;
+                    }
+                }
+                if (pageChanged)
+                {
+                    _pager.WritePage(page);
                 }
             }
-            if (pageChanged)
-            {
-                _pager.WritePage(page);
-            }
+        }
+        finally
+        {
+            _treeLock.ExitWriteLock();
         }
     }
 
@@ -191,17 +216,25 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// <exception cref="Exception">Thrown when the index has not been loaded.</exception>
     public bool ContainsValue(long rowId)
     {
-        if (_pager == null) throw new IndexException("Index not loaded");
-
-        for (int i = 1; i < _pager.NumPages; i++)
+        _treeLock.EnterReadLock();
+        try
         {
-            var page = _pager.ReadPage(i);
-            for (int k = 0; k < page.NumKeys; k++)
+            if (_pager == null) throw new IndexException("Index not loaded");
+
+            for (int i = 1; i < _pager.NumPages; i++)
             {
-                if (page.Values[k] == rowId) return true;
+                var page = _pager.ReadPage(i);
+                for (int k = 0; k < page.NumKeys; k++)
+                {
+                    if (page.Values[k] == rowId) return true;
+                }
             }
+            return false;
         }
-        return false;
+        finally
+        {
+            _treeLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -209,6 +242,7 @@ public class BinaryBTreeIndex : IIndex, IDisposable
     /// </summary>
     public void Dispose()
     {
+        _treeLock.Dispose();
         _pager?.Dispose();
     }
 }

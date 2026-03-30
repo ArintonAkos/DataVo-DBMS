@@ -773,7 +773,7 @@ public class IndexManager : IDisposable
             return vectorIndex;
         }
 
-        if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt))
+        if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt) && rebuilt != null)
         {
             return rebuilt;
         }

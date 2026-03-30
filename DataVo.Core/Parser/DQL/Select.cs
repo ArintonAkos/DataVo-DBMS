@@ -100,7 +100,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     private bool _volcanoLimitPushedDown;
     private bool _volcanoOffsetPushedDown;
     private bool _volcanoOrderPushedDown;
-    private bool _volcanoProjectionPushedDown;
     private bool _volcanoDistinctPushedDown;
     private bool _volcanoGroupByPushedDown;
     private bool _volcanoAggregatePushedDown;
@@ -592,7 +591,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         {
             if (!IsNearestJoinTwoPhaseEligible(materializedWhere, out var embeddingFilter))
             {
-                if (materializedWhere == null || !ReferencesOnlyFromTable(materializedWhere, _model.FromTable.TableName))
+                if (materializedWhere == null || !ReferencesOnlyFromTable(materializedWhere, _model.FromTable!.TableName))
                 {
                     ExpressionNode? partialEmbeddingFilter = ResolveSeedPredicateForExpansion(materializedWhere);
                     try
@@ -617,7 +616,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         }
 
         return new ListedTable(seedRows.Values
-            .Select(record => new JoinedRow(_model.FromTable.TableName, record.ToRow()))
+            .Select(record => new JoinedRow(_model.FromTable!.TableName, record.ToRow()))
             .ToList());
     }
 
@@ -743,7 +742,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         TableData filtered = ApplyPredicateToSeedRows(seedRows, materializedWhere);
         return new ListedTable(filtered.Values
-            .Select(record => new JoinedRow(_model.FromTable.TableName, record.ToRow()))
+            .Select(record => new JoinedRow(_model.FromTable!.TableName, record.ToRow()))
             .ToList());
     }
 
@@ -1481,7 +1480,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 return values;
             });
 
-            _volcanoProjectionPushedDown = true;
         }
 
         bool orderPushedDown = false;
@@ -1690,7 +1688,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 return values;
             });
 
-            _volcanoProjectionPushedDown = true;
         }
 
         if (TryBuildJoinDistinctPushdown(out var distinctColumns))
@@ -2515,7 +2512,8 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 continue;
             }
 
-            if (aggregateAliasMap.TryGetValue(token, out string aggregateOutputKey))
+            if (aggregateAliasMap.TryGetValue(token, out string? aggregateOutputKey)
+                && !string.IsNullOrWhiteSpace(aggregateOutputKey))
             {
                 orderKeys.Add((aggregateOutputKey, orderColumn.IsAscending));
                 continue;

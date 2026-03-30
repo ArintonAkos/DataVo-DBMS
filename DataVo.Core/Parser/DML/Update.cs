@@ -370,7 +370,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 {
                     if (!CheckForeignKeyConstraint(fk, fkValStr, databaseName))
                     {
-                        throw new EvaluationException($"Foreign key violation: Value '{fkValStr}' perfectly validates against references in row {rowNumber}.");
+                        throw new EvaluationException($"Foreign key violation: Value '{fkValStr}' does not reference an existing parent row for foreign key column {fk.AttributeName} in row {rowNumber}.");
                     }
                 }
             }
