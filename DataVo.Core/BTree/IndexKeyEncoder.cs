@@ -15,7 +15,7 @@ namespace DataVo.Core.BTree;
 ///
 /// The sign-flip trick: XOR the sign bit so that negative ints sort before positive.
 /// Example: -5 → 0x7FFFFFFB, 0 → 0x80000000, 1 → 0x80000001
-/// Byte comparison: 0x7F... &lt; 0x80... → -5 &lt; 1 ✅
+/// Byte comparison: 0x7F... &lt; 0x80... → -5 &lt; 1 as desired.
 /// </summary>
 public static class IndexKeyEncoder
 {
