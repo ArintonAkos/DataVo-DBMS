@@ -1,6 +1,7 @@
+/// <reference types="node" />
 import { expect, test } from "@playwright/test";
-import fs from "node:fs";
-import path from "node:path";
+import fs from "fs";
+import path from "path";
 
 /** Enables stricter browser parity assertions when set to 1. */
 const strictBrowserParityGate =
@@ -62,6 +63,14 @@ type RuntimeNeedsSpecificItem = {
   id: string;
   source: string;
   reason: string;
+};
+
+type ScenarioExecutionSummaryItem = {
+  id: string;
+  source: string;
+  status: "passed" | "failed";
+  reason?: string;
+  durationMs?: number;
 };
 
 /**
@@ -175,6 +184,51 @@ function writeRuntimeNeedsSpecificReport(
 }
 
 /**
+ * Writes a full generated-scenario execution summary with pass/fail counts.
+ */
+function writeGeneratedExecutionSummary(
+  items: ScenarioExecutionSummaryItem[],
+): void {
+  const filePath = path.join(
+    process.cwd(),
+    "tests",
+    "browser",
+    "generated",
+    "wasm-scenarios.execution-summary.json",
+  );
+
+  const passed = items.filter((x) => x.status === "passed").length;
+  const failed = items.filter((x) => x.status === "failed").length;
+
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify(
+      {
+        generatedAtUtc: new Date().toISOString(),
+        totals: {
+          total: items.length,
+          passed,
+          failed,
+        },
+        bySource: items.reduce<
+          Record<string, { passed: number; failed: number }>
+        >((acc, item) => {
+          if (!acc[item.source]) {
+            acc[item.source] = { passed: 0, failed: 0 };
+          }
+          acc[item.source][item.status]++;
+          return acc;
+        }, {}),
+        records: items,
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
+}
+
+/**
  * Executes SQL and asserts success, returning the final result.
  *
  * @param page Playwright page.
@@ -222,7 +276,10 @@ function isAuthorizationScenario(scenario: GeneratedScenario): boolean {
 /**
  * Returns true when setup errors match known transaction translation edge cases.
  */
-function isIgnorableTransactionSetupError(command: string, message: string): boolean {
+function isIgnorableTransactionSetupError(
+  command: string,
+  message: string,
+): boolean {
   if (/^\s*COMMIT\s*;?\s*$/i.test(command)) {
     return /Row\s+\d+\s+not\s+found\s+in\s+.*T_AUTO_TOKEN/i.test(message);
   }
@@ -512,10 +569,12 @@ test.describe("DataVo WASM browser runtime", () => {
     }
 
     const runtimeNeedsSpecific: RuntimeNeedsSpecificItem[] = [];
+    const summary: ScenarioExecutionSummaryItem[] = [];
     let executedScenarios = 0;
 
     for (let i = 0; i < scenarios.length; i++) {
       const scenario = scenarios[i];
+      const startedAt = Date.now();
       try {
         await resetBrowserClient(page);
 
@@ -655,6 +714,12 @@ test.describe("DataVo WASM browser runtime", () => {
         }
 
         executedScenarios++;
+        summary.push({
+          id: scenario.id,
+          source: scenario.source,
+          status: "passed",
+          durationMs: Date.now() - startedAt,
+        });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         runtimeNeedsSpecific.push({
@@ -662,12 +727,20 @@ test.describe("DataVo WASM browser runtime", () => {
           source: scenario.source,
           reason,
         });
+        summary.push({
+          id: scenario.id,
+          source: scenario.source,
+          status: "failed",
+          reason,
+          durationMs: Date.now() - startedAt,
+        });
       }
     }
 
     expect(executedScenarios).toBeGreaterThan(0);
 
     writeRuntimeNeedsSpecificReport(runtimeNeedsSpecific);
+    writeGeneratedExecutionSummary(summary);
 
     if (runtimeNeedsSpecific.length > 0) {
       console.warn(

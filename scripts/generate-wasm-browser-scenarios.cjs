@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const {
+  buildManualScenarioForUnitTest,
+} = require("./wasm-scenarios/manual-scenarios.cjs");
+const {
+  isIntentionallyNonBrowserLane,
+} = require("./wasm-scenarios/policy.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "docs", "tests", "browser", "generated");
@@ -658,6 +664,11 @@ function extractScenario(method, sourcePath, helperMethodsByClass, setupSqlByCla
   const helperCalls = extractHelperSqlCalls(method, helperMethodsByClass);
   const setupCalls = setupSqlByClass.get(method.className) || [];
 
+  const manualScenario = buildManualScenarioForUnitTest(method, sourcePath);
+  if (manualScenario) {
+    return manualScenario;
+  }
+
   if (methodCalls.length === 0 && helperCalls.length === 0 && setupCalls.length === 0) {
     return null;
   }
@@ -801,11 +812,19 @@ function main() {
       const methodIgnoreReason = parseReasonFromAttribute(method.attrs, ATTR_IGNORE);
       const ignoreReason = methodIgnoreReason ?? classIgnoreReason;
       if (ignoreReason !== null) {
-        ignored.push({
-          id: `${method.className}.${method.name}`,
-          source: sourcePath,
-          reason: ignoreReason || "ignored",
-        });
+        if (isIntentionallyNonBrowserLane(sourcePath)) {
+          ignored.push({
+            id: `${method.className}.${method.name}`,
+            source: sourcePath,
+            reason: ignoreReason || "ignored",
+          });
+        } else {
+          needsSpecificCode.push({
+            id: `${method.className}.${method.name}`,
+            source: sourcePath,
+            reason: `Explicit BrowserTranslateIgnore: ${ignoreReason || "ignored"}`,
+          });
+        }
         continue;
       }
 

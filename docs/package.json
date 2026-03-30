@@ -9,8 +9,10 @@
     "test:browser:generate": "bash ../scripts/generate-wasm-browser-scenarios.sh",
     "test:browser:install": "playwright install chromium",
     "test:browser": "npm run test:browser:generate && playwright test",
+    "test:browser:needs-specific": "npm run test:browser:generate && rm -f tests/browser/generated/wasm-needs-specific.execution-summary*.json tests/browser/generated/wasm-parity.overall-summary.json && playwright test tests/browser/datavo-wasm-needs-specific-*.spec.ts && playwright test tests/browser/datavo-wasm-needs-summary.spec.ts",
     "test:browser:strict": "npm run test:browser:generate && DATAVO_STRICT_BROWSER_PARITY=1 playwright test",
-    "test:browser:strict:stress": "DATAVO_STRICT_BROWSER_PARITY=1 playwright test -g \"strict parity remains stable across repeated loops|strict parity backend matrix\""
+    "test:browser:strict:stress": "DATAVO_STRICT_BROWSER_PARITY=1 playwright test -g \"strict parity remains stable across repeated loops|strict parity backend matrix\"",
+    "test:browser:summary": "node ../scripts/browser-parity-summary.cjs"
   },
   "keywords": [],
   "author": "",
