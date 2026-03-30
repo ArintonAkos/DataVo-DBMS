@@ -204,7 +204,7 @@ public sealed class LockManager
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
         {
-            throw new SynchronizationLockException($"Row read lock not found for key '{rowKey}'.");
+            throw new InvalidOperationException($"Row read lock not found for key '{rowKey}'.");
         }
 
         rowLock.Lock.ExitReadLock();
@@ -223,7 +223,7 @@ public sealed class LockManager
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
         {
-            throw new SynchronizationLockException($"Row write lock not found for key '{rowKey}'.");
+            throw new InvalidOperationException($"Row write lock not found for key '{rowKey}'.");
         }
 
         rowLock.Lock.ExitWriteLock();
@@ -376,7 +376,7 @@ public sealed class LockManager
     {
         if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
         {
-            throw new SynchronizationLockException($"Table {(write ? "write" : "read")} lock not found for key '{tableKey}'.");
+            throw new InvalidOperationException($"Table {(write ? "write" : "read")} lock not found for key '{tableKey}'.");
         }
 
         if (write)

@@ -325,7 +325,7 @@ public class IndexManager : IDisposable
                 {
                     if (!persistence.TryDeleteFile(path) && File.Exists(path))
                     {
-                        throw new IOException($"Failed to delete index file '{path}'.");
+                        throw new InvalidOperationException($"Failed to delete index file '{path}'.");
                     }
                 }
                 else
@@ -419,7 +419,7 @@ public class IndexManager : IDisposable
                 {
                     if (!persistence.TryDeleteFile(filePath) && File.Exists(filePath))
                     {
-                        throw new IOException($"Failed to delete index file '{filePath}'.");
+                        throw new InvalidOperationException($"Failed to delete index file '{filePath}'.");
                     }
                 }
             }
@@ -445,7 +445,7 @@ public class IndexManager : IDisposable
             }
             catch (Exception ex)
             {
-                throw new IOException($"Failed to delete legacy index file '{legacyScalarPath}'.", ex);
+                throw new InvalidOperationException($"Failed to delete legacy index file '{legacyScalarPath}'.", ex);
             }
         }
     }

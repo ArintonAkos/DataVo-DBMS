@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
+using DataVo.Core.Utils;
 using Newtonsoft.Json;
 
 namespace DataVo.Core.Transactions;
@@ -173,14 +174,7 @@ internal sealed class WalFileStore
 
         stream.Flush(true);
 
-        if (File.Exists(FilePath))
-        {
-            File.Replace(tmpPath, FilePath, null);
-        }
-        else
-        {
-            File.Move(tmpPath, FilePath, overwrite: true);
-        }
+        AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
     }
 
     private void EnsureDirectoryExists()
