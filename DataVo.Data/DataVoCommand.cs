@@ -151,6 +151,11 @@ public class DataVoCommand : DbCommand
     {
         foreach (DataVoParameter param in _parameters.AllParameters)
         {
+            if (string.IsNullOrEmpty(param.ParameterName))
+            {
+                continue;
+            }
+
             string literal = FormatLiteral(param.Value);
             sql = sql.Replace(param.ParameterName, literal);
         }

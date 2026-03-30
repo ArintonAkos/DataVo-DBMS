@@ -73,6 +73,10 @@ internal class InnerJoinStrategy : IJoinStrategy
             }
 
             var leftValue = leftRowEntry.Value[leftTable][leftColumn];
+            if (leftValue == null)
+            {
+                continue;
+            }
 
             if (rightLookup.TryGetValue(leftValue, out List<Record>? rightTableRows) && rightTableRows != null)
             {
@@ -159,7 +163,13 @@ internal class InnerJoinStrategy : IJoinStrategy
                 continue;
             }
 
-            dynamic key = rightTableRow.Value[rightColumn];
+            object? keyValue = rightTableRow.Value[rightColumn];
+            if (keyValue == null)
+            {
+                continue;
+            }
+
+            dynamic key = keyValue;
             lookup.AddRecord(key, rightTableRow.Value);
         }
 

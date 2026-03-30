@@ -4,7 +4,7 @@ namespace DataVo.Data;
 
 /// <summary>
 /// Represents a transaction against a DataVo database.
-/// Created via <see cref="DataVoConnection.BeginTransaction()"/>.
+/// Created via <see cref="DbConnection.BeginTransaction()"/>.
 /// </summary>
 /// <example>
 /// <code>

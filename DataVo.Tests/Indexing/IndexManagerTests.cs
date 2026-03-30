@@ -175,17 +175,19 @@ public class IndexManagerTests : IDisposable
     }
 
     [Fact]
-    public void ScalarIndexMutations_CompleteWithoutBlocking()
+    public async Task ScalarIndexMutations_CompleteWithoutBlocking()
     {
         _manager.CreateIndex([], "locksafe_idx", "Users", "Db");
 
         Task insertTask = Task.Run(() =>
             _manager.InsertIntoIndex("42", 101L, "locksafe_idx", "Users", "Db"));
-        Assert.True(insertTask.Wait(TimeSpan.FromSeconds(2)), "InsertIntoIndex should not block.");
+        await insertTask.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(insertTask.IsCompletedSuccessfully, "InsertIntoIndex should not block.");
 
         Task deleteTask = Task.Run(() =>
             _manager.DeleteFromIndex([101L], "locksafe_idx", "Users", "Db"));
-        Assert.True(deleteTask.Wait(TimeSpan.FromSeconds(2)), "DeleteFromIndex should not block.");
+        await deleteTask.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(deleteTask.IsCompletedSuccessfully, "DeleteFromIndex should not block.");
     }
 
     public void Dispose()

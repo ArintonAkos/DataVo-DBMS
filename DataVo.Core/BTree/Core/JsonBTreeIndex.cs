@@ -14,6 +14,8 @@ namespace DataVo.Core.BTree;
 public class JsonBTreeIndex(int minDegree) : IIndex
 {
     private const int DefaultMinDegree = 50;
+    [JsonIgnore]
+    private readonly ReaderWriterLockSlim _treeLock = new(LockRecursionPolicy.NoRecursion);
 
     /// <summary>
     /// Gets or sets the root node of the B-Tree.
@@ -42,6 +44,19 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// Duplicate keys are supported and append the row ID to the key's value list.
     /// </remarks>
     public void Insert(string key, long value)
+    {
+        _treeLock.EnterWriteLock();
+        try
+        {
+            InsertCore(key, value);
+        }
+        finally
+        {
+            _treeLock.ExitWriteLock();
+        }
+    }
+
+    private void InsertCore(string key, long value)
     {
         if (Root.IsFull)
         {
@@ -79,7 +94,15 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <returns>A list of matching row IDs, or an empty list if the key is not present.</returns>
     public List<long> Search(string key)
     {
-        return Root.Search(key);
+        _treeLock.EnterReadLock();
+        try
+        {
+            return Root.Search(key);
+        }
+        finally
+        {
+            _treeLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -89,7 +112,15 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
     public bool ContainsValue(long rowId)
     {
-        return Root.ContainsValue(rowId);
+        _treeLock.EnterReadLock();
+        try
+        {
+            return Root.ContainsValue(rowId);
+        }
+        finally
+        {
+            _treeLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -103,34 +134,42 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void Delete(string key, long value)
     {
-        var allEntries = new List<KeyValuePair<string, List<long>>>();
-        Root.CollectAll(allEntries);
-
-        // Remove the specific value from the matching key
-        bool modified = false;
-        foreach (var entry in allEntries)
+        _treeLock.EnterWriteLock();
+        try
         {
-            if (entry.Key == key)
+            var allEntries = new List<KeyValuePair<string, List<long>>>();
+            Root.CollectAll(allEntries);
+
+            // Remove the specific value from the matching key
+            bool modified = false;
+            foreach (var entry in allEntries)
             {
-                entry.Value.Remove(value);
-                modified = true;
-                break;
+                if (entry.Key == key)
+                {
+                    entry.Value.Remove(value);
+                    modified = true;
+                    break;
+                }
+            }
+
+            if (!modified)
+            {
+                return;
+            }
+
+            // Rebuild the tree from the remaining entries
+            Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
+            foreach (var entry in allEntries)
+            {
+                foreach (long val in entry.Value)
+                {
+                    InsertCore(entry.Key, val);
+                }
             }
         }
-
-        if (!modified)
+        finally
         {
-            return;
-        }
-
-        // Rebuild the tree from the remaining entries
-        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
-        foreach (var entry in allEntries)
-        {
-            foreach (long val in entry.Value)
-            {
-                Insert(entry.Key, val);
-            }
+            _treeLock.ExitWriteLock();
         }
     }
 
@@ -143,30 +182,38 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void DeleteValues(List<long> valuesToDelete)
     {
-        var allEntries = new List<KeyValuePair<string, List<long>>>();
-        Root.CollectAll(allEntries);
-
-        var toDeleteSet = new HashSet<long>(valuesToDelete);
-
-        // Filter out the values to delete
-        var filtered = new List<KeyValuePair<string, List<long>>>();
-        foreach (var entry in allEntries)
+        _treeLock.EnterWriteLock();
+        try
         {
-            var remaining = entry.Value.Where(v => !toDeleteSet.Contains(v)).ToList();
-            if (remaining.Count > 0)
+            var allEntries = new List<KeyValuePair<string, List<long>>>();
+            Root.CollectAll(allEntries);
+
+            var toDeleteSet = new HashSet<long>(valuesToDelete);
+
+            // Filter out the values to delete
+            var filtered = new List<KeyValuePair<string, List<long>>>();
+            foreach (var entry in allEntries)
             {
-                filtered.Add(new KeyValuePair<string, List<long>>(entry.Key, remaining));
+                var remaining = entry.Value.Where(v => !toDeleteSet.Contains(v)).ToList();
+                if (remaining.Count > 0)
+                {
+                    filtered.Add(new KeyValuePair<string, List<long>>(entry.Key, remaining));
+                }
+            }
+
+            // Rebuild
+            Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
+            foreach (var entry in filtered)
+            {
+                foreach (long val in entry.Value)
+                {
+                    InsertCore(entry.Key, val);
+                }
             }
         }
-
-        // Rebuild
-        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
-        foreach (var entry in filtered)
+        finally
         {
-            foreach (long val in entry.Value)
-            {
-                Insert(entry.Key, val);
-            }
+            _treeLock.ExitWriteLock();
         }
     }
 
@@ -176,17 +223,25 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <param name="filePath">The destination file path.</param>
     public void Save(string filePath)
     {
-        string directory = Path.GetDirectoryName(filePath)!;
-        if (!Directory.Exists(directory))
+        _treeLock.EnterReadLock();
+        try
         {
-            Directory.CreateDirectory(directory);
-        }
+            string directory = Path.GetDirectoryName(filePath)!;
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
 
-        string json = JsonConvert.SerializeObject(this, Formatting.Indented, new JsonSerializerSettings
+            string json = JsonConvert.SerializeObject(this, Formatting.Indented, new JsonSerializerSettings
+            {
+                TypeNameHandling = TypeNameHandling.None
+            });
+            File.WriteAllText(filePath, json);
+        }
+        finally
         {
-            TypeNameHandling = TypeNameHandling.None
-        });
-        File.WriteAllText(filePath, json);
+            _treeLock.ExitReadLock();
+        }
     }
 
     /// <summary>

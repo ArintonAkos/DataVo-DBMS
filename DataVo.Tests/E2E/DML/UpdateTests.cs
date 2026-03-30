@@ -100,6 +100,7 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
         // Attempt to update DeptId to a non-existent parent
         var res = ExecuteAndReturn("UPDATE Emps SET DeptId = 99 WHERE Id = 10");
         Assert.Contains(res.Messages, m => m.Contains("Foreign key violation"));
+        Assert.Contains(res.Messages, m => m.Contains("does not reference an existing parent row"));
 
         // Emps row should remain unchanged
         var emps = ExecuteAndReturn("SELECT * FROM Emps");

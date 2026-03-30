@@ -4,8 +4,13 @@ using DataVo.Core.Runtime.Security;
 
 namespace DataVo.Core.Parser.Commands;
 
-internal sealed class ShowRoles(ShowRolesStatement _) : BaseDbAction
+internal sealed class ShowRoles : BaseDbAction
 {
+    public ShowRoles(ShowRolesStatement statement)
+    {
+        _ = statement;
+    }
+
     protected override DatabasePermission RequiredPermission => DatabasePermission.ManageSecurity;
 
     public override void PerformAction(Guid session)

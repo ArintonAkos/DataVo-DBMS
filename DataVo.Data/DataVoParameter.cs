@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DataVo.Data;
 
@@ -24,12 +25,14 @@ public class DataVoParameter : DbParameter
     public override bool IsNullable { get; set; } = true;
 
     /// <inheritdoc />
+    [AllowNull]
     public override string ParameterName { get; set; } = string.Empty;
 
     /// <inheritdoc />
     public override int Size { get; set; }
 
     /// <inheritdoc />
+    [AllowNull]
     public override string SourceColumn { get; set; } = string.Empty;
 
     /// <inheritdoc />

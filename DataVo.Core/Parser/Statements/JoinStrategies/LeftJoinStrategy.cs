@@ -74,6 +74,16 @@ internal class LeftJoinStrategy : IJoinStrategy
             }
 
             var leftValue = leftRowEntry.Value[leftTable][leftColumn];
+            if (leftValue == null)
+            {
+                JoinedRowId nullHash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRow nullJoinedRow = context.CreateNullRightRow(
+                    leftRowEntry.Value,
+                    rightTable);
+
+                result.Add(nullHash, nullJoinedRow);
+                continue;
+            }
 
             if (rightLookup.TryGetValue(leftValue, out List<Record>? rightTableRows) && rightTableRows != null)
             {
@@ -184,7 +194,13 @@ internal class LeftJoinStrategy : IJoinStrategy
                 continue;
             }
 
-            dynamic key = rightTableRow.Value[rightColumn];
+            object? keyValue = rightTableRow.Value[rightColumn];
+            if (keyValue == null)
+            {
+                continue;
+            }
+
+            dynamic key = keyValue;
             lookup.AddRecord(key, rightTableRow.Value);
         }
 

@@ -27,8 +27,8 @@ public abstract class VacuumTestsBase(DataVoConfig config, string testDbName) : 
         // Same 2 rows should remain
         var after = ExecuteAndReturn("SELECT * FROM Items");
         Assert.Equal(2, after.Data.Count);
-        Assert.Contains(after.Data, r => r["Name"].ToString() == "Alpha");
-        Assert.Contains(after.Data, r => r["Name"].ToString() == "Gamma");
+        Assert.Contains(after.Data, r => r["Name"]?.ToString() == "Alpha");
+        Assert.Contains(after.Data, r => r["Name"]?.ToString() == "Gamma");
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public abstract class VacuumTestsBase(DataVoConfig config, string testDbName) : 
         // Bob should still exist
         var result = ExecuteAndReturn("SELECT * FROM Users");
         Assert.Single(result.Data);
-        Assert.Equal("Bob", result.Data.First()["Name"]);
+        Assert.Equal("Bob", result.Data.First()["Name"]?.ToString());
 
         // Re-inserting Id=1 should work (index was rebuilt)
         Execute("INSERT INTO Users VALUES (1, 'Charlie')");

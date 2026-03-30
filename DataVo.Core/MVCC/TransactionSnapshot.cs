@@ -41,6 +41,6 @@ public class TransactionSnapshot
     /// <summary>
     /// Returns a string representation of the snapshot.
     /// </summary>
-    public override string ToString() => 
+    public override string ToString() =>
         $"TransactionSnapshot(txId={TransactionId}, timestamp={SnapshotTimestamp}, createdAt={CreatedAt:O})";
 }

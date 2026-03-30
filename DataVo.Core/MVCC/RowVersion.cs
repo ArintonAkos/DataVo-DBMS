@@ -28,7 +28,7 @@ public struct RowVersion
     /// <summary>
     /// Creates a default RowVersion with all fields zero.
     /// </summary>
-    public RowVersion() 
+    public RowVersion()
     {
         Xmin = 0;
         Xmax = 0;
