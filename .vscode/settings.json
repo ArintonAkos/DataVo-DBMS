@@ -1,0 +1,8 @@
+{
+	"editor.semanticHighlighting.enabled": true,
+	"files.associations": {
+		"*.razor": "aspnetcorerazor"
+	},
+	"dotnet.defaultSolution": "DataVo.sln",
+	"omnisharp.enableRoslynAnalyzers": true
+}

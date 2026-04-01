@@ -1,5 +1,6 @@
 using DataVo.Core.StorageEngine.Config;
 using System.Diagnostics;
+using System.Globalization;
 using DataVo.Tests.BrowserParity;
 
 namespace DataVo.Tests.E2E.DML;
@@ -315,6 +316,84 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal("Item1", result.Data[0]["i.Name"]);
         Assert.Equal(3, result.Data[1]["e.Id"]);
         Assert.Equal("Item3", result.Data[1]["i.Name"]);
+    }
+
+    [Fact]
+    public void Select_VectorDistanceWhereThreshold_StringLiteral_CurrentCultureFallback_NoJoin()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            var de = CultureInfo.GetCultureInfo("de-DE");
+            CultureInfo.CurrentCulture = de;
+            CultureInfo.CurrentUICulture = de;
+
+            Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+            ExecuteAndReturn("CREATE INDEX idx_vec_locale_nojoin ON Embeddings (Emb) USING HNSW");
+
+            // String threshold with comma decimal separator should parse under CurrentCulture fallback.
+            var result = ExecuteAndReturn(@"
+                SELECT Id
+                FROM Embeddings
+                WHERE Emb <=> '[0.95,0.05,0]' < '0,2'
+                ORDER BY Id ASC");
+
+            Assert.False(result.IsError, string.Join(" | ", result.Messages));
+            Assert.Equal(2, result.Data.Count);
+            Assert.Equal(1, result.Data[0]["Id"]);
+            Assert.Equal(3, result.Data[1]["Id"]);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
+    }
+
+    [Fact]
+    public void Select_VectorDistanceWhereThreshold_StringLiteral_CurrentCultureFallback_WithJoin()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            var de = CultureInfo.GetCultureInfo("de-DE");
+            CultureInfo.CurrentCulture = de;
+            CultureInfo.CurrentUICulture = de;
+
+            Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Status VARCHAR)");
+            Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR)");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (1, '[1,0,0]', 'active')");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (2, '[0,1,0]', 'active')");
+            Execute("INSERT INTO Embeddings (Id, Emb, Status) VALUES (3, '[0.9,0.1,0]', 'active')");
+            Execute("INSERT INTO Items (Id, Name) VALUES (1, 'Item1')");
+            Execute("INSERT INTO Items (Id, Name) VALUES (2, 'Item2')");
+            Execute("INSERT INTO Items (Id, Name) VALUES (3, 'Item3')");
+            ExecuteAndReturn("CREATE INDEX idx_vec_locale_join ON Embeddings (Emb) USING HNSW");
+
+            var result = ExecuteAndReturn(@"
+                SELECT i.Name, e.Id
+                FROM Embeddings e
+                WHERE e.Emb <=> '[0.95,0.05,0]' < '0,2'
+                JOIN Items i ON e.Id = i.Id
+                ORDER BY e.Id ASC");
+
+            Assert.False(result.IsError, string.Join(" | ", result.Messages));
+            Assert.Equal(2, result.Data.Count);
+            Assert.Equal(1, result.Data[0]["e.Id"]);
+            Assert.Equal(3, result.Data[1]["e.Id"]);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]

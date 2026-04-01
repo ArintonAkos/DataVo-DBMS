@@ -530,6 +530,31 @@ export function getStorageCapabilities() {
     return JSON.stringify(capabilities);
 }
 
+export function getRuntimeFlags() {
+    let forceVectorFallback = true;
+
+    if (typeof globalThis.__datavoForceVectorFallback === "boolean") {
+        forceVectorFallback = globalThis.__datavoForceVectorFallback;
+    }
+
+    try {
+        if (typeof location !== "undefined" && typeof location.search === "string") {
+            const params = new URLSearchParams(location.search);
+            const mode = params.get("datavoVectorMode");
+
+            if (mode === "hnsw") {
+                forceVectorFallback = false;
+            } else if (mode === "fallback") {
+                forceVectorFallback = true;
+            }
+        }
+    } catch {
+        // Ignore URL parsing failures and keep the default/override value.
+    }
+
+    return JSON.stringify({ forceVectorFallback });
+}
+
 globalThis.DataVoStorage = {
     insertRow,
     readRow,
@@ -543,5 +568,6 @@ globalThis.DataVoStorage = {
     writeSelectedDatabase,
     clearAllStorage,
     getStorageBackendKind,
-    getStorageCapabilities
+    getStorageCapabilities,
+    getRuntimeFlags
 };
