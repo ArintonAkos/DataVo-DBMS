@@ -1,0 +1,120 @@
+:root {
+  --bg: #f7f6f2;
+  --panel: #ffffff;
+  --line: #ded9cf;
+  --text: #1e1b16;
+  --accent: #0f766e;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: "Source Sans 3", "IBM Plex Sans", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 10% 10%, #f2efe7, var(--bg));
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+}
+
+.nav {
+  border-right: 1px solid var(--line);
+  background: #ece8df;
+  padding: 1rem;
+}
+
+.nav h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.nav a {
+  display: block;
+  padding: 0.5rem 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--accent);
+}
+
+.content {
+  padding: 1.25rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.kpi {
+  font-size: 2rem;
+  margin: 0.25rem 0 0;
+  color: var(--accent);
+}
+
+.form-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+input, button {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+}
+
+button {
+  border: 1px solid #9ca3af;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border-bottom: 1px solid #ece9e2;
+  padding: 0.45rem;
+  text-align: left;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.status {
+  color: #065f46;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .nav {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+}

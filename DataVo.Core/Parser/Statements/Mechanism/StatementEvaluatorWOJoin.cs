@@ -5,6 +5,7 @@ using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Utils;
+using System.Globalization;
 using System.Security;
 
 namespace DataVo.Core.Parser.Statements.Mechanism
@@ -394,7 +395,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 float v => Assign(v, out threshold),
                 double v => Assign(v, out threshold),
                 decimal v => Assign((double)v, out threshold),
-                string s => double.TryParse(s, out threshold),
+                string s => TryParseDoubleInvariantFirst(s, out threshold),
                 _ => false
             };
 
@@ -402,6 +403,31 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             {
                 output = value;
                 return true;
+            }
+
+            static bool TryParseDoubleInvariantFirst(string value, out double output)
+            {
+                string candidate = value.Trim();
+                if ((candidate.StartsWith("'", StringComparison.Ordinal) && candidate.EndsWith("'", StringComparison.Ordinal))
+                    || (candidate.StartsWith("\"", StringComparison.Ordinal) && candidate.EndsWith("\"", StringComparison.Ordinal)))
+                {
+                    candidate = candidate[1..^1].Trim();
+                }
+
+                if (double.TryParse(
+                    candidate.AsSpan(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out output))
+                {
+                    return true;
+                }
+
+                return double.TryParse(
+                    candidate.AsSpan(),
+                    NumberStyles.Float,
+                    CultureInfo.CurrentCulture,
+                    out output);
             }
         }
 

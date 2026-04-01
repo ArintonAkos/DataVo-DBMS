@@ -11,6 +11,7 @@ using DataVo.Core.BTree;
 using DataVo.Core.Indexing.HNSW;
 using System.Globalization;
 using System.Runtime.Versioning;
+using Newtonsoft.Json.Linq;
 
 namespace DataVo.Browser;
 
@@ -60,12 +61,15 @@ public partial class DataVoInterop
     [JSImport("globalThis.DataVoStorage.getStorageCapabilities")]
     internal static partial string? GetStorageCapabilities();
 
+    [JSImport("globalThis.DataVoStorage.getRuntimeFlags")]
+    internal static partial string? GetRuntimeFlags();
+
     [JSExport]
     public static void Initialize()
     {
         if (_engine != null) return;
 
-        BrowserRuntimeFlags.ForceVectorFallback = true;
+        BrowserRuntimeFlags.ForceVectorFallback = ResolveForceVectorFallback();
 
         var config = new DataVoConfig
         {
@@ -192,8 +196,34 @@ public partial class DataVoInterop
         return JsonConvert.SerializeObject(new
         {
             storageBackend = backendKind,
-            engineInitialized = _engine != null
+            engineInitialized = _engine != null,
+            forceVectorFallback = BrowserRuntimeFlags.ForceVectorFallback
         });
+    }
+
+    private static bool ResolveForceVectorFallback()
+    {
+        try
+        {
+            string? raw = GetRuntimeFlags();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return true;
+            }
+
+            JObject flags = JObject.Parse(raw);
+            JToken? token = flags["forceVectorFallback"];
+            if (token != null && token.Type == JTokenType.Boolean)
+            {
+                return token.Value<bool>();
+            }
+        }
+        catch
+        {
+            // Keep safe default for constrained browser runtimes.
+        }
+
+        return true;
     }
 
     private static object BuildLexerEnvironment()

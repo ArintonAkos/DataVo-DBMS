@@ -1,0 +1,70 @@
+@page "/catalog"
+@inject InventoryService InventoryService
+
+<h1>Catalog</h1>
+
+<div class="card form-row">
+    <label>Category Filter</label>
+    <input @bind="_category" placeholder="e.g. Furniture" />
+    <button @onclick="LoadAsync">Apply</button>
+    <button @onclick="ClearAsync">Clear</button>
+</div>
+
+@if (_loading)
+{
+    <p>Loading catalog...</p>
+}
+else
+{
+    <section class="card">
+        <table>
+            <thead>
+            <tr>
+                <th>Id</th>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Location</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in _rows)
+            {
+                <tr>
+                    <td>@item.Id</td>
+                    <td>@item.Name</td>
+                    <td>@item.Category</td>
+                    <td>@item.Price.ToString("C")</td>
+                    <td>@item.Quantity</td>
+                    <td>@item.Location</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _category;
+    private List<InventoryService.CatalogRow> _rows = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _rows = await InventoryService.GetCatalogAsync(_category);
+        _loading = false;
+    }
+
+    private async Task ClearAsync()
+    {
+        _category = null;
+        await LoadAsync();
+    }
+}

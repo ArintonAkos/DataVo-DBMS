@@ -1,0 +1,59 @@
+@page "/orders"
+@inject InventoryService InventoryService
+
+<h1>Place Order (EF Transaction)</h1>
+
+<div class="card form-row">
+    <label>Item Id</label>
+    <input type="number" min="1" @bind="_itemId" />
+    <label>Quantity</label>
+    <input type="number" min="1" @bind="_qty" />
+    <button @onclick="PlaceAsync">Place Order</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <p class="status">@_message</p>
+}
+
+<section class="card">
+    <h3>Recent Top Sellers</h3>
+    <table>
+        <thead>
+        <tr>
+            <th>Item</th>
+            <th>Units Sold</th>
+            <th>Revenue</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in _topSellers)
+        {
+            <tr>
+                <td>@row.Name</td>
+                <td>@row.UnitsSold</td>
+                <td>@row.Revenue.ToString("C")</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private int _itemId = 1;
+    private int _qty = 1;
+    private string? _message;
+    private List<InventoryService.TopSellerRow> _topSellers = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _topSellers = await InventoryService.GetTopSellersAsync(10);
+    }
+
+    private async Task PlaceAsync()
+    {
+        var result = await InventoryService.PlaceOrderAsync(_itemId, _qty);
+        _message = result.Message;
+        _topSellers = await InventoryService.GetTopSellersAsync(10);
+    }
+}

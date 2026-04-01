@@ -1,0 +1,62 @@
+@page "/"
+@inject InventoryService InventoryService
+
+<h1>Semantic Inventory Dashboard</h1>
+
+@if (_loading)
+{
+    <p>Loading dashboard...</p>
+}
+else
+{
+    <section class="grid">
+        <article class="card">
+            <h3>Catalog Size</h3>
+            <p class="kpi">@_catalog.Count</p>
+        </article>
+        <article class="card">
+            <h3>Total Stock</h3>
+            <p class="kpi">@_catalog.Sum(c => c.Quantity)</p>
+        </article>
+        <article class="card">
+            <h3>Top Seller</h3>
+            <p class="kpi">@(_topSellers.FirstOrDefault()?.Name ?? "-")</p>
+        </article>
+    </section>
+
+    <section class="card">
+        <h3>Top Sellers (LINQ GroupBy + Join)</h3>
+        <table>
+            <thead>
+            <tr>
+                <th>Item</th>
+                <th>Units</th>
+                <th>Revenue</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var row in _topSellers)
+            {
+                <tr>
+                    <td>@row.Name</td>
+                    <td>@row.UnitsSold</td>
+                    <td>@row.Revenue.ToString("C")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private List<InventoryService.CatalogRow> _catalog = [];
+    private List<InventoryService.TopSellerRow> _topSellers = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _catalog = await InventoryService.GetCatalogAsync();
+        _topSellers = await InventoryService.GetTopSellersAsync(6);
+        _loading = false;
+    }
+}

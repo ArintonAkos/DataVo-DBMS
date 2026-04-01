@@ -1,0 +1,78 @@
+@page "/showcase"
+@inject EmbeddingPipelineService EmbeddingPipeline
+@inject StressService StressService
+
+<h1>Showcase: Embeddings + Stress</h1>
+
+<section class="card">
+    <h3>Embed Item Text</h3>
+    <div class="form-row">
+        <label>Item Id</label>
+        <input type="number" min="1" @bind="_embedItemId" />
+        <label>Text</label>
+        <input @bind="_embedText" placeholder="Description to embed" style="min-width: 360px" />
+        <button @onclick="EmbedAsync">Embed + Upsert</button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(_embedMessage))
+    {
+        <p class="status">@_embedMessage</p>
+    }
+</section>
+
+<section class="card">
+    <h3>Stress Test</h3>
+    <div class="form-row">
+        <label>Iterations</label>
+        <input type="number" min="1" max="2000" @bind="_iterations" />
+        <button @onclick="RunStressAsync" disabled="@_running">Run</button>
+    </div>
+
+    @if (_running)
+    {
+        <p>Running stress workload...</p>
+    }
+
+    @if (_result is not null)
+    {
+        <table>
+            <tbody>
+            <tr><th>Iterations</th><td>@_result.Iterations</td></tr>
+            <tr><th>Successes</th><td>@_result.Successes</td></tr>
+            <tr><th>Failures</th><td>@_result.Failures</td></tr>
+            <tr><th>Avg Latency (ms)</th><td>@_result.AvgMs.ToString("F2")</td></tr>
+            <tr><th>P95 Latency (ms)</th><td>@_result.P95Ms.ToString("F2")</td></tr>
+            <tr><th>Orders Placed</th><td>@_result.OrdersPlaced</td></tr>
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private int _embedItemId = 1;
+    private string _embedText = "Ergonomic office chair with lumbar support";
+    private string? _embedMessage;
+
+    private int _iterations = 200;
+    private bool _running;
+    private StressService.StressResult? _result;
+
+    private async Task EmbedAsync()
+    {
+        var result = await EmbeddingPipeline.EmbedItemAsync(_embedItemId, _embedText);
+        _embedMessage = result.Message;
+    }
+
+    private async Task RunStressAsync()
+    {
+        _running = true;
+        _result = null;
+        try
+        {
+            _result = await StressService.RunAsync(_iterations);
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+}

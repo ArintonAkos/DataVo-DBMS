@@ -1,0 +1,113 @@
+@page "/semantic-search"
+@inject InventoryService InventoryService
+
+<h1>Semantic Search (Ollama Embeddings + Similarity)</h1>
+
+<div class="card form-row">
+    <label>Query Text</label>
+    <input @bind="_queryText" placeholder="ergonomic office seating" style="min-width: 320px" />
+    <label>Or Vector</label>
+    <input @bind="_vectorText" placeholder="[0.95,0.05,0] (optional debug vector)" style="min-width: 320px" />
+    <label>Top K</label>
+    <input type="number" min="1" max="20" @bind="_topK" />
+    <button @onclick="SearchAsync">Search Similar Items</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <p class="error">@_error</p>
+}
+
+@if (_results.Count > 0)
+{
+    <section class="card">
+        <table>
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Qty</th>
+                    <th>Similarity</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _results)
+                {
+                    <tr>
+                        <td>@row.Name</td>
+                        <td>@row.Category</td>
+                        <td>@row.Price.ToString("C")</td>
+                        <td>@row.Quantity</td>
+                        <td>@row.Score.ToString("F4")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private string _queryText = "ergonomic office chair lumbar support";
+    private string _vectorText = string.Empty;
+    private int _topK = 5;
+    private string? _error;
+    private List<InventoryService.SemanticRow> _results = [];
+
+    private async Task SearchAsync()
+    {
+        _error = null;
+
+        if (!string.IsNullOrWhiteSpace(_vectorText))
+        {
+            if (!TryParseVector(_vectorText, out var vector))
+            {
+                _error = "Vector must be in format [x,y,z,...].";
+                _results = [];
+                return;
+            }
+
+            _results = await InventoryService.SearchByEmbeddingAsync(vector, _topK);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_queryText))
+        {
+            _error = "Provide a query text or a vector.";
+            _results = [];
+            return;
+        }
+
+        _results = await InventoryService.SearchByTextAsync(_queryText, _topK);
+    }
+
+    private static bool TryParseVector(string text, out List<float> vector)
+    {
+        vector = [];
+
+        string candidate = text.Trim();
+        if (!candidate.StartsWith("[") || !candidate.EndsWith("]"))
+        {
+            return false;
+        }
+
+        string[] parts = candidate[1..^1].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (string part in parts)
+        {
+            if (!float.TryParse(part, out float value))
+            {
+                vector = [];
+                return false;
+            }
+
+            vector.Add(value);
+        }
+
+        return true;
+    }
+}

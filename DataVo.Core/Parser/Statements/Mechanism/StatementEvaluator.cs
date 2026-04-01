@@ -543,10 +543,26 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         static bool TryParseInvariantDouble(string value, out double output)
         {
-            return double.TryParse(
-                value.AsSpan(),
-                NumberStyles.Float | NumberStyles.AllowThousands,
+            string candidate = value.Trim();
+            if ((candidate.StartsWith("'", StringComparison.Ordinal) && candidate.EndsWith("'", StringComparison.Ordinal))
+                || (candidate.StartsWith("\"", StringComparison.Ordinal) && candidate.EndsWith("\"", StringComparison.Ordinal)))
+            {
+                candidate = candidate[1..^1].Trim();
+            }
+
+            if (double.TryParse(
+                candidate.AsSpan(),
+                NumberStyles.Float,
                 CultureInfo.InvariantCulture,
+                out output))
+            {
+                return true;
+            }
+
+            return double.TryParse(
+                candidate.AsSpan(),
+                NumberStyles.Float,
+                CultureInfo.CurrentCulture,
                 out output);
         }
     }
