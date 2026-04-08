@@ -54,6 +54,7 @@ internal class HttpServer
         }
         catch (Exception ex)
         {
+            Logger.Error(ex.ToString());
             await WriteResponse(context, new ErrorResponse(ex));
         }
     }

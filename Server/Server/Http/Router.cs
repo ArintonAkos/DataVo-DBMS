@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Newtonsoft.Json;
 using Server.Server.Http.Attributes;
 using Server.Server.Requests;
@@ -24,12 +25,12 @@ internal class Router
     {
         if (request.Request.Url == null)
         {
-            throw new Exception("Error parsing request!");
+            throw new ArgumentException("Request URL is required.");
         }
 
         if (request.Request.Url.Segments.Length < 3)
         {
-            throw new Exception("Invalid URL path!");
+            throw new ArgumentException("Request path must include controller and action segments.");
         }
 
         string controllerName = request.Request.Url.Segments[1].Replace("/", "");
@@ -60,7 +61,7 @@ internal class Router
 
                 break;
             default:
-                throw new Exception("Unsupported HTTP method!");
+                throw new NotSupportedException($"Unsupported HTTP method '{httpMethod}'.");
         }
 
         try
@@ -68,14 +69,10 @@ internal class Router
             object? returnValue = method.Invoke(obj: null, parameters);
             return (Response)returnValue!;
         }
-        catch (Exception ex)
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
-            while (ex.InnerException != null)
-            {
-                ex = ex.InnerException;
-            }
-
-            throw ex;
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
         }
     }
 
@@ -85,12 +82,12 @@ internal class Router
 
         if (httpMethod == null)
         {
-            throw new Exception("Method attribute not found!");
+            throw new InvalidOperationException($"Method '{method.Name}' is missing the required HTTP method attribute.");
         }
 
         if (request.HttpMethod != httpMethod.HttpMethod)
         {
-            throw new Exception("HTTP method not found!");
+            throw new NotSupportedException($"HTTP method '{request.HttpMethod}' is not supported for '{method.Name}'. Expected '{httpMethod.HttpMethod}'.");
         }
 
         return httpMethod.HttpMethod;
@@ -124,7 +121,7 @@ internal class Router
 
         if (method == null)
         {
-            throw new Exception("Method not found!");
+            throw new MissingMethodException(controller.FullName, methodName);
         }
 
         return method;
@@ -148,6 +145,11 @@ internal class Router
             return null;
         }
 
+        if (!typeof(Request).IsAssignableFrom(paramType))
+        {
+            throw new InvalidOperationException($"Request binding type '{paramType.FullName}' is not a Request subtype.");
+        }
+
         var deserializeGeneric = typeof(Router).GetMethod(nameof(DeserializeObject))!;
         var generic = deserializeGeneric.MakeGenericMethod(paramType);
 
@@ -155,9 +157,10 @@ internal class Router
         {
             return (Request?)generic.Invoke(obj: null, new object[] { content, });
         }
-        catch (Exception ex)
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
-            throw ex.InnerException ?? ex;
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
         }
     }
 

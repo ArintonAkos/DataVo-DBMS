@@ -9,5 +9,5 @@ try
 catch (Exception e)
 {
     Logger.Error("Stopping SERVER! An error occured!");
-    Logger.Error(e.Message);
+    Logger.Error(e.ToString());
 }

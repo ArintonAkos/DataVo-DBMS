@@ -13,10 +13,7 @@ internal class ParserController
     [Route("parse")]
     public static ParseResponse Parse(ParseRequest request)
     {
-        if (request == null)
-        {
-            throw new Exception("Error while parsing data!");
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         var engine = new DataVo.Core.Parser.QueryEngine(request.Data, request.Session);
         
