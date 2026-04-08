@@ -492,13 +492,8 @@ internal static class DataVoNativeQueryTranslator
         var left = TranslateOperand(expression.Arguments[vectorArgsStart], parameter, entityType, tableIdentifier);
         var right = TranslateOperand(expression.Arguments[vectorArgsStart + 1], parameter, entityType, tableIdentifier);
 
-        if (isL2)
-        {
-            throw new NotSupportedException("Native translation for DataVoVectorDbFunctions.L2Distance is not available yet. Use cosine distance in native preview or raw SQL for custom distance behavior.");
-        }
-
-        // DataVo's vector-distance parser surface currently accepts the cosine operator form.
-        sql = $"({left.Sql} <=> {right.Sql})";
+        string operatorToken = isL2 ? "<->" : "<=>";
+        sql = $"({left.Sql} {operatorToken} {right.Sql})";
         return true;
     }
 

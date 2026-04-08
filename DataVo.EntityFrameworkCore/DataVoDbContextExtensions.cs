@@ -22,7 +22,7 @@ public static class DataVoDbContextExtensions
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var entityTypes = context.Model
+        var modelEntityTypes = context.Model
             .GetEntityTypes()
             .Where(static entityType =>
                 !entityType.IsOwned() &&
@@ -30,20 +30,25 @@ public static class DataVoDbContextExtensions
                 entityType.GetTableName() is not null)
             .ToList();
 
-        var duplicateTables = entityTypes
+        var entityTypes = modelEntityTypes
             .GroupBy(static entityType => new { Name = entityType.GetTableName(), Schema = entityType.GetSchema() })
-            .Where(static group => group.Count() > 1)
+            .Select(static group => group
+                .OrderByDescending(static entityType => entityType.GetProperties().Count())
+                .ThenBy(static entityType => entityType.DisplayName(), StringComparer.Ordinal)
+                .First())
             .ToList();
 
-        if (duplicateTables.Count > 0)
+        var ordered = OrderEntityTypesForCreation(entityTypes);
+        var createdTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var statements = new List<string>(ordered.Count);
+
+        foreach (IEntityType entityType in ordered)
         {
-            string duplicateList = string.Join(", ", duplicateTables.Select(static group => group.Key.Schema is null ? group.Key.Name : $"{group.Key.Schema}.{group.Key.Name}"));
-            throw new NotSupportedException($"DataVo EF schema generation does not yet support multiple entity types mapped to the same table: {duplicateList}.");
+            statements.Add(BuildCreateTableStatement(entityType, createdTables));
+            createdTables.Add(GetTableKey(entityType));
         }
 
-        return OrderEntityTypesForCreation(entityTypes)
-            .Select(BuildCreateTableStatement)
-            .ToList();
+        return statements;
     }
 
     /// <summary>
@@ -104,7 +109,7 @@ public static class DataVoDbContextExtensions
         return connectionString;
     }
 
-    private static string BuildCreateTableStatement(IEntityType entityType)
+    private static string BuildCreateTableStatement(IEntityType entityType, IReadOnlySet<string> createdTables)
     {
         string tableName = entityType.GetTableName()!;
         var tableIdentifier = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
@@ -114,7 +119,7 @@ public static class DataVoDbContextExtensions
         string[] columnDefinitions = entityType
             .GetProperties()
             .Where(property => property.GetColumnName(tableIdentifier) is not null)
-            .Select(property => BuildColumnDefinition(property, tableIdentifier, primaryKey, foreignKeyLookup))
+            .Select(property => BuildColumnDefinition(property, tableIdentifier, primaryKey, foreignKeyLookup, createdTables))
             .ToArray();
 
         return $"CREATE TABLE IF NOT EXISTS {tableName} ({string.Join(", ", columnDefinitions)});";
@@ -122,7 +127,7 @@ public static class DataVoDbContextExtensions
 
     private static IReadOnlyList<IEntityType> OrderEntityTypesForCreation(IReadOnlyList<IEntityType> entityTypes)
     {
-        var tableLookup = entityTypes.ToDictionary(static entityType => entityType.GetTableName()!);
+        var entityTypeSet = entityTypes.ToHashSet();
         var dependencies = entityTypes.ToDictionary(
             static entityType => entityType,
             static entityType => entityType
@@ -138,14 +143,15 @@ public static class DataVoDbContextExtensions
         while (remaining.Count > 0)
         {
             var ready = remaining
-                .Where(entityType => dependencies[entityType].All(dependency => !remaining.Contains(dependency) || !tableLookup.ContainsKey(dependency.GetTableName()!)))
+                .Where(entityType => dependencies[entityType].All(dependency => !entityTypeSet.Contains(dependency) || !remaining.Contains(dependency)))
                 .OrderBy(static entityType => entityType.GetTableName(), StringComparer.Ordinal)
                 .ToList();
 
             if (ready.Count == 0)
             {
-                string cycleTables = string.Join(", ", remaining.Select(static entityType => entityType.GetTableName()));
-                throw new NotSupportedException($"DataVo EF schema generation does not yet support cyclic table dependencies: {cycleTables}.");
+                ready.Add(remaining
+                    .OrderBy(static entityType => entityType.GetTableName(), StringComparer.Ordinal)
+                    .First());
             }
 
             foreach (IEntityType entityType in ready)
@@ -172,7 +178,8 @@ public static class DataVoDbContextExtensions
         IProperty property,
         StoreObjectIdentifier tableIdentifier,
         IKey? primaryKey,
-        IReadOnlyDictionary<IProperty, IForeignKey> foreignKeyLookup)
+        IReadOnlyDictionary<IProperty, IForeignKey> foreignKeyLookup,
+        IReadOnlySet<string> createdTables)
     {
         string columnName = property.GetColumnName(tableIdentifier) ?? property.Name;
         string sqlType = GetDataVoType(property);
@@ -193,7 +200,11 @@ public static class DataVoDbContextExtensions
             string principalColumn = foreignKey.PrincipalKey.Properties[0].GetColumnName(principalStoreObject)
                 ?? foreignKey.PrincipalKey.Properties[0].Name;
 
-            columnDefinition += $" REFERENCES {principalTable}({principalColumn})";
+            string principalTableKey = GetTableKey(principalTable, foreignKey.PrincipalEntityType.GetSchema());
+            if (createdTables.Contains(principalTableKey))
+            {
+                columnDefinition += $" REFERENCES {principalTable}({principalColumn})";
+            }
         }
 
         object? defaultValue = property.GetDefaultValue();
@@ -223,12 +234,17 @@ public static class DataVoDbContextExtensions
             return maxLength is > 0 ? $"VARCHAR({maxLength.Value})" : "VARCHAR";
         }
 
+        if (clrType == typeof(char))
+        {
+            return "VARCHAR(1)";
+        }
+
         if (clrType == typeof(bool))
         {
             return "BIT";
         }
 
-        if (clrType == typeof(DateOnly) || clrType == typeof(DateTime) || clrType == typeof(DateTimeOffset))
+        if (clrType == typeof(DateOnly) || clrType == typeof(DateTime) || clrType == typeof(DateTimeOffset) || clrType == typeof(TimeOnly))
         {
             return "DATE";
         }
@@ -238,7 +254,14 @@ public static class DataVoDbContextExtensions
             return "FLOAT";
         }
 
-        if (clrType == typeof(byte) || clrType == typeof(short) || clrType == typeof(int) || clrType == typeof(long))
+        if (clrType == typeof(byte) ||
+            clrType == typeof(sbyte) ||
+            clrType == typeof(short) ||
+            clrType == typeof(ushort) ||
+            clrType == typeof(int) ||
+            clrType == typeof(uint) ||
+            clrType == typeof(long) ||
+            clrType == typeof(ulong))
         {
             return "INT";
         }
@@ -261,5 +284,17 @@ public static class DataVoDbContextExtensions
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             _ => $"'{value.ToString()?.Replace("'", "''")}'"
         };
+    }
+
+    private static string GetTableKey(IEntityType entityType)
+    {
+        return GetTableKey(entityType.GetTableName()!, entityType.GetSchema());
+    }
+
+    private static string GetTableKey(string tableName, string? schema)
+    {
+        return schema is null
+            ? tableName
+            : $"{schema}.{tableName}";
     }
 }
