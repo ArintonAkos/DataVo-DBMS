@@ -385,7 +385,9 @@ internal static class DataVoQueryTranslationAnalyzer
                 return false;
             }
 
-            if (methodCallExpression.Method.Name != nameof(DataVoVectorDbFunctions.CosineDistance))
+            string methodName = methodCallExpression.Method.Name;
+            if (methodName != nameof(DataVoVectorDbFunctions.CosineDistance) &&
+                methodName != nameof(DataVoVectorDbFunctions.L2Distance))
             {
                 return false;
             }
