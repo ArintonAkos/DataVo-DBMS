@@ -11,6 +11,8 @@ const SEQ_ROWID_KEY = "datavo:seq:rowid";
 const CATALOG_KEY = "datavo:catalog";
 const SELECTED_DATABASE_KEY = "datavo:selectedDatabase";
 const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB per sync call buffer
+const WORKER_WAIT_TIMEOUT_MS = 1000;
+const WORKER_MAX_WAIT_ITERATIONS = 30;
 const STORAGE_FORCE_BACKEND_GLOBAL_KEY = "__datavoForceStorageBackend";
 const STORAGE_BACKEND_SINGLETON_KEY = "__datavoStorageBackendSingleton";
 const STORAGE_BACKEND_DIAGNOSTICS_KEY = "__datavoStorageBackendDiagnostics";
@@ -316,6 +318,7 @@ function createWorkerBackendOrNull() {
     }
 
     let worker;
+    let workerActive = true;
     try {
         worker = new Worker(new URL("./datavo.storage.worker.js", import.meta.url), { type: "module" });
     } catch {
@@ -325,15 +328,48 @@ function createWorkerBackendOrNull() {
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
 
+    function terminateWorker() {
+        if (!workerActive) {
+            return;
+        }
+
+        workerActive = false;
+        try {
+            worker.terminate();
+        } catch {
+            // Best-effort termination.
+        }
+    }
+
     function invokeSync(command, payload) {
+        if (!workerActive) {
+            throw new Error("Storage worker is unavailable.");
+        }
+
         const controlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3);
         const control = new Int32Array(controlBuffer);
         const responseBuffer = new SharedArrayBuffer(WORKER_RESPONSE_BYTES);
 
-        worker.postMessage({ command, payload, controlBuffer, responseBuffer });
+        try {
+            worker.postMessage({ command, payload, controlBuffer, responseBuffer });
+        } catch (error) {
+            terminateWorker();
+            throw new Error(`Failed to post storage command '${command}' to worker: ${error && error.message ? error.message : String(error)}`);
+        }
 
-        // Wait until worker marks command as complete.
-        Atomics.wait(control, 0, 0);
+        let waitIterations = 0;
+        while (Atomics.load(control, 0) === 0) {
+            const waitResult = Atomics.wait(control, 0, 0, WORKER_WAIT_TIMEOUT_MS);
+            if (waitResult !== "timed-out") {
+                continue;
+            }
+
+            waitIterations += 1;
+            if (waitIterations >= WORKER_MAX_WAIT_ITERATIONS) {
+                terminateWorker();
+                throw new Error(`Storage worker timed out while executing '${command}'.`);
+            }
+        }
 
         const status = Atomics.load(control, 1);
         const length = Atomics.load(control, 2);
@@ -360,7 +396,7 @@ function createWorkerBackendOrNull() {
     try {
         invokeSync("getBackendKind", null);
     } catch {
-        worker.terminate();
+        terminateWorker();
         return null;
     }
 
