@@ -773,17 +773,25 @@ public class IndexManager : IDisposable
             return vectorIndex;
         }
 
-        if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt) && rebuilt != null)
+        if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt, out Exception? rebuildError) && rebuilt != null)
         {
             return rebuilt;
+        }
+
+        if (rebuildError != null)
+        {
+            throw new IndexException(
+                $"Vector index {indexName} on table {tableName} does not exist and rebuild failed for type '{indexType}': {rebuildError.Message}",
+                rebuildError);
         }
 
         throw new IndexException($"Vector index {indexName} on table {tableName} does not exist or is incompatible with type '{indexType}'.");
     }
 
-    private bool TryRebuildVectorIndexFromStorage(string indexName, string tableName, string databaseName, string indexType, out IVectorIndex? rebuilt)
+    private bool TryRebuildVectorIndexFromStorage(string indexName, string tableName, string databaseName, string indexType, out IVectorIndex? rebuilt, out Exception? rebuildError)
     {
         rebuilt = null;
+        rebuildError = null;
 
         try
         {
@@ -823,9 +831,9 @@ public class IndexManager : IDisposable
                 return true;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback is best-effort; keep original lookup failure if rebuild fails.
+            rebuildError = ex;
         }
 
         return false;

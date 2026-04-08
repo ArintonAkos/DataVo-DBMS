@@ -28,6 +28,7 @@ public sealed class DataVoEngine : IDisposable
     private static readonly object SyncRoot = new();
     private static DataVoEngine? _fallbackCurrent;
     private readonly TransactionIdStateStore? _transactionIdStateStore;
+    private bool _disposed;
 
     private DataVoEngine(StorageContext storageContext)
     {
@@ -143,7 +144,12 @@ public sealed class DataVoEngine : IDisposable
 
         lock (SyncRoot)
         {
-            return _fallbackCurrent ??= new DataVoEngine(StorageContext.Instance);
+            if (_fallbackCurrent == null || _fallbackCurrent._disposed)
+            {
+                _fallbackCurrent = new DataVoEngine(StorageContext.Instance);
+            }
+
+            return _fallbackCurrent;
         }
     }
 
@@ -168,7 +174,6 @@ public sealed class DataVoEngine : IDisposable
     {
         var previous = ScopedCurrent.Value;
         ScopedCurrent.Value = engine;
-        SetFallback(engine);
 
         return new EngineScope(previous);
     }
@@ -332,6 +337,13 @@ public sealed class DataVoEngine : IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
         if (_transactionIdStateStore != null)
         {
             _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
@@ -339,5 +351,13 @@ public sealed class DataVoEngine : IDisposable
 
         IndexManager.Dispose();
         VersionStorageManager.Dispose();
+
+        lock (SyncRoot)
+        {
+            if (ReferenceEquals(_fallbackCurrent, this))
+            {
+                _fallbackCurrent = null;
+            }
+        }
     }
 }

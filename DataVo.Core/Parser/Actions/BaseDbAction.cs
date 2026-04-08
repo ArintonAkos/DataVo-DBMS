@@ -22,6 +22,7 @@ internal abstract class BaseDbAction : IDbAction
     protected List<string> Fields = [];
 
     protected List<string> Messages = [];
+    protected bool HasErrors;
 
     public BaseDbAction()
     {
@@ -54,6 +55,18 @@ internal abstract class BaseDbAction : IDbAction
     protected void SetDatabaseName(Guid session, string databaseName)
     {
         Sessions.Set(session, databaseName);
+    }
+
+    protected void AddError(string message)
+    {
+        HasErrors = true;
+        Messages.Add(message);
+    }
+
+    protected void AddError(Exception ex)
+    {
+        HasErrors = true;
+        Messages.Add(ex.ToString());
     }
 
     protected virtual DatabasePermission RequiredPermission => InferRequiredPermission();
@@ -98,19 +111,25 @@ internal abstract class BaseDbAction : IDbAction
     {
         try
         {
+            Data.Clear();
+            Fields.Clear();
+            Messages.Clear();
+            HasErrors = false;
+
             using IDisposable _ = Engine.SessionSecurity.PushAmbientPrincipalForSession(session);
             Engine.SessionSecurity.Authorize(session, RequiredPermission, Engine.Config);
 
             PerformAction(session);
-            if (Messages.Count > 0 && Messages.Any(m => m.Contains("error", StringComparison.CurrentCultureIgnoreCase) || m.Contains("exception", StringComparison.CurrentCultureIgnoreCase)))
+            if (HasErrors || Messages.Any(m => m.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)))
             {
                 return new QueryResult { Messages = Messages, IsError = true, Data = Data, Fields = Fields };
             }
+
             return QueryResult.Success(Messages, Data, Fields);
         }
         catch (Exception ex)
         {
-            return QueryResult.Error(ex.Message);
+            return QueryResult.Error(ex.ToString());
         }
     }
 
