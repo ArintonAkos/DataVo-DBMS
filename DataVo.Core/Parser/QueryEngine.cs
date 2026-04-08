@@ -74,7 +74,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 Logger.Error($"[ParserDebug] Parse pipeline failure: {ex.GetType().Name}: {ex.Message}");
             }
 
-            response.Add(QueryResult.Error(ex.Message));
+            response.Add(QueryResult.Error(ex.ToString()));
             return response;
         }
 

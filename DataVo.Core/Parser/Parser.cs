@@ -1418,13 +1418,14 @@ public class Parser(List<Token> tokens)
             }
             catch (ParserException ex)
             {
-                if (ex.Message.Contains("not supported", StringComparison.OrdinalIgnoreCase))
+                if (IsWildcardProjection(colNode.RawExpression))
                 {
-                    throw;
+                    colNode.Expression = null;
                 }
-
-                // Fall back to storing raw text when parsing fails
-                colNode.Expression = null;
+                else
+                {
+                    throw new ParserException($"Parser Error: Failed to parse SELECT expression '{colNode.RawExpression}'. {ex.Message}");
+                }
             }
 
             // Optional alias
@@ -1469,6 +1470,13 @@ public class Parser(List<Token> tokens)
 
         ExpressionNode? expr = ParseWhereExpression(tokens);
         return expr ?? throw new ParserException("Expected a valid expression after DEFAULT.");
+    }
+
+    private static bool IsWildcardProjection(string rawExpression)
+    {
+        string trimmed = rawExpression.Trim();
+        return trimmed == "*" ||
+               (trimmed.EndsWith(".*", StringComparison.Ordinal) && trimmed.Length > 2);
     }
 
     // This adapts the existing Shunting-Yard from StatementParser to use the Lexer's Tokens directly

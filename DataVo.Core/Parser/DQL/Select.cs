@@ -190,7 +190,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         }
         catch (Exception ex)
         {
-            Messages.Add(ex.ToString());
+            AddError(ex);
             Logger.Error(ex.ToString());
         }
     }

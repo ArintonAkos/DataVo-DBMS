@@ -65,7 +65,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
         catch (Exception e)
         {
-            Messages.Add(e.Message);
+            AddError(e);
             Logger.Error(e.ToString());
         }
     }

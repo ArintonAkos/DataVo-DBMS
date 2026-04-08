@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace DataVo.Core.Parser.Utils;
@@ -24,28 +25,29 @@ internal static class ExpressionValueComparer
         if (leftValue == null && rightValue == null) return true;
         if (leftValue == null || rightValue == null) return false;
 
-        if (leftValue is IConvertible leftConvertible && rightValue is IConvertible rightConvertible)
+        if (string.Equals(
+            Convert.ToString(leftValue, CultureInfo.InvariantCulture),
+            Convert.ToString(rightValue, CultureInfo.InvariantCulture),
+            StringComparison.Ordinal))
         {
-            try
-            {
-                if (Convert.ToString(leftValue) == Convert.ToString(rightValue)) return true;
-
-                double leftNumber = leftConvertible.ToDouble(null);
-                double rightNumber = rightConvertible.ToDouble(null);
-
-                if (useNumericTolerance)
-                {
-                    return Math.Abs(leftNumber - rightNumber) < numericTolerance;
-                }
-
-                return leftNumber == rightNumber;
-            }
-            catch (Exception)
-            {
-            }
+            return true;
         }
 
-        return Convert.ToString(leftValue) == Convert.ToString(rightValue);
+        if (TryConvertToDouble(leftValue, out double leftNumber) &&
+            TryConvertToDouble(rightValue, out double rightNumber))
+        {
+            if (useNumericTolerance)
+            {
+                return Math.Abs(leftNumber - rightNumber) < numericTolerance;
+            }
+
+            return leftNumber == rightNumber;
+        }
+
+        return string.Equals(
+            Convert.ToString(leftValue, CultureInfo.InvariantCulture),
+            Convert.ToString(rightValue, CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -68,27 +70,21 @@ internal static class ExpressionValueComparer
         if (leftValue == null) return -1;
         if (rightValue == null) return 1;
 
-        if (leftValue is IConvertible leftConvertible && rightValue is IConvertible rightConvertible)
+        if (TryConvertToDouble(leftValue, out double leftNumber) &&
+            TryConvertToDouble(rightValue, out double rightNumber))
         {
-            try
-            {
-                double leftNumber = leftConvertible.ToDouble(null);
-                double rightNumber = rightConvertible.ToDouble(null);
-                return leftNumber.CompareTo(rightNumber);
-            }
-            catch (Exception)
-            {
-            }
+            return leftNumber.CompareTo(rightNumber);
         }
 
-        try
+        if (leftValue is IComparable comparable && leftValue.GetType() == rightValue.GetType())
         {
-            return Comparer<object?>.Default.Compare(leftValue, rightValue);
+            return comparable.CompareTo(rightValue);
         }
-        catch
-        {
-            return string.Compare(Convert.ToString(leftValue), Convert.ToString(rightValue), StringComparison.Ordinal);
-        }
+
+        return string.Compare(
+            Convert.ToString(leftValue, CultureInfo.InvariantCulture),
+            Convert.ToString(rightValue, CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -119,5 +115,51 @@ internal static class ExpressionValueComparer
             .Replace("_", ".") + "$";
 
         return Regex.IsMatch(input, regexPattern, RegexOptions.Singleline);
+    }
+
+    private static bool TryConvertToDouble(object value, out double number)
+    {
+        switch (value)
+        {
+            case byte typed:
+                number = typed;
+                return true;
+            case sbyte typed:
+                number = typed;
+                return true;
+            case short typed:
+                number = typed;
+                return true;
+            case ushort typed:
+                number = typed;
+                return true;
+            case int typed:
+                number = typed;
+                return true;
+            case uint typed:
+                number = typed;
+                return true;
+            case long typed:
+                number = typed;
+                return true;
+            case ulong typed:
+                number = typed;
+                return true;
+            case float typed:
+                number = typed;
+                return true;
+            case double typed:
+                number = typed;
+                return true;
+            case decimal typed:
+                number = (double)typed;
+                return true;
+            case string text:
+                return double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out number)
+                    || double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out number);
+            default:
+                number = default;
+                return false;
+        }
     }
 }

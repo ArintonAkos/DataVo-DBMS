@@ -70,11 +70,58 @@ internal static class AtomicFileOperations
     /// <param name="destinationPath">Path that should receive the replacement file.</param>
     private static void ReplaceViaDeleteAndMove(string tempPath, string destinationPath)
     {
-        if (File.Exists(destinationPath))
-        {
-            File.Delete(destinationPath);
-        }
+        string backupPath = destinationPath + ".bak";
+        bool movedDestinationToBackup = false;
 
-        File.Move(tempPath, destinationPath, overwrite: true);
+        try
+        {
+            if (File.Exists(backupPath))
+            {
+                File.Delete(backupPath);
+            }
+
+            if (File.Exists(destinationPath))
+            {
+                File.Move(destinationPath, backupPath, overwrite: true);
+                movedDestinationToBackup = true;
+            }
+
+            File.Move(tempPath, destinationPath, overwrite: true);
+
+            if (movedDestinationToBackup && File.Exists(backupPath))
+            {
+                try
+                {
+                    File.Delete(backupPath);
+                }
+                catch
+                {
+                    // Cleanup best effort; replacement has already succeeded.
+                }
+            }
+        }
+        catch
+        {
+            if (movedDestinationToBackup && !File.Exists(destinationPath) && File.Exists(backupPath))
+            {
+                File.Move(backupPath, destinationPath, overwrite: true);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Cleanup best effort.
+                }
+            }
+        }
     }
 }

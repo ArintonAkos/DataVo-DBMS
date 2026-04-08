@@ -1,5 +1,6 @@
 using DataVo.Core.Contracts;
 using DataVo.Core.Utils;
+using System.Globalization;
 
 namespace DataVo.Core.Models.Catalog;
 
@@ -35,31 +36,7 @@ public class Column : IColumn
     /// </summary>
     public dynamic? ParsedValue
     {
-        get
-        {
-            if (Value == null || Value.Equals("NULL", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            try
-            {
-                return Type.ToUpperInvariant() switch
-                {
-                    "VARCHAR" => (Length > 0 && Length < Value.Length) ? Value[..Length] : Value,
-                    "DATE" => DateOnly.Parse(Value),
-                    "BIT" => bool.Parse(Value),
-                    "INT" => int.Parse(Value),
-                    "FLOAT" => double.Parse(Value, System.Globalization.CultureInfo.InvariantCulture),
-                    "VECTOR" => VectorParser.TryParseVector(Value, out float[] parsedVector) ? parsedVector : null,
-                    _ => Value,
-                };
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
+        get => ParseTypedValue(Value);
     }
 
     /// <summary>
@@ -76,30 +53,37 @@ public class Column : IColumn
     /// </summary>
     public dynamic? ParsedDefaultValue
     {
-        get
-        {
-            if (DefaultValue == null || DefaultValue.Equals("NULL", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
+        get => ParseTypedValue(DefaultValue);
+    }
 
-            try
-            {
-                return Type.ToUpperInvariant() switch
-                {
-                    "VARCHAR" => (Length > 0 && Length < DefaultValue.Length) ? DefaultValue[..Length] : DefaultValue,
-                    "DATE" => DateOnly.Parse(DefaultValue),
-                    "BIT" => bool.Parse(DefaultValue),
-                    "INT" => int.Parse(DefaultValue),
-                    "FLOAT" => double.Parse(DefaultValue, System.Globalization.CultureInfo.InvariantCulture),
-                    "VECTOR" => VectorParser.TryParseVector(DefaultValue, out float[] parsedVector) ? parsedVector : null,
-                    _ => DefaultValue,
-                };
-            }
-            catch (Exception)
-            {
-                return null;
-            }
+    private dynamic? ParseTypedValue(string? rawValue)
+    {
+        if (rawValue == null || rawValue.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
         }
+
+        return Type.ToUpperInvariant() switch
+        {
+            "VARCHAR" => (Length > 0 && Length < rawValue.Length) ? rawValue[..Length] : rawValue,
+            "DATE" => TryParseDate(rawValue, out DateOnly parsedDate) ? parsedDate : rawValue,
+            "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,
+            "INT" => int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) ? parsedInt : rawValue,
+            "FLOAT" => TryParseFloatingPoint(rawValue, out double parsedFloat) ? parsedFloat : rawValue,
+            "VECTOR" => VectorParser.TryParseVector(rawValue, out float[] parsedVector) ? parsedVector : rawValue,
+            _ => rawValue,
+        };
+    }
+
+    private static bool TryParseDate(string input, out DateOnly parsedDate)
+    {
+        return DateOnly.TryParse(input, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate)
+            || DateOnly.TryParse(input, CultureInfo.CurrentCulture, DateTimeStyles.None, out parsedDate);
+    }
+
+    private static bool TryParseFloatingPoint(string input, out double parsedFloat)
+    {
+        return double.TryParse(input, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out parsedFloat)
+            || double.TryParse(input, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out parsedFloat);
     }
 }

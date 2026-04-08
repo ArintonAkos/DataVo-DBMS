@@ -89,7 +89,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add(ex.Message);
+            AddError(ex);
         }
     }
 }
