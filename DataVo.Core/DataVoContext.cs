@@ -1,4 +1,6 @@
 ﻿using DataVo.Core.Contracts.Results;
+using DataVo.Core.MVCC;
+using DataVo.Core.Parser.DML;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
@@ -89,6 +91,53 @@ public sealed class DataVoContext : IDisposable
     public void RestoreSnapshot(DataVoSnapshot snapshot)
     {
         Engine.RestoreSnapshot(SessionId, snapshot);
+    }
+
+    /// <summary>
+    /// Inserts multiple typed rows into a table using the current <see cref="SessionId"/> database binding.
+    /// </summary>
+    public IReadOnlyList<long> BulkInsert(
+        string tableName,
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
+        List<IReadOnlyDictionary<string, object?>> materializedRows = rows
+            .Select(row => row ?? throw new ArgumentNullException(nameof(rows), "Rows cannot contain null entries."))
+            .Select(row => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (materializedRows.Count == 0)
+        {
+            return [];
+        }
+
+        string databaseName = ResolveCurrentDatabase();
+
+        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        {
+            throw new InvalidOperationException("BulkInsert cannot run while the current session has an active transaction.");
+        }
+
+        var service = new InsertRowService(
+            Engine,
+            Engine.StorageContext,
+            Engine.Catalog,
+            Engine.IndexManager);
+
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
+        Engine.LockManager.AcquireWriteLock(databaseName, tableName);
+
+        try
+        {
+            InsertRowsResult result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId);
+            return result.RowIds;
+        }
+        finally
+        {
+            Engine.LockManager.ReleaseWriteLock(databaseName, tableName);
+        }
     }
 
     /// <summary>
