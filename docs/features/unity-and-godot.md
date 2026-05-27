@@ -15,6 +15,26 @@ This page provides practical guidance for teams using DataVo in game and simulat
 - Local analytics snapshots during playtests
 - Authoring tools and editors backed by SQL
 
+## Deterministic in-memory workflows
+
+For gameplay tests, runtime simulations, and local playtest tooling, use `StorageMode.InMemory` with snapshots:
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+
+db.Execute("CREATE DATABASE GameTests");
+db.Execute("USE GameTests");
+db.Execute("CREATE TABLE PlayerState (Id INT PRIMARY KEY, Level INT)");
+db.Execute("INSERT INTO PlayerState VALUES (1, 5)");
+
+DataVoSnapshot baseline = db.CreateSnapshot();
+
+db.Execute("UPDATE PlayerState SET Level = 10 WHERE Id = 1");
+db.RestoreSnapshot(baseline);
+```
+
+This lets game teams seed one database, run a scenario, restore instantly, and reuse the same database surface in runtime code and automated tests.
+
 ## Unity integration approach
 
 1. Add DataVo packages to your .NET project references.

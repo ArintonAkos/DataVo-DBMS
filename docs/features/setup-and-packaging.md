@@ -80,6 +80,7 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 
 - .NET app teams: start with DataVo.Core and DataVo.Data
 - Unity and Godot teams: use disk mode for persistent save/profile data
+- For deterministic tests and simulations, prefer `StorageMode.InMemory` plus `CreateSnapshot()` / `RestoreSnapshot(...)`.
 - Browser teams: deploy WASM runtime assets and follow npm rollout updates
 - EF teams: adopt DataVo.EntityFrameworkCore in bounded integration slices
 
