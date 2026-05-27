@@ -2,6 +2,7 @@ using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 
 namespace DataVo.Core.Parser;
 
@@ -37,6 +38,21 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
     public List<QueryResult> Parse()
     {
         using var _ = DataVoEngine.PushCurrent(_engine);
+        string? databaseName = _engine.Sessions.Get(session);
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (_engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = query,
+                StorageMode = _engine.Config.StorageMode,
+                DatabaseName = databaseName
+            };
+            diagnosticsBuilder.SetOperation(InferOperation(query));
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(_engine.Diagnostics, diagnosticsBuilder);
 
         List<QueryResult> response = [];
 
@@ -69,6 +85,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
         }
         catch (Exception ex)
         {
+            diagnosticsBuilder?.RecordError(ex.Message);
             if (ParserDebugEnabled)
             {
                 Logger.Error($"[ParserDebug] Parse pipeline failure: {ex.GetType().Name}: {ex.Message}");
@@ -80,28 +97,88 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
 
         foreach (Queue<IDbAction> runnable in runnables)
         {
-            ExecuteRunnableQueue(runnable, response);
+            ExecuteRunnableQueue(runnable, response, diagnosticsBuilder);
         }
 
         return response;
     }
 
+    private static string InferOperation(string sql)
+    {
+        string trimmed = sql.TrimStart();
+        if (trimmed.Length == 0)
+        {
+            return "UNKNOWN";
+        }
+
+        int end = 0;
+        while (end < trimmed.Length && !char.IsWhiteSpace(trimmed[end]) && trimmed[end] != ';')
+        {
+            end++;
+        }
+
+        return trimmed[..end].ToUpperInvariant();
+    }
+
     /// <summary>
     /// Executes a queue of actions until completion or until one action fails.
     /// </summary>
-    private void ExecuteRunnableQueue(Queue<IDbAction> runnable, List<QueryResult> response)
+    private void ExecuteRunnableQueue(
+        Queue<IDbAction> runnable,
+        List<QueryResult> response,
+        RuntimeQueryStatsBuilder? diagnosticsBuilder)
     {
         while (runnable.Count != 0)
         {
             try
             {
-                response.Add(runnable.Dequeue().Perform(session));
+                QueryResult result = runnable.Dequeue().Perform(session);
+                response.Add(result);
+                if (diagnosticsBuilder is not null)
+                {
+                    RecordResultMetrics(diagnosticsBuilder, result);
+                }
             }
             catch (Exception ex)
             {
+                diagnosticsBuilder?.RecordError(ex.Message);
                 response.Add(QueryResult.Error(ex.ToString()));
                 break;
             }
         }
+    }
+
+    private static void RecordResultMetrics(RuntimeQueryStatsBuilder builder, QueryResult result)
+    {
+        if (result.IsError)
+        {
+            builder.RecordError(string.Join(" | ", result.Messages));
+        }
+
+        if (result.Data.Count > 0)
+        {
+            builder.AddRowsReturned(result.Data.Count);
+        }
+
+        foreach (string message in result.Messages)
+        {
+            if (TryReadMessageCount(message, "Rows affected:", out int affected))
+            {
+                builder.AddRowsAffected(affected);
+                continue;
+            }
+
+            if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
+            {
+                builder.AddRowsReturned(selected);
+            }
+        }
+    }
+
+    private static bool TryReadMessageCount(string message, string prefix, out int count)
+    {
+        count = 0;
+        return message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(message[prefix.Length..].Trim(), out count);
     }
 }

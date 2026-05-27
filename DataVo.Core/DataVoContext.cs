@@ -3,6 +3,7 @@ using DataVo.Core.MVCC;
 using DataVo.Core.Parser.DML;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 
@@ -54,6 +55,11 @@ public sealed class DataVoContext : IDisposable
     /// Gets or sets the default session identifier used by <see cref="Execute(string)"/>.
     /// </summary>
     public Guid SessionId { get; set; }
+
+    /// <summary>
+    /// Gets the diagnostics facade for runtime query instrumentation.
+    /// </summary>
+    public DataVoDiagnostics Diagnostics => Engine.Diagnostics;
 
     /// <summary>
     /// Executes a SQL query using the current <see cref="SessionId"/>.
@@ -114,6 +120,21 @@ public sealed class DataVoContext : IDisposable
         }
 
         string databaseName = ResolveCurrentDatabase();
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (Engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = $"BULK INSERT {tableName}",
+                StorageMode = Engine.Config.StorageMode,
+                DatabaseName = databaseName
+            };
+            diagnosticsBuilder.SetOperation("BULK INSERT");
+            diagnosticsBuilder.AddTable(tableName);
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
 
         if (Engine.TransactionManager.HasActiveTransaction(SessionId))
         {
@@ -132,7 +153,13 @@ public sealed class DataVoContext : IDisposable
         try
         {
             InsertRowsResult result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId);
+            diagnosticsBuilder?.AddRowsAffected(result.AcceptedRowCount);
             return result.RowIds;
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
         }
         finally
         {
@@ -185,19 +212,45 @@ public sealed class DataVoContext : IDisposable
         using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
         string databaseName = ResolveCurrentDatabase();
         using var _ = DataVoEngine.PushCurrent(Engine);
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (Engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = $"VECTOR SEARCH {tableName}.{indexName}",
+                StorageMode = Engine.Config.StorageMode,
+                DatabaseName = databaseName
+            };
+            diagnosticsBuilder.SetOperation("VECTOR SEARCH");
+            diagnosticsBuilder.AddTable(tableName);
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
 
         List<long> rowIds;
-        rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        try
+        {
+            rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+
         if (rowIds.Count == 0)
         {
             return [];
         }
 
         Dictionary<long, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
-        return rowIds
+        List<Dictionary<string, object?>> results = rowIds
             .Where(rows.ContainsKey)
             .Select(id => rows[id])
             .ToList();
+        diagnosticsBuilder?.AddRowsReturned(results.Count);
+        return results;
     }
 
     /// <summary>

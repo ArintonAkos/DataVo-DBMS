@@ -3,6 +3,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Runtime.Security;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
 using DataVo.Core.Utils;
@@ -49,6 +50,7 @@ public sealed class DataVoEngine : IDisposable
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();
+        Diagnostics = new DataVoDiagnostics();
 
         if (Config.StorageMode == StorageMode.Disk)
         {
@@ -115,6 +117,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the transaction ID allocator that assigns globally unique transaction IDs.
     /// </summary>
     public TransactionIdAllocator TransactionIdAllocator { get; }
+
+    /// <summary>
+    /// Gets the runtime diagnostics collector owned by this engine.
+    /// </summary>
+    public DataVoDiagnostics Diagnostics { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
