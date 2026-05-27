@@ -6,6 +6,7 @@ using DataVo.Core.StorageEngine.Backends.Abstractions;
 using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
 
@@ -378,6 +379,8 @@ public class StorageContext(DataVoConfig config)
                 ResolveSerializerSchemaScopeKey());
         }
 
+        RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
+
         return parsedTableData;
     }
 
@@ -399,6 +402,8 @@ public class StorageContext(DataVoConfig config)
                 ResolveCatalog(),
                 ResolveSerializerSchemaScopeKey());
         }
+
+        RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, parsedTableData.Count);
 
         return parsedTableData;
     }

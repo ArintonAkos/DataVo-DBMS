@@ -7,6 +7,7 @@ using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
 using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 
 namespace DataVo.Core.Indexing;
 
@@ -690,7 +691,9 @@ public class IndexManager : IDisposable
         }
 
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        return vectorIndex.SearchTopK(queryVector, topK);
+        List<long> results = vectorIndex.SearchTopK(queryVector, topK);
+        RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, expansionPasses: 0);
+        return results;
     }
 
     /// <summary>
@@ -733,7 +736,9 @@ public class IndexManager : IDisposable
     public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        return [.. index.Search(columnValue)];
+        HashSet<long> results = [.. index.Search(columnValue)];
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return results;
     }
 
     /// <summary>
@@ -742,7 +747,9 @@ public class IndexManager : IDisposable
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        return index.Search(key).Any();
+        bool exists = index.Search(key).Any();
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return exists;
     }
 
     /// <summary>
@@ -751,7 +758,9 @@ public class IndexManager : IDisposable
     public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
     {
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        return index.ContainsValue(rowId);
+        bool exists = index.ContainsValue(rowId);
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return exists;
     }
 
     private IIndex GetOrLoadScalarIndex(string indexName, string tableName, string databaseName)

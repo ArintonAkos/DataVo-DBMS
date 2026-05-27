@@ -14,6 +14,7 @@ using DataVo.Core.Transactions;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Execution.Volcano;
 using DataVo.Core.MVCC;
 using System.Collections.Concurrent;
@@ -570,6 +571,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             totalRows,
             initialTopK,
             seedPredicate);
+        RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, _queryVectorExpansionPasses);
         if (rowIds.Count == 0)
         {
             return new ListedTable();
@@ -712,6 +714,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             totalRows,
             topK,
             materializedWhere);
+        RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, _queryVectorExpansionPasses);
 
         if (rowIds.Count == 0)
         {
