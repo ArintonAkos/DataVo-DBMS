@@ -1384,22 +1384,22 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
     private ListedTable EvaluateWhereWithExpression(ExpressionNode whereExpression)
     {
-        if (!_model.JoinStatement.ContainsJoin())
+        if (!_model.JoinStatement.ContainsJoin() && CanEvaluateWhereWithoutJoin(whereExpression))
         {
-            var sourceRows = _model.FromTable!.TableContentValues!
-                .Select((record, index) => new ExecutionRow(index + 1, ToExecutionValues(record.ToRow())))
-                .ToList();
-
-            IQueryOperator root = new FilterOperator(new TableScanOperator(sourceRows), (ExecutionRow row) =>
+            string tableName = _model.FromTable!.TableName;
+            string databaseName = _model.Database
+                ?? throw new InvalidOperationException("SELECT requires an active database before evaluating the WHERE clause.");
+            HashSet<long> rowIds = new Where(whereExpression, _model.FromTable).EvaluateWithoutJoin(tableName, databaseName);
+            if (rowIds.Count == 0)
             {
-                var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values)));
-                return EvaluatePredicate(whereExpression, joinedRow);
-            });
+                return new ListedTable();
+            }
 
-            List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
-            return new ListedTable(filteredRows
-                .Select(row => new JoinedRow(_model.FromTable.TableName, new Row(new Dictionary<string, object?>(row.Values))))
-                .ToList());
+            Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents([.. rowIds], tableName, databaseName);
+            return new ListedTable([.. rowIds
+                .OrderBy(static id => id)
+                .Where(rows.ContainsKey)
+                .Select(id => new JoinedRow(tableName, new Row(rows[id])))]);
         }
 
         ListedTable source = _model.JoinStatement.ContainsJoin()
@@ -1413,6 +1413,36 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             .ToList();
 
         return new ListedTable(filtered);
+    }
+
+    private static bool CanEvaluateWhereWithoutJoin(ExpressionNode expression)
+    {
+        if (expression is LiteralNode)
+        {
+            return true;
+        }
+
+        if (expression is not BinaryExpressionNode binaryExpression)
+        {
+            return false;
+        }
+
+        if (binaryExpression.Operator == Operators.AND || binaryExpression.Operator == Operators.OR)
+        {
+            return CanEvaluateWhereWithoutJoin(binaryExpression.Left) && CanEvaluateWhereWithoutJoin(binaryExpression.Right);
+        }
+
+        BinaryExpressionNode normalizedExpression = ExpressionNodeNormalizer.NormalizeComparisonNode(binaryExpression);
+        return normalizedExpression.Left switch
+        {
+            ResolvedColumnRefNode when normalizedExpression.Right is LiteralNode => true,
+            LiteralNode when normalizedExpression.Right is LiteralNode => true,
+            ResolvedColumnRefNode when normalizedExpression.Right is ResolvedColumnRefNode => true,
+            BinaryExpressionNode distanceExpression when normalizedExpression.Right is LiteralNode
+                => distanceExpression.Operator == Operators.VECTOR_DISTANCE_COSINE
+                    || distanceExpression.Operator == Operators.VECTOR_DISTANCE_L2,
+            _ => false
+        };
     }
 
     private ListedTable EvaluateNoJoinWithVolcano(ExpressionNode? whereExpression)

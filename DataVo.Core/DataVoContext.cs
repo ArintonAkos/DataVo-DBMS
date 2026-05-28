@@ -138,7 +138,9 @@ public sealed class DataVoContext : IDisposable
 
         if (Engine.TransactionManager.HasActiveTransaction(SessionId))
         {
-            throw new InvalidOperationException("BulkInsert cannot run while the current session has an active transaction.");
+            const string transactionError = "BulkInsert cannot run while the current session has an active transaction.";
+            diagnosticsBuilder?.RecordError(transactionError);
+            throw new InvalidOperationException(transactionError);
         }
 
         var service = new InsertRowService(
@@ -244,13 +246,21 @@ public sealed class DataVoContext : IDisposable
             return [];
         }
 
-        Dictionary<long, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
-        List<Dictionary<string, object?>> results = rowIds
-            .Where(rows.ContainsKey)
-            .Select(id => rows[id])
-            .ToList();
-        diagnosticsBuilder?.AddRowsReturned(results.Count);
-        return results;
+        try
+        {
+            Dictionary<long, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
+            List<Dictionary<string, object?>> results = rowIds
+                .Where(rows.ContainsKey)
+                .Select(id => rows[id])
+                .ToList();
+            diagnosticsBuilder?.AddRowsReturned(results.Count);
+            return results;
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
     }
 
     /// <summary>

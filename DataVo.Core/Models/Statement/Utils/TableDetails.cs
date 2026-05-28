@@ -91,7 +91,7 @@ namespace DataVo.Core.Models.Statement.Utils
         {
             get
             {
-                if (_columnsCache != null)
+                if (_columnsCache != null && DatabaseName is null)
                 {
                     _primaryKeysCache ??= [];
                     return _primaryKeysCache;
@@ -116,7 +116,7 @@ namespace DataVo.Core.Models.Statement.Utils
         {
             get
             {
-                if (_columnsCache != null)
+                if (_columnsCache != null && DatabaseName is null)
                 {
                     _indexedColumnsCache ??= [];
                     return _indexedColumnsCache;
