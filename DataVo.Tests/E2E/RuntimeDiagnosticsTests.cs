@@ -153,6 +153,28 @@ public class RuntimeDiagnosticsTests
     }
 
     [Fact]
+    public void Diagnostics_RecordsBulkInsertNoDatabaseSelectedErrors()
+    {
+        using var context = new DataVoContext(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory
+        });
+        context.Diagnostics.Enabled = true;
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => context.BulkInsert(
+            "Events",
+            [new Dictionary<string, object?> { ["Id"] = 1 }]));
+
+        RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
+        Assert.NotNull(stats);
+        Assert.Equal("BULK INSERT", stats.Operation);
+        Assert.True(stats.IsError);
+        Assert.Equal(StorageMode.InMemory, stats.StorageMode);
+        Assert.Contains("Events", stats.Tables);
+        Assert.Equal(ex.Message, stats.ErrorMessage);
+    }
+
+    [Fact]
     public void Diagnostics_RecordsSearchNearestMaterializationErrors()
     {
         using var context = CreateContext(StorageMode.InMemory);
@@ -170,6 +192,56 @@ public class RuntimeDiagnosticsTests
         Assert.True(stats.IsError);
         Assert.Contains("idx_emb", stats.IndexesUsed);
         Assert.Equal(ex.Message, stats.ErrorMessage);
+    }
+
+    [Fact]
+    public void Diagnostics_RecordsSearchNearestNoDatabaseSelectedErrors()
+    {
+        using var context = new DataVoContext(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory
+        });
+        context.Diagnostics.Enabled = true;
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => context.SearchNearest(
+            "Embeddings",
+            "idx_emb",
+            [1f, 0f, 0f],
+            topK: 1));
+
+        RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
+        Assert.NotNull(stats);
+        Assert.Equal("VECTOR SEARCH", stats.Operation);
+        Assert.True(stats.IsError);
+        Assert.Equal(StorageMode.InMemory, stats.StorageMode);
+        Assert.Contains("Embeddings", stats.Tables);
+        Assert.Equal(ex.Message, stats.ErrorMessage);
+    }
+
+    [Fact]
+    public void Diagnostics_RecordsSearchNearestStringParseErrors()
+    {
+        const string parseError = "Query vector must be in format [x,y,z].";
+        using var context = CreateContext(StorageMode.InMemory);
+        context.Diagnostics.Enabled = true;
+        context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3))");
+        context.Execute("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
+        context.Diagnostics.Clear();
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => context.SearchNearest(
+            "Embeddings",
+            "idx_emb",
+            "[oops]",
+            topK: 1));
+
+        RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
+        Assert.NotNull(stats);
+        Assert.Equal("VECTOR SEARCH", stats.Operation);
+        Assert.True(stats.IsError);
+        Assert.Equal(StorageMode.InMemory, stats.StorageMode);
+        Assert.Contains("Embeddings", stats.Tables);
+        Assert.Equal(parseError, stats.ErrorMessage);
+        Assert.Contains(parseError, ex.Message, StringComparison.Ordinal);
     }
 
     private static DataVoContext CreateContext(StorageMode mode, string? diskPath = null)
