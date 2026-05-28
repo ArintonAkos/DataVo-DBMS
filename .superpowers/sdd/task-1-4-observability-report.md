@@ -101,3 +101,30 @@ Passed!  - Failed: 0, Passed: 20, Skipped: 0, Total: 20
 ## Concerns
 
 - The current planner path for the point-lookup `SELECT` used in the diagnostics test does not reliably expose scalar index usage in `IndexesUsed`, even though vector index attribution works and row access metrics are recorded. I adapted that test per the brief’s note to preserve behavioral intent rather than locking the milestone to a planner-internal detail.
+
+## Follow-up fix: complete runtime diagnostics coverage
+
+- Restored the scalar index assertion in `RuntimeDiagnosticsTests.Diagnostics_RecordsSelectStats` and added direct API error coverage for:
+  - `BulkInsert` transaction-state failures
+  - `BulkInsert` insert failures
+  - `SearchNearest` materialization failures after vector index lookup
+- Updated `Select.EvaluateWhereWithExpression(...)` to route single-table, evaluator-safe predicates through `Where.EvaluateWithoutJoin(...)`, so point lookups like `SELECT Id, Name FROM Players WHERE Id = 1` record `_PK_Players` in `RuntimeQueryStats.IndexesUsed` while unsupported computed predicates still fall back to the existing legacy filter path.
+- Fixed `TableDetail.PrimaryKeys` / `IndexedColumns` so catalog-backed table details continue loading key/index metadata even after column metadata has been cached, which is required for the reused single-table evaluator to choose indexed access paths.
+- Updated `DataVoContext.BulkInsert(...)` to record diagnostics errors before throwing on active transactions.
+- Updated `DataVoContext.SearchNearest(...)` to record diagnostics errors during row materialization/result construction, not only during `IndexManager.SearchVector(...)`.
+
+### Focused verification
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter RuntimeDiagnosticsTests
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "GameRuntimeBulkInsertTests|VolcanoSelectExecutionTests|VectorContextTests|VectorIndexTests"
+```
+
+Results:
+
+```text
+Passed!  - Failed: 0, Passed: 8, Skipped: 0, Total: 8
+Passed!  - Failed: 0, Passed: 98, Skipped: 0, Total: 98
+```
+
+Note: one focused regression run emitted an `MSB3101` cache-file warning during parallel build state writes, but the test run completed successfully with all targeted tests passing.
