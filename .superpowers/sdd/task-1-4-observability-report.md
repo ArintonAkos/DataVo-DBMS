@@ -128,3 +128,27 @@ Passed!  - Failed: 0, Passed: 98, Skipped: 0, Total: 98
 ```
 
 Note: one focused regression run emitted an `MSB3101` cache-file warning during parallel build state writes, but the test run completed successfully with all targeted tests passing.
+
+## Follow-up fix: record direct diagnostics preflight errors
+
+- Added E2E coverage for the remaining direct API diagnostics gaps:
+  - `BulkInsert(...)` with diagnostics enabled and no active database selected
+  - `SearchNearest(...)` float-array overload with diagnostics enabled and no active database selected
+  - `SearchNearest(...)` string overload with malformed vector literal
+- Updated `DataVoContext` so direct-operation diagnostics builders use a non-throwing current-database lookup for metadata, open a scope only when diagnostics are enabled, and record preflight errors before rethrowing.
+- Kept the disabled path cheap: no diagnostics builder or scope allocation happens unless `Engine.Diagnostics.Enabled` is `true`.
+- Avoided double-recording successful string-overload vector searches by recording diagnostics only for parse failures in the string overload and delegating successful calls to the float-array overload.
+
+### Focused verification
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter RuntimeDiagnosticsTests
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "GameRuntimeBulkInsertTests|VectorContextTests|VectorIndexTests"
+```
+
+Results:
+
+```text
+Passed!  - Failed: 0, Passed: 11, Skipped: 0, Total: 11
+Passed!  - Failed: 0, Passed: 62, Skipped: 0, Total: 62
+```

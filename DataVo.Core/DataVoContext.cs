@@ -119,7 +119,6 @@ public sealed class DataVoContext : IDisposable
             return [];
         }
 
-        string databaseName = ResolveCurrentDatabase();
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
         if (Engine.Diagnostics.Enabled)
         {
@@ -127,7 +126,7 @@ public sealed class DataVoContext : IDisposable
             {
                 QueryText = $"BULK INSERT {tableName}",
                 StorageMode = Engine.Config.StorageMode,
-                DatabaseName = databaseName
+                DatabaseName = TryGetCurrentDatabaseName()
             };
             diagnosticsBuilder.SetOperation("BULK INSERT");
             diagnosticsBuilder.AddTable(tableName);
@@ -135,6 +134,17 @@ public sealed class DataVoContext : IDisposable
 
         using RuntimeQueryDiagnosticsScope? diagnosticsScope =
             RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
+
+        string databaseName;
+        try
+        {
+            databaseName = ResolveCurrentDatabase();
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
 
         if (Engine.TransactionManager.HasActiveTransaction(SessionId))
         {
@@ -212,8 +222,6 @@ public sealed class DataVoContext : IDisposable
     public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
     {
         using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
-        string databaseName = ResolveCurrentDatabase();
-        using var _ = DataVoEngine.PushCurrent(Engine);
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
         if (Engine.Diagnostics.Enabled)
         {
@@ -221,15 +229,28 @@ public sealed class DataVoContext : IDisposable
             {
                 QueryText = $"VECTOR SEARCH {tableName}.{indexName}",
                 StorageMode = Engine.Config.StorageMode,
-                DatabaseName = databaseName
+                DatabaseName = TryGetCurrentDatabaseName()
             };
             diagnosticsBuilder.SetOperation("VECTOR SEARCH");
             diagnosticsBuilder.AddTable(tableName);
+            diagnosticsBuilder.AddIndex(indexName);
         }
 
         using RuntimeQueryDiagnosticsScope? diagnosticsScope =
             RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
 
+        string databaseName;
+        try
+        {
+            databaseName = ResolveCurrentDatabase();
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+
+        using var _ = DataVoEngine.PushCurrent(Engine);
         List<long> rowIds;
         try
         {
@@ -268,17 +289,40 @@ public sealed class DataVoContext : IDisposable
     /// </summary>
     public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, string queryVector, int topK = 10)
     {
-        if (!VectorParser.TryParseVector(queryVector, out float[] parsedVector))
+        if (VectorParser.TryParseVector(queryVector, out float[] parsedVector))
         {
-            throw new ArgumentException("Query vector must be in format [x,y,z].", nameof(queryVector));
+            return SearchNearest(tableName, indexName, parsedVector, topK);
         }
 
-        return SearchNearest(tableName, indexName, parsedVector, topK);
+        const string parseError = "Query vector must be in format [x,y,z].";
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (Engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = $"VECTOR SEARCH {tableName}.{indexName}",
+                StorageMode = Engine.Config.StorageMode,
+                DatabaseName = TryGetCurrentDatabaseName()
+            };
+            diagnosticsBuilder.SetOperation("VECTOR SEARCH");
+            diagnosticsBuilder.AddTable(tableName);
+            diagnosticsBuilder.AddIndex(indexName);
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
+        diagnosticsBuilder?.RecordError(parseError);
+        throw new ArgumentException(parseError, nameof(queryVector));
+    }
+
+    private string? TryGetCurrentDatabaseName()
+    {
+        return Engine.Sessions.Get(SessionId);
     }
 
     private string ResolveCurrentDatabase()
     {
-        string? databaseName = Engine.Sessions.Get(SessionId);
+        string? databaseName = TryGetCurrentDatabaseName();
         if (string.IsNullOrWhiteSpace(databaseName))
         {
             throw new InvalidOperationException("No database selected for the current session. Execute USE <database> first.");
