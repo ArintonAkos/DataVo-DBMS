@@ -1,6 +1,7 @@
 using System.Globalization;
 using DataVo.Core.BTree;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.CompiledQueries;
 
@@ -148,11 +149,13 @@ public static class DataVoCompiledQuery
         string databaseName,
         string expectedKey)
     {
+        string primaryKeyIndexName = $"_PK_{plan.TableName}";
+
         try
         {
             List<long> ids =
             [
-                .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, $"_PK_{plan.TableName}", plan.TableName, databaseName)
+                .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName)
             ];
 
             Dictionary<long, Dictionary<string, object?>> indexedRows =
@@ -168,7 +171,7 @@ public static class DataVoCompiledQuery
                 return matches;
             }
         }
-        catch
+        catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
         {
         }
 
@@ -182,6 +185,11 @@ public static class DataVoCompiledQuery
                     expectedKey,
                     StringComparison.Ordinal))
             .ToList();
+    }
+
+    private static bool IsMissingPrimaryKeyIndex(IndexException exception, string indexName, string tableName)
+    {
+        return exception.Message.Contains($"Index {indexName} on table {tableName} does not exist", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, object?> ToParameterDictionary(IReadOnlyList<DataVoCompiledQueryParameter> parameters)
