@@ -152,3 +152,25 @@ Results:
 Passed!  - Failed: 0, Passed: 11, Skipped: 0, Total: 11
 Passed!  - Failed: 0, Passed: 62, Skipped: 0, Total: 62
 ```
+
+## Follow-up fix: avoid speculative vector index diagnostics
+
+- Removed eager `diagnosticsBuilder.AddIndex(indexName)` calls from both direct `SearchNearest(...)` overloads so preflight failures no longer report vector indexes that were never observed.
+- Preserved real vector index attribution by leaving `IndexManager.SearchVector(...)` and `RuntimeQueryDiagnosticsScope.RecordVectorSearch(...)` unchanged.
+- Strengthened `RuntimeDiagnosticsTests` to assert:
+  - no-database `SearchNearest(...)` failures have empty `IndexesUsed`
+  - malformed string-vector parse failures have empty `IndexesUsed`
+  - materialization failures after vector lookup still report `idx_emb`
+  - successful vector searches still report `idx_emb`
+
+### Focused verification
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter RuntimeDiagnosticsTests
+```
+
+Result:
+
+```text
+Passed!  - Failed: 0, Passed: 11, Skipped: 0, Total: 11
+```

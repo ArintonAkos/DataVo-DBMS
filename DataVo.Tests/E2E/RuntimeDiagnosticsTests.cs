@@ -111,6 +111,7 @@ public class RuntimeDiagnosticsTests
         Assert.NotNull(stats);
         Assert.True(stats.VectorIndexUsed);
         Assert.Equal(1, stats.VectorTopK);
+        Assert.Equal("idx_emb", Assert.Single(stats.IndexesUsed));
         Assert.Contains("idx_emb", stats.IndexesUsed);
     }
 
@@ -190,6 +191,7 @@ public class RuntimeDiagnosticsTests
         RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
         Assert.NotNull(stats);
         Assert.True(stats.IsError);
+        Assert.Equal("idx_emb", Assert.Single(stats.IndexesUsed));
         Assert.Contains("idx_emb", stats.IndexesUsed);
         Assert.Equal(ex.Message, stats.ErrorMessage);
     }
@@ -215,6 +217,7 @@ public class RuntimeDiagnosticsTests
         Assert.True(stats.IsError);
         Assert.Equal(StorageMode.InMemory, stats.StorageMode);
         Assert.Contains("Embeddings", stats.Tables);
+        Assert.Empty(stats.IndexesUsed);
         Assert.Equal(ex.Message, stats.ErrorMessage);
     }
 
@@ -240,6 +243,7 @@ public class RuntimeDiagnosticsTests
         Assert.True(stats.IsError);
         Assert.Equal(StorageMode.InMemory, stats.StorageMode);
         Assert.Contains("Embeddings", stats.Tables);
+        Assert.Empty(stats.IndexesUsed);
         Assert.Equal(parseError, stats.ErrorMessage);
         Assert.Contains(parseError, ex.Message, StringComparison.Ordinal);
     }

@@ -233,7 +233,6 @@ public sealed class DataVoContext : IDisposable
             };
             diagnosticsBuilder.SetOperation("VECTOR SEARCH");
             diagnosticsBuilder.AddTable(tableName);
-            diagnosticsBuilder.AddIndex(indexName);
         }
 
         using RuntimeQueryDiagnosticsScope? diagnosticsScope =
@@ -306,7 +305,6 @@ public sealed class DataVoContext : IDisposable
             };
             diagnosticsBuilder.SetOperation("VECTOR SEARCH");
             diagnosticsBuilder.AddTable(tableName);
-            diagnosticsBuilder.AddIndex(indexName);
         }
 
         using RuntimeQueryDiagnosticsScope? diagnosticsScope =
