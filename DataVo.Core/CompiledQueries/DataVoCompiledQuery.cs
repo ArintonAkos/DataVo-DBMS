@@ -149,30 +149,36 @@ public static class DataVoCompiledQuery
         string databaseName,
         string expectedKey)
     {
-        string primaryKeyIndexName = $"_PK_{plan.TableName}";
+        List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
+        bool isPrimaryKeyPredicate = primaryKeys.Contains(plan.WhereColumn!, StringComparer.OrdinalIgnoreCase);
 
-        try
+        if (isPrimaryKeyPredicate)
         {
-            List<long> ids =
-            [
-                .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName)
-            ];
+            string primaryKeyIndexName = $"_PK_{plan.TableName}";
 
-            Dictionary<long, Dictionary<string, object?>> indexedRows =
-                context.Engine.StorageContext.GetTableContents(ids, plan.TableName, databaseName);
-
-            List<Dictionary<string, object?>> matches = ids
-                .Where(indexedRows.ContainsKey)
-                .Select(id => indexedRows[id])
-                .ToList();
-
-            if (matches.Count > 0)
+            try
             {
-                return matches;
+                List<long> ids =
+                [
+                    .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName)
+                ];
+
+                Dictionary<long, Dictionary<string, object?>> indexedRows =
+                    context.Engine.StorageContext.GetTableContents(ids, plan.TableName, databaseName);
+
+                List<Dictionary<string, object?>> matches = ids
+                    .Where(indexedRows.ContainsKey)
+                    .Select(id => indexedRows[id])
+                    .ToList();
+
+                if (matches.Count > 0)
+                {
+                    return matches;
+                }
             }
-        }
-        catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
-        {
+            catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
+            {
+            }
         }
 
         Dictionary<long, Dictionary<string, object?>> scanned =
