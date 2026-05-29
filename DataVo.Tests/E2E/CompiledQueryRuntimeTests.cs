@@ -80,6 +80,33 @@ public class CompiledQueryRuntimeTests
     }
 
     [Fact]
+    public void CompiledSelectMany_ByNonPrimaryKeyColumn_DoesNotUsePrimaryKeyFastPathOnValueCollision()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.BulkInsert(
+            "Players",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada", ["Level"] = 5 },
+                new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "1", ["Level"] = 8 }
+            ]);
+
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+            context,
+            DataVoCompiledQueryPlan.SelectMany(
+                tableName: "Players",
+                projectedColumns: ["Id", "Name", "Level"],
+                whereColumn: "Name",
+                parameterName: "name"),
+            [new DataVoCompiledQueryParameter("name", "1")],
+            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+
+        Assert.Equal(
+            [new PlayerProjection(2, "1", 8)],
+            players);
+    }
+
+    [Fact]
     public void CompiledSelectSingle_MissingPrimaryKeyIndex_FallsBackToScan()
     {
         using var context = CreateContext();

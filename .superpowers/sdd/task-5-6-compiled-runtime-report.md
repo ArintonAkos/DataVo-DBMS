@@ -58,6 +58,39 @@ Observed result:
 Passed!  - Failed: 0, Passed: 18, Skipped: 0, Total: 18
 ```
 
+## Follow-up fix: PK fast-path guard
+
+- Root cause: `DataVoCompiledQuery.TryReadMatchingRows` always probed `_PK_<Table>` with the predicate key, even when `plan.WhereColumn` was not a primary key column.
+- Fix: the compiled runtime now checks `context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName)` first and only uses the `_PK_<Table>` index path when the predicate column is an actual PK column.
+- Fallback behavior: non-PK predicates now go directly to the scan path; the missing-PK-index swallow remains scoped to PK predicates only.
+- Added regression coverage for `SelectMany` on `Name = "1"` with rows `{ Id = 1, Name = "Ada" }` and `{ Id = 2, Name = "1" }`, verifying the runtime returns only `Id = 2`.
+
+### Follow-up verification
+
+Command:
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter CompiledQueryRuntimeTests
+```
+
+Observed result:
+
+```text
+Passed!  - Failed: 0, Passed: 7, Skipped: 0, Total: 7
+```
+
+Command:
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "RuntimeDiagnosticsTests|GameRuntimeBulkInsertTests"
+```
+
+Observed result:
+
+```text
+Passed!  - Failed: 0, Passed: 18, Skipped: 0, Total: 18
+```
+
 ## TDD evidence RED/GREEN
 
 1. Added `CompiledQueryRuntimeTests` first.
