@@ -26,6 +26,9 @@
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
     <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
     <ProjectReference Include="..\DataVo.EntityFrameworkCore\DataVo.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\DataVo.Generators\DataVo.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

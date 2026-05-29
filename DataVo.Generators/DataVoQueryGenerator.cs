@@ -1,0 +1,315 @@
+using System.Text;
+using DataVo.Generators.Diagnostics;
+using DataVo.Generators.Sql;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+namespace DataVo.Generators;
+
+[Generator]
+public sealed class DataVoQueryGenerator : IIncrementalGenerator
+{
+    private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
+        SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
+            SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions |
+            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        IncrementalValuesProvider<MethodDeclarationSyntax> methods = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is MethodDeclarationSyntax method && method.AttributeLists.Count > 0,
+                static (ctx, _) => (MethodDeclarationSyntax)ctx.Node)
+            .Where(static method => method.Modifiers.Any(SyntaxKind.PartialKeyword));
+
+        IncrementalValueProvider<Compilation> compilation = context.CompilationProvider;
+
+        context.RegisterSourceOutput(methods.Combine(compilation), static (spc, pair) =>
+        {
+            EmitForMethod(spc, pair.Left, pair.Right);
+        });
+    }
+
+    private static void EmitForMethod(SourceProductionContext context, MethodDeclarationSyntax method, Compilation compilation)
+    {
+        SemanticModel semanticModel = compilation.GetSemanticModel(method.SyntaxTree);
+        if (semanticModel.GetDeclaredSymbol(method) is not IMethodSymbol symbol)
+        {
+            return;
+        }
+
+        AttributeData? attribute = symbol.GetAttributes()
+            .FirstOrDefault(static attr => attr.AttributeClass?.ToDisplayString() == "DataVo.Core.CompiledQueries.DataVoQueryAttribute");
+        if (attribute is null)
+        {
+            return;
+        }
+
+        string sql = attribute.ConstructorArguments.Length == 1
+            ? attribute.ConstructorArguments[0].Value?.ToString() ?? string.Empty
+            : string.Empty;
+
+        if (!DataVoQueryShapeParser.TryParse(sql, out GeneratedQueryModel? model) || model is null)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(DataVoGeneratorDiagnostics.UnsupportedSql, method.Identifier.GetLocation(), sql));
+            return;
+        }
+
+        string[] sqlParameters = GetSqlParameters(model);
+        var methodParameters = new HashSet<string>(
+            symbol.Parameters
+                .Skip(1)
+                .Select(static parameter => parameter.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (string sqlParameter in sqlParameters)
+        {
+            if (!methodParameters.Contains(sqlParameter))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(DataVoGeneratorDiagnostics.MissingParameter, method.Identifier.GetLocation(), sqlParameter));
+                return;
+            }
+        }
+
+        if (!SupportsMethodShape(symbol, model))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(DataVoGeneratorDiagnostics.UnsupportedSql, method.Identifier.GetLocation(), sql));
+            return;
+        }
+
+        string source = GenerateMethod(symbol, model);
+        context.AddSource($"{symbol.ContainingType.Name}_{symbol.Name}.DataVo.g.cs", source);
+    }
+
+    private static bool SupportsMethodShape(IMethodSymbol method, GeneratedQueryModel model)
+    {
+        if (!method.IsStatic || !method.IsPartialDefinition ||
+            method.ContainingType is not { IsStatic: true } containingType ||
+            !containingType.DeclaringSyntaxReferences
+                .Select(static reference => reference.GetSyntax())
+                .OfType<TypeDeclarationSyntax>()
+                .Any(static declaration => declaration.Modifiers.Any(SyntaxKind.PartialKeyword)))
+        {
+            return false;
+        }
+
+        if (method.Parameters.Length == 0 ||
+            method.Parameters[0].Type.ToDisplayString() != "DataVo.Core.DataVoContext")
+        {
+            return false;
+        }
+
+        return ResolveExecutionShape(method, model) != GeneratedExecutionShape.Unsupported;
+    }
+
+    private static string GenerateMethod(IMethodSymbol method, GeneratedQueryModel model)
+    {
+        string namespaceDeclaration = method.ContainingNamespace.IsGlobalNamespace
+            ? string.Empty
+            : $"namespace {method.ContainingNamespace.ToDisplayString()};";
+        string containingType = GetContainingTypeDeclaration(method.ContainingType);
+        string returnType = method.ReturnType.ToDisplayString(FullyQualifiedNullableFormat);
+        string parameterList = string.Join(
+            ", ",
+            method.Parameters.Select(parameter => $"{parameter.Type.ToDisplayString(FullyQualifiedNullableFormat)} {parameter.Name}"));
+        string planName = $"__DataVoPlan_{method.Name}";
+
+        var builder = new StringBuilder();
+        builder.AppendLine("// <auto-generated />");
+        builder.AppendLine("#nullable enable");
+        if (namespaceDeclaration.Length > 0)
+        {
+            builder.AppendLine(namespaceDeclaration);
+        }
+
+        builder.AppendLine(containingType);
+        builder.AppendLine("{");
+        builder.AppendLine($"    private static readonly global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan {planName} = {GeneratePlan(method, model)};");
+        builder.AppendLine($"    public static partial {returnType} {method.Name}({parameterList})");
+        builder.AppendLine("    {");
+        builder.AppendLine($"        return {GenerateInvocation(method, model, planName)};");
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        return builder.ToString();
+    }
+
+    private static string GeneratePlan(IMethodSymbol method, GeneratedQueryModel model)
+    {
+        GeneratedExecutionShape executionShape = ResolveExecutionShape(method, model);
+
+        return executionShape switch
+        {
+            GeneratedExecutionShape.SelectSingle => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectSingle(\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
+            GeneratedExecutionShape.SelectMany => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany(\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
+            GeneratedExecutionShape.Insert => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Insert(\"{model.TableName}\", new string[] {{ {QuoteList(model.InsertColumns)} }}, new string[] {{ {QuoteList(model.InsertParameterNames)} }})",
+            GeneratedExecutionShape.Update => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Update(\"{model.TableName}\", new global::System.Collections.Generic.Dictionary<string, string>(global::System.StringComparer.OrdinalIgnoreCase) {{ {AssignmentList(model.Assignments)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
+            _ => throw new InvalidOperationException($"Unsupported query kind '{model.Kind}'.")
+        };
+    }
+
+    private static string GenerateInvocation(IMethodSymbol method, GeneratedQueryModel model, string planName)
+    {
+        string dbParameter = method.Parameters[0].Name;
+        ITypeSymbol? selectRowType = GetSelectRowType(method);
+        string parameters = string.Join(
+            ", ",
+            GetSqlParameters(model).Select(static name => name)
+                .Select(name => $"new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter(\"{name}\", {FindMethodParameterName(method, name)})"));
+
+        return ResolveExecutionShape(method, model) switch
+        {
+            GeneratedExecutionShape.SelectSingle => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQuery.SelectSingle<{selectRowType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}>({dbParameter}, {planName}, new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter[] {{ {parameters} }}, static row => new {selectRowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}({MapperArguments(selectRowType, model.ProjectedColumns)}))",
+            GeneratedExecutionShape.SelectMany => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQuery.SelectMany<{selectRowType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}>({dbParameter}, {planName}, new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter[] {{ {parameters} }}, static row => new {selectRowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}({MapperArguments(selectRowType, model.ProjectedColumns)}))",
+            GeneratedExecutionShape.Insert => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQuery.Insert({dbParameter}, {planName}, new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter[] {{ {parameters} }})",
+            GeneratedExecutionShape.Update => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQuery.Update({dbParameter}, {planName}, new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter[] {{ {parameters} }})",
+            _ => throw new InvalidOperationException($"Unsupported query kind '{model.Kind}'.")
+        };
+    }
+
+    private static string MapperArguments(ITypeSymbol rowType, string[] columns)
+    {
+        if (rowType is INamedTypeSymbol namedType)
+        {
+            IMethodSymbol? constructor = namedType.InstanceConstructors
+                .Where(static ctor => !ctor.IsImplicitlyDeclared)
+                .OrderByDescending(static ctor => ctor.Parameters.Length)
+                .FirstOrDefault();
+
+            if (constructor is not null &&
+                constructor.Parameters.Length == columns.Length &&
+                constructor.Parameters.All(parameter => columns.Any(column => string.Equals(column, parameter.Name, StringComparison.OrdinalIgnoreCase))))
+            {
+                return string.Join(
+                    ", ",
+                    constructor.Parameters.Select(parameter =>
+                    {
+                        string column = columns.First(candidate => string.Equals(candidate, parameter.Name, StringComparison.OrdinalIgnoreCase));
+                        return $"({parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)})row[\"{column}\"]!";
+                    }));
+            }
+        }
+
+        return string.Join(", ", columns.Select(column => $"({InferCastType(column)})row[\"{column}\"]!"));
+    }
+
+    private static string InferCastType(string column)
+    {
+        return column.EndsWith("Id", StringComparison.OrdinalIgnoreCase) ||
+               column.Equals("Level", StringComparison.OrdinalIgnoreCase) ||
+               column.Equals("Frame", StringComparison.OrdinalIgnoreCase)
+            ? "int"
+            : "string";
+    }
+
+    private static string[] GetSqlParameters(GeneratedQueryModel model)
+    {
+        return model.Kind switch
+        {
+            "Insert" => model.InsertParameterNames,
+            "Update" => model.Assignments.Values.Concat(new[] { model.WhereParameterName! }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            _ => new[] { model.WhereParameterName! }
+        };
+    }
+
+    private static GeneratedExecutionShape ResolveExecutionShape(IMethodSymbol method, GeneratedQueryModel model)
+    {
+        if (model.Kind == "Insert")
+        {
+            return IsReadOnlyListOfInt64(method.ReturnType) ? GeneratedExecutionShape.Insert : GeneratedExecutionShape.Unsupported;
+        }
+
+        if (model.Kind == "Update")
+        {
+            return method.ReturnType.SpecialType == SpecialType.System_Int32 ? GeneratedExecutionShape.Update : GeneratedExecutionShape.Unsupported;
+        }
+
+        if (model.Kind == "SelectSingle")
+        {
+            if (GetSelectRowType(method) is null)
+            {
+                return GeneratedExecutionShape.Unsupported;
+            }
+
+            return IsListLike(method.ReturnType) ? GeneratedExecutionShape.SelectMany : GeneratedExecutionShape.SelectSingle;
+        }
+
+        return GeneratedExecutionShape.Unsupported;
+    }
+
+    private static ITypeSymbol? GetSelectRowType(IMethodSymbol method)
+    {
+        if (IsListLike(method.ReturnType) &&
+            method.ReturnType is INamedTypeSymbol listType &&
+            listType.TypeArguments.Length == 1)
+        {
+            return listType.TypeArguments[0];
+        }
+
+        return method.ReturnType.NullableAnnotation == NullableAnnotation.Annotated && method.ReturnType is INamedTypeSymbol nullableNamed
+            ? nullableNamed
+            : method.ReturnType;
+    }
+
+    private static bool IsListLike(ITypeSymbol returnType)
+    {
+        return returnType is INamedTypeSymbol named &&
+               named.TypeArguments.Length == 1 &&
+               (named.Name == "List" && named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic" ||
+                named.Name == "IReadOnlyList" && named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic");
+    }
+
+    private static bool IsReadOnlyListOfInt64(ITypeSymbol returnType)
+    {
+        return returnType is INamedTypeSymbol named &&
+               named.Name == "IReadOnlyList" &&
+               named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic" &&
+               named.TypeArguments.Length == 1 &&
+               named.TypeArguments[0].SpecialType == SpecialType.System_Int64;
+    }
+
+    private static string FindMethodParameterName(IMethodSymbol method, string sqlParameter)
+    {
+        return method.Parameters
+            .Skip(1)
+            .First(parameter => string.Equals(parameter.Name, sqlParameter, StringComparison.OrdinalIgnoreCase))
+            .Name;
+    }
+
+    private static string GetContainingTypeDeclaration(INamedTypeSymbol containingType)
+    {
+        string accessibility = containingType.DeclaredAccessibility switch
+        {
+            Accessibility.Public => "public ",
+            Accessibility.Internal => "internal ",
+            Accessibility.Private => "private ",
+            Accessibility.Protected => "protected ",
+            Accessibility.ProtectedAndInternal => "private protected ",
+            Accessibility.ProtectedOrInternal => "protected internal ",
+            _ => string.Empty
+        };
+
+        string kind = containingType.TypeKind switch
+        {
+            TypeKind.Struct => "struct",
+            TypeKind.Class => "class",
+            _ => "class"
+        };
+
+        string staticModifier = containingType.IsStatic ? "static " : string.Empty;
+        return $"{accessibility}{staticModifier}partial {kind} {containingType.Name}";
+    }
+
+    private static string QuoteList(IEnumerable<string> values) => string.Join(", ", values.Select(static value => $"\"{value}\""));
+
+    private static string AssignmentList(IReadOnlyDictionary<string, string> assignments) => string.Join(", ", assignments.Select(static pair => $"[\"{pair.Key}\"] = \"{pair.Value}\""));
+
+    private enum GeneratedExecutionShape
+    {
+        Unsupported,
+        SelectSingle,
+        SelectMany,
+        Insert,
+        Update
+    }
+}
