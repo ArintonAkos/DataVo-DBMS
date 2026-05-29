@@ -5,8 +5,14 @@ using DataVo.Core.Exceptions;
 
 namespace DataVo.Core.CompiledQueries;
 
+/// <summary>
+/// Executes source-generated compiled query plans against a <see cref="DataVoContext"/>.
+/// </summary>
 public static class DataVoCompiledQuery
 {
+    /// <summary>
+    /// Executes a select plan and returns the first mapped row, or <c>default</c> when no row matches.
+    /// </summary>
     public static TResult? SelectSingle<TResult>(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
@@ -27,6 +33,9 @@ public static class DataVoCompiledQuery
         return rows.Count == 0 ? default : rows[0];
     }
 
+    /// <summary>
+    /// Executes a select plan and returns every mapped row that matches the plan predicate.
+    /// </summary>
     public static IReadOnlyList<TResult> SelectMany<TResult>(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
@@ -46,6 +55,9 @@ public static class DataVoCompiledQuery
         return ExecuteSelect(context, plan, parameters, mapper);
     }
 
+    /// <summary>
+    /// Executes an insert plan for a single row and returns inserted row identifiers.
+    /// </summary>
     public static IReadOnlyList<long> Insert(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
@@ -71,6 +83,9 @@ public static class DataVoCompiledQuery
         return context.BulkInsert(plan.TableName, [row]);
     }
 
+    /// <summary>
+    /// Executes an update plan and returns the affected row count.
+    /// </summary>
     public static int Update(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,

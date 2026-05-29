@@ -120,7 +120,7 @@ Passed!  - Failed: 0, Passed: 18, Skipped: 0, Total: 18
 
 ## Concerns
 
-- The new public APIs currently emit XML-doc warnings (`CS1591`) during `dotnet test`. They do not fail the build, and I did not broaden scope into documentation/comment cleanup because the milestone is explicitly runtime support plus E2E coverage.
+- The initial implementation emitted XML-doc warnings (`CS1591`) for the new public runtime APIs; those were resolved in a follow-up cleanup commit.
 
 ## Follow-up fixes after review
 
@@ -145,7 +145,7 @@ dotnet test DataVo.Tests/DataVo.Tests.csproj --filter CompiledQueryRuntimeTests
 Observed result:
 
 ```text
-Passed!  - Failed: 0, Passed: 6, Skipped: 0, Total: 6
+Passed!  - Failed: 0, Passed: 7, Skipped: 0, Total: 7
 ```
 
 Command:
