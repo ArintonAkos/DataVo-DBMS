@@ -1,5 +1,8 @@
 namespace DataVo.Core.CompiledQueries;
 
+/// <summary>
+/// Describes a supported compiled-query runtime plan emitted by source-generated code.
+/// </summary>
 public sealed class DataVoCompiledQueryPlan
 {
     private DataVoCompiledQueryPlan(
@@ -27,22 +30,33 @@ public sealed class DataVoCompiledQueryPlan
         Assignments = assignments;
     }
 
+    /// <summary>Gets the compiled-query execution kind.</summary>
     public DataVoCompiledQueryKind Kind { get; }
 
+    /// <summary>Gets the target table name.</summary>
     public string TableName { get; }
 
+    /// <summary>Gets the columns projected by a select plan.</summary>
     public IReadOnlyList<string> ProjectedColumns { get; }
 
+    /// <summary>Gets the column used by the equality predicate, when applicable.</summary>
     public string? WhereColumn { get; }
 
+    /// <summary>Gets the parameter name used by the equality predicate, when applicable.</summary>
     public string? WhereParameterName { get; }
 
+    /// <summary>Gets the columns written by an insert plan.</summary>
     public IReadOnlyList<string> InsertColumns { get; }
 
+    /// <summary>Gets the parameter names used by an insert plan.</summary>
     public IReadOnlyList<string> InsertParameterNames { get; }
 
+    /// <summary>Gets update column assignments mapped to parameter names.</summary>
     public IReadOnlyDictionary<string, string> Assignments { get; }
 
+    /// <summary>
+    /// Creates a plan that returns the first row matching an equality predicate.
+    /// </summary>
     public static DataVoCompiledQueryPlan SelectSingle(
         string tableName,
         IReadOnlyList<string> projectedColumns,
@@ -60,6 +74,9 @@ public sealed class DataVoCompiledQueryPlan
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Creates a plan that returns all rows matching an equality predicate.
+    /// </summary>
     public static DataVoCompiledQueryPlan SelectMany(
         string tableName,
         IReadOnlyList<string> projectedColumns,
@@ -77,6 +94,9 @@ public sealed class DataVoCompiledQueryPlan
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Creates a plan that inserts one row using column-to-parameter mapping.
+    /// </summary>
     public static DataVoCompiledQueryPlan Insert(
         string tableName,
         IReadOnlyList<string> columns,
@@ -101,6 +121,9 @@ public sealed class DataVoCompiledQueryPlan
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Creates a plan that updates rows matching an equality predicate.
+    /// </summary>
     public static DataVoCompiledQueryPlan Update(
         string tableName,
         IReadOnlyDictionary<string, string> assignments,
