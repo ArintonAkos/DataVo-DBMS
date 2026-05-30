@@ -122,3 +122,36 @@ Passed!  - Failed: 0, Passed: 21, Skipped: 0, Total: 21
 ## Concerns
 
 - `SELECT` generation for collection-returning methods is implemented via `SelectMany`, but this milestone’s E2E coverage only exercises generated `SelectSingle`, `Insert`, and `Update`. Collection-returning source-generated `SELECT` currently has generator-level coverage, not dedicated runtime E2E coverage in this task.
+
+## Follow-up fixes after review
+
+### Findings addressed
+
+- Replaced `DataVoCompiledQuery.Update(...)` SQL reconstruction with a direct runtime helper for the supported V1 shape. The helper now:
+  - resolves the current database from `context.Engine.Sessions`
+  - finds candidate rows with the same PK-fast-path-or-scan behavior as compiled `SELECT`
+  - acquires row write locks and revalidates the candidate set after locking
+  - validates MVCC and applies literal assignment parameter values into copied row dictionaries
+  - preserves out-of-place update storage/index maintenance by deleting old rows, removing scalar/vector index entries, inserting new rows, registering MVCC update versions, and rebuilding scalar/vector index entries
+- Tightened source generation for `SELECT` return shapes so unsupported scalar returns such as `int` now fail with `DATAVOQ001` instead of generating invalid `new int(...)` code.
+- Added generator coverage for emitted `SelectMany` code.
+- Added runtime E2E coverage for generated `IReadOnlyList<GeneratedPlayer>` `SELECT`.
+- Added a runtime regression asserting compiled `UPDATE` no longer records a parsed SQL query entry when diagnostics are enabled.
+
+### Follow-up verification
+
+Commands:
+
+```bash
+dotnet test DataVo.Generators.Tests/DataVo.Generators.Tests.csproj
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter SourceGeneratedCompiledQueryTests
+dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "CompiledQueryRuntimeTests|SourceGeneratedCompiledQueryTests|RuntimeDiagnosticsTests"
+```
+
+Results:
+
+```text
+Passed!  - Failed: 0, Passed: 7, Skipped: 0, Total: 7
+Passed!  - Failed: 0, Passed: 4, Skipped: 0, Total: 4
+Passed!  - Failed: 0, Passed: 23, Skipped: 0, Total: 23
+```

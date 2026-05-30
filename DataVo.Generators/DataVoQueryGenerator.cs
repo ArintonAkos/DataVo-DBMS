@@ -226,7 +226,8 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
 
         if (model.Kind == "SelectSingle")
         {
-            if (GetSelectRowType(method) is null)
+            ITypeSymbol? rowType = GetSelectRowType(method);
+            if (rowType is null || !IsSupportedSelectRowType(rowType))
             {
                 return GeneratedExecutionShape.Unsupported;
             }
@@ -243,12 +244,28 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
             method.ReturnType is INamedTypeSymbol listType &&
             listType.TypeArguments.Length == 1)
         {
-            return listType.TypeArguments[0];
+            return UnwrapNullableValueType(listType.TypeArguments[0]);
         }
 
-        return method.ReturnType.NullableAnnotation == NullableAnnotation.Annotated && method.ReturnType is INamedTypeSymbol nullableNamed
-            ? nullableNamed
-            : method.ReturnType;
+        return UnwrapNullableValueType(method.ReturnType);
+    }
+
+    private static ITypeSymbol UnwrapNullableValueType(ITypeSymbol type)
+    {
+        return type is INamedTypeSymbol named &&
+               named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+               named.TypeArguments.Length == 1
+            ? named.TypeArguments[0]
+            : type;
+    }
+
+    private static bool IsSupportedSelectRowType(ITypeSymbol rowType)
+    {
+        return rowType is INamedTypeSymbol named &&
+               named.TypeKind is TypeKind.Class or TypeKind.Struct &&
+               named.SpecialType == SpecialType.None &&
+               !named.IsAnonymousType &&
+               !named.IsTupleType;
     }
 
     private static bool IsListLike(ITypeSymbol returnType)
