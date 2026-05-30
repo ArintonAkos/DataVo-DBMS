@@ -1,5 +1,6 @@
 using DataVo.Core.BTree;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Runtime.Security;
@@ -51,6 +52,7 @@ public sealed class DataVoEngine : IDisposable
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();
         Diagnostics = new DataVoDiagnostics();
+        Changes = new ChangeCapture();
 
         if (Config.StorageMode == StorageMode.Disk)
         {
@@ -122,6 +124,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the runtime diagnostics collector owned by this engine.
     /// </summary>
     public DataVoDiagnostics Diagnostics { get; }
+
+    /// <summary>
+    /// Gets the change-capture service that emits a <see cref="Changes.ChangeSet"/> per committed transaction.
+    /// </summary>
+    public ChangeCapture Changes { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
