@@ -4,6 +4,7 @@ using DataVo.Core.Parser.DML;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 
@@ -50,6 +51,11 @@ public sealed class DataVoContext : IDisposable
     /// Gets the engine instance owned by this context.
     /// </summary>
     public DataVoEngine Engine { get; }
+
+    /// <summary>
+    /// Gets the change-capture service exposing committed <see cref="ChangeSet"/> notifications.
+    /// </summary>
+    public ChangeCapture Changes => Engine.Changes;
 
     /// <summary>
     /// Gets or sets the default session identifier used by <see cref="Execute(string)"/>.

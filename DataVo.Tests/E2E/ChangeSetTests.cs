@@ -32,4 +32,18 @@ public class ChangeSetTests
         Assert.Contains("Players", set.Tables);
         Assert.Contains("Items", set.Tables);
     }
+
+    [Fact]
+    public void ChangeCapture_DisabledByDefault()
+    {
+        var capture = new DataVo.Core.Runtime.Changes.ChangeCapture();
+        Assert.False(capture.Enabled);
+    }
+
+    [Fact]
+    public void ChangeCapture_SequenceIdsIncrease()
+    {
+        var capture = new DataVo.Core.Runtime.Changes.ChangeCapture { Enabled = true };
+        Assert.True(capture.NextSequenceId() < capture.NextSequenceId());
+    }
 }
