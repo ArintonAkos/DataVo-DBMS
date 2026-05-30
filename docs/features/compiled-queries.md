@@ -16,7 +16,7 @@ public static partial class GameQueries
 }
 ```
 
-The generator validates the SQL at build time, creates a `DataVoCompiledQueryPlan`, and emits a method body that calls the runtime helpers in `DataVoCompiledQuery`.
+The generator validates the supported SQL shape at build time, creates a `DataVoCompiledQueryPlan`, and emits a method body that calls the runtime helpers in `DataVoCompiledQuery`.
 
 ## Supported V1 SQL shapes
 
@@ -44,7 +44,7 @@ The analyzer reports build errors for unsupported compiled-query declarations:
 
 | Diagnostic | Meaning |
 | :--------- | :------ |
-| `DATAVOQ001` | SQL shape is not supported by the generator |
+| `DATAVOQ001` | SQL shape, method shape, or return type is not supported by the generator |
 | `DATAVOQ002` | SQL parameter has no matching method parameter |
 
 Use `DataVoContext.Execute(...)` for SQL that depends on runtime string construction, optional clauses, joins, grouping, ordering, or other shapes outside the V1 contract.
