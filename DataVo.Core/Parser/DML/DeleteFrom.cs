@@ -11,6 +11,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -55,6 +56,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 }
 
                 List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
+                ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
                 try
                 {
                     List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
@@ -63,7 +65,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                         MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "DELETE");
                     }
 
-                    ExecuteDelete(revalidatedRowIds, _model.TableName, databaseName, statementTxId);
+                    ExecuteDelete(revalidatedRowIds, _model.TableName, databaseName, statementTxId, recorder);
 
                     Messages.Add($"Rows affected: {revalidatedRowIds.Count}");
                 }
@@ -71,6 +73,8 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 {
                     Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
                 }
+
+                recorder?.Publish();
             }
         }
         catch (Exception ex)
@@ -134,7 +138,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         return false;
     }
 
-    private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName, long statementTxId)
+    private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName, long statementTxId, ChangeRecorder? recorder)
     {
         if (toBeDeleted.Count == 0) return;
 
@@ -188,7 +192,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                     if (childFk.OnDeleteAction == "CASCADE")
                     {
                         // Cascade delete: recursively clean up children -> grandchildren etc.
-                        ExecuteDelete(childRowIds, childFk.ChildTable, databaseName, statementTxId);
+                        ExecuteDelete(childRowIds, childFk.ChildTable, databaseName, statementTxId, recorder);
                     }
                 }
             }
@@ -197,6 +201,19 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         foreach (long rowId in toBeDeleted)
         {
             MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId);
+        }
+
+        if (recorder is { IsEnabled: true })
+        {
+            // Capture old row images before the physical delete so reactive subscriptions see Before.
+            var deletedRows = Context.GetTableContents(toBeDeleted, tableName, databaseName);
+            foreach (long rowId in toBeDeleted)
+            {
+                if (deletedRows.TryGetValue(rowId, out var oldRow))
+                {
+                    recorder.RecordDelete(tableName, rowId, oldRow);
+                }
+            }
         }
 
         // Delete entries from the main table

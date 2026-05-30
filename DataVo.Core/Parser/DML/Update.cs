@@ -14,6 +14,7 @@ using DataVo.Core.Services;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -104,7 +105,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                             MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "UPDATE");
                         }
 
-                        ExecuteUpdate(newRows, oldRowIds, databaseName, statementTxId);
+                        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+                        ExecuteUpdate(newRows, oldRowIds, revalidatedRows, databaseName, statementTxId, recorder);
+                        recorder?.Publish();
                         rowsAffected = newRows.Count;
                     }
                 }
@@ -423,7 +426,13 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Old records are deleted, and new records are inserted with identical RowIds or newly allocated ones.
     /// Index structures are purged and updated as well.
     /// </summary>
-    private void ExecuteUpdate(List<Dictionary<string, object?>> newRows, List<long> oldRowIds, string databaseName, long statementTxId)
+    private void ExecuteUpdate(
+        List<Dictionary<string, object?>> newRows,
+        List<long> oldRowIds,
+        Dictionary<long, Dictionary<string, object?>> oldRowsById,
+        string databaseName,
+        long statementTxId,
+        ChangeRecorder? recorder)
     {
         var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
 
@@ -456,6 +465,11 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             long oldRowId = oldRowIds[i];
             long assignedRowId = Context.InsertOneIntoTable(newRow, _model.TableName, databaseName);
             MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId);
+
+            if (recorder is { IsEnabled: true } && oldRowsById.TryGetValue(oldRowId, out var oldRow))
+            {
+                recorder.RecordUpdate(_model.TableName, assignedRowId, oldRow, newRow);
+            }
 
             foreach (var index in indexFiles)
             {
