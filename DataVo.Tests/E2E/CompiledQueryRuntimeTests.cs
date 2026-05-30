@@ -237,6 +237,34 @@ public class CompiledQueryRuntimeTests
         Assert.Null(context.Diagnostics.LastQuery);
     }
 
+    [Fact]
+    public void CompiledUpdate_RejectsActiveTransactions()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Level INT)");
+        context.Execute("INSERT INTO Players VALUES (1, 5)");
+        context.Execute("BEGIN TRANSACTION");
+
+        var plan = DataVoCompiledQueryPlan.Update(
+            tableName: "Players",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Level"] = "level"
+            },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        NotSupportedException ex = Assert.Throws<NotSupportedException>(() => DataVoCompiledQuery.Update(
+            context,
+            plan,
+            [
+                new DataVoCompiledQueryParameter("id", 1),
+                new DataVoCompiledQueryParameter("level", 7)
+            ]));
+
+        Assert.Contains("active transactions", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static DataVoContext CreateContext()
     {
         var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
