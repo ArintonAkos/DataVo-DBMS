@@ -4,6 +4,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
@@ -22,7 +23,8 @@ internal sealed class InsertRowService(
         string tableName,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
         TransactionContext? txContext,
-        long statementTxId)
+        long statementTxId,
+        ChangeRecorder? recorder = null)
     {
         if (string.IsNullOrWhiteSpace(tableName))
         {
@@ -104,6 +106,7 @@ internal sealed class InsertRowService(
             long rowId = rowIds[i];
             MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
             InsertIndexes(tableName, databaseName, acceptedRows[i], rowId, indexFiles);
+            recorder?.RecordInsert(tableName, rowId, acceptedRows[i]);
         }
 
         return new InsertRowsResult(rowIds, acceptedRows.Count, messages);

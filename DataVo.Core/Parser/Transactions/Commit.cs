@@ -6,6 +6,7 @@ using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Parser.Transactions;
 
@@ -74,11 +75,15 @@ internal class Commit : BaseDbAction
 
         long txId = MvccCoordinator.ResolveStatementTransactionId(activeEngine, context.TransactionId > 0 ? context.TransactionId : null);
 
-        FlushInserts(context, databaseName, activeEngine, txId);
-        FlushDeletes(context, databaseName, activeEngine, txId);
-        FlushUpdates(context, databaseName, activeEngine, txId);
+        ChangeRecorder? recorder = ChangeRecorder.TryCreate(activeEngine, databaseName);
+
+        FlushInserts(context, databaseName, activeEngine, txId, recorder);
+        FlushDeletes(context, databaseName, activeEngine, txId, recorder);
+        FlushUpdates(context, databaseName, activeEngine, txId, recorder);
 
         activeEngine.VersionStorageManager.VacuumTable(databaseName, activeEngine.StorageContext);
+
+        recorder?.Publish();
     }
 
     private readonly record struct LockedResources(
@@ -155,7 +160,7 @@ internal class Commit : BaseDbAction
     /// Replays all buffered INSERT operations using <see cref="StorageContext.InsertOneIntoTable"/>
     /// and updates all associated B-Tree indexes.
     /// </summary>
-    private static void FlushInserts(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId)
+    private static void FlushInserts(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId, ChangeRecorder? recorder)
     {
         foreach (var (tableName, rows) in context.InsertedRows)
         {
@@ -165,6 +170,7 @@ internal class Commit : BaseDbAction
             {
                 long assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
                 MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, assignedRowId, txId);
+                recorder?.RecordInsert(tableName, assignedRowId, row);
 
                 foreach (var index in indexFiles)
                 {
@@ -181,7 +187,7 @@ internal class Commit : BaseDbAction
     /// Replays all buffered DELETE operations using <see cref="StorageContext.DeleteFromTable"/>
     /// and purges all associated B-Tree index entries.
     /// </summary>
-    private static void FlushDeletes(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId)
+    private static void FlushDeletes(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId, ChangeRecorder? recorder)
     {
         foreach (var (tableName, rowIds) in context.DeletedRowIds)
         {
@@ -191,6 +197,18 @@ internal class Commit : BaseDbAction
             {
                 MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, context.Snapshot, "DELETE");
                 MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId);
+            }
+
+            if (recorder is { IsEnabled: true })
+            {
+                var deletedRows = engine.StorageContext.GetTableContents(rowIdList, tableName, databaseName);
+                foreach (long rowId in rowIdList)
+                {
+                    if (deletedRows.TryGetValue(rowId, out var oldRow))
+                    {
+                        recorder.RecordDelete(tableName, rowId, oldRow);
+                    }
+                }
             }
 
             engine.StorageContext.DeleteFromTable(rowIdList, tableName, databaseName);
@@ -207,7 +225,7 @@ internal class Commit : BaseDbAction
     /// Replays all buffered UPDATE operations using an out-of-place strategy (delete old + insert new),
     /// consistent with the standard <see cref="DML.Update"/> executor approach.
     /// </summary>
-    private static void FlushUpdates(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId)
+    private static void FlushUpdates(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId, ChangeRecorder? recorder)
     {
         foreach (var (tableName, updates) in context.UpdatedRows)
         {
@@ -236,6 +254,7 @@ internal class Commit : BaseDbAction
 
                 long newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
                 MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, rowId, newRowId, txId);
+                recorder?.RecordUpdate(tableName, newRowId, oldRow, newRow);
                 foreach (var index in indexFiles)
                 {
                     if (index.AttributeNames.Any(attr => newRow[attr] == null)) continue;

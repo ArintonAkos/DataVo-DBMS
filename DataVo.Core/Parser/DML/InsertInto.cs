@@ -6,6 +6,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -41,20 +42,23 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
             if (txContext != null)
             {
-                rowsAffected = ProcessAndInsertTableRows(databaseName, txContext, statementTxId);
+                rowsAffected = ProcessAndInsertTableRows(databaseName, txContext, statementTxId, recorder: null);
             }
             else
             {
+                ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
                 Locks.AcquireWriteLock(databaseName, _model.TableName);
 
                 try
                 {
-                    rowsAffected = ProcessAndInsertTableRows(databaseName, null, statementTxId);
+                    rowsAffected = ProcessAndInsertTableRows(databaseName, null, statementTxId, recorder);
                 }
                 finally
                 {
                     Locks.ReleaseWriteLock(databaseName, _model.TableName);
                 }
+
+                recorder?.Publish();
             }
 
             Messages.Add($"Rows affected: {rowsAffected}");
@@ -74,7 +78,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// <param name="txContext">The active transaction context, or <c>null</c> for auto-commit mode.</param>
     /// <param name="statementTxId">The MVCC transaction identifier for this statement.</param>
     /// <returns>The total number of rows securely pushed to the database.</returns>
-    private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext, long statementTxId)
+    private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext, long statementTxId, ChangeRecorder? recorder)
     {
         var tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
         VerifyTableColumnsExist(tableColumns);
@@ -89,7 +93,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
 
         var service = new InsertRowService(Engine, Context, Catalog, Indexes);
-        InsertRowsResult result = service.InsertRows(databaseName, _model.TableName, inputRows, txContext, statementTxId);
+        InsertRowsResult result = service.InsertRows(databaseName, _model.TableName, inputRows, txContext, statementTxId, recorder);
 
         foreach (string message in result.Messages)
         {
