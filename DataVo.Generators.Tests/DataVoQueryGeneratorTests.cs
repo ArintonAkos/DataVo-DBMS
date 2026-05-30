@@ -71,6 +71,52 @@ public class DataVoQueryGeneratorTests
     }
 
     [Fact]
+    public void Generator_ReportsDiagnosticForUnsupportedScalarSelectReturnShape()
+    {
+        string source = """
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id FROM Players WHERE Id = @id")]
+                public static partial int GetPlayerId(DataVoContext db, int id);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("DATAVOQ001", diagnostic.Id);
+        Assert.Empty(result.Results.Single().GeneratedSources);
+    }
+
+    [Fact]
+    public void Generator_EmitsSelectManyImplementation()
+    {
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record PlayerProjection(int Id, string Name, int Level);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Name = @name")]
+                public static partial IReadOnlyList<PlayerProjection> GetPlayersByName(DataVoContext db, string name);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("DataVoCompiledQueryPlan.SelectMany", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectMany<global::PlayerProjection>", generated);
+        Assert.Contains("new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter(\"name\", name)", generated);
+    }
+
+    [Fact]
     public void ShapeParser_ParsesInsert()
     {
         Assert.True(DataVo.Generators.Sql.DataVoQueryShapeParser.TryParse(

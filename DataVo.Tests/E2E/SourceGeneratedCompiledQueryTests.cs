@@ -11,6 +11,9 @@ public static partial class GeneratedGameQueries
     [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Id = @id")]
     public static partial GeneratedPlayer? GetPlayer(DataVoContext db, int id);
 
+    [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Name = @name")]
+    public static partial IReadOnlyList<GeneratedPlayer> GetPlayersByName(DataVoContext db, string name);
+
     [DataVoQuery("INSERT INTO Telemetry (Id, EventName, Frame) VALUES (@id, @eventName, @frame)")]
     public static partial IReadOnlyList<long> InsertTelemetry(DataVoContext db, int id, string eventName, int frame);
 
@@ -30,6 +33,22 @@ public class SourceGeneratedCompiledQueryTests
         GeneratedPlayer? player = GeneratedGameQueries.GetPlayer(context, 1);
 
         Assert.Equal(new GeneratedPlayer(1, "Ada", 5), player);
+    }
+
+    [Fact]
+    public void GeneratedSelectMany_ReturnsTypedRecords()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.Execute("INSERT INTO Players VALUES (1, 'Ada', 5)");
+        context.Execute("INSERT INTO Players VALUES (2, 'Grace', 8)");
+        context.Execute("INSERT INTO Players VALUES (3, 'Ada', 9)");
+
+        IReadOnlyList<GeneratedPlayer> players = GeneratedGameQueries.GetPlayersByName(context, "Ada");
+
+        Assert.Equal(
+            [new GeneratedPlayer(1, "Ada", 5), new GeneratedPlayer(3, "Ada", 9)],
+            players);
     }
 
     [Fact]

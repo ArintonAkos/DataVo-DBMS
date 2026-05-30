@@ -206,6 +206,37 @@ public class CompiledQueryRuntimeTests
         Assert.Equal(7, (int)context.Execute("SELECT Level FROM Players WHERE Id = 1").Single().Data.Single()["Level"]!);
     }
 
+    [Fact]
+    public void CompiledUpdate_DoesNotExecuteSqlParserPath()
+    {
+        using var context = CreateContext();
+        context.Diagnostics.Enabled = true;
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Level INT)");
+        context.Execute("INSERT INTO Players VALUES (1, 5)");
+
+        var plan = DataVoCompiledQueryPlan.Update(
+            tableName: "Players",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Level"] = "level"
+            },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        context.Diagnostics.Clear();
+
+        int affected = DataVoCompiledQuery.Update(
+            context,
+            plan,
+            [
+                new DataVoCompiledQueryParameter("id", 1),
+                new DataVoCompiledQueryParameter("level", 7)
+            ]);
+
+        Assert.Equal(1, affected);
+        Assert.Null(context.Diagnostics.LastQuery);
+    }
+
     private static DataVoContext CreateContext()
     {
         var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
