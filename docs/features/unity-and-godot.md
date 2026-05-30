@@ -85,4 +85,6 @@ See [Security and Authentication](./security-and-authentication.md).
 
 - [Getting Started](./getting-started.md)
 - [Setup and Packaging](./setup-and-packaging.md)
+- [Runtime Observability](./runtime-observability.md)
+- [Source-Generated Compiled Queries](./compiled-queries.md)
 - [Security and Authentication](./security-and-authentication.md)

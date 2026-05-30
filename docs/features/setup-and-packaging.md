@@ -56,6 +56,7 @@ This is the current customer-ready path for browser-based DataVo experiences whi
 | DataVo.Core                | Core SQL runtime, storage, indexing, transactions   |
 | DataVo.Data                | Data-access integration surface                     |
 | DataVo.EntityFrameworkCore | Entity Framework integration path                   |
+| DataVo.Generators          | Source-generated compiled-query analyzer package    |
 | @datavo/wasm (planned)     | JavaScript/TypeScript distribution for WASM runtime |
 
 ## Minimal .NET embedding sample
