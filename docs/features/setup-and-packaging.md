@@ -19,6 +19,7 @@ When public packages are published:
 dotnet add package DataVo.Core
 dotnet add package DataVo.Data
 dotnet add package DataVo.EntityFrameworkCore
+dotnet add package DataVo.Generators # optional: source-generated compiled queries
 ```
 
 ### Local install flow available today
@@ -28,6 +29,7 @@ dotnet pack DataVo.sln -c Release
 dotnet add package DataVo.Core --source ./artifacts/packages
 dotnet add package DataVo.Data --source ./artifacts/packages
 dotnet add package DataVo.EntityFrameworkCore --source ./artifacts/packages
+dotnet add package DataVo.Generators --source ./artifacts/packages # optional: source-generated compiled queries
 ```
 
 ## npm

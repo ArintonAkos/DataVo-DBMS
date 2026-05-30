@@ -32,6 +32,12 @@ features:
   - title: Unity and Godot
     details: Apply DataVo in game development workflows for local persistence and deterministic SQL behavior.
     link: /features/unity-and-godot
+  - title: Runtime Observability
+    details: Enable bounded query diagnostics for elapsed time, row activity, index use, vector paths, and runtime errors.
+    link: /features/runtime-observability
+  - title: Source-Generated Compiled Queries
+    details: Use DataVoQuery methods for fixed SQL shapes that generate typed, parser-free fast paths.
+    link: /features/compiled-queries
   - title: Entity Framework
     details: Understand the EF integration path and current adoption posture.
     link: /features/entity-framework
@@ -68,17 +74,19 @@ It is separate from the DataVo.Core module reference on purpose:
 
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
-3. [WebAssembly and npm](./wasm-and-npm.md)
-4. [Unity and Godot](./unity-and-godot.md)
-5. [Entity Framework Integration](./entity-framework.md)
-6. [SELECT and Query Features](./select-and-querying.md)
-7. [Vector Queries Guide](./vector-queries-guide.md)
-8. [Security and Authentication](./security-and-authentication.md)
-9. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
-10. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
-11. [DDL and Schema Changes](./schema-and-ddl.md)
-12. [Transactions](./transactions.md)
-13. [Roadmap and Integrations](./roadmap-and-integrations.md)
+3. [Runtime Observability](./runtime-observability.md)
+4. [Source-Generated Compiled Queries](./compiled-queries.md)
+5. [WebAssembly and npm](./wasm-and-npm.md)
+6. [Unity and Godot](./unity-and-godot.md)
+7. [Entity Framework Integration](./entity-framework.md)
+8. [SELECT and Query Features](./select-and-querying.md)
+9. [Vector Queries Guide](./vector-queries-guide.md)
+10. [Security and Authentication](./security-and-authentication.md)
+11. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
+12. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
+13. [DDL and Schema Changes](./schema-and-ddl.md)
+14. [Transactions](./transactions.md)
+15. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ## Audience
 
@@ -106,6 +114,8 @@ The docs below reflect the currently implemented feature set in the engine, incl
 - auth session commands (`LOGIN`, `LOGOUT`)
 - introspection commands (`SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`, `SHOW GRANTS FOR USER`, `SHOW GRANTS FOR ROLE`)
 - browser WebAssembly runtime deployment flow
+- runtime diagnostics for SQL, direct context operations, indexes, vectors, and errors
+- source-generated compiled queries for fixed SELECT, INSERT, and UPDATE shapes
 - customer-facing NuGet and npm publication guidance
 
 ## Fast paths
@@ -116,7 +126,9 @@ Read:
 
 1. [Setup and Packaging](./setup-and-packaging.md)
 2. [Getting Started](./getting-started.md)
-3. [Transactions](./transactions.md)
+3. [Runtime Observability](./runtime-observability.md)
+4. [Source-Generated Compiled Queries](./compiled-queries.md)
+5. [Transactions](./transactions.md)
 
 ### I want to ship to Unity or Godot
 
@@ -124,7 +136,9 @@ Read:
 
 1. [Unity and Godot](./unity-and-godot.md)
 2. [Setup and Packaging](./setup-and-packaging.md)
-3. [Security and Authentication](./security-and-authentication.md)
+3. [Runtime Observability](./runtime-observability.md)
+4. [Source-Generated Compiled Queries](./compiled-queries.md)
+5. [Security and Authentication](./security-and-authentication.md)
 
 ### I want browser and npm adoption guidance
 
@@ -167,6 +181,7 @@ Current local packages:
 
 - `DataVo.Core`
 - `DataVo.Data`
+- `DataVo.Generators`
 
 NuGet and npm publication are part of the active packaging and distribution rollout.
 
