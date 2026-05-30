@@ -121,7 +121,7 @@ Passed!  - Failed: 0, Passed: 21, Skipped: 0, Total: 21
 
 ## Concerns
 
-- `SELECT` generation for collection-returning methods is implemented via `SelectMany`, but this milestone’s E2E coverage only exercises generated `SelectSingle`, `Insert`, and `Update`. Collection-returning source-generated `SELECT` currently has generator-level coverage, not dedicated runtime E2E coverage in this task.
+- Compiled direct `UPDATE` is parser-free for the supported V1 shape, but intentionally rejects active-transaction execution rather than emulating full SQL `UPDATE` transaction semantics. This V1 limitation is pinned by `CompiledQueryRuntimeTests`.
 
 ## Follow-up fixes after review
 
@@ -137,6 +137,7 @@ Passed!  - Failed: 0, Passed: 21, Skipped: 0, Total: 21
 - Added generator coverage for emitted `SelectMany` code.
 - Added runtime E2E coverage for generated `IReadOnlyList<GeneratedPlayer>` `SELECT`.
 - Added a runtime regression asserting compiled `UPDATE` no longer records a parsed SQL query entry when diagnostics are enabled.
+- Added a runtime regression pinning the V1 limitation that compiled direct `UPDATE` rejects active transactions.
 
 ### Follow-up verification
 
@@ -153,5 +154,5 @@ Results:
 ```text
 Passed!  - Failed: 0, Passed: 7, Skipped: 0, Total: 7
 Passed!  - Failed: 0, Passed: 4, Skipped: 0, Total: 4
-Passed!  - Failed: 0, Passed: 23, Skipped: 0, Total: 23
+Passed!  - Failed: 0, Passed: 24, Skipped: 0, Total: 24
 ```
