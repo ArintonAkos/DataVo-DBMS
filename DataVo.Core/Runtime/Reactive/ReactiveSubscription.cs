@@ -107,41 +107,46 @@ public sealed class ReactiveSubscription
 
         foreach (RowChange change in tableChanges)
         {
+            // Base the enter/leave/stay decision on the predicate evaluated over the before/after
+            // images (the §4.3 matrix). This is robust to the engine's out-of-place UPDATE, which
+            // reassigns the physical row id and would otherwise break a row-id-keyed match-set.
+            bool beforeMatches = change.Before is not null && Matches(change.Before);
+            bool afterMatches = change.After is not null && Matches(change.After);
+
             switch (change.Kind)
             {
                 case ChangeKind.Insert:
-                    if (change.After is not null && Matches(change.After))
+                    if (afterMatches)
                     {
                         _matchSet.Add(change.RowId);
-                        added.Add(Project(change.After));
+                        added.Add(Project(change.After!));
                     }
 
                     break;
 
                 case ChangeKind.Delete:
-                    if (change.Before is not null && _matchSet.Remove(change.RowId))
+                    _matchSet.Remove(change.RowId);
+                    if (beforeMatches)
                     {
-                        removed.Add(Project(change.Before));
+                        removed.Add(Project(change.Before!));
                     }
 
                     break;
 
                 case ChangeKind.Update:
-                    bool wasMatching = _matchSet.Contains(change.RowId);
-                    bool isMatching = change.After is not null && Matches(change.After);
-
-                    if (!wasMatching && isMatching)
+                    if (!beforeMatches && afterMatches)
                     {
                         _matchSet.Add(change.RowId);
                         added.Add(Project(change.After!));
                     }
-                    else if (wasMatching && !isMatching)
+                    else if (beforeMatches && !afterMatches)
                     {
                         _matchSet.Remove(change.RowId);
-                        removed.Add(Project(change.Before ?? change.After!));
+                        removed.Add(Project(change.Before!));
                     }
-                    else if (wasMatching && isMatching)
+                    else if (beforeMatches && afterMatches)
                     {
+                        _matchSet.Add(change.RowId);
                         updated.Add(Project(change.After!));
                     }
 
