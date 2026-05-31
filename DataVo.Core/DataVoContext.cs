@@ -5,6 +5,7 @@ using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 
@@ -66,6 +67,28 @@ public sealed class DataVoContext : IDisposable
     /// Gets the diagnostics facade for runtime query instrumentation.
     /// </summary>
     public DataVoDiagnostics Diagnostics => Engine.Diagnostics;
+
+    /// <summary>
+    /// Registers a single-table linear reactive query and returns a handle whose disposal removes it.
+    /// </summary>
+    /// <param name="sql">A single-table <c>SELECT … WHERE</c> statement to observe.</param>
+    /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable Subscribe(string sql, Action<QueryChange> onChanged)
+        => Engine.Reactive.Add(this, sql, onChanged);
+
+    /// <summary>
+    /// Drains buffered committed change sets through active subscriptions on the calling thread.
+    /// </summary>
+    public void DispatchPendingNotifications()
+        => Engine.Reactive.Dispatch();
+
+    /// <summary>
+    /// Sets the maximum number of concurrently active reactive subscriptions.
+    /// </summary>
+    /// <param name="max">The new subscription cap.</param>
+    public void SetMaxReactiveSubscriptions(int max)
+        => Engine.Reactive.MaxSubscriptions = max;
 
     /// <summary>
     /// Executes a SQL query using the current <see cref="SessionId"/>.
