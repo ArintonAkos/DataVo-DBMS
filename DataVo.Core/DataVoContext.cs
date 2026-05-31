@@ -188,13 +188,15 @@ public sealed class DataVoContext : IDisposable
             Engine.Catalog,
             Engine.IndexManager);
 
+        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
         Engine.LockManager.AcquireWriteLock(databaseName, tableName);
 
         try
         {
-            InsertRowsResult result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId);
+            InsertRowsResult result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId, recorder);
             diagnosticsBuilder?.AddRowsAffected(result.AcceptedRowCount);
+            recorder?.Publish();
             return result.RowIds;
         }
         catch (Exception ex)
