@@ -1,6 +1,7 @@
 using DataVo.Core.BTree;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Runtime.Security;
@@ -53,6 +54,7 @@ public sealed class DataVoEngine : IDisposable
         TransactionIdAllocator = new TransactionIdAllocator();
         Diagnostics = new DataVoDiagnostics();
         Changes = new ChangeCapture();
+        Reactive = new ReactiveRegistry(this);
 
         if (Config.StorageMode == StorageMode.Disk)
         {
@@ -129,6 +131,11 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the change-capture service that emits a <see cref="Changes.ChangeSet"/> per committed transaction.
     /// </summary>
     public ChangeCapture Changes { get; }
+
+    /// <summary>
+    /// Gets the reactive subscription registry implementing pull-drain incremental query notifications.
+    /// </summary>
+    public ReactiveRegistry Reactive { get; }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
