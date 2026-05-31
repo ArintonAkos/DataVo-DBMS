@@ -18,7 +18,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// Comparison and NULL semantics are delegated to the same evaluator the batch single-table WHERE
 /// path uses, so reactive results match a full re-execution of the query.
 /// </remarks>
-public sealed class ReactiveSubscription
+public sealed class ReactiveSubscription : IReactiveQuery
 {
     private readonly ExpressionNode? _predicate;
     private readonly bool _selectStar;
@@ -83,7 +83,7 @@ public sealed class ReactiveSubscription
     /// Seeds the match-set from the current table contents without emitting any output.
     /// </summary>
     /// <param name="rows">The current <c>(rowId, row)</c> pairs in the table.</param>
-    public void Seed(IEnumerable<(long rowId, IReadOnlyDictionary<string, object?> row)> rows)
+    public void Seed(IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         foreach ((long rowId, IReadOnlyDictionary<string, object?> row) in rows)
         {
