@@ -46,7 +46,7 @@ public sealed class ReactiveRegistry
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(onChanged);
 
-        var subscription = new ReactiveSubscription(sql);
+        IReactiveQuery subscription = CreateQuery(sql);
         string databaseName = ResolveDatabase(ctx);
 
         Registration registration;
@@ -150,7 +150,21 @@ public sealed class ReactiveRegistry
         }
     }
 
-    private void SeedSubscription(ReactiveSubscription subscription, string databaseName)
+    /// <summary>
+    /// Compiles the supplied SQL into the appropriate reactive query operator.
+    /// </summary>
+    /// <param name="sql">The single-table reactive <c>SELECT</c> to compile.</param>
+    /// <returns>The compiled <see cref="IReactiveQuery"/>.</returns>
+    /// <remarks>
+    /// Currently routes every supported shape to the linear operator; later tasks expand this to
+    /// route aggregates and top-K queries to their dedicated operators.
+    /// </remarks>
+    private static IReactiveQuery CreateQuery(string sql)
+    {
+        return new ReactiveSubscription(sql);
+    }
+
+    private void SeedSubscription(IReactiveQuery subscription, string databaseName)
     {
         using IDisposable _ = DataVoEngine.PushCurrent(_engine);
 
@@ -173,9 +187,9 @@ public sealed class ReactiveRegistry
         return databaseName;
     }
 
-    private sealed class Registration(ReactiveSubscription subscription, Action<QueryChange> callback)
+    private sealed class Registration(IReactiveQuery subscription, Action<QueryChange> callback)
     {
-        public ReactiveSubscription Subscription { get; } = subscription;
+        public IReactiveQuery Subscription { get; } = subscription;
         public Action<QueryChange> Callback { get; } = callback;
         public bool Disposed { get; set; }
     }
