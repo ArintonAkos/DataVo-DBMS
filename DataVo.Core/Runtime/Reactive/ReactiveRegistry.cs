@@ -46,8 +46,8 @@ public sealed class ReactiveRegistry
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(onChanged);
 
-        IReactiveQuery subscription = CreateQuery(sql);
         string databaseName = ResolveDatabase(ctx);
+        IReactiveQuery subscription = CreateQuery(sql, databaseName);
 
         Registration registration;
         lock (_gate)
@@ -151,16 +151,31 @@ public sealed class ReactiveRegistry
     }
 
     /// <summary>
-    /// Compiles the supplied SQL into the appropriate reactive query operator.
+    /// Compiles the supplied SQL into the appropriate reactive query operator by parsed shape.
     /// </summary>
     /// <param name="sql">The single-table reactive <c>SELECT</c> to compile.</param>
+    /// <param name="databaseName">The database that owns the query's source table.</param>
     /// <returns>The compiled <see cref="IReactiveQuery"/>.</returns>
     /// <remarks>
-    /// Currently routes every supported shape to the linear operator; later tasks expand this to
-    /// route aggregates and top-K queries to their dedicated operators.
+    /// A query with <c>GROUP BY</c> or a top-level aggregate routes to <see cref="AggregateReactiveQuery"/>;
+    /// an <c>ORDER BY … LIMIT</c> query routes to <see cref="TopKReactiveQuery"/>; everything else routes
+    /// to the linear <see cref="ReactiveSubscription"/>. Unsupported shapes (joins, subqueries, and so on)
+    /// raise <see cref="NotSupportedException"/> from the chosen operator's constructor.
     /// </remarks>
-    private static IReactiveQuery CreateQuery(string sql)
+    private IReactiveQuery CreateQuery(string sql, string databaseName)
     {
+        Parser.AST.SelectStatement select = ReactiveQueryParser.ParseSingleSelect(sql);
+
+        if (ReactiveQueryParser.IsAggregateShape(select))
+        {
+            return new AggregateReactiveQuery(select, _engine, databaseName);
+        }
+
+        if (ReactiveQueryParser.IsTopKShape(select))
+        {
+            return new TopKReactiveQuery(select, _engine, databaseName);
+        }
+
         return new ReactiveSubscription(sql);
     }
 
