@@ -53,4 +53,27 @@ public class ReactiveAggregateTests
 
         Assert.Contains(last!.Removed, r => Equals(r["Team"], "blue"));
     }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Disk)]
+    public void Max_RecoversNextValue_OnDelete(StorageMode mode)
+    {
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE P (Id INT PRIMARY KEY, Team VARCHAR(10), Score INT)");
+        QueryChange? last = null;
+        using var sub = ctx.Subscribe("SELECT Team, MAX(Score) AS Hi, MIN(Score) AS Lo FROM P GROUP BY Team", qc => last = qc);
+
+        ctx.Execute("INSERT INTO P VALUES (1, 'red', 10)");
+        ctx.Execute("INSERT INTO P VALUES (2, 'red', 30)");
+        ctx.Execute("INSERT INTO P VALUES (3, 'red', 20)");
+        ctx.DispatchPendingNotifications();
+
+        ctx.Execute("DELETE FROM P WHERE Id = 2"); // removes the current MAX (30)
+        ctx.DispatchPendingNotifications();
+
+        var red = last!.Updated.Single(r => Equals(r["Team"], "red"));
+        Assert.Equal(20L, Convert.ToInt64(red["Hi"])); // next max
+        Assert.Equal(10L, Convert.ToInt64(red["Lo"]));
+    }
 }
