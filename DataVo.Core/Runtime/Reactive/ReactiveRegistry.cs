@@ -168,6 +168,11 @@ public sealed class ReactiveRegistry
     {
         Parser.AST.SelectStatement select = ReactiveQueryParser.ParseSingleSelect(sql);
 
+        if (ReactiveQueryParser.TryGetJoinShape(select, out JoinShape joinShape))
+        {
+            return new JoinReactiveQuery(joinShape, _engine, databaseName);
+        }
+
         if (ReactiveQueryParser.IsAggregateShape(select))
         {
             return new AggregateReactiveQuery(select, _engine, databaseName);
