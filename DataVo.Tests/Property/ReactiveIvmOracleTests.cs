@@ -44,4 +44,94 @@ public class ReactiveIvmOracleTests
             expected.OrderBy(k => k.Key).ToArray(),
             live.OrderBy(k => k.Key).Select(k => new KeyValuePair<int, int>(k.Key, (int)k.Value["V"]!)).ToArray());
     }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory, 11)]
+    [InlineData(StorageMode.Disk, 12)]
+    public void Aggregate_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE T (Id INT PRIMARY KEY, G INT, V INT)");
+
+        var live = new Dictionary<object, (long Cnt, long Sum, long Max)>();
+        using var sub = ctx.Subscribe(
+            "SELECT G, COUNT(*) AS C, SUM(V) AS S, MAX(V) AS M FROM T GROUP BY G", qc =>
+        {
+            foreach (var r in qc.Added.Concat(qc.Updated))
+                live[r["G"]!] = (Convert.ToInt64(r["C"]), Convert.ToInt64(r["S"]), Convert.ToInt64(r["M"]));
+            foreach (var r in qc.Removed) live.Remove(r["G"]!);
+        });
+
+        for (int i = 0; i < 400; i++)
+        {
+            int id = rng.Next(1, 25), g = rng.Next(0, 4), v = rng.Next(0, 100), op = rng.Next(3);
+            try
+            {
+                if (op == 0) ctx.Execute($"INSERT INTO T VALUES ({id}, {g}, {v})");
+                else if (op == 1) ctx.Execute($"UPDATE T SET G = {g}, V = {v} WHERE Id = {id}");
+                else ctx.Execute($"DELETE FROM T WHERE Id = {id}");
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+            ctx.DispatchPendingNotifications();
+        }
+
+        // COUNT and SUM are recomputed via the batch aggregate engine. The batch engine's MIN/MAX path
+        // rejects every column type (it validates a column as numeric AND string in the same pass), so
+        // MAX(V) cannot be recomputed there; the MAX oracle is computed independently from the raw rows.
+        // This keeps the incremental==recompute gate honest for all three aggregates without depending
+        // on the engine's broken batch MIN/MAX, which is out of L2 scope to fix.
+        var countSum = ctx.Execute("SELECT G, COUNT(*) AS C, SUM(V) AS S FROM T GROUP BY G")
+            .Single().Data.ToDictionary(r => Convert.ToInt32(r["G"]!), r => (Convert.ToInt64(r["C"]), Convert.ToInt64(r["S"])));
+
+        var maxByGroup = ctx.Execute("SELECT G, V FROM T").Single().Data
+            .GroupBy(r => Convert.ToInt32(r["G"]!))
+            .ToDictionary(g => g.Key, g => g.Max(r => Convert.ToInt64(r["V"]!)));
+
+        var expected = countSum.ToDictionary(
+            kv => kv.Key,
+            kv => (Cnt: kv.Value.Item1, Sum: kv.Value.Item2, Max: maxByGroup[kv.Key]));
+
+        Assert.Equal(
+            expected.OrderBy(k => k.Key).ToArray(),
+            live.OrderBy(k => Convert.ToInt32(k.Key))
+                .Select(k => new KeyValuePair<int, (long Cnt, long Sum, long Max)>(Convert.ToInt32(k.Key), k.Value))
+                .ToArray());
+    }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory, 21)]
+    [InlineData(StorageMode.Disk, 22)]
+    public void TopK_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE T (Id INT PRIMARY KEY, V INT)");
+
+        const int k = 3;
+        var window = new HashSet<int>();
+        using var sub = ctx.Subscribe($"SELECT Id, V FROM T WHERE V < 80 ORDER BY V DESC, Id ASC LIMIT {k}", qc =>
+        {
+            foreach (var r in qc.Added) window.Add(Convert.ToInt32(r["Id"]));
+            foreach (var r in qc.Removed) window.Remove(Convert.ToInt32(r["Id"]));
+        });
+
+        for (int i = 0; i < 400; i++)
+        {
+            int id = rng.Next(1, 25), v = rng.Next(0, 100), op = rng.Next(3);
+            try
+            {
+                if (op == 0) ctx.Execute($"INSERT INTO T VALUES ({id}, {v})");
+                else if (op == 1) ctx.Execute($"UPDATE T SET V = {v} WHERE Id = {id}");
+                else ctx.Execute($"DELETE FROM T WHERE Id = {id}");
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+            ctx.DispatchPendingNotifications();
+
+            var expected = ctx.Execute($"SELECT Id, V FROM T WHERE V < 80 ORDER BY V DESC, Id ASC LIMIT {k}")
+                .Single().Data.Select(r => Convert.ToInt32(r["Id"])).OrderBy(x => x).ToArray();
+
+            Assert.Equal(expected, window.OrderBy(x => x).ToArray());
+        }
+    }
 }
