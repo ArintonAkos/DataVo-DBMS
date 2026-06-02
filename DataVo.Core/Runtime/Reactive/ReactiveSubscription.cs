@@ -60,6 +60,9 @@ public sealed class ReactiveSubscription : IReactiveQuery
     /// <summary>Gets the source table this subscription observes.</summary>
     public string Table { get; }
 
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> Tables => [Table];
+
     /// <summary>
     /// Evaluates the subscription predicate against a single materialized row.
     /// </summary>
@@ -73,8 +76,9 @@ public sealed class ReactiveSubscription : IReactiveQuery
     /// <summary>
     /// Seeds the match-set from the current table contents without emitting any output.
     /// </summary>
+    /// <param name="table">The table whose contents are supplied (always this subscription's table).</param>
     /// <param name="rows">The current <c>(rowId, row)</c> pairs in the table.</param>
-    public void Seed(IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         foreach ((long rowId, IReadOnlyDictionary<string, object?> row) in rows)
         {

@@ -98,21 +98,23 @@ public sealed class ReactiveRegistry
                     continue;
                 }
 
-                if (!set.Tables.Any(table => table.Equals(registration.Subscription.Table, StringComparison.OrdinalIgnoreCase)))
+                IReadOnlyCollection<string> tables = registration.Subscription.Tables;
+
+                if (!set.Tables.Any(table => tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase))))
                 {
                     continue;
                 }
 
-                List<RowChange> tableChanges = set.Changes
-                    .Where(change => change.Table.Equals(registration.Subscription.Table, StringComparison.OrdinalIgnoreCase))
+                List<RowChange> relevantChanges = set.Changes
+                    .Where(change => tables.Any(observed => observed.Equals(change.Table, StringComparison.OrdinalIgnoreCase)))
                     .ToList();
 
-                if (tableChanges.Count == 0)
+                if (relevantChanges.Count == 0)
                 {
                     continue;
                 }
 
-                QueryChange result = registration.Subscription.Apply(tableChanges);
+                QueryChange result = registration.Subscription.Apply(relevantChanges);
                 if (!result.IsEmpty)
                 {
                     registration.Callback(result);
@@ -183,11 +185,14 @@ public sealed class ReactiveRegistry
     {
         using IDisposable _ = DataVoEngine.PushCurrent(_engine);
 
-        Dictionary<long, Dictionary<string, object?>> rows =
-            _engine.StorageContext.GetTableContents(subscription.Table, databaseName);
+        foreach (string table in subscription.Tables)
+        {
+            Dictionary<long, Dictionary<string, object?>> rows =
+                _engine.StorageContext.GetTableContents(table, databaseName);
 
-        subscription.Seed(rows.Select(pair =>
-            (pair.Key, (IReadOnlyDictionary<string, object?>)pair.Value)));
+            subscription.Seed(table, rows.Select(pair =>
+                (pair.Key, (IReadOnlyDictionary<string, object?>)pair.Value)));
+        }
     }
 
     private static string ResolveDatabase(DataVoContext ctx)

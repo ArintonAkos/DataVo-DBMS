@@ -81,11 +81,14 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>Gets the source table this aggregate observes.</summary>
     public string Table { get; }
 
     /// <inheritdoc />
-    public void Seed(IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public IReadOnlyCollection<string> Tables => [Table];
+
+    /// <inheritdoc />
+    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
         {
