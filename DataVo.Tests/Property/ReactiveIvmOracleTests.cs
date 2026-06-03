@@ -201,4 +201,126 @@ public class ReactiveIvmOracleTests
             Assert.Equal(expected, actual);
         }
     }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory, "LEFT", 41)]
+    [InlineData(StorageMode.InMemory, "FULL", 42)]
+    [InlineData(StorageMode.Disk, "LEFT", 43)]
+    [InlineData(StorageMode.Disk, "FULL", 44)]
+    public void OuterJoin_Incremental_Equals_Recompute(StorageMode mode, string kind, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE R (Id INT PRIMARY KEY, Gid INT, Tag INT)");
+        ctx.Execute("CREATE TABLE S (Sid INT PRIMARY KEY, Kind INT)");
+
+        string sql = $"SELECT R.Id, R.Tag, S.Kind FROM R {kind} JOIN S ON R.Gid = S.Sid";
+
+        // Live view keyed by output identity (rid|sid with "∅" sentinels for null-padded sides).
+        var live = new Dictionary<string, (int? rid, int? tag, int? kind)>();
+        using var sub = ctx.Subscribe(sql, qc =>
+        {
+            foreach (var r in qc.Added.Concat(qc.Updated))
+            {
+                live[Key(r)] = (
+                    r["R.Id"] is null ? null : Convert.ToInt32(r["R.Id"]),
+                    r["R.Tag"] is null ? null : Convert.ToInt32(r["R.Tag"]),
+                    r["S.Kind"] is null ? null : Convert.ToInt32(r["S.Kind"]));
+            }
+
+            foreach (var r in qc.Removed)
+            {
+                live.Remove(Key(r));
+            }
+        });
+
+        static string Key(IReadOnlyDictionary<string, object?> r) =>
+            ((r["__rid"] as string) ?? "∅") + "|" + ((r["__sid"] as string) ?? "∅");
+
+        for (int i = 0; i < 600; i++)
+        {
+            int table = rng.Next(2);
+            int op = rng.Next(3);
+            try
+            {
+                if (table == 0)
+                {
+                    int id = rng.Next(1, 12);
+                    if (op == 0) ctx.Execute($"INSERT INTO R VALUES ({id}, {rng.Next(1, 8)}, {rng.Next(0, 100)})");
+                    else if (op == 1) ctx.Execute($"UPDATE R SET Gid = {rng.Next(1, 8)}, Tag = {rng.Next(0, 100)} WHERE Id = {id}");
+                    else ctx.Execute($"DELETE FROM R WHERE Id = {id}");
+                }
+                else
+                {
+                    int sid = rng.Next(1, 8);
+                    if (op == 0) ctx.Execute($"INSERT INTO S VALUES ({sid}, {rng.Next(0, 100)})");
+                    else if (op == 1) ctx.Execute($"UPDATE S SET Kind = {rng.Next(0, 100)} WHERE Sid = {sid}");
+                    else ctx.Execute($"DELETE FROM S WHERE Sid = {sid}");
+                }
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            // Reference recompute computed independently from the raw single-table rows. The batch join
+            // engine drops all right rows when the FROM (left) table is empty — a pre-existing batch bug
+            // unrelated to incremental maintenance — so the outer-join oracle must not depend on it
+            // (mirroring how the L2 oracle avoids the engine's broken batch MIN/MAX path).
+            var expected = OuterJoinReference(ctx, kind)
+                .OrderBy(x => x.Item1 ?? -1).ThenBy(x => x.Item2 ?? -1).ThenBy(x => x.Item3 ?? -1).ToArray();
+
+            var actual = live.Values
+                .OrderBy(x => x.rid ?? -1).ThenBy(x => x.tag ?? -1).ThenBy(x => x.kind ?? -1).ToArray();
+
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    /// <summary>
+    /// Computes the LEFT/FULL equi-join of R(Id,Gid,Tag) and S(Sid,Kind) on R.Gid = S.Sid from the raw
+    /// single-table rows, as the trustworthy recompute reference for the outer-join oracle.
+    /// </summary>
+    private static List<(int? Rid, int? Tag, int? Kind)> OuterJoinReference(DataVoContext ctx, string kind)
+    {
+        var rRows = ctx.Execute("SELECT Id, Gid, Tag FROM R").Single().Data
+            .Select(d => (Id: Convert.ToInt32(d["Id"]), Gid: Convert.ToInt32(d["Gid"]), Tag: Convert.ToInt32(d["Tag"])))
+            .ToList();
+        var sRows = ctx.Execute("SELECT Sid, Kind FROM S").Single().Data
+            .Select(d => (Sid: Convert.ToInt32(d["Sid"]), Kind: Convert.ToInt32(d["Kind"])))
+            .ToList();
+
+        var sByKey = sRows.ToLookup(s => s.Sid);
+        var result = new List<(int? Rid, int? Tag, int? Kind)>();
+
+        // Every left row, paired with each matching right row, or null-padded when none (LEFT and FULL).
+        foreach (var r in rRows)
+        {
+            var matches = sByKey[r.Gid].ToList();
+            if (matches.Count == 0)
+            {
+                result.Add((r.Id, r.Tag, null));
+            }
+            else
+            {
+                foreach (var s in matches)
+                {
+                    result.Add((r.Id, r.Tag, s.Kind));
+                }
+            }
+        }
+
+        // FULL additionally emits each unmatched right row null-padded on the left.
+        if (kind == "FULL")
+        {
+            foreach (var s in sRows)
+            {
+                if (!rRows.Any(r => r.Gid == s.Sid))
+                {
+                    result.Add((null, null, s.Kind));
+                }
+            }
+        }
+
+        return result;
+    }
 }
