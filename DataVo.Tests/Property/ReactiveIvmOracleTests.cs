@@ -134,4 +134,71 @@ public class ReactiveIvmOracleTests
             Assert.Equal(expected, window.OrderBy(x => x).ToArray());
         }
     }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory, 31)]
+    [InlineData(StorageMode.InMemory, 32)]
+    [InlineData(StorageMode.Disk, 33)]
+    [InlineData(StorageMode.Disk, 34)]
+    public void InnerJoin_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE R (Id INT PRIMARY KEY, Gid INT, Tag INT)");
+        ctx.Execute("CREATE TABLE S (Sid INT PRIMARY KEY, Kind INT)");
+
+        const string sql = "SELECT R.Id, R.Tag, S.Kind FROM R INNER JOIN S ON R.Gid = S.Sid";
+
+        // Maintain the incremental join keyed by the hidden per-side identity columns.
+        var live = new Dictionary<string, (int rid, int tag, int kind)>();
+        using var sub = ctx.Subscribe(sql, qc =>
+        {
+            foreach (var r in qc.Added.Concat(qc.Updated))
+            {
+                string key = (string)r["__rid"]! + "|" + (string)r["__sid"]!;
+                live[key] = (Convert.ToInt32(r["R.Id"]), Convert.ToInt32(r["R.Tag"]), Convert.ToInt32(r["S.Kind"]));
+            }
+
+            foreach (var r in qc.Removed)
+            {
+                live.Remove((string)r["__rid"]! + "|" + (string)r["__sid"]!);
+            }
+        });
+
+        for (int i = 0; i < 500; i++)
+        {
+            int table = rng.Next(2);
+            int op = rng.Next(3);
+            try
+            {
+                if (table == 0)
+                {
+                    int id = rng.Next(1, 12);
+                    if (op == 0) ctx.Execute($"INSERT INTO R VALUES ({id}, {rng.Next(1, 8)}, {rng.Next(0, 100)})");
+                    else if (op == 1) ctx.Execute($"UPDATE R SET Gid = {rng.Next(1, 8)}, Tag = {rng.Next(0, 100)} WHERE Id = {id}");
+                    else ctx.Execute($"DELETE FROM R WHERE Id = {id}");
+                }
+                else
+                {
+                    int sid = rng.Next(1, 8);
+                    if (op == 0) ctx.Execute($"INSERT INTO S VALUES ({sid}, {rng.Next(0, 100)})");
+                    else if (op == 1) ctx.Execute($"UPDATE S SET Kind = {rng.Next(0, 100)} WHERE Sid = {sid}");
+                    else ctx.Execute($"DELETE FROM S WHERE Sid = {sid}");
+                }
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            var expected = ctx.Execute(sql).Single().Data
+                .Select(d => (Convert.ToInt32(d["R.Id"]), Convert.ToInt32(d["R.Tag"]), Convert.ToInt32(d["S.Kind"])))
+                .OrderBy(x => x).ToArray();
+
+            var actual = live.Values
+                .Select(v => (v.rid, v.tag, v.kind))
+                .OrderBy(x => x).ToArray();
+
+            Assert.Equal(expected, actual);
+        }
+    }
 }
