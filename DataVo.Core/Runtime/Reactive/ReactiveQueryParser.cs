@@ -133,6 +133,15 @@ internal static class ReactiveQueryParser
     }
 
     /// <summary>
+    /// Returns <c>true</c> when the statement is a single-table DISTINCT shape.
+    /// </summary>
+    /// <param name="select">The parsed SELECT.</param>
+    public static bool IsDistinctShape(SelectStatement select)
+    {
+        return select.IsDistinct;
+    }
+
+    /// <summary>
     /// Attempts to extract a supported two-table equi-join shape from the parsed statement.
     /// </summary>
     /// <param name="select">The parsed SELECT.</param>
