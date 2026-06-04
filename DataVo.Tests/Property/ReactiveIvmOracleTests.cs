@@ -136,6 +136,50 @@ public class ReactiveIvmOracleTests
     }
 
     [Theory]
+    [InlineData(StorageMode.InMemory, 51)]
+    [InlineData(StorageMode.InMemory, 52)]
+    [InlineData(StorageMode.Disk, 53)]
+    [InlineData(StorageMode.Disk, 54)]
+    public void Distinct_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE T (Id INT PRIMARY KEY, G INT, V INT)");
+
+        const string sql = "SELECT DISTINCT G FROM T WHERE V < 70";
+        var live = new HashSet<int>();
+        using var sub = ctx.Subscribe(sql, qc =>
+        {
+            foreach (var r in qc.Added) live.Add(Convert.ToInt32(r["G"]));
+            foreach (var r in qc.Removed) live.Remove(Convert.ToInt32(r["G"]));
+        });
+
+        for (int i = 0; i < 400; i++)
+        {
+            int id = rng.Next(1, 25);
+            int g = rng.Next(0, 6);
+            int v = rng.Next(0, 100);
+            int op = rng.Next(3);
+
+            try
+            {
+                if (op == 0) ctx.Execute($"INSERT INTO T VALUES ({id}, {g}, {v})");
+                else if (op == 1) ctx.Execute($"UPDATE T SET G = {g}, V = {v} WHERE Id = {id}");
+                else ctx.Execute($"DELETE FROM T WHERE Id = {id}");
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            var expected = ctx.Execute(sql).Single().Data
+                .Select(r => Convert.ToInt32(r["G"]))
+                .OrderBy(x => x).ToArray();
+
+            Assert.Equal(expected, live.OrderBy(x => x).ToArray());
+        }
+    }
+
+    [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
     [InlineData(StorageMode.Disk, 33)]
