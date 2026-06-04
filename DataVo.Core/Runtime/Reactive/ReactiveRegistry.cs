@@ -183,6 +183,11 @@ public sealed class ReactiveRegistry
             return new TopKReactiveQuery(select, _engine, databaseName);
         }
 
+        if (ReactiveQueryParser.IsDistinctShape(select))
+        {
+            return new DistinctReactiveQuery(select);
+        }
+
         return new ReactiveSubscription(sql);
     }
 
