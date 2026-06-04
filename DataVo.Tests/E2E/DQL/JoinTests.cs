@@ -87,6 +87,32 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
     }
 
     [Fact]
+    public void JoinTests_RightAndFullJoin_WithEmptyFromTable_EmitRightRows()
+    {
+        Execute("CREATE TABLE EmptyEmployees (EmpId INT, Name VARCHAR, DeptId INT)");
+        Execute("CREATE TABLE ActiveDepartments (DeptId INT, DeptName VARCHAR)");
+
+        Execute("INSERT INTO ActiveDepartments (DeptId, DeptName) VALUES (1, 'Engineering')");
+        Execute("INSERT INTO ActiveDepartments (DeptId, DeptName) VALUES (2, 'HR')");
+
+        var rightResult = ExecuteAndReturn("SELECT EmptyEmployees.Name, ActiveDepartments.DeptName FROM EmptyEmployees RIGHT JOIN ActiveDepartments ON EmptyEmployees.DeptId = ActiveDepartments.DeptId ORDER BY ActiveDepartments.DeptName");
+
+        Assert.False(rightResult.IsError, string.Join(Environment.NewLine, rightResult.Messages));
+        Assert.Equal(2, rightResult.Data.Count);
+        Assert.All(rightResult.Data, row => Assert.Null(row["EmptyEmployees.Name"]));
+        Assert.Contains(rightResult.Data, row => row["ActiveDepartments.DeptName"]?.ToString() == "Engineering");
+        Assert.Contains(rightResult.Data, row => row["ActiveDepartments.DeptName"]?.ToString() == "HR");
+
+        var fullResult = ExecuteAndReturn("SELECT EmptyEmployees.Name, ActiveDepartments.DeptName FROM EmptyEmployees FULL JOIN ActiveDepartments ON EmptyEmployees.DeptId = ActiveDepartments.DeptId ORDER BY ActiveDepartments.DeptName");
+
+        Assert.False(fullResult.IsError, string.Join(Environment.NewLine, fullResult.Messages));
+        Assert.Equal(2, fullResult.Data.Count);
+        Assert.All(fullResult.Data, row => Assert.Null(row["EmptyEmployees.Name"]));
+        Assert.Contains(fullResult.Data, row => row["ActiveDepartments.DeptName"]?.ToString() == "Engineering");
+        Assert.Contains(fullResult.Data, row => row["ActiveDepartments.DeptName"]?.ToString() == "HR");
+    }
+
+    [Fact]
     public void JoinTests_CrossJoin_ReturnsCartesianProduct()
     {
         Execute("CREATE TABLE A (Id INT)");
