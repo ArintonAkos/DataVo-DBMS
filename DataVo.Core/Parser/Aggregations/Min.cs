@@ -14,9 +14,7 @@ namespace DataVo.Core.Parser.Aggregations
 
         protected override void Validate()
         {
-            ValidateNumericColumn();
-            ValidateStringColumn();
-            ValidateDateColumn();
+            ValidateOrderableColumn();
         }
     }
 }

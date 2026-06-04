@@ -192,5 +192,23 @@ namespace DataVo.Core.Parser.Aggregations
                 throw new EvaluationException($"Cannot apply {ClassName} aggregation on non date column!");
             }
         }
+
+        /// <summary>
+        /// Validates that the bound source column can be ordered by MIN/MAX.
+        /// </summary>
+        protected void ValidateOrderableColumn()
+        {
+            if (_field is null)
+            {
+                return;
+            }
+
+            if (!TableColumnService.IsNumeric(_field)
+                && !TableColumnService.IsString(_field)
+                && !TableColumnService.IsDate(_field))
+            {
+                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non orderable column!");
+            }
+        }
     }
 }

@@ -51,7 +51,7 @@ internal class RightJoinStrategy : IJoinStrategy
             ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys)
             : ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys);
 
-        ProcessUnmatchedRightRows(leftRows, rightTableData, rightTable, insertHashAfter, matchedRightKeys, result, context);
+        ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, insertHashAfter, matchedRightKeys, result, context);
 
         return result;
     }
@@ -158,6 +158,7 @@ internal class RightJoinStrategy : IJoinStrategy
     private static void ProcessUnmatchedRightRows(
         HashedTable leftRows,
         TableData rightTableData,
+        string leftTable,
         string rightTable,
         bool insertHashAfter,
         HashSet<long> matchedRightKeys,
@@ -187,6 +188,8 @@ internal class RightJoinStrategy : IJoinStrategy
                 else
                 {
                     // Fallback if the entire left pipeline was completely empty
+                    dict[leftTable] = context.TableService.GetNullRowForTable(leftTable);
+
                     foreach (var joinTableDetail in context.JoinModel.JoinTableDetails.Values)
                     {
                         if (joinTableDetail.TableName != rightTable)

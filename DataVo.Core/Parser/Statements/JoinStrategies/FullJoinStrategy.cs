@@ -49,7 +49,7 @@ internal class FullJoinStrategy : IJoinStrategy
             ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys, context)
             : ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys, context);
 
-        ProcessUnmatchedRightRows(leftRows, rightTableData, rightTable, insertHashAfter, matchedRightKeys, result, context);
+        ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, insertHashAfter, matchedRightKeys, result, context);
 
         return result;
     }
@@ -181,6 +181,7 @@ internal class FullJoinStrategy : IJoinStrategy
     private static void ProcessUnmatchedRightRows(
         HashedTable leftRows,
         TableData rightTableData,
+        string leftTable,
         string rightTable,
         bool insertHashAfter,
         HashSet<long> matchedRightKeys,
@@ -209,6 +210,8 @@ internal class FullJoinStrategy : IJoinStrategy
                 }
                 else
                 {
+                    dict[leftTable] = context.TableService.GetNullRowForTable(leftTable);
+
                     foreach (var joinTableDetail in context.JoinModel.JoinTableDetails.Values)
                     {
                         if (joinTableDetail.TableName != rightTable)

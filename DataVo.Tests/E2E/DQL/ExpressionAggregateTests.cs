@@ -65,6 +65,26 @@ public abstract class ExpressionAggregateTestsBase(DataVoConfig config, string t
     }
 
     [Fact]
+    public void Select_MinMax_OnNumericStringAndDateColumns_ComputesExtrema()
+    {
+        Execute("CREATE TABLE Measurements (Id INT, Score INT, Label VARCHAR, CapturedOn DATE)");
+        Execute("INSERT INTO Measurements (Id, Score, Label, CapturedOn) VALUES (1, 30, 'beta', '2026-02-10')");
+        Execute("INSERT INTO Measurements (Id, Score, Label, CapturedOn) VALUES (2, 10, 'alpha', '2026-01-05')");
+        Execute("INSERT INTO Measurements (Id, Score, Label, CapturedOn) VALUES (3, 20, 'gamma', '2026-03-15')");
+
+        var result = ExecuteAndReturn("SELECT MIN(Score) AS MinScore, MAX(Score) AS MaxScore, MIN(Label) AS MinLabel, MAX(Label) AS MaxLabel, MIN(CapturedOn) AS FirstDate, MAX(CapturedOn) AS LastDate FROM Measurements");
+
+        Assert.False(result.IsError, string.Join(Environment.NewLine, result.Messages));
+        Assert.Single(result.Data);
+        Assert.Equal(10L, Convert.ToInt64(result.Data[0]["MinScore"]));
+        Assert.Equal(30L, Convert.ToInt64(result.Data[0]["MaxScore"]));
+        Assert.Equal("alpha", result.Data[0]["MinLabel"]);
+        Assert.Equal("gamma", result.Data[0]["MaxLabel"]);
+        Assert.Equal(DateOnly.Parse("2026-01-05"), result.Data[0]["FirstDate"]);
+        Assert.Equal(DateOnly.Parse("2026-03-15"), result.Data[0]["LastDate"]);
+    }
+
+    [Fact]
     public void Select_OrderByAggregateAlias_WithOffsetLimit_Works()
     {
         Execute("CREATE TABLE Sales (UserName VARCHAR, Amount INT)");
