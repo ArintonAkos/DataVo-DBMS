@@ -139,6 +139,54 @@ using var top3 = ctx.Subscribe(
 Both are acceptable for L2; a bounded-buffer refinement is a possible future optimization, not a
 correctness requirement.
 
+## Supported SQL (L3)
+
+Two-table **equi-joins** are maintained reactively for all four join kinds — `INNER`, `LEFT`,
+`RIGHT`, and `FULL` — with an optional post-join `WHERE`:
+
+```sql
+SELECT R.Id, R.Name, S.Kind
+FROM   R
+LEFT JOIN S ON R.Gid = S.Id
+WHERE  R.Name IS NOT NULL
+```
+
+A join subscription observes **both** tables; a committed change to either side incrementally updates
+the result. The classic use is a live "entity with its related row" view — for example players joined
+to their guild — that stays current as either table changes.
+
+### How it is maintained
+
+- Each side is held as an indexed **arrangement** keyed by the join key and then by the side's
+  **primary key** (so out-of-place `UPDATE`s, which reassign the physical row id, are identified
+  correctly).
+- Every committed `RowChange` is expanded into signed image deltas
+  (`Insert → (After,+1)`, `Delete → (Before,−1)`, `Update → (Before,−1)` and `(After,+1)`), so
+  join-key changes and `WHERE`/match transitions are handled uniformly.
+- The output delta is computed with the DBSP delta-join linearization — probe the left deltas against
+  the *old* right arrangement, apply them, probe the right deltas against the *new* left arrangement,
+  apply them — so the `ΔR ⋈ ΔS` cross term is never double-counted. Per-drain work is proportional to
+  the change batch; the engine never re-scans storage to recompute the join.
+- **Outer joins** additionally emit a null-padded row for any left row (`LEFT`/`FULL`) or right row
+  (`RIGHT`/`FULL`) that currently has no match; the null-padded row is retracted when a match appears
+  and re-emitted when the last match leaves.
+
+The projected output row uses the same qualified column names as a batch join (for example `R.Id`,
+`S.Kind`) and additionally carries the hidden per-side primary-key identities `__rid` (left) and
+`__sid` (right) so a consumer can key a live view by output identity (the absent side's identity is
+`null` on a null-padded row).
+
+### Memory characteristics (L3)
+
+Both inputs are fully materialized as keyed arrangements, so memory is proportional to the combined
+row count of the two joined tables. This is the standard cost of incremental join maintenance.
+
+### Not supported (later layers)
+
+`Subscribe` rejects, with `NotSupportedException`, join shapes outside this layer: three or more
+tables, non-equi or `OR` join conditions, self-joins, and correlated subqueries. `DISTINCT`, `UNION`,
+and recursive CTEs remain L4.
+
 ## Enter / leave / stay semantics
 
 For each committed row mutation, the row is classified by whether its **before** and **after**
@@ -154,8 +202,8 @@ images satisfy the predicate:
 | other  |                |               | ignored   |
 
 The incrementally maintained result is verified to **exactly equal** a full re-execution of the
-query — the L1, aggregate, and top-K oracle tests run long random operation sequences and assert
-incremental == recompute on both `InMemory` and `Disk` storage.
+query — the L1, aggregate, top-K, and inner/outer join oracle tests run long random operation
+sequences and assert incremental == recompute on both `InMemory` and `Disk` storage.
 
 ## Safety rules
 
