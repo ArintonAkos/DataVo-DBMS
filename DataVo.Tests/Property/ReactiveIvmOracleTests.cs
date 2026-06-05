@@ -260,6 +260,73 @@ public class ReactiveIvmOracleTests
     }
 
     [Theory]
+    [InlineData(StorageMode.InMemory, 71)]
+    [InlineData(StorageMode.InMemory, 72)]
+    [InlineData(StorageMode.Disk, 73)]
+    [InlineData(StorageMode.Disk, 74)]
+    public void Subquery_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE R (Id INT PRIMARY KEY, Gid INT)");
+        ctx.Execute("CREATE TABLE S (Gid INT PRIMARY KEY, Flag INT)");
+
+        const string inSql = "SELECT Id FROM R WHERE Gid IN (SELECT Gid FROM S WHERE Flag = 1)";
+        const string existsSql = "SELECT Id FROM R WHERE EXISTS (SELECT Gid FROM S WHERE Flag = 1)";
+
+        var liveIn = new HashSet<int>();
+        var liveExists = new HashSet<int>();
+
+        using var inSub = ctx.Subscribe(inSql, qc => ApplySet(liveIn, qc));
+        using var existsSub = ctx.Subscribe(existsSql, qc => ApplySet(liveExists, qc));
+
+        for (int i = 0; i < 400; i++)
+        {
+            int table = rng.Next(2);
+            int op = rng.Next(3);
+
+            try
+            {
+                if (table == 0)
+                {
+                    int id = rng.Next(1, 25);
+                    int gid = rng.Next(1, 10);
+                    if (op == 0) ctx.Execute($"INSERT INTO R VALUES ({id}, {gid})");
+                    else if (op == 1) ctx.Execute($"UPDATE R SET Gid = {gid} WHERE Id = {id}");
+                    else ctx.Execute($"DELETE FROM R WHERE Id = {id}");
+                }
+                else
+                {
+                    int gid = rng.Next(1, 10);
+                    int flag = rng.Next(0, 2);
+                    if (op == 0) ctx.Execute($"INSERT INTO S VALUES ({gid}, {flag})");
+                    else if (op == 1) ctx.Execute($"UPDATE S SET Flag = {flag} WHERE Gid = {gid}");
+                    else ctx.Execute($"DELETE FROM S WHERE Gid = {gid}");
+                }
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            Assert.Equal(ExpectedIds(ctx, inSql), liveIn.OrderBy(x => x).ToArray());
+            Assert.Equal(ExpectedIds(ctx, existsSql), liveExists.OrderBy(x => x).ToArray());
+        }
+
+        static void ApplySet(HashSet<int> live, QueryChange qc)
+        {
+            foreach (var r in qc.Added.Concat(qc.Updated)) live.Add(Convert.ToInt32(r["Id"]));
+            foreach (var r in qc.Removed) live.Remove(Convert.ToInt32(r["Id"]));
+        }
+
+        static int[] ExpectedIds(DataVoContext ctx, string sql)
+        {
+            return ctx.Execute(sql).Single().Data
+                .Select(r => Convert.ToInt32(r["Id"]))
+                .OrderBy(x => x).ToArray();
+        }
+    }
+
+    [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
     [InlineData(StorageMode.Disk, 33)]
