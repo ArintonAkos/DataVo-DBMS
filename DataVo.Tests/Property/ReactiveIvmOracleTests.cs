@@ -180,6 +180,86 @@ public class ReactiveIvmOracleTests
     }
 
     [Theory]
+    [InlineData(StorageMode.InMemory, 61)]
+    [InlineData(StorageMode.InMemory, 62)]
+    [InlineData(StorageMode.Disk, 63)]
+    [InlineData(StorageMode.Disk, 64)]
+    public void Union_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE A (Id INT PRIMARY KEY, V INT)");
+        ctx.Execute("CREATE TABLE B (Id INT PRIMARY KEY, V INT)");
+
+        const string unionSql = "SELECT V FROM A UNION SELECT V FROM B";
+        const string unionAllSql = "SELECT V FROM A UNION ALL SELECT V FROM B";
+
+        var liveUnion = new HashSet<int>();
+        var liveUnionAll = new Dictionary<int, int>();
+
+        using var unionSub = ctx.Subscribe(unionSql, qc =>
+        {
+            foreach (var r in qc.Added) liveUnion.Add(Convert.ToInt32(r["V"]));
+            foreach (var r in qc.Removed) liveUnion.Remove(Convert.ToInt32(r["V"]));
+        });
+
+        using var unionAllSub = ctx.Subscribe(unionAllSql, qc =>
+        {
+            foreach (var r in qc.Added) AddCount(liveUnionAll, Convert.ToInt32(r["V"]), +1);
+            foreach (var r in qc.Removed) AddCount(liveUnionAll, Convert.ToInt32(r["V"]), -1);
+        });
+
+        for (int i = 0; i < 400; i++)
+        {
+            string table = rng.Next(2) == 0 ? "A" : "B";
+            int id = rng.Next(1, 25);
+            int v = rng.Next(0, 8);
+            int op = rng.Next(3);
+
+            try
+            {
+                if (op == 0) ctx.Execute($"INSERT INTO {table} VALUES ({id}, {v})");
+                else if (op == 1) ctx.Execute($"UPDATE {table} SET V = {v} WHERE Id = {id}");
+                else ctx.Execute($"DELETE FROM {table} WHERE Id = {id}");
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            var expectedUnion = ctx.Execute(unionSql).Single().Data
+                .Select(r => Convert.ToInt32(r["V"]))
+                .OrderBy(x => x).ToArray();
+
+            var expectedUnionAll = ToCounts(ctx.Execute(unionAllSql).Single().Data.Select(r => Convert.ToInt32(r["V"])));
+
+            Assert.Equal(expectedUnion, liveUnion.OrderBy(x => x).ToArray());
+            Assert.Equal(
+                expectedUnionAll.OrderBy(k => k.Key).ToArray(),
+                liveUnionAll.Where(k => k.Value != 0).OrderBy(k => k.Key).ToArray());
+        }
+
+        static Dictionary<int, int> ToCounts(IEnumerable<int> values)
+        {
+            var counts = new Dictionary<int, int>();
+            foreach (int value in values)
+            {
+                AddCount(counts, value, +1);
+            }
+
+            return counts;
+        }
+
+        static void AddCount(Dictionary<int, int> counts, int value, int delta)
+        {
+            counts[value] = counts.GetValueOrDefault(value) + delta;
+            if (counts[value] == 0)
+            {
+                counts.Remove(value);
+            }
+        }
+    }
+
+    [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
     [InlineData(StorageMode.Disk, 33)]
