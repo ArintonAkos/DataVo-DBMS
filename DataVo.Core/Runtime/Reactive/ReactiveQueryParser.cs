@@ -70,6 +70,22 @@ internal static class ReactiveQueryParser
     /// <returns>The parsed <see cref="SelectStatement"/>.</returns>
     public static SelectStatement ParseSingleSelect(string sql)
     {
+        SqlStatement statement = ParseSingleStatement(sql);
+
+        if (statement is not SelectStatement select)
+        {
+            throw new NotSupportedException("Reactive subscriptions support only SELECT statements.");
+        }
+
+        return select;
+    }
+
+    /// <summary>
+    /// Parses the supplied SQL as exactly one SELECT-family statement.
+    /// </summary>
+    /// <param name="sql">The reactive subscription SQL.</param>
+    public static SqlStatement ParseSingleStatement(string sql)
+    {
         if (string.IsNullOrWhiteSpace(sql))
         {
             throw new NotSupportedException("Reactive subscriptions require a non-empty SELECT statement.");
@@ -94,6 +110,11 @@ internal static class ReactiveQueryParser
 
         if (statements[0] is not SelectStatement select)
         {
+            if (statements[0] is UnionSelectStatement union)
+            {
+                return union;
+            }
+
             throw new NotSupportedException("Reactive subscriptions support only SELECT statements.");
         }
 
@@ -139,6 +160,15 @@ internal static class ReactiveQueryParser
     public static bool IsDistinctShape(SelectStatement select)
     {
         return select.IsDistinct;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the statement is a UNION / UNION ALL shape.
+    /// </summary>
+    /// <param name="statement">The parsed statement.</param>
+    public static bool IsUnionShape(SqlStatement statement)
+    {
+        return statement is UnionSelectStatement;
     }
 
     /// <summary>

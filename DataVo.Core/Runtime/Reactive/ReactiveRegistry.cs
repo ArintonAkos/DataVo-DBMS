@@ -166,7 +166,21 @@ public sealed class ReactiveRegistry
     /// </remarks>
     private IReactiveQuery CreateQuery(string sql, string databaseName)
     {
-        Parser.AST.SelectStatement select = ReactiveQueryParser.ParseSingleSelect(sql);
+        Parser.AST.SqlStatement statement = ReactiveQueryParser.ParseSingleStatement(sql);
+        return CreateQuery(statement, databaseName, sql);
+    }
+
+    private IReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName, string? sql = null)
+    {
+        if (statement is Parser.AST.UnionSelectStatement union)
+        {
+            return new UnionReactiveQuery(union);
+        }
+
+        if (statement is not Parser.AST.SelectStatement select)
+        {
+            throw new NotSupportedException("Reactive subscriptions support only SELECT statements.");
+        }
 
         if (ReactiveQueryParser.TryGetJoinShape(select, out JoinShape joinShape))
         {
@@ -186,6 +200,11 @@ public sealed class ReactiveRegistry
         if (ReactiveQueryParser.IsDistinctShape(select))
         {
             return new DistinctReactiveQuery(select);
+        }
+
+        if (sql is null)
+        {
+            throw new NotSupportedException("Reactive subscriptions require SQL text for linear SELECT routing.");
         }
 
         return new ReactiveSubscription(sql);
