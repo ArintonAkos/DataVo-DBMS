@@ -187,6 +187,11 @@ public sealed class ReactiveRegistry
             return new JoinReactiveQuery(joinShape, _engine, databaseName);
         }
 
+        if (ReactiveQueryParser.TryGetSubqueryShape(select, out SubqueryShape subqueryShape))
+        {
+            return new SubqueryReactiveQuery(subqueryShape, _engine, databaseName);
+        }
+
         if (ReactiveQueryParser.IsAggregateShape(select))
         {
             return new AggregateReactiveQuery(select, _engine, databaseName);

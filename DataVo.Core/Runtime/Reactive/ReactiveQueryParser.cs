@@ -52,6 +52,25 @@ internal sealed record JoinShape(
     ExpressionNode? Where,
     IReadOnlyList<SelectColumnNode> Columns);
 
+internal enum SubqueryKind
+{
+    In,
+    NotIn,
+    Exists,
+    NotExists,
+}
+
+internal sealed record SubqueryShape(
+    string OuterTable,
+    string OuterAlias,
+    IReadOnlyList<SelectColumnNode> OuterColumns,
+    string OuterColumn,
+    string InnerTable,
+    string InnerAlias,
+    string? InnerColumn,
+    ExpressionNode? InnerWhere,
+    SubqueryKind Kind);
+
 /// <summary>
 /// Shared parsing and shape-inspection helpers for reactive query operators.
 /// </summary>
@@ -169,6 +188,74 @@ internal static class ReactiveQueryParser
     public static bool IsUnionShape(SqlStatement statement)
     {
         return statement is UnionSelectStatement;
+    }
+
+    /// <summary>
+    /// Attempts to extract a supported uncorrelated IN/EXISTS subquery shape.
+    /// </summary>
+    public static bool TryGetSubqueryShape(SelectStatement select, out SubqueryShape shape)
+    {
+        shape = null!;
+
+        if (select.FromTable is null
+            || select.Joins.Count > 0
+            || select.IsDistinct
+            || select.GroupByExpression is not null
+            || select.HavingExpression is not null
+            || select.OrderByExpression is not null
+            || select.LimitExpression is not null
+            || select.Ctes.Count > 0
+            || select.WhereExpression is null)
+        {
+            return false;
+        }
+
+        string outerTable = select.FromTable.Name;
+        string outerAlias = select.FromAlias?.Name ?? outerTable;
+
+        if (select.WhereExpression is InSubqueryExpressionNode inSubquery)
+        {
+            if (!TryResolveColumn(inSubquery.Left, out string? outerQualifier, out string outerColumn)
+                || (outerQualifier is not null
+                    && !outerQualifier.Equals(outerTable, StringComparison.OrdinalIgnoreCase)
+                    && !outerQualifier.Equals(outerAlias, StringComparison.OrdinalIgnoreCase))
+                || inSubquery.Subquery is not SelectStatement inner
+                || !TryValidateInnerSelect(inner, outerTable, outerAlias, requireSingleProjection: true, out string innerTable, out string innerAlias, out string? innerColumn))
+            {
+                return false;
+            }
+
+            shape = new SubqueryShape(
+                outerTable,
+                outerAlias,
+                select.Columns,
+                outerColumn,
+                innerTable,
+                innerAlias,
+                innerColumn,
+                inner.WhereExpression,
+                inSubquery.IsNegated ? SubqueryKind.NotIn : SubqueryKind.In);
+            return true;
+        }
+
+        if (select.WhereExpression is ExistsSubqueryExpressionNode exists
+            && exists.Subquery is SelectStatement existsInner
+            && TryValidateInnerSelect(existsInner, outerTable, outerAlias, requireSingleProjection: false, out string existsInnerTable, out string existsInnerAlias, out _))
+        {
+            shape = new SubqueryShape(
+                outerTable,
+                outerAlias,
+                select.Columns,
+                OuterColumn: string.Empty,
+                existsInnerTable,
+                existsInnerAlias,
+                InnerColumn: null,
+                existsInner.WhereExpression,
+                exists.IsNegated ? SubqueryKind.NotExists : SubqueryKind.Exists);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -317,6 +404,103 @@ internal static class ReactiveQueryParser
 
         return column.TableOrAlias.Equals(table, StringComparison.OrdinalIgnoreCase)
             || column.TableOrAlias.Equals(alias, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryValidateInnerSelect(
+        SelectStatement inner,
+        string outerTable,
+        string outerAlias,
+        bool requireSingleProjection,
+        out string innerTable,
+        out string innerAlias,
+        out string? innerColumn)
+    {
+        innerTable = string.Empty;
+        innerAlias = string.Empty;
+        innerColumn = null;
+
+        if (inner.FromTable is null
+            || inner.Joins.Count > 0
+            || inner.IsDistinct
+            || inner.GroupByExpression is not null
+            || inner.HavingExpression is not null
+            || inner.OrderByExpression is not null
+            || inner.LimitExpression is not null
+            || inner.Ctes.Count > 0
+            || inner.SubqueryContainsOuterReference(outerTable, outerAlias))
+        {
+            return false;
+        }
+
+        innerTable = inner.FromTable.Name;
+        innerAlias = inner.FromAlias?.Name ?? innerTable;
+
+        if (requireSingleProjection)
+        {
+            if (inner.Columns.Count != 1 || !TryResolveColumn(inner.Columns[0].Expression, out _, out string column))
+            {
+                return false;
+            }
+
+            innerColumn = column;
+        }
+
+        return true;
+    }
+
+    private static bool SubqueryContainsOuterReference(this SelectStatement inner, string outerTable, string outerAlias)
+    {
+        foreach (SelectColumnNode column in inner.Columns)
+        {
+            if (ContainsOuterReference(column.Expression, outerTable, outerAlias))
+            {
+                return true;
+            }
+        }
+
+        return inner.WhereExpression is not null
+            && ContainsOuterReference(inner.WhereExpression, outerTable, outerAlias);
+    }
+
+    private static bool ContainsOuterReference(ExpressionNode? expression, string outerTable, string outerAlias)
+    {
+        return expression switch
+        {
+            null => false,
+            ColumnRefNode column => !string.IsNullOrEmpty(column.TableOrAlias)
+                && (column.TableOrAlias.Equals(outerTable, StringComparison.OrdinalIgnoreCase)
+                    || column.TableOrAlias.Equals(outerAlias, StringComparison.OrdinalIgnoreCase)),
+            ResolvedColumnRefNode resolved => resolved.TableName.Equals(outerTable, StringComparison.OrdinalIgnoreCase)
+                || resolved.TableName.Equals(outerAlias, StringComparison.OrdinalIgnoreCase),
+            BinaryExpressionNode binary => ContainsOuterReference(binary.Left, outerTable, outerAlias)
+                || ContainsOuterReference(binary.Right, outerTable, outerAlias),
+            InSubqueryExpressionNode => true,
+            ExistsSubqueryExpressionNode => true,
+            ScalarSubqueryExpressionNode => true,
+            _ => false,
+        };
+    }
+
+    private static bool TryResolveColumn(ExpressionNode? expression, out string? qualifier, out string column)
+    {
+        qualifier = null;
+        column = string.Empty;
+
+        switch (expression)
+        {
+            case ColumnRefNode columnRef:
+                qualifier = string.IsNullOrWhiteSpace(columnRef.TableOrAlias) ? null : columnRef.TableOrAlias;
+                column = columnRef.Column;
+                return true;
+
+            case ResolvedColumnRefNode resolved:
+                qualifier = string.IsNullOrWhiteSpace(resolved.TableName) ? null : resolved.TableName;
+                column = resolved.Column;
+                return true;
+
+            default:
+                return false;
+        }
     }
 
     private static bool ContainsAggregate(ExpressionNode? expression)

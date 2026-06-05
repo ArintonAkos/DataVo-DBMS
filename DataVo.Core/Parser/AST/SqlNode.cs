@@ -204,6 +204,11 @@ public class ResolvedColumnRefNode : ExpressionNode
 public class InSubqueryExpressionNode : ExpressionNode
 {
     /// <summary>
+    /// Gets or sets a value indicating whether the predicate is negated (<c>NOT IN</c>).
+    /// </summary>
+    public bool IsNegated { get; set; }
+
+    /// <summary>
     /// Gets or sets the left expression tested for membership.
     /// </summary>
     public ExpressionNode Left { get; set; } = null!;
