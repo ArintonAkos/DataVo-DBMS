@@ -1710,9 +1710,15 @@ public class Parser(List<Token> tokens)
                     tokens.Dequeue();
                     values.Push(ParseExistsExpression(tokens, isNegated: true));
                 }
+                else if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.IN)
+                {
+                    tokens.Dequeue();
+                    ReducePendingOperandOperators(values, operators);
+                    values.Push(ParseInExpression(values, tokens, isNegated: true));
+                }
                 else
                 {
-                    throw new ParserException("Parser Error: Only NOT EXISTS is supported in subquery expressions.");
+                    throw new ParserException("Parser Error: Only NOT EXISTS and NOT IN subqueries are supported in subquery expressions.");
                 }
             }
             else
@@ -1978,7 +1984,7 @@ public class Parser(List<Token> tokens)
         operators.Push(token);
     }
 
-    private ExpressionNode ParseInExpression(Stack<ExpressionNode> values, Queue<Token> tokens)
+    private ExpressionNode ParseInExpression(Stack<ExpressionNode> values, Queue<Token> tokens, bool isNegated = false)
     {
         if (values.Count == 0)
         {
@@ -1996,9 +2002,15 @@ public class Parser(List<Token> tokens)
         {
             return new InSubqueryExpressionNode
             {
+                IsNegated = isNegated,
                 Left = left,
                 Subquery = ParseSubqueryStatement(tokens, "IN")
             };
+        }
+
+        if (isNegated)
+        {
+            throw new ParserException("Parser Error: NOT IN lists are not supported; use NOT IN (SELECT ...) for subqueries.");
         }
 
         List<ExpressionNode> options = [];
@@ -2206,7 +2218,7 @@ public class Parser(List<Token> tokens)
             ColumnRefNode column => new ColumnRefNode { TableOrAlias = column.TableOrAlias, Column = column.Column },
             ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
             ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },
-            InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
+            InSubqueryExpressionNode inSubquery => new InSubqueryExpressionNode { IsNegated = inSubquery.IsNegated, Left = CloneExpression(inSubquery.Left), Subquery = inSubquery.Subquery },
             ScalarSubqueryExpressionNode scalar => new ScalarSubqueryExpressionNode { Subquery = scalar.Subquery },
             _ => throw new ParserException($"Parser Error: Unsupported expression node '{node.GetType().Name}'.")
         };

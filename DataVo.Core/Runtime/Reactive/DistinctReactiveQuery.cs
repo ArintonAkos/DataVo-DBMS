@@ -164,7 +164,7 @@ internal sealed class DistinctReactiveQuery : IReactiveQuery
     private static string EncodeComponent(string value) =>
         value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value;
 
-    private static string ValueKey(object? value)
+    internal static string ValueKey(object? value)
     {
         if (value is null)
         {
