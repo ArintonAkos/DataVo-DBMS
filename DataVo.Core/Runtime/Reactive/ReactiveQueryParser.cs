@@ -69,7 +69,10 @@ internal sealed record SubqueryShape(
     string InnerAlias,
     string? InnerColumn,
     ExpressionNode? InnerWhere,
-    SubqueryKind Kind);
+    SubqueryKind Kind,
+    bool IsCorrelated = false,
+    string? OuterCorrelationColumn = null,
+    string? InnerCorrelationColumn = null);
 
 /// <summary>
 /// Shared parsing and shape-inspection helpers for reactive query operators.
@@ -220,7 +223,13 @@ internal static class ReactiveQueryParser
                     && !outerQualifier.Equals(outerTable, StringComparison.OrdinalIgnoreCase)
                     && !outerQualifier.Equals(outerAlias, StringComparison.OrdinalIgnoreCase))
                 || inSubquery.Subquery is not SelectStatement inner
-                || !TryValidateInnerSelect(inner, outerTable, outerAlias, requireSingleProjection: true, out string innerTable, out string innerAlias, out string? innerColumn))
+                || !TryValidateInnerSelect(inner, requireSingleProjection: true, out string innerTable, out string innerAlias, out string? innerColumn))
+            {
+                return false;
+            }
+
+            if (!TrySplitInnerWhere(inner.WhereExpression, outerTable, outerAlias, innerTable, innerAlias,
+                    out ExpressionNode? inResidual, out string? inOuterCorr, out string? inInnerCorr))
             {
                 return false;
             }
@@ -233,15 +242,24 @@ internal static class ReactiveQueryParser
                 innerTable,
                 innerAlias,
                 innerColumn,
-                inner.WhereExpression,
-                inSubquery.IsNegated ? SubqueryKind.NotIn : SubqueryKind.In);
+                inResidual,
+                inSubquery.IsNegated ? SubqueryKind.NotIn : SubqueryKind.In,
+                IsCorrelated: inOuterCorr is not null,
+                OuterCorrelationColumn: inOuterCorr,
+                InnerCorrelationColumn: inInnerCorr);
             return true;
         }
 
         if (select.WhereExpression is ExistsSubqueryExpressionNode exists
             && exists.Subquery is SelectStatement existsInner
-            && TryValidateInnerSelect(existsInner, outerTable, outerAlias, requireSingleProjection: false, out string existsInnerTable, out string existsInnerAlias, out _))
+            && TryValidateInnerSelect(existsInner, requireSingleProjection: false, out string existsInnerTable, out string existsInnerAlias, out _))
         {
+            if (!TrySplitInnerWhere(existsInner.WhereExpression, outerTable, outerAlias, existsInnerTable, existsInnerAlias,
+                    out ExpressionNode? existsResidual, out string? existsOuterCorr, out string? existsInnerCorr))
+            {
+                return false;
+            }
+
             shape = new SubqueryShape(
                 outerTable,
                 outerAlias,
@@ -250,12 +268,118 @@ internal static class ReactiveQueryParser
                 existsInnerTable,
                 existsInnerAlias,
                 InnerColumn: null,
-                existsInner.WhereExpression,
-                exists.IsNegated ? SubqueryKind.NotExists : SubqueryKind.Exists);
+                existsResidual,
+                exists.IsNegated ? SubqueryKind.NotExists : SubqueryKind.Exists,
+                IsCorrelated: existsOuterCorr is not null,
+                OuterCorrelationColumn: existsOuterCorr,
+                InnerCorrelationColumn: existsInnerCorr);
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Splits an inner subquery <c>WHERE</c> into its (optional) single equality correlation conjunct
+    /// <c>inner.col = outer.col</c> and the residual inner-only predicate. Returns <c>false</c> when the
+    /// inner WHERE references the outer table in any way that is not a single supported equality
+    /// correlation conjunct (so unsupported correlation shapes are rejected rather than silently wrong).
+    /// </summary>
+    private static bool TrySplitInnerWhere(
+        ExpressionNode? innerWhere,
+        string outerTable,
+        string outerAlias,
+        string innerTable,
+        string innerAlias,
+        out ExpressionNode? residual,
+        out string? outerCorrelationColumn,
+        out string? innerCorrelationColumn)
+    {
+        residual = innerWhere;
+        outerCorrelationColumn = null;
+        innerCorrelationColumn = null;
+
+        if (innerWhere is null)
+        {
+            return true;
+        }
+
+        // Flatten the top-level AND-chain. OR cannot host a correlation conjunct we can isolate, so an OR
+        // anywhere over an outer reference is rejected.
+        var conjuncts = new List<ExpressionNode>();
+        FlattenAnd(innerWhere, conjuncts);
+
+        var residualConjuncts = new List<ExpressionNode>();
+        foreach (ExpressionNode conjunct in conjuncts)
+        {
+            bool refsOuter = ContainsOuterReference(conjunct, outerTable, outerAlias);
+            if (!refsOuter)
+            {
+                residualConjuncts.Add(conjunct);
+                continue;
+            }
+
+            // This conjunct correlates to the outer table. Only a single, top-level
+            // inner.col = outer.col equality is supported.
+            if (outerCorrelationColumn is not null
+                || conjunct is not BinaryExpressionNode binary
+                || !binary.Operator.Equals(Operators.EQUALS, StringComparison.Ordinal)
+                || !TryResolveColumn(binary.Left, out string? leftQualifier, out string leftColumn)
+                || !TryResolveColumn(binary.Right, out string? rightQualifier, out string rightColumn))
+            {
+                return false;
+            }
+
+            bool leftOuter = QualifierMatches(leftQualifier, outerTable, outerAlias);
+            bool leftInner = QualifierMatches(leftQualifier, innerTable, innerAlias);
+            bool rightOuter = QualifierMatches(rightQualifier, outerTable, outerAlias);
+            bool rightInner = QualifierMatches(rightQualifier, innerTable, innerAlias);
+
+            if (leftOuter && rightInner && !leftInner && !rightOuter)
+            {
+                outerCorrelationColumn = leftColumn;
+                innerCorrelationColumn = rightColumn;
+            }
+            else if (rightOuter && leftInner && !rightInner && !leftOuter)
+            {
+                outerCorrelationColumn = rightColumn;
+                innerCorrelationColumn = leftColumn;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        residual = residualConjuncts.Count == 0
+            ? null
+            : residualConjuncts.Aggregate((left, right) => new BinaryExpressionNode
+            {
+                Operator = Operators.AND,
+                Left = left,
+                Right = right,
+            });
+
+        return true;
+    }
+
+    private static void FlattenAnd(ExpressionNode expression, List<ExpressionNode> conjuncts)
+    {
+        if (expression is BinaryExpressionNode binary && binary.Operator.Equals(Operators.AND, StringComparison.Ordinal))
+        {
+            FlattenAnd(binary.Left, conjuncts);
+            FlattenAnd(binary.Right, conjuncts);
+            return;
+        }
+
+        conjuncts.Add(expression);
+    }
+
+    private static bool QualifierMatches(string? qualifier, string table, string alias)
+    {
+        return qualifier is not null
+            && (qualifier.Equals(table, StringComparison.OrdinalIgnoreCase)
+                || qualifier.Equals(alias, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -408,8 +532,6 @@ internal static class ReactiveQueryParser
 
     private static bool TryValidateInnerSelect(
         SelectStatement inner,
-        string outerTable,
-        string outerAlias,
         bool requireSingleProjection,
         out string innerTable,
         out string innerAlias,
@@ -426,8 +548,7 @@ internal static class ReactiveQueryParser
             || inner.HavingExpression is not null
             || inner.OrderByExpression is not null
             || inner.LimitExpression is not null
-            || inner.Ctes.Count > 0
-            || inner.SubqueryContainsOuterReference(outerTable, outerAlias))
+            || inner.Ctes.Count > 0)
         {
             return false;
         }
@@ -437,6 +558,8 @@ internal static class ReactiveQueryParser
 
         if (requireSingleProjection)
         {
+            // The IN value column must be a plain inner column. A correlated scalar aggregate
+            // (for example COUNT(*) = R.col) is out of scope and is rejected here.
             if (inner.Columns.Count != 1 || !TryResolveColumn(inner.Columns[0].Expression, out _, out string column))
             {
                 return false;
@@ -446,20 +569,6 @@ internal static class ReactiveQueryParser
         }
 
         return true;
-    }
-
-    private static bool SubqueryContainsOuterReference(this SelectStatement inner, string outerTable, string outerAlias)
-    {
-        foreach (SelectColumnNode column in inner.Columns)
-        {
-            if (ContainsOuterReference(column.Expression, outerTable, outerAlias))
-            {
-                return true;
-            }
-        }
-
-        return inner.WhereExpression is not null
-            && ContainsOuterReference(inner.WhereExpression, outerTable, outerAlias);
     }
 
     private static bool ContainsOuterReference(ExpressionNode? expression, string outerTable, string outerAlias)

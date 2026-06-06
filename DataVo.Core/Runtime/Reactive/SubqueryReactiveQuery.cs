@@ -4,8 +4,15 @@ using DataVo.Core.Runtime.Changes;
 namespace DataVo.Core.Runtime.Reactive;
 
 /// <summary>
-/// Incremental uncorrelated IN/EXISTS subquery operator implemented as a semi-join.
+/// Incremental IN/EXISTS subquery operator implemented as a semi/anti-join.
 /// </summary>
+/// <remarks>
+/// Two shapes are maintained behind the same routing. An <em>uncorrelated</em> subquery tracks a single
+/// global membership index (a per-IN-value count, or a single EXISTS count). A <em>correlated</em>
+/// subquery (<c>… WHERE S.k = R.k [AND &lt;inner pred&gt;]</c>) indexes the inner relation by the
+/// correlation key, so a change to <c>S</c> re-evaluates only the outer rows whose correlation key was
+/// affected.
+/// </remarks>
 internal sealed class SubqueryReactiveQuery : IReactiveQuery
 {
     private readonly SubqueryShape _shape;
@@ -17,6 +24,12 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
     private readonly Dictionary<string, HashSet<string>> _outerByValue = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _innerValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _emitted = new(StringComparer.Ordinal);
+
+    // Correlated state: inner match counts keyed by correlation key (EXISTS) or (correlationKey, inValue)
+    // (IN), and the outer-row index keyed by the same so an affected key's outer rows can be re-evaluated.
+    private readonly Dictionary<string, int> _innerByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _outerByCorrelation = new(StringComparer.Ordinal);
+
     private int _innerExistsCount;
     private bool _seeded;
 
@@ -49,6 +62,10 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
     }
 
     public IReadOnlyCollection<string> Tables => [_shape.OuterTable, _shape.InnerTable];
+
+    private bool IsCorrelated => _shape.IsCorrelated;
+
+    private bool IsExistsKind => _shape.Kind is SubqueryKind.Exists or SubqueryKind.NotExists;
 
     public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
@@ -112,7 +129,7 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
                     touchedInnerValues.Add(key);
                 }
 
-                recheckAllOuter = IsExistsKind;
+                recheckAllOuter |= IsExistsKind && !IsCorrelated;
             }
 
             if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update && _innerPredicate.Matches(change.After))
@@ -123,7 +140,7 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
                     touchedInnerValues.Add(key);
                 }
 
-                recheckAllOuter = IsExistsKind;
+                recheckAllOuter |= IsExistsKind && !IsCorrelated;
             }
         }
 
@@ -136,9 +153,10 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
         else
         {
+            Dictionary<string, HashSet<string>> index = IsCorrelated ? _outerByCorrelation : _outerByValue;
             foreach (string valueKey in touchedInnerValues)
             {
-                if (_outerByValue.TryGetValue(valueKey, out HashSet<string>? pks))
+                if (index.TryGetValue(valueKey, out HashSet<string>? pks))
                 {
                     foreach (string pk in pks)
                     {
@@ -150,8 +168,6 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
 
         return Diff(candidates);
     }
-
-    private bool IsExistsKind => _shape.Kind is SubqueryKind.Exists or SubqueryKind.NotExists;
 
     private void EnsureBaseline()
     {
@@ -238,66 +254,107 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
 
     private void AddOuterIndex(string pk, IReadOnlyDictionary<string, object?> row)
     {
+        if (IsCorrelated)
+        {
+            AddToIndex(_outerByCorrelation, OuterCorrelationKey(row), pk);
+            return;
+        }
+
         if (IsExistsKind)
         {
             return;
         }
 
-        string key = OuterValueKey(row);
-        if (!_outerByValue.TryGetValue(key, out HashSet<string>? pks))
+        AddToIndex(_outerByValue, OuterValueKey(row), pk);
+    }
+
+    private void RemoveOuterIndex(string pk, IReadOnlyDictionary<string, object?> row)
+    {
+        if (IsCorrelated)
+        {
+            RemoveFromIndex(_outerByCorrelation, OuterCorrelationKey(row), pk);
+            return;
+        }
+
+        if (IsExistsKind)
+        {
+            return;
+        }
+
+        RemoveFromIndex(_outerByValue, OuterValueKey(row), pk);
+    }
+
+    private static void AddToIndex(Dictionary<string, HashSet<string>> index, string key, string pk)
+    {
+        if (!index.TryGetValue(key, out HashSet<string>? pks))
         {
             pks = new HashSet<string>(StringComparer.Ordinal);
-            _outerByValue[key] = pks;
+            index[key] = pks;
         }
 
         pks.Add(pk);
     }
 
-    private void RemoveOuterIndex(string pk, IReadOnlyDictionary<string, object?> row)
+    private static void RemoveFromIndex(Dictionary<string, HashSet<string>> index, string key, string pk)
     {
-        if (IsExistsKind)
-        {
-            return;
-        }
-
-        string key = OuterValueKey(row);
-        if (_outerByValue.TryGetValue(key, out HashSet<string>? pks))
+        if (index.TryGetValue(key, out HashSet<string>? pks))
         {
             pks.Remove(pk);
             if (pks.Count == 0)
             {
-                _outerByValue.Remove(key);
+                index.Remove(key);
             }
         }
     }
 
     private string? AddInner(IReadOnlyDictionary<string, object?> row, int weight)
     {
+        if (IsCorrelated)
+        {
+            string key = InnerCorrelationKey(row);
+            Bump(_innerByKey, key, weight);
+            return key;
+        }
+
         if (IsExistsKind)
         {
             _innerExistsCount += weight;
             return null;
         }
 
-        string key = InnerValueKey(row);
-        int next = _innerValues.GetValueOrDefault(key) + weight;
+        string valueKey = InnerValueKey(row);
+        Bump(_innerValues, valueKey, weight);
+        return valueKey;
+    }
+
+    private static void Bump(Dictionary<string, int> counts, string key, int weight)
+    {
+        int next = counts.GetValueOrDefault(key) + weight;
         if (next <= 0)
         {
-            _innerValues.Remove(key);
+            counts.Remove(key);
         }
         else
         {
-            _innerValues[key] = next;
+            counts[key] = next;
         }
-
-        return key;
     }
 
     private bool Qualifies(IReadOnlyDictionary<string, object?> outerRow)
     {
-        bool contains = IsExistsKind
-            ? _innerExistsCount > 0
-            : _innerValues.GetValueOrDefault(OuterValueKey(outerRow)) > 0;
+        bool contains;
+        if (IsCorrelated)
+        {
+            contains = _innerByKey.GetValueOrDefault(OuterCorrelationKey(outerRow)) > 0;
+        }
+        else if (IsExistsKind)
+        {
+            contains = _innerExistsCount > 0;
+        }
+        else
+        {
+            contains = _innerValues.GetValueOrDefault(OuterValueKey(outerRow)) > 0;
+        }
 
         return _shape.Kind is SubqueryKind.NotIn or SubqueryKind.NotExists
             ? !contains
@@ -306,15 +363,40 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
 
     private string OuterValueKey(IReadOnlyDictionary<string, object?> row)
     {
-        object? value = row.TryGetValue(_shape.OuterColumn, out object? candidate) ? candidate : null;
-        return DistinctReactiveQuery.ValueKey(value);
+        return ValueKeyOf(row, _shape.OuterColumn);
     }
 
     private string InnerValueKey(IReadOnlyDictionary<string, object?> row)
     {
-        object? value = _shape.InnerColumn is not null && row.TryGetValue(_shape.InnerColumn, out object? candidate)
-            ? candidate
-            : null;
+        return _shape.InnerColumn is null ? string.Empty : ValueKeyOf(row, _shape.InnerColumn);
+    }
+
+    /// <summary>
+    /// Builds the correlation key for an outer row: the outer correlation column value for EXISTS, or the
+    /// (correlation, IN value) compound key for IN.
+    /// </summary>
+    private string OuterCorrelationKey(IReadOnlyDictionary<string, object?> row)
+    {
+        string correlation = ValueKeyOf(row, _shape.OuterCorrelationColumn!);
+        return IsExistsKind ? correlation : Compound(correlation, ValueKeyOf(row, _shape.OuterColumn));
+    }
+
+    /// <summary>
+    /// Builds the correlation key for an inner row: the inner correlation column value for EXISTS, or the
+    /// (correlation, projected IN value) compound key for IN — aligned with <see cref="OuterCorrelationKey"/>.
+    /// </summary>
+    private string InnerCorrelationKey(IReadOnlyDictionary<string, object?> row)
+    {
+        string correlation = ValueKeyOf(row, _shape.InnerCorrelationColumn!);
+        return IsExistsKind ? correlation : Compound(correlation, InnerValueKey(row));
+    }
+
+    private static string Compound(string correlation, string value) =>
+        correlation.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + correlation + value;
+
+    private static string ValueKeyOf(IReadOnlyDictionary<string, object?> row, string column)
+    {
+        object? value = row.TryGetValue(column, out object? candidate) ? candidate : null;
         return DistinctReactiveQuery.ValueKey(value);
     }
 
