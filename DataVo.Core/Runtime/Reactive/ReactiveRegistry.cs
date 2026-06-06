@@ -166,6 +166,13 @@ public sealed class ReactiveRegistry
     /// </remarks>
     private IReactiveQuery CreateQuery(string sql, string databaseName)
     {
+        // A WITH RECURSIVE CTE is detected at the SQL level: the engine's primary parser does not accept
+        // the RECURSIVE keyword nor a UNION ALL CTE body, so RecursiveCteParser slices and validates it.
+        if (RecursiveCteParser.LooksRecursive(sql))
+        {
+            return new RecursiveCteReactiveQuery(RecursiveCteParser.Parse(sql), _engine, databaseName);
+        }
+
         Parser.AST.SqlStatement statement = ReactiveQueryParser.ParseSingleStatement(sql);
         return CreateQuery(statement, databaseName, sql);
     }
