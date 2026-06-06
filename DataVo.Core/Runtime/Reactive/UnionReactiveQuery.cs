@@ -8,25 +8,36 @@ namespace DataVo.Core.Runtime.Reactive;
 /// </summary>
 internal sealed class UnionReactiveQuery : IReactiveQuery
 {
-    private sealed record BranchSpec(
+    private sealed record SeedBranch(
         string Table,
         ReactivePredicate Predicate,
         IReadOnlyList<string> SourceColumns,
         IReadOnlyList<string> OutputColumns);
 
-    private readonly BranchSpec _left;
-    private readonly BranchSpec _right;
+    private sealed record BranchAdapter(
+        IReactiveQuery Query,
+        IReadOnlyList<string> ChildOutputColumns,
+        IReadOnlyList<string> UnionOutputColumns);
+
+    private readonly SeedBranch _leftSeed;
+    private readonly SeedBranch _rightSeed;
+    private readonly BranchAdapter _left;
+    private readonly BranchAdapter _right;
     private readonly bool _isAll;
     private readonly Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Count)> _counts = new(StringComparer.Ordinal);
 
-    public UnionReactiveQuery(UnionSelectStatement union)
+    public UnionReactiveQuery(UnionSelectStatement union, Func<SelectStatement, IReactiveQuery> childFactory)
     {
         Validate(union);
 
         _isAll = union.Branches[0].IsAll;
-        _left = BuildLeftBranch(union.Left);
-        _right = BuildRightBranch(union.Branches[0].Select, _left.OutputColumns);
-        Tables = new[] { _left.Table, _right.Table }
+        _leftSeed = BuildLeftSeedBranch(union.Left);
+        _rightSeed = BuildRightSeedBranch(union.Branches[0].Select, _leftSeed.OutputColumns);
+        _left = BuildAdapter(union.Left, _leftSeed.OutputColumns, childFactory);
+        _right = BuildAdapter(union.Branches[0].Select, _leftSeed.OutputColumns, childFactory);
+
+        Tables = _left.Query.Tables
+            .Concat(_right.Query.Tables)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -35,9 +46,21 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
 
     public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
-        foreach (BranchSpec branch in BranchesFor(table))
+        var materialized = rows.ToArray();
+
+        foreach (BranchAdapter branch in BranchesFor(table))
         {
-            foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+            branch.Query.Seed(table, materialized);
+        }
+
+        if (_isAll)
+        {
+            return;
+        }
+
+        foreach (SeedBranch branch in SeedBranchesFor(table))
+        {
+            foreach ((long _, IReadOnlyDictionary<string, object?> row) in materialized)
             {
                 if (!branch.Predicate.Matches(row))
                 {
@@ -57,20 +80,19 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
     {
         Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Delta)> deltas = new(StringComparer.Ordinal);
 
-        foreach (RowChange change in changes)
+        foreach (BranchAdapter branch in new[] { _left, _right })
         {
-            foreach (BranchSpec branch in BranchesFor(change.Table))
-            {
-                if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update && branch.Predicate.Matches(change.Before))
-                {
-                    AddDelta(deltas, Project(branch, change.Before), -1);
-                }
+            List<RowChange> relevant = changes
+                .Where(change => branch.Query.Tables.Any(table => table.Equals(change.Table, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
 
-                if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update && branch.Predicate.Matches(change.After))
-                {
-                    AddDelta(deltas, Project(branch, change.After), +1);
-                }
+            if (relevant.Count == 0)
+            {
+                continue;
             }
+
+            QueryChange childChange = branch.Query.Apply(relevant);
+            AddChildDeltas(deltas, branch, childChange);
         }
 
         return _isAll ? ApplyUnionAll(deltas) : ApplyUnion(deltas);
@@ -132,16 +154,29 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         return new QueryChange(added, removed, []);
     }
 
-    private IEnumerable<BranchSpec> BranchesFor(string table)
+    private IEnumerable<BranchAdapter> BranchesFor(string table)
     {
-        if (_left.Table.Equals(table, StringComparison.OrdinalIgnoreCase))
+        if (_left.Query.Tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase)))
         {
             yield return _left;
         }
 
-        if (_right.Table.Equals(table, StringComparison.OrdinalIgnoreCase))
+        if (_right.Query.Tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase)))
         {
             yield return _right;
+        }
+    }
+
+    private IEnumerable<SeedBranch> SeedBranchesFor(string table)
+    {
+        if (_leftSeed.Table.Equals(table, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return _leftSeed;
+        }
+
+        if (_rightSeed.Table.Equals(table, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return _rightSeed;
         }
     }
 
@@ -172,7 +207,49 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         deltas[key] = (row, weight);
     }
 
-    private static IReadOnlyDictionary<string, object?> Project(BranchSpec branch, IReadOnlyDictionary<string, object?> row)
+    private static void AddChildDeltas(
+        Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Delta)> deltas,
+        BranchAdapter branch,
+        QueryChange childChange)
+    {
+        foreach (IReadOnlyDictionary<string, object?> row in childChange.Added)
+        {
+            AddDelta(deltas, Normalize(branch, row), +1);
+        }
+
+        foreach (IReadOnlyDictionary<string, object?> row in childChange.Removed)
+        {
+            AddDelta(deltas, Normalize(branch, row), -1);
+        }
+
+        if (childChange.Updated.Count > 0 && childChange.UpdatedBefore.Count != childChange.Updated.Count)
+        {
+            throw new NotSupportedException("Reactive UNION child updates require before-images.");
+        }
+
+        for (int i = 0; i < childChange.Updated.Count; i++)
+        {
+            AddDelta(deltas, Normalize(branch, childChange.UpdatedBefore[i]), -1);
+            AddDelta(deltas, Normalize(branch, childChange.Updated[i]), +1);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object?> Normalize(
+        BranchAdapter branch,
+        IReadOnlyDictionary<string, object?> row)
+    {
+        var normalized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < branch.ChildOutputColumns.Count; i++)
+        {
+            string child = branch.ChildOutputColumns[i];
+            string output = branch.UnionOutputColumns[i];
+            normalized[output] = row.TryGetValue(child, out object? value) ? value : null;
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyDictionary<string, object?> Project(SeedBranch branch, IReadOnlyDictionary<string, object?> row)
     {
         var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < branch.SourceColumns.Count; i++)
@@ -185,15 +262,15 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         return projected;
     }
 
-    private static BranchSpec BuildLeftBranch(SelectStatement select)
+    private static SeedBranch BuildLeftSeedBranch(SelectStatement select)
     {
         ValidateBranch(select);
         var sources = select.Columns.Select(ResolveProjectedColumnName).ToArray();
         var outputs = select.Columns.Select(ResolveOutputColumnName).ToArray();
-        return new BranchSpec(select.FromTable!.Name, ReactivePredicate.Compile(select.WhereExpression), sources, outputs);
+        return new SeedBranch(select.FromTable!.Name, ReactivePredicate.Compile(select.WhereExpression), sources, outputs);
     }
 
-    private static BranchSpec BuildRightBranch(SelectStatement select, IReadOnlyList<string> outputColumns)
+    private static SeedBranch BuildRightSeedBranch(SelectStatement select, IReadOnlyList<string> outputColumns)
     {
         ValidateBranch(select);
         var sources = select.Columns.Select(ResolveProjectedColumnName).ToArray();
@@ -202,7 +279,21 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
             throw new NotSupportedException("Reactive UNION branches must project the same number of columns.");
         }
 
-        return new BranchSpec(select.FromTable!.Name, ReactivePredicate.Compile(select.WhereExpression), sources, outputColumns);
+        return new SeedBranch(select.FromTable!.Name, ReactivePredicate.Compile(select.WhereExpression), sources, outputColumns);
+    }
+
+    private static BranchAdapter BuildAdapter(
+        SelectStatement select,
+        IReadOnlyList<string> unionOutputColumns,
+        Func<SelectStatement, IReactiveQuery> childFactory)
+    {
+        var childOutputColumns = select.Columns.Select(ResolveOutputColumnName).ToArray();
+        if (childOutputColumns.Length != unionOutputColumns.Count)
+        {
+            throw new NotSupportedException("Reactive UNION branches must project the same number of columns.");
+        }
+
+        return new BranchAdapter(childFactory(select), childOutputColumns, unionOutputColumns);
     }
 
     private static void Validate(UnionSelectStatement union)
