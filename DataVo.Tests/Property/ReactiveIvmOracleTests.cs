@@ -327,6 +327,119 @@ public class ReactiveIvmOracleTests
     }
 
     [Theory]
+    [InlineData(StorageMode.InMemory, 81)]
+    [InlineData(StorageMode.InMemory, 82)]
+    [InlineData(StorageMode.Disk, 83)]
+    [InlineData(StorageMode.Disk, 84)]
+    public void CorrelatedSubquery_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE R (Id INT PRIMARY KEY, K INT, C INT)");
+        ctx.Execute("CREATE TABLE S (Id INT PRIMARY KEY, K INT, V INT, Flag INT)");
+
+        // Correlated EXISTS (equality correlation + residual inner predicate) and correlated IN
+        // (equality correlation + value match). Both reference the single outer table R via S.K = R.K.
+        const string existsSql =
+            "SELECT Id FROM R WHERE EXISTS (SELECT 1 FROM S WHERE S.K = R.K AND S.Flag = 1)";
+        const string inSql =
+            "SELECT Id FROM R WHERE R.C IN (SELECT S.V FROM S WHERE S.K = R.K AND S.Flag = 1)";
+        const string notExistsSql =
+            "SELECT Id FROM R WHERE NOT EXISTS (SELECT 1 FROM S WHERE S.K = R.K AND S.Flag = 1)";
+
+        var liveExists = new HashSet<int>();
+        var liveIn = new HashSet<int>();
+        var liveNotExists = new HashSet<int>();
+
+        using var existsSub = ctx.Subscribe(existsSql, qc => ApplySet(liveExists, qc));
+        using var inSub = ctx.Subscribe(inSql, qc => ApplySet(liveIn, qc));
+        using var notExistsSub = ctx.Subscribe(notExistsSql, qc => ApplySet(liveNotExists, qc));
+
+        for (int i = 0; i < 500; i++)
+        {
+            int table = rng.Next(2);
+            int op = rng.Next(3);
+
+            try
+            {
+                if (table == 0)
+                {
+                    int id = rng.Next(1, 18);
+                    int k = rng.Next(1, 6);
+                    int c = rng.Next(0, 6);
+                    if (op == 0) ctx.Execute($"INSERT INTO R VALUES ({id}, {k}, {c})");
+                    else if (op == 1) ctx.Execute($"UPDATE R SET K = {k}, C = {c} WHERE Id = {id}");
+                    else ctx.Execute($"DELETE FROM R WHERE Id = {id}");
+                }
+                else
+                {
+                    int id = rng.Next(1, 18);
+                    int k = rng.Next(1, 6);
+                    int v = rng.Next(0, 6);
+                    int flag = rng.Next(0, 2);
+                    if (op == 0) ctx.Execute($"INSERT INTO S VALUES ({id}, {k}, {v}, {flag})");
+                    else if (op == 1) ctx.Execute($"UPDATE S SET K = {k}, V = {v}, Flag = {flag} WHERE Id = {id}");
+                    else ctx.Execute($"DELETE FROM S WHERE Id = {id}");
+                }
+            }
+            catch { /* PK clash on insert: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            // The batch engine's correlated-subquery path returns empty for every correlated EXISTS/IN
+            // (a pre-existing batch bug unrelated to incremental maintenance), so — as with the L2 batch
+            // MIN/MAX and the outer-join oracle — the reference is computed independently from the raw
+            // single-table R and S rows, keeping the incremental==recompute gate honest against true SQL
+            // semantics rather than the broken batch path.
+            var (refExists, refIn, refNotExists) = CorrelatedReference(ctx);
+
+            Assert.Equal(refExists, liveExists.OrderBy(x => x).ToArray());
+            Assert.Equal(refIn, liveIn.OrderBy(x => x).ToArray());
+            Assert.Equal(refNotExists, liveNotExists.OrderBy(x => x).ToArray());
+        }
+
+        static void ApplySet(HashSet<int> live, QueryChange qc)
+        {
+            foreach (var r in qc.Added.Concat(qc.Updated)) live.Add(Convert.ToInt32(r["Id"]));
+            foreach (var r in qc.Removed) live.Remove(Convert.ToInt32(r["Id"]));
+        }
+    }
+
+    /// <summary>
+    /// Computes the correlated EXISTS / IN / NOT EXISTS reference for the L4b oracle directly from the raw
+    /// R(Id,K,C) and S(Id,K,V,Flag) rows, expressing the true SQL semantics:
+    /// EXISTS → some S with S.K=R.K and S.Flag=1; IN → additionally S.V=R.C; NOT EXISTS → the complement.
+    /// </summary>
+    private static (int[] Exists, int[] In, int[] NotExists) CorrelatedReference(DataVoContext ctx)
+    {
+        var rRows = ctx.Execute("SELECT Id, K, C FROM R").Single().Data
+            .Select(d => (Id: Convert.ToInt32(d["Id"]), K: Convert.ToInt32(d["K"]), C: Convert.ToInt32(d["C"])))
+            .ToList();
+        var sRows = ctx.Execute("SELECT Id, K, V, Flag FROM S").Single().Data
+            .Select(d => (K: Convert.ToInt32(d["K"]), V: Convert.ToInt32(d["V"]), Flag: Convert.ToInt32(d["Flag"])))
+            .Where(s => s.Flag == 1)
+            .ToList();
+
+        var exists = new List<int>();
+        var inList = new List<int>();
+        var notExists = new List<int>();
+
+        foreach (var r in rRows)
+        {
+            bool any = sRows.Any(s => s.K == r.K);
+            bool anyValue = sRows.Any(s => s.K == r.K && s.V == r.C);
+            if (any) exists.Add(r.Id);
+            else notExists.Add(r.Id);
+            if (anyValue) inList.Add(r.Id);
+        }
+
+        return (
+            exists.OrderBy(x => x).ToArray(),
+            inList.OrderBy(x => x).ToArray(),
+            notExists.OrderBy(x => x).ToArray());
+    }
+
+    [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
     [InlineData(StorageMode.Disk, 33)]
