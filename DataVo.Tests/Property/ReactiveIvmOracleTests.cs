@@ -440,6 +440,102 @@ public class ReactiveIvmOracleTests
     }
 
     [Theory]
+    [InlineData(StorageMode.InMemory, 91)]
+    [InlineData(StorageMode.InMemory, 92)]
+    [InlineData(StorageMode.Disk, 93)]
+    [InlineData(StorageMode.Disk, 94)]
+    public void RecursiveCte_Incremental_Equals_Recompute(StorageMode mode, int seed)
+    {
+        var rng = new Random(seed);
+        using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
+        ctx.Execute("CREATE TABLE Edge (Src INT, Dst INT, Id INT PRIMARY KEY)");
+
+        const string sql = @"WITH RECURSIVE Reach AS (
+            SELECT Src, Dst FROM Edge
+            UNION ALL
+            SELECT r.Src, e.Dst FROM Reach r INNER JOIN Edge e ON e.Src = r.Dst)
+            SELECT Src, Dst FROM Reach";
+
+        var live = new HashSet<(int, int)>();
+        using var sub = ctx.Subscribe(sql, qc =>
+        {
+            foreach (var r in qc.Added) live.Add((Convert.ToInt32(r["Src"]), Convert.ToInt32(r["Dst"])));
+            foreach (var r in qc.Removed) live.Remove((Convert.ToInt32(r["Src"]), Convert.ToInt32(r["Dst"])));
+        });
+
+        // A small node set (1..5) keeps cycles frequent so the deletion / cyclic-retraction path is
+        // exercised hard. Edge Id is the primary key the change capture uses to identify rows.
+        const int nodes = 5;
+        int nextId = 1;
+        var edgeIds = new List<int>();
+
+        for (int i = 0; i < 400; i++)
+        {
+            int op = rng.Next(3);
+            try
+            {
+                if (op == 0 || edgeIds.Count == 0)
+                {
+                    int id = nextId++;
+                    ctx.Execute($"INSERT INTO Edge VALUES ({rng.Next(1, nodes + 1)}, {rng.Next(1, nodes + 1)}, {id})");
+                    edgeIds.Add(id);
+                }
+                else if (op == 1)
+                {
+                    int id = edgeIds[rng.Next(edgeIds.Count)];
+                    ctx.Execute($"UPDATE Edge SET Src = {rng.Next(1, nodes + 1)}, Dst = {rng.Next(1, nodes + 1)} WHERE Id = {id}");
+                }
+                else
+                {
+                    int idx = rng.Next(edgeIds.Count);
+                    int id = edgeIds[idx];
+                    ctx.Execute($"DELETE FROM Edge WHERE Id = {id}");
+                    edgeIds.RemoveAt(idx);
+                }
+            }
+            catch { /* unexpected clash: skip; oracle unaffected */ }
+
+            ctx.DispatchPendingNotifications();
+
+            // The batch engine does not support WITH RECURSIVE, so the reachability reference is computed
+            // independently as the transitive closure of the raw Edge rows (handles cycles), mirroring the
+            // outer-join and correlated-subquery oracles' independent references.
+            var expected = ReachabilityReference(ctx).OrderBy(x => x).ToArray();
+            Assert.Equal(expected, live.OrderBy(x => x).ToArray());
+        }
+    }
+
+    /// <summary>
+    /// Computes graph reachability (transitive closure, set semantics — terminates on cycles) over the raw
+    /// Edge(Src,Dst) rows as the trustworthy recompute reference for the recursive-CTE oracle.
+    /// </summary>
+    private static HashSet<(int, int)> ReachabilityReference(DataVoContext ctx)
+    {
+        var edges = ctx.Execute("SELECT Src, Dst FROM Edge").Single().Data
+            .Select(d => (Src: Convert.ToInt32(d["Src"]), Dst: Convert.ToInt32(d["Dst"])))
+            .ToList();
+
+        var reach = new HashSet<(int, int)>(edges);
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var (src, dst) in reach.ToArray())
+            {
+                foreach (var e in edges)
+                {
+                    if (e.Src == dst && reach.Add((src, e.Dst)))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        return reach;
+    }
+
+    [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
     [InlineData(StorageMode.Disk, 33)]
