@@ -1,4 +1,4 @@
-# Reactive Queries (L1–L4 Part 1)
+# Reactive Queries (L1–L4)
 
 Reactive queries let you register a standing `SELECT` and be told exactly what changed
 in its result set — which rows were **added**, **removed**, or **updated** — without polling or
@@ -7,9 +7,11 @@ re-running the query against the whole table.
 This page documents **Phase 1 (linear / L1)** — single-table `SELECT … WHERE`;
 **Phase 2 (aggregates + top-K / L2)** — single-table `GROUP BY` aggregates
 (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) and maintained `ORDER BY … LIMIT` top-K windows;
-**Phase 3 (joins / L3)** — two-table equi-joins; and **Phase 4 part 1 (L4)** — reactive
-`DISTINCT`, `UNION`/`UNION ALL`, and uncorrelated `IN`/`EXISTS` subqueries. The public API below is
-**stable** across layers.
+**Phase 3 (joins / L3)** — two-table equi-joins; **Phase 4 part 1 (L4)** — reactive
+`DISTINCT`, `UNION`/`UNION ALL`, and uncorrelated `IN`/`EXISTS` subqueries; and **Phase 4 part 2
+(L4)** — correlated `IN`/`EXISTS` subqueries and recursive CTEs (`WITH RECURSIVE`), which bring the
+reactive SQL surface to parity with the batch surface for the supported shapes. The public API below
+is **stable** across layers.
 
 ## API
 
@@ -255,8 +257,9 @@ maintains:
 - for `EXISTS`/`NOT EXISTS`, a count of inner rows passing the inner `WHERE`.
 
 Outer-table changes re-evaluate only the changed outer rows. Inner-table changes re-evaluate the
-outer rows whose `IN` key changed, or all outer rows when an `EXISTS` result flips. The inner query
-must be uncorrelated; references from the inner query back to the outer table are rejected.
+outer rows whose `IN` key changed, or all outer rows when an `EXISTS` result flips. In this
+*uncorrelated* form the inner query has a single global membership; correlated forms are covered in
+L4 part 2 below.
 
 ### Memory Characteristics (L4 Part 1)
 
@@ -265,8 +268,82 @@ must be uncorrelated; references from the inner query back to the outer table ar
 - `IN`/`NOT IN` keeps the inner value-set multiplicities and an outer index by the tested value.
 - `EXISTS`/`NOT EXISTS` keeps all outer rows by primary key plus an inner qualifying-row count.
 
-Correlated subqueries and recursive CTEs are intentionally not part of L4 part 1; they are the final
-reactive recursion phase.
+## Supported SQL (L4 Part 2)
+
+L4 part 2 completes the reactive surface with **correlated** `IN`/`EXISTS` subqueries and **recursive
+CTEs**. With these, the reactive SQL surface matches the batch SQL surface for the supported shapes.
+
+### Correlated IN / EXISTS Subqueries
+
+A correlated subquery references the outer table through a single equality correlation in its inner
+`WHERE` (`S.k = R.k`), optionally with an additional inner-only predicate:
+
+```sql
+-- live "outer rows that have a matching, flagged inner row of the same key"
+SELECT Id
+FROM R
+WHERE EXISTS (SELECT 1 FROM S WHERE S.K = R.K AND S.Flag = 1)
+```
+
+```sql
+SELECT Id
+FROM R
+WHERE R.C IN (SELECT S.V FROM S WHERE S.K = R.K AND S.Flag = 1)
+```
+
+`NOT EXISTS` and `NOT IN` are supported as the negated complements. The operator indexes the inner
+relation **by the correlation key** — a per-key match count for `EXISTS`, or a per-`(correlation key,
+IN value)` count for `IN` — and keeps the outer rows indexed by the same key. An outer-row change
+re-evaluates only that row; an inner-row change updates the affected key's count and re-evaluates
+**only the outer rows in that key's bucket**, so work is proportional to the affected keys rather than
+a full rescan. Out-of-place updates that move a row between keys are expanded to signed image deltas
+(`Before` retraction + `After` assertion), so changing `R.K`, `R.C`, `S.K`, `S.V`, or the inner flag
+is maintained correctly.
+
+A correlated **scalar-aggregate** subquery (for example `… = (SELECT COUNT(*) FROM S WHERE …)`),
+mutual correlation, or correlation through anything other than a single top-level equality is rejected
+with `NotSupportedException`.
+
+### Recursive CTEs (`WITH RECURSIVE`)
+
+Linear recursion of the classic graph-reachability / transitive-closure shape is maintained reactively:
+
+```sql
+WITH RECURSIVE Reach AS (
+    SELECT Src, Dst FROM Edge
+    UNION ALL
+    SELECT r.Src, e.Dst FROM Reach r INNER JOIN Edge e ON e.Src = r.Dst)
+SELECT Src, Dst FROM Reach
+```
+
+The recursive arm must equi-join the CTE to exactly one base table (linear recursion). The CTE
+relation is maintained as the **set** of distinct reachable tuples — set semantics is the only
+terminating interpretation for cyclic graphs and is exactly what reachability means, so the fixpoint
+always terminates even when `Edge` contains cycles. An optional final `WHERE`/projection over the CTE
+is applied when emitting changes.
+
+- **Insertions** grow the closure incrementally with a semi-naïve forward pass over the inserted base
+  rows (no full rescan): inserted base-arm rows seed new tuples, inserted recursive-base rows join
+  against existing CTE tuples, and the frontier is saturated to a fixpoint. `Added` is emitted on
+  `absent → present`.
+- **Deletions and updates** are the hardest correctness point in recursive IVM — naïve derivation
+  counting cannot retract a tuple whose support runs through a cycle. As designed, any batch that
+  contains a retraction (an update expands to delete + insert) **recomputes the CTE from a fixpoint
+  over the operator's current base relation** (held in memory — no storage rescan) and diffs it against
+  the previous output, emitting the exact `Added`/`Removed`. This from-scratch-fixpoint deletion
+  fallback prioritizes correctness; the insert path stays incremental.
+
+Base rows are identified by **primary key** (physical row ids are not stable across updates), so a base
+table without a primary key is rejected. Mutual recursion, non-linear recursion (the recursive arm
+referencing the CTE more than once), and `UNION`-distinct recursion are rejected with
+`NotSupportedException`.
+
+### Memory Characteristics (L4 Part 2)
+
+- A correlated subquery keeps the inner relation's per-correlation-key match counts plus the outer
+  rows indexed by their correlation key.
+- A recursive CTE keeps its base relation (by primary key) and the closure as a set of distinct
+  tuples; the insert path additionally builds a transient join index over the base relation per drain.
 
 ## Enter / leave / stay semantics
 
@@ -283,9 +360,12 @@ images satisfy the predicate:
 | other  |                |               | ignored   |
 
 The incrementally maintained result is verified to **exactly equal** a full re-execution of the
-query — the L1, aggregate, top-K, inner/outer join, DISTINCT, UNION, and subquery oracle tests run
-long random operation sequences and assert incremental == recompute on both `InMemory` and `Disk`
-storage.
+query — the L1, aggregate, top-K, inner/outer join, DISTINCT, UNION, uncorrelated and correlated
+subquery, and recursive-CTE oracle tests run long random operation sequences and assert
+incremental == recompute on both `InMemory` and `Disk` storage. (Where the batch engine has a
+pre-existing gap — correlated subqueries and `WITH RECURSIVE` are not supported by the batch
+executor — the oracle's reference is computed independently from the raw rows so the gate still
+checks against true SQL semantics, not a broken batch path.)
 
 ## Safety rules
 
