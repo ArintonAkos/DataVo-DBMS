@@ -150,6 +150,7 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
         List<IReadOnlyDictionary<string, object?>> added = [];
         List<IReadOnlyDictionary<string, object?>> removed = [];
         List<IReadOnlyDictionary<string, object?>> updated = [];
+        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
 
         foreach ((string key, IReadOnlyDictionary<string, object?> row) in next)
         {
@@ -159,6 +160,7 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
             }
             else if (!RowsEqual(previous, row))
             {
+                updatedBefore.Add(previous);
                 updated.Add(row);
             }
         }
@@ -172,7 +174,7 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
         }
 
         _window = next;
-        return new QueryChange(added, removed, updated);
+        return new QueryChange(added, removed, updated, updatedBefore);
     }
 
     private void AddEntry(IReadOnlyDictionary<string, object?> row)

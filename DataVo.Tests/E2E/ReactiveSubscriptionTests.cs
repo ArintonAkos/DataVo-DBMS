@@ -54,4 +54,21 @@ public class ReactiveSubscriptionTests
         Assert.Single(qc.Updated);
         Assert.Equal(15, qc.Updated[0]["Health"]);
     }
+
+    [Fact]
+    public void Apply_StayInSet_CarriesBeforeAndAfterImages()
+    {
+        var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
+        sub.Seed("Players", new (long, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
+
+        QueryChange qc = sub.Apply(new[]
+        {
+            new RowChange("Players", 1, ChangeKind.Update, Row(1, 10), Row(1, 15)),
+        });
+
+        Assert.Single(qc.UpdatedBefore);
+        Assert.Single(qc.Updated);
+        Assert.Equal(10, qc.UpdatedBefore[0]["Health"]);
+        Assert.Equal(15, qc.Updated[0]["Health"]);
+    }
 }

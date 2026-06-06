@@ -18,7 +18,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
 {
     private readonly ReactivePredicate _predicate;
     private readonly bool _selectStar;
-    private readonly List<string> _projection = [];
+    private readonly List<(string Source, string Output)> _projection = [];
     private readonly HashSet<long> _matchSet = [];
 
     /// <summary>
@@ -31,8 +31,12 @@ public sealed class ReactiveSubscription : IReactiveQuery
     /// multiple tables.
     /// </exception>
     public ReactiveSubscription(string sql)
+        : this(ReactiveQueryParser.ParseSingleSelect(sql))
     {
-        SelectStatement select = ReactiveQueryParser.ParseSingleSelect(sql);
+    }
+
+    internal ReactiveSubscription(SelectStatement select)
+    {
         Validate(select);
 
         Table = select.FromTable!.Name;
@@ -45,8 +49,9 @@ public sealed class ReactiveSubscription : IReactiveQuery
                 continue;
             }
 
-            string columnName = ResolveProjectedColumnName(column);
-            _projection.Add(columnName);
+            string source = ResolveProjectedColumnName(column);
+            string output = ResolveOutputColumnName(column);
+            _projection.Add((source, output));
         }
 
         if (_projection.Count == 0)
@@ -99,6 +104,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
         List<IReadOnlyDictionary<string, object?>> added = [];
         List<IReadOnlyDictionary<string, object?>> removed = [];
         List<IReadOnlyDictionary<string, object?>> updated = [];
+        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
 
         foreach (RowChange change in tableChanges)
         {
@@ -142,6 +148,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
                     else if (beforeMatches && afterMatches)
                     {
                         _matchSet.Add(change.RowId);
+                        updatedBefore.Add(Project(change.Before!));
                         updated.Add(Project(change.After!));
                     }
 
@@ -149,7 +156,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
             }
         }
 
-        return new QueryChange(added, removed, updated);
+        return new QueryChange(added, removed, updated, updatedBefore);
     }
 
     private IReadOnlyDictionary<string, object?> Project(IReadOnlyDictionary<string, object?> row)
@@ -162,9 +169,9 @@ public sealed class ReactiveSubscription : IReactiveQuery
         }
 
         var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (string column in _projection)
+        foreach ((string source, string output) in _projection)
         {
-            projected[column] = row.TryGetValue(column, out object? value) ? value : null;
+            projected[output] = row.TryGetValue(source, out object? value) ? value : null;
         }
 
         return projected;
@@ -244,4 +251,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
         int dot = raw.LastIndexOf('.');
         return dot >= 0 ? raw[(dot + 1)..] : raw;
     }
+
+    private static string ResolveOutputColumnName(SelectColumnNode column) =>
+        column.Alias ?? ResolveProjectedColumnName(column);
 }

@@ -174,7 +174,7 @@ public sealed class ReactiveRegistry
     {
         if (statement is Parser.AST.UnionSelectStatement union)
         {
-            return new UnionReactiveQuery(union);
+            return new UnionReactiveQuery(union, branch => CreateQuery(branch, databaseName));
         }
 
         if (statement is not Parser.AST.SelectStatement select)
@@ -207,12 +207,7 @@ public sealed class ReactiveRegistry
             return new DistinctReactiveQuery(select);
         }
 
-        if (sql is null)
-        {
-            throw new NotSupportedException("Reactive subscriptions require SQL text for linear SELECT routing.");
-        }
-
-        return new ReactiveSubscription(sql);
+        return sql is null ? new ReactiveSubscription(select) : new ReactiveSubscription(sql);
     }
 
     private void SeedSubscription(IReactiveQuery subscription, string databaseName)

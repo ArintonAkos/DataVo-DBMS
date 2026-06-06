@@ -175,6 +175,7 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         List<IReadOnlyDictionary<string, object?>> added = [];
         List<IReadOnlyDictionary<string, object?>> removed = [];
         List<IReadOnlyDictionary<string, object?>> updated = [];
+        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
 
         foreach (string pk in candidates)
         {
@@ -204,11 +205,12 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
             else if (!RowsEqual(previous!, current))
             {
                 _emitted[pk] = current;
+                updatedBefore.Add(previous!);
                 updated.Add(current);
             }
         }
 
-        return new QueryChange(added, removed, updated);
+        return new QueryChange(added, removed, updated, updatedBefore);
     }
 
     private void AddOuter(IReadOnlyDictionary<string, object?> row)

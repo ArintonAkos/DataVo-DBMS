@@ -159,6 +159,7 @@ internal sealed partial class JoinReactiveQuery
         List<IReadOnlyDictionary<string, object?>> added = [];
         List<IReadOnlyDictionary<string, object?>> removed = [];
         List<IReadOnlyDictionary<string, object?>> updated = [];
+        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
 
         foreach (string identity in candidates)
         {
@@ -184,11 +185,12 @@ internal sealed partial class JoinReactiveQuery
             else if (!RowsEqual(previous!, current))
             {
                 _emitted[identity] = current;
+                updatedBefore.Add(previous!);
                 updated.Add(current);
             }
         }
 
-        return new QueryChange(added, removed, updated);
+        return new QueryChange(added, removed, updated, updatedBefore);
     }
 
     /// <summary>
