@@ -1,16 +1,15 @@
-# Reactive Queries (Linear + Aggregates + Top-K / L1–L2)
+# Reactive Queries (L1–L4 Part 1)
 
 Reactive queries let you register a standing `SELECT` and be told exactly what changed
 in its result set — which rows were **added**, **removed**, or **updated** — without polling or
 re-running the query against the whole table.
 
-This page documents **Phase 1 (linear / L1)** — single-table `SELECT … WHERE` — and
+This page documents **Phase 1 (linear / L1)** — single-table `SELECT … WHERE`;
 **Phase 2 (aggregates + top-K / L2)** — single-table `GROUP BY` aggregates
-(`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) and maintained `ORDER BY … LIMIT` top-K windows. Joins,
-`DISTINCT`/`UNION`, subqueries, and recursion are later layers (L3–L4); `Subscribe` rejects them
-today with a clear `NotSupportedException` naming the unsupported construct. The public API below is
-**stable** and does not change as those layers land — adding aggregates and top-K did not change the
-surface at all.
+(`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) and maintained `ORDER BY … LIMIT` top-K windows;
+**Phase 3 (joins / L3)** — two-table equi-joins; and **Phase 4 part 1 (L4)** — reactive
+`DISTINCT`, `UNION`/`UNION ALL`, and uncorrelated `IN`/`EXISTS` subqueries. The public API below is
+**stable** across layers.
 
 ## API
 
@@ -61,9 +60,9 @@ A single-table `SELECT` with an optional `WHERE` over:
 - null checks: `IS NULL`, `IS NOT NULL`
 - boolean composition: `AND`, `OR`
 
-Rejected (until a later layer ships): `JOIN`, `HAVING`, `DISTINCT`, CTEs, subqueries, and any
-multi-table query. These throw `NotSupportedException`. `GROUP BY` aggregates and `ORDER BY … LIMIT`
-top-K are supported by the L2 operators described below.
+Rejected in the linear operator: `HAVING`, CTEs, and unsupported multi-table shapes. `GROUP BY`,
+top-K, joins, `DISTINCT`, `UNION`, and uncorrelated subqueries are routed to the later operators
+described below.
 
 ## Supported SQL (L2)
 
@@ -181,11 +180,93 @@ The projected output row uses the same qualified column names as a batch join (f
 Both inputs are fully materialized as keyed arrangements, so memory is proportional to the combined
 row count of the two joined tables. This is the standard cost of incremental join maintenance.
 
-### Not supported (later layers)
+### Not supported in L3
 
 `Subscribe` rejects, with `NotSupportedException`, join shapes outside this layer: three or more
-tables, non-equi or `OR` join conditions, self-joins, and correlated subqueries. `DISTINCT`, `UNION`,
-and recursive CTEs remain L4.
+tables, non-equi or `OR` join conditions, self-joins, and correlated subqueries.
+
+## Supported SQL (L4 Part 1)
+
+### DISTINCT
+
+Single-table `SELECT DISTINCT <cols...> FROM t [WHERE ...]` is maintained with a per-output-tuple
+multiplicity map. Every committed row mutation is expanded into signed image deltas:
+`Insert -> (After,+1)`, `Delete -> (Before,-1)`, and `Update -> (Before,-1)` plus `(After,+1)`.
+A DISTINCT tuple is present while its count is greater than zero.
+
+```csharp
+using var cities = ctx.Subscribe(
+    "SELECT DISTINCT City FROM Player WHERE City IS NOT NULL",
+    change =>
+    {
+        foreach (var r in change.Added)   AddCity((string)r["City"]!);
+        foreach (var r in change.Removed) RemoveCity((string)r["City"]!);
+    });
+```
+
+Duplicate inserts do not emit duplicate `Added` rows; deleting one duplicate does not emit
+`Removed` until the last contributing row leaves.
+
+### UNION and UNION ALL
+
+Two single-table branches are supported:
+
+```sql
+SELECT V FROM A
+UNION
+SELECT V FROM B
+```
+
+and:
+
+```sql
+SELECT V FROM A
+UNION ALL
+SELECT V FROM B
+```
+
+`UNION` uses the same multiplicity-count model as `DISTINCT`, deduplicating equal output tuples
+across both branches. `UNION ALL` preserves bag semantics: one output delta is produced for each
+net contributing tuple in the change batch. Final `ORDER BY`/`LIMIT`, three-or-more branch unions,
+branch joins, branch aggregates, and wildcard branch projections are rejected.
+
+### Uncorrelated IN / EXISTS Subqueries
+
+The supported subquery forms are uncorrelated semi-joins:
+
+```sql
+SELECT Id
+FROM R
+WHERE Gid IN (SELECT Gid FROM S WHERE Flag = 1)
+```
+
+```sql
+SELECT Id
+FROM R
+WHERE EXISTS (SELECT Gid FROM S WHERE Flag = 1)
+```
+
+Negated forms `NOT IN (SELECT ...)` and `NOT EXISTS (SELECT ...)` are also supported. The operator
+maintains:
+
+- a primary-keyed outer row map;
+- for `IN`/`NOT IN`, an inner value multiplicity map plus an outer index keyed by the tested outer
+  value;
+- for `EXISTS`/`NOT EXISTS`, a count of inner rows passing the inner `WHERE`.
+
+Outer-table changes re-evaluate only the changed outer rows. Inner-table changes re-evaluate the
+outer rows whose `IN` key changed, or all outer rows when an `EXISTS` result flips. The inner query
+must be uncorrelated; references from the inner query back to the outer table are rejected.
+
+### Memory Characteristics (L4 Part 1)
+
+- `DISTINCT` and `UNION` keep one multiplicity counter per distinct output tuple.
+- `UNION ALL` emits bag deltas and does not need a dedup state map.
+- `IN`/`NOT IN` keeps the inner value-set multiplicities and an outer index by the tested value.
+- `EXISTS`/`NOT EXISTS` keeps all outer rows by primary key plus an inner qualifying-row count.
+
+Correlated subqueries and recursive CTEs are intentionally not part of L4 part 1; they are the final
+reactive recursion phase.
 
 ## Enter / leave / stay semantics
 
@@ -202,8 +283,9 @@ images satisfy the predicate:
 | other  |                |               | ignored   |
 
 The incrementally maintained result is verified to **exactly equal** a full re-execution of the
-query — the L1, aggregate, top-K, and inner/outer join oracle tests run long random operation
-sequences and assert incremental == recompute on both `InMemory` and `Disk` storage.
+query — the L1, aggregate, top-K, inner/outer join, DISTINCT, UNION, and subquery oracle tests run
+long random operation sequences and assert incremental == recompute on both `InMemory` and `Disk`
+storage.
 
 ## Safety rules
 
