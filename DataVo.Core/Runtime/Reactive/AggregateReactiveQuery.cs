@@ -35,7 +35,7 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         public readonly Dictionary<string, long> NonNullCount = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, decimal> Sum = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, bool> SumIsIntegral = new(StringComparer.OrdinalIgnoreCase);
-        public readonly Dictionary<string, SortedDictionary<object, long>> Extremes = new(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, ReactiveExtremumMultiset> Extremes = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private readonly ReactivePredicate _predicate;
@@ -233,7 +233,7 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
 
                 case AggregateFunction.Min:
                 case AggregateFunction.Max:
-                    MultisetAdd(GetExtremes(state, spec.Column), value);
+                    GetExtremes(state, spec.Column).Add(value);
                     break;
             }
         }
@@ -283,7 +283,7 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
 
                 case AggregateFunction.Min:
                 case AggregateFunction.Max:
-                    MultisetRemove(GetExtremes(state, spec.Column), value);
+                    GetExtremes(state, spec.Column).Remove(value);
                     break;
             }
         }
@@ -378,16 +378,10 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
             }
 
             case AggregateFunction.Min:
-            {
-                SortedDictionary<object, long> values = GetExtremes(state, spec.Column!);
-                return values.Count == 0 ? null : First(values).Key;
-            }
+                return GetExtremes(state, spec.Column!).Min;
 
             case AggregateFunction.Max:
-            {
-                SortedDictionary<object, long> values = GetExtremes(state, spec.Column!);
-                return values.Count == 0 ? null : Last(values).Key;
-            }
+                return GetExtremes(state, spec.Column!).Max;
 
             default:
                 return null;
@@ -519,58 +513,15 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         return dot >= 0 ? name[(dot + 1)..] : name;
     }
 
-    private static SortedDictionary<object, long> GetExtremes(GroupState state, string column)
+    private static ReactiveExtremumMultiset GetExtremes(GroupState state, string column)
     {
-        if (!state.Extremes.TryGetValue(column, out SortedDictionary<object, long>? values))
+        if (!state.Extremes.TryGetValue(column, out ReactiveExtremumMultiset? values))
         {
-            values = new SortedDictionary<object, long>(ReactiveValueComparer.Instance);
+            values = new ReactiveExtremumMultiset();
             state.Extremes[column] = values;
         }
 
         return values;
-    }
-
-    private static void MultisetAdd(SortedDictionary<object, long> values, object value)
-    {
-        values[value] = (values.TryGetValue(value, out long count) ? count : 0) + 1;
-    }
-
-    private static void MultisetRemove(SortedDictionary<object, long> values, object value)
-    {
-        if (!values.TryGetValue(value, out long count))
-        {
-            return;
-        }
-
-        if (count <= 1)
-        {
-            values.Remove(value);
-        }
-        else
-        {
-            values[value] = count - 1;
-        }
-    }
-
-    private static KeyValuePair<object, long> First(SortedDictionary<object, long> values)
-    {
-        foreach (KeyValuePair<object, long> entry in values)
-        {
-            return entry;
-        }
-
-        return default;
-    }
-
-    private static KeyValuePair<object, long> Last(SortedDictionary<object, long> values)
-    {
-        KeyValuePair<object, long> last = default;
-        foreach (KeyValuePair<object, long> entry in values)
-        {
-            last = entry;
-        }
-
-        return last;
     }
 
     private static long GetOrZero(Dictionary<string, long> map, string key) =>
