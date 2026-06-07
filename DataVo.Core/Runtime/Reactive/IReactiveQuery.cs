@@ -6,12 +6,13 @@ using DataVo.Core.Runtime.Changes;
 /// A compiled, incrementally maintained reactive query operator over one or more source tables.
 /// </summary>
 /// <remarks>
-/// Each subscription is backed by one operator implementation: linear filters (L1), per-group
-/// aggregates, maintained top-K (L2), or a two-table equi-join (L3). The operator is seeded once from
-/// the current contents of each of its <see cref="Tables"/> and thereafter consumes committed
-/// <see cref="RowChange"/> batches, emitting the resulting added/removed/updated rows. All
-/// implementations share the stable <c>Subscribe</c> / <c>DispatchPendingNotifications</c> public
-/// surface.
+/// Each subscription is backed by one operator implementation, selected by parsed query shape: linear
+/// filters (L1), per-group aggregates and maintained top-K (L2), two-table equi-joins (L3), and the
+/// long tail — DISTINCT, UNION/UNION ALL, IN/EXISTS subqueries, and recursive CTEs (L4). The operator
+/// is seeded once from the current contents of each of its <see cref="Tables"/> (the seed establishes
+/// the baseline and is never delivered) and thereafter consumes committed <see cref="RowChange"/>
+/// batches, emitting the resulting added/removed/updated rows. All implementations share the stable
+/// <c>Subscribe</c> / <c>DispatchPendingNotifications</c> public surface.
 /// </remarks>
 internal interface IReactiveQuery
 {

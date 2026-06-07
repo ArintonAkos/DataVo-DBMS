@@ -24,6 +24,19 @@ namespace DataVo.Core.Runtime.Reactive;
 /// <c>Added</c>/<c>Removed</c>. Correctness first; this from-scratch-fixpoint deletion fallback is the
 /// documented behavior.
 /// </para>
+/// <para>
+/// <b>Cost trade-off.</b> Insertions are sub-linear (semi-naïve forward growth over only the new base
+/// rows). Any batch carrying a retraction is <c>O(closure size)</c> for that batch — a full fixpoint
+/// recompute of the CTE over the current base relation — which on cyclic / densely-connected graphs is
+/// the dominant cost and is <em>not</em> sub-linear. This is a deliberate correctness-over-speed choice
+/// for the hardest case in recursive IVM (retracting support that flows through a cycle).
+/// </para>
+/// <para>
+/// <b>Identity invariants.</b> The CTE is maintained as a <em>set</em> (no bag multiplicity). Base rows
+/// are identified by <b>primary key</b> value, never by <see cref="RowChange.RowId"/> — the physical row
+/// id is not stable across the engine's out-of-place updates — so every observed base table must declare
+/// a primary key; a PK-less base table is rejected at construction with <see cref="NotSupportedException"/>.
+/// </para>
 /// </remarks>
 internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
 {
@@ -50,6 +63,13 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
 
     private bool _seeded;
 
+    /// <summary>
+    /// Compiles the supplied recursive-CTE shape into an incrementally maintained closure operator.
+    /// </summary>
+    /// <param name="shape">The extracted, validated linear <c>WITH RECURSIVE</c> shape.</param>
+    /// <param name="engine">The owning engine (catalog access for each base table's primary key).</param>
+    /// <param name="databaseName">The database that owns the base tables.</param>
+    /// <exception cref="NotSupportedException">Thrown when any observed base table lacks a primary key to identify rows across updates.</exception>
     public RecursiveCteReactiveQuery(RecursiveCteShape shape, DataVoEngine engine, string databaseName)
     {
         _shape = shape;
@@ -88,16 +108,27 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <inheritdoc />
     public IReadOnlyCollection<string> Tables { get; }
 
+    /// <inheritdoc />
     public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
+        // Seeding only populates the maintained base relation; the closure itself is computed lazily on
+        // the first Apply (see EnsureSeededClosure) so the baseline is established but never delivered.
         foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
         {
             StoreBase(table, row);
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Splits the batch into base-relation retractions and insertions. A pure-insertion batch grows the
+    /// closure incrementally (<see cref="GrowClosure"/>); a batch with any retraction recomputes the
+    /// closure from scratch (<see cref="RecomputeClosureFromScratch"/>). Either way the new closure is
+    /// diffed against the previously emitted output to produce the exact added/removed rows.
+    /// </remarks>
     public QueryChange Apply(IReadOnlyList<RowChange> changes)
     {
         EnsureSeededClosure();

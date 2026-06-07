@@ -4,8 +4,25 @@ using DataVo.Core.Runtime.Changes;
 namespace DataVo.Core.Runtime.Reactive;
 
 /// <summary>
-/// A two-branch incremental UNION / UNION ALL operator over single-table SELECT branches.
+/// A two-branch incremental <c>UNION</c> / <c>UNION ALL</c> operator over single-table SELECT branches (L4).
 /// </summary>
+/// <remarks>
+/// In the Z-set algebra union is just <b>addition</b> of the two branch relations: the combined
+/// multiplicity of a tuple is the sum of its multiplicities in each branch. Each branch is compiled to
+/// its own child reactive query; on a drain, each child emits a delta which is normalized to the union's
+/// output column names and folded into one signed per-tuple delta. The two set-vs-bag variants differ
+/// only in how that summed delta becomes output:
+/// <list type="bullet">
+/// <item><description><c>UNION ALL</c> (bag) passes the multiplicity through directly — a delta of
+/// <c>+n</c> emits the tuple <c>n</c> times in <c>Added</c>, <c>−n</c> emits it <c>n</c> times in
+/// <c>Removed</c> — and keeps no membership state.</description></item>
+/// <item><description><c>UNION</c> (set) wraps the sum in the DBSP <c>distinct</c>: it keeps a
+/// per-tuple count and emits <c>Added</c>/<c>Removed</c> only on the <c>0 ↔ positive</c> boundary, so a
+/// tuple produced by both branches still appears once.</description></item>
+/// </list>
+/// Output identity uses the same canonical <see cref="DistinctReactiveQuery.TupleKey"/> the distinct
+/// operator uses, so it is independent of the engine's out-of-place <c>UPDATE</c> row-id reassignment.
+/// </remarks>
 internal sealed class UnionReactiveQuery : IReactiveQuery
 {
     private sealed record SeedBranch(
@@ -26,6 +43,13 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
     private readonly bool _isAll;
     private readonly Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Count)> _counts = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Compiles the supplied two-branch UNION statement, building a child reactive query per branch via
+    /// the supplied factory.
+    /// </summary>
+    /// <param name="union">The parsed two-branch UNION / UNION ALL statement.</param>
+    /// <param name="childFactory">Factory that compiles a branch SELECT into its own reactive query.</param>
+    /// <exception cref="NotSupportedException">Thrown for an unsupported UNION shape (more than two branches, final ORDER BY/LIMIT, mismatched branch arity, wildcard/computed branch projections).</exception>
     public UnionReactiveQuery(UnionSelectStatement union, Func<SelectStatement, IReactiveQuery> childFactory)
     {
         Validate(union);
@@ -42,8 +66,10 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
             .ToArray();
     }
 
+    /// <inheritdoc />
     public IReadOnlyCollection<string> Tables { get; }
 
+    /// <inheritdoc />
     public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         var materialized = rows.ToArray();
@@ -76,8 +102,11 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <inheritdoc />
     public QueryChange Apply(IReadOnlyList<RowChange> changes)
     {
+        // Run each branch over its relevant changes, normalize the child deltas to the union's output
+        // columns, and sum them into one signed multiplicity per tuple before reducing to output.
         Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Delta)> deltas = new(StringComparer.Ordinal);
 
         foreach (BranchAdapter branch in new[] { _left, _right })
@@ -98,6 +127,10 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         return _isAll ? ApplyUnionAll(deltas) : ApplyUnion(deltas);
     }
 
+    /// <summary>
+    /// Bag semantics: emits each tuple's net multiplicity delta directly (<c>+n</c> as <c>n</c> Added,
+    /// <c>−n</c> as <c>n</c> Removed), holding no membership state.
+    /// </summary>
     private QueryChange ApplyUnionAll(Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Delta)> deltas)
     {
         List<IReadOnlyDictionary<string, object?>> added = [];
@@ -124,6 +157,11 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
         return new QueryChange(added, removed, []);
     }
 
+    /// <summary>
+    /// Set semantics (DBSP <c>distinct</c> over the summed branches): maintains a per-tuple count and
+    /// emits only the <c>0 ↔ positive</c> boundary transitions, so a tuple present in both branches
+    /// appears exactly once.
+    /// </summary>
     private QueryChange ApplyUnion(Dictionary<string, (IReadOnlyDictionary<string, object?> Row, int Delta)> deltas)
     {
         List<IReadOnlyDictionary<string, object?>> added = [];

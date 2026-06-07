@@ -69,22 +69,41 @@ public sealed class DataVoContext : IDisposable
     public DataVoDiagnostics Diagnostics => Engine.Diagnostics;
 
     /// <summary>
-    /// Registers a single-table linear reactive query and returns a handle whose disposal removes it.
+    /// Registers a standing reactive query that reports exactly what changed in its result set, and
+    /// returns a handle whose disposal tears the subscription down.
     /// </summary>
-    /// <param name="sql">A single-table <c>SELECT … WHERE</c> statement to observe.</param>
+    /// <remarks>
+    /// The SQL is parsed, validated, and compiled into an incremental dataflow operator
+    /// (filter/aggregate/top-K/join/distinct/union/subquery/recursive-CTE per the query shape), then
+    /// seeded from current table contents — the seed is the baseline and is never re-delivered, so the
+    /// first callback is the first post-subscribe change. Notifications are <b>pull-drain</b>: nothing
+    /// fires until <see cref="DispatchPendingNotifications"/> is called, and only committed changes are
+    /// ever delivered (rollbacks emit nothing). Subscribing requires an active database for the session
+    /// (execute <c>USE &lt;database&gt;</c> first) and auto-enables change capture on the first
+    /// subscription.
+    /// </remarks>
+    /// <param name="sql">The <c>SELECT</c> statement to observe; unsupported constructs throw <see cref="NotSupportedException"/>.</param>
     /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
     /// <returns>A disposable subscription handle.</returns>
     public IDisposable Subscribe(string sql, Action<QueryChange> onChanged)
         => Engine.Reactive.Add(this, sql, onChanged);
 
     /// <summary>
-    /// Drains buffered committed change sets through active subscriptions on the calling thread.
+    /// Drains buffered committed change sets through active subscriptions, invoking callbacks on the
+    /// calling thread.
     /// </summary>
+    /// <remarks>
+    /// This is the only point at which reactive work runs — there are no background threads or timers,
+    /// so the consumer fully controls timing (deterministic for game main-loops, non-blocking for the
+    /// writer). Writes performed inside a callback are captured and surface on the <b>next</b> drain,
+    /// never recursively within the current one, so callbacks cannot self-trigger an infinite loop.
+    /// </remarks>
     public void DispatchPendingNotifications()
         => Engine.Reactive.Dispatch();
 
     /// <summary>
-    /// Sets the maximum number of concurrently active reactive subscriptions.
+    /// Sets the maximum number of concurrently active reactive subscriptions; <see cref="Subscribe"/>
+    /// throws once the cap is reached.
     /// </summary>
     /// <param name="max">The new subscription cap.</param>
     public void SetMaxReactiveSubscriptions(int max)
