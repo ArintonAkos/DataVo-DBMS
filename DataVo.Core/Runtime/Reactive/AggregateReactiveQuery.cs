@@ -45,6 +45,10 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
     private readonly Dictionary<string, GroupState> _groups = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?[]> _groupKeyValues = new(StringComparer.Ordinal);
 
+    // Group keys currently present in the delivered output, so a re-touched group is classified as an
+    // update rather than a duplicate add, and an emptied group is retracted exactly once.
+    private readonly HashSet<string> _emittedGroups = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Compiles the supplied parsed SELECT into an incremental aggregate operator.
     /// </summary>
@@ -145,6 +149,12 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         return Classify(touched);
     }
 
+    /// <summary>
+    /// Turns the set of groups touched by a batch into output: a group still present that was not
+    /// previously emitted is <c>Added</c>, one that was emitted is <c>Updated</c>, and a group that
+    /// disappeared (row count reached zero) is <c>Removed</c> — the per-group analogue of the DISTINCT
+    /// present-iff-count&gt;0 boundary.
+    /// </summary>
     private QueryChange Classify(HashSet<string> touched)
     {
         List<IReadOnlyDictionary<string, object?>> added = [];
@@ -177,8 +187,11 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         return new QueryChange(added, removed, updated);
     }
 
-    private readonly HashSet<string> _emittedGroups = new(StringComparer.Ordinal);
-
+    /// <summary>
+    /// Adds a matching row's contribution to its group, creating the group on first sight. Invertible
+    /// aggregates accumulate (count, non-null count, running sum); MIN/MAX push the value into the
+    /// per-column multiset. Returns the affected group key so the caller can re-classify it.
+    /// </summary>
     private string AddRow(IReadOnlyDictionary<string, object?> row)
     {
         string key = ComputeGroupKey(row);
@@ -228,6 +241,11 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         return key;
     }
 
+    /// <summary>
+    /// Subtracts a matching row's contribution from its group (the inverse of <see cref="AddRow"/>):
+    /// invertible aggregates decrement, MIN/MAX remove one occurrence from the value multiset so the next
+    /// extreme surfaces. A group whose row count falls to zero is dropped. Returns the affected group key.
+    /// </summary>
     private string RemoveRow(IReadOnlyDictionary<string, object?> row)
     {
         string key = ComputeGroupKey(row);

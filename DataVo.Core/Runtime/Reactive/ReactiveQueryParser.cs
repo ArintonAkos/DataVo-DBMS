@@ -52,14 +52,41 @@ internal sealed record JoinShape(
     ExpressionNode? Where,
     IReadOnlyList<SelectColumnNode> Columns);
 
+/// <summary>
+/// The four supported reactive subquery predicate kinds. IN/EXISTS are semi-joins; their negations are
+/// the corresponding anti-joins.
+/// </summary>
 internal enum SubqueryKind
 {
+    /// <summary><c>WHERE col IN (SELECT …)</c> — semi-join on value membership.</summary>
     In,
+
+    /// <summary><c>WHERE col NOT IN (SELECT …)</c> — anti-join on value membership.</summary>
     NotIn,
+
+    /// <summary><c>WHERE EXISTS (SELECT …)</c> — semi-join on inner non-emptiness.</summary>
     Exists,
+
+    /// <summary><c>WHERE NOT EXISTS (SELECT …)</c> — anti-join on inner non-emptiness.</summary>
     NotExists,
 }
 
+/// <summary>
+/// The extracted, validated shape of a supported reactive IN/EXISTS subquery: a single outer table whose
+/// <c>WHERE</c> is one IN/EXISTS predicate over a single-table inner SELECT.
+/// </summary>
+/// <param name="OuterTable">The outer (FROM) table.</param>
+/// <param name="OuterAlias">The outer table alias, or its name when none is declared.</param>
+/// <param name="OuterColumns">The outer SELECT's projected columns.</param>
+/// <param name="OuterColumn">The outer column tested by an IN predicate (empty for EXISTS).</param>
+/// <param name="InnerTable">The inner subquery's single source table.</param>
+/// <param name="InnerAlias">The inner table alias, or its name when none is declared.</param>
+/// <param name="InnerColumn">The inner column projected by an IN subquery, or <c>null</c> for EXISTS.</param>
+/// <param name="InnerWhere">The residual inner-only WHERE predicate after the correlation conjunct is split out.</param>
+/// <param name="Kind">The subquery predicate kind.</param>
+/// <param name="IsCorrelated"><c>true</c> when the inner WHERE references the outer table via a single equality conjunct.</param>
+/// <param name="OuterCorrelationColumn">The outer side of the correlation equality, or <c>null</c> when uncorrelated.</param>
+/// <param name="InnerCorrelationColumn">The inner side of the correlation equality, or <c>null</c> when uncorrelated.</param>
 internal sealed record SubqueryShape(
     string OuterTable,
     string OuterAlias,
@@ -75,12 +102,17 @@ internal sealed record SubqueryShape(
     string? InnerCorrelationColumn = null);
 
 /// <summary>
-/// Shared parsing and shape-inspection helpers for reactive query operators.
+/// Shared parsing and shape-inspection helpers used by <see cref="ReactiveRegistry"/> to route a
+/// subscription to the correct reactive operator.
 /// </summary>
 /// <remarks>
-/// All reactive operators (linear, aggregate, top-K) parse exactly one single-table <c>SELECT</c>
-/// through the engine's existing parser. This helper centralizes that parse and the predicates used
-/// to route a query to the correct operator so the maintenance logic never reimplements SQL parsing.
+/// Every reactive operator reuses the engine's existing SQL parser rather than reimplementing parsing.
+/// This helper centralizes that single parse and the shape predicates that classify the result —
+/// aggregate vs top-K vs distinct, two-table equi-join (<see cref="TryGetJoinShape"/>), and IN/EXISTS
+/// subquery (<see cref="TryGetSubqueryShape"/>, including splitting a correlated inner WHERE into its
+/// correlation conjunct and residual). Each classifier is conservative: it returns the shape only when
+/// the query is fully within the supported subset, so an unsupported construct is rejected with a clear
+/// error rather than silently mis-maintained.
 /// </remarks>
 internal static class ReactiveQueryParser
 {
@@ -185,17 +217,12 @@ internal static class ReactiveQueryParser
     }
 
     /// <summary>
-    /// Returns <c>true</c> when the statement is a UNION / UNION ALL shape.
+    /// Attempts to extract a supported IN/EXISTS subquery shape (correlated or uncorrelated) from the
+    /// parsed statement.
     /// </summary>
-    /// <param name="statement">The parsed statement.</param>
-    public static bool IsUnionShape(SqlStatement statement)
-    {
-        return statement is UnionSelectStatement;
-    }
-
-    /// <summary>
-    /// Attempts to extract a supported uncorrelated IN/EXISTS subquery shape.
-    /// </summary>
+    /// <param name="select">The parsed SELECT.</param>
+    /// <param name="shape">The extracted shape when the statement is a supported IN/EXISTS subquery.</param>
+    /// <returns><c>true</c> for a supported single-outer-table IN/NOT IN/EXISTS/NOT EXISTS over a single-table inner SELECT; otherwise <c>false</c>.</returns>
     public static bool TryGetSubqueryShape(SelectStatement select, out SubqueryShape shape)
     {
         shape = null!;

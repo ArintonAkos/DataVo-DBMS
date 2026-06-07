@@ -71,6 +71,12 @@ public sealed class ReactiveRegistry
     /// Drains all buffered change sets through the active subscriptions, invoking callbacks for any
     /// non-empty results on the calling thread.
     /// </summary>
+    /// <remarks>
+    /// The buffer is snapshotted and cleared under the lock before any callback runs, so writes a
+    /// callback performs are enqueued for the <b>next</b> drain rather than re-entering this one (no
+    /// recursive dispatch, no infinite loop). Only committed change sets are ever in the buffer, which is
+    /// what makes every delivered delta transaction-safe. A subscription disposed mid-drain is skipped.
+    /// </remarks>
     public void Dispatch()
     {
         ChangeSet[] pending;
@@ -100,13 +106,14 @@ public sealed class ReactiveRegistry
 
                 IReadOnlyCollection<string> tables = registration.Subscription.Tables;
 
-                if (!set.Tables.Any(table => tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase))))
+                // Cheap pre-filter on the change set's small distinct table list before scanning rows.
+                if (!set.Tables.Any(table => Observes(tables, table)))
                 {
                     continue;
                 }
 
                 List<RowChange> relevantChanges = set.Changes
-                    .Where(change => tables.Any(observed => observed.Equals(change.Table, StringComparison.OrdinalIgnoreCase)))
+                    .Where(change => Observes(tables, change.Table))
                     .ToList();
 
                 if (relevantChanges.Count == 0)
@@ -122,6 +129,9 @@ public sealed class ReactiveRegistry
             }
         }
     }
+
+    private static bool Observes(IReadOnlyCollection<string> tables, string table) =>
+        tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase));
 
     private void EnsureHookedNoLock()
     {
@@ -177,6 +187,14 @@ public sealed class ReactiveRegistry
         return CreateQuery(statement, databaseName, sql);
     }
 
+    /// <summary>
+    /// Routes a parsed statement to the operator for its shape, in precedence order: UNION → join →
+    /// IN/EXISTS subquery → aggregate → top-K → DISTINCT → linear filter. The first matching shape wins;
+    /// an unsupported construct surfaces as <see cref="NotSupportedException"/> from the chosen operator.
+    /// </summary>
+    /// <param name="statement">The parsed SELECT-family statement.</param>
+    /// <param name="databaseName">The database that owns the query's source tables.</param>
+    /// <param name="sql">The original SQL, threaded through only so the linear fallback can report it; <c>null</c> for recursively-compiled UNION branches.</param>
     private IReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName, string? sql = null)
     {
         if (statement is Parser.AST.UnionSelectStatement union)

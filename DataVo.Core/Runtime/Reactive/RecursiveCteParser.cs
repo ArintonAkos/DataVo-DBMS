@@ -51,6 +51,12 @@ internal sealed record RecursiveCteShape(
 /// </summary>
 internal static class RecursiveCteParser
 {
+    /// <summary>
+    /// Cheap, allocation-light pre-check: returns <c>true</c> when the SQL begins with
+    /// <c>WITH RECURSIVE</c>. Used to route to <see cref="Parse"/> before the engine's primary parser
+    /// (which rejects the <c>RECURSIVE</c> keyword) is invoked. Returns <c>false</c> on any lex error.
+    /// </summary>
+    /// <param name="sql">The candidate reactive subscription SQL.</param>
     public static bool LooksRecursive(string sql)
     {
         List<SqlToken> tokens;
@@ -73,6 +79,15 @@ internal static class RecursiveCteParser
         return IsValue(tokens, i, "RECURSIVE");
     }
 
+    /// <summary>
+    /// Tokenizes the SQL and slices it into the base arm, recursive arm, and final SELECT at their
+    /// structural boundaries — the top-level <c>UNION ALL</c> and the CTE body's matching close paren,
+    /// both located at brace depth 1 — then parses and validates each slice into a
+    /// <see cref="RecursiveCteShape"/>.
+    /// </summary>
+    /// <param name="sql">The <c>WITH RECURSIVE … SELECT … FROM cte</c> statement.</param>
+    /// <returns>The extracted, validated recursive-CTE shape.</returns>
+    /// <exception cref="NotSupportedException">Thrown for any shape outside the supported linear closure form (missing/duplicate <c>UNION ALL</c>, <c>UNION</c>-distinct recursion, non-linear or mutual recursion, a non-equi recursive join, and so on).</exception>
     public static RecursiveCteShape Parse(string sql)
     {
         List<SqlToken> tokens = new SqlLexer(sql).Tokenize();

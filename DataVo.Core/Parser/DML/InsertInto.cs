@@ -77,6 +77,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// <param name="databaseName">The current active context database name.</param>
     /// <param name="txContext">The active transaction context, or <c>null</c> for auto-commit mode.</param>
     /// <param name="statementTxId">The MVCC transaction identifier for this statement.</param>
+    /// <param name="recorder">The change recorder that captures inserted row images for reactive notifications, or <c>null</c> when change capture is disabled.</param>
     /// <returns>The total number of rows securely pushed to the database.</returns>
     private int ProcessAndInsertTableRows(string databaseName, TransactionContext? txContext, long statementTxId, ChangeRecorder? recorder)
     {

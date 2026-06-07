@@ -33,6 +33,13 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
     private int _innerExistsCount;
     private bool _seeded;
 
+    /// <summary>
+    /// Compiles the supplied IN/EXISTS subquery shape into an incremental semi/anti-join operator.
+    /// </summary>
+    /// <param name="shape">The extracted IN/NOT IN/EXISTS/NOT EXISTS shape.</param>
+    /// <param name="engine">The owning engine (catalog access for the outer table's primary key).</param>
+    /// <param name="databaseName">The database that owns the outer and inner tables.</param>
+    /// <exception cref="NotSupportedException">Thrown when the outer table has no primary key to identify rows across updates.</exception>
     public SubqueryReactiveQuery(SubqueryShape shape, DataVoEngine engine, string databaseName)
     {
         _shape = shape;
@@ -61,12 +68,14 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <inheritdoc />
     public IReadOnlyCollection<string> Tables => [_shape.OuterTable, _shape.InnerTable];
 
     private bool IsCorrelated => _shape.IsCorrelated;
 
     private bool IsExistsKind => _shape.Kind is SubqueryKind.Exists or SubqueryKind.NotExists;
 
+    /// <inheritdoc />
     public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         if (IsOuter(table))
@@ -88,6 +97,15 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Outer changes affect only their own row's membership and are added directly as candidates. Inner
+    /// changes shift the membership index: for a correlated or IN subquery only the outer rows indexed
+    /// under the touched correlation/value key are re-evaluated; an <em>uncorrelated</em> EXISTS shares a
+    /// single global count, so any inner change can flip every outer row and forces a full re-evaluation
+    /// of the outer relation. NOT IN / NOT EXISTS are the anti-join
+    /// complement and fall out of the same membership test negated in <see cref="Qualifies"/>.
+    /// </remarks>
     public QueryChange Apply(IReadOnlyList<RowChange> changes)
     {
         EnsureBaseline();
@@ -169,6 +187,11 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         return Diff(candidates);
     }
 
+    /// <summary>
+    /// Materializes the qualifying outer rows into the emitted baseline on the first <see cref="Apply"/>
+    /// (after both sides are seeded), so the first delivered delta is diffed against the correct
+    /// starting point. The baseline itself is never delivered.
+    /// </summary>
     private void EnsureBaseline()
     {
         if (_seeded)
@@ -186,6 +209,10 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <summary>
+    /// Re-evaluates each candidate outer row's qualification from final state and diffs it against the
+    /// currently emitted set, producing the exact added/removed/updated output.
+    /// </summary>
     private QueryChange Diff(HashSet<string> candidates)
     {
         List<IReadOnlyDictionary<string, object?>> added = [];
@@ -340,6 +367,11 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <summary>
+    /// Decides whether an outer row belongs in the result: tests membership against the maintained inner
+    /// index (correlated → per-correlation-key count; uncorrelated EXISTS → global count; IN →
+    /// per-value count), then negates the test for the NOT IN / NOT EXISTS anti-join variants.
+    /// </summary>
     private bool Qualifies(IReadOnlyDictionary<string, object?> outerRow)
     {
         bool contains;
