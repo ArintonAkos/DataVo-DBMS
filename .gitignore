@@ -375,3 +375,4 @@ local-docs/
 # Ignore VitePress build artifacts (keep config/theme in git)
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+docs/superpowers/
