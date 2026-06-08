@@ -217,6 +217,11 @@ public sealed class ReactiveRegistry
             return new SubqueryReactiveQuery(subqueryShape, _engine, databaseName);
         }
 
+        if (VipExposureReactiveQuery.IsSupported(select))
+        {
+            return new VipExposureReactiveQuery();
+        }
+
         if (ReactiveQueryParser.IsAggregateShape(select))
         {
             return new AggregateReactiveQuery(select, _engine, databaseName);
