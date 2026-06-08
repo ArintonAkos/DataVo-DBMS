@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DataVo Live Delta Gateway</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">DataVo reactive SQL over WebSocket</p>
+        <h1>One write stream. Four live SQL views. Only deltas cross the wire.</h1>
+      </div>
+      <div class="status">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Connecting</span>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="Live metrics">
+      <div><span id="tick">0</span><label>ticks</label></div>
+      <div><span id="mutations">0</span><label>mutations</label></div>
+      <div><span id="deltaRows">0</span><label>delta rows</label></div>
+      <div><span id="subscriptions">0</span><label>subscriptions</label></div>
+    </section>
+
+    <section class="workspace">
+      <aside class="queries">
+        <header>
+          <h2>Subscriptions</h2>
+          <button id="pauseButton" type="button">Pause</button>
+        </header>
+        <div id="queryList"></div>
+      </aside>
+
+      <section class="stream">
+        <header>
+          <h2>Delta stream</h2>
+          <button id="clearButton" type="button">Clear</button>
+        </header>
+        <div id="events" class="events"></div>
+      </section>
+    </section>
+
+    <section class="comparison">
+      <h2>What this replaces</h2>
+      <div class="compare-grid">
+        <article>
+          <h3>Polling</h3>
+          <p>Rerun each SQL view every tick, then redraw or diff in application code.</p>
+        </article>
+        <article>
+          <h3>External stream stack</h3>
+          <p>CDC connector, broker, stream processor, WebSocket service, operational glue.</p>
+        </article>
+        <article>
+          <h3>DataVo</h3>
+          <p>Subscribe once. Mutate base tables. Dispatch. Send exact result deltas.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
