@@ -35,6 +35,17 @@ public class CellValueTests
     }
 
     [Fact]
+    public void NonStringAccessors_OnNullCell_Throw()
+    {
+        CellValue nullCell = CellValue.Null;
+        Assert.Throws<InvalidOperationException>(() => nullCell.AsBoolean());
+        Assert.Throws<InvalidOperationException>(() => nullCell.AsInt32());
+        Assert.Throws<InvalidOperationException>(() => nullCell.AsInt64());
+        Assert.Throws<InvalidOperationException>(() => nullCell.AsDouble());
+        Assert.Throws<InvalidOperationException>(() => nullCell.AsDecimal());
+    }
+
+    [Fact]
     public void ToObject_And_FromObject_Bridge_CommonTypes()
     {
         Assert.Null(CellValue.From((object?)null).ToObject());
@@ -42,6 +53,8 @@ public class CellValueTests
         Assert.Equal(250L, CellValue.From((object?)250L).ToObject());
         Assert.Equal(1.5m, CellValue.From((object?)1.5m).ToObject());
         Assert.Equal("x", CellValue.From((object?)"x").ToObject());
+        Assert.Equal(true, CellValue.From((object?)true).ToObject());
+        Assert.Equal(2.5d, CellValue.From((object?)2.5d).ToObject());
         Assert.Throws<NotSupportedException>(() => CellValue.From((object?)new object()));
     }
 
