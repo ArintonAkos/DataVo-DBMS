@@ -25,6 +25,11 @@ public readonly ref struct RowSet
     {
         get
         {
+            if ((uint)index >= (uint)Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
             int width = _schema.ColumnCount;
             return new RowRef(_schema, _cells.Slice(index * width, width));
         }
