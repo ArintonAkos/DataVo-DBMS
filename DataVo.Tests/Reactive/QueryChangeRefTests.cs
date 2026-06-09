@@ -52,4 +52,20 @@ public class QueryChangeRefTests
         Assert.Equal(30m, owned.Updated[0]["TotalExposure"]);
         Assert.Equal(25m, owned.UpdatedBefore[0]["TotalExposure"]);
     }
+
+    [Fact]
+    public void RowSet_Count_IsZero_ForZeroColumnSchema()
+    {
+        var emptySchema = new ReactiveRowSchema();
+        var change = new QueryChangeRef(emptySchema, [], [], [], []);
+        Assert.Equal(0, change.Added.Count);
+    }
+
+    [Fact]
+    public void IsEmpty_IgnoresUpdatedBefore()
+    {
+        CellValue[] before = [CellValue.From("poker"), CellValue.From(25m)];
+        var change = new QueryChangeRef(Schema, [], [], [], before);
+        Assert.True(change.IsEmpty);
+    }
 }
