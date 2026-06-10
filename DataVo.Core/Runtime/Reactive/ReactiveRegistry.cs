@@ -68,6 +68,38 @@ public sealed class ReactiveRegistry
     }
 
     /// <summary>
+    /// Test-only seam: registers a pre-built reactive operator (bypassing SQL compilation), seeds it,
+    /// and returns a disposing handle. Exists to exercise the borrowed-to-materialized delta bridge
+    /// end-to-end through the same <see cref="Dispatch"/> path as production subscriptions, without
+    /// migrating real operators (Phase 1).
+    /// </summary>
+    internal IDisposable AddCompiledForTest(DataVoContext ctx, IReactiveQuery query, Action<QueryChange> onChanged)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(onChanged);
+
+        string databaseName = ResolveDatabase(ctx);
+
+        Registration registration;
+        lock (_gate)
+        {
+            if (_subscriptions.Count >= MaxSubscriptions)
+            {
+                throw new InvalidOperationException(
+                    $"Reactive subscription cap of {MaxSubscriptions} reached.");
+            }
+
+            EnsureHookedNoLock();
+            registration = new Registration(query, onChanged);
+            _subscriptions.Add(registration);
+        }
+
+        SeedSubscription(query, databaseName);
+        return new SubscriptionHandle(this, registration);
+    }
+
+    /// <summary>
     /// Drains all buffered change sets through the active subscriptions, invoking callbacks for any
     /// non-empty results on the calling thread.
     /// </summary>
