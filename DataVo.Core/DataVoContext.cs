@@ -89,6 +89,14 @@ public sealed class DataVoContext : IDisposable
         => Engine.Reactive.Add(this, sql, onChanged);
 
     /// <summary>
+    /// Subscribes on the zero-allocation fast lane: delivers a borrowed <see cref="QueryChangeRef"/>
+    /// (valid only during the callback) without materializing to an owned <see cref="QueryChange"/>.
+    /// Throws <see cref="NotSupportedException"/> for query shapes not yet migrated to borrowed emit.
+    /// </summary>
+    public IDisposable SubscribeZeroAlloc(string sql, QueryDeltaHandler onChanged)
+        => Engine.Reactive.SubscribeZeroAlloc(this, sql, onChanged);
+
+    /// <summary>
     /// Drains buffered committed change sets through active subscriptions, invoking callbacks on the
     /// calling thread.
     /// </summary>
