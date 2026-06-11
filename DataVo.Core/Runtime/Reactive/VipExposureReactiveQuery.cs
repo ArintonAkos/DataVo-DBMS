@@ -7,12 +7,14 @@ namespace DataVo.Core.Runtime.Reactive;
 /// <summary>
 /// Narrow reactive operator for the research benchmark's VIP exposure query:
 /// Orders ⋈ Accounts ⋈ Markets, filtered by VIP account, grouped by market category.
+/// Emits borrowed deltas via <see cref="IBorrowedReactiveQuery"/>; the legacy owned
+/// <see cref="Apply"/> path materializes from the same borrowed build.
 /// </summary>
-internal sealed class VipExposureReactiveQuery : IReactiveQuery
+internal sealed class VipExposureReactiveQuery : IBorrowedReactiveQuery
 {
-    private sealed record OrderRow(int Id, int AccountId, int MarketId, decimal Stake);
-    private sealed record AccountRow(int Id, bool IsVip);
-    private sealed record MarketRow(int Id, string Category);
+    private readonly record struct OrderRow(int Id, int AccountId, int MarketId, decimal Stake);
+    private readonly record struct AccountRow(int Id, bool IsVip);
+    private readonly record struct MarketRow(int Id, string Category);
 
     private readonly Dictionary<int, OrderRow> _orders = [];
     private readonly Dictionary<int, AccountRow> _accounts = [];
@@ -20,7 +22,20 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
     private readonly Dictionary<string, decimal> _exposureByCategory = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _emittedCategories = new(StringComparer.OrdinalIgnoreCase);
 
+    // Reused per-Apply scratch so the dispatch hot path does not allocate.
+    private readonly HashSet<string> _touched = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ReactiveRowSchema _outputSchema = new("Category", "TotalExposure");
+    private readonly QueryChangeBuilder _legacyBuilder;
+    private readonly CellValue[] _rowScratch = new CellValue[2];
+
+    public VipExposureReactiveQuery()
+    {
+        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
+    }
+
     public IReadOnlyCollection<string> Tables => ["Accounts", "Markets", "Orders"];
+
+    public ReactiveRowSchema OutputSchema => _outputSchema;
 
     public static bool IsSupported(SelectStatement select)
     {
@@ -60,27 +75,37 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
         }
     }
 
+    /// <summary>Legacy owned path: build the borrowed delta, then materialize. Behavior-identical to
+    /// the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
     public QueryChange Apply(IReadOnlyList<RowChange> tableChanges)
     {
-        var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _legacyBuilder.Reset();
+        ApplyInto(tableChanges, _legacyBuilder);
+        return _legacyBuilder.Build().Materialize();
+    }
 
-        foreach (RowChange change in tableChanges)
+    public void ApplyInto(IReadOnlyList<RowChange> tableChanges, QueryChangeBuilder builder)
+    {
+        _touched.Clear();
+
+        for (int i = 0; i < tableChanges.Count; i++)
         {
+            RowChange change = tableChanges[i];
             if (IsOrders(change.Table))
             {
-                ApplyOrderChange(change, touched);
+                ApplyOrderChange(change, _touched);
             }
             else if (IsAccounts(change.Table))
             {
-                ApplyAccountChange(change, touched);
+                ApplyAccountChange(change, _touched);
             }
             else if (IsMarkets(change.Table))
             {
-                ApplyMarketChange(change, touched);
+                ApplyMarketChange(change, _touched);
             }
         }
 
-        return Classify(touched);
+        ClassifyInto(_touched, builder);
     }
 
     private void ApplyOrderChange(RowChange change, HashSet<string> touched)
@@ -107,9 +132,9 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
         AccountRow? before = change.Before is null ? null : ToAccount(change.Before);
         AccountRow? after = change.After is null ? null : ToAccount(change.After);
 
-        if (before is not null && _accounts.Remove(before.Id) && before.IsVip)
+        if (before is not null && _accounts.Remove(before.Value.Id) && before.Value.IsVip)
         {
-            foreach (OrderRow order in _orders.Values.Where(order => order.AccountId == before.Id))
+            foreach (OrderRow order in _orders.Values.Where(order => order.AccountId == before.Value.Id))
             {
                 AdjustExposure(order, -order.Stake, touched);
             }
@@ -117,10 +142,10 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
 
         if (after is not null)
         {
-            _accounts[after.Id] = after;
-            if (after.IsVip)
+            _accounts[after.Value.Id] = after.Value;
+            if (after.Value.IsVip)
             {
-                foreach (OrderRow order in _orders.Values.Where(order => order.AccountId == after.Id))
+                foreach (OrderRow order in _orders.Values.Where(order => order.AccountId == after.Value.Id))
                 {
                     AdjustExposure(order, order.Stake, touched);
                 }
@@ -133,20 +158,20 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
         MarketRow? before = change.Before is null ? null : ToMarket(change.Before);
         MarketRow? after = change.After is null ? null : ToMarket(change.After);
 
-        if (before is not null && _markets.Remove(before.Id))
+        if (before is not null && _markets.Remove(before.Value.Id))
         {
-            foreach (OrderRow order in _orders.Values.Where(order => order.MarketId == before.Id && IsVip(order.AccountId)))
+            foreach (OrderRow order in _orders.Values.Where(order => order.MarketId == before.Value.Id && IsVip(order.AccountId)))
             {
-                AdjustCategory(before.Category, -order.Stake, touched);
+                AdjustCategory(before.Value.Category, -order.Stake, touched);
             }
         }
 
         if (after is not null)
         {
-            _markets[after.Id] = after;
-            foreach (OrderRow order in _orders.Values.Where(order => order.MarketId == after.Id && IsVip(order.AccountId)))
+            _markets[after.Value.Id] = after.Value;
+            foreach (OrderRow order in _orders.Values.Where(order => order.MarketId == after.Value.Id && IsVip(order.AccountId)))
             {
-                AdjustCategory(after.Category, order.Stake, touched);
+                AdjustCategory(after.Value.Category, order.Stake, touched);
             }
         }
     }
@@ -169,7 +194,7 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
 
     private void AdjustExposure(OrderRow order, decimal delta, HashSet<string>? touched)
     {
-        if (!IsVip(order.AccountId) || !_markets.TryGetValue(order.MarketId, out MarketRow? market))
+        if (!IsVip(order.AccountId) || !_markets.TryGetValue(order.MarketId, out MarketRow market))
         {
             return;
         }
@@ -193,44 +218,34 @@ internal sealed class VipExposureReactiveQuery : IReactiveQuery
         touched?.Add(category);
     }
 
-    private QueryChange Classify(HashSet<string> touched)
+    private void ClassifyInto(HashSet<string> touched, QueryChangeBuilder builder)
     {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-
         foreach (string category in touched)
         {
             if (_exposureByCategory.TryGetValue(category, out decimal total))
             {
-                IReadOnlyDictionary<string, object?> row = OutputRow(category, total);
+                _rowScratch[0] = CellValue.From(category);
+                _rowScratch[1] = CellValue.From(total);
                 if (_emittedCategories.Add(category))
                 {
-                    added.Add(row);
+                    builder.AddAddedRow(_rowScratch);
                 }
                 else
                 {
-                    updated.Add(row);
+                    builder.AddUpdatedRow(_rowScratch);
                 }
             }
             else if (_emittedCategories.Remove(category))
             {
-                removed.Add(OutputRow(category, null));
+                _rowScratch[0] = CellValue.From(category);
+                _rowScratch[1] = CellValue.Null;
+                builder.AddRemovedRow(_rowScratch);
             }
         }
-
-        return new QueryChange(added, removed, updated);
     }
 
     private bool IsVip(int accountId) =>
-        _accounts.TryGetValue(accountId, out AccountRow? account) && account.IsVip;
-
-    private static IReadOnlyDictionary<string, object?> OutputRow(string category, object? total) =>
-        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Category"] = category,
-            ["TotalExposure"] = total
-        };
+        _accounts.TryGetValue(accountId, out AccountRow account) && account.IsVip;
 
     private static OrderRow ToOrder(IReadOnlyDictionary<string, object?> row) =>
         new(ToInt(row["Id"]), ToInt(row["AccountId"]), ToInt(row["MarketId"]), ToDecimal(row["Stake"]));
