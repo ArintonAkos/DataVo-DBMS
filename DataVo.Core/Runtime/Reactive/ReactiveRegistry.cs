@@ -49,19 +49,7 @@ public sealed class ReactiveRegistry
         string databaseName = ResolveDatabase(ctx);
         IReactiveQuery subscription = CreateQuery(sql, databaseName);
 
-        Registration registration;
-        lock (_gate)
-        {
-            if (_subscriptions.Count >= MaxSubscriptions)
-            {
-                throw new InvalidOperationException(
-                    $"Reactive subscription cap of {MaxSubscriptions} reached.");
-            }
-
-            EnsureHookedNoLock();
-            registration = new Registration(subscription, onChanged);
-            _subscriptions.Add(registration);
-        }
+        Registration registration = RegisterUnderLock(subscription, onChanged);
 
         SeedSubscription(subscription, databaseName);
         return new SubscriptionHandle(this, registration);
@@ -81,7 +69,19 @@ public sealed class ReactiveRegistry
 
         string databaseName = ResolveDatabase(ctx);
 
-        Registration registration;
+        Registration registration = RegisterUnderLock(query, onChanged);
+
+        SeedSubscription(query, databaseName);
+        return new SubscriptionHandle(this, registration);
+    }
+
+    /// <summary>
+    /// Registers a compiled operator under the subscription lock: enforces the cap, ensures the change
+    /// hook is attached, and appends the registration. Shared by <see cref="Add"/> and the test seam so
+    /// the cap/hook policy lives in one place.
+    /// </summary>
+    private Registration RegisterUnderLock(IReactiveQuery query, Action<QueryChange> onChanged)
+    {
         lock (_gate)
         {
             if (_subscriptions.Count >= MaxSubscriptions)
@@ -91,12 +91,10 @@ public sealed class ReactiveRegistry
             }
 
             EnsureHookedNoLock();
-            registration = new Registration(query, onChanged);
+            var registration = new Registration(query, onChanged);
             _subscriptions.Add(registration);
+            return registration;
         }
-
-        SeedSubscription(query, databaseName);
-        return new SubscriptionHandle(this, registration);
     }
 
     /// <summary>
