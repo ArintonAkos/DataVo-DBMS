@@ -11,6 +11,7 @@ string benchmarkScenario = ReadStringArg(args, "--scenario", "complex-vip");
 int baselineOrders = ReadIntArg(args, "--baseline", 10_000);
 int iterations = ReadIntArg(args, "--iterations", 50_000);
 int progressEvery = ReadIntArg(args, "--progress-every", 1_000);
+string engineFilter = ReadStringArg(args, "--engine", "all").ToLowerInvariant();
 
 List<BenchmarkMetrics> results = [];
 
@@ -23,9 +24,12 @@ if (benchmarkScenario.Equals("simple-exposure", StringComparison.OrdinalIgnoreCa
         InitialOrderCount: baselineOrders,
         SubscriberCount: 2_500);
 
-    results.Add(await RunSimpleAsync(new DataVoEngine(), scenario, iterations, progressEvery));
-    results.Add(await RunSimpleAsync(new DuckDbEngine(), scenario, iterations, progressEvery));
-    results.Add(await RunSimpleAsync(new SqliteEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "datavo"))
+        results.Add(await RunSimpleAsync(new DataVoEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "duckdb"))
+        results.Add(await RunSimpleAsync(new DuckDbEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(await RunSimpleAsync(new SqliteEngine(), scenario, iterations, progressEvery));
 }
 else if (benchmarkScenario.Equals("complex-vip", StringComparison.OrdinalIgnoreCase))
 {
@@ -35,9 +39,12 @@ else if (benchmarkScenario.Equals("complex-vip", StringComparison.OrdinalIgnoreC
         MarketCount: 50,
         VipRatio: 0.20d);
 
-    results.Add(await RunComplexAsync(new DataVoComplexVipExposureEngine(), scenario, iterations, progressEvery));
-    results.Add(await RunComplexAsync(new DuckDbComplexVipExposureEngine(), scenario, iterations, progressEvery));
-    results.Add(await RunComplexAsync(new SqliteComplexVipExposureEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "datavo"))
+        results.Add(await RunComplexAsync(new DataVoComplexVipExposureEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "duckdb"))
+        results.Add(await RunComplexAsync(new DuckDbComplexVipExposureEngine(), scenario, iterations, progressEvery));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(await RunComplexAsync(new SqliteComplexVipExposureEngine(), scenario, iterations, progressEvery));
 }
 else
 {
@@ -183,3 +190,5 @@ static string ReadStringArg(string[] args, string name, string defaultValue)
 
     return string.IsNullOrWhiteSpace(args[index + 1]) ? defaultValue : args[index + 1];
 }
+
+static bool ShouldRun(string filter, string engine) => filter is "all" || filter == engine;
