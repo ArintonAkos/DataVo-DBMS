@@ -28,5 +28,10 @@ public class ChangeRecorderCloneTests
         // Case-insensitive key access (snapshot preserves OrdinalIgnoreCase).
         Assert.Equal(1, Convert.ToInt32(change.After!["id"]));
         Assert.Equal("alice", change.After!["NAME"]);
+
+        // Independence: the captured insert image must be frozen — a later UPDATE to the same row
+        // must not retroactively change the already-captured snapshot.
+        ctx.Execute("UPDATE T SET Name = 'bob' WHERE Id = 1");
+        Assert.Equal("alice", change.After!["NAME"]);
     }
 }
