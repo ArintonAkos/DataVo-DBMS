@@ -44,7 +44,7 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
                 ["Category"] = ComplexVipTickFactory.CategoryForMarket(id)
             }));
 
-        _subscription = EnsureContext().Subscribe(ComplexVipSql.Query, ApplyChange);
+        _subscription = EnsureContext().SubscribeZeroAlloc(ComplexVipSql.Query, ApplyChange);
 
         List<IReadOnlyDictionary<string, object?>> baseline = Enumerable
             .Range(0, scenario.InitialOrderCount)
@@ -88,18 +88,23 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
         return ValueTask.CompletedTask;
     }
 
-    private void ApplyChange(QueryChange change)
+    private void ApplyChange(in QueryChangeRef change)
     {
         lock (_gate)
         {
-            foreach (IReadOnlyDictionary<string, object?> row in change.Removed)
+            for (int i = 0; i < change.Removed.Count; i++)
             {
-                _exposure.Remove((string)row["Category"]!);
+                _exposure.Remove(change.Removed[i]["Category"].AsString()!);
             }
 
-            foreach (IReadOnlyDictionary<string, object?> row in change.Added.Concat(change.Updated))
+            for (int i = 0; i < change.Added.Count; i++)
             {
-                _exposure[(string)row["Category"]!] = Convert.ToDecimal(row["TotalExposure"]);
+                _exposure[change.Added[i]["Category"].AsString()!] = change.Added[i]["TotalExposure"].AsDecimal();
+            }
+
+            for (int i = 0; i < change.Updated.Count; i++)
+            {
+                _exposure[change.Updated[i]["Category"].AsString()!] = change.Updated[i]["TotalExposure"].AsDecimal();
             }
         }
     }
