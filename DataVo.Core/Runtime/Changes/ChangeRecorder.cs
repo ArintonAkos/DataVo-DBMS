@@ -73,9 +73,13 @@ internal sealed class ChangeRecorder
     private static IReadOnlyDictionary<string, object?> Clone(IReadOnlyDictionary<string, object?> row)
     {
         // Snapshot the row so later mutation of the underlying storage dictionary cannot leak into the
-        // captured before/after images.
-        return new Dictionary<string, object?>(
-            row.ToDictionary(pair => pair.Key, pair => pair.Value),
-            StringComparer.OrdinalIgnoreCase);
+        // captured before/after images. Single allocation (no intermediate ToDictionary copy).
+        var clone = new Dictionary<string, object?>(row.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, object?> pair in row)
+        {
+            clone[pair.Key] = pair.Value;
+        }
+
+        return clone;
     }
 }
