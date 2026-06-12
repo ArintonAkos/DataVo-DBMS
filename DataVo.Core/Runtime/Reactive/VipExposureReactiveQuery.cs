@@ -121,7 +121,7 @@ internal sealed class VipExposureReactiveQuery : IBorrowedReactiveQuery
 
         if (change.After is not null)
         {
-            OrderRow after = ToOrder(change.After);
+            OrderRow after = ToOrder(change);
             _orders[after.Id] = after;
             AdjustExposure(after, after.Stake, touched);
         }
@@ -249,6 +249,26 @@ internal sealed class VipExposureReactiveQuery : IBorrowedReactiveQuery
 
     private static OrderRow ToOrder(IReadOnlyDictionary<string, object?> row) =>
         new(ToInt(row["Id"]), ToInt(row["AccountId"]), ToInt(row["MarketId"]), ToDecimal(row["Stake"]));
+
+    private static OrderRow ToOrder(RowChange change)
+    {
+        if (change.TypedAfter is TypedRow typedAfter && HasOrderSchema(typedAfter.Schema))
+        {
+            return ToOrder(typedAfter.AsRowRef());
+        }
+
+        return ToOrder(change.After!);
+    }
+
+    private static OrderRow ToOrder(RowRef row) =>
+        new(row[0].AsInt32(), row[1].AsInt32(), row[2].AsInt32(), row[3].AsInt32());
+
+    private static bool HasOrderSchema(ReactiveRowSchema schema) =>
+        schema.ColumnCount == 4
+        && schema.ColumnAt(0).Equals("Id", StringComparison.OrdinalIgnoreCase)
+        && schema.ColumnAt(1).Equals("AccountId", StringComparison.OrdinalIgnoreCase)
+        && schema.ColumnAt(2).Equals("MarketId", StringComparison.OrdinalIgnoreCase)
+        && schema.ColumnAt(3).Equals("Stake", StringComparison.OrdinalIgnoreCase);
 
     private static AccountRow ToAccount(IReadOnlyDictionary<string, object?> row) =>
         new(ToInt(row["Id"]), ToBool(row["IsVip"]));

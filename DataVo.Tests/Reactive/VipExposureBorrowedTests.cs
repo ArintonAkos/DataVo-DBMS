@@ -38,6 +38,56 @@ public class VipExposureBorrowedTests
     }
 
     [Fact]
+    public void ApplyInto_UsesTypedAfter_ForOrderInsert_WhenPresent()
+    {
+        VipExposureReactiveQuery op = SeededOperator();
+        var builder = new QueryChangeBuilder(op.OutputSchema);
+        var schema = new ReactiveRowSchema("Id", "AccountId", "MarketId", "Stake");
+        var typedAfter = new TypedRow(schema,
+            [CellValue.From(1), CellValue.From(1), CellValue.From(1), CellValue.From(250)]);
+
+        var misleadingDictAfter = Row(
+            ("Id", 1),
+            ("AccountId", 1),
+            ("MarketId", 1),
+            ("Stake", 1L));
+
+        var insert = new RowChange("Orders", 1, ChangeKind.Insert, before: null, after: misleadingDictAfter, typedAfter);
+
+        op.ApplyInto([insert], builder);
+        QueryChangeRef change = builder.Build();
+
+        Assert.Equal(1, change.Added.Count);
+        Assert.Equal("sports", change.Added[0]["Category"].AsString());
+        Assert.Equal(250m, change.Added[0]["TotalExposure"].AsDecimal());
+    }
+
+    [Fact]
+    public void ApplyInto_FallsBackToAfter_ForOrderInsert_WhenTypedAfterSchemaOrderDiffers()
+    {
+        VipExposureReactiveQuery op = SeededOperator();
+        var builder = new QueryChangeBuilder(op.OutputSchema);
+        var schema = new ReactiveRowSchema("AccountId", "Id", "MarketId", "Stake");
+        var typedAfter = new TypedRow(schema,
+            [CellValue.From(1), CellValue.From(9), CellValue.From(1), CellValue.From(250)]);
+
+        var dictAfter = Row(
+            ("Id", 9),
+            ("AccountId", 1),
+            ("MarketId", 1),
+            ("Stake", 250L));
+
+        var insert = new RowChange("Orders", 9, ChangeKind.Insert, before: null, after: dictAfter, typedAfter);
+
+        op.ApplyInto([insert], builder);
+        QueryChangeRef change = builder.Build();
+
+        Assert.Equal(1, change.Added.Count);
+        Assert.Equal("sports", change.Added[0]["Category"].AsString());
+        Assert.Equal(250m, change.Added[0]["TotalExposure"].AsDecimal());
+    }
+
+    [Fact]
     public void OrderInsertDispatch_IsAllocationFree_OnSteadyState()
     {
         VipExposureReactiveQuery op = SeededOperator();
