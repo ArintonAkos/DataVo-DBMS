@@ -5,6 +5,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
@@ -112,11 +113,152 @@ internal sealed class InsertRowService(
         return new InsertRowsResult(rowIds, acceptedRows.Count, messages);
     }
 
+    public long InsertTypedRow(
+        string databaseName,
+        string tableName,
+        ReactiveRowSchema columns,
+        ReadOnlySpan<CellValue> row,
+        long statementTxId,
+        ChangeRecorder? recorder = null)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name is required.", nameof(tableName));
+        }
+
+        if (columns.ColumnCount != row.Length)
+        {
+            throw new ArgumentException(
+                $"Typed row schema has {columns.ColumnCount} columns but row has {row.Length} cells.",
+                nameof(row));
+        }
+
+        List<string> primaryKeys = catalog.GetTablePrimaryKeys(tableName, databaseName);
+        List<string> uniqueKeys = catalog.GetTableUniqueKeys(tableName, databaseName);
+        List<ForeignKey> foreignKeys = catalog.GetTableForeignKeys(tableName, databaseName);
+        List<IndexFile> indexFiles = catalog.GetTableIndexes(tableName, databaseName);
+        List<Column> tableColumns = catalog.GetTableColumns(tableName, databaseName);
+
+        EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
+
+        HashSet<string> columnNames = tableColumns
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var foreignKeysByAttribute = foreignKeys
+            .GroupBy(foreignKey => foreignKey.AttributeName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var inputRow = new Dictionary<string, object?>(row.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < row.Length; i++)
+        {
+            ValidateTypedCell(tableColumns[i], row[i]);
+            inputRow[tableColumns[i].Name] = row[i].ToObject();
+        }
+
+        EnsureKnownColumns(inputRow, columnNames, tableName);
+
+        var messages = new List<string>();
+        var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
+        var acceptedUniqueValues = uniqueKeys.ToDictionary(
+            key => key,
+            _ => new HashSet<string>(StringComparer.Ordinal),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (!TryNormalizeRow(
+            tableName,
+            databaseName,
+            rowNumber: 1,
+            inputRow,
+            tableColumns,
+            primaryKeys,
+            uniqueKeys,
+            foreignKeysByAttribute,
+            acceptedPrimaryKeys,
+            acceptedUniqueValues,
+            messages,
+            out Dictionary<string, object?> normalized))
+        {
+            string message = messages.Count == 0
+                ? $"Typed insert into {tableName} was rejected."
+                : string.Join(" ", messages);
+            throw new InvalidOperationException(message);
+        }
+
+        List<long> rowIds = context.InsertIntoTable([normalized], tableName, databaseName);
+        long rowId = rowIds[0];
+        MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
+        InsertIndexes(tableName, databaseName, normalized, rowId, indexFiles);
+
+        if (recorder is not null)
+        {
+            var typedAfter = new TypedRow(columns, row);
+            recorder.RecordTypedInsert(tableName, rowId, normalized, typedAfter);
+        }
+
+        return rowId;
+    }
+
     private static Dictionary<string, object?> MaterializeRow(IReadOnlyDictionary<string, object?> row)
     {
         return row is Dictionary<string, object?> dict && dict.Comparer.Equals(StringComparer.OrdinalIgnoreCase)
             ? new Dictionary<string, object?>(dict, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureTypedSchemaMatchesCatalog(
+        ReactiveRowSchema columns,
+        IReadOnlyList<Column> tableColumns,
+        string tableName)
+    {
+        if (columns.ColumnCount != tableColumns.Count)
+        {
+            throw new NotSupportedException(
+                $"Typed inserts for table {tableName} require the full catalog row in catalog order; use the dictionary BulkInsert path for partial rows.");
+        }
+
+        for (int i = 0; i < tableColumns.Count; i++)
+        {
+            if (!columns.ColumnAt(i).Equals(tableColumns[i].Name, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new NotSupportedException(
+                    $"Typed inserts for table {tableName} require catalog order. Expected column {tableColumns[i].Name} at ordinal {i}; use the dictionary BulkInsert path.");
+            }
+        }
+    }
+
+    private static void ValidateTypedCell(Column column, CellValue cell)
+    {
+        CellType expected = column.Type.ToUpperInvariant() switch
+        {
+            "INT" => CellType.Int32,
+            "VARCHAR" => CellType.String,
+            "BIT" => CellType.Boolean,
+            "FLOAT" or "DATE" or "VECTOR" => throw new NotSupportedException(
+                $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path."),
+            _ => throw new NotSupportedException(
+                $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.")
+        };
+
+        if (cell.IsNull)
+        {
+            return;
+        }
+
+        if (cell.Type != expected)
+        {
+            throw new NotSupportedException(
+                $"Typed insert cell for column {column.Name} must be {expected} for {column.Type}; use the dictionary BulkInsert path.");
+        }
+
+        if (expected == CellType.String
+            && column.Length > 0
+            && cell.AsString() is string text
+            && text.Length > column.Length)
+        {
+            throw new NotSupportedException(
+                $"Typed insert cell for column {column.Name} exceeds VARCHAR({column.Length}); use the dictionary BulkInsert path.");
+        }
     }
 
     private static void EnsureKnownColumns(
