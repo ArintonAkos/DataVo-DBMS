@@ -41,6 +41,17 @@ internal sealed class ChangeRecorder
     public void RecordInsert(string table, long rowId, IReadOnlyDictionary<string, object?> after)
         => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: Clone(after)));
 
+    /// <summary>
+    /// Records an inserted row image whose dictionary is already a fresh owned normalized row.
+    /// Used by the typed insert fast lane to avoid a redundant after-image clone.
+    /// </summary>
+    public void RecordTypedInsert(
+        string table,
+        long rowId,
+        IReadOnlyDictionary<string, object?> ownedAfter,
+        TypedRow typedAfter)
+        => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: ownedAfter, typedAfter));
+
     /// <summary>Records a deleted row image.</summary>
     public void RecordDelete(string table, long rowId, IReadOnlyDictionary<string, object?> before)
         => Add(new RowChange(table, rowId, ChangeKind.Delete, before: Clone(before), after: null));
