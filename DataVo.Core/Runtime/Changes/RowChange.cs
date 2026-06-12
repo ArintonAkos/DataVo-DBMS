@@ -21,12 +21,30 @@ public sealed class RowChange
     public RowChange(string table, long rowId, ChangeKind kind,
         IReadOnlyDictionary<string, object?>? before,
         IReadOnlyDictionary<string, object?>? after)
+        : this(table, rowId, kind, before, after, typedAfter: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new <see cref="RowChange"/>.
+    /// </summary>
+    /// <param name="table">The table the row belongs to.</param>
+    /// <param name="rowId">The physical row identifier.</param>
+    /// <param name="kind">The kind of mutation.</param>
+    /// <param name="before">The row image prior to the change, or <c>null</c> for inserts.</param>
+    /// <param name="after">The row image after the change, or <c>null</c> for deletes.</param>
+    /// <param name="typedAfter">The typed row image after the change, or <c>null</c> for dictionary paths and deletes.</param>
+    public RowChange(string table, long rowId, ChangeKind kind,
+        IReadOnlyDictionary<string, object?>? before,
+        IReadOnlyDictionary<string, object?>? after,
+        TypedRow? typedAfter)
     {
         Table = table;
         RowId = rowId;
         Kind = kind;
         Before = before;
         After = after;
+        TypedAfter = typedAfter;
     }
 
     /// <summary>Gets the table the row belongs to.</summary>
@@ -51,4 +69,7 @@ public sealed class RowChange
 
     /// <summary>Gets the row image after the change, or <c>null</c> for deletes.</summary>
     public IReadOnlyDictionary<string, object?>? After { get; }
+
+    /// <summary>Gets the typed row image after the change, or <c>null</c> for dictionary paths and deletes.</summary>
+    public TypedRow? TypedAfter { get; }
 }
