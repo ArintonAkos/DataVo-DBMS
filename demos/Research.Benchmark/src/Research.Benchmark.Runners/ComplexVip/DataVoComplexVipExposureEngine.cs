@@ -13,6 +13,8 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
     private DataVoContext? _context;
     private IDisposable? _subscription;
     private long _nextOrderId = 1;
+    private static readonly ReactiveRowSchema OrdersSchema = new("Id", "AccountId", "MarketId", "Stake");
+    private readonly CellValue[] _orderCells = new CellValue[4];
 
     public string Name => "DataVo";
 
@@ -64,7 +66,11 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
     public ValueTask IngestOrderAsync(ComplexOrderTick order, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EnsureContext().BulkInsert("Orders", [ToRow(order)]);
+        _orderCells[0] = CellValue.From(checked((int)order.Id));
+        _orderCells[1] = CellValue.From(order.AccountId);
+        _orderCells[2] = CellValue.From(order.MarketId);
+        _orderCells[3] = CellValue.From(checked((int)decimal.Round(order.Stake, 0)));
+        EnsureContext().InsertTyped("Orders", OrdersSchema, _orderCells);
         EnsureContext().DispatchPendingNotifications();
         _nextOrderId = Math.Max(_nextOrderId, order.Id + 1);
         return ValueTask.CompletedTask;
