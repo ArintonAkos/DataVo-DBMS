@@ -238,6 +238,84 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
+    /// Inserts one typed row using a strict fast lane. The supplied span is consumed synchronously and
+    /// never stored; callers must keep using <see cref="BulkInsert"/> when coercion or partial rows are needed.
+    /// </summary>
+    public long InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        if (columns.ColumnCount != row.Length)
+        {
+            throw new ArgumentException(
+                $"Typed row schema has {columns.ColumnCount} columns but row has {row.Length} cells.",
+                nameof(row));
+        }
+
+        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
+
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (Engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = $"TYPED INSERT {tableName}",
+                StorageMode = Engine.Config.StorageMode,
+                DatabaseName = TryGetCurrentDatabaseName()
+            };
+            diagnosticsBuilder.SetOperation("TYPED INSERT");
+            diagnosticsBuilder.AddTable(tableName);
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
+
+        string databaseName;
+        try
+        {
+            databaseName = ResolveCurrentDatabase();
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+
+        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        {
+            const string transactionError = "InsertTyped cannot run while the current session has an active transaction.";
+            diagnosticsBuilder?.RecordError(transactionError);
+            throw new InvalidOperationException(transactionError);
+        }
+
+        var service = new InsertRowService(
+            Engine,
+            Engine.StorageContext,
+            Engine.Catalog,
+            Engine.IndexManager);
+
+        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
+        Engine.LockManager.AcquireWriteLock(databaseName, tableName);
+
+        try
+        {
+            long rowId = service.InsertTypedRow(databaseName, tableName, columns, row, statementTxId, recorder);
+            diagnosticsBuilder?.AddRowsAffected(1);
+            recorder?.Publish();
+            return rowId;
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+        finally
+        {
+            Engine.LockManager.ReleaseWriteLock(databaseName, tableName);
+        }
+    }
+
+    /// <summary>
     /// Authenticates the current <see cref="SessionId"/> against configured users.
     /// </summary>
     public bool Login(string username, string password)
