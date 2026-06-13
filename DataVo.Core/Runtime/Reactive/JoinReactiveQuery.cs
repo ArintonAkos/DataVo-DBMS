@@ -17,12 +17,17 @@ namespace DataVo.Core.Runtime.Reactive;
 /// apply right deltas) so the <c>ΔR⋈ΔS</c> cross term is never double-counted. Outer joins additionally
 /// track per-key match counts to emit and retract null-padded rows.
 /// </remarks>
-internal sealed partial class JoinReactiveQuery : IReactiveQuery
+internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
 {
     private readonly JoinShape _shape;
     private readonly ReactivePredicate _where;
     private readonly IReadOnlyList<string> _leftPrimaryKeys;
     private readonly IReadOnlyList<string> _rightPrimaryKeys;
+
+    private readonly ReactiveRowSchema _outputSchema;
+    private readonly string[] _outputColumns;
+    private readonly QueryChangeBuilder _legacyBuilder;
+    private readonly CellValue[] _rowScratch;
 
     /// <summary>
     /// Compiles the supplied join shape into an incremental equi-join operator.
@@ -58,6 +63,37 @@ internal sealed partial class JoinReactiveQuery : IReactiveQuery
         }
 
         BuildProjection();
+
+        // Output schema: each explicit projection column's output name, or — for SELECT * — both tables'
+        // catalog columns qualified as "Table.Column" (matching ProjectStar), followed by the hidden
+        // identity columns every joined row carries. Built once so the borrowed delta has a fixed schema.
+        var outputColumns = new List<string>();
+        foreach (ProjectedColumn column in _projection)
+        {
+            if (column.IsStar)
+            {
+                foreach (var c in engine.Catalog.GetTableColumns(_shape.LeftTable, databaseName))
+                {
+                    outputColumns.Add(_shape.LeftTable + "." + c.Name);
+                }
+
+                foreach (var c in engine.Catalog.GetTableColumns(_shape.RightTable, databaseName))
+                {
+                    outputColumns.Add(_shape.RightTable + "." + c.Name);
+                }
+            }
+            else
+            {
+                outputColumns.Add(column.OutputName);
+            }
+        }
+
+        outputColumns.Add(LeftIdentityColumn);
+        outputColumns.Add(RightIdentityColumn);
+        _outputColumns = outputColumns.ToArray();
+        _outputSchema = new ReactiveRowSchema(_outputColumns);
+        _rowScratch = new CellValue[_outputColumns.Length];
+        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
     }
 
     /// <inheritdoc />
@@ -70,8 +106,14 @@ internal sealed partial class JoinReactiveQuery : IReactiveQuery
     }
 
     /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _outputSchema;
+
+    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
+    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
     public QueryChange Apply(IReadOnlyList<RowChange> changes)
     {
-        return ApplyDelta(changes);
+        _legacyBuilder.Reset();
+        ApplyInto(changes, _legacyBuilder);
+        return _legacyBuilder.Build().Materialize();
     }
 }

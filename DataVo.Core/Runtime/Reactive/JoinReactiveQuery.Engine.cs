@@ -58,7 +58,7 @@ internal sealed partial class JoinReactiveQuery
         }
     }
 
-    private QueryChange ApplyDelta(IReadOnlyList<RowChange> changes)
+    public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
     {
         // The first Apply after both sides are seeded must materialize the baseline result so the diff
         // is taken against the correct starting point (the baseline itself is never delivered).
@@ -67,8 +67,10 @@ internal sealed partial class JoinReactiveQuery
         List<SideDelta> leftDeltas = [];
         List<SideDelta> rightDeltas = [];
 
-        foreach (RowChange change in changes)
+        // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
+        for (int i = 0; i < changes.Count; i++)
         {
+            RowChange change = changes[i];
             bool isLeft = IsLeftTable(change.Table);
             List<SideDelta> target = isLeft ? leftDeltas : rightDeltas;
             IReadOnlyList<string> primaryKeys = isLeft ? _leftPrimaryKeys : _rightPrimaryKeys;
@@ -102,7 +104,7 @@ internal sealed partial class JoinReactiveQuery
         // Outer joins additionally re-evaluate null-padded rows for every touched side row.
         CollectOuterCandidates(leftDeltas, rightDeltas, candidates);
 
-        return Diff(candidates);
+        DiffInto(candidates, builder);
     }
 
     /// <summary>
@@ -154,13 +156,8 @@ internal sealed partial class JoinReactiveQuery
     /// currently emitted set. Because every identity is recomputed from final state, listing it more
     /// than once (the cross term) is harmless — there is no weight summation to double-count.
     /// </summary>
-    private QueryChange Diff(HashSet<string> candidates)
+    private void DiffInto(HashSet<string> candidates, QueryChangeBuilder builder)
     {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
-
         foreach (string identity in candidates)
         {
             IReadOnlyDictionary<string, object?>? current = ComputeOutputRow(identity);
@@ -171,7 +168,8 @@ internal sealed partial class JoinReactiveQuery
                 if (wasEmitted)
                 {
                     _emitted.Remove(identity);
-                    removed.Add(previous!);
+                    WriteRow(previous!);
+                    builder.AddRemovedRow(_rowScratch);
                 }
 
                 continue;
@@ -180,17 +178,31 @@ internal sealed partial class JoinReactiveQuery
             if (!wasEmitted)
             {
                 _emitted[identity] = current;
-                added.Add(current);
+                WriteRow(current);
+                builder.AddAddedRow(_rowScratch);
             }
             else if (!RowsEqual(previous!, current))
             {
                 _emitted[identity] = current;
-                updatedBefore.Add(previous!);
-                updated.Add(current);
+                WriteRow(previous!);
+                builder.AddUpdatedBeforeRow(_rowScratch);
+                WriteRow(current);
+                builder.AddUpdatedRow(_rowScratch);
             }
         }
+    }
 
-        return new QueryChange(added, removed, updated, updatedBefore);
+    /// <summary>
+    /// Writes a (boxed) projected output row into the reused <see cref="_rowScratch"/>, in
+    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps cell values via
+    /// <c>CellValue.From(object?)</c> — the documented residual boxing, targeted by Step 2.
+    /// </summary>
+    private void WriteRow(IReadOnlyDictionary<string, object?> row)
+    {
+        for (int i = 0; i < _outputColumns.Length; i++)
+        {
+            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
+        }
     }
 
     /// <summary>
