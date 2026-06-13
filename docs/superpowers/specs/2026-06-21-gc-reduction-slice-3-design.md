@@ -245,6 +245,22 @@ dotnet test DataVo.Tests/DataVo.Tests.csproj --filter <Operator>BorrowedTests
 - **"Steady-state" workload definition in tests** — must keep maintained structures
   non-growing so amortized buffer growth is excluded, consistent with existing tests.
 
+## Future Improvements
+
+### Known limitation: borrowed currency does not support `DateOnly` (and other non-scalar types)
+
+Routing the owned aggregate path through the `CellValue` arena constrains group-key and aggregate
+output to the borrowed currency's scalar set (`bool`/`int`/`long`/`double`/`decimal`/`string`).
+A reactive `GROUP BY`, `MIN`, or `MAX` over a `DATE` column (`DateOnly`) — or any other type
+outside that set — now throws from `CellValue.From(object?)`, whereas the pre-migration owned path
+carried it as a boxed `object?`. No current test exercises this shape (the only `DATE` aggregate is
+a non-reactive `Execute` query), so nothing regresses today, but it is a real behavior change for
+that untested shape.
+
+**Plan:** extend `CellValue` with `DateOnly` (and audit the full SQL type set) so the borrowed
+currency is type-complete. **Prioritized after Step 2b (MIN/MAX de-boxing)**, since both touch the
+`CellValue` surface and the MIN/MAX path is where date extrema would first appear.
+
 ## Definition of done (Slice 3)
 
 - Operators 1–3 (and 4, subject to its feasibility decision) implement

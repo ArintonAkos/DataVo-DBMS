@@ -16,7 +16,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// next extreme surfaces after the current one is deleted. An optional pre-aggregation <c>WHERE</c>
 /// is applied first: a row only contributes to its group while it matches.
 /// </remarks>
-internal sealed class AggregateReactiveQuery : IReactiveQuery
+internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
 {
     private enum AggregateFunction
     {
@@ -48,6 +48,16 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
     // Group keys currently present in the delivered output, so a re-touched group is classified as an
     // update rather than a duplicate add, and an emptied group is retracted exactly once.
     private readonly HashSet<string> _emittedGroups = new(StringComparer.Ordinal);
+
+    // Reused per-Apply scratch so the borrowed dispatch hot path does not allocate.
+    private readonly HashSet<string> _touched = new(StringComparer.Ordinal);
+    private readonly ReactiveRowSchema _outputSchema;
+    private readonly QueryChangeBuilder _legacyBuilder;
+    private readonly CellValue[] _rowScratch;
+
+    // Maps each group output column to its index within _groupColumns (-1 when not a group column),
+    // precomputed so the emit hot path avoids a per-row FindIndex over _groupColumns.
+    private readonly int[] _groupOutputValueIndex;
 
     /// <summary>
     /// Compiles the supplied parsed SELECT into an incremental aggregate operator.
@@ -83,6 +93,30 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
                 _groupOutputs.Add((output, source));
             }
         }
+
+        // Output schema = group output columns (declared order) followed by aggregate outputs.
+        var outputNames = new string[_groupOutputs.Count + _aggregates.Count];
+        for (int i = 0; i < _groupOutputs.Count; i++)
+        {
+            outputNames[i] = _groupOutputs[i].OutputName;
+        }
+
+        for (int j = 0; j < _aggregates.Count; j++)
+        {
+            outputNames[_groupOutputs.Count + j] = _aggregates[j].OutputName;
+        }
+
+        _outputSchema = new ReactiveRowSchema(outputNames);
+        _rowScratch = new CellValue[outputNames.Length];
+        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
+
+        _groupOutputValueIndex = new int[_groupOutputs.Count];
+        for (int i = 0; i < _groupOutputs.Count; i++)
+        {
+            string sourceColumn = _groupOutputs[i].Column;
+            _groupOutputValueIndex[i] = _groupColumns.FindIndex(
+                c => c.Equals(sourceColumn, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     /// <summary>Gets the source table this aggregate observes.</summary>
@@ -104,9 +138,21 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
     }
 
     /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _outputSchema;
+
+    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
+    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
     public QueryChange Apply(IReadOnlyList<RowChange> tableChanges)
     {
-        var touched = new HashSet<string>(StringComparer.Ordinal);
+        _legacyBuilder.Reset();
+        ApplyInto(tableChanges, _legacyBuilder);
+        return _legacyBuilder.Build().Materialize();
+    }
+
+    /// <inheritdoc />
+    public void ApplyInto(IReadOnlyList<RowChange> tableChanges, QueryChangeBuilder builder)
+    {
+        _touched.Clear();
 
         foreach (RowChange change in tableChanges)
         {
@@ -118,7 +164,7 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
                 case ChangeKind.Insert:
                     if (afterMatches)
                     {
-                        touched.Add(AddRow(change.After!));
+                        _touched.Add(AddRow(change.After!));
                     }
 
                     break;
@@ -126,7 +172,7 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
                 case ChangeKind.Delete:
                     if (beforeMatches)
                     {
-                        touched.Add(RemoveRow(change.Before!));
+                        _touched.Add(RemoveRow(change.Before!));
                     }
 
                     break;
@@ -134,57 +180,94 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
                 case ChangeKind.Update:
                     if (beforeMatches)
                     {
-                        touched.Add(RemoveRow(change.Before!));
+                        _touched.Add(RemoveRow(change.Before!));
                     }
 
                     if (afterMatches)
                     {
-                        touched.Add(AddRow(change.After!));
+                        _touched.Add(AddRow(change.After!));
                     }
 
                     break;
             }
         }
 
-        return Classify(touched);
+        ClassifyInto(_touched, builder);
     }
 
     /// <summary>
-    /// Turns the set of groups touched by a batch into output: a group still present that was not
-    /// previously emitted is <c>Added</c>, one that was emitted is <c>Updated</c>, and a group that
-    /// disappeared (row count reached zero) is <c>Removed</c> — the per-group analogue of the DISTINCT
+    /// Turns the set of groups touched by a batch into borrowed output rows written into
+    /// <paramref name="builder"/>: a group still present that was not previously emitted is
+    /// <c>Added</c>, one that was emitted is <c>Updated</c>, and a group that disappeared (row count
+    /// reached zero) is <c>Removed</c> — the per-group analogue of the DISTINCT
     /// present-iff-count&gt;0 boundary.
     /// </summary>
-    private QueryChange Classify(HashSet<string> touched)
+    private void ClassifyInto(HashSet<string> touched, QueryChangeBuilder builder)
     {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-
         foreach (string key in touched)
         {
             if (_groups.TryGetValue(key, out GroupState? state))
             {
-                IReadOnlyDictionary<string, object?> row = BuildOutputRow(key, state);
+                WriteGroupRow(key, state);
                 if (_emittedGroups.Add(key))
                 {
-                    added.Add(row);
+                    builder.AddAddedRow(_rowScratch);
                 }
                 else
                 {
-                    updated.Add(row);
+                    builder.AddUpdatedRow(_rowScratch);
                 }
             }
-            else
+            else if (_emittedGroups.Remove(key))
             {
-                if (_emittedGroups.Remove(key))
-                {
-                    removed.Add(BuildRemovedRow(key));
-                }
+                WriteRemovedRow(key);
+                builder.AddRemovedRow(_rowScratch);
             }
         }
+    }
 
-        return new QueryChange(added, removed, updated);
+    /// <summary>
+    /// Writes a present group's output row (group-key values then aggregate results) into the reused
+    /// <see cref="_rowScratch"/>, in <see cref="_outputSchema"/> column order.
+    /// </summary>
+    /// <remarks>
+    /// Step 1 (emit-side) reads the boxed group-key values and boxed <see cref="ComputeAggregate"/>
+    /// results and wraps them via <c>CellValue.From(object?)</c> — the documented residual boxing,
+    /// removed in Step 2 (typed <c>CellValue[]</c> group keys + direct aggregate cell writes).
+    /// </remarks>
+    private void WriteGroupRow(string key, GroupState state)
+    {
+        object?[] groupValues = _groupKeyValues[key];
+        for (int i = 0; i < _groupOutputs.Count; i++)
+        {
+            int idx = _groupOutputValueIndex[i];
+            _rowScratch[i] = CellValue.From(idx >= 0 ? groupValues[idx] : null);
+        }
+
+        for (int j = 0; j < _aggregates.Count; j++)
+        {
+            _rowScratch[_groupOutputs.Count + j] = CellValue.From(ComputeAggregate(_aggregates[j], state));
+        }
+    }
+
+    /// <summary>
+    /// Writes a removed group's output row into <see cref="_rowScratch"/>: group-key values from the
+    /// retained <see cref="_groupKeyValues"/>, with null aggregate cells (a removed group carries no
+    /// meaningful aggregate value).
+    /// </summary>
+    private void WriteRemovedRow(string key)
+    {
+        object?[] groupValues = _groupKeyValues.TryGetValue(key, out object?[]? values) ? values : [];
+        for (int i = 0; i < _groupOutputs.Count; i++)
+        {
+            int idx = _groupOutputValueIndex[i];
+            _rowScratch[i] = CellValue.From(idx >= 0 && idx < groupValues.Length ? groupValues[idx] : null);
+        }
+
+        for (int j = 0; j < _aggregates.Count; j++)
+        {
+            _rowScratch[_groupOutputs.Count + j] = CellValue.Null;
+        }
     }
 
     /// <summary>
@@ -294,47 +377,6 @@ internal sealed class AggregateReactiveQuery : IReactiveQuery
         }
 
         return key;
-    }
-
-    private IReadOnlyDictionary<string, object?> BuildOutputRow(string key, GroupState state)
-    {
-        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        object?[] groupValues = _groupKeyValues[key];
-
-        for (int i = 0; i < _groupOutputs.Count; i++)
-        {
-            (string outputName, string sourceColumn) = _groupOutputs[i];
-            int idx = _groupColumns.FindIndex(c => c.Equals(sourceColumn, StringComparison.OrdinalIgnoreCase));
-            row[outputName] = idx >= 0 ? groupValues[idx] : null;
-        }
-
-        foreach (AggregateSpec spec in _aggregates)
-        {
-            row[spec.OutputName] = ComputeAggregate(spec, state);
-        }
-
-        return row;
-    }
-
-    private IReadOnlyDictionary<string, object?> BuildRemovedRow(string key)
-    {
-        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        object?[] groupValues = _groupKeyValues.TryGetValue(key, out object?[]? values) ? values : [];
-
-        for (int i = 0; i < _groupOutputs.Count; i++)
-        {
-            (string outputName, string sourceColumn) = _groupOutputs[i];
-            int idx = _groupColumns.FindIndex(c => c.Equals(sourceColumn, StringComparison.OrdinalIgnoreCase));
-            row[outputName] = idx >= 0 && idx < groupValues.Length ? groupValues[idx] : null;
-        }
-
-        // The aggregate columns of a removed group carry no meaningful value; report null.
-        foreach (AggregateSpec spec in _aggregates)
-        {
-            row[spec.OutputName] = null;
-        }
-
-        return row;
     }
 
     private object? ComputeAggregate(AggregateSpec spec, GroupState state)
