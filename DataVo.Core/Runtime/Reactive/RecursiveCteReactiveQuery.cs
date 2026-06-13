@@ -38,7 +38,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// a primary key; a PK-less base table is rejected at construction with <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
+internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
 {
     private readonly RecursiveCteShape _shape;
     private readonly ReactivePredicate _finalPredicate;
@@ -60,6 +60,11 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
 
     // Emitted (post-final-projection) output rows, keyed by CTE tupleKey, for exact output diffing.
     private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _emitted = new(StringComparer.Ordinal);
+
+    private readonly ReactiveRowSchema _outputSchema;
+    private readonly string[] _outputColumns;
+    private readonly QueryChangeBuilder _legacyBuilder;
+    private readonly CellValue[] _rowScratch;
 
     private bool _seeded;
 
@@ -90,6 +95,15 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         {
             _finalSelectStar = true;
         }
+
+        // Output schema: explicit final projection, or the CTE relation's output columns for SELECT *.
+        string[] outputColumns = _finalSelectStar
+            ? _shape.OutputColumns.ToArray()
+            : _finalProjection.ToArray();
+        _outputColumns = outputColumns;
+        _outputSchema = new ReactiveRowSchema(outputColumns);
+        _rowScratch = new CellValue[outputColumns.Length];
+        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
 
         Tables = _shape.BaseTable.Equals(_shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase)
             ? [_shape.BaseTable]
@@ -123,13 +137,27 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
     }
 
     /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _outputSchema;
+
+    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
+    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
+    public QueryChange Apply(IReadOnlyList<RowChange> changes)
+    {
+        _legacyBuilder.Reset();
+        ApplyInto(changes, _legacyBuilder);
+        return _legacyBuilder.Build().Materialize();
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// Splits the batch into base-relation retractions and insertions. A pure-insertion batch grows the
     /// closure incrementally (<see cref="GrowClosure"/>); a batch with any retraction recomputes the
     /// closure from scratch (<see cref="RecomputeClosureFromScratch"/>). Either way the new closure is
-    /// diffed against the previously emitted output to produce the exact added/removed rows.
+    /// diffed against the previously emitted output to produce the exact added/removed rows. This is the
+    /// borrowed emit-side migration only — deep state purification is infeasible here (a retraction
+    /// recomputes the whole closure), so it is deferred to a later slice.
     /// </remarks>
-    public QueryChange Apply(IReadOnlyList<RowChange> changes)
+    public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
     {
         EnsureSeededClosure();
 
@@ -139,8 +167,10 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         // join roles correctly even when the base arm and recursive arm read different tables.
         var insertedByTable = new Dictionary<string, List<IReadOnlyDictionary<string, object?>>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (RowChange change in changes)
+        // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
+        for (int i = 0; i < changes.Count; i++)
         {
+            RowChange change = changes[i];
             if (!IsObserved(change.Table))
             {
                 continue;
@@ -174,7 +204,7 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
             GrowClosure(insertedByTable);
         }
 
-        return EmitDiff();
+        EmitDiffInto(builder);
     }
 
     private string BaseIdentity(string table, IReadOnlyDictionary<string, object?> row)
@@ -355,13 +385,12 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
     }
 
     /// <summary>
-    /// Diffs the (final-projected, filtered) current CTE relation against the last emitted output.
+    /// Diffs the (final-projected, filtered) current CTE relation against the last emitted output and
+    /// writes the added/removed rows into the borrowed <paramref name="builder"/>. A recursive CTE emits
+    /// only Added/Removed (set semantics; no Updated).
     /// </summary>
-    private QueryChange EmitDiff()
+    private void EmitDiffInto(QueryChangeBuilder builder)
     {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-
         // Current output keyed by CTE tupleKey.
         var current = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
         foreach ((string key, IReadOnlyDictionary<string, object?> tuple) in _present)
@@ -376,7 +405,8 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         {
             if (!_emitted.ContainsKey(key))
             {
-                added.Add(row);
+                WriteRow(row);
+                builder.AddAddedRow(_rowScratch);
             }
         }
 
@@ -384,7 +414,8 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         {
             if (!current.ContainsKey(key))
             {
-                removed.Add(row);
+                WriteRow(row);
+                builder.AddRemovedRow(_rowScratch);
             }
         }
 
@@ -393,8 +424,19 @@ internal sealed class RecursiveCteReactiveQuery : IReactiveQuery
         {
             _emitted[key] = row;
         }
+    }
 
-        return new QueryChange(added, removed, []);
+    /// <summary>
+    /// Writes a final-projected output row into the reused <see cref="_rowScratch"/>, in
+    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps boxed cell values via
+    /// <c>CellValue.From(object?)</c>; deep state purification is deferred for the recursive CTE.
+    /// </summary>
+    private void WriteRow(IReadOnlyDictionary<string, object?> row)
+    {
+        for (int i = 0; i < _outputColumns.Length; i++)
+        {
+            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
+        }
     }
 
     private IReadOnlyDictionary<string, object?> ProjectBaseArm(IReadOnlyDictionary<string, object?> baseRow)
