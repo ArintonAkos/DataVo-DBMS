@@ -1,4 +1,7 @@
 using DataVo.Core;
+using DataVo.Core.Parser.AST;
+using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 
@@ -56,6 +59,66 @@ public class AggregateBorrowedTests
         for (int i = 0; i < change.Removed.Count; i++)
         {
             sink.Add(new Delivered("Removed", change.Removed[i]["Category"].AsString(), 0, 0));
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object?> Row(params (string Key, object? Value)[] cells)
+    {
+        var d = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string key, object? value) in cells)
+        {
+            d[key] = value;
+        }
+
+        return d;
+    }
+
+    // Operator-level construction: parse the GROUP BY into a SelectStatement and seed one existing
+    // "sports" group, so the steady-state loop only ever updates an existing group (no group creation).
+    private static AggregateReactiveQuery SeededSportsOperator(out DataVoEngine engine)
+    {
+        var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(GroupBySql);
+        engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        var op = new AggregateReactiveQuery(select, engine, "AggDb");
+        op.Seed("Orders", new[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        return op;
+    }
+
+    [Fact]
+    public void AggregateDispatch_IsAllocationFree_OnSteadyState()
+    {
+        AggregateReactiveQuery op = SeededSportsOperator(out DataVoEngine engine);
+        using (engine)
+        {
+            var builder = new QueryChangeBuilder(op.OutputSchema);
+            var batch = new RowChange[]
+            {
+                new("Orders", 1, ChangeKind.Insert, before: null,
+                    after: Row(("Id", 1), ("Category", "sports"), ("Stake", 100))),
+            };
+
+            long sink = 0;
+            for (int i = 0; i < 2_000; i++) // warm up JIT + buffer growth + Added->Updated transition
+            {
+                builder.Reset();
+                op.ApplyInto(batch, builder);
+                QueryChangeRef c = builder.Build();
+                for (int r = 0; r < c.Added.Count; r++) sink += c.Added[r][0].AsString()!.Length;
+                for (int r = 0; r < c.Updated.Count; r++) sink += c.Updated[r][0].AsString()!.Length;
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 5_000; i++)
+            {
+                builder.Reset();
+                op.ApplyInto(batch, builder);
+                QueryChangeRef c = builder.Build();
+                for (int r = 0; r < c.Updated.Count; r++) sink += c.Updated[r][0].AsString()!.Length;
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(sink > 0);
+            Assert.Equal(0L, allocated);
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Runtime.Changes;
@@ -43,7 +44,12 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     private readonly List<AggregateSpec> _aggregates = [];
     private readonly List<(string OutputName, string Column)> _groupOutputs = [];
     private readonly Dictionary<string, GroupState> _groups = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, object?[]> _groupKeyValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CellValue[]> _groupKeyValues = new(StringComparer.Ordinal);
+
+    // Reused buffer for rendering a group's composite key as chars, so steady-state lookups go through
+    // the dictionary's ReadOnlySpan<char> alternate lookup with no string allocation. Grows one-time; a
+    // real string is materialized (via new string(span)) only when a brand-new group is created.
+    private char[] _keyBuffer = new char[64];
 
     // Group keys currently present in the delivered output, so a re-touched group is classified as an
     // update rather than a duplicate add, and an emptied group is retracted exactly once.
@@ -154,8 +160,10 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     {
         _touched.Clear();
 
-        foreach (RowChange change in tableChanges)
+        // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
+        for (int i = 0; i < tableChanges.Count; i++)
         {
+            RowChange change = tableChanges[i];
             bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
             bool afterMatches = change.After is not null && _predicate.Matches(change.After);
 
@@ -227,26 +235,23 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     }
 
     /// <summary>
-    /// Writes a present group's output row (group-key values then aggregate results) into the reused
-    /// <see cref="_rowScratch"/>, in <see cref="_outputSchema"/> column order.
+    /// Writes a present group's output row (typed group-key cells then aggregate results) into the
+    /// reused <see cref="_rowScratch"/>, in <see cref="_outputSchema"/> column order. Group cells come
+    /// from the cached typed <see cref="_groupKeyValues"/>; COUNT/SUM/AVG are written as typed cells
+    /// with no boxing (MIN/MAX still box via <see cref="ComputeAggregateCell"/> until Step 2b).
     /// </summary>
-    /// <remarks>
-    /// Step 1 (emit-side) reads the boxed group-key values and boxed <see cref="ComputeAggregate"/>
-    /// results and wraps them via <c>CellValue.From(object?)</c> — the documented residual boxing,
-    /// removed in Step 2 (typed <c>CellValue[]</c> group keys + direct aggregate cell writes).
-    /// </remarks>
     private void WriteGroupRow(string key, GroupState state)
     {
-        object?[] groupValues = _groupKeyValues[key];
+        CellValue[] groupValues = _groupKeyValues[key];
         for (int i = 0; i < _groupOutputs.Count; i++)
         {
             int idx = _groupOutputValueIndex[i];
-            _rowScratch[i] = CellValue.From(idx >= 0 ? groupValues[idx] : null);
+            _rowScratch[i] = idx >= 0 ? groupValues[idx] : CellValue.Null;
         }
 
         for (int j = 0; j < _aggregates.Count; j++)
         {
-            _rowScratch[_groupOutputs.Count + j] = CellValue.From(ComputeAggregate(_aggregates[j], state));
+            _rowScratch[_groupOutputs.Count + j] = ComputeAggregateCell(_aggregates[j], state);
         }
     }
 
@@ -257,11 +262,11 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     /// </summary>
     private void WriteRemovedRow(string key)
     {
-        object?[] groupValues = _groupKeyValues.TryGetValue(key, out object?[]? values) ? values : [];
+        CellValue[] groupValues = _groupKeyValues.TryGetValue(key, out CellValue[]? values) ? values : [];
         for (int i = 0; i < _groupOutputs.Count; i++)
         {
             int idx = _groupOutputValueIndex[i];
-            _rowScratch[i] = CellValue.From(idx >= 0 && idx < groupValues.Length ? groupValues[idx] : null);
+            _rowScratch[i] = idx >= 0 && idx < groupValues.Length ? groupValues[idx] : CellValue.Null;
         }
 
         for (int j = 0; j < _aggregates.Count; j++)
@@ -277,9 +282,17 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     /// </summary>
     private string AddRow(IReadOnlyDictionary<string, object?> row)
     {
-        string key = ComputeGroupKey(row);
-        if (!_groups.TryGetValue(key, out GroupState? state))
+        ReadOnlySpan<char> keySpan = BuildGroupKey(row);
+        string key;
+        GroupState state;
+        if (_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existing, out GroupState? existingState))
         {
+            key = existing!;
+            state = existingState!;
+        }
+        else
+        {
+            key = new string(keySpan);
             state = new GroupState();
             _groups[key] = state;
             _groupKeyValues[key] = CaptureGroupValues(row);
@@ -331,12 +344,16 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     /// </summary>
     private string RemoveRow(IReadOnlyDictionary<string, object?> row)
     {
-        string key = ComputeGroupKey(row);
-        if (!_groups.TryGetValue(key, out GroupState? state))
+        ReadOnlySpan<char> keySpan = BuildGroupKey(row);
+        if (!_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existingKey, out GroupState? existingState))
         {
-            return key;
+            // No such group (e.g. deleting a row whose group is already gone): materialize the key so
+            // the caller can classify it. Off the steady-state path.
+            return new string(keySpan);
         }
 
+        string key = existingKey!;
+        GroupState state = existingState!;
         state.Count--;
 
         foreach (AggregateSpec spec in _aggregates)
@@ -379,79 +396,146 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         return key;
     }
 
-    private object? ComputeAggregate(AggregateSpec spec, GroupState state)
+    /// <summary>
+    /// Computes one aggregate's result as a typed <see cref="CellValue"/>. COUNT/SUM/AVG produce typed
+    /// cells with no boxing (preserving the legacy types: COUNT and integral SUM as <c>long</c>,
+    /// non-integral SUM and AVG as <c>decimal</c>, empty SUM/AVG as NULL). MIN/MAX still read a boxed
+    /// value from the multiset via <c>CellValue.From(object?)</c> — de-boxed in Step 2b.
+    /// </summary>
+    private CellValue ComputeAggregateCell(AggregateSpec spec, GroupState state)
     {
         switch (spec.Function)
         {
             case AggregateFunction.Count:
-                if (spec.IsStar || spec.Column is null)
-                {
-                    return state.Count;
-                }
-
-                return GetOrZero(state.NonNullCount, spec.Column);
+                return CellValue.From(spec.IsStar || spec.Column is null
+                    ? state.Count
+                    : GetOrZero(state.NonNullCount, spec.Column));
 
             case AggregateFunction.Sum:
             {
                 if (spec.Column is null || GetOrZero(state.NonNullCount, spec.Column) == 0)
                 {
-                    return null;
+                    return CellValue.Null;
                 }
 
                 decimal sum = GetOrZeroDecimal(state.Sum, spec.Column);
                 bool integral = !state.SumIsIntegral.TryGetValue(spec.Column, out bool flag) || flag;
-                return integral ? Convert.ToInt64(sum) : sum;
+                return integral ? CellValue.From(Convert.ToInt64(sum)) : CellValue.From(sum);
             }
 
             case AggregateFunction.Avg:
             {
                 if (spec.Column is null)
                 {
-                    return null;
+                    return CellValue.Null;
                 }
 
                 long n = GetOrZero(state.NonNullCount, spec.Column);
                 if (n == 0)
                 {
-                    return null;
+                    return CellValue.Null;
                 }
 
-                return GetOrZeroDecimal(state.Sum, spec.Column) / n;
+                return CellValue.From(GetOrZeroDecimal(state.Sum, spec.Column) / n);
             }
 
+            // MIN/MAX surface a boxed object? from the multiset; Step 2b de-boxes this path.
             case AggregateFunction.Min:
-                return GetExtremes(state, spec.Column!).Min;
+                return CellValue.From(GetExtremes(state, spec.Column!).Min);
 
             case AggregateFunction.Max:
-                return GetExtremes(state, spec.Column!).Max;
+                return CellValue.From(GetExtremes(state, spec.Column!).Max);
 
             default:
-                return null;
+                return CellValue.Null;
         }
     }
 
-    private string ComputeGroupKey(IReadOnlyDictionary<string, object?> row)
+    /// <summary>
+    /// Renders a row's composite group key as chars into the reused <see cref="_keyBuffer"/> and returns
+    /// it as a span. Byte-for-byte identical to the legacy string key (components joined by U+001F, a null
+    /// component rendered as "\0NULL", a non-null as "v:" + invariant text), so grouping is unchanged.
+    /// Steady state allocates nothing; the buffer grows one-time. The caller materializes a string only
+    /// when a brand-new group is created.
+    /// </summary>
+    private ReadOnlySpan<char> BuildGroupKey(IReadOnlyDictionary<string, object?> row)
     {
-        if (_groupColumns.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        return string.Join(
-            "",
-            _groupColumns.Select(column =>
-            {
-                object? value = row.TryGetValue(column, out object? v) ? v : null;
-                return value is null ? " NULL" : "v:" + Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
-            }));
-    }
-
-    private object?[] CaptureGroupValues(IReadOnlyDictionary<string, object?> row)
-    {
-        var values = new object?[_groupColumns.Count];
+        int pos = 0;
         for (int i = 0; i < _groupColumns.Count; i++)
         {
-            values[i] = row.TryGetValue(_groupColumns[i], out object? v) ? v : null;
+            if (i > 0)
+            {
+                AppendChars(ref pos, ""); // legacy string.Join separator (between components only)
+            }
+
+            object? value = row.TryGetValue(_groupColumns[i], out object? v) ? v : null;
+            if (value is null)
+            {
+                AppendChars(ref pos, "\0NULL");
+            }
+            else
+            {
+                AppendChars(ref pos, "v:");
+                AppendValue(ref pos, value);
+            }
+        }
+
+        return _keyBuffer.AsSpan(0, pos);
+    }
+
+    private void AppendChars(ref int pos, ReadOnlySpan<char> text)
+    {
+        EnsureKeyCapacity(pos + text.Length);
+        text.CopyTo(_keyBuffer.AsSpan(pos));
+        pos += text.Length;
+    }
+
+    private void AppendValue(ref int pos, object value)
+    {
+        switch (value)
+        {
+            case string s:
+                AppendChars(ref pos, s);
+                return;
+
+            // bool is not ISpanFormattable; render exactly as the legacy Convert.ToString did.
+            case bool b:
+                AppendChars(ref pos, b ? "True" : "False");
+                return;
+
+            case ISpanFormattable formattable:
+            {
+                int written;
+                while (!formattable.TryFormat(_keyBuffer.AsSpan(pos), out written, default, CultureInfo.InvariantCulture))
+                {
+                    EnsureKeyCapacity(Math.Max(_keyBuffer.Length * 2, pos + 64));
+                }
+
+                pos += written;
+                return;
+            }
+
+            // Exotic types (rare): fall back to the legacy rendering. Allocates, but off the common path.
+            default:
+                AppendChars(ref pos, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+                return;
+        }
+    }
+
+    private void EnsureKeyCapacity(int min)
+    {
+        if (_keyBuffer.Length < min)
+        {
+            Array.Resize(ref _keyBuffer, Math.Max(_keyBuffer.Length * 2, min));
+        }
+    }
+
+    private CellValue[] CaptureGroupValues(IReadOnlyDictionary<string, object?> row)
+    {
+        var values = new CellValue[_groupColumns.Count];
+        for (int i = 0; i < _groupColumns.Count; i++)
+        {
+            values[i] = CellValue.From(row.TryGetValue(_groupColumns[i], out object? v) ? v : null);
         }
 
         return values;
