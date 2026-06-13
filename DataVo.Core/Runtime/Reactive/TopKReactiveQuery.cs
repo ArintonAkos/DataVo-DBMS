@@ -23,7 +23,13 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
     private sealed class Entry
     {
         public required string Key { get; init; }
+
+        // Full source row image; read by the sort comparator (sort keys may not be in the projection).
         public required IReadOnlyDictionary<string, object?> Row { get; init; }
+
+        // Projected output row, computed once at entry creation so the per-dispatch window fill does not
+        // re-project. This is what the window diff compares and what is emitted.
+        public required IReadOnlyDictionary<string, object?> Projected { get; init; }
     }
 
     private readonly ReactivePredicate _predicate;
@@ -36,7 +42,10 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
 
     private readonly SortedSet<Entry> _index;
     private readonly Dictionary<string, Entry> _byKey = new(StringComparer.Ordinal);
+    // Double-buffered window: _window is current, _spareWindow is cleared and refilled each dispatch and
+    // then swapped in, so recomputing the window allocates no new dictionary at steady state.
     private Dictionary<string, IReadOnlyDictionary<string, object?>> _window = new(StringComparer.Ordinal);
+    private Dictionary<string, IReadOnlyDictionary<string, object?>> _spareWindow = new(StringComparer.Ordinal);
 
     private readonly ReactiveRowSchema _outputSchema;
     private readonly string[] _outputColumns;
@@ -118,7 +127,7 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             }
         }
 
-        _window = ComputeWindow();
+        FillWindowInto(_window);
     }
 
     /// <inheritdoc />
@@ -176,7 +185,8 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             }
         }
 
-        Dictionary<string, IReadOnlyDictionary<string, object?>> next = ComputeWindow();
+        FillWindowInto(_spareWindow);
+        Dictionary<string, IReadOnlyDictionary<string, object?>> next = _spareWindow;
 
         // Rows entering the window are Added; rows that stayed but changed value are Updated (with their
         // before-image); rows that left are Removed. Each output row is written into the reused scratch.
@@ -187,8 +197,11 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 WriteRow(row);
                 builder.AddAddedRow(_rowScratch);
             }
-            else if (!RowsEqual(previous, row))
+            else if (!ReferenceEquals(previous, row) && !RowsEqual(previous, row))
             {
+                // An unchanged window entry keeps the same cached Projected instance across dispatches, so
+                // the ReferenceEquals short-circuit skips RowsEqual (and its per-call boxed enumerator) for
+                // every untouched row — making per-dispatch diff allocation independent of window size.
                 WriteRow(previous);
                 builder.AddUpdatedBeforeRow(_rowScratch);
                 WriteRow(row);
@@ -205,6 +218,9 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             }
         }
 
+        // Swap the double-buffered windows: the just-filled buffer becomes current; the old current
+        // becomes the spare to be cleared and refilled next dispatch (no per-dispatch allocation).
+        _spareWindow = _window;
         _window = next;
     }
 
@@ -231,7 +247,8 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             _index.Remove(existing);
         }
 
-        var entry = new Entry { Key = key, Row = Copy(row) };
+        IReadOnlyDictionary<string, object?> copy = Copy(row);
+        var entry = new Entry { Key = key, Row = copy, Projected = Project(copy) };
         _index.Add(entry);
         _byKey[key] = entry;
     }
@@ -246,9 +263,11 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         }
     }
 
-    private Dictionary<string, IReadOnlyDictionary<string, object?>> ComputeWindow()
+    // Fills the target window buffer (cleared first) with the top-K entries' cached projected rows.
+    // No per-entry Project/allocation — projections are computed once at entry creation.
+    private void FillWindowInto(Dictionary<string, IReadOnlyDictionary<string, object?>> target)
     {
-        var window = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
+        target.Clear();
         int skipped = 0;
         int taken = 0;
 
@@ -265,11 +284,9 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 break;
             }
 
-            window[entry.Key] = Project(entry.Row);
+            target[entry.Key] = entry.Projected;
             taken++;
         }
-
-        return window;
     }
 
     private string ComputeIdentity(IReadOnlyDictionary<string, object?> row)
@@ -300,9 +317,7 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
     }
 
     private static IReadOnlyDictionary<string, object?> Copy(IReadOnlyDictionary<string, object?> row) =>
-        new Dictionary<string, object?>(
-            row.ToDictionary(pair => pair.Key, pair => pair.Value),
-            StringComparer.OrdinalIgnoreCase);
+        new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
 
     private static bool RowsEqual(IReadOnlyDictionary<string, object?> a, IReadOnlyDictionary<string, object?> b)
     {
