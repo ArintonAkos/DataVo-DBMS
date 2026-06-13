@@ -122,6 +122,56 @@ public class AggregateBorrowedTests
         }
     }
 
+    private const string MinMaxSql =
+        "SELECT Category, MAX(Stake) AS Hi, MIN(Stake) AS Lo FROM Orders GROUP BY Category";
+
+    private static AggregateReactiveQuery SeededMinMaxOperator(out DataVoEngine engine)
+    {
+        var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(MinMaxSql);
+        engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        var op = new AggregateReactiveQuery(select, engine, "AggDb");
+        op.Seed("Orders", new[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        return op;
+    }
+
+    [Fact]
+    public void MinMaxDispatch_IsAllocationFree_OnSteadyState()
+    {
+        AggregateReactiveQuery op = SeededMinMaxOperator(out DataVoEngine engine);
+        using (engine)
+        {
+            var builder = new QueryChangeBuilder(op.OutputSchema);
+            var batch = new RowChange[]
+            {
+                new("Orders", 2, ChangeKind.Insert, before: null,
+                    after: Row(("Id", 2), ("Category", "sports"), ("Stake", 100))),
+            };
+
+            long sink = 0;
+            for (int i = 0; i < 2_000; i++)
+            {
+                builder.Reset();
+                op.ApplyInto(batch, builder);
+                QueryChangeRef c = builder.Build();
+                for (int r = 0; r < c.Added.Count; r++) sink += Num(c.Added[r][1]);
+                for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 5_000; i++)
+            {
+                builder.Reset();
+                op.ApplyInto(batch, builder);
+                QueryChangeRef c = builder.Build();
+                for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(sink > 0);
+            Assert.Equal(0L, allocated);
+        }
+    }
+
     [Fact]
     public void SubscribeZeroAlloc_GroupBy_EmitsAddedWithAggregatesForNewGroup()
     {
