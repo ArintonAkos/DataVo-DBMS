@@ -128,6 +128,101 @@ public class InsertTypedTests
         Assert.Equal("Bob", dictChange.After!["Name"]);
     }
 
+    [Fact]
+    public void InsertTypedDispatchLoop_AllocatesMateriallyLessThanBulkInsertDispatchLoop()
+    {
+        long typed = MeasureOrderInsertLoop(useTypedInsert: true, startId: 1);
+        long bulk = MeasureOrderInsertLoop(useTypedInsert: false, startId: 1);
+
+        Assert.True(typed < bulk, $"typed={typed} bulk={bulk}");
+        Assert.True(typed <= bulk * 90 / 100, $"typed={typed} bulk={bulk}");
+    }
+
+    [Fact]
+    public void InsertTyped_WhenExistingValidationRejectsSingleRow_Throws()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        ctx.InsertTyped("Players", PlayerSchema,
+            [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            ctx.InsertTyped("Players", PlayerSchema,
+                [CellValue.From(1), CellValue.From("Duplicate"), CellValue.From(8)]));
+
+        Assert.Contains("Primary key", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static long MeasureOrderInsertLoop(bool useTypedInsert, int startId)
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Accounts (Id INT PRIMARY KEY, IsVip BIT)");
+        ctx.Execute("CREATE TABLE Markets (Id INT PRIMARY KEY, Category VARCHAR(20))");
+        ctx.Execute("CREATE TABLE Orders (Id INT, AccountId INT, MarketId INT, Stake INT)");
+        ctx.Execute("INSERT INTO Accounts VALUES (1, true)");
+        ctx.Execute("INSERT INTO Markets VALUES (1, 'sports')");
+        using IDisposable sub = ctx.SubscribeZeroAlloc("""
+            SELECT m.Category, SUM(o.Stake) AS TotalExposure
+            FROM Orders o
+            JOIN Accounts a ON o.AccountId = a.Id
+            JOIN Markets m ON o.MarketId = m.Id
+            WHERE a.IsVip = true
+            GROUP BY m.Category
+            """, (in QueryChangeRef _) => { });
+
+        var schema = new ReactiveRowSchema("Id", "AccountId", "MarketId", "Stake");
+        CellValue[] cells = new CellValue[4];
+
+        for (int i = 0; i < 200; i++)
+        {
+            InsertOne(ctx, useTypedInsert, schema, cells, startId + i);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 2_000; i++)
+        {
+            InsertOne(ctx, useTypedInsert, schema, cells, startId + 200 + i);
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    private static void InsertOne(
+        DataVoContext ctx,
+        bool useTypedInsert,
+        ReactiveRowSchema schema,
+        CellValue[] cells,
+        int id)
+    {
+        if (useTypedInsert)
+        {
+            cells[0] = CellValue.From(id);
+            cells[1] = CellValue.From(1);
+            cells[2] = CellValue.From(1);
+            cells[3] = CellValue.From(25);
+            ctx.InsertTyped("Orders", schema, cells);
+        }
+        else
+        {
+            ctx.BulkInsert("Orders",
+            [
+                new Dictionary<string, object?>
+                {
+                    ["Id"] = id,
+                    ["AccountId"] = 1,
+                    ["MarketId"] = 1,
+                    ["Stake"] = 25
+                }
+            ]);
+        }
+
+        ctx.DispatchPendingNotifications();
+    }
+
     private static DataVoContext CreateContext()
     {
         var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
