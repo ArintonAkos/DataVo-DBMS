@@ -150,7 +150,7 @@ public class InsertTypedTests
             ctx.InsertTyped("Players", PlayerSchema,
                 [CellValue.From(1), CellValue.From("Duplicate"), CellValue.From(8)]));
 
-        Assert.Contains("Primary key", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Primary key violation in row 1!", ex.Message);
     }
 
     private static long MeasureOrderInsertLoop(bool useTypedInsert, int startId)
@@ -161,6 +161,12 @@ public class InsertTypedTests
         ctx.Execute("CREATE TABLE Orders (Id INT, AccountId INT, MarketId INT, Stake INT)");
         ctx.Execute("INSERT INTO Accounts VALUES (1, true)");
         ctx.Execute("INSERT INTO Markets VALUES (1, 'sports')");
+
+        // Allocation-light sinks that prove the reactive callback actually reads delivered
+        // rows (Category + TotalExposure) rather than being a no-op. No LINQ, no boxing, and
+        // no per-dispatch allocation, so the GC measurement below stays undistorted.
+        long categorySink = 0;
+        decimal exposureSink = 0m;
         using IDisposable sub = ctx.SubscribeZeroAlloc("""
             SELECT m.Category, SUM(o.Stake) AS TotalExposure
             FROM Orders o
@@ -168,7 +174,31 @@ public class InsertTypedTests
             JOIN Markets m ON o.MarketId = m.Id
             WHERE a.IsVip = true
             GROUP BY m.Category
-            """, (in QueryChangeRef _) => { });
+            """, (in QueryChangeRef change) =>
+        {
+            // Read both added and updated rows: a category enters as Added the first time it
+            // appears, then every later insert into that category arrives as Updated. The
+            // measured loop below re-inserts into the existing "sports" category, so its deltas
+            // are Updated — accumulating both kinds is what lets the assertion prove delivery
+            // during the measured region, not just during warmup.
+            RowSet added = change.Added;
+            for (int i = 0; i < added.Count; i++)
+            {
+                RowRef row = added[i];
+                string? category = row["Category"].AsString();
+                categorySink += category?.Length ?? 0;
+                exposureSink += row["TotalExposure"].AsDecimal();
+            }
+
+            RowSet updated = change.Updated;
+            for (int i = 0; i < updated.Count; i++)
+            {
+                RowRef row = updated[i];
+                string? category = row["Category"].AsString();
+                categorySink += category?.Length ?? 0;
+                exposureSink += row["TotalExposure"].AsDecimal();
+            }
+        });
 
         var schema = new ReactiveRowSchema("Id", "AccountId", "MarketId", "Stake");
         CellValue[] cells = new CellValue[4];
@@ -182,13 +212,26 @@ public class InsertTypedTests
         GC.WaitForPendingFinalizers();
         GC.Collect();
 
+        // Discard warmup deliveries so the post-loop assertion strictly reflects rows the
+        // reactive pipeline delivered during the measured loop (all of which arrive as Updated).
+        categorySink = 0;
+        exposureSink = 0m;
+
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 2_000; i++)
         {
             InsertOne(ctx, useTypedInsert, schema, cells, startId + 200 + i);
         }
 
-        return GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // The reactive pipeline must have delivered real rows into the sinks; otherwise the
+        // callback could silently be a no-op and the benchmark would measure nothing useful.
+        // Captured after `allocated` so the assertion strings don't skew the measurement.
+        Assert.True(exposureSink > 0m, $"exposureSink={exposureSink}");
+        Assert.True(categorySink > 0, $"categorySink={categorySink}");
+
+        return allocated;
     }
 
     private static void InsertOne(
