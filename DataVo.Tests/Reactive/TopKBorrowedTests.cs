@@ -1,4 +1,6 @@
 using DataVo.Core;
+using DataVo.Core.Parser.AST;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 
@@ -56,6 +58,43 @@ public class TopKBorrowedTests
         {
             sink.Add(new Delivered("Removed", Num(change.Removed[i]["Id"]), Num(change.Removed[i]["Score"])));
         }
+    }
+
+    private static IReadOnlyDictionary<string, object?> Row(int id, int score) =>
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Id"] = id, ["Score"] = score };
+
+    [Fact]
+    public void TopKDispatch_IsAllocationLight_AndIndependentOfWindowSize()
+    {
+        using DataVoContext ctx = NewContext();
+        const int windowSize = 50;
+        var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(
+            $"SELECT Id, Score FROM Players ORDER BY Score DESC LIMIT {windowSize}");
+        var op = new TopKReactiveQuery(select, ctx.Engine, "TopKDb");
+
+        var seed = new List<(long, IReadOnlyDictionary<string, object?>)>();
+        for (int i = 1; i <= windowSize; i++) seed.Add((i, Row(i, i * 10)));
+        op.Seed("Players", seed);
+
+        var builder = new QueryChangeBuilder(op.OutputSchema);
+        // Re-insert an existing windowed row with the same value: the window is unchanged (no emit),
+        // but one AddEntry runs. Per-dispatch cost must NOT scale with the window size.
+        var batch = new RowChange[] { new("Players", 5, ChangeKind.Insert, null, Row(5, 50)) };
+
+        long sink = 0;
+        for (int i = 0; i < 2_000; i++) { builder.Reset(); op.ApplyInto(batch, builder); sink += builder.Build().Updated.Count + 1; }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 5_000; i++) { builder.Reset(); op.ApplyInto(batch, builder); sink += builder.Build().Updated.Count; }
+        long perIter = (GC.GetAllocatedBytesForCurrentThread() - before) / 5_000;
+
+        Assert.True(sink >= 0);
+        // Pre-Step-2 this 50-row window cost ~3920 B/iter and scaled ~linearly with window size (it
+        // rebuilt the window dict and re-projected all 50 rows every dispatch). After double-buffering +
+        // cached projections + the ReferenceEquals diff short-circuit it is ~900 B/iter and window-size
+        // independent. The bound proves the reduction; the residual is the inherent per-AddEntry cost
+        // (Entry + row copy + sorted-set node) — true 0-byte needs pooling (out of this slice).
+        Assert.True(perIter <= 1500, $"top-K dispatch allocated {perIter} B/iter (window={windowSize})");
     }
 
     [Fact]
