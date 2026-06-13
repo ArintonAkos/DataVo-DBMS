@@ -1,3 +1,4 @@
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime.Changes;
 
@@ -15,7 +16,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// previous window: rows entering are Added, rows leaving are Removed, and rows that stay but whose
 /// projected values changed are Updated.
 /// </remarks>
-internal sealed class TopKReactiveQuery : IReactiveQuery
+internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
 {
     private sealed record SortKey(string Column, bool Ascending);
 
@@ -36,6 +37,11 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
     private readonly SortedSet<Entry> _index;
     private readonly Dictionary<string, Entry> _byKey = new(StringComparer.Ordinal);
     private Dictionary<string, IReadOnlyDictionary<string, object?>> _window = new(StringComparer.Ordinal);
+
+    private readonly ReactiveRowSchema _outputSchema;
+    private readonly string[] _outputColumns;
+    private readonly QueryChangeBuilder _legacyBuilder;
+    private readonly CellValue[] _rowScratch;
 
     /// <summary>
     /// Compiles the supplied parsed SELECT into a maintained top-K operator.
@@ -82,6 +88,17 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
         }
 
         _index = new SortedSet<Entry>(new EntryComparer(_sortKeys));
+
+        // Output schema: the explicit projection columns, or the table's catalog columns for SELECT *.
+        // A SELECT * top-K carries no schema in the SQL, so the borrowed fast lane takes it from the
+        // catalog here (the same catalog access already used for the primary key above).
+        string[] outputColumns = _selectStar
+            ? engine.Catalog.GetTableColumns(Table, databaseName).Select(c => c.Name).ToArray()
+            : _projection.ToArray();
+        _outputColumns = outputColumns;
+        _outputSchema = new ReactiveRowSchema(outputColumns);
+        _rowScratch = new CellValue[outputColumns.Length];
+        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
     }
 
     /// <summary>Gets the source table this top-K observes.</summary>
@@ -105,10 +122,24 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
     }
 
     /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _outputSchema;
+
+    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
+    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
     public QueryChange Apply(IReadOnlyList<RowChange> tableChanges)
     {
-        foreach (RowChange change in tableChanges)
+        _legacyBuilder.Reset();
+        ApplyInto(tableChanges, _legacyBuilder);
+        return _legacyBuilder.Build().Materialize();
+    }
+
+    /// <inheritdoc />
+    public void ApplyInto(IReadOnlyList<RowChange> tableChanges, QueryChangeBuilder builder)
+    {
+        // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
+        for (int i = 0; i < tableChanges.Count; i++)
         {
+            RowChange change = tableChanges[i];
             bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
             bool afterMatches = change.After is not null && _predicate.Matches(change.After);
 
@@ -147,21 +178,21 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
 
         Dictionary<string, IReadOnlyDictionary<string, object?>> next = ComputeWindow();
 
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
-
+        // Rows entering the window are Added; rows that stayed but changed value are Updated (with their
+        // before-image); rows that left are Removed. Each output row is written into the reused scratch.
         foreach ((string key, IReadOnlyDictionary<string, object?> row) in next)
         {
             if (!_window.TryGetValue(key, out IReadOnlyDictionary<string, object?>? previous))
             {
-                added.Add(row);
+                WriteRow(row);
+                builder.AddAddedRow(_rowScratch);
             }
             else if (!RowsEqual(previous, row))
             {
-                updatedBefore.Add(previous);
-                updated.Add(row);
+                WriteRow(previous);
+                builder.AddUpdatedBeforeRow(_rowScratch);
+                WriteRow(row);
+                builder.AddUpdatedRow(_rowScratch);
             }
         }
 
@@ -169,12 +200,25 @@ internal sealed class TopKReactiveQuery : IReactiveQuery
         {
             if (!next.ContainsKey(key))
             {
-                removed.Add(row);
+                WriteRow(row);
+                builder.AddRemovedRow(_rowScratch);
             }
         }
 
         _window = next;
-        return new QueryChange(added, removed, updated, updatedBefore);
+    }
+
+    /// <summary>
+    /// Writes a (already-projected) window row into the reused <see cref="_rowScratch"/>, in
+    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps the boxed cell values via
+    /// <c>CellValue.From(object?)</c> — the documented residual boxing, removed in Step 2.
+    /// </summary>
+    private void WriteRow(IReadOnlyDictionary<string, object?> row)
+    {
+        for (int i = 0; i < _outputColumns.Length; i++)
+        {
+            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
+        }
     }
 
     private void AddEntry(IReadOnlyDictionary<string, object?> row)
