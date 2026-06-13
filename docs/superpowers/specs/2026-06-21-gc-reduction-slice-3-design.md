@@ -173,10 +173,15 @@ so the emit path is correct and parity-green while the boxed state remains under
   allocate nothing.
 - **Reused per-batch scratch.** `touched` becomes a reused `HashSet<string>` field cleared
   per `ApplyInto` (mirrors `VipExposure._touched`); `_rowScratch` is reused across emits.
-- **`MIN`/`MAX` multiset.** `ReactiveExtremumMultiset` stores boxed `object` values
-  (`ReactiveExtremumMultiset.cs:8-9`). Step 2 de-boxes it to `CellValue` (or a typed numeric
-  path) so MIN/MAX groups also reach 0 bytes. If this proves large, it may split into a
-  Step 2b — but it stays within the Aggregate migration, not a separate slice.
+- **`MIN`/`MAX` multiset — Step 2b: VERIFIED already 0-byte; de-boxing not pursued.**
+  Measurement (`MinMaxDispatch_IsAllocationFree_OnSteadyState`) shows MIN/MAX steady-state
+  dispatch already allocates **0 bytes**. Row values arrive pre-boxed (`object?`), so the
+  multiset stores an existing reference and `CellValue.From(.Min/.Max)` reads it back — there
+  is no per-op boxing to remove. The only MIN/MAX allocation is sorted-tree **node churn** on
+  distinct-value workloads (not a bounded steady state), and de-boxing `object`→`CellValue`
+  would **not** fix it (`SortedSet<CellValue>.Add` still allocates a node). De-boxing was
+  therefore declined as a no-benefit refactor; the regression test is kept as a guard. Node
+  churn, if ever needed, is a separate structural change (pooling), out of this slice.
 
 ---
 
