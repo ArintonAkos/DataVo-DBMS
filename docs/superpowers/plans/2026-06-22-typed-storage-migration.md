@@ -67,7 +67,7 @@ Gate 0.)
 - **Commit:** `feat(cellvalue): add DateOnly cell (Slice 4 P0)`
 
 ### Task P0.2 — `CellValue` gains `Vector` (`float[]`) with strict ownership
-- **Files:** `CellValue.cs`.
+- **Files:** `DataVo.Core/Runtime/Reactive/CellValue.cs`.
 - **Behavior:** `From(float[])` **clones** the input; `ToObject()` returns a **clone**; `AsVector()` returns
   a clone (or a `ReadOnlySpan<float>` accessor) — never the stored array.
 - **Test (add):** `DataVo.Tests/Reactive/CellValueVectorTests.cs` — store a vector, mutate the original →

@@ -19,6 +19,8 @@ public enum CellType : byte
     String = 6,
     /// <summary>A <see cref="DateOnly"/> (the SQL DATE type), stored inline as its day number.</summary>
     Date = 7,
+    /// <summary>A dense <see cref="float"/>[] (the SQL VECTOR type); the cell owns a clone of the array.</summary>
+    Vector = 8,
 }
 
 /// <summary>
@@ -68,6 +70,11 @@ public readonly struct CellValue
     /// <summary>Creates a <see cref="DateOnly"/> cell (stored inline as its day number; no boxing).</summary>
     public static CellValue From(DateOnly value) => new(CellType.Date, value.DayNumber, 0m, null);
 
+    /// <summary>Creates a VECTOR (<see cref="float"/>[]) cell; the array is <b>cloned</b> so the cell owns
+    /// it (callers cannot mutate stored state). <c>null</c> maps to <see cref="Null"/>.</summary>
+    public static CellValue From(float[]? value) =>
+        value is null ? Null : new(CellType.Vector, 0L, 0m, (float[])value.Clone());
+
     /// <summary>
     /// Compatibility-only: builds a cell from a boxed value. NOT for the hot path — operators must
     /// construct cells from typed values.
@@ -82,6 +89,7 @@ public readonly struct CellValue
         decimal m => From(m),
         string s => From(s),
         DateOnly d => From(d),
+        float[] v => From(v),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
     };
 
@@ -123,6 +131,11 @@ public readonly struct CellValue
     public DateOnly AsDate() =>
         _type == CellType.Date ? DateOnly.FromDayNumber((int)_numeric) : throw Mismatch(CellType.Date);
 
+    /// <summary>Reads the cell as a VECTOR (<see cref="float"/>[]), returning a defensive <b>clone</b> so
+    /// the stored array can never be mutated through the result.</summary>
+    public float[] AsVector() =>
+        _type == CellType.Vector ? (float[])((float[])_reference!).Clone() : throw Mismatch(CellType.Vector);
+
     /// <summary>
     /// Compatibility-only: boxes the cell into <c>object?</c> for materialization. NOT for the hot path.
     /// </summary>
@@ -136,6 +149,7 @@ public readonly struct CellValue
         CellType.Decimal => _decimal,
         CellType.String => _reference,
         CellType.Date => DateOnly.FromDayNumber((int)_numeric),
+        CellType.Vector => ((float[])_reference!).Clone(),
         _ => null,
     };
 
