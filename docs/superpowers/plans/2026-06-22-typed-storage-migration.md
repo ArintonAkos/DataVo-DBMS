@@ -18,25 +18,40 @@ use a borrowed `StoredRowView`; legacy consumers use a read-only dictionary adap
 
 Confirm against the repo and record findings inline in this plan. **No P1 code until all six are answered.**
 
-- [ ] **G0.1 Backend is `byte[]`.** Confirm `IStorageEngine.InsertRow/InsertRows/ReadRow` traffic in
-  `byte[]` and that in-memory + disk backends both do. Files: `StorageEngine/StorageContext.cs:118,136`,
-  `StorageEngine/IStorageEngine*.cs`, the in-memory + disk backend impls.
-- [ ] **G0.2 Catalog SQL types.** Confirm `Enums/DataTypes.cs` = INT/FLOAT/BIT/DATE/VARCHAR/VECTOR and how
-  the parser maps them. Files: `Enums/DataTypes.cs`, `Parser/.../ColumnDefinitionParser.cs`.
-- [ ] **G0.3 DATETIME reachability.** Determine if `DATETIME` is parser/catalog reachable or only appears
-  in `RowSerializer`. If unreachable → exclude from `CellValue` storage support. Files: `RowSerializer.cs`,
-  parser type table.
-- [ ] **G0.4 Public concrete-dictionary APIs.** List public/return-typed `Dictionary<...>` surfaces that
-  must stay dictionaries (e.g. `QueryResult.Data`, `DataVoContext.Execute`) vs. internal ones that can be
-  loosened to `IReadOnlyDictionary`.
-- [ ] **G0.5 DDL rewrite + row-id/index consequences.** Confirm ADD/DROP/MODIFY read-all → rewrite →
-  reindex behavior and whether row ids are reassigned. Files: `Parser/DDL/AlterTable*.cs`.
-- [ ] **G0.6 VECTOR ALTER parser support.** Confirm whether `ColumnDefinitionParser.ParseType` parses
-  VECTOR on ALTER paths (create-table does; ALTER may not). If not, parser support is a P3 task.
-- [ ] **G0.7 Existing coverage map.** Identify current tests for: InsertTyped, Disk round-trip, WAL/vector
-  recovery, ALTER TABLE, HNSW/vector index, reactive IVM oracle — these are the regression oracles.
+- [x] **G0.1 Backend is `byte[]`. CONFIRMED.** `DataVo.Core/StorageEngine/IStorageEngine.cs:16,25,33` —
+  `long InsertRow(string,string,byte[])`, `List<long> InsertRows(string,string,List<byte[]>)`, `byte[]
+  ReadRow(string,string,long)`. Impls: `DataVo.Core/StorageEngine/Memory/InMemoryStorageEngine.cs:29,52,80`,
+  `DataVo.Core/StorageEngine/Disk/DiskStorageEngine.cs`, `DataVo.Core/StorageEngine/Backends/WasmStorageBackend.cs:24-26`.
+  `DataVo.Core/StorageEngine/StorageContext.cs:118,136` serialize the dict to `byte[]` before the backend.
+- [x] **G0.2 Catalog SQL types. CONFIRMED.** `DataVo.Core/Enums/DataTypes.cs:7` = exactly `Int, Float,
+  Bit, Date, Varchar, Vector`. So `CellValue` must add `Date` (`DateOnly`) and `Vector` (`float[]`) — the
+  other four already map (Int32/Double/Boolean/String). Catalog/runtime mapping: `Date`→`DateOnly`,
+  `Vector`→`float[]`.
+- [x] **G0.3 DATETIME reachability. CONFIRMED — exclude.** `DATETIME` appears only in
+  `DataVo.Core/StorageEngine/Serialization/RowSerializer.cs`, not in `DataTypes` nor any parser type table.
+  Not parser/catalog reachable → **do not** add a `CellValue` DATETIME case for storage.
+- [x] **G0.4 Public concrete-dictionary APIs. CONFIRMED.** Surfaces that **stay dictionaries** (boundary
+  materialization, P4 keeps them): `DataVo.Core/Contracts/Results/QueryResult.cs:24` (`Data` /
+  `:55` `Success(...)`), `DataVo.Core/DataVoContext.cs:358,425` (`SearchNearest`). Internal
+  `StorageContext.GetTableContents`/`SelectFromTable` (`StorageContext.cs:196,205`) may be loosened/typed.
+- [x] **G0.5 DDL rewrite + row-id reassignment. CONFIRMED.** `DataVo.Core/Parser/DDL/AlterTableAddColumn.cs:25,41,75,85`
+  reads all rows (`Context.GetTableContents`), `RewriteTable` re-inserts via `Context.InsertIntoTable`
+  → **new row ids are assigned** (`:85,100`) and indexes rebuilt. P3.2 makes this rewrite typed and must
+  re-extract index keys against the new ids.
+- [x] **G0.6 VECTOR ALTER parser support. CONFIRMED GAP.** `DataVo.Core/Parser/DDL/ColumnDefinitionParser.cs:10-18`
+  `ParseType` maps `int/float/bit/date` and **falls through to `Varchar`** — it does **not** parse
+  `VECTOR`. ALTER ADD/MODIFY use it (`AlterTableAddColumn.cs:112`). ⇒ P3.2 must add a `VECTOR` case to
+  `ParseType` (+ `ParseLength` for dimension) with a parse test **before** typed ALTER VECTOR; DATE works
+  today.
+- [x] **G0.7 Coverage map (regression oracles).** InsertTyped: `DataVo.Tests/E2E/InsertTypedTests.cs`.
+  HNSW/vector: `DataVo.Tests/E2E/DML/VectorIndexTests.cs` (+ in-memory/disk variants). Reactive IVM oracle:
+  `DataVo.Tests/Property/ReactiveIvmOracleTests.cs`. Recursive/Join: `DataVo.Tests/E2E/ReactiveRecursiveCteTests.cs`,
+  `ReactiveJoinTests.cs`. WAL recovery: `DataVo.Tests/E2E/WalTests.cs`. Disk round-trip:
+  `[InlineData(StorageMode.Disk)]` across reactive + DML + `DataVo.Tests/E2E/DiskIndexConcurrencyTests.cs`.
 
-**Commit:** none (verification only; record findings in this file).
+**Recording:** write each finding (with file:line evidence) inline above and commit as
+`docs(storage): record typed-storage Gate 0 findings` once all six are answered. (No production code in
+Gate 0.)
 
 ---
 
@@ -57,7 +72,7 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
   a clone (or a `ReadOnlySpan<float>` accessor) — never the stored array.
 - **Test (add):** `DataVo.Tests/Reactive/CellValueVectorTests.cs` — store a vector, mutate the original →
   cell unaffected; `ToObject()` result mutation → cell unaffected; round-trip equality; null/empty.
-- **Command:** `dotnet test … --filter CellValueVectorTests`
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter CellValueVectorTests`
 - **RED:** compile error / mutation leaks. **GREEN:** ownership isolation proven.
 - **Commit:** `feat(cellvalue): add owned Vector(float[]) cell (Slice 4 P0)`
 
@@ -67,7 +82,7 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
   StoredRowView(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)`; ordinal + by-name access.
 - **Test (add):** `DataVo.Tests/Storage/StoredRowTests.cs` — by-name (case-insensitive) + ordinal access,
   `Count`, missing-column behavior, view-over-span correctness, no copy in the view path.
-- **Command:** `dotnet test … --filter StoredRowTests`
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter StoredRowTests`
 - **RED → GREEN.** **Commit:** `feat(storage): StoredRow + StoredRowView typed row containers (Slice 4 P0)`
 
 ### Task P0.4 — Read-only dictionary adapter over `(schema, cells)`
@@ -78,7 +93,7 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
   (no mutation surface).
 - **Test (add):** `DataVo.Tests/Storage/StoredRowDictionaryViewTests.cs` — all of the above + missing key,
   null cells, enumeration order = schema order, and **mutation-impossibility** (vector clone) test.
-- **Command:** `dotnet test … --filter StoredRowDictionaryViewTests`
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter StoredRowDictionaryViewTests`
 - **RED → GREEN.** **Commit:** `feat(storage): read-only dictionary adapter over typed rows (Slice 4 P0)`
 
 **Phase gate:** `dotnet test DataVo.Tests/DataVo.Tests.csproj` (full suite green; P0 is purely additive).
@@ -96,20 +111,23 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
   (INT/FLOAT/BIT/DATE/VARCHAR/VECTOR): dict-`Serialize` bytes == `SerializeCells` bytes, and
   `DeserializeCells` ∘ `SerializeCells` == original; legacy bytes (dict path) read back equal via
   `DeserializeCells`.
-- **Command:** `dotnet test … --filter RowSerializerTypedParityTests`
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter RowSerializerTypedParityTests`
 - **RED:** methods missing / byte mismatch. **GREEN:** byte-for-byte parity.
 - **Commit:** `feat(storage): typed RowSerializer SerializeCells/DeserializeCells, wire-compatible (Slice 4 P1)`
 
 ### Task P1.2 — Typed `InsertTypedRow` (no dictionaries)
 - **Files:** `DataVo.Core/Parser/DML/InsertRowService.cs` (`InsertTypedRow` + new typed helpers),
-  `StorageContext.cs` (add `InsertSerializedRow(byte[])`/typed insert entry if needed).
+  `DataVo.Core/StorageEngine/StorageContext.cs` — add exactly
+  `public List<long> InsertTypedRows(IReadOnlyList<StoredRow> rows, string tableName, string databaseName)`
+  that calls `RowSerializer.SerializeCells` per row and `_storageEngine.InsertRows(db, table, List<byte[]>)`
+  (mirrors the existing dict `InsertIntoTable` at `:136`; no `IStorageEngine` change).
 - **Change:** replace `inputRow`/`normalized` dict construction with **typed normalization** into a
   `CellValue[]` (defaults/coercion), **typed constraint checks** (PK/unique/FK read from cells via the
   cached `TableValidationMetadata`), **typed index-key extraction**, and `SerializeCells` → backend. Extend
   the typed cell validation beyond INT/VARCHAR/BIT to all catalog types.
 - **Tests (modify/add):** `DataVo.Tests/E2E/InsertTypedTests.cs` (existing must stay green); add typed
   DATE/VECTOR/FLOAT insert + read-back parity vs the dict path.
-- **Command:** `dotnet test … --filter "InsertTypedTests|TypedInsertStorage"` then full suite +
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "InsertTypedTests|TypedInsertStorage"` then full suite +
   disk-mode (`--filter "FullyQualifiedName~Disk"`).
 - **RED:** new typed-insert parity test fails (dict path still used). **GREEN:** typed path passes; existing
   InsertTyped + disk round-trip green.
@@ -129,11 +147,14 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
 ## P2 — Typed read APIs + hot readers
 
 ### Task P2.1 — Typed `StorageContext` read APIs (additive)
-- **Files:** `StorageContext.cs` (`ReadRowsById`/`GetTableContents` companions returning typed rows; legacy
-  signatures loosened to `IReadOnlyDictionary` **or** boundary-materialized per G0.4).
+- **Files:** `DataVo.Core/StorageEngine/StorageContext.cs` — add typed companions to `ReadRowsById` /
+  `GetTableContents` returning typed rows. **⚠ Gate 0 resolution required (G0.4):** for each legacy
+  concrete-`Dictionary` signature, the G0.4 finding decides per call site — loosen to `IReadOnlyDictionary`
+  (internal) or keep concrete + materialize at the boundary (public). Do not start P2.1 until G0.4 lists
+  each site's choice.
 - **Test (add):** `DataVo.Tests/Storage/TypedReadParityTests.cs` — typed read == legacy `GetTableContents`
   for a seeded table across all catalog types.
-- **Command:** `dotnet test … --filter TypedReadParityTests` → full suite. **RED → GREEN.**
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter TypedReadParityTests` → full suite. **RED → GREEN.**
 - **Commit:** `feat(storage): typed read APIs alongside legacy GetTableContents (Slice 4 P2)`
 
 ### Task P2.2 — Migrate hot readers to typed
@@ -141,7 +162,7 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
   (candidate reads), `Parser/DQL/Select.cs` (projection). Adapter only at public boundaries.
 - **Tests:** existing reactive/IVM-oracle, compiled-query, and SELECT tests are the parity oracle (must stay
   green); add a reactive-seed allocation test.
-- **Command:** `dotnet test … --filter "FullyQualifiedName~Reactive|FullyQualifiedName~CompiledQuery|FullyQualifiedName~Select"` → full suite.
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "FullyQualifiedName~Reactive|FullyQualifiedName~CompiledQuery|FullyQualifiedName~Select"` → full suite.
 - **Commit (per reader):** `perf(read): typed <reader> materialization (Slice 4 P2)`
 
 **Phase gate:** full suite green incl. IVM oracle.
@@ -156,12 +177,15 @@ Confirm against the repo and record findings inline in this plan. **No P1 code u
 - **Commit:** `perf(dml): typed update/delete + index key extraction (Slice 4 P3)`
 
 ### Task P3.2 — Typed DDL rewrite (existing model)
-- **Files:** `Parser/DDL/AlterTableAddColumn.cs`, `AlterTableDropColumn.cs`, `AlterTableModifyColumn.cs`;
-  **G0.6 result:** if ALTER VECTOR isn't parsed, add `ColumnDefinitionParser` VECTOR support here first.
+- **Files:** `DataVo.Core/Parser/DDL/AlterTableAddColumn.cs`, `DataVo.Core/Parser/DDL/AlterTableDropColumn.cs`,
+  `DataVo.Core/Parser/DDL/AlterTableModifyColumn.cs`. **⚠ Gate 0 resolution required (G0.6):** if
+  `DataVo.Core/Parser/DDL/ColumnDefinitionParser.cs` does not parse VECTOR on ALTER paths, add that parser
+  support as the first sub-task of P3.2 (and a parse test); otherwise DATE-only for ALTER. The G0.6 finding
+  sets which.
 - **Change:** make the read-all → rewrite → reindex path typed, under the existing DDL write lock; no
   schema-version-tagged payloads.
 - **Tests (add):** ALTER ADD/DROP/MODIFY rewrite for DATE and VECTOR; index rebuild after rewrite.
-- **Command:** `dotnet test … --filter "AlterTable|FullyQualifiedName~Ddl"` → full suite.
+- **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "AlterTable|FullyQualifiedName~Ddl"` → full suite.
 - **Commit:** `perf(ddl): typed in-place table rewrite for ADD/DROP/MODIFY (Slice 4 P3)`
 
 ### Task P3.3 — Transaction/WAL decision (documented)
