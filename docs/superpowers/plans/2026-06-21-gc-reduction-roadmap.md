@@ -121,6 +121,11 @@ INDEX` now bump the schema version, so the version is a true schema version). Me
 storage-write+validation **7,418 → 3,655 B/tick (−51%)**, total **8,353 → 4,590 (−45%)**; capture
 784 and delivery 151 unchanged. Full suite green.
 
+**Macro impact (complex-vip, datavo, 50k):** GC **428.5 → 259.4 MB (−39.5%)**, total time
+**698.8 → 322.6 ms (−54%, 2.2× faster)**, p99 **0.023 → 0.008 ms**. The cache also removed 5 *locked*
+XML catalog walks per insert, hence the large throughput gain. Full GC trajectory:
+552.9 → 489.6 → 428.5 → **259.4 MB (−53% from program start)**.
+
 **Step 2 — next: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
 re-boxing + `normalized`/storage row dicts + MVCC version. Make the storage/validation path accept
 typed `CellValue` rows directly (no per-insert dict materialization). Deeper and riskier (shared
