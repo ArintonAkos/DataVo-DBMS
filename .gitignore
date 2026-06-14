@@ -372,5 +372,6 @@ local-docs/
 # Ignore .agents
 .agents/
 
-# Ignore vitepress cache
-docs/.vitepress
+# Ignore VitePress build artifacts (keep config/theme in git)
+docs/.vitepress/cache/
+docs/.vitepress/dist/

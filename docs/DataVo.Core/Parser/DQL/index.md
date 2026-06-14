@@ -12,7 +12,9 @@ The `DQL` component is responsible for read-oriented query execution, primarily 
 
 | Component (File) | Architectural Role                                                                                                                                                                                  |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Select.cs`      | The standalone orchestrator dynamically generating temporary internal cross-sections mapping `QueryResult` datasets utilizing distinct evaluation mechanisms mapping nested loop paths dynamically. |
+| `Select.cs` and partials | Coordinates `SELECT` execution: table binding, lock acquisition, predicate evaluation, joins, grouping/window handling, projection, ordering, and limit/offset application. |
+| `Select.Planner.cs` | Chooses between legacy and Volcano execution paths using join shape, predicate complexity, estimated row counts, selectivity, and feature-cost weights. |
+| `Select.FastPathDecisions.cs` | Contains vector and hybrid fast-path decision helpers, including candidate sizing, selectivity estimates, and guardrails that decide when optimized vector predicate/order-by execution is eligible. |
 
 ## Dependencies & Interactions
 

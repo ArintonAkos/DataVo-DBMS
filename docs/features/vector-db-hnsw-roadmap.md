@@ -99,7 +99,7 @@ Exit criteria:
 
 ### Query (exact)
 
-- `SELECT Id, L2_DISTANCE(Embedding, @query) AS Score FROM Items ORDER BY Score ASC LIMIT 10;`
+- `SELECT Id, Embedding <-> '[1,0,0]' AS Score FROM Items ORDER BY Score ASC LIMIT 10;`
 
 ### Query (ANN)
 

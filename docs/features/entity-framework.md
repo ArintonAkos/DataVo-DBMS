@@ -71,7 +71,7 @@ Supported vector LINQ function shims:
 Current native translation preview status:
 
 - `CosineDistance`: translated to DataVo vector-distance SQL
-- `L2Distance`: API surface exists, but native LINQ translation is not enabled yet
+- `L2Distance`: translated to the DataVo `<->` L2 vector-distance operator
 
 ## Why this differs from PostgreSQL EF providers
 

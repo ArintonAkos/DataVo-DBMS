@@ -180,7 +180,7 @@ CREATE TABLE Embeddings (
 - Storage: Each component is 32-bit float (4 bytes per element)
 - Constraints: All values must be finite (no NaN or Infinity)
 - Indexing: Supports HNSW vector indexes for approximate nearest-neighbor search
-- Query: Use distance functions (`COSINE_DISTANCE`, `L2_DISTANCE`) in `ORDER BY`
+- Query: Use distance operators (`<=>` for cosine, `<->` for L2) in `ORDER BY`
 
 **Common dimensions**:
 
