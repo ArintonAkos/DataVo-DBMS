@@ -215,6 +215,7 @@ internal sealed class CatalogStore
 
             var root = table.Elements("IndexFiles").First();
             InsertIntoXml(indexFile, root);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 
@@ -226,6 +227,7 @@ internal sealed class CatalogStore
                             ?? throw new CatalogException($"Index file {indexName} doesn't exist!");
 
             RemoveFromXml(indexFile);
+            BumpTableSchemaVersion(databaseName, tableName);
         }
     }
 

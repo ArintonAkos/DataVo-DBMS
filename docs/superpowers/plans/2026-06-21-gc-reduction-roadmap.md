@@ -68,7 +68,7 @@ the symptom does not reproduce, and the suspected mechanism is structurally impo
 concrete repro (exact build command + environment/CI image, or a `[DataVoQuery] partial`
 method sample that triggers the hang).
 
-### Phase 5 — Fast Lane Expansion (Slice 3) — IN PROGRESS (3 of 4 operators)
+### Phase 5 — Fast Lane Expansion (Slice 3) — COMPLETE (4 of 4 operators migrated)
 
 Migrate the remaining operators onto the borrowed `IBorrowedReactiveQuery` + `QueryChangeBuilder`
 fast lane (previously only `VipExposure` used it). Design + per-operator detail:
@@ -80,22 +80,57 @@ fast lane (previously only `VipExposure` used it). Design + per-operator detail:
   ~3920→~904 B/iter at a 50-row window (~77%). True 0-byte needs entry/node pooling (deferred).
 - **RecursiveCte** — ✅ emit-side (borrowed delivery + parity); deep purification **deferred**
   (a retraction recomputes the whole closure, so 0-byte is structurally infeasible here).
-- **Join** — ⏳ pending: the "final boss" (deepest boxing); next focused effort.
+- **Join** — ✅ done. Emit-side + parity; Step 2 allocation-light reduction ~4384→~3176 B/iter
+  (~28%) by skipping the per-candidate `BuildContext` (no-WHERE) + reusing delta/candidate
+  containers. Deeper typed-arrangement work deferred; not 0-byte (per-row arrangements inherent).
 
-Measurements were taken, not assumed; strict 0-byte holds for Aggregate, with TopK/RecursiveCte
-honestly scoped to what their structures allow.
+Measurements were taken, not assumed; strict 0-byte holds for Aggregate, with TopK/Join/RecursiveCte
+honestly scoped to what their structures allow (allocation-light / emit-side).
 
-### Phase 6 — Deep Storage Purification (Slice 4) — PLANNED
+**Macro benchmark (complex-vip, datavo, 50k — Slice 1+2 path; does NOT exercise these generic
+operators):** 552.9 MB (pre-program) → 489.6 (Slice 1) → **428.5 MB** now (Slice 2 typed insert),
+≈ −22.5% overall; ~699 ms total, p99 0.023 ms. Slice 3's generic-operator wins are captured by the
+per-operator allocation tests, not this macro number.
+
+### Phase 6 — Deep Storage Purification (Slice 4) — PLANNED (profiled)
 
 Rewrite the lowest-level storage engine, index B-Trees, and byte-serialization to accept
 `Span` directly. This will eliminate the final internal `Dictionary` fallback currently
 retained for validation, achieving the ultimate 0 MB allocation goal.
 
+**Profile evidence (2026-06-22, complex-vip per-tick, VipExposure path):** the remaining
+allocation is overwhelmingly the **storage-write + validation** path inside `InsertTyped`,
+not capture or delivery —
+
+| Bucket | B/tick | Share |
+|---|---:|---:|
+| storage-write + validation | **7,418** | **~89%** |
+| change-capture (`TypedRow` copy) | 784 | ~9% |
+| delivery (registry per-drain snapshots) | 151 | ~2% |
+
+So Slice 4 targets the insert/validation/storage path: per-insert catalog lookups, LINQ-built
+HashSets/Dictionaries (`columnNames`, `foreignKeysByAttribute`, accepted-key sets), the
+`row[i].ToObject()` dict **re-boxing** of typed cells, and the `normalized`/storage row dicts +
+MVCC version (`InsertRowService.InsertTypedRow`). Delivery is already negligible (the Slice 1/3
+fast lane); capture is a minor follow-up.
+
+**Step 1 — DONE: validation-metadata cache.** `EngineCatalog.GetTableValidationMetadata` computes
+the per-table keys/indexes/columns + `columnNames`/`foreignKeysByAttribute` once and caches them by
+schema version (both insert paths use it; the cache also drove a correctness fix — `CREATE`/`DROP
+INDEX` now bump the schema version, so the version is a true schema version). Measured per-tick:
+storage-write+validation **7,418 → 3,655 B/tick (−51%)**, total **8,353 → 4,590 (−45%)**; capture
+784 and delivery 151 unchanged. Full suite green.
+
+**Step 2 — next: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
+re-boxing + `normalized`/storage row dicts + MVCC version. Make the storage/validation path accept
+typed `CellValue` rows directly (no per-insert dict materialization). Deeper and riskier (shared
+storage format) — measure-then-reduce.
+
 ---
 
 ## Next action
 
-Phase 5 (Slice 3) is 3 of 4 operators done (Aggregate, TopK, RecursiveCte). The remaining
-operator is **`Join`** — the deepest-boxed "final boss." Next: scan and plan the Join
-migration (typed arrangements + WHERE-context de-boxing are the risk areas), following the
-proven `Apply` → `ApplyInto` blueprint.
+Phase 5 (Slice 3) is **complete** — all four operators migrated onto the borrowed fast lane. Next
+candidates: **Phase 6 (Slice 4) deep storage purification**, or the deferred deeper-purification
+follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework, the `DateOnly`
+borrowed-currency gap) — sequence by measured impact.

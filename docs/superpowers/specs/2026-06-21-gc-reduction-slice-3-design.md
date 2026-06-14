@@ -273,7 +273,7 @@ currency is type-complete. **Prioritized after Step 2b (MIN/MAX de-boxing)**, si
 | **Aggregate** (GROUP BY) | ✅ Step 1 + Step 2 | COUNT/SUM/AVG **0-byte** steady state; MIN/MAX **verified already 0-byte** (Step 2b declined — no benefit) |
 | **TopK** (ORDER BY + LIMIT) | ✅ Step 1 + Step 2 (reduction) | **allocation-light, window-size-independent** — ~3920→~904 B/iter at k=50 (~77%); typed entries not pursued (parity-risky non-boxing comparer); true 0-byte needs pooling (deferred) |
 | **RecursiveCte** (WITH RECURSIVE) | ✅ Step 1 (emit-side) | borrowed delivery + parity; **Step 2 formally deferred** — a retraction recomputes the whole closure, so 0-byte is structurally infeasible in this slice |
-| **Join** (INNER/LEFT/RIGHT/FULL) | ⏳ pending | the "final boss"; deepest boxing — to be migrated next (its own focused effort) |
+| **Join** (INNER/LEFT/RIGHT/FULL) | ✅ Step 1 + Step 2 (reduction) | borrowed emit-side + parity; Step 2 allocation-light — ~4384→~3176 B/iter (~28%) by skipping the per-candidate `BuildContext` when no WHERE + reusing the delta/candidate containers. Residual (recomputed composed keys + per-row arrangement dicts) needs typed arrangements (deferred); not 0-byte (per-row arrangements inherent) |
 
 All four operators now route through `SubscribeZeroAlloc` once migrated; the owned
 `Subscribe`/`Apply` path and the full reactive test suite (incl. the IVM oracle property
