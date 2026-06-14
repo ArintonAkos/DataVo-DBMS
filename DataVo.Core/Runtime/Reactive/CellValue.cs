@@ -17,6 +17,8 @@ public enum CellType : byte
     Decimal = 5,
     /// <summary>A <see cref="string"/>.</summary>
     String = 6,
+    /// <summary>A <see cref="DateOnly"/> (the SQL DATE type), stored inline as its day number.</summary>
+    Date = 7,
 }
 
 /// <summary>
@@ -63,6 +65,9 @@ public readonly struct CellValue
     public static CellValue From(string? value) =>
         value is null ? Null : new(CellType.String, 0L, 0m, value);
 
+    /// <summary>Creates a <see cref="DateOnly"/> cell (stored inline as its day number; no boxing).</summary>
+    public static CellValue From(DateOnly value) => new(CellType.Date, value.DayNumber, 0m, null);
+
     /// <summary>
     /// Compatibility-only: builds a cell from a boxed value. NOT for the hot path — operators must
     /// construct cells from typed values.
@@ -76,6 +81,7 @@ public readonly struct CellValue
         double d => From(d),
         decimal m => From(m),
         string s => From(s),
+        DateOnly d => From(d),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
     };
 
@@ -113,6 +119,10 @@ public readonly struct CellValue
         _ => throw Mismatch(CellType.String),
     };
 
+    /// <summary>Reads the cell as a <see cref="DateOnly"/>.</summary>
+    public DateOnly AsDate() =>
+        _type == CellType.Date ? DateOnly.FromDayNumber((int)_numeric) : throw Mismatch(CellType.Date);
+
     /// <summary>
     /// Compatibility-only: boxes the cell into <c>object?</c> for materialization. NOT for the hot path.
     /// </summary>
@@ -125,6 +135,7 @@ public readonly struct CellValue
         CellType.Double => BitConverter.Int64BitsToDouble(_numeric),
         CellType.Decimal => _decimal,
         CellType.String => _reference,
+        CellType.Date => DateOnly.FromDayNumber((int)_numeric),
         _ => null,
     };
 
