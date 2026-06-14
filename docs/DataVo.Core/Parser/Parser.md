@@ -1,16 +1,18 @@
 # Parser.cs
 
-`Parser.cs` implements a recursive descent parser that converts lexer `Token` sequences into typed `SqlStatement` AST nodes. It enforces statement grammar boundaries, builds expression trees for supported syntax, and emits clear parser errors when input cannot be interpreted safely.
+`Parser` converts lexer `Token` sequences into typed `SqlStatement` AST nodes.
 
-## Implementation Details & Methodologies
+It uses a recursive-descent top-level dispatcher and an operator-precedence (shunting-yard style) expression parser for `WHERE`/projection expressions.
 
-| Feature | Supported | Description |
+## Key capabilities
+
+| Feature | Supported | Notes |
 | :--- | :---: | :--- |
-| **Recursive Descent** | Yes | Utilizes `Consume()`, `Match()`, and `Advance()` methods scanning lists efficiently checking sequences effectively throwing explicitly trapped `ParserException` states correctly evaluating tokens accurately extracting variables proactively mapping attributes. |
-| **Shunting-Yard Evaluation** | Yes | Implements an inline Operator-Precedence parser converting infix expressions into validated postfix `ExpressionNode` logic trees parsing Boolean variables perfectly extracting nodes cleanly. |
-| **Multiple Statements** | Yes | Organizes tokens into arrays returning `List<SqlStatement>` natively evaluating scripts containing multiple commands smoothly parsing boundaries effectively checking elements natively separating tokens securely evaluating limits gracefully testing streams properly isolating contexts. |
-| **Syntax Error Trapping** | Yes | Fails rapidly throwing exact string parameters mapping missing characters natively (`Expected 'database name' but found EOF`) gracefully defining problems transparently extracting limits properly analyzing bounds. |
-| **Nested Subqueries** | No | Currently iterates linearly parsing brackets correctly extracting strings natively evaluating limits successfully representing variables efficiently testing sizes functionally structuring elements safely interpreting structures correctly assigning options explicitly handling states. Does not support recursively instantiating `ParseSelectStatement` inside `WHERE` nodes. |
+| Recursive-descent statement parsing | Yes | Dispatches based on the leading keyword (SELECT/INSERT/UPDATE/DELETE/CREATE/...). |
+| Expressions | Yes | Boolean logic, comparisons, arithmetic, functions, and parentheses. |
+| Subqueries in expressions | Yes | `IN (SELECT ...)`, `EXISTS (SELECT ...)`, and scalar subqueries `(SELECT ...)` inside expression contexts. |
+| Parenthesized SELECT at top-level | No | `(SELECT ...)` / parenthesized compound statements are rejected by the top-level loop. |
+| Window functions | Partial | Special-cases `RANK() OVER (...)` in SELECT projections. |
 
 ### Top-Level Dispatch Algorithm
 
@@ -34,6 +36,7 @@ flowchart TD
     Loop -- Yes --> Exit[Return List<SqlStatement>]
 ```
 
-### Critical Implementation specifics
-- **Shunting-Yard for `WHERE` Clauses:** Because expressions (`WHERE age > 10 AND name = 'John'`) fluctuate massively natively replacing links intuitively extracting methods safely creating bounds logically wrapping strings efficiently testing rules properly structuring variables smoothly validating logic properly configuring attributes correctly testing outputs elegantly processing sequences explicitly setting rules organically tracking paths. `ParseWhereExpression` executes an immediate mathematical conversion dynamically wrapping vectors appropriately tracking variables seamlessly generating logical binary trees natively setting networks transparently structuring metrics directly organizing structs precisely parsing inputs directly loading paths.
-- **Strict Pointer Advance:** The parser fundamentally guarantees forward-only traversal. Once `Advance()` pulls a token gracefully evaluating links successfully loading structures fluidly testing rules effectively assigning features, the parser commits completely preventing cyclic loop dependencies natively tracking matrices smoothly formatting sequences dynamically evaluating paths gracefully loading sequences correctly interpreting values correctly standardizing networks fluently pushing networks creatively capturing metrics smoothly defining components.
+## Notes
+
+- Expression parsing normalizes token streams to drop dangling `AND`/`OR` operators when an operand is missing.
+- Subqueries are parsed by collecting tokens until the matching `)` and parsing the inner token stream with a new `Parser` instance.

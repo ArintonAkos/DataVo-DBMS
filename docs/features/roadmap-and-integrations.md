@@ -2,6 +2,8 @@
 
 This page explains the integration direction around NuGet, npm, Unity/Godot, Entity Framework, vector features, and WebAssembly.
 
+DataVo is preview software aimed at local-first and embeddable database scenarios. Local package distribution and browser/WebAssembly runtime support are available now; public NuGet and npm publication are in deployment preparation. Production-hardening work is active, so validate representative workloads before production adoption.
+
 ## Current state vs roadmap
 
 It is important to distinguish between:
@@ -74,11 +76,11 @@ If you want to experiment today:
 - reference the local packages
 - use the core engine directly where needed
 
-If you want a polished public provider experience with stable external documentation, that is still part of the product maturation path.
+If you want a fully hardened public provider experience with stable external documentation, that is still part of the product maturation path.
 
 ## Entity Framework support
 
-Entity Framework support is a roadmap item.
+Entity Framework support is available as a preview integration package and remains an active hardening/documentation roadmap item.
 
 ### Intended meaning
 
@@ -87,7 +89,7 @@ The long-term goal is that `DataVo` should be approachable from mainstream .NET 
 ### Current status
 
 - preview integration package and helpers are present in the repository
-- not documented as fully production-ready yet
+- documented as preview software with active production-hardening work
 - additional provider hardening/documentation remains on the roadmap
 
 See [Entity Framework Integration](./entity-framework.md).
@@ -132,17 +134,17 @@ See [WebAssembly and npm](./wasm-and-npm.md).
 | Distribution mode        | Status        |
 | :----------------------- | :------------ |
 | local packaging          | available now |
-| public NuGet publication | planned       |
-| public npm publication   | planned       |
+| public NuGet publication | deployment preparation |
+| public npm publication   | deployment preparation |
 
 ## Recommended message to developers right now
 
 If you are evaluating `DataVo` today, the clearest statement is:
 
-> DataVo can already be packaged and consumed locally as DataVo.Core and DataVo.Data. Public NuGet publication, npm distribution, provider polishing, and broader framework integrations are part of the active roadmap.
+> DataVo can already be packaged and consumed locally as DataVo.Core and DataVo.Data. Browser/WebAssembly runtime support is available now. Public NuGet publication, npm distribution, provider polishing, and broader framework integrations are part of the active roadmap and production-hardening work.
 
 ## Updated practical message
 
 Use this summary when introducing the project today:
 
-> DataVo supports local packaging, direct embedding via DataVo.Core, browser/WASM execution support, and principal/auth SQL commands today. Public NuGet and npm distribution are in deployment preparation.
+> DataVo is preview software for local-first and embeddable database scenarios. It supports local packaging, direct embedding via DataVo.Core, browser/WASM execution support, and principal/auth SQL commands today. Public NuGet and npm distribution are in deployment preparation; validate representative workloads before production adoption.

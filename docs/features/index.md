@@ -23,9 +23,9 @@ features:
   - title: SELECT and Querying
     details: Browse filtering, joins, grouping, ordering, limits, predicates, set operations, and subquery support.
     link: /features/select-and-querying
-    - title: Vector Queries Guide
-      details: Create and search vector columns with distance metrics, HNSW indexing, and hybrid queries.
-      link: /features/vector-queries-guide
+  - title: Vector Queries Guide
+    details: Create and search vector columns with distance metrics, HNSW indexing, and hybrid queries.
+    link: /features/vector-queries-guide
   - title: WebAssembly and npm
     details: Learn browser runtime support today and customer-ready npm package integration planning.
     link: /features/wasm-and-npm
@@ -72,13 +72,13 @@ It is separate from the DataVo.Core module reference on purpose:
 4. [Unity and Godot](./unity-and-godot.md)
 5. [Entity Framework Integration](./entity-framework.md)
 6. [SELECT and Query Features](./select-and-querying.md)
-   @@7. [Vector Queries Guide](./vector-queries-guide.md)
-   @@8. [Security and Authentication](./security-and-authentication.md)
-   @@9. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
-   @@10. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
-   @@11. [DDL and Schema Changes](./schema-and-ddl.md)
-   @@12. [Transactions](./transactions.md)
-   @@13. [Roadmap and Integrations](./roadmap-and-integrations.md)
+7. [Vector Queries Guide](./vector-queries-guide.md)
+8. [Security and Authentication](./security-and-authentication.md)
+9. [Volcano Planner and Execution](./volcano-planner-and-execution.md)
+10. [INSERT, UPDATE, DELETE, and VACUUM](./data-modification.md)
+11. [DDL and Schema Changes](./schema-and-ddl.md)
+12. [Transactions](./transactions.md)
+13. [Roadmap and Integrations](./roadmap-and-integrations.md)
 
 ## Audience
 

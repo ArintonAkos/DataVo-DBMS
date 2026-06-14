@@ -38,46 +38,50 @@ dotnet add package DataVo.EntityFrameworkCore
 Get started with similarity search on embeddings:
 
 ```csharp
-using DataVo.Core;
+using DataVo.Data;
 
-using var db = new DataVoContext(new DataVoConfig
-{
-  StorageMode = StorageMode.Disk,
-  DatabasePath = "./embeddings.db"
-});
+using var connection = new DataVoConnection("StorageMode=Disk;DataSource=Products");
+connection.Open();
 
-db.Execute("CREATE DATABASE Products");
-db.Execute("USE Products");
-
-db.Execute(@"
+using var create = connection.CreateCommand();
+create.CommandText = @"
   CREATE TABLE Items (
     Id INT PRIMARY KEY,
     Name VARCHAR(100),
-    Vector VECTOR(384)
-  )
-");
+    Vector VECTOR(3)
+  )";
+create.ExecuteNonQuery();
 
 // Create vector index for fast approximate nearest-neighbor search
-db.Execute("CREATE VECTOR INDEX IX_Items_Vector ON Items(Vector) USING HNSW");
+using var index = connection.CreateCommand();
+index.CommandText = "CREATE INDEX IX_Items_Vector ON Items (Vector) USING HNSW";
+index.ExecuteNonQuery();
 
-// Insert embeddings
-float[] embedding = new float[384] { /* your embedding */ };
-db.ExecuteWithParams("INSERT INTO Items VALUES (@id, @name, @vec)",
-  ("id", 1),
-  ("name", "Widget"),
-  ("vec", embedding)
-);
+// Insert embeddings. Vector values are currently passed as SQL vector literal strings.
+string embedding = "[0.1,0.2,0.3]";
+using var insert = connection.CreateCommand();
+insert.CommandText = "INSERT INTO Items VALUES (@id, @name, @vec)";
+insert.Parameters.AddWithValue("@id", 1);
+insert.Parameters.AddWithValue("@name", "Widget");
+insert.Parameters.AddWithValue("@vec", embedding);
+insert.ExecuteNonQuery();
 
 // Find similar items (automatic HNSW ANN search)
-float[] queryVector = new float[384] { /* query embedding */ };
-var similar = db.ExecuteWithParams(@"
-  SELECT Id, Name, COSINE_DISTANCE(Vector, @query) AS similarity
+string queryVector = "[0.2,0.1,0.4]";
+using var search = connection.CreateCommand();
+search.CommandText = @"
+  SELECT Id, Name, Vector <=> @query AS similarity
   FROM Items
   ORDER BY similarity ASC
   LIMIT 10
-",
-  ("query", queryVector)
-);
+";
+search.Parameters.AddWithValue("@query", queryVector);
+
+using var similar = search.ExecuteReader();
+while (similar.Read())
+{
+  Console.WriteLine($"{similar["Id"]}: {similar["Name"]} ({similar["similarity"]})");
+}
 ```
 
 ### Entity Framework (example)
@@ -100,11 +104,11 @@ public class ItemEmbedding
 {
   public int Id { get; set; }
   public string Name { get; set; }
-  public float[] Vector { get; set; } // maps to VECTOR(n)
+  public float[] Vector { get; set; } // maps to VECTOR(3)
 }
 
 using var ef = new AppDbContext();
-float[] q = new float[384] { /* query vector */ };
+float[] q = new float[] { 1f, 0f, 0f };
 
 // Normal LINQ (non-vector)
 var activeNames = ef.Items
@@ -210,8 +214,8 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
   - `SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`
 - Vector search and indexing:
   - `VECTOR(n)` column type with fixed dimensionality
-  - `CREATE VECTOR INDEX ... USING HNSW` for approximate nearest-neighbor
-  - Distance functions: `L2_DISTANCE`, `COSINE_DISTANCE`
+  - `CREATE INDEX ... USING HNSW` for approximate nearest-neighbor
+  - Distance operators: `<->` for L2 and `<=>` for cosine
   - Hybrid queries (vector + lexical filters + joins)
   - Exact brute-force and fast ANN modes
 
@@ -228,11 +232,12 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 
 ## Status
 
-DataVo is production-oriented and actively evolving.
+DataVo is preview software aimed at local-first and embeddable database scenarios.
 
 - Local package distribution is available now.
 - Browser/WebAssembly runtime support is available now.
 - Public NuGet and npm publication are in deployment preparation.
+- Production-hardening work is active; validate representative workloads before production adoption.
 
 ## License
 

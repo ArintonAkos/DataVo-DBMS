@@ -9,7 +9,7 @@
 DataVo provides first-class vector search capabilities for similarity-based queries on embedding data. This guide covers:
 
 - Creating and querying vector columns
-- Distance metrics and similarity functions
+- Distance metrics and similarity operators
 - Exact (brute-force) vs. approximate nearest-neighbor (ANN) search
 - Hybrid queries that combine vectors with lexical filters and joins
 - Performance optimization through indexing
@@ -24,7 +24,7 @@ Define vector columns using the `VECTOR(dimension)` type:
 CREATE TABLE Embeddings (
     Id INT PRIMARY KEY,
     Content VARCHAR(500),
-    Vector VECTOR(768),
+    Vector VECTOR(3),
     CreatedAt DATETIME,
     Status VARCHAR(20)
 );
@@ -42,10 +42,10 @@ Vectors are arrays of floating-point numbers:
 
 ```sql
 INSERT INTO Embeddings VALUES
-    (1, 'Hello world', '[0.1, 0.2, 0.3, ...]', '2026-03-20', 'active');
+    (1, 'Hello world', '[1,0,0]', '2026-03-20', 'active');
 
 INSERT INTO Embeddings VALUES
-    (2, 'Another embedding', '[0.05, 0.25, 0.28, ...]', '2026-03-21', 'active');
+    (2, 'Another embedding', '[0,1,0]', '2026-03-21', 'active');
 ```
 
 Constraints:
@@ -58,16 +58,16 @@ Constraints:
 
 ```sql
 -- ERROR: Contains NaN
-INSERT INTO Embeddings VALUES (1, 'text', '[0.1, NaN, 0.3]', ..., ...);
+INSERT INTO Embeddings VALUES (1, 'text', '[0.1,NaN,0.3]', '2026-03-20', 'active');
 
--- ERROR: Dimension mismatch (768 expected, 3 provided)
-INSERT INTO Embeddings VALUES (1, 'text', '[0.1, 0.2, 0.3]', ..., ...);
+-- ERROR: Dimension mismatch (3 expected, 2 provided)
+INSERT INTO Embeddings VALUES (1, 'text', '[0.1,0.2]', '2026-03-20', 'active');
 
 -- ERROR: Non-finite value
-INSERT INTO Embeddings VALUES (1, 'text', '[0.1, Infinity, 0.3]', ..., ...);
+INSERT INTO Embeddings VALUES (1, 'text', '[0.1,Infinity,0.3]', '2026-03-20', 'active');
 ```
 
-## Distance metrics and similarity functions
+## Distance metrics and similarity operators
 
 DataVo supports two common distance metrics for nearest-neighbor search:
 
@@ -80,7 +80,7 @@ Straight-line distance in vector space. Use when:
 
 ```sql
 SELECT Id, Content,
-       L2_DISTANCE(Vector, @query_vector) AS distance
+       Vector <-> '[1,0,0]' AS distance
 FROM Embeddings
 ORDER BY distance ASC
 LIMIT 10;
@@ -102,7 +102,7 @@ Measures angle between vectors (normalized). Use when:
 
 ```sql
 SELECT Id, Content,
-       COSINE_DISTANCE(Vector, @query_vector) AS distance
+       Vector <=> '[1,0,0]' AS distance
 FROM Embeddings
 ORDER BY distance ASC
 LIMIT 10;
@@ -131,15 +131,15 @@ Exact search evaluates all rows in the table—best for correctness, lower laten
 
 ```sql
 -- Find 10 most similar embeddings to a query vector
-SELECT Id, Content, Score,
-       COSINE_DISTANCE(Vector, @query_vector) AS similarity
+SELECT Id, Content,
+       Vector <=> '[1,0,0]' AS similarity
 FROM Embeddings
 WHERE Status = 'active'
 ORDER BY similarity ASC
 LIMIT 10;
 ```
 
-The `ORDER BY` clause must use a distance function. The `LIMIT` specifies how many rows to return.
+The `ORDER BY` clause must use a distance operator expression. The `LIMIT` specifies how many rows to return.
 
 ### With lexical filters
 
@@ -148,7 +148,7 @@ Combine distance metrics with `WHERE` predicates:
 ```sql
 -- Find similar embeddings from a specific date range
 SELECT Id, Content,
-       L2_DISTANCE(Vector, @query_vector) AS distance
+       Vector <-> '[1,0,0]' AS distance
 FROM Embeddings
 WHERE CreatedAt >= '2026-03-01'
   AND CreatedAt <  '2026-04-01'
@@ -169,8 +169,8 @@ LIMIT 5;
 Combine vector similarity with relational joins:
 
 ```sql
-SELECT p.Name, p.Category, e.Score,
-       COSINE_DISTANCE(e.Vector, @query_vector) AS similarity
+SELECT p.Name, p.Category,
+       e.Vector <=> '[1,0,0]' AS similarity
 FROM Embeddings e
 INNER JOIN Products p ON e.ProductId = p.Id
 WHERE p.Category = 'electronics'
@@ -193,30 +193,10 @@ For large datasets, use HNSW (Hierarchical Navigable Small World) indexing for f
 ### Creating a vector index
 
 ```sql
-CREATE VECTOR INDEX IX_Embeddings_Vector ON Embeddings(Vector) USING HNSW;
+CREATE INDEX IX_Embeddings_Vector ON Embeddings (Vector) USING HNSW;
 ```
 
-Configuration (optional):
-
-```sql
-CREATE VECTOR INDEX IX_Embeddings_Vector ON Embeddings(Vector)
-USING HNSW
-WITH (
-    METRIC = 'cosine',
-    M = 8,
-    EF_CONSTRUCTION = 64,
-    EF_SEARCH = 24
-);
-```
-
-**Parameters**:
-
-| Parameter         | Default | Range             | Effect                                                  |
-| :---------------- | :------ | :---------------- | :------------------------------------------------------ |
-| `METRIC`          | cosine  | cosine\|euclidean | Distance metric for index building                      |
-| `M`               | 8       | 4–64              | Connectivity degree; higher = more connections          |
-| `EF_CONSTRUCTION` | 64      | 32–256            | Search width during index build; higher = more accurate |
-| `EF_SEARCH`       | 24      | 8–128             | Search width during query; higher = more accurate       |
+The current public SQL surface uses `CREATE INDEX ... USING HNSW`; index tuning options are part of ongoing hardening work.
 
 ### ANN query syntax
 
@@ -224,7 +204,7 @@ Use the same SQL syntax as exact search; the query planner automatically uses th
 
 ```sql
 SELECT Id, Content,
-       COSINE_DISTANCE(Vector, @query_vector) AS similarity
+       Vector <=> '[1,0,0]' AS similarity
 FROM Embeddings
 WHERE Status = 'active'
 ORDER BY similarity ASC
@@ -237,24 +217,7 @@ _With a vector index on `Vector`, this query automatically uses HNSW instead of 
 
 **Accuracy vs. Speed tradeoff**:
 
-```sql
--- Fast but approximate (low EF_SEARCH)
-CREATE VECTOR INDEX IX_Fast ON Embeddings(Vector)
-USING HNSW WITH (EF_SEARCH = 8);
--- Recall: ~60%, latency: 1ms
-
--- Balanced (default)
-CREATE VECTOR INDEX IX_Balanced ON Embeddings(Vector)
-USING HNSW WITH (EF_SEARCH = 24);
--- Recall: ~85%, latency: 5ms
-
--- Accurate but slower (high EF_SEARCH)
-CREATE VECTOR INDEX IX_Accurate ON Embeddings(Vector)
-USING HNSW WITH (EF_SEARCH = 128);
--- Recall: ~95%, latency: 20ms
-```
-
-Higher `EF_SEARCH` = better recall, higher latency.
+Index tuning controls are not part of the documented public SQL syntax yet. Validate recall and latency on representative data while the HNSW surface continues to harden.
 
 ## Hybrid queries: vector + joins + filters
 
@@ -263,13 +226,13 @@ DataVo's hybrid planner optimizes queries that combine vector search with lexica
 ### Example: Find similar products by category
 
 ```sql
-SELECT p.Name, p.Price, e.Score,
-       COSINE_DISTANCE(e.Vector, @query_vector) AS similarity
+SELECT p.Name, p.Price,
+       e.Vector <=> '[1,0,0]' AS similarity
 FROM ProductEmbeddings e
-WHERE e.IsActive = 1
-  AND e.CreatedAt > '2026-01-01'
 INNER JOIN Products p ON e.ProductId = p.Id
 WHERE p.Category = 'electronics'
+  AND e.IsActive = 1
+  AND e.CreatedAt > '2026-01-01'
 ORDER BY similarity ASC
 LIMIT 20;
 ```
@@ -293,7 +256,7 @@ Benefits:
 The hybrid planner will use ANN + candidate first execution when:
 
 1. Vector index exists on the column
-2. `ORDER BY` uses distance function on indexed column
+2. `ORDER BY` uses a distance operator expression on the indexed column
 3. `WHERE` predicates reference only the embedding table (not joined tables)
 4. No `OR` in WHERE clause (requires full evaluation)
 
@@ -301,52 +264,50 @@ If ineligible, the query falls back to brute-force evaluation.
 
 ## .NET / C# examples
 
-### Using DataVo.Core directly
+### Using DataVo.Data with ADO.NET
 
 ```csharp
-using DataVo.Core;
+using DataVo.Data;
 
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Disk,
-    DatabasePath = "./embeddings.db"
-});
+using var connection = new DataVoConnection("StorageMode=Disk;DataSource=Products");
+connection.Open();
 
-db.Execute("CREATE DATABASE Products");
-db.Execute("USE Products");
-
-db.Execute(@"
+using var create = connection.CreateCommand();
+create.CommandText = @"
     CREATE TABLE Items (
         Id INT PRIMARY KEY,
         Name VARCHAR(100),
         Description VARCHAR(500),
-        Vector VECTOR(384)
-    )
-");
+        Vector VECTOR(3)
+    )";
+create.ExecuteNonQuery();
 
-// Insert an embedding
-float[] embedding = new float[384] { /* ... */ };
-db.ExecuteWithParams("INSERT INTO Items VALUES (@id, @name, @desc, @vec)",
-    ("id", 1),
-    ("name", "Widget"),
-    ("desc", "A useful widget"),
-    ("vec", embedding)
-);
+// Insert an embedding.
+// Vector values are currently passed as SQL vector literal strings in ADO.NET examples.
+string embedding = "[0.1,0.2,0.3]";
+using var insert = connection.CreateCommand();
+insert.CommandText = "INSERT INTO Items VALUES (@id, @name, @desc, @vec)";
+insert.Parameters.AddWithValue("@id", 1);
+insert.Parameters.AddWithValue("@name", "Widget");
+insert.Parameters.AddWithValue("@desc", "A useful widget");
+insert.Parameters.AddWithValue("@vec", embedding);
+insert.ExecuteNonQuery();
 
 // Query with embedding vector
-float[] queryVector = new float[384] { /* ... */ };
-var results = db.ExecuteWithParams(@"
-    SELECT Id, Name, COSINE_DISTANCE(Vector, @query) AS similarity
+string queryVector = "[0.2,0.1,0.4]";
+using var query = connection.CreateCommand();
+query.CommandText = @"
+    SELECT Id, Name, Vector <=> @query AS similarity
     FROM Items
     ORDER BY similarity ASC
     LIMIT 10
-",
-    ("query", queryVector)
-);
+";
+query.Parameters.AddWithValue("@query", queryVector);
 
-foreach (var row in results)
+using var results = query.ExecuteReader();
+while (results.Read())
 {
-    Console.WriteLine($"{row["Id"]}: {row["Name"]} (sim: {row["similarity"]})");
+    Console.WriteLine($"{results["Id"]}: {results["Name"]} (sim: {results["similarity"]})");
 }
 ```
 
@@ -371,14 +332,14 @@ public class ItemEmbedding
 {
     public int Id { get; set; }
     public string Name { get; set; }
-    public float[] Vector { get; set; } // VECTOR(768)
+    public float[] Vector { get; set; } // VECTOR(3)
     public DateTime CreatedAt { get; set; }
 }
 
 // Query usage
 using var db = new AppDbContext();
 
-float[] queryVector = new float[768] { /* ... */ };
+float[] queryVector = new float[] { 1f, 0f, 0f };
 
 // Normal LINQ for non-vector expressions:
 var names = db.Items.Where(x => x.Id > 0).Select(x => x.Name).ToList();
@@ -394,7 +355,7 @@ var nearest = db.QueryFromDataVo<ItemEmbedding>(q => q
 This section provides a complete EF Core setup showing project init, `DbContext` configuration, schema creation, inserting vectors, and two query approaches:
 
 - Native LINQ vector expressions via `DataVoVectorDbFunctions`
-- Raw SQL via `FromSqlRaw` for advanced/custom SQL shapes
+- Raw SQL through `ExecuteSqlOnDataVo`, `ExecuteDataVoSqlRaw`, or ADO.NET `DataVoConnection` for advanced/custom SQL shapes
 
 1. Project setup
 
@@ -415,7 +376,7 @@ public class ItemEmbedding
 {
     public int Id { get; set; }
     public string Name { get; set; } = null!;
-    public float[] Vector { get; set; } = null!; // maps to VECTOR(384)
+    public float[] Vector { get; set; } = null!; // maps to VECTOR(3)
     public DateTime CreatedAt { get; set; }
 }
 ```
@@ -441,7 +402,7 @@ public class AppDbContext : DataVoDbContext
         {
             b.ToTable("Items");
             b.HasKey(e => e.Id);
-            b.Property(e => e.Vector).HasColumnType("VECTOR(384)");
+            b.Property(e => e.Vector).HasColumnType("VECTOR(3)");
         });
     }
 }
@@ -450,28 +411,37 @@ public class AppDbContext : DataVoDbContext
 3. Program example (DDL, insert, query)
 
 ```csharp
-using DataVo.Core;
+using DataVo.Data;
 using Microsoft.EntityFrameworkCore;
 
-// Create schema and insert using DataVoContext (convenient for DDL + param binding)
-using (var dv = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Disk, DatabasePath = "./embeddings.db" }))
+// Create schema and insert using the ADO.NET package.
+using (var connection = new DataVoConnection("StorageMode=Disk;DataSource=VectorDemo"))
 {
-    dv.Execute("CREATE DATABASE IF NOT EXISTS Demo");
-    dv.Execute("USE Demo");
+    connection.Open();
 
-    dv.Execute(@"
+    using var create = connection.CreateCommand();
+    create.CommandText = @"
         CREATE TABLE IF NOT EXISTS Items (
             Id INT PRIMARY KEY,
             Name VARCHAR(100),
-            Vector VECTOR(384),
+            Vector VECTOR(3),
             CreatedAt DATETIME
-        )");
+        )";
+    create.ExecuteNonQuery();
 
-    dv.Execute("CREATE VECTOR INDEX IF NOT EXISTS IX_Items_Vector ON Items(Vector) USING HNSW");
+    using var index = connection.CreateCommand();
+    index.CommandText = "CREATE INDEX IX_Items_Vector ON Items (Vector) USING HNSW";
+    index.ExecuteNonQuery();
 
-    float[] sample = new float[384]; // fill with embedding
-    dv.ExecuteWithParams("INSERT INTO Items VALUES (@id, @name, @vec, @now)",
-        ("id", 1), ("name", "Alpha"), ("vec", sample), ("now", DateTime.UtcNow));
+    // Vector values are currently passed as SQL vector literal strings in ADO.NET examples.
+    string sample = "[0.1,0.2,0.3]";
+    using var insert = connection.CreateCommand();
+    insert.CommandText = "INSERT INTO Items VALUES (@id, @name, @vec, @now)";
+    insert.Parameters.AddWithValue("@id", 1);
+    insert.Parameters.AddWithValue("@name", "Alpha");
+    insert.Parameters.AddWithValue("@vec", sample);
+    insert.Parameters.AddWithValue("@now", DateTime.UtcNow);
+    insert.ExecuteNonQuery();
 }
 
 // EF usage
@@ -481,7 +451,7 @@ using (var ctx = new AppDbContext())
     ctx.EnsureCreatedAndLoad();
 
     // A) LINQ vector query translated by DataVo native preview
-    float[] q = new float[384]; // query embedding
+    float[] q = new float[] { 1f, 0f, 0f };
     var nearest = ctx.QueryFromDataVo<ItemEmbedding>(s => s
         .Where(e => e.CreatedAt >= DateTime.UtcNow.AddMonths(-1))
         .OrderBy(e => DataVoVectorDbFunctions.CosineDistance(EF.Functions, e.Vector, q))
@@ -499,9 +469,9 @@ using (var ctx = new AppDbContext())
 
 Guidance:
 
-- Use `DataVoVectorDbFunctions.CosineDistance` with `EF.Functions` for LINQ vector queries in native translation preview.
-- `DataVoVectorDbFunctions.L2Distance` is exposed as a typed API surface, but native LINQ translation for L2 is not enabled yet.
-- Use `FromSqlRaw` for advanced/custom SQL surfaces, or when you need SQL-only syntax.
+- Use `DataVoVectorDbFunctions.CosineDistance` with `EF.Functions` for LINQ vector queries; native translation emits the `<=>` cosine operator.
+- Use `DataVoVectorDbFunctions.L2Distance` with `EF.Functions` for L2 vector queries; native translation emits the `<->` L2 operator.
+- Use `ExecuteSqlOnDataVo`, `ExecuteDataVoSqlRaw`, or ADO.NET `DataVoConnection` for advanced/custom SQL surfaces, or when you need SQL-only syntax.
 - `QueryFromDataVo` remains the guarded bridge entrypoint; it will run native translation when eligible and fall back safely otherwise.
 - Map `float[]` -> `VECTOR(n)` with `.HasColumnType("VECTOR(n)")`.
 - For production-sized datasets, create the HNSW index to enable ANN performance.
@@ -571,7 +541,7 @@ _Latencies are approximate and depend on hardware and vector dimensionality._
 **Possible causes**:
 
 1. Index not being used (WHERE predicates on joined table)
-2. EF_SEARCH too low (high recall requirement)
+2. ANN recall/latency tradeoff needs validation on representative data
 3. Full table scan due to OR predicate in WHERE
 
 **Solution**: Check query plan eligibility and adjust index parameters.

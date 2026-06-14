@@ -1,22 +1,34 @@
 # InsertInto.cs
 
-The `InsertInto.cs` action physically validates and writes new records executing the `INSERT INTO` SQL command. It maps literal arrays recursively capturing primary constraints, foreign constraints, and unique attributes to guarantee exact integrity dynamically allocating storage states seamlessly.
+`InsertInto` executes `INSERT INTO` statements by validating each input row against the catalog schema and constraints, then writing accepted rows to storage and indexes.
 
-## Implementation Details & Methodologies
+## Supported syntax
 
-| Feature | Supported | Description |
-| :--- | :---: | :--- |
-| **Named Column Inserts** | Yes | Can handle `INSERT INTO table (col1) VALUES (val1)`. Unspecified columns gracefully default to `null`. |
-| **Implicit Inserts** | Yes | Can handle `INSERT INTO table VALUES (val1, val2)` as long as the value count perfectly matches the total column count. |
-| **Data Type Validation** | Yes | Checks literals verifying parameter structures match the schema (e.g. attempting to insert "text" into an Integer column throws safely). |
-| **Primary Key Checking** | Yes | Traps `null` values natively analyzing `IndexManager` instances explicitly bouncing duplicates preventing IO overhead directly. |
-| **Foreign Key Enforcement** | Yes | Looks up remote references executing indexed scans enforcing relational data boundaries continuously defining limits natively rejecting orphans elegantly. |
-| **DEFAULT Values Mapping** | Yes | Resolves optional attributes gracefully bypassing absent values with native Schema defaults mapping primitives seamlessly while retaining explicit user `NULL` override protections accurately. |
-| **Batch Insertion** | No | Currently iterates raw values linearly, executing physical writes per row. Bulk sequential disk streaming is not presently supported. |
+- `INSERT INTO <table> VALUES (...)`
+- `INSERT INTO <table> (<col1>, <col2>, ...) VALUES (...), (...), ...`
 
-### Execution Flow Algorithm
+Multiple `VALUES` lists are supported; rows are processed sequentially.
 
-The insertion algorithm executes as a serial constraint loop cleanly capturing values and isolating index configurations prior to touching disk arrays fluently predicting collisions robustly mapping boundaries securely.
+## Validation and constraints
+
+For each input row:
+
+- Maps provided values onto the table schema. When a column list is provided, missing columns use the column default (or `NULL`).
+- Performs type coercion via the catalog column parser (`Column.ParsedValue`).
+- Enforces constraints:
+    - Primary key: non-null and unique (uses `_PK_<Table>` index when available; otherwise table scan)
+    - Unique keys: unique when non-null (uses `_UK_<Column>` index when available; otherwise table scan)
+    - Foreign keys: referenced parent exists (uses the parent `_PK_<ParentTable>` index when available; otherwise table scan)
+
+Rows that fail validation are skipped and a message is appended; other rows may still be inserted.
+
+## Storage + indexing
+
+- Auto-commit mode acquires a table write lock and inserts immediately.
+- Transactional mode buffers inserts in the transaction context.
+- After insertion, all indexes for the table are updated (including vector index types).
+
+### Execution flow
 
 ```mermaid
 sequenceDiagram
@@ -50,6 +62,6 @@ sequenceDiagram
     InsertInto-->>User: Return affected row count
 ```
 
-### Critical Implementation specifics
-- **Early Abort Policy:** If a single row violates a Unique/Foreign key, `invalidRow` captures the state flagging the transaction logging exact string indices. The entire row is skipped safely leaving the database integrity flawless, continuing with the next mapped row natively without crashing the session entirely.
-- **Null Safety Allocation:** Missing columns inside `(col1, col2)` commands generate implicit `null` strings guaranteeing the dictionary structure aligns with the disk serialization arrays consistently manipulating sizes flawlessly dynamically tracking parameters.
+## Notes
+
+- Inserts are sequential (no bulk I/O batching).

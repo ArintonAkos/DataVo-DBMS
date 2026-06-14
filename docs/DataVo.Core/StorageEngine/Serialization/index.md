@@ -1,22 +1,27 @@
 # Serialization Overview
 
-The `Serialization` module acts as the bridge between dynamically-typed C# runtime objects (such as `Dictionary<string, dynamic>`) and raw binary byte arrays. This module natively supports structuring, encoding, and interpreting structured data so it can be safely stored on disk or held efficiently in memory.
+`RowSerializer` converts between in-memory row dictionaries (`Dictionary<string, object?>`) and the binary representation stored by the storage engines.
 
-## Core Responsibilities
+## Encoding
 
-- **Binary Processing:** Translates native C# types (strings, integers, floats, booleans) into precise byte sequences and vice-versa.
-- **Schema Enforcement:** Applies database catalog schema definitions during serialization, ensuring that raw values fit within the designated column size limits and type constraints.
+- Values are written in catalog column order.
+- Each column begins with a null flag (`bool`): `true` means null, `false` means value follows.
+- Non-null encodings:
+	- `INT`: `int32`
+	- `FLOAT`: IEEE float stored as int bits
+	- `BIT`: `bool`
+	- `DATE` / `DATETIME`: `DateTime.ToBinary()` (`int64`)
+	- `VECTOR`: `[int32 count][float bits * count]`
+	- default: UTF-8 string via `BinaryWriter.Write(string)`
 
-## Component Breakdown
+## Schema awareness & caching
 
-| Component (File)   | Architectural Role                                                                                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RowSerializer.cs` | The central utility class. It computes exact byte offsets, dynamically pads or truncates strings based on column capacities, translates types safely, and serializes/deserializes data streams in predictable, fixed-length formats. |
+Schema columns are loaded from the `EngineCatalog` and cached per engine/database/table + schema version.
 
-## File Documentation
+## File documentation
 
 - [RowSerializer](./RowSerializer.md)
 
-## Dependencies & Interactions
+## Interactions
 
-This module is crucial for both `DiskStorageEngine.cs` and `InMemoryStorageEngine.cs`. By standardizing the binary output format, the serializer allows the core engine to safely decouple high-level logic representations (`Row` objects) from physical byte manipulations.
+Used by both disk and memory storage paths via `StorageContext`.
