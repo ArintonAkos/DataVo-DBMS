@@ -37,19 +37,15 @@ internal sealed class InsertRowService(
             return new InsertRowsResult([], 0, []);
         }
 
-        List<string> primaryKeys = catalog.GetTablePrimaryKeys(tableName, databaseName);
-        List<string> uniqueKeys = catalog.GetTableUniqueKeys(tableName, databaseName);
-        List<ForeignKey> foreignKeys = catalog.GetTableForeignKeys(tableName, databaseName);
-        List<IndexFile> indexFiles = catalog.GetTableIndexes(tableName, databaseName);
-        List<Column> tableColumns = catalog.GetTableColumns(tableName, databaseName);
-
-        HashSet<string> columnNames = tableColumns
-            .Select(column => column.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var foreignKeysByAttribute = foreignKeys
-            .GroupBy(foreignKey => foreignKey.AttributeName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        // Cached per (table, schema version): computed once instead of per batch (also benefits any
+        // repeated single-row inserts hitting the same warm cache).
+        TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
+        IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
+        IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
+        IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
+        IReadOnlyList<Column> tableColumns = metadata.Columns;
+        HashSet<string> columnNames = metadata.ColumnNames;
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
 
         var acceptedRows = new List<Dictionary<string, object?>>(rows.Count);
         var messages = new List<string>();
@@ -133,21 +129,16 @@ internal sealed class InsertRowService(
                 nameof(row));
         }
 
-        List<string> primaryKeys = catalog.GetTablePrimaryKeys(tableName, databaseName);
-        List<string> uniqueKeys = catalog.GetTableUniqueKeys(tableName, databaseName);
-        List<ForeignKey> foreignKeys = catalog.GetTableForeignKeys(tableName, databaseName);
-        List<IndexFile> indexFiles = catalog.GetTableIndexes(tableName, databaseName);
-        List<Column> tableColumns = catalog.GetTableColumns(tableName, databaseName);
+        // Cached per (table, schema version): no per-row catalog re-reads or LINQ structure rebuilds.
+        TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
+        IReadOnlyList<Column> tableColumns = metadata.Columns;
+        IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
+        IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
+        IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
+        HashSet<string> columnNames = metadata.ColumnNames;
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
 
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
-
-        HashSet<string> columnNames = tableColumns
-            .Select(column => column.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var foreignKeysByAttribute = foreignKeys
-            .GroupBy(foreignKey => foreignKey.AttributeName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
         var inputRow = new Dictionary<string, object?>(row.Length, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < row.Length; i++)
