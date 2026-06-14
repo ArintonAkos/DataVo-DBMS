@@ -48,9 +48,9 @@ internal sealed partial class JoinReactiveQuery
         IReadOnlyDictionary<string, object?>? leftRow,
         IReadOnlyDictionary<string, object?>? rightRow)
     {
-        Dictionary<string, object?> context = BuildContext(leftRow, rightRow);
-
-        if (!_where.Matches(context))
+        // The WHERE-eval context (qualified + bare + alias keys for every column) is only needed when a
+        // post-join WHERE exists; skip building it entirely otherwise — it is a large per-candidate dict.
+        if (_hasWhere && !_where.Matches(BuildContext(leftRow, rightRow)))
         {
             return null;
         }
