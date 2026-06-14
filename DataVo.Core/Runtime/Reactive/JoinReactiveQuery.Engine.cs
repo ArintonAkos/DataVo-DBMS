@@ -38,6 +38,11 @@ internal sealed partial class JoinReactiveQuery
 
     private bool _seeded;
 
+    // Reused per-batch scratch so the dispatch hot path does not allocate fresh containers each Apply.
+    private readonly List<SideDelta> _leftDeltas = [];
+    private readonly List<SideDelta> _rightDeltas = [];
+    private readonly HashSet<string> _candidates = new(StringComparer.Ordinal);
+
     /// <summary>A single signed image delta for one side of the join.</summary>
     private readonly record struct SideDelta(string PrimaryKey, IReadOnlyDictionary<string, object?> Row, int Weight);
 
@@ -64,8 +69,10 @@ internal sealed partial class JoinReactiveQuery
         // is taken against the correct starting point (the baseline itself is never delivered).
         EnsureBaseline();
 
-        List<SideDelta> leftDeltas = [];
-        List<SideDelta> rightDeltas = [];
+        _leftDeltas.Clear();
+        _rightDeltas.Clear();
+        List<SideDelta> leftDeltas = _leftDeltas;
+        List<SideDelta> rightDeltas = _rightDeltas;
 
         // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
         for (int i = 0; i < changes.Count; i++)
@@ -87,7 +94,8 @@ internal sealed partial class JoinReactiveQuery
             }
         }
 
-        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        _candidates.Clear();
+        HashSet<string> candidates = _candidates;
 
         // Probe left deltas against the OLD right arrangement (collect affected identities).
         CollectLeftCandidates(leftDeltas, candidates);

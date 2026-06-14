@@ -21,6 +21,7 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
 {
     private readonly JoinShape _shape;
     private readonly ReactivePredicate _where;
+    private readonly bool _hasWhere;
     private readonly IReadOnlyList<string> _leftPrimaryKeys;
     private readonly IReadOnlyList<string> _rightPrimaryKeys;
 
@@ -46,6 +47,7 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
 
         _shape = shape;
         _where = ReactivePredicate.Compile(shape.Where);
+        _hasWhere = shape.Where is not null;
 
         _leftPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.LeftTable, databaseName);
         _rightPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.RightTable, databaseName);

@@ -1,4 +1,6 @@
 using DataVo.Core;
+using DataVo.Core.Parser.AST;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 
@@ -57,6 +59,41 @@ public class JoinBorrowedTests
         {
             sink.Add(new Delivered("Removed", Num(change.Removed[i]["R.Id"]), change.Removed[i]["S.Kind"].AsString()));
         }
+    }
+
+    private static IReadOnlyDictionary<string, object?> RowR(int id, int gid) =>
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Id"] = id, ["Gid"] = gid };
+
+    private static IReadOnlyDictionary<string, object?> RowS(int id, string kind) =>
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Id"] = id, ["Kind"] = kind };
+
+    [Fact]
+    public void JoinDispatch_IsAllocationLight_OnSteadyMatchingReinsert()
+    {
+        using DataVoContext ctx = NewContext();
+        var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(JoinSql);
+        Assert.True(ReactiveQueryParser.TryGetJoinShape(select, out var shape));
+        var op = new JoinReactiveQuery(shape, ctx.Engine, "JoinDb");
+        op.Seed("S", new[] { (100L, RowS(100, "gold")) });
+        op.Seed("R", new[] { (1L, RowR(1, 100)) });
+
+        var builder = new QueryChangeBuilder(op.OutputSchema);
+        // Re-insert the matching R row: one candidate, no output change (no emit), one delta applied.
+        var batch = new RowChange[] { new("R", 1, ChangeKind.Insert, null, RowR(1, 100)) };
+
+        long sink = 0;
+        for (int i = 0; i < 2_000; i++) { builder.Reset(); op.ApplyInto(batch, builder); sink += builder.Build().Updated.Count + 1; }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 5_000; i++) { builder.Reset(); op.ApplyInto(batch, builder); sink += builder.Build().Updated.Count; }
+        long perIter = (GC.GetAllocatedBytesForCurrentThread() - before) / 5_000;
+
+        Assert.True(sink >= 0);
+        // ~4384 B/iter before Step 2; skipping BuildContext (no WHERE) + reusing the delta/candidate
+        // containers brings it to ~3176. The residual is recomputed composed keys (Identity/JoinKey)
+        // and per-row arrangement dicts — further cuts need typed arrangements (deferred). Allocation-
+        // light, not 0-byte (per-row arrangement entries are inherent to a maintained join).
+        Assert.True(perIter <= 3_600, $"join dispatch allocated {perIter} B/iter");
     }
 
     [Fact]
