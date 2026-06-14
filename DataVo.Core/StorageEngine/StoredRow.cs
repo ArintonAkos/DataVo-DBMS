@@ -57,6 +57,10 @@ internal sealed class StoredRow
 
     /// <summary>A borrowed, no-copy view over this row's cells. Valid only while this row is alive.</summary>
     public StoredRowView AsView() => new(_schema, _cells);
+
+    /// <summary>A read-only dictionary adapter over this row (legacy/boundary consumers). Boxes on access;
+    /// VECTOR values are cloned, so stored state cannot be mutated through it.</summary>
+    public StoredRowDictionaryView AsDictionary() => new(_schema, _cells);
 }
 
 /// <summary>
