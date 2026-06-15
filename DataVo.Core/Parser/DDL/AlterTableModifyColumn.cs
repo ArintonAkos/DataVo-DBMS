@@ -171,12 +171,30 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         }
 
         var column = ColumnDefinitionParser.ToColumn(field);
-        column.Value = ToRawValue(value);
+        string rawValue = ToRawValue(value);
 
-        dynamic? parsedValue = column.ParsedValue;
+        dynamic? parsedValue;
+        try
+        {
+            column.Value = rawValue;
+            parsedValue = column.ParsedValue;
+        }
+        catch (Exception ex)
+        {
+            throw new CatalogException(
+                $"ALTER TABLE MODIFY COLUMN cannot convert existing value '{rawValue}' in column {field.Name} to type {column.Type}.",
+                ex);
+        }
         if (parsedValue == null)
         {
-            throw new CatalogException($"ALTER TABLE MODIFY COLUMN cannot convert existing value '{column.Value}' in column {field.Name} to type {column.Type}.");
+            return null;
+        }
+
+        // Column parsing returns the original raw string when conversion fails.
+        // For non-VARCHAR targets this indicates an incompatible value.
+        if (field.Type != DataVo.Core.Enums.DataTypes.Varchar && parsedValue is string)
+        {
+            throw new CatalogException($"ALTER TABLE MODIFY COLUMN cannot convert existing value '{rawValue}' in column {field.Name} to type {column.Type}.");
         }
 
         return parsedValue;
