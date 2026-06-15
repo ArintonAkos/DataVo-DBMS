@@ -419,7 +419,7 @@ public class IndexManager : IDisposable
                 {
                     if (!persistence.TryDeleteFile(filePath) && File.Exists(filePath))
                     {
-                        throw new InvalidOperationException($"Failed to delete index file '{filePath}'.");
+                        throw new IOException($"Failed to delete index file '{filePath}'.");
                     }
                 }
             }
