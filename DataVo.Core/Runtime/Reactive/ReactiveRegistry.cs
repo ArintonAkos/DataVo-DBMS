@@ -1,4 +1,5 @@
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.StorageEngine;
 
 namespace DataVo.Core.Runtime.Reactive;
 
@@ -382,11 +383,11 @@ public sealed class ReactiveRegistry
 
         foreach (string table in subscription.Tables)
         {
-            Dictionary<long, Dictionary<string, object?>> rows =
-                _engine.StorageContext.GetTableContents(table, databaseName);
+            Dictionary<long, StoredRow> rows =
+                _engine.StorageContext.GetTypedTableContents(table, databaseName);
 
             subscription.Seed(table, rows.Select(pair =>
-                (pair.Key, (IReadOnlyDictionary<string, object?>)pair.Value)));
+                (pair.Key, (IReadOnlyDictionary<string, object?>)pair.Value.AsDictionary())));
         }
     }
 

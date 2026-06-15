@@ -4,6 +4,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.CompiledQueries;
@@ -219,12 +220,14 @@ public static class DataVoCompiledQuery
                     .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName)
                 ];
 
-                Dictionary<long, Dictionary<string, object?>> indexedRows =
-                    context.Engine.StorageContext.GetTableContents(ids, plan.TableName, databaseName);
+                Dictionary<long, StoredRow> indexedRows =
+                    context.Engine.StorageContext.GetTypedTableContents(ids, plan.TableName, databaseName);
 
                 List<KeyValuePair<long, Dictionary<string, object?>>> matches = ids
                     .Where(indexedRows.ContainsKey)
-                    .Select(id => new KeyValuePair<long, Dictionary<string, object?>>(id, indexedRows[id]))
+                    .Select(id => new KeyValuePair<long, Dictionary<string, object?>>(
+                        id,
+                        MaterializeStoredRow(indexedRows[id])))
                     .ToList();
 
                 if (matches.Count > 0)
@@ -237,16 +240,31 @@ public static class DataVoCompiledQuery
             }
         }
 
-        Dictionary<long, Dictionary<string, object?>> scanned =
-            context.Engine.StorageContext.GetTableContents(plan.TableName, databaseName);
+        Dictionary<long, StoredRow> scanned =
+            context.Engine.StorageContext.GetTypedTableContents(plan.TableName, databaseName);
 
         return scanned
+            .Select(pair => new KeyValuePair<long, Dictionary<string, object?>>(
+                pair.Key,
+                MaterializeStoredRow(pair.Value)))
             .Where(pair => pair.Value.ContainsKey(plan.WhereColumn!)
                 && string.Equals(
                     IndexKeyEncoder.BuildKeyString(pair.Value, [plan.WhereColumn!]),
                     expectedKey,
                     StringComparison.Ordinal))
             .ToList();
+    }
+
+    private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
+    {
+        StoredRowDictionaryView view = row.AsDictionary();
+        var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string key, object? value) in view)
+        {
+            result[key] = value;
+        }
+
+        return result;
     }
 
     private static List<long> RevalidateMatchingRowIdsAfterLock(

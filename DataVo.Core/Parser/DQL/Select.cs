@@ -15,6 +15,7 @@ using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Execution.Volcano;
 using DataVo.Core.MVCC;
 using System.Collections.Concurrent;
@@ -577,16 +578,16 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
         foreach (long rowId in rowIds)
         {
-            if (!rows.TryGetValue(rowId, out var rowValues))
+            if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
                 continue;
             }
 
-            seedRows[rowId] = new Record(rowId, rowValues);
+            seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
         }
 
         if (_model.JoinStatement.ContainsJoin())
@@ -721,16 +722,16 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(rowIds, tableName, _model.Database);
+        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
         foreach (long rowId in rowIds)
         {
-            if (!rows.TryGetValue(rowId, out var rowValues))
+            if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
                 continue;
             }
 
-            seedRows[rowId] = new Record(rowId, rowValues);
+            seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
         }
 
         if (_model.JoinStatement.ContainsJoin())
@@ -845,19 +846,31 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         Logger.Info($"Planner(hybrid-route): {outcome}; requestedTopK={requestedTopK}; initialTopK={initialTopK}; seedSelectivity={selectivity:F3}");
     }
 
+    private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
+    {
+        StoredRowDictionaryView view = row.AsDictionary();
+        var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string key, object? value) in view)
+        {
+            result[key] = value;
+        }
+
+        return result;
+    }
+
     private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
     {
-        Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents(candidateRowIds, tableName, _model.Database!);
+        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(candidateRowIds, tableName, _model.Database!);
         int count = 0;
 
         foreach (long rowId in candidateRowIds)
         {
-            if (!rows.TryGetValue(rowId, out var rowValues))
+            if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
                 continue;
             }
 
-            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(rowValues));
+            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(MaterializeStoredRow(rowValues)));
             if (EvaluatePredicate(whereExpression, joinedRow))
             {
                 count++;
@@ -1395,11 +1408,11 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 return new ListedTable();
             }
 
-            Dictionary<long, Dictionary<string, object?>> rows = Context.GetTableContents([.. rowIds], tableName, databaseName);
+            Dictionary<long, StoredRow> rows = Context.GetTypedTableContents([.. rowIds], tableName, databaseName);
             return new ListedTable([.. rowIds
                 .OrderBy(static id => id)
                 .Where(rows.ContainsKey)
-                .Select(id => new JoinedRow(tableName, new Row(rows[id])))]);
+                .Select(id => new JoinedRow(tableName, new Row(MaterializeStoredRow(rows[id]))))]);
         }
 
         ListedTable source = _model.JoinStatement.ContainsJoin()
