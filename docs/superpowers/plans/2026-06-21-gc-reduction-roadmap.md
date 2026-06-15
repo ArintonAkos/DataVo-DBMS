@@ -126,6 +126,13 @@ storage-write+validation **7,418 → 3,655 B/tick (−51%)**, total **8,353 → 
 XML catalog walks per insert, hence the large throughput gain. Full GC trajectory:
 552.9 → 489.6 → 428.5 → **259.4 MB (−53% from program start)**.
 
+**Slice 4 P1 typed-insert measurement (2026-06-22, after `InsertTypedRow` typed normalization +
+typed serialization):** complex-vip, DataVo-only, 10k baseline + 50k live ticks measured
+**258.8 MB GC**, **376.7 ms** total, p50 **0.0058 ms**, p99 **0.0104 ms**. This is only a marginal
+macro GC movement from the prior **259.4 MB** checkpoint; the expected large drop did not materialize
+at macro level in P1, so the remaining allocation needs the P2 typed-read migration/profiler pass rather
+than another insert-only change.
+
 **Step 2 — next: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
 re-boxing + `normalized`/storage row dicts + MVCC version. Make the storage/validation path accept
 typed `CellValue` rows directly (no per-insert dict materialization). Deeper and riskier (shared
