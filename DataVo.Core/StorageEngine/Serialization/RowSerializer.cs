@@ -2,6 +2,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.StorageEngine.Serialization;
@@ -137,6 +138,58 @@ public static class RowSerializer
     }
 
     /// <summary>
+    /// Serializes typed cells (aligned by index with <paramref name="columns"/>) into the same binary
+    /// format the dictionary <see cref="Serialize(string,string,Dictionary{string,object?},EngineCatalog,string)"/>
+    /// produces — no dictionary intermediate.
+    /// </summary>
+    public static byte[] SerializeCells(IReadOnlyList<Column> columns, ReadOnlySpan<CellValue> cells)
+    {
+        if (cells.Length != columns.Count)
+        {
+            throw new ArgumentException(
+                $"Row has {cells.Length} cells but schema has {columns.Count} columns.", nameof(cells));
+        }
+
+        using var memoryStream = new MemoryStream();
+        using var writer = new BinaryWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+        for (int i = 0; i < columns.Count; i++)
+        {
+            CellValue cell = cells[i];
+            if (cell.IsNull)
+            {
+                writer.Write(true);
+                continue;
+            }
+
+            writer.Write(false);
+            WriteTypedCell(writer, columns[i], cell);
+        }
+
+        writer.Flush();
+        return memoryStream.ToArray();
+    }
+
+    /// <summary>
+    /// Deserializes a binary payload into typed cells aligned by index with <paramref name="columns"/>,
+    /// reading the same wire format the dictionary path writes.
+    /// </summary>
+    public static CellValue[] DeserializeCells(byte[] data, IReadOnlyList<Column> columns)
+    {
+        var cells = new CellValue[columns.Count];
+
+        using var memoryStream = new MemoryStream(data);
+        using var reader = new BinaryReader(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+        for (int i = 0; i < columns.Count; i++)
+        {
+            cells[i] = reader.ReadBoolean() ? CellValue.Null : ReadTypedCell(reader, columns[i]);
+        }
+
+        return cells;
+    }
+
+    /// <summary>
     /// Gets schema columns from the cache or refreshes them from the catalog when the schema version changes.
     /// </summary>
     private static List<Column> GetCachedSchemaColumns(string databaseName, string tableName, EngineCatalog catalog, string schemaScopeKey)
@@ -253,6 +306,69 @@ public static class RowSerializer
         }
 
         return reader.ReadString();
+    }
+
+    /// <summary>Writes a non-null typed cell using the column type encoding (matches <see cref="WriteNonNullValue"/>).</summary>
+    private static void WriteTypedCell(BinaryWriter writer, Column column, CellValue cell)
+    {
+        switch (column.Type.ToUpperInvariant())
+        {
+            case "INT":
+                writer.Write(cell.AsInt32());
+                return;
+            case "FLOAT":
+                writer.Write(BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
+                return;
+            case "BIT":
+                writer.Write(cell.AsBoolean());
+                return;
+            case "DATE":
+                writer.Write(cell.AsDate().ToDateTime(TimeOnly.MinValue).ToBinary());
+                return;
+            case "VECTOR":
+            {
+                float[] vector = cell.AsVector();
+                writer.Write(vector.Length);
+                foreach (float item in vector)
+                {
+                    writer.Write(BitConverter.SingleToInt32Bits(item));
+                }
+
+                return;
+            }
+            default:
+                writer.Write(cell.AsString() ?? string.Empty);
+                return;
+        }
+    }
+
+    /// <summary>Reads a non-null typed cell using the column type encoding (matches <see cref="ReadNonNullValue"/>).</summary>
+    private static CellValue ReadTypedCell(BinaryReader reader, Column column)
+    {
+        switch (column.Type.ToUpperInvariant())
+        {
+            case "INT":
+                return CellValue.From(reader.ReadInt32());
+            case "FLOAT":
+                return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
+            case "BIT":
+                return CellValue.From(reader.ReadBoolean());
+            case "DATE":
+                return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case "VECTOR":
+            {
+                int count = reader.ReadInt32();
+                float[] vector = new float[count];
+                for (int i = 0; i < count; i++)
+                {
+                    vector[i] = BitConverter.Int32BitsToSingle(reader.ReadInt32());
+                }
+
+                return CellValue.From(vector);
+            }
+            default:
+                return CellValue.From(reader.ReadString());
+        }
     }
 
     /// <summary>
