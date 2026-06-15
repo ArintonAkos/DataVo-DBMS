@@ -7,6 +7,7 @@ using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
 
@@ -251,8 +252,64 @@ public class StorageContext(DataVoConfig config)
         return ApplyMvccVisibilityFilter(rows, tableName, databaseName);
     }
 
+    /// <summary>
+    /// Fetches all records from a table as typed storage rows, bypassing dictionary materialization.
+    /// </summary>
+    internal Dictionary<long, StoredRow> GetTypedTableContents(string tableName, string databaseName)
+    {
+        return GetTypedTableContents(null, tableName, databaseName);
+    }
+
+    /// <summary>
+    /// Fetches specific records from a table as typed storage rows, bypassing dictionary materialization.
+    /// </summary>
+    internal Dictionary<long, StoredRow> GetTypedTableContents(List<long>? rowIds, string tableName, string databaseName)
+    {
+        Dictionary<long, StoredRow> rows = rowIds != null
+            ? ReadTypedRowsById(rowIds, tableName, databaseName)
+            : ReadAllTypedRows(tableName, databaseName);
+
+        return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName);
+    }
+
     private static Dictionary<long, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
         Dictionary<long, Dictionary<string, object?>> rows,
+        string tableName,
+        string databaseName)
+    {
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot == null || rows.Count == 0)
+        {
+            return rows;
+        }
+
+        DataVoEngine engine = DataVoEngine.Current();
+        List<long> toRemove = [];
+
+        foreach (long rowId in rows.Keys)
+        {
+            RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+            if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
+            {
+                toRemove.Add(rowId);
+            }
+        }
+
+        if (toRemove.Count == 0)
+        {
+            return rows;
+        }
+
+        foreach (long rowId in toRemove)
+        {
+            rows.Remove(rowId);
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<long, StoredRow> ApplyTypedMvccVisibilityFilter(
+        Dictionary<long, StoredRow> rows,
         string tableName,
         string databaseName)
     {
@@ -402,6 +459,32 @@ public class StorageContext(DataVoConfig config)
     }
 
     /// <summary>
+    /// Reads explicit row identifiers from storage as typed rows.
+    /// </summary>
+    private Dictionary<long, StoredRow> ReadTypedRowsById(List<long> rowIds, string tableName, string databaseName)
+    {
+        var parsedTableData = new Dictionary<long, StoredRow>();
+
+        if (rowIds.Count == 0)
+        {
+            return parsedTableData;
+        }
+
+        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+        ReactiveRowSchema schema = BuildReactiveSchema(columns);
+
+        foreach (long rowId in rowIds)
+        {
+            byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+            parsedTableData[rowId] = new StoredRow(schema, RowSerializer.DeserializeCells(rawRow, columns));
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
+
+        return parsedTableData;
+    }
+
+    /// <summary>
     /// Reads every live row from the target table.
     /// </summary>
     private Dictionary<long, Dictionary<string, object?>> ReadAllRows(string tableName, string databaseName,
@@ -423,6 +506,38 @@ public class StorageContext(DataVoConfig config)
         RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, parsedTableData.Count);
 
         return parsedTableData;
+    }
+
+    /// <summary>
+    /// Reads every live row from the target table as typed rows.
+    /// </summary>
+    private Dictionary<long, StoredRow> ReadAllTypedRows(string tableName, string databaseName)
+    {
+        var parsedTableData = new Dictionary<long, StoredRow>();
+        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+        ReactiveRowSchema schema = BuildReactiveSchema(columns);
+
+        foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
+        {
+            parsedTableData[rowTuple.RowId] = new StoredRow(
+                schema,
+                RowSerializer.DeserializeCells(rowTuple.RawRow, columns));
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, parsedTableData.Count);
+
+        return parsedTableData;
+    }
+
+    private static ReactiveRowSchema BuildReactiveSchema(IReadOnlyList<Column> columns)
+    {
+        var names = new string[columns.Count];
+        for (int i = 0; i < columns.Count; i++)
+        {
+            names[i] = columns[i].Name;
+        }
+
+        return new ReactiveRowSchema(names);
     }
 
     private EngineCatalog ResolveCatalog()
