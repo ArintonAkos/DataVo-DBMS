@@ -141,6 +141,23 @@ public class StorageContext(DataVoConfig config)
     }
 
     /// <summary>
+    /// Serializes and inserts typed storage rows without materializing dictionaries.
+    /// </summary>
+    internal List<long> InsertTypedRows(IReadOnlyList<StoredRow> rows, string tableName, string databaseName)
+    {
+        if (rows.Count == 0) return [];
+
+        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+        var serializedRows = new List<byte[]>(rows.Count);
+        foreach (StoredRow row in rows)
+        {
+            serializedRows.Add(RowSerializer.SerializeCells(columns, row.AsView().Cells));
+        }
+
+        return _storageEngine.InsertRows(databaseName, tableName, serializedRows);
+    }
+
+    /// <summary>
     /// Deletes the specified row identifiers from a table.
     /// </summary>
     /// <param name="toBeDeletedIds">The row identifiers to delete.</param>

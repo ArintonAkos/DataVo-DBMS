@@ -135,19 +135,10 @@ internal sealed class InsertRowService(
         IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
         IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
         IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
-        HashSet<string> columnNames = metadata.ColumnNames;
         IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
 
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
-
-        var inputRow = new Dictionary<string, object?>(row.Length, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < row.Length; i++)
-        {
-            ValidateTypedCell(tableColumns[i], row[i]);
-            inputRow[tableColumns[i].Name] = row[i].ToObject();
-        }
-
-        EnsureKnownColumns(inputRow, columnNames, tableName);
+        CellValue[] normalizedCells = NormalizeTypedCells(tableColumns, row);
 
         var messages = new List<string>();
         var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
@@ -156,19 +147,31 @@ internal sealed class InsertRowService(
             _ => new HashSet<string>(StringComparer.Ordinal),
             StringComparer.OrdinalIgnoreCase);
 
-        if (!TryNormalizeRow(
+        if (!ValidateTypedPrimaryKeys(
             tableName,
             databaseName,
             rowNumber: 1,
-            inputRow,
-            tableColumns,
+            normalizedCells,
+            columns,
             primaryKeys,
-            uniqueKeys,
-            foreignKeysByAttribute,
             acceptedPrimaryKeys,
-            acceptedUniqueValues,
-            messages,
-            out Dictionary<string, object?> normalized))
+            messages)
+            || !ValidateTypedUniqueKeys(
+                tableName,
+                databaseName,
+                rowNumber: 1,
+                normalizedCells,
+                columns,
+                uniqueKeys,
+                acceptedUniqueValues,
+                messages)
+            || !ValidateTypedForeignKeys(
+                databaseName,
+                rowNumber: 1,
+                normalizedCells,
+                columns,
+                foreignKeysByAttribute,
+                messages))
         {
             string message = messages.Count == 0
                 ? $"Typed insert into {tableName} was rejected."
@@ -176,15 +179,17 @@ internal sealed class InsertRowService(
             throw new InvalidOperationException(message);
         }
 
-        List<long> rowIds = context.InsertIntoTable([normalized], tableName, databaseName);
+        var storedRow = new StoredRow(columns, normalizedCells);
+        List<long> rowIds = context.InsertTypedRows([storedRow], tableName, databaseName);
         long rowId = rowIds[0];
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
-        InsertIndexes(tableName, databaseName, normalized, rowId, indexFiles);
+        InsertTypedIndexes(tableName, databaseName, columns, normalizedCells, rowId, indexFiles);
 
         if (recorder is not null)
         {
-            var typedAfter = new TypedRow(columns, row);
-            recorder.RecordTypedInsert(tableName, rowId, normalized, typedAfter);
+            Dictionary<string, object?> after = MaterializeTypedRow(tableColumns, normalizedCells);
+            var typedAfter = new TypedRow(columns, normalizedCells);
+            recorder.RecordTypedInsert(tableName, rowId, after, typedAfter);
         }
 
         return rowId;
@@ -218,15 +223,41 @@ internal sealed class InsertRowService(
         }
     }
 
+    private static CellValue[] NormalizeTypedCells(IReadOnlyList<Column> tableColumns, ReadOnlySpan<CellValue> row)
+    {
+        var normalized = new CellValue[row.Length];
+        for (int i = 0; i < row.Length; i++)
+        {
+            ValidateTypedCell(tableColumns[i], row[i]);
+            normalized[i] = row[i];
+        }
+
+        return normalized;
+    }
+
+    private static Dictionary<string, object?> MaterializeTypedRow(
+        IReadOnlyList<Column> tableColumns,
+        ReadOnlySpan<CellValue> cells)
+    {
+        var row = new Dictionary<string, object?>(tableColumns.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < tableColumns.Count; i++)
+        {
+            row[tableColumns[i].Name] = cells[i].ToObject();
+        }
+
+        return row;
+    }
+
     private static void ValidateTypedCell(Column column, CellValue cell)
     {
         CellType expected = column.Type.ToUpperInvariant() switch
         {
             "INT" => CellType.Int32,
-            "VARCHAR" => CellType.String,
+            "FLOAT" => CellType.Double,
             "BIT" => CellType.Boolean,
-            "FLOAT" or "DATE" or "VECTOR" => throw new NotSupportedException(
-                $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path."),
+            "DATE" => CellType.Date,
+            "VARCHAR" => CellType.String,
+            "VECTOR" => CellType.Vector,
             _ => throw new NotSupportedException(
                 $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.")
         };
@@ -250,6 +281,151 @@ internal sealed class InsertRowService(
             throw new NotSupportedException(
                 $"Typed insert cell for column {column.Name} exceeds VARCHAR({column.Length}); use the dictionary BulkInsert path.");
         }
+
+        if (expected == CellType.Vector
+            && column.Length > 0
+            && cell.AsVector().Length != column.Length)
+        {
+            throw new NotSupportedException(
+                $"Typed insert cell for column {column.Name} must have VECTOR({column.Length}) dimensions; use the dictionary BulkInsert path.");
+        }
+    }
+
+    private bool ValidateTypedPrimaryKeys(
+        string tableName,
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyList<string> primaryKeys,
+        HashSet<string> acceptedPrimaryKeys,
+        List<string> messages)
+    {
+        if (primaryKeys.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (string primaryKey in primaryKeys)
+        {
+            if (!GetTypedCell(cells, schema, primaryKey).IsNull)
+            {
+                continue;
+            }
+
+            messages.Add($"Primary key cannot be null in row {rowNumber}!");
+            return false;
+        }
+
+        string primaryKeyValue = BuildTypedKeyString(cells, schema, primaryKeys);
+        if (acceptedPrimaryKeys.Contains(primaryKeyValue)
+            || PrimaryKeyExists(tableName, databaseName, primaryKeyValue, primaryKeys))
+        {
+            messages.Add($"Primary key violation in row {rowNumber}!");
+            return false;
+        }
+
+        acceptedPrimaryKeys.Add(primaryKeyValue);
+        return true;
+    }
+
+    private bool ValidateTypedUniqueKeys(
+        string tableName,
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyList<string> uniqueKeys,
+        IReadOnlyDictionary<string, HashSet<string>> acceptedUniqueValues,
+        List<string> messages)
+    {
+        foreach (string uniqueKey in uniqueKeys)
+        {
+            if (GetTypedCell(cells, schema, uniqueKey).IsNull)
+            {
+                continue;
+            }
+
+            string uniqueValue = BuildTypedKeyString(cells, schema, [uniqueKey]);
+            HashSet<string> acceptedValues = acceptedUniqueValues[uniqueKey];
+
+            if (acceptedValues.Contains(uniqueValue)
+                || UniqueValueExists(tableName, databaseName, uniqueKey, uniqueValue))
+            {
+                messages.Add($"Unique key violation in row {rowNumber}!");
+                return false;
+            }
+
+            acceptedValues.Add(uniqueValue);
+        }
+
+        return true;
+    }
+
+    private bool ValidateTypedForeignKeys(
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute,
+        List<string> messages)
+    {
+        foreach ((string columnName, ForeignKey foreignKey) in foreignKeysByAttribute)
+        {
+            string candidate = BuildTypedKeyString(cells, schema, [columnName]);
+            if (!ReferenceExists(foreignKey, candidate, databaseName))
+            {
+                messages.Add($"Foreign key violation in row {rowNumber}!");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static CellValue GetTypedCell(ReadOnlySpan<CellValue> cells, ReactiveRowSchema schema, string columnName)
+    {
+        if (!schema.TryGetOrdinal(columnName, out int ordinal))
+        {
+            throw new BindingException($"Column {columnName} doesn't exist in typed row schema!");
+        }
+
+        return cells[ordinal];
+    }
+
+    private static string BuildTypedKeyString(
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IEnumerable<string> attributes)
+    {
+        var parts = new List<string>();
+        foreach (string attribute in attributes)
+        {
+            parts.Add(NormalizeTypedKeyCell(GetTypedCell(cells, schema, attribute)));
+        }
+
+        return string.Join(IndexKeyEncoder.CompositeKeySeparator, parts);
+    }
+
+    private static string NormalizeTypedKeyCell(CellValue cell)
+    {
+        if (cell.IsNull)
+        {
+            return string.Empty;
+        }
+
+        return cell.Type switch
+        {
+            CellType.Boolean => cell.AsBoolean().ToString(),
+            CellType.Int32 => cell.AsInt32().ToString(),
+            CellType.Int64 => cell.AsInt64().ToString(),
+            CellType.Double => cell.AsDouble().ToString(),
+            CellType.Decimal => cell.AsDecimal().ToString(),
+            CellType.String => cell.AsString() ?? string.Empty,
+            CellType.Date => cell.AsDate().ToString(),
+            CellType.Vector => VectorParser.SerializeVector(cell.AsVector()),
+            _ => string.Empty,
+        };
     }
 
     private static void EnsureKnownColumns(
@@ -490,7 +666,15 @@ internal sealed class InsertRowService(
         IReadOnlyList<string> primaryKeys)
     {
         string primaryKeyValue = IndexKeyEncoder.BuildKeyString(row, primaryKeys);
+        return PrimaryKeyExists(tableName, databaseName, primaryKeyValue, primaryKeys);
+    }
 
+    private bool PrimaryKeyExists(
+        string tableName,
+        string databaseName,
+        string primaryKeyValue,
+        IReadOnlyList<string> primaryKeys)
+    {
         try
         {
             if (indexes.IndexContainsKey(primaryKeyValue, $"_PK_{tableName}", tableName, databaseName))
@@ -514,7 +698,15 @@ internal sealed class InsertRowService(
         Dictionary<string, object?> row)
     {
         string uniqueValue = IndexKeyEncoder.BuildKeyString(row, [columnName]);
+        return UniqueValueExists(tableName, databaseName, columnName, uniqueValue);
+    }
 
+    private bool UniqueValueExists(
+        string tableName,
+        string databaseName,
+        string columnName,
+        string uniqueValue)
+    {
         try
         {
             if (indexes.IndexContainsKey(uniqueValue, $"_UK_{columnName}", tableName, databaseName))
@@ -548,7 +740,9 @@ internal sealed class InsertRowService(
 
             Dictionary<long, Dictionary<string, object?>> existingRows = context.GetTableContents(reference.ReferenceTableName, databaseName);
             if (existingRows.Values.Any(existingRow =>
-                string.Equals(IndexKeyEncoder.BuildKeyString(existingRow, [reference.ReferenceAttributeName]), expectedValue, StringComparison.Ordinal)))
+                existingRow.TryGetValue(reference.ReferenceAttributeName, out object? value)
+                && value != null
+                && string.Equals(value.ToString(), expectedValue, StringComparison.Ordinal)))
             {
                 continue;
             }
@@ -598,6 +792,61 @@ internal sealed class InsertRowService(
             }
 
             string indexValue = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
+            indexes.InsertIntoIndex(indexValue, rowId, indexName, tableName, databaseName);
+        }
+    }
+
+    private void InsertTypedIndexes(
+        string tableName,
+        string databaseName,
+        ReactiveRowSchema schema,
+        ReadOnlySpan<CellValue> cells,
+        long rowId,
+        IReadOnlyList<IndexFile> indexFiles)
+    {
+        foreach (IndexFile index in indexFiles)
+        {
+            bool hasNullKeyPart = false;
+            foreach (string attribute in index.AttributeNames)
+            {
+                if (GetTypedCell(cells, schema, attribute).IsNull)
+                {
+                    hasNullKeyPart = true;
+                    break;
+                }
+            }
+
+            if (hasNullKeyPart)
+            {
+                continue;
+            }
+
+            string indexName = index.IndexFileName ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(indexName))
+            {
+                continue;
+            }
+
+            string indexKind = index.IndexKind ?? string.Empty;
+            if (indexes.SupportsVectorIndexType(indexKind))
+            {
+                if (index.AttributeNames.Count != 1)
+                {
+                    throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+                }
+
+                string vectorColumn = index.AttributeNames[0];
+                CellValue vectorCell = GetTypedCell(cells, schema, vectorColumn);
+                if (vectorCell.Type != CellType.Vector)
+                {
+                    throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                }
+
+                indexes.InsertIntoVectorIndex(vectorCell.AsVector(), rowId, indexName, tableName, databaseName, indexKind);
+                continue;
+            }
+
+            string indexValue = BuildTypedKeyString(cells, schema, index.AttributeNames);
             indexes.InsertIntoIndex(indexValue, rowId, indexName, tableName, databaseName);
         }
     }

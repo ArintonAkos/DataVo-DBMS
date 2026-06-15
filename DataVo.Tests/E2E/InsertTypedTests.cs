@@ -88,17 +88,158 @@ public class InsertTypedTests
     }
 
     [Fact]
-    public void InsertTyped_WhenUnsupportedColumnTypeHasNullCell_Throws()
+    public void InsertTyped_FloatInsert_MatchesBulkInsertReadBack()
     {
-        using DataVoContext ctx = CreateContext();
-        ctx.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, Reading FLOAT)");
         var schema = new ReactiveRowSchema("Id", "Reading");
 
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
-            ctx.InsertTyped("Metrics", schema, [CellValue.From(1), CellValue.Null]));
+        using DataVoContext typed = CreateContext();
+        typed.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, Reading FLOAT)");
+        typed.InsertTyped("Metrics", schema, [CellValue.From(1), CellValue.From(12.5d)]);
 
-        Assert.Contains("Reading", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("dictionary", ex.Message, StringComparison.OrdinalIgnoreCase);
+        using DataVoContext dict = CreateContext();
+        dict.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, Reading FLOAT)");
+        dict.BulkInsert("Metrics",
+        [
+            new Dictionary<string, object?> { ["Id"] = 1, ["Reading"] = 12.5d }
+        ]);
+
+        Dictionary<string, object?> typedRow = Select(typed, "SELECT Id, Reading FROM Metrics").Single();
+        Dictionary<string, object?> dictRow = Select(dict, "SELECT Id, Reading FROM Metrics").Single();
+        Assert.Equal(dictRow["Id"], typedRow["Id"]);
+        Assert.Equal(dictRow["Reading"], typedRow["Reading"]);
+    }
+
+    [Fact]
+    public void InsertTyped_DateInsert_MatchesBulkInsertReadBack()
+    {
+        var schema = new ReactiveRowSchema("Id", "ObservedOn");
+        var observedOn = new DateOnly(2026, 6, 22);
+
+        using DataVoContext typed = CreateContext();
+        typed.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, ObservedOn DATE)");
+        typed.InsertTyped("Metrics", schema, [CellValue.From(1), CellValue.From(observedOn)]);
+
+        using DataVoContext dict = CreateContext();
+        dict.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, ObservedOn DATE)");
+        dict.BulkInsert("Metrics",
+        [
+            new Dictionary<string, object?> { ["Id"] = 1, ["ObservedOn"] = observedOn }
+        ]);
+
+        Dictionary<string, object?> typedRow = Select(typed, "SELECT Id, ObservedOn FROM Metrics").Single();
+        Dictionary<string, object?> dictRow = Select(dict, "SELECT Id, ObservedOn FROM Metrics").Single();
+        Assert.Equal(dictRow["Id"], typedRow["Id"]);
+        Assert.Equal(dictRow["ObservedOn"], typedRow["ObservedOn"]);
+    }
+
+    [Fact]
+    public void InsertTyped_VectorInsert_MatchesBulkInsertReadBack()
+    {
+        var schema = new ReactiveRowSchema("Id", "Emb", "Label");
+        float[] vector = [1f, 0.25f, 0f];
+
+        using DataVoContext typed = CreateContext();
+        typed.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR(20))");
+        typed.InsertTyped("Embeddings", schema, [CellValue.From(1), CellValue.From(vector), CellValue.From("typed")]);
+
+        using DataVoContext dict = CreateContext();
+        dict.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR(20))");
+        dict.BulkInsert("Embeddings",
+        [
+            new Dictionary<string, object?> { ["Id"] = 1, ["Emb"] = vector, ["Label"] = "typed" }
+        ]);
+
+        Dictionary<string, object?> typedRow = Select(typed, "SELECT Id, Emb, Label FROM Embeddings").Single();
+        Dictionary<string, object?> dictRow = Select(dict, "SELECT Id, Emb, Label FROM Embeddings").Single();
+        Assert.Equal(dictRow["Id"], typedRow["Id"]);
+        Assert.Equal(dictRow["Label"], typedRow["Label"]);
+        AssertVectorsEqual((float[])dictRow["Emb"]!, (float[])typedRow["Emb"]!);
+    }
+
+    [Fact]
+    public void InsertTyped_VectorIndexExistingBeforeInsert_SearchesTypedRows()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR(20))");
+        ctx.Execute("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
+
+        ctx.InsertTyped("Embeddings", new ReactiveRowSchema("Id", "Emb", "Label"),
+            [CellValue.From(1), CellValue.From(new[] { 1f, 0f, 0f }), CellValue.From("A")]);
+        ctx.InsertTyped("Embeddings", new ReactiveRowSchema("Id", "Emb", "Label"),
+            [CellValue.From(2), CellValue.From(new[] { 0f, 1f, 0f }), CellValue.From("B")]);
+
+        List<Dictionary<string, object?>> nearest = ctx.SearchNearest("Embeddings", "idx_emb", [0.95f, 0.05f, 0f], topK: 1);
+
+        Dictionary<string, object?> row = Assert.Single(nearest);
+        Assert.Equal(1, row["Id"]);
+        Assert.Equal("A", row["Label"]);
+    }
+
+    [Fact]
+    public void InsertTyped_ConstraintMessagesMatchSqlInsert()
+    {
+        const string createParent = "CREATE TABLE Parents (Id INT PRIMARY KEY)";
+        const string createChild = "CREATE TABLE Children (Id INT PRIMARY KEY, ParentId INT REFERENCES Parents(Id), Code VARCHAR(20) UNIQUE)";
+        var childSchema = new ReactiveRowSchema("Id", "ParentId", "Code");
+
+        using DataVoContext typed = CreateContext();
+        typed.Execute(createParent);
+        typed.Execute(createChild);
+        typed.Execute("INSERT INTO Parents VALUES (1)");
+        typed.InsertTyped("Children", childSchema, [CellValue.From(1), CellValue.From(1), CellValue.From("A")]);
+
+        AssertTypedConstraintMatchesSql(
+            typed,
+            () => typed.InsertTyped("Children", childSchema, [CellValue.From(1), CellValue.From(1), CellValue.From("B")]),
+            "Primary key violation in row 1!",
+            createParent,
+            createChild,
+            "INSERT INTO Parents VALUES (1)",
+            "INSERT INTO Children VALUES (1, 1, 'A')",
+            "INSERT INTO Children VALUES (1, 1, 'B')");
+
+        AssertTypedConstraintMatchesSql(
+            typed,
+            () => typed.InsertTyped("Children", childSchema, [CellValue.From(2), CellValue.From(1), CellValue.From("A")]),
+            "Unique key violation in row 1!",
+            createParent,
+            createChild,
+            "INSERT INTO Parents VALUES (1)",
+            "INSERT INTO Children VALUES (1, 1, 'A')",
+            "INSERT INTO Children VALUES (2, 1, 'A')");
+
+        AssertTypedConstraintMatchesSql(
+            typed,
+            () => typed.InsertTyped("Children", childSchema, [CellValue.From(3), CellValue.From(99), CellValue.From("C")]),
+            "Foreign key violation in row 1!",
+            createParent,
+            createChild,
+            "INSERT INTO Parents VALUES (1)",
+            "INSERT INTO Children VALUES (1, 1, 'A')",
+            "INSERT INTO Children VALUES (3, 99, 'C')");
+    }
+
+    [Fact]
+    public void InsertTyped_RecorderKeepsPublicDictionaryPayloadForTypedCells()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Metrics (Id INT PRIMARY KEY, Reading FLOAT, ObservedOn DATE, Emb VECTOR(3))");
+        ctx.Changes.Enabled = true;
+        var captured = new List<RowChange>();
+        ctx.Changes.Captured += set => captured.AddRange(set.Changes);
+
+        var schema = new ReactiveRowSchema("Id", "Reading", "ObservedOn", "Emb");
+        var observedOn = new DateOnly(2026, 6, 22);
+        ctx.InsertTyped("Metrics", schema,
+            [CellValue.From(1), CellValue.From(12.5d), CellValue.From(observedOn), CellValue.From(new[] { 1f, 0f, 0f })]);
+
+        RowChange change = Assert.Single(captured);
+        Assert.NotNull(change.After);
+        Assert.Equal(1, change.After!["Id"]);
+        Assert.Equal(12.5d, change.After["Reading"]);
+        Assert.Equal(observedOn, change.After["ObservedOn"]);
+        AssertVectorsEqual([1f, 0f, 0f], (float[])change.After["Emb"]!);
+        Assert.NotNull(change.TypedAfter);
     }
 
     [Fact]
@@ -280,5 +421,33 @@ public class InsertTypedTests
         QueryResult result = context.Execute(sql).Single();
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
         return result.Data;
+    }
+
+    private static void AssertTypedConstraintMatchesSql(
+        DataVoContext typed,
+        Action typedInsert,
+        string expectedMessage,
+        params string[] sqlStatements)
+    {
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(typedInsert);
+        Assert.Equal(expectedMessage, ex.Message);
+
+        using DataVoContext sql = CreateContext();
+        for (int i = 0; i < sqlStatements.Length - 1; i++)
+        {
+            sql.Execute(sqlStatements[i]);
+        }
+
+        QueryResult result = sql.Execute(sqlStatements[^1]).Single();
+        Assert.Contains(expectedMessage, result.Messages);
+    }
+
+    private static void AssertVectorsEqual(float[] expected, float[] actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.Equal(expected[i], actual[i], precision: 6);
+        }
     }
 }
