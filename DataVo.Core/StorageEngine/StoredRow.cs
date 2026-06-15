@@ -26,6 +26,23 @@ internal sealed class StoredRow
         _cells = cells.ToArray(); // owned clone — the caller's buffer can change without affecting this row
     }
 
+    private StoredRow(ReactiveRowSchema schema, CellValue[] ownedCells)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(ownedCells);
+        if (ownedCells.Length != schema.ColumnCount)
+        {
+            throw new ArgumentException(
+                $"Row has {ownedCells.Length} cells but schema has {schema.ColumnCount} columns.",
+                nameof(ownedCells));
+        }
+
+        _schema = schema;
+        _cells = ownedCells;
+    }
+
+    internal static StoredRow FromOwnedCells(ReactiveRowSchema schema, CellValue[] ownedCells) => new(schema, ownedCells);
+
     /// <summary>The shared column layout.</summary>
     public ReactiveRowSchema Schema => _schema;
 

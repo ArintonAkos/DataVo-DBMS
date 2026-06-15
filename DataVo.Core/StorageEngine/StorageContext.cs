@@ -476,7 +476,7 @@ public class StorageContext(DataVoConfig config)
         foreach (long rowId in rowIds)
         {
             byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
-            parsedTableData[rowId] = new StoredRow(schema, RowSerializer.DeserializeCells(rawRow, columns));
+            parsedTableData[rowId] = StoredRow.FromOwnedCells(schema, RowSerializer.DeserializeCells(rawRow, columns));
         }
 
         RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
@@ -519,7 +519,7 @@ public class StorageContext(DataVoConfig config)
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[rowTuple.RowId] = new StoredRow(
+            parsedTableData[rowTuple.RowId] = StoredRow.FromOwnedCells(
                 schema,
                 RowSerializer.DeserializeCells(rowTuple.RawRow, columns));
         }
