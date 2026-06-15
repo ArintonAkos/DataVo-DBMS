@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
@@ -149,17 +150,132 @@ public class DataVoCommand : DbCommand
     /// </summary>
     private string SubstituteParameters(string sql)
     {
-        foreach (DataVoParameter param in _parameters.AllParameters)
+        var parameters = _parameters.AllParameters
+            .Where(p => !string.IsNullOrEmpty(p.ParameterName))
+            .OrderByDescending(p => p.ParameterName.Length)
+            .ToArray();
+
+        if (parameters.Length == 0)
         {
-            if (string.IsNullOrEmpty(param.ParameterName))
+            return sql;
+        }
+
+        var builder = new StringBuilder(sql.Length);
+        char? activeQuote = null;
+        bool inLineComment = false;
+        bool inBlockComment = false;
+
+        for (int i = 0; i < sql.Length;)
+        {
+            char current = sql[i];
+            char next = i + 1 < sql.Length ? sql[i + 1] : '\0';
+
+            if (inLineComment)
             {
+                builder.Append(current);
+                if (current is '\r' or '\n')
+                {
+                    inLineComment = false;
+                }
+
+                i++;
                 continue;
             }
 
-            string literal = FormatLiteral(param.Value);
-            sql = sql.Replace(param.ParameterName, literal);
+            if (inBlockComment)
+            {
+                builder.Append(current);
+                if (current == '*' && next == '/')
+                {
+                    builder.Append(next);
+                    inBlockComment = false;
+                    i += 2;
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (activeQuote == null && current == '-' && next == '-')
+            {
+                builder.Append(current);
+                builder.Append(next);
+                inLineComment = true;
+                i += 2;
+                continue;
+            }
+
+            if (activeQuote == null && current == '/' && next == '*')
+            {
+                builder.Append(current);
+                builder.Append(next);
+                inBlockComment = true;
+                i += 2;
+                continue;
+            }
+
+            if (current is '\'' or '"')
+            {
+                builder.Append(current);
+
+                if (activeQuote == '\'' && current == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                {
+                    builder.Append(sql[i + 1]);
+                    i += 2;
+                    continue;
+                }
+
+                if (activeQuote == current)
+                {
+                    activeQuote = null;
+                }
+                else if (activeQuote == null)
+                {
+                    activeQuote = current;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (activeQuote == null)
+            {
+                DataVoParameter? matchedParameter = parameters.FirstOrDefault(p => IsParameterMatch(sql, i, p.ParameterName));
+                if (matchedParameter != null)
+                {
+                    builder.Append(FormatLiteral(matchedParameter.Value));
+                    i += matchedParameter.ParameterName.Length;
+                    continue;
+                }
+            }
+
+            builder.Append(current);
+            i++;
         }
-        return sql;
+
+        return builder.ToString();
+    }
+
+    private static bool IsParameterMatch(string sql, int index, string parameterName)
+    {
+        if (!sql.AsSpan(index).StartsWith(parameterName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int nextIndex = index + parameterName.Length;
+        if (nextIndex >= sql.Length)
+        {
+            return true;
+        }
+
+        return !IsParameterNameCharacter(sql[nextIndex]);
+    }
+
+    private static bool IsParameterNameCharacter(char value)
+    {
+        return char.IsLetterOrDigit(value) || value == '_';
     }
 
     /// <summary>
@@ -171,10 +287,21 @@ public class DataVoCommand : DbCommand
 
         return value switch
         {
+            float[] values => FormatVectorLiteral(values),
+            double[] values => FormatVectorLiteral(values),
+            decimal[] values => FormatVectorLiteral(values),
+            IEnumerable<float> values => FormatVectorLiteral(values),
+            IEnumerable<double> values => FormatVectorLiteral(values),
+            IEnumerable<decimal> values => FormatVectorLiteral(values),
             int or long or float or double or decimal => Convert.ToString(value, CultureInfo.InvariantCulture)!,
             bool b => b ? "true" : "false",
             string s => $"'{s.Replace("'", "''")}'",
             _ => $"'{value}'"
         };
+    }
+
+    private static string FormatVectorLiteral<T>(IEnumerable<T> values) where T : IFormattable
+    {
+        return $"'[{string.Join(", ", values.Select(value => value.ToString(null, CultureInfo.InvariantCulture)))}]'";
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using DataVo.Data;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
@@ -85,6 +86,145 @@ public class AdoNetTests : IDisposable
         using var reader = cmd.ExecuteReader();
         Assert.True(reader.Read());
         Assert.Equal("Bob", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_DoNotReplacePrefixInsideLongerParameterName()
+    {
+        CreateAndSeedTable("PrefixParams");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM PrefixParams WHERE Id = @id_long;";
+        cmd.Parameters.AddWithValue("@id", 1);
+        cmd.Parameters.AddWithValue("@id_long", 2);
+
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_DoNotReplaceMarkersInsideQuotedStrings()
+    {
+        Execute("CREATE TABLE IF NOT EXISTS QuotedParams (Id INT PRIMARY KEY, Name VARCHAR(50));");
+        Execute("INSERT INTO QuotedParams (Id, Name) VALUES (1, '@name');");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM QuotedParams WHERE Id = @id AND Name = '@name';";
+        cmd.Parameters.AddWithValue("@id", 1);
+        cmd.Parameters.AddWithValue("@name", "Alice");
+
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("@name", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_DoNotReplaceMarkersInsideDoubleQuotedStrings()
+    {
+        Execute("CREATE TABLE IF NOT EXISTS DoubleQuotedParams (Id INT PRIMARY KEY, Name VARCHAR(50));");
+        Execute("INSERT INTO DoubleQuotedParams (Id, Name) VALUES (1, \"@name\");");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM DoubleQuotedParams WHERE Id = @id AND Name = \"@name\";";
+        cmd.Parameters.AddWithValue("@id", 1);
+        cmd.Parameters.AddWithValue("@name", "Alice");
+
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("@name", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_DoNotReplaceMarkersInsideLineComments()
+    {
+        CreateAndSeedTable("LineCommentParams");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT * FROM LineCommentParams WHERE Id = @id -- @name
+            ;
+            """;
+        cmd.Parameters.AddWithValue("@id", 1);
+        cmd.Parameters.AddWithValue("@name", "\nAND Name = Bob");
+
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_DoNotReplaceMarkersInsideBlockComments()
+    {
+        CreateAndSeedTable("BlockCommentParams");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM BlockCommentParams WHERE Id = @id /* @name */;";
+        cmd.Parameters.AddWithValue("@id", 1);
+        cmd.Parameters.AddWithValue("@name", "*/ AND Name = Bob /*");
+
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader["Name"]?.ToString());
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void CommandParameters_FormatFloatArrayAsVectorLiteral()
+    {
+        CultureInfo originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+
+        try
+        {
+            Execute("CREATE TABLE IF NOT EXISTS VectorParams (Id INT PRIMARY KEY, Emb VECTOR(3));");
+
+            using var insert = _connection.CreateCommand();
+            insert.CommandText = "INSERT INTO VectorParams (Id, Emb) VALUES (@id, @embedding);";
+            insert.Parameters.AddWithValue("@id", 1);
+            insert.Parameters.AddWithValue("@embedding", new float[] { 0.1f, 0.2f, 0.3f });
+
+            Assert.Equal(1, insert.ExecuteNonQuery());
+
+            using var select = _connection.CreateCommand();
+            select.CommandText = "SELECT Emb FROM VectorParams WHERE Id = 1;";
+
+            using var reader = select.ExecuteReader();
+            Assert.True(reader.Read());
+            var vector = Assert.IsType<float[]>(reader["Emb"]);
+            Assert.Equal([0.1f, 0.2f, 0.3f], vector);
+            Assert.False(reader.Read());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
+
+    [Fact]
+    public void CommandParameters_FormatFloatEnumerableAsVectorLiteral()
+    {
+        Execute("CREATE TABLE IF NOT EXISTS VectorEnumerableParams (Id INT PRIMARY KEY, Emb VECTOR(3));");
+
+        using var insert = _connection.CreateCommand();
+        insert.CommandText = "INSERT INTO VectorEnumerableParams (Id, Emb) VALUES (@id, @embedding);";
+        insert.Parameters.AddWithValue("@id", 1);
+        insert.Parameters.AddWithValue("@embedding", new List<float> { 0.1f, 0.2f, 0.3f });
+
+        Assert.Equal(1, insert.ExecuteNonQuery());
+
+        using var select = _connection.CreateCommand();
+        select.CommandText = "SELECT Emb FROM VectorEnumerableParams WHERE Id = 1;";
+
+        using var reader = select.ExecuteReader();
+        Assert.True(reader.Read());
+        var vector = Assert.IsType<float[]>(reader["Emb"]);
+        Assert.Equal([0.1f, 0.2f, 0.3f], vector);
         Assert.False(reader.Read());
     }
 
