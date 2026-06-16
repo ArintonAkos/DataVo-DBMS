@@ -1,4 +1,6 @@
 using System.Text;
+using DataVo.Core.Exceptions;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.BTree;
@@ -69,6 +71,54 @@ public static class IndexKeyEncoder
     {
         return string.Join(CompositeKeySeparator, attributes.Select(attr => NormalizeValue(row[attr])));
     }
+
+    /// <summary>
+    /// Builds a logical key string from typed cells and a sequence of indexed attributes, producing a key
+    /// identical to the dictionary <see cref="BuildKeyString(Dictionary{string, object?}, IEnumerable{string})"/>
+    /// overload. This is the typed-storage path (no dictionary materialization).
+    /// </summary>
+    /// <param name="schema">The column layout describing <paramref name="cells"/>.</param>
+    /// <param name="cells">The row's cells, in schema order.</param>
+    /// <param name="attributes">The indexed attributes, in key order.</param>
+    /// <returns>A single-column key or a composite key joined with <see cref="CompositeKeySeparator"/>.</returns>
+    internal static string BuildKeyString(
+        ReactiveRowSchema schema,
+        ReadOnlySpan<CellValue> cells,
+        IReadOnlyList<string> attributes)
+    {
+        if (attributes.Count == 1)
+        {
+            return NormalizeCell(GetCell(schema, cells, attributes[0]));
+        }
+
+        var builder = new StringBuilder();
+        for (int i = 0; i < attributes.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(CompositeKeySeparator);
+            }
+
+            builder.Append(NormalizeCell(GetCell(schema, cells, attributes[i])));
+        }
+
+        return builder.ToString();
+    }
+
+    private static CellValue GetCell(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells, string columnName)
+    {
+        if (!schema.TryGetOrdinal(columnName, out int ordinal))
+        {
+            throw new BindingException($"Column {columnName} doesn't exist in typed row schema!");
+        }
+
+        return cells[ordinal];
+    }
+
+    // Typed cells normalize through the exact same value-normalization as the dictionary path (operating on
+    // the boxed cell value) so typed and dictionary index keys are byte-for-byte identical — including the
+    // dictionary path's quirk of coercing numeric scalars to a "[n]" vector serialization.
+    private static string NormalizeCell(CellValue cell) => NormalizeValue(cell.ToObject());
 
     private static string NormalizeValue(object? value)
     {

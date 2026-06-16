@@ -317,7 +317,7 @@ internal sealed class InsertRowService(
             return false;
         }
 
-        string primaryKeyValue = BuildTypedKeyString(cells, schema, primaryKeys);
+        string primaryKeyValue = IndexKeyEncoder.BuildKeyString(schema, cells, primaryKeys);
         if (acceptedPrimaryKeys.Contains(primaryKeyValue)
             || PrimaryKeyExists(tableName, databaseName, primaryKeyValue, primaryKeys))
         {
@@ -346,7 +346,7 @@ internal sealed class InsertRowService(
                 continue;
             }
 
-            string uniqueValue = BuildTypedKeyString(cells, schema, [uniqueKey]);
+            string uniqueValue = IndexKeyEncoder.BuildKeyString(schema, cells, [uniqueKey]);
             HashSet<string> acceptedValues = acceptedUniqueValues[uniqueKey];
 
             if (acceptedValues.Contains(uniqueValue)
@@ -372,7 +372,7 @@ internal sealed class InsertRowService(
     {
         foreach ((string columnName, ForeignKey foreignKey) in foreignKeysByAttribute)
         {
-            string candidate = BuildTypedKeyString(cells, schema, [columnName]);
+            string candidate = IndexKeyEncoder.BuildKeyString(schema, cells, [columnName]);
             if (!ReferenceExists(foreignKey, candidate, databaseName))
             {
                 messages.Add($"Foreign key violation in row {rowNumber}!");
@@ -391,41 +391,6 @@ internal sealed class InsertRowService(
         }
 
         return cells[ordinal];
-    }
-
-    private static string BuildTypedKeyString(
-        ReadOnlySpan<CellValue> cells,
-        ReactiveRowSchema schema,
-        IEnumerable<string> attributes)
-    {
-        var parts = new List<string>();
-        foreach (string attribute in attributes)
-        {
-            parts.Add(NormalizeTypedKeyCell(GetTypedCell(cells, schema, attribute)));
-        }
-
-        return string.Join(IndexKeyEncoder.CompositeKeySeparator, parts);
-    }
-
-    private static string NormalizeTypedKeyCell(CellValue cell)
-    {
-        if (cell.IsNull)
-        {
-            return string.Empty;
-        }
-
-        return cell.Type switch
-        {
-            CellType.Boolean => cell.AsBoolean().ToString(),
-            CellType.Int32 => cell.AsInt32().ToString(),
-            CellType.Int64 => cell.AsInt64().ToString(),
-            CellType.Double => cell.AsDouble().ToString(),
-            CellType.Decimal => cell.AsDecimal().ToString(),
-            CellType.String => cell.AsString() ?? string.Empty,
-            CellType.Date => cell.AsDate().ToString(),
-            CellType.Vector => VectorParser.SerializeVector(cell.AsVector()),
-            _ => string.Empty,
-        };
     }
 
     private static void EnsureKnownColumns(
@@ -846,7 +811,7 @@ internal sealed class InsertRowService(
                 continue;
             }
 
-            string indexValue = BuildTypedKeyString(cells, schema, index.AttributeNames);
+            string indexValue = IndexKeyEncoder.BuildKeyString(schema, cells, index.AttributeNames);
             indexes.InsertIntoIndex(indexValue, rowId, indexName, tableName, databaseName);
         }
     }
