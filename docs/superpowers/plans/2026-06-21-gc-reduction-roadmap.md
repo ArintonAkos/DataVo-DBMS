@@ -133,7 +133,13 @@ macro GC movement from the prior **259.4 MB** checkpoint; the expected large dro
 at macro level in P1, so the remaining allocation needs the P2 typed-read migration/profiler pass rather
 than another insert-only change.
 
-**Step 2 — next: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
+**Slice 4 P2 typed-read measurement (2026-06-22, after typed read APIs + hot reader migration):**
+complex-vip, DataVo-only, 10k baseline + 50k live ticks measured **260.4 MB GC**, **393.6 ms** total,
+p50 **0.0061 ms**, p99 **0.0122 ms**. Focused reactive seed allocation improved
+**877,176 → 646,312 bytes** for a 1,000-row seed, but the macro benchmark remains essentially flat;
+the remaining macro allocation is therefore not explained by the typed read candidates migrated in P2.
+
+**Step 2 — in progress: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
 re-boxing + `normalized`/storage row dicts + MVCC version. Make the storage/validation path accept
 typed `CellValue` rows directly (no per-insert dict materialization). Deeper and riskier (shared
 storage format) — measure-then-reduce.
