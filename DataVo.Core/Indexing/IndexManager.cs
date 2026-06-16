@@ -1,12 +1,12 @@
 using DataVo.Core.BTree;
 using DataVo.Core.BTree.Core;
-using System.Globalization;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
 using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Runtime.Diagnostics;
 
 namespace DataVo.Core.Indexing;
@@ -848,20 +848,19 @@ public class IndexManager : IDisposable
             }
 
             string vectorColumn = catalogIndex.AttributeNames[0];
-            var rows = engine.StorageContext.GetTableContents(tableName, databaseName);
+            var rows = engine.StorageContext.GetTypedTableContents(tableName, databaseName);
             List<(long RowId, float[] Vector)> vectors = [];
 
             foreach (var row in rows)
             {
-                if (!row.Value.TryGetValue(vectorColumn, out dynamic? rawValue) || rawValue == null)
+                // Vector columns deserialize directly to a Vector cell — read it typed, with no
+                // per-row dictionary materialization or string re-coercion.
+                if (!row.Value.TryGet(vectorColumn, out CellValue cell) || cell.IsNull || cell.Type != CellType.Vector)
                 {
                     continue;
                 }
 
-                if (TryCoerceVector(rawValue, out float[] vector))
-                {
-                    vectors.Add((row.Key, vector));
-                }
+                vectors.Add((row.Key, cell.AsVector()));
             }
 
             CreateVectorIndex(vectors, indexName, tableName, databaseName, indexType: catalogIndex.IndexKind);
@@ -878,47 +877,6 @@ public class IndexManager : IDisposable
             rebuildError = ex;
         }
 
-        return false;
-    }
-
-    private static bool TryCoerceVector(object value, out float[] vector)
-    {
-        if (value is float[] typed)
-        {
-            vector = [.. typed];
-            return true;
-        }
-
-        if (value is IEnumerable<float> floatEnumerable)
-        {
-            vector = [.. floatEnumerable];
-            return true;
-        }
-
-        if (value is string text)
-        {
-            string trimmed = text.Trim();
-            if (trimmed.StartsWith('[') && trimmed.EndsWith(']') && trimmed.Length >= 2)
-            {
-                string[] parts = trimmed[1..^1]
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                float[] parsed = new float[parts.Length];
-                for (int i = 0; i < parts.Length; i++)
-                {
-                    if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[i]))
-                    {
-                        vector = [];
-                        return false;
-                    }
-                }
-
-                vector = parsed;
-                return true;
-            }
-        }
-
-        vector = [];
         return false;
     }
 
