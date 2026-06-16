@@ -170,13 +170,13 @@ WHERE Name LIKE 'A%';
 
 ## Vector distance and similarity
 
-### `COSINE_DISTANCE`
+### `<=>`
 
 For embedding vectors, find similar items using cosine similarity:
 
 ```sql
 SELECT Id, Content,
-       COSINE_DISTANCE(Vector, @query_vector) AS distance
+       Vector <=> '[1,0,0]' AS distance
 FROM Embeddings
 WHERE IsActive = 1
 ORDER BY distance ASC
@@ -191,19 +191,19 @@ Result:
 |  87 | "Related topic"   |     0.12 |
 |  15 | "Another match"   |     0.18 |
 
-### `L2_DISTANCE`
+### `<->`
 
 For Euclidean distance on vector columns:
 
 ```sql
 SELECT Id, Name,
-       L2_DISTANCE(Vector, @query_vector) AS distance
+       Vector <-> '[1,0,0]' AS distance
 FROM Items
 ORDER BY distance ASC
 LIMIT 5;
 ```
 
-**Note**: Vector distance functions are used in `ORDER BY` for nearest-neighbor queries. Lower distances indicate more similar items.
+**Note**: Vector distance operators are used in `ORDER BY` for nearest-neighbor queries. Lower distances indicate more similar items.
 
 For comprehensive vector search examples, including HNSW indexing and hybrid queries, see [Vector Queries Guide](./vector-queries-guide.md).
 
@@ -269,6 +269,19 @@ WHERE Score > (
   SELECT AVG(Score) FROM Users
 );
 ```
+
+## EXPLAIN
+
+`EXPLAIN SELECT ...` returns one planner-diagnostic row without returning table rows.
+
+```sql
+EXPLAIN SELECT *
+FROM Users
+WHERE Id = 1;
+```
+
+The diagnostic fields are `Plan`, `Physical`, `EstimatedCost`, and `Reason`.
+`EXPLAIN ANALYZE` is not part of the initial scope.
 
 ## Execution flow for a typical `SELECT`
 
