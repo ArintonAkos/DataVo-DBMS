@@ -1,11 +1,20 @@
 using DataVo.Core.Constants;
 using DataVo.Core.Enums;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Parser.DQL;
 
+internal sealed record SelectPlannerDiagnostics(
+    string Plan,
+    string Physical,
+    int EstimatedCost,
+    string Reason);
+
 internal partial class Select
 {
+    private const int UnknownRowCountEstimate = 1;
+
     private enum LogicalPlanKind
     {
         LegacyWhereJoin,
@@ -32,7 +41,38 @@ internal partial class Select
         public string Reason { get; }
     }
 
-    private PhysicalPlanDecision BuildPhysicalPlan(ExpressionNode? whereExpression)
+    private readonly record struct PlanCostProfile(
+        double StartupCost,
+        double RowWeight,
+        double ComplexityWeight,
+        double PipelineWeight);
+
+    internal SelectPlannerDiagnostics BuildPlannerDiagnostics(Guid session)
+    {
+        string databaseName = GetDatabaseName(session);
+
+        bool hasMissingColumns = _model.ValidateForPlannerDiagnostics(databaseName);
+        if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
+        {
+            throw new BindingException("Invalid columns specified'");
+        }
+
+        ExpressionNode? whereExpression = _model.WhereStatement.IsEvaluatable()
+            ? _model.WhereStatement.GetExpression()
+            : null;
+
+        PhysicalPlanDecision plan = BuildPhysicalPlan(whereExpression, useRowMaterializationForEstimates: false);
+
+        return new SelectPlannerDiagnostics(
+            plan.LogicalPlan.ToString(),
+            plan.UseVolcano ? "Volcano" : "Legacy",
+            plan.EstimatedCost,
+            plan.Reason);
+    }
+
+    private PhysicalPlanDecision BuildPhysicalPlan(
+        ExpressionNode? whereExpression,
+        bool useRowMaterializationForEstimates = true)
     {
         if (whereExpression != null)
         {
@@ -43,7 +83,8 @@ internal partial class Select
                     legacyPlan: LogicalPlanKind.LegacyWhereJoin,
                     whereExpression,
                     volcanoReason: "JOIN graph is fully INNER and connected",
-                    legacyReason: "legacy join path estimated cheaper for current predicate");
+                    legacyReason: "legacy join path estimated cheaper for current predicate",
+                    useRowMaterializationForEstimates: useRowMaterializationForEstimates);
             }
 
             if (ShouldUseVolcanoNoJoinPath(whereExpression))
@@ -57,7 +98,8 @@ internal partial class Select
                     legacyPlan: legacyCandidate,
                     whereExpression,
                     volcanoReason: "single-table filter with no subquery",
-                    legacyReason: "legacy filter path estimated cheaper for current predicate");
+                    legacyReason: "legacy filter path estimated cheaper for current predicate",
+                    useRowMaterializationForEstimates: useRowMaterializationForEstimates);
             }
 
             if (RequiresExpressionEvaluation(whereExpression))
@@ -65,14 +107,14 @@ internal partial class Select
                 return new PhysicalPlanDecision(
                     LogicalPlanKind.LegacyWhereExpression,
                     useVolcano: false,
-                    estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereExpression, whereExpression),
+                    estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereExpression, whereExpression, useRowMaterializationForEstimates),
                     reason: "expression predicate requires legacy evaluator");
             }
 
             return new PhysicalPlanDecision(
                 LogicalPlanKind.LegacyWhereJoin,
                 useVolcano: false,
-                estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereJoin, whereExpression),
+                estimatedCost: EstimateCost(LogicalPlanKind.LegacyWhereJoin, whereExpression, useRowMaterializationForEstimates),
                 reason: "fallback where/join evaluation");
         }
 
@@ -85,13 +127,14 @@ internal partial class Select
                     legacyPlan: LogicalPlanKind.LegacyJoinOnly,
                     whereExpression: null,
                     volcanoReason: "join-only query has connected INNER JOIN graph",
-                    legacyReason: "legacy join-only path estimated cheaper");
+                    legacyReason: "legacy join-only path estimated cheaper",
+                    useRowMaterializationForEstimates: useRowMaterializationForEstimates);
             }
 
             return new PhysicalPlanDecision(
                 LogicalPlanKind.LegacyJoinOnly,
                 useVolcano: false,
-                estimatedCost: EstimateCost(LogicalPlanKind.LegacyJoinOnly, null),
+                estimatedCost: EstimateCost(LogicalPlanKind.LegacyJoinOnly, null, useRowMaterializationForEstimates),
                 reason: "join without where uses legacy join strategy");
         }
 
@@ -102,13 +145,14 @@ internal partial class Select
                 legacyPlan: LogicalPlanKind.LegacyNoJoinScan,
                 whereExpression: null,
                 volcanoReason: "simple no-join scan path",
-                legacyReason: "legacy no-join scan estimated cheaper");
+                legacyReason: "legacy no-join scan estimated cheaper",
+                useRowMaterializationForEstimates: useRowMaterializationForEstimates);
         }
 
         return new PhysicalPlanDecision(
             LogicalPlanKind.LegacyNoJoinScan,
             useVolcano: false,
-            estimatedCost: EstimateCost(LogicalPlanKind.LegacyNoJoinScan, null),
+            estimatedCost: EstimateCost(LogicalPlanKind.LegacyNoJoinScan, null, useRowMaterializationForEstimates),
             reason: "volcano disabled or unsupported");
     }
 
@@ -117,12 +161,29 @@ internal partial class Select
         LogicalPlanKind legacyPlan,
         ExpressionNode? whereExpression,
         string volcanoReason,
-        string legacyReason)
+        string legacyReason,
+        bool useRowMaterializationForEstimates = true)
     {
-        int volcanoCost = EstimateCost(volcanoPlan, whereExpression);
-        int legacyCost = EstimateCost(legacyPlan, whereExpression);
+        // Join-cardinality feedback persistence requires the Volcano join pipeline.
+        // When persistence is enabled, prefer Volcano so learned feedback can be written.
+        if (volcanoPlan == LogicalPlanKind.VolcanoInnerJoin
+            && Engine.Config.EnableVolcanoJoinCardinalityFeedbackPersistence
+            && !string.IsNullOrWhiteSpace(Engine.Config.VolcanoJoinCardinalityFeedbackPersistenceFile))
+        {
+            int volcanoCostForced = EstimateCost(volcanoPlan, whereExpression, useRowMaterializationForEstimates);
+            int legacyCostForced = EstimateCost(legacyPlan, whereExpression, useRowMaterializationForEstimates);
 
-        if (volcanoCost <= legacyCost)
+            return new PhysicalPlanDecision(
+                volcanoPlan,
+                useVolcano: true,
+                estimatedCost: volcanoCostForced,
+                reason: $"join feedback persistence enabled; {volcanoReason}; compared to {legacyPlan} cost {legacyCostForced}");
+        }
+
+        int volcanoCost = EstimateCost(volcanoPlan, whereExpression, useRowMaterializationForEstimates);
+        int legacyCost = EstimateCost(legacyPlan, whereExpression, useRowMaterializationForEstimates);
+
+        if (volcanoCost < legacyCost)
         {
             return new PhysicalPlanDecision(
                 volcanoPlan,
@@ -138,12 +199,16 @@ internal partial class Select
             reason: $"{legacyReason}; compared to {volcanoPlan} cost {volcanoCost}");
     }
 
-    private int EstimateCost(LogicalPlanKind plan, ExpressionNode? whereExpression)
+    private int EstimateCost(
+        LogicalPlanKind plan,
+        ExpressionNode? whereExpression,
+        bool useRowMaterializationForEstimates = true)
     {
         int rowCount = plan switch
         {
-            LogicalPlanKind.VolcanoInnerJoin or LogicalPlanKind.LegacyWhereJoin or LogicalPlanKind.LegacyJoinOnly => EstimateJoinInputRowCount(),
-            _ => _model.FromTable?.TableContentValues?.Count ?? 0
+            LogicalPlanKind.VolcanoInnerJoin or LogicalPlanKind.LegacyWhereJoin or LogicalPlanKind.LegacyJoinOnly
+                => EstimateJoinInputRowCount(useRowMaterializationForEstimates),
+            _ => EstimateFromTableRowCount(useRowMaterializationForEstimates)
         };
 
         int complexity = whereExpression == null ? 1 : EstimatePredicateComplexity(whereExpression);
@@ -151,15 +216,58 @@ internal partial class Select
         int effectiveRows = Math.Max(1, (int)Math.Ceiling(rowCount * selectivity));
         int pipelineFeatures = EstimatePipelineFeatureCost();
 
+        PlanCostProfile profile = GetPlanCostProfile(plan);
+
+        double cost = profile.StartupCost
+            + (profile.RowWeight * effectiveRows)
+            + (profile.ComplexityWeight * complexity)
+            + (profile.PipelineWeight * pipelineFeatures);
+
+        return Math.Max(1, (int)Math.Ceiling(cost));
+    }
+
+    private static PlanCostProfile GetPlanCostProfile(LogicalPlanKind plan)
+    {
         return plan switch
         {
-            LogicalPlanKind.VolcanoNoJoin => 8 + complexity + pipelineFeatures + (effectiveRows / 1000),
-            LogicalPlanKind.VolcanoInnerJoin => 14 + complexity + pipelineFeatures + (effectiveRows / 750),
-            LogicalPlanKind.LegacyWhereExpression => 30 + (2 * complexity) + pipelineFeatures + (effectiveRows / 500),
-            LogicalPlanKind.LegacyWhereJoin => 24 + complexity + pipelineFeatures + (effectiveRows / 400),
-            LogicalPlanKind.LegacyJoinOnly => 22 + pipelineFeatures + (effectiveRows / 350),
-            LogicalPlanKind.LegacyNoJoinScan => 16 + pipelineFeatures + (effectiveRows / 450),
-            _ => 100
+            // Volcano has higher setup cost, but scales better as row counts grow.
+            LogicalPlanKind.VolcanoNoJoin => new PlanCostProfile(
+                StartupCost: 20d,
+                RowWeight: 0.010d,
+                ComplexityWeight: 1.20d,
+                PipelineWeight: 0.90d),
+            LogicalPlanKind.VolcanoInnerJoin => new PlanCostProfile(
+                StartupCost: 30d,
+                RowWeight: 0.018d,
+                ComplexityWeight: 1.25d,
+                PipelineWeight: 0.90d),
+
+            // Legacy keeps lower startup overhead, but row growth is more expensive.
+            LogicalPlanKind.LegacyWhereExpression => new PlanCostProfile(
+                StartupCost: 10d,
+                RowWeight: 0.060d,
+                ComplexityWeight: 3.00d,
+                PipelineWeight: 1.30d),
+            LogicalPlanKind.LegacyWhereJoin => new PlanCostProfile(
+                StartupCost: 9d,
+                RowWeight: 0.055d,
+                ComplexityWeight: 1.80d,
+                PipelineWeight: 1.20d),
+            LogicalPlanKind.LegacyJoinOnly => new PlanCostProfile(
+                StartupCost: 8d,
+                RowWeight: 0.060d,
+                ComplexityWeight: 0.60d,
+                PipelineWeight: 1.20d),
+            LogicalPlanKind.LegacyNoJoinScan => new PlanCostProfile(
+                StartupCost: 7d,
+                RowWeight: 0.045d,
+                ComplexityWeight: 0.75d,
+                PipelineWeight: 1.20d),
+            _ => new PlanCostProfile(
+                StartupCost: 100d,
+                RowWeight: 1d,
+                ComplexityWeight: 1d,
+                PipelineWeight: 1d)
         };
     }
 
@@ -259,8 +367,24 @@ internal partial class Select
         return 0.5d;
     }
 
-    private int EstimateJoinInputRowCount()
+    private int EstimateFromTableRowCount(bool useRowMaterializationForEstimates)
     {
+        if (!useRowMaterializationForEstimates)
+        {
+            return UnknownRowCountEstimate;
+        }
+
+        return _model.FromTable?.TableContentValues?.Count ?? 0;
+    }
+
+    private int EstimateJoinInputRowCount(bool useRowMaterializationForEstimates = true)
+    {
+        if (!useRowMaterializationForEstimates)
+        {
+            int tableCount = 1 + (_model.JoinStatement?.Model.JoinTableDetails.Count ?? 0);
+            return Math.Max(UnknownRowCountEstimate, tableCount * UnknownRowCountEstimate);
+        }
+
         int total = _model.FromTable?.TableContentValues?.Count ?? 0;
         if (_model.TableService == null)
         {

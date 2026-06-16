@@ -14,6 +14,10 @@ public static class SqlKeywords
     /// </summary>
     public const string SELECT = "SELECT";
     /// <summary>
+    /// Represents the SQL EXPLAIN keyword.
+    /// </summary>
+    public const string EXPLAIN = "EXPLAIN";
+    /// <summary>
     /// Represents the SQL FROM keyword.
     /// </summary>
     public const string FROM = "FROM";
@@ -386,7 +390,7 @@ public static class SqlKeywords
     /// </summary>
     public static readonly string[] All =
     [
-        SELECT, FROM, WHERE, INSERT, INTO, VALUES,
+        SELECT, EXPLAIN, FROM, WHERE, INSERT, INTO, VALUES,
         CREATE, TABLE, DROP, INDEX, ON, SHOW, DATABASES,
         TABLES, DESCRIBE, DELETE, UPDATE, SET, USE, GO,
         DATABASE, DEFAULT, PRIMARY, KEY, UNIQUE, REFERENCES, FOREIGN,

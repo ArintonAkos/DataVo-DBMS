@@ -157,6 +157,28 @@ internal class SelectModel
         return false;
     }
 
+    public bool ValidateForPlannerDiagnostics(string databaseName)
+    {
+        Database = databaseName;
+        TableService = new TableService(databaseName);
+
+        FromTable = ResolveTableDetail(FromTable);
+        TableService.AddTableDetail(FromTable);
+
+        WhereStatement = Ast.WhereExpression != null
+            ? new Where(Ast.WhereExpression, FromTable)
+            : new Where(new LiteralNode { Value = SqlLiterals.TrueExpression }, FromTable);
+
+        var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
+        JoinStatement = new Join(boundJoinModel, TableService);
+        GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
+        AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
+
+        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
+
+        return false;
+    }
+
     private TableDetail ResolveTableDetail(TableDetail requested)
     {
         if (!CteTables.TryGetValue(requested.TableName, out var cteTable))

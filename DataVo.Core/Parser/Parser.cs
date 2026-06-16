@@ -83,7 +83,9 @@ public class Parser(List<Token> tokens)
                 continue;
             }
 
-            if (Match(TokenType.Keyword, SqlKeywords.SELECT))
+            if (MatchKeywordOrIdentifierValue(SqlKeywords.EXPLAIN))
+                statements.Add(ParseExplainStatement());
+            else if (Match(TokenType.Keyword, SqlKeywords.SELECT))
                 statements.Add(ParseSelectStatement());
             else if (Match(TokenType.Keyword, SqlKeywords.USE))
                 statements.Add(ParseUseStatement());
@@ -747,7 +749,7 @@ public class Parser(List<Token> tokens)
         }
     }
 
-    private SqlStatement ParseDeleteStatement()
+    private DeleteFromStatement ParseDeleteStatement()
     {
         Consume(TokenType.Keyword, SqlKeywords.FROM);
         var stmt = new DeleteFromStatement
@@ -771,7 +773,7 @@ public class Parser(List<Token> tokens)
         return stmt;
     }
 
-    private SqlStatement ParseUpdateStatement()
+    private UpdateStatement ParseUpdateStatement()
     {
         var stmt = new UpdateStatement
         {
@@ -853,7 +855,7 @@ public class Parser(List<Token> tokens)
         return stmt;
     }
 
-    private SqlStatement ParseInsertStatement()
+    private InsertIntoStatement ParseInsertStatement()
     {
         Consume(TokenType.Keyword, SqlKeywords.INTO);
         var stmt = new InsertIntoStatement
@@ -950,6 +952,18 @@ public class Parser(List<Token> tokens)
         ParseUnionTail(unionStatement);
 
         return unionStatement;
+    }
+
+    private ExplainStatement ParseExplainStatement()
+    {
+        Consume(TokenType.Keyword, SqlKeywords.SELECT);
+        var select = ParseSingleSelectStatement(parseTailClauses: false);
+        ParseSelectTail(select);
+
+        return new ExplainStatement
+        {
+            Select = select
+        };
     }
 
     private SelectStatement ParseWithSelectStatement()
@@ -1474,9 +1488,26 @@ public class Parser(List<Token> tokens)
 
     private static bool IsWildcardProjection(string rawExpression)
     {
+        if (string.IsNullOrWhiteSpace(rawExpression))
+        {
+            return false;
+        }
+
         string trimmed = rawExpression.Trim();
-        return trimmed == "*" ||
-               (trimmed.EndsWith(".*", StringComparison.Ordinal) && trimmed.Length > 2);
+        if (trimmed == "*")
+        {
+            return true;
+        }
+
+        // The lexer emits identifiers that may include a trailing dot (e.g. "Employees.")
+        // and the select-column collector joins tokens with spaces, producing "Employees. *".
+        // Normalize common spacing artifacts so qualified wildcards are recognized.
+        string normalized = trimmed
+            .Replace(" . ", ".", StringComparison.Ordinal)
+            .Replace(" .", ".", StringComparison.Ordinal)
+            .Replace(". ", ".", StringComparison.Ordinal);
+
+        return normalized.EndsWith(".*", StringComparison.Ordinal) && normalized.Length > 2;
     }
 
     // This adapts the existing Shunting-Yard from StatementParser to use the Lexer's Tokens directly

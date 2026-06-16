@@ -399,6 +399,17 @@ public class SelectStatement : SqlStatement
 }
 
 /// <summary>
+/// Represents an <c>EXPLAIN SELECT</c> query.
+/// </summary>
+public class ExplainStatement : SqlStatement
+{
+    /// <summary>
+    /// Gets or sets the SELECT statement to diagnose.
+    /// </summary>
+    public SelectStatement Select { get; set; } = null!;
+}
+
+/// <summary>
 /// Represents one UNION branch.
 /// </summary>
 public class UnionBranchNode : SqlNode
