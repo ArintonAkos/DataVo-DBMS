@@ -14,6 +14,7 @@ internal static class ColumnDefinitionParser
         if (t.Contains("float")) return DataTypes.Float;
         if (t.Contains("bit")) return DataTypes.Bit;
         if (t.Contains("date")) return DataTypes.Date;
+        if (t.Contains("vector")) return DataTypes.Vector;
         return DataTypes.Varchar;
     }
 
