@@ -147,6 +147,89 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
         Assert.False(verify.IsError);
         Assert.Equal(["Alice", "Bob"], verify.Data.Select(row => row["Name"]?.ToString()).ToList());
     }
+
+    [Fact]
+    public void AlterTable_AddColumn_DateType_BackfillsNullAndAcceptsNewValues()
+    {
+        var alter = ExecuteAndReturn("ALTER TABLE Users ADD COLUMN Born DATE");
+        Assert.False(alter.IsError);
+
+        Execute("INSERT INTO Users (Id, Name, Born) VALUES (3, 'Cara', '2026-06-22')");
+
+        var result = ExecuteAndReturn("SELECT Born FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.Equal(3, result.Data.Count);
+        Assert.Null(result.Data[0]["Born"]);
+        Assert.Null(result.Data[1]["Born"]);
+        Assert.Equal(new DateOnly(2026, 6, 22), result.Data[2]["Born"]);
+    }
+
+    [Fact]
+    public void AlterTable_AddColumn_VectorType_BackfillsNullAndPreservesPrimaryKeyLookups()
+    {
+        var alter = ExecuteAndReturn("ALTER TABLE Users ADD COLUMN Embedding VECTOR(3)");
+        Assert.False(alter.IsError);
+
+        Execute("INSERT INTO Users (Id, Name, Embedding) VALUES (3, 'Cara', '[1,2,3]')");
+
+        var result = ExecuteAndReturn("SELECT Embedding FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.Equal(3, result.Data.Count);
+        Assert.Null(result.Data[0]["Embedding"]);
+        Assert.IsType<float[]>(result.Data[2]["Embedding"]!);
+        Assert.Equal([1f, 2f, 3f], (float[])result.Data[2]["Embedding"]!);
+
+        // The pre-existing primary-key index must survive the rewrite + reindex.
+        var pkLookup = ExecuteAndReturn("SELECT Name FROM Users WHERE Id = 2");
+        Assert.False(pkLookup.IsError);
+        Assert.Single(pkLookup.Data);
+        Assert.Equal("Bob", pkLookup.Data[0]["Name"]);
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_VarcharToDate_ConvertsExistingValues()
+    {
+        Execute("ALTER TABLE Users ADD COLUMN Born VARCHAR(20) DEFAULT '2026-06-22'");
+        var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Born DATE");
+        Assert.False(alter.IsError);
+
+        var result = ExecuteAndReturn("SELECT Born FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.All(result.Data, row => Assert.Equal(new DateOnly(2026, 6, 22), row["Born"]));
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_VarcharToVector_ConvertsExistingValues()
+    {
+        Execute("ALTER TABLE Users ADD COLUMN Embedding VARCHAR(20) DEFAULT '[1,2,3]'");
+        var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Embedding VECTOR(3)");
+        Assert.False(alter.IsError);
+
+        var result = ExecuteAndReturn("SELECT Embedding FROM Users ORDER BY Id");
+        Assert.False(result.IsError);
+        Assert.All(result.Data, row =>
+        {
+            Assert.IsType<float[]>(row["Embedding"]!);
+            Assert.Equal([1f, 2f, 3f], (float[])row["Embedding"]!);
+        });
+    }
+
+    [Fact]
+    public void AlterTable_DropColumn_DateType_RemovesColumnAndPreservesPrimaryKeyLookups()
+    {
+        Execute("ALTER TABLE Users ADD COLUMN Born DATE");
+
+        var drop = ExecuteAndReturn("ALTER TABLE Users DROP COLUMN Born");
+        Assert.False(drop.IsError);
+
+        var missing = ExecuteAndReturn("SELECT Born FROM Users");
+        Assert.True(missing.IsError);
+
+        var pkLookup = ExecuteAndReturn("SELECT Name FROM Users WHERE Id = 1");
+        Assert.False(pkLookup.IsError);
+        Assert.Single(pkLookup.Data);
+        Assert.Equal("Alice", pkLookup.Data[0]["Name"]);
+    }
 }
 
 public class AlterTableTestsMemory : AlterTableTestsBase
