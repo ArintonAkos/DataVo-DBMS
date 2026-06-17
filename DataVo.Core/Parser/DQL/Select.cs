@@ -1527,7 +1527,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             _volcanoLimitPushedDown = true;
         }
 
-        List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root);
+        List<ExecutionRow> filteredRows = OperatorPipelineRunner.ExecuteToList(root, GetVolcanoRunnerMaxRows());
         List<JoinedRow> listed;
         if (_volcanoAggregatePushedDown)
         {
@@ -1735,7 +1735,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             _volcanoLimitPushedDown = true;
         }
 
-        List<ExecutionRow> joinedRows = OperatorPipelineRunner.ExecuteToList(root);
+        List<ExecutionRow> joinedRows = OperatorPipelineRunner.ExecuteToList(root, GetVolcanoRunnerMaxRows());
         UpdateJoinCardinalityFeedback(joinCounters);
 
         List<JoinedRow> listed = joinedRows
@@ -2381,6 +2381,11 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         return orderPushedDown;
     }
+
+    private int? GetVolcanoRunnerMaxRows()
+        => _volcanoLimitPushedDown && _model.LimitTake.HasValue
+            ? _model.LimitTake.Value
+            : null;
 
     private bool CanPushDownOffsetToVolcano(bool orderPushedDown)
     {
