@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text;
 using DataVo.Core.Logging;
 using Server.Server.Http;
 using Server.Server.Responses;
@@ -8,12 +9,14 @@ namespace Server.Server;
 internal class HttpServer
 {
     private readonly HttpListener _httpListener;
+    private readonly string _corsOrigin;
 
     public HttpServer()
     {
         _httpListener = new HttpListener();
         //_httpListener.Prefixes.Add("http://+:8001/");
         _httpListener.Prefixes.Add("http://localhost:8001/");
+        _corsOrigin = GetCorsOrigin();
     }
 
     public async Task Start()
@@ -30,14 +33,14 @@ internal class HttpServer
         }
     }
 
-    private static async Task ProcessRequest(HttpListenerContext context)
+    private async Task ProcessRequest(HttpListenerContext context)
     {
         try
         {
             Logger.Info($"New Request from {context.Request.UserHostName}");
 
             // Handle CORS headers
-            context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+            context.Response.Headers.Add("Access-Control-Allow-Origin", _corsOrigin);
             context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept");
 
@@ -48,7 +51,7 @@ internal class HttpServer
                 return;
             }
 
-            var response = await Task.Run(() => Router.HandleRequest(context));
+            var response = Router.HandleRequest(context);
 
             await WriteResponse(context, response);
         }
@@ -61,8 +64,22 @@ internal class HttpServer
 
     public static async Task WriteResponse(HttpListenerContext context, Response response)
     {
-        using var sw = new StreamWriter(context.Response.OutputStream);
+        context.Response.ContentType = "application/json";
+        context.Response.ContentEncoding = Encoding.UTF8;
+
+        var json = response.ToJson();
+        await using var sw = new StreamWriter(context.Response.OutputStream, Encoding.UTF8);
+        await sw.WriteAsync(json);
         await sw.FlushAsync();
-        await sw.WriteAsync(response.ToJson());
+
+        context.Response.Close();
+    }
+
+    private static string GetCorsOrigin()
+    {
+        string? configured = Environment.GetEnvironmentVariable("DATAVO_SERVER_CORS_ORIGIN");
+        return string.IsNullOrWhiteSpace(configured)
+            ? "http://localhost:5173"
+            : configured;
     }
 }

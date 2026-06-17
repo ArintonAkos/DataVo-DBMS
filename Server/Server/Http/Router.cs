@@ -11,6 +11,7 @@ namespace Server.Server.Http;
 internal class Router
 {
     private static readonly string _controllerNameSpace = "Server.Server.Http.Controllers";
+    private const int DefaultMaxRequestBodyBytes = 1024 * 1024;
 
     private static List<Type> HttpControllers
     {
@@ -52,7 +53,7 @@ internal class Router
                     ?.ToArray()!;
                 break;
             case "POST":
-                var requestObject = GetRequest(request.Request, method);
+                var requestObject = GetRequest(request.Request, method, GetMaxRequestBodyBytes());
 
                 if (requestObject != null)
                 {
@@ -127,15 +128,37 @@ internal class Router
         return method;
     }
 
-    private static string GetRequestContent(HttpListenerRequest request)
+    private static string GetRequestContent(HttpListenerRequest request, int maxRequestBodyBytes)
     {
-        using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
-        return reader.ReadToEnd();
+        if (request.ContentLength64 > maxRequestBodyBytes)
+        {
+            throw new InvalidOperationException($"Request body exceeds the {maxRequestBodyBytes} byte limit.");
+        }
+
+        byte[] buffer = new byte[8192];
+        using var memory = new MemoryStream();
+        while (true)
+        {
+            int read = request.InputStream.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (memory.Length + read > maxRequestBodyBytes)
+            {
+                throw new InvalidOperationException($"Request body exceeds the {maxRequestBodyBytes} byte limit.");
+            }
+
+            memory.Write(buffer, 0, read);
+        }
+
+        return request.ContentEncoding.GetString(memory.ToArray());
     }
 
-    private static Request? GetRequest(HttpListenerRequest request, MethodInfo method)
+    private static Request? GetRequest(HttpListenerRequest request, MethodInfo method, int maxRequestBodyBytes)
     {
-        string content = GetRequestContent(request);
+        string content = GetRequestContent(request, maxRequestBodyBytes);
         var paramType = method.GetParameters()
             .Select(p => p.ParameterType)
             .FirstOrDefault();
@@ -165,4 +188,20 @@ internal class Router
     }
 
     public static T? DeserializeObject<T>(string content) => JsonConvert.DeserializeObject<T>(content);
+
+    private static int GetMaxRequestBodyBytes()
+    {
+        string? configured = Environment.GetEnvironmentVariable("DATAVO_SERVER_MAX_BODY_BYTES");
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return DefaultMaxRequestBodyBytes;
+        }
+
+        if (!int.TryParse(configured, out int maxBytes) || maxBytes <= 0)
+        {
+            throw new InvalidOperationException("DATAVO_SERVER_MAX_BODY_BYTES must be a positive integer.");
+        }
+
+        return maxBytes;
+    }
 }
