@@ -121,6 +121,32 @@ public class VolcanoOperatorTests
     }
 
     [Fact]
+    public void OperatorPipelineRunner_StopsAfterMaxRows()
+    {
+        var input = Enumerable.Range(1, 100)
+            .Select(value => new ExecutionRow(value, new Dictionary<string, object?> { ["V"] = value }))
+            .ToList();
+
+        List<ExecutionRow> rows = OperatorPipelineRunner.ExecuteToList(new TableScanOperator(input), maxRows: 5);
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(1, rows[0].RowId);
+        Assert.Equal(5, rows[^1].RowId);
+    }
+
+    [Fact]
+    public void OperatorPipelineRunner_RejectsNegativeMaxRows()
+    {
+        var input = new List<ExecutionRow>
+        {
+            new(1, new Dictionary<string, object?> { ["V"] = 10 })
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => OperatorPipelineRunner.ExecuteToList(new TableScanOperator(input), maxRows: -1));
+    }
+
+    [Fact]
     public void SkipOperator_SkipsConfiguredRows()
     {
         var input = new List<ExecutionRow>

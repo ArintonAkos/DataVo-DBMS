@@ -34,6 +34,10 @@ Execution and data layout are being optimized to stay cache-friendly:
 
 The practical target is to keep hot loops closer to L1/L2 cache characteristics and reduce stalls caused by random memory access patterns.
 
+## Bounded Volcano materialization
+
+Volcano execution uses pull-based operators. The pipeline runner supports a bounded materialization mode so callers can stop collecting after the required number of rows. `SELECT` paths that safely push down `LIMIT` pass this bound to the runner, keeping row materialization explicit at the final collection point while preserving the same operator semantics.
+
 ## SIMD-aware operations
 
 DataVo is designed to adopt SIMD-friendly paths where useful:
