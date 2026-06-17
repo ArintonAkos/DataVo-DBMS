@@ -1,10 +1,8 @@
-﻿# DataVo Database Server
+﻿# DataVo Server
 
-![img](https://github.com/ArintonAkos/ABKR/assets/43067524/5f90c2f1-71a9-42a5-9bac-5128750fc089)
+> Support scope: this server is a local development/demo host for DataVo APIs. It is not a hardened multi-tenant production API. Keep it bound to localhost unless you add authentication, deployment-grade CORS policy, deployment-grade request limits, logging, and operational controls.
 
-DataVo is a high-performance, multi-threaded C# server providing robust functionalities for managing and manipulating data with a user-friendly interface. This document offers an in-depth look at the server's architecture, functionality, and usage.
-
-**Image was generated using Bing Image Generator**
+DataVo Server exposes a small HTTP interface over the DataVo query engine. It is useful for local demos, browser experiments, and API prototyping.
 
 ## Table of Contents
 
@@ -31,18 +29,14 @@ DataVo is a high-performance, multi-threaded C# server providing robust function
 
 ## Technologies Used
 
-- C#: C# is a modern, object-oriented programming language that offers a robust and versatile platform for building software applications. It was used in this project because it allows for fast development while maintaining type-safety and performance.
-
-- .NET 6: .NET 6 is a cross-platform framework that allows for the development of modern applications. Its compatibility with C#, scalability, and high performance make it an ideal choice for this project.
-
-- MongoDB: MongoDB is a source-available, NoSQL database that offers high performance, high availability, and easy scalability. It works on the concept of collections and documents.
+- C# and .NET 10
+- `HttpListener`
+- DataVo.Core query execution
+- Newtonsoft.Json for request and response JSON
 
 ## System Requirements
 
-To run this project, you need:
-
-- .NET 6 or later
-- MongoDB server
+To run this project, you need the .NET 10 SDK.
 
 ## Installation and Setup
 
@@ -51,32 +45,37 @@ You can get the project up and running in a few steps:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/ArintonAkos/ABKR.git
+git clone https://github.com/ArintonAkos/DataVo-DBMS.git
 ```
 
 2. Navigate to the project directory:
 
 ```bash
-cd ABKR
+cd DataVo-DBMS
 ```
 
 3. Build the project:
 
 ```bash
-dotnet build
+dotnet build Server/Server.csproj
 ```
 
 4. Run the project:
 
 ```bash
-dotnet run
+dotnet run --project Server/Server.csproj
 ```
 
-The server is now running and ready to handle incoming connections.
+The server listens on `http://localhost:8001/`.
 
 ## Usage
 
-Once the server is up and running, it listens for incoming connections. You can interact with the DataVo server using provided client libraries or by implementing your own client application. The server responds to requests sent over the network using the DataVo query language.
+Once the server is running, local clients can send HTTP requests to the DataVo endpoints. The parser endpoint accepts SQL text and a session identifier in JSON.
+
+Runtime settings:
+
+- `DATAVO_SERVER_CORS_ORIGIN`: allowed browser origin. Defaults to `http://localhost:5173`.
+- `DATAVO_SERVER_MAX_BODY_BYTES`: maximum POST body size in bytes. Defaults to `1048576`.
 
 
 ## Detailed Usage Guide
@@ -88,7 +87,7 @@ This section describes the typical workflow of the DataVo Database Server, along
 After installing and setting up the project following the instructions above, you can start the server by running the following command in the project directory:
 
 ```bash
-dotnet run
+dotnet run --project Server/Server.csproj
 ```
 
 ### Interacting with the Server
@@ -116,10 +115,8 @@ To stop the server, simply press CTRL+C in the terminal where the server is runn
 
 If you encounter problems while setting up or running the server, here are some possible solutions:
 
-- If the dotnet run command fails with an error saying that .NET 6 is not installed, make sure that you have .NET 6 or later installed on your machine. 
+- If the dotnet run command fails with an SDK error, make sure that the .NET 10 SDK is installed.
   You can check your .NET version by running dotnet --version.
-- If the server fails to start and an error message indicates that it can't connect to the MongoDB server, make sure that your MongoDB server is running 
-  and that the connection parameters are correctly configured in your server settings.
 - If the server starts but you can't connect to it from your client application, make sure that your client is trying to connect to the correct IP address 
   and port. Also, ensure that your network allows connections on the server's port.
 
@@ -159,8 +156,9 @@ the server might respond with a message like "Missing data for required field 'n
 
 ## Performance and Security
 
-The DataVo server is designed with performance and security in mind. It uses multi-threading to handle multiple connections simultaneously,
-providing high throughput and low latency.
+The demo server keeps one background task per accepted request and bounds POST body reads by default. CORS defaults to a local frontend origin instead of `*`.
+
+This is not a production hardening boundary. Before exposing it beyond localhost, add authentication, authorization, structured logging, TLS termination, rate limiting, deployment-grade CORS policy, and operational monitoring.
 
 ## Future Work
 
@@ -192,7 +190,7 @@ The project is divided into several main components:
 
 This project utilizes a modular design pattern that makes the codebase scalable and maintainable. Each component of the project corresponds to a specific part of the server's functionality, making it easier to update and debug individual features without affecting the rest of the project.
 
-The use of C# along with .NET 6 enhances the application's performance and efficiency, while MongoDB provides a robust and scalable database solution.
+The use of C# and .NET 10 keeps the server aligned with the rest of the DataVo engine and test matrix.
 
 ## Contributing
 

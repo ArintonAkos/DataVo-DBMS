@@ -9,6 +9,6 @@ public class Response
     public string ToJson() => JsonConvert.SerializeObject(this, new JsonSerializerSettings
     {
         Formatting = Formatting.Indented,
-        TypeNameHandling = TypeNameHandling.Objects
+        TypeNameHandling = TypeNameHandling.None
     });
 }
