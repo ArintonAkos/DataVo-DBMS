@@ -85,7 +85,7 @@ consumers behave identically during the transition (boxes on demand via `CellVal
 | Update / Delete | `Parser/DML/Update.cs`, `DeleteFrom.cs` | typed read-modify-write |
 | DDL (typed in-place rewrite) | `Parser/DDL/AlterTableAddColumn.cs:25`, `AlterTableDropColumn.cs:26`, `AlterTableModifyColumn.cs:27`, `CreateIndex.cs` | keep the **existing full-table rewrite + reindex** model under the DDL write lock; make the rewrite typed (**DATE included; VECTOR only if `ColumnDefinitionParser.ParseType` parses VECTOR on ALTER paths — create-table parsing does, ALTER may not; verify and, if missing, adding ALTER VECTOR parser support is part of the plan**) |
 | Indexing | `Indexing/IndexManager.cs` | index keys from typed cells |
-| MVCC / txn | `MVCC/*`, `Parser/Transactions/Commit.cs`, WAL | decide explicitly (see Risk): keep dictionary boundary payloads as durable/compat format, or type them |
+| MVCC / txn | `MVCC/*`, `Parser/Transactions/Commit.cs`, WAL | **Decision (P3.3): keep dictionary payloads.** WAL (`WalEntry`) is a versioned durable JSON format (`vector-f32b64-v1` envelope); `TransactionContext` is replay-symmetric with it (`From/ToTransactionContext`) and not the hot per-tick path. Typing would change the durable format and add a parallel representation. Commit-flush index keys already route through the parity-identical `IndexKeyEncoder` (P3.1). |
 | Reactive / capture | `Runtime/Reactive/ReactiveRegistry.cs`, `Runtime/Changes/ChangeRecorder.cs` | seed reads typed; capture typed after-image without a dict clone (operators already typed, Slice 3) |
 | Public facade | `DataVoContext.cs`, `Runtime/DataVoEngine.cs` | `QueryResult`/public results stay dictionaries (public API) — materialized at the boundary |
 
@@ -124,8 +124,9 @@ subsystem-by-subsystem; an atomic cutover is rejected as unreviewable.
   must produce equivalent reads).
 - **Adapter = behavioral oracle** for un-migrated consumers (identical dictionary view).
 - **Durability**: wire format unchanged → existing on-disk data still reads; add legacy-bytes → typed-read
-  compatibility tests. If TransactionContext/WAL stay dictionary, mark them explicitly as public/durable
-  compatibility boundaries.
+  compatibility tests. **TransactionContext/WAL stay dictionary (P3.3 decision):** WAL is a versioned
+  durable JSON format and `TransactionContext` round-trips to/from it, so both are durable/compatibility
+  boundaries, not typed.
 - **Allocation/throughput gating**: re-run the per-tick profiler and the macro complex-vip benchmark at each
   phase boundary; the 3,655 bucket must trend toward 0 with no regression.
 - **Revertibility**: phases are isolated commits behind the adapter; any can be backed out independently.

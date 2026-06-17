@@ -171,10 +171,19 @@ Gate 0.)
 
 ## P3 — DML / DDL / index / transactions
 
-### Task P3.1 — Typed update/delete + index-key extraction
+### Task P3.1 — Typed update/delete + index-key extraction — DONE
 - **Files:** `Parser/DML/Update.cs`, `DeleteFrom.cs`, `Indexing/IndexManager.cs`.
 - **Tests:** existing update/delete/index tests (parity); add typed index-key tests.
 - **Commit:** `perf(dml): typed update/delete + index key extraction (Slice 4 P3)`
+- **Recorded:** delivered as the shared typed index-key extractor
+  `IndexKeyEncoder.BuildKeyString(schema, cells, attributes)` + `IndexKeyEncoderTypedTests`
+  (typed key ≡ dictionary key per catalog type). This **fixed a latent P1.2 divergence**: the old
+  private typed normalizer emitted `-5` while the dictionary path emits `[-5]` (numeric scalars coerce
+  through `VectorParser`), so cross-path PK/UK/FK/index keys disagreed. `InsertRowService` now routes all
+  typed key building through the shared encoder; `IndexManager` vector-index rebuild reads typed rows.
+  **Scope:** Update SET-evaluation stays dictionary-bound (`ScalarEvaluator` is dictionary/`dynamic`-based —
+  typing it would risk SQL semantics) and Delete index maintenance is already row-id-based (no key
+  extraction); both now share the parity-identical encoder, so no key divergence remains.
 
 ### Task P3.2 — Typed DDL rewrite (existing model)
 - **Files:** `DataVo.Core/Parser/DDL/AlterTableAddColumn.cs`, `DataVo.Core/Parser/DDL/AlterTableDropColumn.cs`,
@@ -187,13 +196,30 @@ Gate 0.)
 - **Tests (add):** ALTER ADD/DROP/MODIFY rewrite for DATE and VECTOR; index rebuild after rewrite.
 - **Command:** `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "AlterTable|FullyQualifiedName~Ddl"` → full suite.
 - **Commit:** `perf(ddl): typed in-place table rewrite for ADD/DROP/MODIFY (Slice 4 P3)`
+- **Recorded — DONE.** Fixed the G0.6 gap: `ColumnDefinitionParser.ParseType` now parses `VECTOR`
+  (it fell through to `VARCHAR`), with `AlterTableColumnTypeParserTests`. Added DATE/VECTOR ALTER
+  ADD/MODIFY/DROP + index-rebuild e2e tests to `AlterTableTests` (Memory + Disk). **Scope:** the
+  read-all → rewrite → reindex model is preserved on the existing dictionary path (ALTER is a cold,
+  one-time schema migration, not a hot allocation path); its index rebuild routes through the
+  parity-identical `IndexKeyEncoder` (P3.1), so typed and dictionary DDL produce identical index keys.
+  Row-id reassignment and reindex behavior are unchanged.
 
-### Task P3.3 — Transaction/WAL decision (documented)
+### Task P3.3 — Transaction/WAL decision (documented) — DONE
 - **Decide + document:** keep `TransactionContext`/WAL payloads as dictionary **durable/compat boundaries**
   (default, lower risk) or type them. If unchanged, mark them explicitly as boundaries in the design doc.
 - **Tests:** WAL recovery + MVCC visibility tests (if touched).
 - **Commit:** `docs(storage): record txn/WAL dictionary boundary decision (Slice 4 P3)` (+ code commit only
   if typed).
+- **Decision — KEEP DICTIONARY (no code change).** Evidence: WAL `WalOperation.RowData`/`UpdatedColumns`
+  are `Dictionary<string, object?>` serialized to durable JSON via Newtonsoft with a **versioned vector
+  envelope** `vector-f32b64-v1` (`DataVo.Core/Transactions/WalEntry.cs:64,69,87-88,362-377`) — a durable
+  on-disk format; typing it would change that format (forbidden this slice). `TransactionContext`
+  (`DataVo.Core/Transactions/TransactionContext.cs:39,45,51`) is replay-symmetric with the WAL
+  (`WalEntry.FromTransactionContext`/`ToTransactionContext`) and is **not** the hot per-tick path
+  (autocommit `InsertTyped` is). Commit flush (`Parser/Transactions/Commit.cs:179,262`) builds index keys
+  via `IndexKeyEncoder.BuildKeyString`, now parity-identical between typed and dictionary paths (P3.1), so
+  typed and transactional commits produce identical index keys and stored bytes. Both are marked as
+  durable/compatibility boundaries in the design doc. No clear requirement for typed payloads ⇒ unchanged.
 
 **Phase gate:** full suite incl. WAL recovery + MVCC + ALTER.
 
