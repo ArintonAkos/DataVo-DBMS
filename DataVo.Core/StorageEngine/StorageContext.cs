@@ -3,6 +3,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.StorageEngine.Backends;
 using DataVo.Core.StorageEngine.Backends.Abstractions;
+using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
@@ -300,6 +301,27 @@ public class StorageContext(DataVoConfig config)
         }
 
         return _storageEngine.CompactTable(databaseName, tableName);
+    }
+
+    internal InMemoryStorageSnapshot CreateInMemorySnapshot()
+    {
+        if (_storageEngine is IInMemoryStorageSnapshotProvider snapshotProvider)
+        {
+            return snapshotProvider.CreateSnapshot();
+        }
+
+        throw new NotSupportedException("Storage snapshots are only supported by the in-memory storage backend.");
+    }
+
+    internal void RestoreInMemorySnapshot(InMemoryStorageSnapshot snapshot)
+    {
+        if (_storageEngine is IInMemoryStorageSnapshotProvider snapshotProvider)
+        {
+            snapshotProvider.RestoreSnapshot(snapshot);
+            return;
+        }
+
+        throw new NotSupportedException("Storage snapshots are only supported by the in-memory storage backend.");
     }
 
     /// <summary>

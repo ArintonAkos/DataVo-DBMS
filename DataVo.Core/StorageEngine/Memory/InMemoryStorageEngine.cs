@@ -6,14 +6,15 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// <summary>
 /// In-memory storage engine used for fast, non-persistent row operations.
 /// </summary>
-public class InMemoryStorageEngine : IStorageEngine
+public class InMemoryStorageEngine : IStorageEngine, IInMemoryStorageSnapshotProvider
 {
     // A thread-safe, purely RAM-based mapping of DatabaseName.TableName -> List<byte[]>
-    private readonly ConcurrentDictionary<string, List<byte[]>> _databases = new();
+    private readonly ConcurrentDictionary<string, List<byte[]?>> _databases = new();
+    private readonly object _syncRoot = new();
 
     private string GetKey(string databaseName, string tableName) => $"{databaseName}.{tableName}";
 
-    private List<byte[]> GetOrAddTable(string databaseName, string tableName)
+    private List<byte[]?> GetOrAddTable(string databaseName, string tableName)
     {
         return _databases.GetOrAdd(GetKey(databaseName, tableName), _ => []);
     }
@@ -27,14 +28,17 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <returns>The assigned 1-based RowId.</returns>
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
-        var table = GetOrAddTable(databaseName, tableName);
-
-        // Lock to ensure sequential RowId.
-        // Row IDs are 1-based to avoid collision with B+Tree's 0 sentinel value.
-        lock (table)
+        lock (_syncRoot)
         {
-            table.Add(rowBytes);
-            return table.Count; // 1-based: first row = 1
+            var table = GetOrAddTable(databaseName, tableName);
+
+            // Lock to ensure sequential RowId.
+            // Row IDs are 1-based to avoid collision with B+Tree's 0 sentinel value.
+            lock (table)
+            {
+                table.Add(rowBytes);
+                return table.Count; // 1-based: first row = 1
+            }
         }
     }
 
@@ -48,14 +52,18 @@ public class InMemoryStorageEngine : IStorageEngine
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
         var rowIds = new List<long>(rowsBytes.Count);
-        var table = GetOrAddTable(databaseName, tableName);
 
-        lock (table)
+        lock (_syncRoot)
         {
-            foreach (var rowBytes in rowsBytes)
+            var table = GetOrAddTable(databaseName, tableName);
+
+            lock (table)
             {
-                table.Add(rowBytes);
-                rowIds.Add(table.Count); // 1-based
+                foreach (var rowBytes in rowsBytes)
+                {
+                    table.Add(rowBytes);
+                    rowIds.Add(table.Count); // 1-based
+                }
             }
         }
 
@@ -71,22 +79,28 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <returns>The serialized row payload.</returns>
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
-        if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
+        lock (_syncRoot)
         {
-            // O(1) Array indexing — convert 1-based RowId to 0-based index
-            int index = (int)(rowId - 1);
-            if (index >= 0 && index < table.Count)
+            if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
             {
-                var bytes = table[index];
-                if (bytes != null) return bytes;
+                lock (table)
+                {
+                    // O(1) Array indexing — convert 1-based RowId to 0-based index
+                    int index = (int)(rowId - 1);
+                    if (index >= 0 && index < table.Count)
+                    {
+                        var bytes = table[index];
+                        if (bytes != null) return bytes;
 
-                throw new RowDeletedException(rowId, tableName);
+                        throw new RowDeletedException(rowId, tableName);
+                    }
+
+                    throw new RowNotFoundException(rowId, tableName);
+                }
             }
 
             throw new RowNotFoundException(rowId, tableName);
         }
-
-        throw new RowNotFoundException(rowId, tableName);
     }
 
     /// <summary>
@@ -97,16 +111,26 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <returns>All surviving row IDs and payloads.</returns>
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
-        if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
+        var rows = new List<(long RowId, byte[] RawRow)>();
+
+        lock (_syncRoot)
         {
-            for (int i = 0; i < table.Count; i++)
+            if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
             {
-                if (table[i] != null)
+                lock (table)
                 {
-                    yield return (i + 1, table[i]); // 1-based RowId
+                    for (int i = 0; i < table.Count; i++)
+                    {
+                        if (table[i] != null)
+                        {
+                            rows.Add((i + 1, table[i]!)); // 1-based RowId
+                        }
+                    }
                 }
             }
         }
+
+        return rows;
     }
 
     /// <summary>
@@ -117,15 +141,18 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <param name="rowId">The 1-based RowId.</param>
     public void DeleteRow(string databaseName, string tableName, long rowId)
     {
-        if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
+        lock (_syncRoot)
         {
-            lock (table)
+            if (_databases.TryGetValue(GetKey(databaseName, tableName), out var table))
             {
-                int index = (int)(rowId - 1);
-                if (index >= 0 && index < table.Count)
+                lock (table)
                 {
-                    // "Tombstone" deletion — leave a null gap so RowIds don't shift.
-                    table[index] = null!;
+                    int index = (int)(rowId - 1);
+                    if (index >= 0 && index < table.Count)
+                    {
+                        // "Tombstone" deletion — leave a null gap so RowIds don't shift.
+                        table[index] = null;
+                    }
                 }
             }
         }
@@ -138,7 +165,10 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
-        _databases.TryRemove(GetKey(databaseName, tableName), out _);
+        lock (_syncRoot)
+        {
+            _databases.TryRemove(GetKey(databaseName, tableName), out _);
+        }
     }
 
     /// <summary>
@@ -147,11 +177,14 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <param name="databaseName">The database name.</param>
     public void DropDatabase(string databaseName)
     {
-        string prefix = $"{databaseName}.";
-        var keysToRemove = _databases.Keys.Where(k => k.StartsWith(prefix)).ToList();
-        foreach (var key in keysToRemove)
+        lock (_syncRoot)
         {
-            _databases.TryRemove(key, out _);
+            string prefix = $"{databaseName}.";
+            var keysToRemove = _databases.Keys.Where(k => k.StartsWith(prefix)).ToList();
+            foreach (var key in keysToRemove)
+            {
+                _databases.TryRemove(key, out _);
+            }
         }
     }
 
@@ -163,28 +196,75 @@ public class InMemoryStorageEngine : IStorageEngine
     /// <returns>The new RowId and payload for each surviving row.</returns>
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
-        var table = GetOrAddTable(databaseName, tableName);
         var compacted = new List<(long, byte[])>();
-        var newTable = new List<byte[]>();
+        var newTable = new List<byte[]?>();
 
-        lock (table)
+        lock (_syncRoot)
         {
-            for (int i = 0; i < table.Count; i++)
+            var table = GetOrAddTable(databaseName, tableName);
+
+            lock (table)
             {
-                if (table[i] != null && table[i].Length > 0)
+                for (int i = 0; i < table.Count; i++)
                 {
-                    newTable.Add(table[i]);
-                    long newRowId = newTable.Count; // 1-based
-                    compacted.Add((newRowId, table[i]));
+                    byte[]? row = table[i];
+                    if (row != null && row.Length > 0)
+                    {
+                        newTable.Add(row);
+                        long newRowId = newTable.Count; // 1-based
+                        compacted.Add((newRowId, row));
+                    }
+                }
+            }
+
+            // Replace the table with the compacted version
+            string key = GetKey(databaseName, tableName);
+            _databases[key] = newTable;
+        }
+
+        return compacted;
+    }
+
+    InMemoryStorageSnapshot IInMemoryStorageSnapshotProvider.CreateSnapshot()
+    {
+        var tables = new Dictionary<string, List<byte[]?>>(StringComparer.Ordinal);
+
+        lock (_syncRoot)
+        {
+            foreach (var entry in _databases)
+            {
+                lock (entry.Value)
+                {
+                    tables[entry.Key] = CloneRows(entry.Value);
                 }
             }
         }
 
-        // Replace the table with the compacted version
-        string key = GetKey(databaseName, tableName);
-        _databases[key] = newTable;
+        return new InMemoryStorageSnapshot(tables);
+    }
 
-        return compacted;
+    void IInMemoryStorageSnapshotProvider.RestoreSnapshot(InMemoryStorageSnapshot snapshot)
+    {
+        lock (_syncRoot)
+        {
+            _databases.Clear();
+
+            foreach (var entry in snapshot.EnumerateTables())
+            {
+                _databases[entry.Key] = CloneRows(entry.Value);
+            }
+        }
+    }
+
+    private static List<byte[]?> CloneRows(List<byte[]?> rows)
+    {
+        var clone = new List<byte[]?>(rows.Count);
+
+        foreach (byte[]? row in rows)
+        {
+            clone.Add(row?.ToArray());
+        }
+
+        return clone;
     }
 }
-
