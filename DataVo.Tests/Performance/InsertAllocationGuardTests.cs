@@ -7,7 +7,7 @@ namespace DataVo.Tests.Performance;
 public class InsertAllocationGuardTests
 {
     // Tightened per phase: baseline ~4700 -> P1 ~3800 -> P2 ~2200 -> P3 ~1800.
-    private const long PerInsertCeilingBytes = 4_700;
+    private const long PerInsertCeilingBytes = 3_900; // P1: -serializer stream (~520) -StoredRow clone (216)
 
     [Fact]
     public void InsertTyped_WarmPerInsertAllocation_StaysUnderCeiling()
