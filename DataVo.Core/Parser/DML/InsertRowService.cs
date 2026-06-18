@@ -182,8 +182,7 @@ internal sealed class InsertRowService(
         // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
         // later uses in this method must remain read-only after handing ownership to StoredRow.
         var storedRow = StoredRow.FromOwnedCells(columns, normalizedCells);
-        List<long> rowIds = context.InsertTypedRows([storedRow], tableName, databaseName);
-        long rowId = rowIds[0];
+        long rowId = context.InsertTypedRow(storedRow, tableColumns, tableName, databaseName);
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
         InsertTypedIndexes(tableName, databaseName, columns, normalizedCells, rowId, indexFiles);
 
