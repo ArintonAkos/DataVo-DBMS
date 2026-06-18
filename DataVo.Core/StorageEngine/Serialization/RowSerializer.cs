@@ -37,6 +37,9 @@ public static class RowSerializer
     /// </summary>
     private static readonly ConcurrentDictionary<string, SchemaCacheEntry> _schemaCache = new();
 
+    [ThreadStatic] private static MemoryStream? _scratchStream;
+    [ThreadStatic] private static BinaryWriter? _scratchWriter;
+
     /// <summary>
     /// Serializes a dictionary of column names and values into a tight binary format
     /// based on the schema order defined in the table's Catalog.
@@ -150,8 +153,10 @@ public static class RowSerializer
                 $"Row has {cells.Length} cells but schema has {columns.Count} columns.", nameof(cells));
         }
 
-        using var memoryStream = new MemoryStream();
-        using var writer = new BinaryWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+        MemoryStream stream = _scratchStream ??= new MemoryStream(256);
+        BinaryWriter writer = _scratchWriter ??= new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        stream.Position = 0;
+        stream.SetLength(0);
 
         for (int i = 0; i < columns.Count; i++)
         {
@@ -167,7 +172,7 @@ public static class RowSerializer
         }
 
         writer.Flush();
-        return memoryStream.ToArray();
+        return stream.ToArray();
     }
 
     /// <summary>
