@@ -26,6 +26,24 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    public void Select_VectorColumn_PublicResultArrayIsIndependentOfStoredState()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3))");
+        Execute("INSERT INTO Embeddings (Id, Emb) VALUES (1, '[1,2,3]')");
+
+        var first = ExecuteAndReturn("SELECT Emb FROM Embeddings WHERE Id = 1");
+        Assert.False(first.IsError);
+        float[] handedOut = Assert.IsType<float[]>(first.Data[0]["Emb"]!);
+
+        // Mutating the array handed to the caller must never corrupt stored state at the public boundary.
+        handedOut[0] = 999f;
+
+        var second = ExecuteAndReturn("SELECT Emb FROM Embeddings WHERE Id = 1");
+        Assert.False(second.IsError);
+        Assert.Equal([1f, 2f, 3f], Assert.IsType<float[]>(second.Data[0]["Emb"]!));
+    }
+
+    [Fact]
     public void CreateIndex_UsingHnsw_SearchNearestReturnsClosestRow()
     {
         Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");

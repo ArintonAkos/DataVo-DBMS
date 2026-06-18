@@ -243,25 +243,39 @@ public static class DataVoCompiledQuery
         Dictionary<long, StoredRow> scanned =
             context.Engine.StorageContext.GetTypedTableContents(plan.TableName, databaseName);
 
-        return scanned
-            .Select(pair => new KeyValuePair<long, Dictionary<string, object?>>(
-                pair.Key,
-                MaterializeStoredRow(pair.Value)))
-            .Where(pair => pair.Value.ContainsKey(plan.WhereColumn!)
-                && string.Equals(
-                    IndexKeyEncoder.BuildKeyString(pair.Value, [plan.WhereColumn!]),
+        // Filter typed (ordinal access + typed key extraction) so only matching rows ever materialize a
+        // dictionary — non-matching scanned rows skip the public boundary materialization entirely.
+        string[] whereColumns = [plan.WhereColumn!];
+        var scannedMatches = new List<KeyValuePair<long, Dictionary<string, object?>>>();
+        foreach ((long rowId, StoredRow row) in scanned)
+        {
+            StoredRowView view = row.AsView();
+            if (!view.Schema.TryGetOrdinal(plan.WhereColumn!, out _))
+            {
+                continue;
+            }
+
+            if (!string.Equals(
+                    IndexKeyEncoder.BuildKeyString(view.Schema, view.Cells, whereColumns),
                     expectedKey,
                     StringComparison.Ordinal))
-            .ToList();
+            {
+                continue;
+            }
+
+            scannedMatches.Add(new KeyValuePair<long, Dictionary<string, object?>>(rowId, MaterializeStoredRow(row)));
+        }
+
+        return scannedMatches;
     }
 
     private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
     {
-        StoredRowDictionaryView view = row.AsDictionary();
+        StoredRowView view = row.AsView();
         var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
-        foreach ((string key, object? value) in view)
+        for (int i = 0; i < view.Count; i++)
         {
-            result[key] = value;
+            result[view.Schema.ColumnAt(i)] = view[i].ToObject();
         }
 
         return result;

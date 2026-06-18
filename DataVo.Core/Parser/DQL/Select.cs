@@ -848,11 +848,11 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
     private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
     {
-        StoredRowDictionaryView view = row.AsDictionary();
+        StoredRowView view = row.AsView();
         var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
-        foreach ((string key, object? value) in view)
+        for (int i = 0; i < view.Count; i++)
         {
-            result[key] = value;
+            result[view.Schema.ColumnAt(i)] = view[i].ToObject();
         }
 
         return result;
