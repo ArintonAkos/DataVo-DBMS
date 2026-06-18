@@ -30,6 +30,15 @@ public sealed class SessionDatabaseStore
     }
 
     /// <summary>
+    /// Removes the selected database binding for the provided session.
+    /// </summary>
+    /// <param name="session">The logical session identifier.</param>
+    public void Remove(Guid session)
+    {
+        _selectedDatabases.TryRemove(session, out _);
+    }
+
+    /// <summary>
     /// Removes all tracked session-to-database bindings.
     /// </summary>
     public void Clear()

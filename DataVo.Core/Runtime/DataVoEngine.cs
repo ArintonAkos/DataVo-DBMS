@@ -1,8 +1,12 @@
+using DataVo.Core.BTree;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Runtime.Security;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
+using DataVo.Core.Utils;
+using System.Runtime.ExceptionServices;
 using PolyIndexManager = DataVo.Core.Indexing.IndexManager;
 
 namespace DataVo.Core.Runtime;
@@ -27,6 +31,7 @@ public sealed class DataVoEngine : IDisposable
     private static readonly AsyncLocal<DataVoEngine?> ScopedCurrent = new();
     private static readonly object SyncRoot = new();
     private static DataVoEngine? _fallbackCurrent;
+    private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
     private bool _disposed;
 
@@ -176,6 +181,225 @@ public sealed class DataVoEngine : IDisposable
         ScopedCurrent.Value = engine;
 
         return new EngineScope(previous);
+    }
+
+    /// <summary>
+    /// Creates a snapshot of in-memory storage, catalog state, and selected database for a session.
+    /// </summary>
+    /// <param name="session">The logical session identifier.</param>
+    /// <returns>A restorable snapshot of the current engine state.</returns>
+    public DataVoSnapshot CreateSnapshot(Guid session)
+    {
+        using IDisposable _ = EnterRuntimeWriteScope();
+
+        EnsureInMemorySnapshotsSupported();
+        EnsureNoActiveTransactionsForSnapshot("create");
+
+        return CaptureSnapshotNoLock(session);
+    }
+
+    /// <summary>
+    /// Restores a previously captured snapshot into this engine for a session.
+    /// </summary>
+    /// <param name="session">The logical session identifier.</param>
+    /// <param name="snapshot">The snapshot to restore.</param>
+    public void RestoreSnapshot(Guid session, DataVoSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        using IDisposable _ = EnterRuntimeWriteScope();
+
+        EnsureInMemorySnapshotsSupported();
+
+        if (snapshot.StorageMode != Config.StorageMode)
+        {
+            throw new InvalidOperationException($"Snapshot storage mode '{snapshot.StorageMode}' cannot be restored into '{Config.StorageMode}'.");
+        }
+
+        EnsureNoActiveTransactionsForSnapshot("restore");
+
+        DataVoSnapshot previousState = CaptureSnapshotNoLock(session);
+
+        try
+        {
+            ApplySnapshotNoLock(session, snapshot);
+        }
+        catch (Exception restoreError)
+        {
+            try
+            {
+                ApplySnapshotNoLock(session, previousState);
+            }
+            catch (Exception rollbackError)
+            {
+                throw new InvalidOperationException(
+                    "Failed to restore the requested DataVo snapshot and rollback the engine to its previous state.",
+                    new AggregateException(restoreError, rollbackError));
+            }
+
+            ExceptionDispatchInfo.Capture(restoreError).Throw();
+        }
+    }
+
+    internal IDisposable EnterRuntimeReadScope()
+    {
+        _snapshotLock.EnterReadLock();
+        return new SnapshotLockScope(_snapshotLock, isWrite: false);
+    }
+
+    internal IDisposable EnterRuntimeWriteScope()
+    {
+        _snapshotLock.EnterWriteLock();
+        return new SnapshotLockScope(_snapshotLock, isWrite: true);
+    }
+
+    private void RebuildAllIndexesFromCatalog()
+    {
+        using IDisposable _ = PushCurrent(this);
+
+        foreach (string databaseName in Catalog.GetDatabases())
+        {
+            foreach (string tableName in Catalog.GetTables(databaseName))
+            {
+                RebuildTableIndexes(databaseName, tableName);
+            }
+        }
+    }
+
+    private void RebuildTableIndexes(string databaseName, string tableName)
+    {
+        List<IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+        if (indexFiles.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<long, Dictionary<string, object?>> rows = StorageContext.GetTableContents(tableName, databaseName);
+
+        foreach (IndexFile index in indexFiles)
+        {
+            string indexName = index.IndexFileName;
+            if (string.IsNullOrWhiteSpace(indexName))
+            {
+                continue;
+            }
+
+            if (IndexManager.SupportsVectorIndexType(index.IndexKind))
+            {
+                RebuildVectorIndex(databaseName, tableName, index, rows);
+                continue;
+            }
+
+            Dictionary<string, List<long>> values = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<long, Dictionary<string, object?>> row in rows)
+            {
+                if (index.AttributeNames.Any(attr => !row.Value.TryGetValue(attr, out object? value) || value == null))
+                {
+                    continue;
+                }
+
+                string key = IndexKeyEncoder.BuildKeyString(row.Value, index.AttributeNames);
+                if (!values.TryGetValue(key, out List<long>? rowIds))
+                {
+                    rowIds = [];
+                    values[key] = rowIds;
+                }
+
+                rowIds.Add(row.Key);
+            }
+
+            IndexManager.RebuildIndex(values, indexName, tableName, databaseName);
+        }
+    }
+
+    private void RebuildVectorIndex(
+        string databaseName,
+        string tableName,
+        IndexFile index,
+        Dictionary<long, Dictionary<string, object?>> rows)
+    {
+        string indexName = index.IndexFileName;
+        if (index.AttributeNames.Count != 1)
+        {
+            throw new InvalidOperationException($"Vector index '{indexName}' must reference exactly one column.");
+        }
+
+        string vectorColumn = index.AttributeNames[0];
+        List<(long RowId, float[] Vector)> vectors = [];
+
+        foreach (KeyValuePair<long, Dictionary<string, object?>> row in rows)
+        {
+            if (!row.Value.TryGetValue(vectorColumn, out object? rawValue) || rawValue == null)
+            {
+                continue;
+            }
+
+            if (!VectorParser.TryCoerceToVector(rawValue, out float[] vector))
+            {
+                throw new InvalidOperationException($"Cannot rebuild vector index '{indexName}' because row {row.Key} does not contain a valid vector.");
+            }
+
+            vectors.Add((row.Key, vector));
+        }
+
+        IndexManager.CreateVectorIndex(
+            vectors,
+            indexName,
+            tableName,
+            databaseName,
+            metric: "cosine",
+            indexType: index.IndexKind);
+    }
+
+    private DataVoSnapshot CaptureSnapshotNoLock(Guid session)
+    {
+        return new DataVoSnapshot(
+            Config.StorageMode,
+            Catalog.ExportState(),
+            Sessions.Get(session),
+            StorageContext.CreateInMemorySnapshot());
+    }
+
+    private void ApplySnapshotNoLock(Guid session, DataVoSnapshot snapshot)
+    {
+        StorageContext.RestoreInMemorySnapshot(snapshot.StorageSnapshot);
+        Catalog.LoadState(snapshot.CatalogState);
+        RefreshStorageSchemaScopeNoLock();
+        RestoreSessionSelectionNoLock(session, snapshot.SelectedDatabase);
+        VersionStorageManager.Clear();
+        IndexManager.ClearRuntimeStateAndDeleteAllIndexes();
+        RebuildAllIndexesFromCatalog();
+    }
+
+    private void RestoreSessionSelectionNoLock(Guid session, string? selectedDatabase)
+    {
+        if (string.IsNullOrWhiteSpace(selectedDatabase))
+        {
+            Sessions.Remove(session);
+            return;
+        }
+
+        Sessions.Set(session, selectedDatabase);
+    }
+
+    private void EnsureInMemorySnapshotsSupported()
+    {
+        if (Config.StorageMode != StorageMode.InMemory)
+        {
+            throw new NotSupportedException("DataVo snapshots are currently supported only for StorageMode.InMemory.");
+        }
+    }
+
+    private void EnsureNoActiveTransactionsForSnapshot(string operation)
+    {
+        if (TransactionManager.HasAnyActiveTransaction())
+        {
+            throw new InvalidOperationException($"Cannot {operation} a DataVo snapshot while any session has an active transaction.");
+        }
+    }
+
+    private void RefreshStorageSchemaScopeNoLock()
+    {
+        StorageContext.AttachRuntimeCatalog(Catalog, Guid.NewGuid());
     }
 
     private static void SetFallback(DataVoEngine engine)
@@ -351,6 +575,7 @@ public sealed class DataVoEngine : IDisposable
 
         IndexManager.Dispose();
         VersionStorageManager.Dispose();
+        _snapshotLock.Dispose();
 
         lock (SyncRoot)
         {
@@ -358,6 +583,20 @@ public sealed class DataVoEngine : IDisposable
             {
                 _fallbackCurrent = null;
             }
+        }
+    }
+
+    private sealed class SnapshotLockScope(ReaderWriterLockSlim snapshotLock, bool isWrite) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (isWrite)
+            {
+                snapshotLock.ExitWriteLock();
+                return;
+            }
+
+            snapshotLock.ExitReadLock();
         }
     }
 }

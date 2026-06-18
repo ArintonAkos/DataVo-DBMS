@@ -162,6 +162,22 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>
+    /// Removes all tracked version metadata.
+    /// </summary>
+    public void Clear()
+    {
+        _versionLock.EnterWriteLock();
+        try
+        {
+            _versionMetadata.Clear();
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     /// Removes version metadata entries whose backing physical rows no longer exist.
     /// </summary>
     public int VacuumTable(string databaseName, StorageContext storageContext)

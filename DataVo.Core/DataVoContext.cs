@@ -71,7 +71,24 @@ public sealed class DataVoContext : IDisposable
     /// <returns>The sequence of query results produced by the parsed statement batch.</returns>
     public List<QueryResult> Execute(string query, Guid sessionId)
     {
+        using IDisposable _ = Engine.EnterRuntimeReadScope();
         return new QueryEngine(query, sessionId, Engine).Parse();
+    }
+
+    /// <summary>
+    /// Creates an in-memory snapshot of the current engine state for the current <see cref="SessionId"/>.
+    /// </summary>
+    public DataVoSnapshot CreateSnapshot()
+    {
+        return Engine.CreateSnapshot(SessionId);
+    }
+
+    /// <summary>
+    /// Restores a previously captured engine snapshot for the current <see cref="SessionId"/>.
+    /// </summary>
+    public void RestoreSnapshot(DataVoSnapshot snapshot)
+    {
+        Engine.RestoreSnapshot(SessionId, snapshot);
     }
 
     /// <summary>
@@ -116,6 +133,7 @@ public sealed class DataVoContext : IDisposable
     /// <returns>The matching table rows in ranked order.</returns>
     public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
     {
+        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
         string databaseName = ResolveCurrentDatabase();
         using var _ = DataVoEngine.PushCurrent(Engine);
 

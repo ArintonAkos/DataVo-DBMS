@@ -489,6 +489,39 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Clears all loaded index state for this engine and removes persisted index files.
+    /// </summary>
+    public void ClearRuntimeStateAndDeleteAllIndexes()
+    {
+        lock (_lock)
+        {
+            _cache.Clear();
+            _metadata.Clear();
+            _cachePaths.Clear();
+            _dirtyIndices.Clear();
+            _pendingMutations.Clear();
+        }
+
+        if (!Directory.Exists(_indexRootDirectory))
+        {
+            Directory.CreateDirectory(_indexRootDirectory);
+            return;
+        }
+
+        foreach (string directory in Directory.GetDirectories(_indexRootDirectory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        foreach (string filePath in Directory.GetFiles(_indexRootDirectory))
+        {
+            File.Delete(filePath);
+        }
+
+        Directory.CreateDirectory(_indexRootDirectory);
+    }
+
+    /// <summary>
     /// Returns whether a scalar index can be loaded and queried.
     /// </summary>
     public bool IsIndexHealthy(string indexName, string tableName, string databaseName)
@@ -910,4 +943,3 @@ public class IndexManager : IDisposable
         throw new IndexException($"Index type '{indexType}' returned non-index instance '{index.GetType().FullName}' for cache key '{cacheKey}'.");
     }
 }
-

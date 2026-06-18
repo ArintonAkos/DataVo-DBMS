@@ -142,6 +142,14 @@ public sealed class TransactionManager
     }
 
     /// <summary>
+    /// Determines whether any session currently has an active explicit transaction.
+    /// </summary>
+    public bool HasAnyActiveTransaction()
+    {
+        return !_activeTransactions.IsEmpty;
+    }
+
+    /// <summary>
     /// Retrieves the active <see cref="TransactionContext"/> for the session without removing it.
     /// Returns <c>null</c> if no explicit transaction is active (auto-commit mode).
     /// </summary>

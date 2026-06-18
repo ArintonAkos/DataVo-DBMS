@@ -3,7 +3,7 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend
+internal sealed class InMemoryStorageBackend : IStorageBackend, IInMemoryStorageSnapshotProvider
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -17,4 +17,6 @@ internal sealed class InMemoryStorageBackend : IStorageBackend
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);
+    public InMemoryStorageSnapshot CreateSnapshot() => ((IInMemoryStorageSnapshotProvider)_inner).CreateSnapshot();
+    public void RestoreSnapshot(InMemoryStorageSnapshot snapshot) => ((IInMemoryStorageSnapshotProvider)_inner).RestoreSnapshot(snapshot);
 }
