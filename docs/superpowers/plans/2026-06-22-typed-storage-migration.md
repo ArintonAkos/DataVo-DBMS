@@ -227,16 +227,34 @@ Gate 0.)
 
 ## P4 — Adapter removal + final measurement
 
-### Task P4.1 — Remove the dictionary adapter from internal/hot paths
+### Task P4.1 — Remove the dictionary adapter from internal/hot paths — DONE
 - **Pre-req:** no internal/hot consumer still requires the adapter (public `QueryResult`/`DataVoContext`
   results stay dictionaries — materialized at the boundary).
 - **Files:** delete `StoredRowDictionaryView` usages internally; keep public boundary materialization.
 - **Command:** full suite. **Commit:** `refactor(storage): drop internal dictionary adapter; data plane typed (Slice 4 P4)`
+- **Recorded (commit `d87142b`).** Removed the adapter from the two internal read-materialization paths
+  (`DataVoCompiledQuery`, `Select` `MaterializeStoredRow`) — they now build the public dictionary
+  directly from `StoredRowView` (ordinal + `CellValue.ToObject`). The compiled-query full-scan branch
+  filters typed (schema ordinal + typed `IndexKeyEncoder.BuildKeyString`), so non-matching scanned rows
+  never materialize a dictionary. **Kept (reported):** `ReactiveRegistry.SeedSubscription` still bridges
+  `StoredRow → IReadOnlyDictionary` via the adapter, because `IReactiveQuery.Seed` is dictionary-based
+  across ~10 operators and seeding is once-per-subscription (not the per-tick hot path); the adapter is
+  the lowest-allocation way to satisfy it. The adapter **type is retained** (seed bridge + unit tests),
+  per the task. New test `Select_VectorColumn_PublicResultArrayIsIndependentOfStoredState` (Memory +
+  Disk) locks the public-boundary vector-clone safety invariant. Full suite **999/999**.
 
-### Task P4.2 — Final measurement
+### Task P4.2 — Final measurement — DONE
 - **Command:** per-tick profiler + macro benchmark; record final GC + throughput in the roadmap; update the
   memory + roadmap status to Slice 4 COMPLETE.
 - **Commit:** `docs(gc-reduction): Slice 4 complete — typed storage final numbers`
+- **Recorded.** Macro complex-vip (DataVo, 10k+50k), 3 runs **258.9 / 260.2 / 260.5 MB GC** (mean ≈
+  259.9), ≈ **386–415 ms**, p99 **0.009–0.012 ms** — flat vs the 259.4 MB baseline (no regression);
+  macro-derived per-tick ≈ **5,440 B/tick**, flat. **Honest conclusion:** the typed-storage migration
+  is correct/parity-safe but did not move the complex-vip macro below the Step-1 259.4 MB plateau (P1,
+  P2, P4 all ~259–260 MB) — the remaining macro allocation is not in the storage paths Step 2 typed.
+  P4.1's read-scan win is not exercised by complex-vip (insert/reactive-dominated). The per-tick bucket
+  profiler was a removed throwaway spike and was not reconstructed for P4 (it measures the insert
+  bucket, which P4 did not touch). Next target: re-profile fresh against MVCC `RowVersion` churn.
 
 ---
 

@@ -139,16 +139,39 @@ p50 **0.0061 ms**, p99 **0.0122 ms**. Focused reactive seed allocation improved
 **877,176 → 646,312 bytes** for a 1,000-row seed, but the macro benchmark remains essentially flat;
 the remaining macro allocation is therefore not explained by the typed read candidates migrated in P2.
 
-**Step 2 — in progress: typed storage.** The remaining ~3,655 B/tick is the `row[i].ToObject()` dict
-re-boxing + `normalized`/storage row dicts + MVCC version. Make the storage/validation path accept
-typed `CellValue` rows directly (no per-insert dict materialization). Deeper and riskier (shared
-storage format) — measure-then-reduce.
+**Slice 4 P4 measurement (2026-06-22, after typed read materialization + dropping the dictionary
+adapter from the compiled-query/Select read paths):** complex-vip, DataVo-only, 10k baseline + 50k
+live ticks, 3 runs **258.9 / 260.2 / 260.5 MB GC** (mean ≈ 259.9), total ≈ **386–415 ms**, p99
+**0.009–0.012 ms** — flat vs the 259.4 MB checkpoint (no regression). Macro-derived overall per-tick
+≈ **5,440 B/tick** (MB·1048576/50000), also flat. complex-vip is insert/reactive-dominated and does
+not exercise the read-scan path P4.1 improved (typed ordinal/key filter → non-matching scanned rows
+skip dict materialization entirely), so the macro is expected flat; P4.1's allocation win lands on
+read-scan-heavy workloads, not this benchmark.
+
+**Step 2 — COMPLETE (typed storage, P0–P4).** Typed `CellValue`/`StoredRow` serialize/insert/read,
+shared dict-parity `IndexKeyEncoder` typed key extraction (fixed a latent P1.2 numeric-key divergence),
+VECTOR ALTER parser, and removal of the dictionary adapter from internal read paths; public results and
+WAL/TransactionContext durable JSON stay dictionary boundaries. Full suite 999/999.
+**Honest macro conclusion:** the migration is correct and parity-safe but did **not** move the
+complex-vip macro below the 259.4 MB Step-1 plateau — the per-tick spike attributed 3,655 B/tick to
+storage-write+validation, yet typing those paths did not translate into macro GC reduction (P1, P2, P4
+all flat at ~259–260 MB). The remaining macro allocation is therefore **not** in the storage
+(de)serialization/materialization paths but elsewhere on the per-tick insert→capture→deliver→requery
+cycle (leading hypothesis: MVCC `RowVersion` objects per insert + reactive requery). The fine-grained
+per-tick bucket profiler was a temporary instrumented spike removed after Step 1; it was not
+reconstructed for P4 because P4 changed the read-scan path, not the insert bucket it measured (a
+confirmatory null result). **Next allocation target should be re-profiled fresh against MVCC/version
+churn**, not the now-typed storage path.
 
 ---
 
 ## Next action
 
-Phase 5 (Slice 3) is **complete** — all four operators migrated onto the borrowed fast lane. Next
-candidates: **Phase 6 (Slice 4) deep storage purification**, or the deferred deeper-purification
-follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework, the `DateOnly`
-borrowed-currency gap) — sequence by measured impact.
+Phase 5 (Slice 3) and **Phase 6 / Slice 4 Step 2 (typed storage, P0–P4) are complete** — the data
+plane is typed end-to-end (typed serialize/insert/read, dict-parity typed index keys, adapter removed
+from internal read paths), correct and parity-safe, suite 999/999. But the complex-vip macro is flat at
+~259–260 MB across P1/P2/P4: the remaining allocation is **not** in the typed storage paths. **Next:
+re-profile the per-tick insert→capture→deliver→requery cycle fresh** (leading hypothesis: MVCC
+`RowVersion` churn per insert) to find the real remaining macro bucket; then the deferred
+deeper-purification follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework). Sequence
+by measured impact.
