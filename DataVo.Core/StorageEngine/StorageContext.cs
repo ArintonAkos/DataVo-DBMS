@@ -159,6 +159,16 @@ public class StorageContext(DataVoConfig config)
     }
 
     /// <summary>
+    /// Serializes and inserts a single typed storage row via the single-row backend path, without
+    /// per-row List churn or a redundant catalog column lookup. Wire-identical to the batch path.
+    /// </summary>
+    internal long InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
+    {
+        byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
+        return _storageEngine.InsertRow(databaseName, tableName, serialized);
+    }
+
+    /// <summary>
     /// Deletes the specified row identifiers from a table.
     /// </summary>
     /// <param name="toBeDeletedIds">The row identifiers to delete.</param>
