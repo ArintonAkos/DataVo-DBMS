@@ -179,7 +179,9 @@ internal sealed class InsertRowService(
             throw new InvalidOperationException(message);
         }
 
-        var storedRow = new StoredRow(columns, normalizedCells);
+        // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
+        // later uses in this method must remain read-only after handing ownership to StoredRow.
+        var storedRow = StoredRow.FromOwnedCells(columns, normalizedCells);
         List<long> rowIds = context.InsertTypedRows([storedRow], tableName, databaseName);
         long rowId = rowIds[0];
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
