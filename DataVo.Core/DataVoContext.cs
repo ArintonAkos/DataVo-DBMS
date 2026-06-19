@@ -38,6 +38,8 @@ namespace DataVo.Core;
 /// </example>
 public sealed class DataVoContext : IDisposable
 {
+    private InsertRowService? _typedInsertService;
+
     /// <summary>
     /// Initializes a new context and underlying engine using the supplied configuration.
     /// </summary>
@@ -287,7 +289,9 @@ public sealed class DataVoContext : IDisposable
             throw new InvalidOperationException(transactionError);
         }
 
-        var service = new InsertRowService(
+        // InsertRowService holds only engine-scoped deps (no per-call state); reuse one per context
+        // instead of allocating per insert (Slice 5 P2, lever 5).
+        InsertRowService service = _typedInsertService ??= new InsertRowService(
             Engine,
             Engine.StorageContext,
             Engine.Catalog,
