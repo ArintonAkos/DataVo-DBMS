@@ -6,8 +6,10 @@ namespace DataVo.Tests.Performance;
 
 public class InsertAllocationGuardTests
 {
-    // Tightened per phase: baseline ~4700 -> P1 ~3800 -> P2 ~2200 -> P3 ~1800.
-    private const long PerInsertCeilingBytes = 3_900; // P1: -serializer stream (~520) -StoredRow clone (216)
+    // Tightened per phase: baseline ~4700 -> P1 ~3800 -> P2 measured 1262 (target was 2300).
+    // Durable fence kept tight over the actual measured value (+~140 B variance headroom) so
+    // regressions are caught early; Phase 2 cut deeper than the plan's 2300 estimate.
+    private const long PerInsertCeilingBytes = 1_400; // P2: -List/column refetch -scope/service -residual framework
 
     [Fact]
     public void InsertTyped_WarmPerInsertAllocation_StaysUnderCeiling()
