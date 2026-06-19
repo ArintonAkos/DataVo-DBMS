@@ -317,6 +317,14 @@ public sealed class LockManager
     }
 
     /// <summary>
+    /// Acquires a table-scoped write lock and keeps the lock entry available after release.
+    /// </summary>
+    internal void AcquireRetainedWriteLock(string tableKey)
+    {
+        AcquireTableLock(tableKey, write: true);
+    }
+
+    /// <summary>
     /// Releases a table-scoped read lock acquired through the table-key overloads.
     /// </summary>
     public void ReleaseReadLock(string tableKey)
@@ -330,6 +338,14 @@ public sealed class LockManager
     public void ReleaseWriteLock(string tableKey)
     {
         ReleaseTableLock(tableKey, write: true);
+    }
+
+    /// <summary>
+    /// Releases a retained table-scoped write lock without disposing the table lock entry.
+    /// </summary>
+    internal void ReleaseRetainedWriteLock(string tableKey)
+    {
+        ReleaseTableLock(tableKey, write: true, removeWhenIdle: false);
     }
 
     private void AcquireTableLock(string tableKey, bool write)
@@ -372,7 +388,7 @@ public sealed class LockManager
         }
     }
 
-    private void ReleaseTableLock(string tableKey, bool write)
+    private void ReleaseTableLock(string tableKey, bool write, bool removeWhenIdle = true)
     {
         if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
         {
@@ -390,7 +406,7 @@ public sealed class LockManager
             UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
         }
 
-        ReleaseTableLockEntry(tableKey, tableLock);
+        ReleaseTableLockEntry(tableKey, tableLock, removeWhenIdle);
     }
 
     private TableLockEntry RetainTableLock(string tableKey)
@@ -403,7 +419,7 @@ public sealed class LockManager
         }
     }
 
-    private void ReleaseTableLockEntry(string tableKey, TableLockEntry tableLock)
+    private void ReleaseTableLockEntry(string tableKey, TableLockEntry tableLock, bool removeWhenIdle = true)
     {
         lock (_tableLockLifecycleSync)
         {
@@ -414,7 +430,7 @@ public sealed class LockManager
             }
 
             current.ActiveUsers--;
-            if (current.ActiveUsers > 0)
+            if (current.ActiveUsers > 0 || !removeWhenIdle)
             {
                 return;
             }
