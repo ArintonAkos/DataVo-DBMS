@@ -211,7 +211,7 @@ public sealed class DataVoEngine : IDisposable
     /// <returns>A restorable snapshot of the current engine state.</returns>
     public DataVoSnapshot CreateSnapshot(Guid session)
     {
-        using IDisposable _ = EnterRuntimeWriteScope();
+        using SnapshotLockScope _ = EnterRuntimeWriteScope();
 
         EnsureInMemorySnapshotsSupported();
         EnsureNoActiveTransactionsForSnapshot("create");
@@ -227,7 +227,7 @@ public sealed class DataVoEngine : IDisposable
     public void RestoreSnapshot(Guid session, DataVoSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        using IDisposable _ = EnterRuntimeWriteScope();
+        using SnapshotLockScope _ = EnterRuntimeWriteScope();
 
         EnsureInMemorySnapshotsSupported();
 
@@ -261,13 +261,13 @@ public sealed class DataVoEngine : IDisposable
         }
     }
 
-    internal IDisposable EnterRuntimeReadScope()
+    internal SnapshotLockScope EnterRuntimeReadScope()
     {
         _snapshotLock.EnterReadLock();
         return new SnapshotLockScope(_snapshotLock, isWrite: false);
     }
 
-    internal IDisposable EnterRuntimeWriteScope()
+    internal SnapshotLockScope EnterRuntimeWriteScope()
     {
         _snapshotLock.EnterWriteLock();
         return new SnapshotLockScope(_snapshotLock, isWrite: true);
@@ -607,17 +607,18 @@ public sealed class DataVoEngine : IDisposable
         }
     }
 
-    private sealed class SnapshotLockScope(ReaderWriterLockSlim snapshotLock, bool isWrite) : IDisposable
-    {
-        public void Dispose()
-        {
-            if (isWrite)
-            {
-                snapshotLock.ExitWriteLock();
-                return;
-            }
+}
 
-            snapshotLock.ExitReadLock();
+internal readonly struct SnapshotLockScope(ReaderWriterLockSlim snapshotLock, bool isWrite) : IDisposable
+{
+    public void Dispose()
+    {
+        if (isWrite)
+        {
+            snapshotLock.ExitWriteLock();
+            return;
         }
+
+        snapshotLock.ExitReadLock();
     }
 }

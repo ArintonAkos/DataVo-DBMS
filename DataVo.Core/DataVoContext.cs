@@ -135,7 +135,7 @@ public sealed class DataVoContext : IDisposable
     /// <returns>The sequence of query results produced by the parsed statement batch.</returns>
     public List<QueryResult> Execute(string query, Guid sessionId)
     {
-        using IDisposable _ = Engine.EnterRuntimeReadScope();
+        using SnapshotLockScope _ = Engine.EnterRuntimeReadScope();
         return new QueryEngine(query, sessionId, Engine).Parse();
     }
 
@@ -164,7 +164,7 @@ public sealed class DataVoContext : IDisposable
     {
         ArgumentNullException.ThrowIfNull(rows);
 
-        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         List<IReadOnlyDictionary<string, object?>> materializedRows = rows
             .Select(row => row ?? throw new ArgumentNullException(nameof(rows), "Rows cannot contain null entries."))
             .Select(row => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase))
@@ -251,7 +251,7 @@ public sealed class DataVoContext : IDisposable
                 nameof(row));
         }
 
-        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
 
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
         if (Engine.Diagnostics.Enabled)
@@ -357,7 +357,7 @@ public sealed class DataVoContext : IDisposable
     /// <returns>The matching table rows in ranked order.</returns>
     public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
     {
-        using IDisposable runtimeScope = Engine.EnterRuntimeReadScope();
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
         if (Engine.Diagnostics.Enabled)
         {
