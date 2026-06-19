@@ -299,7 +299,8 @@ public sealed class DataVoContext : IDisposable
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
-        Engine.LockManager.AcquireWriteLock(databaseName, tableName);
+        string tableLockKey = $"{databaseName}.{tableName}";
+        Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
 
         try
         {
@@ -315,7 +316,7 @@ public sealed class DataVoContext : IDisposable
         }
         finally
         {
-            Engine.LockManager.ReleaseWriteLock(databaseName, tableName);
+            Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
         }
     }
 

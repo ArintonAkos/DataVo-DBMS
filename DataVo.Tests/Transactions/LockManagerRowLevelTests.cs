@@ -128,6 +128,23 @@ public class LockManagerRowLevelTests
     }
 
     [Fact]
+    public void RetainedTableWriteLocks_KeepEntry_WhenNoLongerInUse()
+    {
+        var locks = new LockManager();
+        const string tableKey = "db.users";
+
+        locks.AcquireRetainedWriteLock(tableKey);
+        locks.ReleaseRetainedWriteLock(tableKey);
+
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+
+        locks.AcquireRetainedWriteLock(tableKey);
+        locks.ReleaseRetainedWriteLock(tableKey);
+
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+    }
+
+    [Fact]
     public void AcquireRowReadLocks_ReturnsDeterministicOrderedDistinctIds()
     {
         var locks = new LockManager();
