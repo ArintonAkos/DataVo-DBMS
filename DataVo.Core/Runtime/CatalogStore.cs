@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Xml.Linq;
-using System.Xml.Serialization;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Runtime.Catalog;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine.Config;
@@ -96,14 +96,7 @@ internal sealed class CatalogStore
             var structure = table.Elements("Structure").FirstOrDefault()
                             ?? throw new CatalogException($"Table {tableName} has invalid catalog structure.");
 
-            using var writer = new StringWriter();
-            var namespaces = new XmlSerializerNamespaces();
-            var serializer = new XmlSerializer(typeof(Field));
-
-            namespaces.Add("", "");
-            serializer.Serialize(writer, field, namespaces);
-
-            structure.Add(XElement.Parse(writer.ToString()));
+            structure.Add(CatalogXml.ToXElement(field));
             SaveDocument();
             BumpTableSchemaVersion(databaseName, tableName);
         }
@@ -555,16 +548,15 @@ internal sealed class CatalogStore
     {
         try
         {
-            using var writer = new StringWriter();
-            var namespaces = new XmlSerializerNamespaces();
-            var serializer = new XmlSerializer(obj.GetType());
+            XElement element = obj switch
+            {
+                Database database => CatalogXml.ToXElement(database),
+                Table table => CatalogXml.ToXElement(table),
+                IndexFile indexFile => CatalogXml.ToXElement(indexFile),
+                _ => throw new NotSupportedException($"No catalog XML mapper for type {typeof(T).Name}."),
+            };
 
-            namespaces.Add("", "");
-            serializer.Serialize(writer, obj, namespaces);
-
-            var element = XElement.Parse(writer.ToString());
             root.Add(element);
-
             SaveDocument();
         }
         catch (Exception ex)
@@ -580,13 +572,19 @@ internal sealed class CatalogStore
         SaveDocument();
     }
 
-    private static T? ConvertFromXml<T>(XNode element) where T : class
+    private static T? ConvertFromXml<T>(XNode node) where T : class
     {
         try
         {
-            var serializer = new XmlSerializer(typeof(T));
-            var reader = element.CreateReader();
-            return (T?)serializer.Deserialize(reader);
+            var element = (XElement)node;
+            object result = typeof(T) switch
+            {
+                var t when t == typeof(ForeignKey) => CatalogXml.ForeignKeyFromXElement(element),
+                var t when t == typeof(IndexFile) => CatalogXml.IndexFileFromXElement(element),
+                _ => throw new NotSupportedException($"No catalog XML mapper for type {typeof(T).Name}."),
+            };
+
+            return (T)result;
         }
         catch (Exception ex)
         {
