@@ -140,43 +140,49 @@ internal sealed class InsertRowService(
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
         CellValue[] normalizedCells = NormalizeTypedCells(tableColumns, row);
 
-        var messages = new List<string>();
-        var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
-        var acceptedUniqueValues = uniqueKeys.ToDictionary(
-            key => key,
-            _ => new HashSet<string>(StringComparer.Ordinal),
-            StringComparer.OrdinalIgnoreCase);
+        // Constraint-free tables (no PK/UK/FK) skip the validation scaffolding entirely: no messages
+        // List, no acceptedPrimaryKeys HashSet, no acceptedUniqueValues dict (Slice 5 P3, lever 6).
+        bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
+        if (hasConstraints)
+        {
+            var messages = new List<string>();
+            var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
+            var acceptedUniqueValues = uniqueKeys.ToDictionary(
+                key => key,
+                _ => new HashSet<string>(StringComparer.Ordinal),
+                StringComparer.OrdinalIgnoreCase);
 
-        if (!ValidateTypedPrimaryKeys(
-            tableName,
-            databaseName,
-            rowNumber: 1,
-            normalizedCells,
-            columns,
-            primaryKeys,
-            acceptedPrimaryKeys,
-            messages)
-            || !ValidateTypedUniqueKeys(
+            if (!ValidateTypedPrimaryKeys(
                 tableName,
                 databaseName,
                 rowNumber: 1,
                 normalizedCells,
                 columns,
-                uniqueKeys,
-                acceptedUniqueValues,
+                primaryKeys,
+                acceptedPrimaryKeys,
                 messages)
-            || !ValidateTypedForeignKeys(
-                databaseName,
-                rowNumber: 1,
-                normalizedCells,
-                columns,
-                foreignKeysByAttribute,
-                messages))
-        {
-            string message = messages.Count == 0
-                ? $"Typed insert into {tableName} was rejected."
-                : string.Join(" ", messages);
-            throw new InvalidOperationException(message);
+                || !ValidateTypedUniqueKeys(
+                    tableName,
+                    databaseName,
+                    rowNumber: 1,
+                    normalizedCells,
+                    columns,
+                    uniqueKeys,
+                    acceptedUniqueValues,
+                    messages)
+                || !ValidateTypedForeignKeys(
+                    databaseName,
+                    rowNumber: 1,
+                    normalizedCells,
+                    columns,
+                    foreignKeysByAttribute,
+                    messages))
+            {
+                string message = messages.Count == 0
+                    ? $"Typed insert into {tableName} was rejected."
+                    : string.Join(" ", messages);
+                throw new InvalidOperationException(message);
+            }
         }
 
         // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
