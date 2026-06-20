@@ -1,4 +1,5 @@
-using Newtonsoft.Json;
+using System.Text.Json;
+using DataVo.Core.Serialization;
 
 namespace DataVo.Core.Indexing.HNSW;
 
@@ -7,20 +8,20 @@ namespace DataVo.Core.Indexing.HNSW;
 /// </summary>
 public class HNSWIndexPersistence : IIndexPersistence
 {
-    private sealed class HnswSnapshot
+    internal sealed class HnswSnapshot
     {
         public string IndexType { get; set; } = "HNSW";
         public required HNSWIndex.FlatState State { get; set; }
     }
 
-    private sealed class FallbackSnapshot
+    internal sealed class FallbackSnapshot
     {
         public string IndexType { get; set; } = "HNSW";
         public string Metric { get; set; } = "cosine";
         public List<FallbackEntry> Entries { get; set; } = [];
     }
 
-    private sealed class FallbackEntry
+    internal sealed class FallbackEntry
     {
         public long RowId { get; set; }
         public float[] Vector { get; set; } = [];
@@ -52,7 +53,7 @@ public class HNSWIndexPersistence : IIndexPersistence
                     .ToList()
             };
 
-            string fallbackJson = JsonConvert.SerializeObject(payload);
+            string fallbackJson = JsonSerializer.Serialize(payload, DataVoJsonContext.Default.FallbackSnapshot);
             File.WriteAllText(filePath, fallbackJson);
             return;
         }
@@ -66,7 +67,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             State = hnsw.ExportFlatState()
         };
 
-        string json = JsonConvert.SerializeObject(hnswPayload);
+        string json = JsonSerializer.Serialize(hnswPayload, DataVoJsonContext.Default.HnswSnapshot);
 
         File.WriteAllText(filePath, json);
     }
@@ -83,7 +84,7 @@ public class HNSWIndexPersistence : IIndexPersistence
 
         if (IsBrowserRuntime())
         {
-            FallbackSnapshot? fallbackSnapshot = JsonConvert.DeserializeObject<FallbackSnapshot>(json);
+            FallbackSnapshot? fallbackSnapshot = JsonSerializer.Deserialize(json, DataVoJsonContext.Default.FallbackSnapshot);
             if (fallbackSnapshot != null)
             {
                 var fallback = new BrowserFallbackVectorIndex
@@ -98,7 +99,7 @@ public class HNSWIndexPersistence : IIndexPersistence
             }
         }
 
-        HnswSnapshot? snapshot = JsonConvert.DeserializeObject<HnswSnapshot>(json);
+        HnswSnapshot? snapshot = JsonSerializer.Deserialize(json, DataVoJsonContext.Default.HnswSnapshot);
         if (snapshot == null)
             throw new InvalidOperationException($"Failed to deserialize HNSW index payload: {filePath}");
 
