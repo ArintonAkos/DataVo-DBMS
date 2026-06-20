@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Native AOT end-to-end fence (Phase 1). Exercises the real public surface (engine + typed insert +
+       borrowed reactive + ADO.NET, NO EF) so `dotnet publish -r <rid> /p:PublishAot=true` proves the
+       whole referenced graph is AOT/trim-clean and the produced native binary runs correctly.
+       RID is supplied at publish time (osx-arm64 locally, linux-x64 in CI). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Surface cross-assembly trim/AOT issues during ordinary build of this app too. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
+    <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
+  </ItemGroup>
+
+</Project>
