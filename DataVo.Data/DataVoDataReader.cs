@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using DataVo.Core.Contracts.Results;
 
 namespace DataVo.Data;
@@ -163,6 +164,13 @@ public class DataVoDataReader : DbDataReader
     public int GetInt32(string name) => GetInt32(GetOrdinal(name));
 
     /// <inheritdoc />
+    [return: DynamicallyAccessedMembers(
+        DynamicallyAccessedMemberTypes.PublicFields
+        | DynamicallyAccessedMemberTypes.PublicProperties)]
+    [UnconditionalSuppressMessage("Trimming", "IL2073",
+        Justification = "GetFieldType returns the runtime CLR type of the stored cell value; the engine " +
+                        "never reflects over its members, and consumers must not rely on reflecting them " +
+                        "under trimming. The base DbDataReader.GetFieldType annotation is preserved on the signature.")]
     public override Type GetFieldType(int ordinal)
     {
         object val = GetValue(ordinal);

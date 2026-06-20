@@ -5,6 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
+    <!-- AOT durable fence (Phase 1): analyzers ON to surface the trim/AOT warning baseline as a live
+         scoreboard. NOT yet WarningsAsErrors — the count is ratcheted down to 0 by the STJ migration +
+         dynamic removal (scripts/check-aot-baseline.sh), then this project gets locked like DataVo.Data.
+         Baseline at fence setup: 184 (92 IL2026 + 92 IL3050). -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
