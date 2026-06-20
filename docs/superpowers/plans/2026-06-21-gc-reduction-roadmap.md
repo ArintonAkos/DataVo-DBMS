@@ -182,9 +182,7 @@ and constraint-validation scaffolding. Slice 5 attacked those.
   `RowChange.After` is materialized lazily from `TypedAfter` (and the `StoredRow`'s owned immutable cells
   are shared with the captured image), so the borrowed typed lane never builds the owned dict.
 
-**Honest measurement (durable `InsertAllocationGuardTests`; the macro `complex-vip` benchmark was NOT
-re-run — the Research.Benchmark host deadlocks MSBuild in this environment, so per the slice's execution
-rules regressions are fenced by the guard tests instead):**
+**Per-insert measurement (durable `InsertAllocationGuardTests`):**
 
 | Warm insert path | Before Slice 5 | After Slice 5 | Note |
 |---|---:|---:|---|
@@ -199,23 +197,38 @@ query shape (`SELECT Id, Stake`) that routes to the non-borrowed `ReactiveSubscr
 test uses the real VIP shape (`VipExposureReactiveQuery`), the only production borrowed operator that
 reads the typed lane. Full suite 1005/1005.
 
+**Macro benchmark (complex-vip, user-run 2026-06-22):** DataVo **143.5 MB** GC, **237 ms** total,
+**p99 0.007 ms**. Same environment, same workload: DuckDB 131 MB / **103 s**, SQLite 115 MB / **290 s**.
+DataVo is now within ~10–25% of the native engines' memory footprint while finishing **~435× faster than
+DuckDB and ~1,200× faster than SQLite**, at sub-10µs p99 latency. Full program GC trajectory:
+552.9 → 489.6 → 428.5 → 259.4 → **143.5 MB (−74% from program start)**.
+
 - **Plan:** [`2026-06-22-slice5-pipeline-serializer-plan.md`](2026-06-22-slice5-pipeline-serializer-plan.md)
 - **Design:** [`../specs/2026-06-22-slice5-pipeline-serializer-design.md`](../specs/2026-06-22-slice5-pipeline-serializer-design.md)
 
 ---
 
-## Next action
+## Program status — PAUSED (2026-06-22)
 
-Phases 5–7 are complete: Slice 3 (operator fast-lane), Slice 4 (typed storage P0–P4), and **Slice 5
-(pipeline & serializer optimization)**. Slice 5 re-profiled the per-tick cycle and **disproved the MVCC
-hypothesis** (MVCC was only 4.7% of per-tick), then cut the capture-off warm insert path ~77%
-(~4,680 → ~1,090 B/insert) and collapsed the dual after-image on the capture-on VIP path. The VIP
-capture-on per-insert (~2,370 B) is now **dominated by inherent retained/dispatch allocation** — storage
-row retention, the MVCC version per insert, `ChangeSet`/`RowChange`, and the two per-drain registry
-snapshot arrays.
+**The GC-reduction program is officially paused. Goal achieved: DataVo competes with native C/C++
+engines on memory (143.5 MB vs DuckDB 131 / SQLite 115) while running 2–3 orders of magnitude faster.**
+Further GC micro-optimization has poor ROI versus the next strategic priority.
 
-**Next, sequenced by measured impact (re-confirm with a fresh macro number once the Research.Benchmark
-host stops deadlocking MSBuild):** (1) per-drain dispatch churn — pool/reuse the `pending` +
-`_subscriptions` snapshot arrays and the per-insert `ChangeSet`/`RowChange`/`List`; (2) MVCC version
-object per insert (the now-confirmed largest single non-retained per-insert object); (3) the deferred
-deeper-purification follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework).
+Phases 5–7 are complete: Slice 3 (operator fast-lane), Slice 4 (typed storage P0–P4), and Slice 5
+(pipeline & serializer optimization). Slice 5 re-profiled the per-tick cycle, **disproved the MVCC
+hypothesis** (MVCC was only 4.7% of per-tick), cut the capture-off warm insert path ~77%
+(~4,680 → ~1,090 B/insert), and collapsed the dual after-image on the capture-on VIP path. The VIP
+capture-on per-insert (~2,370 B) is now **dominated by inherent retained/dispatch allocation** (storage
+row retention, MVCC version per insert, `ChangeSet`/`RowChange`, per-drain registry snapshots) — the
+accepted managed-.NET noise floor.
+
+**Explicitly NOT planned (deferred indefinitely — do not open a "Slice 6"):** per-drain dispatch churn
+(pooling snapshot arrays / `ChangeSet`/`RowChange`), the MVCC version object per insert, and the deferred
+typed-arrangement follow-ups (Join/TopK pooling, RecursiveCte closure rework). These remain documented
+here as the known remaining buckets should the program ever resume.
+
+**Next strategic priority → Native AOT + Source-Generated Bindings.** A C# Source Generator to eliminate
+all remaining runtime reflection, emit zero-allocation native entity bindings, and make the DataVo engine
+100% Native AOT compatible. Tracked in the program-level roadmap
+([`2026-06-19-advanced-features-roadmap.md`](2026-06-19-advanced-features-roadmap.md)); its own
+`brainstorm → spec → plan → implement` cycle to follow.
