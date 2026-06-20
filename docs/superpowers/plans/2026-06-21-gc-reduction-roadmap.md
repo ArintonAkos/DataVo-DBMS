@@ -163,15 +163,59 @@ reconstructed for P4 because P4 changed the read-scan path, not the insert bucke
 confirmatory null result). **Next allocation target should be re-profiled fresh against MVCC/version
 churn**, not the now-typed storage path.
 
+### Phase 7 — Pipeline & Serializer Optimization (Slice 5) — COMPLETE
+
+Re-profiled the per-tick insert→capture→deliver cycle fresh (2026-06-22) and **disproved the MVCC
+hypothesis**: per-tick ≈ 4,680 B, of which MVCC was only **220 B (4.7%)** and the reactive seed bridge
+≈ 0/tick. The real hogs were the storage-write serializer (per-row `MemoryStream`/`BinaryWriter` +
+`GetTableColumns`/`List` churn + a redundant `StoredRow` clone), the **dual after-image** in change
+capture (eager dict *and* `TypedRow` clone), residual per-call framework (lock scope + insert service),
+and constraint-validation scaffolding. Slice 5 attacked those.
+
+- **P1 — serializer & clone:** thread-local pooled stream in `RowSerializer.SerializeCells`
+  (wire-identical); hand owned cells to `StoredRow.FromOwnedCells` (drop redundant clone).
+- **P2 — framework & scaffolding:** single-row typed insert path (no per-row `List`/column refetch);
+  `SnapshotLockScope` → `readonly struct` (no per-tick alloc/boxing); reuse one `InsertRowService` per
+  context; retained table write-lock (lock framework 432 → 64 B/op).
+- **P3 — validation & capture fast-paths:** skip the validation `List`/`HashSet`/dict scaffolding for
+  constraint-free tables; `TypedRow.FromOwnedCells` no-clone factory; **collapse the dual after-image** —
+  `RowChange.After` is materialized lazily from `TypedAfter` (and the `StoredRow`'s owned immutable cells
+  are shared with the captured image), so the borrowed typed lane never builds the owned dict.
+
+**Honest measurement (durable `InsertAllocationGuardTests`; the macro `complex-vip` benchmark was NOT
+re-run — the Research.Benchmark host deadlocks MSBuild in this environment, so per the slice's execution
+rules regressions are fenced by the guard tests instead):**
+
+| Warm insert path | Before Slice 5 | After Slice 5 | Note |
+|---|---:|---:|---|
+| No subscriber (capture off) | ~4,680 B/insert | **~1,090 B/insert** (−77%) | serializer + clone + framework + constraint-free validation |
+| VIP borrowed subscriber (capture on) | ~2,551 B/insert | **~2,370 B/insert** (−~180 B) | dual after-image collapse only |
+
+The capture-off path saw the large reduction. The capture-on VIP path improved only modestly because
+its per-insert cost is **dominated by inherent retained/dispatch allocation** (storage row retention,
+MVCC version, `ChangeSet`/`RowChange`, per-drain registry snapshots), not the after-image — the after-image
+collapse is the ~180 B slice it could remove. The plan's borrowed estimate (~1,900 / ~600 B) assumed a
+query shape (`SELECT Id, Stake`) that routes to the non-borrowed `ReactiveSubscription`; the corrected
+test uses the real VIP shape (`VipExposureReactiveQuery`), the only production borrowed operator that
+reads the typed lane. Full suite 1005/1005.
+
+- **Plan:** [`2026-06-22-slice5-pipeline-serializer-plan.md`](2026-06-22-slice5-pipeline-serializer-plan.md)
+- **Design:** [`../specs/2026-06-22-slice5-pipeline-serializer-design.md`](../specs/2026-06-22-slice5-pipeline-serializer-design.md)
+
 ---
 
 ## Next action
 
-Phase 5 (Slice 3) and **Phase 6 / Slice 4 Step 2 (typed storage, P0–P4) are complete** — the data
-plane is typed end-to-end (typed serialize/insert/read, dict-parity typed index keys, adapter removed
-from internal read paths), correct and parity-safe, suite 999/999. But the complex-vip macro is flat at
-~259–260 MB across P1/P2/P4: the remaining allocation is **not** in the typed storage paths. **Next:
-re-profile the per-tick insert→capture→deliver→requery cycle fresh** (leading hypothesis: MVCC
-`RowVersion` churn per insert) to find the real remaining macro bucket; then the deferred
-deeper-purification follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework). Sequence
-by measured impact.
+Phases 5–7 are complete: Slice 3 (operator fast-lane), Slice 4 (typed storage P0–P4), and **Slice 5
+(pipeline & serializer optimization)**. Slice 5 re-profiled the per-tick cycle and **disproved the MVCC
+hypothesis** (MVCC was only 4.7% of per-tick), then cut the capture-off warm insert path ~77%
+(~4,680 → ~1,090 B/insert) and collapsed the dual after-image on the capture-on VIP path. The VIP
+capture-on per-insert (~2,370 B) is now **dominated by inherent retained/dispatch allocation** — storage
+row retention, the MVCC version per insert, `ChangeSet`/`RowChange`, and the two per-drain registry
+snapshot arrays.
+
+**Next, sequenced by measured impact (re-confirm with a fresh macro number once the Research.Benchmark
+host stops deadlocking MSBuild):** (1) per-drain dispatch churn — pool/reuse the `pending` +
+`_subscriptions` snapshot arrays and the per-insert `ChangeSet`/`RowChange`/`List`; (2) MVCC version
+object per insert (the now-confirmed largest single non-retained per-insert object); (3) the deferred
+deeper-purification follow-ups (typed arrangements for Join/TopK, RecursiveCte closure rework).
