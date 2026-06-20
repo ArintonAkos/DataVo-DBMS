@@ -25,6 +25,30 @@ public readonly struct TypedRow
         _cells = cells.ToArray();
     }
 
+    private TypedRow(ReactiveRowSchema schema, CellValue[] ownedCells, bool owned)
+    {
+        Schema = schema;
+        _cells = ownedCells;
+    }
+
+    /// <summary>
+    /// Wraps an already-owned cell array without copying. The caller must never mutate
+    /// <paramref name="ownedCells"/> after this call (immutability invariant — see Slice 5 design).
+    /// </summary>
+    public static TypedRow FromOwnedCells(ReactiveRowSchema schema, CellValue[] ownedCells)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(ownedCells);
+        if (ownedCells.Length != schema.ColumnCount)
+        {
+            throw new ArgumentException(
+                $"Row has {ownedCells.Length} cells but schema has {schema.ColumnCount} columns.",
+                nameof(ownedCells));
+        }
+
+        return new TypedRow(schema, ownedCells, owned: true);
+    }
+
     /// <summary>Gets the schema that describes the row's cell order.</summary>
     public ReactiveRowSchema Schema { get; }
 
