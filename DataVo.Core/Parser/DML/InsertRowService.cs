@@ -194,9 +194,10 @@ internal sealed class InsertRowService(
 
         if (recorder is not null)
         {
-            Dictionary<string, object?> after = MaterializeTypedRow(tableColumns, normalizedCells);
-            var typedAfter = new TypedRow(columns, normalizedCells);
-            recorder.RecordTypedInsert(tableName, rowId, after, typedAfter);
+            // Share the StoredRow's owned, immutable cells with the captured after-image (no clone, no
+            // eager dict); the owned dict is materialized lazily only if an owned subscriber reads it
+            // (Slice 5 P3, lever 4). normalizedCells is never mutated after this point.
+            recorder.RecordTypedInsert(tableName, rowId, TypedRow.FromOwnedCells(columns, normalizedCells));
         }
 
         return rowId;
@@ -240,19 +241,6 @@ internal sealed class InsertRowService(
         }
 
         return normalized;
-    }
-
-    private static Dictionary<string, object?> MaterializeTypedRow(
-        IReadOnlyList<Column> tableColumns,
-        ReadOnlySpan<CellValue> cells)
-    {
-        var row = new Dictionary<string, object?>(tableColumns.Count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < tableColumns.Count; i++)
-        {
-            row[tableColumns[i].Name] = cells[i].ToObject();
-        }
-
-        return row;
     }
 
     private static void ValidateTypedCell(Column column, CellValue cell)

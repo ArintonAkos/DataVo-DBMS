@@ -74,7 +74,7 @@ public class TypedRowChangeTests
     }
 
     [Fact]
-    public void ChangeRecorder_RecordTypedInsert_PublishesOwnedAfterAndTypedAfter()
+    public void ChangeRecorder_RecordTypedInsert_PublishesTypedAfter_AndLazyMaterializedOwnedAfter()
     {
         using var engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
         engine.Changes.Enabled = true;
@@ -82,17 +82,20 @@ public class TypedRowChangeTests
         ChangeSet? captured = null;
         engine.Changes.Captured += set => captured = set;
 
-        var schema = new ReactiveRowSchema("Id");
-        var typed = new TypedRow(schema, [CellValue.From(1)]);
-        var ownedAfter = new Dictionary<string, object?> { ["Id"] = 1 };
+        var schema = new ReactiveRowSchema("Id", "Name");
+        var typed = TypedRow.FromOwnedCells(schema, [CellValue.From(1), CellValue.From("ada")]);
 
         ChangeRecorder recorder = ChangeRecorder.TryCreate(engine, "GameDb")!;
-        recorder.RecordTypedInsert("Orders", 7, ownedAfter, typed);
+        recorder.RecordTypedInsert("Orders", 7, typed);
         recorder.Publish();
 
         RowChange change = Assert.Single(captured!.Changes);
-        Assert.Same(ownedAfter, change.After);
         Assert.NotNull(change.TypedAfter);
         Assert.Equal(1, change.TypedAfter.Value.AsRowRef()[0].AsInt32());
+
+        // After is materialized lazily from the typed image and equals the eager dict it replaced.
+        Assert.NotNull(change.After);
+        Assert.Equal(1, Convert.ToInt32(change.After!["Id"]));
+        Assert.Equal("ada", change.After!["Name"]);
     }
 }

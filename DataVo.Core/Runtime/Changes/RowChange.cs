@@ -1,3 +1,5 @@
+using DataVo.Core.Runtime.Reactive;
+
 namespace DataVo.Core.Runtime.Changes;
 
 /// <summary>
@@ -43,7 +45,25 @@ public sealed class RowChange
         RowId = rowId;
         Kind = kind;
         Before = before;
-        After = after;
+        _after = after;
+        TypedAfter = typedAfter;
+    }
+
+    /// <summary>
+    /// Initializes an insert <see cref="RowChange"/> carrying only a typed after-image. The owned
+    /// dictionary <see cref="After"/> is materialized lazily on first access from <paramref name="typedAfter"/>,
+    /// so borrowed-only subscribers (which read <see cref="TypedAfter"/>) never pay for it.
+    /// </summary>
+    /// <param name="table">The table the row belongs to.</param>
+    /// <param name="rowId">The physical row identifier.</param>
+    /// <param name="typedAfter">The typed row image after the insert.</param>
+    public RowChange(string table, long rowId, TypedRow typedAfter)
+    {
+        Table = table;
+        RowId = rowId;
+        Kind = ChangeKind.Insert;
+        Before = null;
+        _after = null; // built on first owned read from TypedAfter
         TypedAfter = typedAfter;
     }
 
@@ -67,8 +87,34 @@ public sealed class RowChange
     /// <summary>Gets the row image prior to the change, or <c>null</c> for inserts.</summary>
     public IReadOnlyDictionary<string, object?>? Before { get; }
 
+    private IReadOnlyDictionary<string, object?>? _after;
+
     /// <summary>Gets the row image after the change, or <c>null</c> for deletes.</summary>
-    public IReadOnlyDictionary<string, object?>? After { get; }
+    /// <remarks>
+    /// For typed inserts captured with the <see cref="RowChange(string, long, TypedRow)"/> constructor,
+    /// this dictionary is materialized lazily from <see cref="TypedAfter"/> on first access (and cached),
+    /// so the borrowed typed lane never allocates it. Vector cells are cloned via
+    /// <c>CellValue.ToObject()</c>, preserving the public-boundary safety of the eager path.
+    /// </remarks>
+    public IReadOnlyDictionary<string, object?>? After
+    {
+        get
+        {
+            if (_after is null && TypedAfter is { } typed)
+            {
+                var dict = new Dictionary<string, object?>(typed.Schema.ColumnCount, StringComparer.OrdinalIgnoreCase);
+                ReadOnlySpan<CellValue> cells = typed.Cells.Span;
+                for (int i = 0; i < cells.Length; i++)
+                {
+                    dict[typed.Schema.ColumnAt(i)] = cells[i].ToObject();
+                }
+
+                _after = dict;
+            }
+
+            return _after;
+        }
+    }
 
     /// <summary>Gets the typed row image after the change, or <c>null</c> for dictionary paths and deletes.</summary>
     public TypedRow? TypedAfter { get; }

@@ -42,15 +42,12 @@ internal sealed class ChangeRecorder
         => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: Clone(after)));
 
     /// <summary>
-    /// Records an inserted row image whose dictionary is already a fresh owned normalized row.
-    /// Used by the typed insert fast lane to avoid a redundant after-image clone.
+    /// Records a typed insert carrying only the typed after-image. The owned dictionary after-image is
+    /// materialized lazily (see <see cref="RowChange.After"/>), so borrowed-only subscriptions that read
+    /// the typed lane never allocate it.
     /// </summary>
-    public void RecordTypedInsert(
-        string table,
-        long rowId,
-        IReadOnlyDictionary<string, object?> ownedAfter,
-        TypedRow typedAfter)
-        => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: ownedAfter, typedAfter));
+    public void RecordTypedInsert(string table, long rowId, TypedRow typedAfter)
+        => Add(new RowChange(table, rowId, typedAfter));
 
     /// <summary>Records a deleted row image.</summary>
     public void RecordDelete(string table, long rowId, IReadOnlyDictionary<string, object?> before)
