@@ -1,6 +1,8 @@
-using Newtonsoft.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Serialization;
 
 namespace DataVo.Core.BTree;
 
@@ -19,13 +21,13 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <summary>
     /// Gets or sets the root node of the B-Tree.
     /// </summary>
-    [JsonProperty("root")]
+    [JsonPropertyName("root")]
     public BTreeNode<string, long> Root { get; set; } = new BTreeNode<string, long>(minDegree, isLeaf: true);
 
     /// <summary>
     /// Gets or sets the minimum degree used by the tree.
     /// </summary>
-    [JsonProperty("minDegree")]
+    [JsonPropertyName("minDegree")]
     public int MinDegree { get; set; } = minDegree;
 
     /// <summary>
@@ -205,10 +207,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
                 Directory.CreateDirectory(directory);
             }
 
-            string json = JsonConvert.SerializeObject(this, Formatting.Indented, new JsonSerializerSettings
-            {
-                TypeNameHandling = TypeNameHandling.None
-            });
+            string json = JsonSerializer.Serialize(this, DataVoJsonContext.Default.JsonBTreeIndex);
             File.WriteAllText(filePath, json);
         }
     }
@@ -228,7 +227,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
         }
 
         string json = File.ReadAllText(filePath);
-        return JsonConvert.DeserializeObject<JsonBTreeIndex>(json)
+        return JsonSerializer.Deserialize(json, DataVoJsonContext.Default.JsonBTreeIndex)
              ?? throw new IndexException($"Failed to deserialize B-Tree index from: {filePath}");
     }
 }

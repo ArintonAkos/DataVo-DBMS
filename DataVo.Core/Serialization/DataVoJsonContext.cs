@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using DataVo.Core.BTree;
 using DataVo.Core.Indexing.HNSW;
 
 namespace DataVo.Core.Serialization;
@@ -12,4 +13,5 @@ namespace DataVo.Core.Serialization;
 [JsonSourceGenerationOptions(WriteIndented = false)]
 [JsonSerializable(typeof(HNSWIndexPersistence.HnswSnapshot))]
 [JsonSerializable(typeof(HNSWIndexPersistence.FallbackSnapshot))]
+[JsonSerializable(typeof(JsonBTreeIndex))]
 internal partial class DataVoJsonContext : JsonSerializerContext;
