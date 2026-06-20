@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 
 namespace DataVo.Core.BTree;
 
@@ -17,40 +17,39 @@ namespace DataVo.Core.BTree;
 /// Non-leaf nodes can contain up to <c>2t</c> children.
 /// </para>
 /// </remarks>
-[JsonObject(MemberSerialization.OptIn)]
 public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
 {
     /// <summary>
     /// Gets or sets the minimum degree of the B-Tree.
     /// A node can store at most <c>2 * MinDegree - 1</c> keys.
     /// </summary>
-    [JsonProperty("t")]
+    [JsonPropertyName("t")]
     public int MinDegree { get; set; }
 
     /// <summary>
     /// Gets or sets the ordered keys stored in this node.
     /// </summary>
-    [JsonProperty("keys")]
+    [JsonPropertyName("keys")]
     public List<TKey> Keys { get; set; }
 
     /// <summary>
     /// Gets or sets the values associated with the keys in <see cref="Keys"/>.
     /// Each position corresponds to the key at the same index, and each key can map to multiple values.
     /// </summary>
-    [JsonProperty("values")]
+    [JsonPropertyName("values")]
     public List<List<TValue>> Values { get; set; }
 
     /// <summary>
     /// Gets or sets the child nodes.
     /// This value is <see langword="null"/> for leaf nodes.
     /// </summary>
-    [JsonProperty("children")]
+    [JsonPropertyName("children")]
     public List<BTreeNode<TKey, TValue>>? Children { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether this node is a leaf node.
     /// </summary>
-    [JsonProperty("isLeaf")]
+    [JsonPropertyName("isLeaf")]
     public bool IsLeaf { get; set; }
 
     /// <summary>
