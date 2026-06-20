@@ -1,8 +1,8 @@
 using System.Xml.Linq;
-using System.Xml.Serialization;
 using System.Collections.Concurrent;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
+using DataVo.Core.Runtime.Catalog;
 
 namespace DataVo.Core.Models.Catalog;
 
@@ -652,18 +652,15 @@ public static class Catalog
     {
         try
         {
-            using var writer = new StringWriter();
-            var namespaces = new XmlSerializerNamespaces();
-            var serializer = new XmlSerializer(obj.GetType());
+            XElement element = obj switch
+            {
+                Database database => CatalogXml.ToXElement(database),
+                Table table => CatalogXml.ToXElement(table),
+                IndexFile indexFile => CatalogXml.ToXElement(indexFile),
+                _ => throw new NotSupportedException($"No catalog XML mapper for type {typeof(T).Name}."),
+            };
 
-            namespaces.Add("", "");
-            serializer.Serialize(writer, obj, namespaces);
-
-            var element = XElement.Parse(writer.ToString());
             root.Add(element);
-
-            writer.Close();
-
             _doc.Save(FilePath);
         }
         catch (Exception ex)
@@ -678,13 +675,19 @@ public static class Catalog
         _doc.Save(FilePath);
     }
 
-    private static T? ConvertFromXml<T>(XNode element) where T : class
+    private static T? ConvertFromXml<T>(XNode node) where T : class
     {
         try
         {
-            var serializer = new XmlSerializer(typeof(T));
-            var reader = element.CreateReader();
-            return (T?)serializer.Deserialize(reader);
+            var element = (XElement)node;
+            object result = typeof(T) switch
+            {
+                var t when t == typeof(ForeignKey) => CatalogXml.ForeignKeyFromXElement(element),
+                var t when t == typeof(IndexFile) => CatalogXml.IndexFileFromXElement(element),
+                _ => throw new NotSupportedException($"No catalog XML mapper for type {typeof(T).Name}."),
+            };
+
+            return (T)result;
         }
         catch (Exception ex)
         {
