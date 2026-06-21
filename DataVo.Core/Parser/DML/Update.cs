@@ -276,7 +276,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         foreach (var setExpr in setExpressions)
         {
             string colName = setExpr.Key;
-            dynamic? newValue = ScalarEvaluator.Evaluate(setExpr.Value, oldRow);
+            object? newValue = ScalarEvaluator.Evaluate(setExpr.Value, oldRow);
 
             if (newValue is string s && s.StartsWith("'") && s.EndsWith("'"))
             {

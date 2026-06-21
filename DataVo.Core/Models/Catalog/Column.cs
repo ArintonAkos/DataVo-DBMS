@@ -34,7 +34,7 @@ public class Column : IColumn
     /// Gets the strongly-typed value parsed from <see cref="Value"/> based on the column's <see cref="Type"/>.
     /// Parses to <see cref="int"/>, <see cref="double"/>, <see cref="bool"/>, or <see cref="DateOnly"/> where applicable.
     /// </summary>
-    public dynamic? ParsedValue
+    public object? ParsedValue
     {
         get => ParseTypedValue(Value);
     }
@@ -51,12 +51,12 @@ public class Column : IColumn
     /// <summary>
     /// Gets the strongly-typed default value parsed from <see cref="DefaultValue"/> based on the column's <see cref="Type"/>.
     /// </summary>
-    public dynamic? ParsedDefaultValue
+    public object? ParsedDefaultValue
     {
         get => ParseTypedValue(DefaultValue);
     }
 
-    private dynamic? ParseTypedValue(string? rawValue)
+    private object? ParseTypedValue(string? rawValue)
     {
         if (rawValue == null || rawValue.Equals("NULL", StringComparison.OrdinalIgnoreCase))
         {

@@ -74,7 +74,7 @@ namespace DataVo.Core.Parser.Types
 
                 foreach (var aggregation in aggregations)
                 {
-                    dynamic? value = aggregation.Execute(group.Value);
+                    object? value = aggregation.Execute(group.Value);
                     groupedRow.Add(aggregation.GetHeaderName(), value);
                 }
 

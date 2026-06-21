@@ -14,8 +14,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Ratchet baseline — the maximum allowed IL trim/AOT warnings in DataVo.Core. LOWER THIS as work lands.
 # History: 184 (fence) -> 144 (T1: catalog XmlSerializer) -> 100 (T2: Newtonsoft -> STJ source-gen)
-#          -> 76 (T3: Volcano spill + Select snapshot -> STJ source-gen contexts).
-CORE_BASELINE=76
+#          -> 76 (T3: Volcano spill + Select snapshot) -> 0 (T4: dynamic/DLR eradicated).
+CORE_BASELINE=0
 
 build_il_warnings() {
   local proj="$1"

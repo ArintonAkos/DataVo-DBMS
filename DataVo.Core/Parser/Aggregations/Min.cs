@@ -7,7 +7,7 @@ namespace DataVo.Core.Parser.Aggregations
     internal class Min(Column? field, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName = null)
         : Aggregation(field, expression, valueSelector, headerName)
     {
-        protected override dynamic? Apply(ListedTable rows)
+        protected override object? Apply(ListedTable rows)
         {
             return rows.Min(SelectColumn);
         }

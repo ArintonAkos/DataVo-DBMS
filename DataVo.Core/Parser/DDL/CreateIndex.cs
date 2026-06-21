@@ -79,7 +79,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                 List<(long RowId, float[] Vector)> vectors = [];
                 foreach (var row in tableDataRows)
                 {
-                    if (!row.Value.TryGetValue(vectorColumnName, out dynamic? value) || value == null)
+                    if (!row.Value.TryGetValue(vectorColumnName, out object? value) || value == null)
                     {
                         continue;
                     }

@@ -7,7 +7,7 @@ namespace DataVo.Core.Parser.Aggregations
     internal class Count(Column? field, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName = null)
         : Aggregation(field, expression, valueSelector, headerName)
     {
-        protected override dynamic? Apply(ListedTable rows)
+        protected override object? Apply(ListedTable rows)
         {
             if (_field?.TableName == "*" && _expression == null)
             {
