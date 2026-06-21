@@ -30,8 +30,8 @@ already sketched as W7 (schema-aware compiled-query verification) and W8 (zero-a
 projection), and builds on the in-flight `DataVo.Generators`. Those become sub-tracks of the AOT push
 rather than independent Wave-3 items.
 
-**Status — Phase 1 (engine core) COMPLETE (2026-06-23).** `DataVo.Core` + `DataVo.Data` are 100% Native
-AOT clean and **locked** (IL trim/AOT diagnostics are build errors). The whole-program
+**Status — Phase 1 (engine core) COMPLETE & MERGED to `master` (2026-06-23).** `DataVo.Core` +
+`DataVo.Data` are 100% Native AOT clean and **locked** (IL trim/AOT diagnostics are build errors). The whole-program
 `dotnet publish /p:PublishAot=true` of the `DataVo.AotSmoke` gate produces **zero** AOT/trim warnings
 (from 217) and the native binary runs correctly. Done via: catalog `XmlSerializer` → reflection-free
 `System.Xml.Linq`; Newtonsoft + reflection-mode STJ → STJ **source generators**; `dynamic`/DLR eradicated
