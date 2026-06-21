@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DataVo.Core.Serialization;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Execution.Volcano;
@@ -333,7 +334,7 @@ public sealed class HashAggregateOperator : IQueryOperator
     {
         string key = BuildGroupKey(typed, _groupKeyColumns);
         int index = (key.GetHashCode() & int.MaxValue) % partitionFiles.Count;
-        writers[index].WriteLine(JsonSerializer.Serialize(typed));
+        writers[index].WriteLine(JsonSerializer.Serialize(typed, SpillJson.Context.TypedExecutionRow));
     }
 
     private Dictionary<string, GroupAccumulator> ReducePartition(string partitionFile)
@@ -349,7 +350,7 @@ public sealed class HashAggregateOperator : IQueryOperator
                 break;
             }
 
-            TypedExecutionRow? typed = JsonSerializer.Deserialize<TypedExecutionRow>(line);
+            TypedExecutionRow? typed = JsonSerializer.Deserialize(line, SpillJson.Context.TypedExecutionRow);
             if (typed == null)
             {
                 continue;
