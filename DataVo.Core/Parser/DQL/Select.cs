@@ -21,6 +21,7 @@ using DataVo.Core.MVCC;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
+using DataVo.Core.Serialization;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -2049,7 +2050,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 if (File.Exists(path))
                 {
                     string json = File.ReadAllText(path);
-                    Dictionary<string, double>? loaded = JsonSerializer.Deserialize<Dictionary<string, double>>(json);
+                    Dictionary<string, double>? loaded = JsonSerializer.Deserialize(json, DataVoJsonContext.Default.StringDoubleMap);
                     if (loaded != null)
                     {
                         foreach (var entry in loaded)
@@ -2094,7 +2095,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             }
 
             var snapshot = _joinCardinalityFeedback.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
-            string json = JsonSerializer.Serialize(snapshot);
+            string json = JsonSerializer.Serialize(snapshot, DataVoJsonContext.Default.StringDoubleMap);
             File.WriteAllText(path, json);
         }
         catch (Exception ex)

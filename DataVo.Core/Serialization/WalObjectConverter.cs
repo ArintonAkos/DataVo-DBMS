@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -60,85 +59,5 @@ internal sealed class WalObjectConverter : JsonConverter<object>
     }
 
     public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
-    {
-        switch (value)
-        {
-            case bool b:
-                writer.WriteBooleanValue(b);
-                break;
-            case string s:
-                writer.WriteStringValue(s);
-                break;
-            case int i:
-                writer.WriteNumberValue(i);
-                break;
-            case long l:
-                writer.WriteNumberValue(l);
-                break;
-            case short sh:
-                writer.WriteNumberValue(sh);
-                break;
-            case byte bt:
-                writer.WriteNumberValue(bt);
-                break;
-            case uint ui:
-                writer.WriteNumberValue(ui);
-                break;
-            case ulong ul:
-                writer.WriteNumberValue(ul);
-                break;
-            case float f:
-                writer.WriteNumberValue(f);
-                break;
-            case double d:
-                writer.WriteNumberValue(d);
-                break;
-            case decimal m:
-                writer.WriteNumberValue(m);
-                break;
-            case DateOnly dateOnly:
-                writer.WriteStringValue(dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-                break;
-            case DateTime dateTime:
-                writer.WriteStringValue(dateTime.ToString("o", CultureInfo.InvariantCulture));
-                break;
-            case Guid guid:
-                writer.WriteStringValue(guid.ToString());
-                break;
-            // Covers both the base64 vector envelope (Dictionary<string, object>) and nested object maps;
-            // object and object? are the same runtime type, so one case handles both.
-            case IDictionary<string, object?> map:
-                writer.WriteStartObject();
-                foreach (KeyValuePair<string, object?> pair in map)
-                {
-                    writer.WritePropertyName(pair.Key);
-                    WriteNullable(writer, pair.Value, options);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case System.Collections.IEnumerable sequence:
-                writer.WriteStartArray();
-                foreach (object? item in sequence)
-                {
-                    WriteNullable(writer, item, options);
-                }
-
-                writer.WriteEndArray();
-                break;
-            default:
-                throw new JsonException($"Unsupported WAL value type '{value.GetType().Name}'.");
-        }
-    }
-
-    private void WriteNullable(Utf8JsonWriter writer, object? value, JsonSerializerOptions options)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-            return;
-        }
-
-        Write(writer, value, options);
-    }
+        => PolymorphicJsonWriter.WriteValue(writer, value, options);
 }

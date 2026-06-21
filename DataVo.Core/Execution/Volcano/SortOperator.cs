@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DataVo.Core.Serialization;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Execution.Volcano;
@@ -290,7 +291,7 @@ public sealed class SortOperator : IQueryOperator
         foreach (ExecutionRow row in sortedChunk)
         {
             TypedExecutionRow typed = row.ToTyped();
-            writer.WriteLine(JsonSerializer.Serialize(typed));
+            writer.WriteLine(JsonSerializer.Serialize(typed, SpillJson.Context.TypedExecutionRow));
         }
     }
 
@@ -468,7 +469,7 @@ public sealed class SortOperator : IQueryOperator
                 return false;
             }
 
-            TypedExecutionRow? typed = JsonSerializer.Deserialize<TypedExecutionRow>(line);
+            TypedExecutionRow? typed = JsonSerializer.Deserialize(line, SpillJson.Context.TypedExecutionRow);
             if (typed == null)
             {
                 return false;
