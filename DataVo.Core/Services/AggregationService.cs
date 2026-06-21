@@ -7,15 +7,6 @@ namespace DataVo.Core.Services
 {
     internal class AggregationService
     {
-        private static readonly Dictionary<string, Type> _aggregationFunctions = new(StringComparer.OrdinalIgnoreCase)
-        {
-            { "avg", typeof(Avg) },
-            { "count", typeof(Count) },
-            { "max", typeof(Max) },
-            { "min", typeof(Min) },
-            { "sum", typeof(Sum) },
-        };
-
         public static Aggregation CreateInstance(string functionName, Column column)
         {
             return CreateInstance(
@@ -34,12 +25,17 @@ namespace DataVo.Core.Services
 
         private static Aggregation CreateInstance(string functionName, Column? column, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName)
         {
-            if (!_aggregationFunctions.TryGetValue(functionName, out var type))
+            // Explicit factory (no Activator/reflection) so the aggregation types' constructors are
+            // statically referenced and the path is Native-AOT safe.
+            return functionName.ToUpperInvariant() switch
             {
-                throw new ArgumentException($"Unknown aggregation function: {functionName}");
-            }
-
-            return (Aggregation)Activator.CreateInstance(type, column, expression, valueSelector, headerName)!;
+                "AVG" => new Avg(column, expression, valueSelector, headerName),
+                "COUNT" => new Count(column, expression, valueSelector, headerName),
+                "MAX" => new Max(column, expression, valueSelector, headerName),
+                "MIN" => new Min(column, expression, valueSelector, headerName),
+                "SUM" => new Sum(column, expression, valueSelector, headerName),
+                _ => throw new ArgumentException($"Unknown aggregation function: {functionName}"),
+            };
         }
     }
 }

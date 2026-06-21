@@ -5,11 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
-    <!-- AOT durable fence (Phase 1): analyzers ON to surface the trim/AOT warning baseline as a live
-         scoreboard. NOT yet WarningsAsErrors — the count is ratcheted down to 0 by the STJ migration +
-         dynamic removal (scripts/check-aot-baseline.sh), then this project gets locked like DataVo.Data.
-         Baseline at fence setup: 184 (92 IL2026 + 92 IL3050). -->
+    <!-- AOT durable fence (Phase 1) — COMPLETE & LOCKED. The trim/AOT analyzers are on and the IL
+         trim/AOT diagnostics are errors, so DataVo.Core stays Native-AOT clean: any regression fails the
+         build. The baseline was ratcheted 184 -> 0 across the Native AOT cleanup (catalog XmlSerializer,
+         Newtonsoft/STJ-reflection -> STJ source-gen, dynamic/DLR removal, Activator factory). -->
     <IsAotCompatible>true</IsAotCompatible>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2067;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
   </PropertyGroup>
 
 </Project>
