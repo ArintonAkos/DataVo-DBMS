@@ -7,7 +7,7 @@ namespace DataVo.Core.Parser.Aggregations
     internal class Sum(Column? field, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName = null)
         : Aggregation(field, expression, valueSelector, headerName)
     {
-        protected override dynamic? Apply(ListedTable rows)
+        protected override object? Apply(ListedTable rows)
         {
             double sum = 0;
 

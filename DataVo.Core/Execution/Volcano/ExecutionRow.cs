@@ -34,7 +34,7 @@ public sealed class ExecutionRow
     }
 
     /// <summary>
-    /// Converts this dynamic-backed row to a typed object-backed row carrier.
+    /// Converts this object-backed row to a typed object-backed row carrier.
     /// </summary>
     public TypedExecutionRow ToTyped()
     {

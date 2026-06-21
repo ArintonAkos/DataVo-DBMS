@@ -52,6 +52,25 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    public void Update_ArithmeticExpressions_ComputeTypedResults()
+    {
+        Execute("CREATE TABLE Calc (Id INT PRIMARY KEY, Qty INT, Price FLOAT)");
+        Execute("INSERT INTO Calc VALUES (1, 10, 2.5)");
+
+        Execute("UPDATE Calc SET Qty = Qty + 5 WHERE Id = 1");      // int + int -> 15
+        Execute("UPDATE Calc SET Price = Price * 2 WHERE Id = 1");  // double * int -> 5.0
+        var r = ExecuteAndReturn("SELECT Qty, Price FROM Calc WHERE Id = 1");
+        Assert.Equal(15, r.Data[0]["Qty"]);
+        Assert.Equal(5.0, Convert.ToDouble(r.Data[0]["Price"]));
+
+        Execute("UPDATE Calc SET Qty = Qty / 2 WHERE Id = 1");      // 15 / 2 -> 7 (integer division)
+        Assert.Equal(7, ExecuteAndReturn("SELECT Qty FROM Calc WHERE Id = 1").Data[0]["Qty"]);
+
+        Execute("UPDATE Calc SET Qty = Qty - 1 WHERE Id = 1");      // 7 - 1 -> 6
+        Assert.Equal(6, ExecuteAndReturn("SELECT Qty FROM Calc WHERE Id = 1").Data[0]["Qty"]);
+    }
+
+    [Fact]
     public void Update_IndexedColumn_UpdatesIndexCorrectly()
     {
         Execute("CREATE TABLE Users (Id INT PRIMARY KEY, Email VARCHAR UNIQUE)");

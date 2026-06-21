@@ -163,7 +163,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         }
     }
 
-    private static dynamic? ConvertExistingValue(dynamic? value, Field field)
+    private static object? ConvertExistingValue(object? value, Field field)
     {
         if (value == null)
         {
@@ -173,7 +173,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         var column = ColumnDefinitionParser.ToColumn(field);
         string rawValue = ToRawValue(value);
 
-        dynamic? parsedValue;
+        object? parsedValue;
         try
         {
             column.Value = rawValue;
@@ -200,7 +200,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         return parsedValue;
     }
 
-    private static string ToRawValue(dynamic value)
+    private static string ToRawValue(object value)
     {
         return value switch
         {

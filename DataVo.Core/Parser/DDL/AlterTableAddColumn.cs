@@ -29,7 +29,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
 
                 var indexes = Catalog.GetTableIndexes(tableName, databaseName);
                 Field field = ToField(ast.Column, tableName);
-                dynamic? defaultValue = ColumnDefinitionParser.ToColumn(field).ParsedDefaultValue;
+                object? defaultValue = ColumnDefinitionParser.ToColumn(field).ParsedDefaultValue;
 
                 Catalog.AddColumn(tableName, databaseName, field);
 

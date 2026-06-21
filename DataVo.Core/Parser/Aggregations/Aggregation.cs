@@ -70,7 +70,7 @@ namespace DataVo.Core.Parser.Aggregations
         /// </summary>
         /// <param name="rows">The grouped rows.</param>
         /// <returns>The aggregate result value.</returns>
-        public dynamic? Execute(ListedTable rows)
+        public object? Execute(ListedTable rows)
         {
             Validate();
 
@@ -90,7 +90,7 @@ namespace DataVo.Core.Parser.Aggregations
         /// </summary>
         /// <param name="rows">The grouped rows.</param>
         /// <returns>The aggregate result value.</returns>
-        protected abstract dynamic? Apply(ListedTable rows);
+        protected abstract object? Apply(ListedTable rows);
 
         /// <summary>
         /// Gets the output header name for this aggregation.
@@ -111,7 +111,7 @@ namespace DataVo.Core.Parser.Aggregations
         /// </summary>
         /// <param name="row">The joined row.</param>
         /// <returns>The selected value.</returns>
-        protected dynamic? SelectColumn(JoinedRow row)
+        protected object? SelectColumn(JoinedRow row)
         {
             return _valueSelector(row);
         }

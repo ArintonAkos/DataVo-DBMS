@@ -275,7 +275,7 @@ public sealed class WalEntry
     }
 
     /// <summary>
-    /// Converts a deserialized object dictionary into the dynamic shape expected by transaction replay.
+    /// Converts a deserialized object dictionary into the object shape expected by transaction replay.
     /// </summary>
     /// <param name="row">The raw row values read from JSON.</param>
     /// <returns>A normalized case-insensitive row dictionary.</returns>

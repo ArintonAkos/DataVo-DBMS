@@ -147,7 +147,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="leftVal">The left-hand value.</param>
         /// <param name="rightVal">The right-hand value.</param>
         /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
-        private static bool EvaluateEquality(dynamic? leftVal, dynamic? rightVal)
+        private static bool EvaluateEquality(object? leftVal, object? rightVal)
         {
             if (leftVal == null || rightVal == null) return false;
             return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
@@ -368,7 +368,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// A negative integer if <paramref name="left"/> is less than <paramref name="right"/>,
         /// zero if equal, a positive integer if greater, or <c>null</c> if either operand is <c>null</c>.
         /// </returns>
-        private static int? CompareDynamics(dynamic? left, dynamic? right)
+        private static int? CompareDynamics(object? left, object? right)
         {
             if (left == null || right == null) return null;
             return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
