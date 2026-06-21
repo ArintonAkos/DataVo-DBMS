@@ -13,8 +13,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Ratchet baseline — the maximum allowed IL trim/AOT warnings in DataVo.Core. LOWER THIS as work lands.
-# History: 184 (fence) -> 144 (T1: catalog XmlSerializer -> reflection-free XElement).
-CORE_BASELINE=144
+# History: 184 (fence) -> 144 (T1: catalog XmlSerializer) -> 100 (T2: Newtonsoft -> STJ source-gen).
+CORE_BASELINE=100
 
 build_il_warnings() {
   local proj="$1"

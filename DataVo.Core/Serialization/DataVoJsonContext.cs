@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using DataVo.Core.BTree;
 using DataVo.Core.Indexing.HNSW;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Serialization;
 
@@ -14,4 +15,6 @@ namespace DataVo.Core.Serialization;
 [JsonSerializable(typeof(HNSWIndexPersistence.HnswSnapshot))]
 [JsonSerializable(typeof(HNSWIndexPersistence.FallbackSnapshot))]
 [JsonSerializable(typeof(JsonBTreeIndex))]
+[JsonSerializable(typeof(WalEntry))]
+[JsonSerializable(typeof(WalFileStore.WalRecordEnvelope))]
 internal partial class DataVoJsonContext : JsonSerializerContext;

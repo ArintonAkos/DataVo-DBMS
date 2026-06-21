@@ -17,6 +17,13 @@
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
   </ItemGroup>
 
+  <!-- DataVo.Core dropped Newtonsoft.Json (Native AOT migration to System.Text.Json source-gen). The
+       Browser host still uses Newtonsoft directly, so it declares its own reference now that it can no
+       longer rely on Core's transitive one. (Browser is WASM/untrimmed, out of the AOT Phase 1 scope.) -->
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
   <ItemGroup>
     <TrimmerRootAssembly Include="DataVo.Core" />
     <TrimmerRootAssembly Include="DataVo.Browser" />

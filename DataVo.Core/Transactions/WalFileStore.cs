@@ -1,8 +1,9 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
+using DataVo.Core.Serialization;
 using DataVo.Core.Utils;
-using Newtonsoft.Json;
 
 namespace DataVo.Core.Transactions;
 
@@ -23,7 +24,7 @@ namespace DataVo.Core.Transactions;
 /// </example>
 internal sealed class WalFileStore
 {
-    private sealed class WalRecordEnvelope
+    internal sealed class WalRecordEnvelope
     {
         public int Version { get; set; }
         public int PayloadLength { get; set; }
@@ -33,6 +34,11 @@ internal sealed class WalFileStore
 
     private static readonly ConcurrentDictionary<string, object> FileLocks =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // Source-gen context built with the WAL object converter so the heterogeneous object? row values
+    // serialize without reflection (Native-AOT safe).
+    private static readonly DataVoJsonContext WalJson =
+        new(new JsonSerializerOptions { Converters = { new WalObjectConverter() } });
 
     /// <summary>
     /// Initializes a new file store for the specified WAL path.
@@ -204,7 +210,7 @@ internal sealed class WalFileStore
         // Prepare the entry by wrapping vector arrays in envelopes before JSON serialization.
         WalEntry prepared = PrepareWalEntryForSerialization(entry);
 
-        string payload = JsonConvert.SerializeObject(prepared);
+        string payload = JsonSerializer.Serialize(prepared, WalJson.WalEntry);
         byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
 
         var envelope = new WalRecordEnvelope
@@ -215,7 +221,7 @@ internal sealed class WalFileStore
             Payload = payload,
         };
 
-        return JsonConvert.SerializeObject(envelope);
+        return JsonSerializer.Serialize(envelope, WalJson.WalRecordEnvelope);
     }
 
     private static WalEntry PrepareWalEntryForSerialization(WalEntry entry)
@@ -308,7 +314,7 @@ internal sealed class WalFileStore
         WalRecordEnvelope? envelope = null;
         try
         {
-            envelope = JsonConvert.DeserializeObject<WalRecordEnvelope>(line);
+            envelope = JsonSerializer.Deserialize(line, WalJson.WalRecordEnvelope);
         }
         catch
         {
@@ -329,7 +335,7 @@ internal sealed class WalFileStore
                 throw new InvalidDataException($"WAL corruption at line {lineNumber}: checksum mismatch.");
             }
 
-            WalEntry? entry = JsonConvert.DeserializeObject<WalEntry>(envelope.Payload);
+            WalEntry? entry = JsonSerializer.Deserialize(envelope.Payload, WalJson.WalEntry);
             if (entry == null)
             {
                 throw new InvalidDataException($"WAL corruption at line {lineNumber}: invalid payload JSON.");
@@ -341,7 +347,7 @@ internal sealed class WalFileStore
         WalEntry? legacyEntry = null;
         try
         {
-            legacyEntry = JsonConvert.DeserializeObject<WalEntry>(line);
+            legacyEntry = JsonSerializer.Deserialize(line, WalJson.WalEntry);
         }
         catch
         {

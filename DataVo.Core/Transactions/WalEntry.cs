@@ -1,4 +1,3 @@
-using Newtonsoft.Json.Linq;
 using System.Buffers.Binary;
 
 namespace DataVo.Core.Transactions;
@@ -303,20 +302,19 @@ public sealed class WalEntry
     /// <returns>A CLR value that can be replayed safely into storage logic.</returns>
     private static object? NormalizeValue(object? value)
     {
+        // WalObjectConverter reads JSON into plain CLR shapes: primitives, Dictionary<string, object?>
+        // (objects) and List<object?> (arrays). Decode the vector envelope / numeric sequences here.
         return value switch
         {
-            JValue jValue => jValue.Value,
-            JObject jObject => TryDecodeVectorEnvelope(jObject, out float[]? vector)
+            IReadOnlyDictionary<string, object?> map => TryDecodeVectorEnvelope(map, out float[]? vector)
                 ? vector
-                : jObject.Properties().ToDictionary(
-                    property => property.Name,
-                    property => NormalizeValue(property.Value)),
-            JArray jArray => NormalizeArray(jArray),
+                : map.ToDictionary(pair => pair.Key, pair => NormalizeValue(pair.Value)),
+            IReadOnlyList<object?> array => NormalizeArray(array),
             _ => value,
         };
     }
 
-    private static object? NormalizeArray(JArray array)
+    private static object? NormalizeArray(IReadOnlyList<object?> array)
     {
         List<object?> values = array.Select(NormalizeValue).ToList();
         return TryConvertNumericSequenceToVector(values, out float[] vector)
@@ -376,19 +374,27 @@ public sealed class WalEntry
         };
     }
 
-    private static bool TryDecodeVectorEnvelope(JObject node, out float[]? vector)
+    private static bool TryDecodeVectorEnvelope(IReadOnlyDictionary<string, object?> node, out float[]? vector)
     {
         vector = null;
 
-        string? type = node[VectorEnvelopeTypeKey]?.Value<string>();
-        if (!string.Equals(type, VectorEnvelopeTypeValue, StringComparison.Ordinal))
+        if (!node.TryGetValue(VectorEnvelopeTypeKey, out object? typeValue)
+            || typeValue is not string type
+            || !string.Equals(type, VectorEnvelopeTypeValue, StringComparison.Ordinal))
         {
             return false;
         }
 
-        int? dims = node[VectorEnvelopeDimsKey]?.Value<int>();
-        string? encoded = node[VectorEnvelopeDataKey]?.Value<string>();
-        if (!dims.HasValue || dims.Value <= 0 || string.IsNullOrWhiteSpace(encoded))
+        if (!node.TryGetValue(VectorEnvelopeDimsKey, out object? dimsValue)
+            || !TryConvertToInt32(dimsValue, out int dims)
+            || dims <= 0)
+        {
+            return false;
+        }
+
+        if (!node.TryGetValue(VectorEnvelopeDataKey, out object? dataValue)
+            || dataValue is not string encoded
+            || string.IsNullOrWhiteSpace(encoded))
         {
             return false;
         }
@@ -403,12 +409,12 @@ public sealed class WalEntry
             return false;
         }
 
-        if (payload.Length != dims.Value * sizeof(int))
+        if (payload.Length != dims * sizeof(int))
         {
             return false;
         }
 
-        float[] decoded = new float[dims.Value];
+        float[] decoded = new float[dims];
         for (int i = 0; i < decoded.Length; i++)
         {
             int bits = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(i * sizeof(int), sizeof(int)));
@@ -417,6 +423,25 @@ public sealed class WalEntry
 
         vector = decoded;
         return true;
+    }
+
+    private static bool TryConvertToInt32(object? value, out int result)
+    {
+        switch (value)
+        {
+            case int i:
+                result = i;
+                return true;
+            case long l when l is >= int.MinValue and <= int.MaxValue:
+                result = (int)l;
+                return true;
+            case double d when d == Math.Floor(d) && d is >= int.MinValue and <= int.MaxValue:
+                result = (int)d;
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
     }
 
     private static bool TryConvertNumericSequenceToVector(IEnumerable<object?> values, out float[] vector)
