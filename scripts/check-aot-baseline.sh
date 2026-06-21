@@ -1,47 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# AOT/trim warning ratchet for the Native AOT initiative (Phase 1).
+# Native AOT durable fence (Phase 1 — COMPLETE).
 #
-# DataVo.Data is LOCKED (IL warnings are errors in its csproj) so any regression there fails its build.
-# DataVo.Core still has trim/AOT warnings while the STJ migration + dynamic removal are in progress; this
-# script is the durable fence that ensures that count only ever goes DOWN. Lower CORE_BASELINE as each
-# phase lands. When it reaches 0, move DataVo.Core to WarningsAsErrors (like DataVo.Data) and retire this.
+# DataVo.Data and DataVo.Core are both LOCKED: their csproj turns the IL trim/AOT diagnostics into errors,
+# so any Native-AOT regression in the engine core fails the build. This script is the CI gate that proves
+# both library projects still build clean. (Companion gate: publish DataVo.AotSmoke with PublishAot and run
+# the native binary — it must print "ALL SMOKE CHECKS PASSED".)
 #
-# Analog of the GC program's InsertAllocationGuardTests ceiling: tighten, never loosen.
+# History of the DataVo.Core ratchet that got us here: 184 (fence) -> 144 (T1 catalog XmlSerializer)
+# -> 100 (T2 Newtonsoft->STJ) -> 76 (T3 Volcano/Select->STJ) -> 0 (T4 dynamic/DLR) + T5 Activator factory.
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Ratchet baseline — the maximum allowed IL trim/AOT warnings in DataVo.Core. LOWER THIS as work lands.
-# History: 184 (fence) -> 144 (T1: catalog XmlSerializer) -> 100 (T2: Newtonsoft -> STJ source-gen)
-#          -> 76 (T3: Volcano spill + Select snapshot) -> 0 (T4: dynamic/DLR eradicated).
-CORE_BASELINE=0
+echo "== AOT fence (locked library projects) =="
 
-build_il_warnings() {
-  local proj="$1"
-  dotnet build "$proj" -c Release -t:Rebuild 2>&1 | grep -cE "warning IL[0-9]+" || true
-}
+for project in DataVo.Data DataVo.Core; do
+  echo "-- $project (locked: IL trim/AOT warnings are errors) --"
+  if ! dotnet build "$ROOT_DIR/$project/$project.csproj" -c Release -t:Rebuild >/dev/null 2>&1; then
+    echo "FAIL: $project build failed — a Native-AOT/trim regression turned an IL diagnostic into an error."
+    exit 1
+  fi
+  echo "OK: $project builds clean and AOT-locked."
+done
 
-echo "== AOT ratchet =="
-
-echo "-- DataVo.Data (locked, expect 0) --"
-if ! dotnet build "$ROOT_DIR/DataVo.Data/DataVo.Data.csproj" -c Release -t:Rebuild >/dev/null 2>&1; then
-  echo "FAIL: DataVo.Data build failed — an AOT/trim regression turned an IL warning into an error."
-  exit 1
-fi
-echo "OK: DataVo.Data builds clean and locked."
-
-echo "-- DataVo.Core (ratchet, baseline ${CORE_BASELINE}) --"
-core_count="$(build_il_warnings "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj")"
-echo "Current DataVo.Core IL trim/AOT warnings: ${core_count} (baseline ${CORE_BASELINE})"
-
-if [ "$core_count" -gt "$CORE_BASELINE" ]; then
-  echo "FAIL: DataVo.Core AOT warnings increased (${core_count} > ${CORE_BASELINE}). Fix the regression or justify it."
-  exit 1
-fi
-
-if [ "$core_count" -lt "$CORE_BASELINE" ]; then
-  echo "PROGRESS: DataVo.Core is below baseline (${core_count} < ${CORE_BASELINE}). Lower CORE_BASELINE to ${core_count} in this script to ratchet."
-fi
-
-echo "OK: AOT ratchet holds."
+echo "OK: AOT fence holds — DataVo.Core + DataVo.Data are Native-AOT clean and locked."
