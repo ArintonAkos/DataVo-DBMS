@@ -1,8 +1,10 @@
 # Native AOT — Phase 1 (Engine Core) Design
 
-> **Status:** Design / scope agreed (2026-06-22). Verification fence implemented; Core cleanup to be
-> planned next (`brainstorm → spec → plan` per the program roadmap). Supersedes nothing; this is the
-> first slice of the Native AOT initiative recorded in
+> **Status: COMPLETE (2026-06-23).** All 5 targets shipped (plan:
+> [`../plans/2026-06-22-aot-phase1-core-cleanup-plan.md`](../plans/2026-06-22-aot-phase1-core-cleanup-plan.md)).
+> `DataVo.Core` + `DataVo.Data` are 100% Native AOT clean and locked; the `DataVo.AotSmoke` whole-program
+> AOT publish has **zero** warnings (from 217) and the native binary runs correctly; full suite 1009/1009.
+> First slice of the Native AOT initiative in
 > [`../plans/2026-06-19-advanced-features-roadmap.md`](../plans/2026-06-19-advanced-features-roadmap.md).
 
 ## Goal

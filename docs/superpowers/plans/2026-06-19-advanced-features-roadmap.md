@@ -30,8 +30,16 @@ already sketched as W7 (schema-aware compiled-query verification) and W8 (zero-a
 projection), and builds on the in-flight `DataVo.Generators`. Those become sub-tracks of the AOT push
 rather than independent Wave-3 items.
 
-**Status:** awaiting its own `brainstorm → spec → plan` cycle (not yet started). The waves below remain
-the backlog for feature work that resumes after the AOT initiative.
+**Status — Phase 1 (engine core) COMPLETE (2026-06-23).** `DataVo.Core` + `DataVo.Data` are 100% Native
+AOT clean and **locked** (IL trim/AOT diagnostics are build errors). The whole-program
+`dotnet publish /p:PublishAot=true` of the `DataVo.AotSmoke` gate produces **zero** AOT/trim warnings
+(from 217) and the native binary runs correctly. Done via: catalog `XmlSerializer` → reflection-free
+`System.Xml.Linq`; Newtonsoft + reflection-mode STJ → STJ **source generators**; `dynamic`/DLR eradicated
+from the SQL evaluation core; `Activator` → explicit factory. Plan:
+[`2026-06-22-aot-phase1-core-cleanup-plan.md`](2026-06-22-aot-phase1-core-cleanup-plan.md); spec:
+[`../specs/2026-06-22-native-aot-phase1-design.md`](../specs/2026-06-22-native-aot-phase1-design.md).
+**Phase 2 (EF Core AOT — its own compiled-model/precompiled-query tooling) is the next AOT slice, not yet
+started.** The waves below remain the backlog for feature work.
 
 ---
 
