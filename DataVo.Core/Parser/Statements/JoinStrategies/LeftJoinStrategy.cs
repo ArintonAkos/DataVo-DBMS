@@ -200,7 +200,7 @@ internal class LeftJoinStrategy : IJoinStrategy
                 continue;
             }
 
-            dynamic key = keyValue;
+            object key = keyValue;
             lookup.AddRecord(key, rightTableRow.Value);
         }
 

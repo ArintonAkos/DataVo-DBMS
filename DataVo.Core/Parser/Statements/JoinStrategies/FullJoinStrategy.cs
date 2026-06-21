@@ -261,7 +261,7 @@ internal class FullJoinStrategy : IJoinStrategy
                 continue;
             }
 
-            dynamic key = keyValue;
+            object key = keyValue;
             lookup.AddRecord(key, rightRowEntry.Value);
         }
 
