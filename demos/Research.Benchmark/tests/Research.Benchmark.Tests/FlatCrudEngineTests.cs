@@ -13,6 +13,7 @@ public sealed class FlatCrudEngineTests
     {
         yield return [new DataVoFlatCrudEngine()];
         yield return [new LiteDbFlatCrudEngine()];
+        yield return [new SqliteFlatCrudEngine()];
     }
 
     [Theory]
