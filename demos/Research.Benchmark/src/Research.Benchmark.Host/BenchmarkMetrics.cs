@@ -69,12 +69,15 @@ public static class BenchmarkReportFormatter
 
         foreach (BenchmarkMetrics row in rows)
         {
+            // A NaN total marks an engine that could not run in this environment (e.g. a missing native
+            // extension); report it as n/a rather than a fabricated number.
+            bool unavailable = double.IsNaN(row.TotalExecutionTimeMs);
             builder
                 .Append(scenarioLabel).Append(',')
                 .Append(row.EngineName).Append(',')
-                .Append(row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
-                .Append(row.P99LatencyMs.ToString("F6", CultureInfo.InvariantCulture)).Append(',')
-                .Append(row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
+                .Append(unavailable ? "n/a" : row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
+                .Append(unavailable ? "n/a" : row.P99LatencyMs.ToString("F6", CultureInfo.InvariantCulture)).Append(',')
+                .Append(unavailable ? "n/a" : row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
                 .AppendLine();
         }
 

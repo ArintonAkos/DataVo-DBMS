@@ -8,6 +8,7 @@ using Research.Benchmark.Runners.DeepDocument;
 using Research.Benchmark.Runners.DuckDb;
 using Research.Benchmark.Runners.FlatCrud;
 using Research.Benchmark.Runners.Sqlite;
+using Research.Benchmark.Runners.VectorSearch;
 
 string benchmarkScenario = ReadStringArg(args, "--scenario", "complex-vip");
 int baselineOrders = ReadIntArg(args, "--baseline", 10_000);
@@ -71,10 +72,24 @@ else if (benchmarkScenario.Equals("deep-document", StringComparison.OrdinalIgnor
     if (ShouldRun(engineFilter, "sqlite"))
         results.Add(RunDeepDocument(new SqliteDeepDocumentEngine(), orders, progressEvery));
 }
+else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnoreCase))
+{
+    int vectors = ReadIntArg(args, "--vectors", 10_000);
+    int dimensions = ReadIntArg(args, "--dimensions", 1_536);
+    int queries = ReadIntArg(args, "--queries", 100);
+    int topK = ReadIntArg(args, "--topk", 10);
+
+    if (ShouldRun(engineFilter, "datavo"))
+        results.Add(RunVectorSearch(new DataVoVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
+    if (ShouldRun(engineFilter, "litedb"))
+        results.Add(RunVectorSearch(new LiteDbVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(RunVectorSearch(new SqliteVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
+}
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, or deep-document.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, deep-document, or vector-search.");
 }
 
 if (outputFormat == "csv")
@@ -386,6 +401,129 @@ static BenchmarkMetrics RunDeepDocument(IDeepDocumentEngine engine, int orders, 
             Console.SetOut(originalOut);
         }
     }
+}
+
+static BenchmarkMetrics RunVectorSearch(IVectorSearchEngine engine, int vectors, int dimensions, int queries, int topK, int progressEvery)
+{
+    using (engine)
+    {
+        Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: vector search — inserting {vectors:N0} x {dimensions}-dim vectors then {queries:N0} top-{topK} queries...");
+
+        // Build the dataset + query set BEFORE the measured region (deterministic RNG for reproducibility).
+        var rng = new Random(20260623);
+        var data = new float[vectors][];
+        for (int i = 0; i < vectors; i++)
+        {
+            data[i] = RandomUnitVector(rng, dimensions);
+        }
+
+        var queryVectors = new float[queries][];
+        for (int q = 0; q < queries; q++)
+        {
+            queryVectors[q] = data[(q * 97) % vectors]; // query with existing vectors spread across the set
+        }
+
+        try
+        {
+            engine.Initialize(dimensions);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: unavailable — {ex.Message} (reported as n/a)");
+            return new BenchmarkMetrics(engine.Name, double.NaN, double.NaN, double.NaN, double.NaN);
+        }
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            double[] queryLatenciesMs = new double[queries];
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var totalStopwatch = Stopwatch.StartNew();
+
+            // Phase 1 — insert vectors.
+            engine.BeginBatch();
+            for (int i = 0; i < vectors; i++)
+            {
+                engine.Insert(i + 1, data[i]);
+
+                int inserted = i + 1;
+                if (progressEvery > 0 && (inserted % progressEvery == 0 || inserted == vectors))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: inserted {inserted:N0}/{vectors:N0}, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            engine.CompleteBatch();
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert phase complete in {totalStopwatch.Elapsed.TotalSeconds:N1}s; starting {queries:N0} top-{topK} queries...");
+
+            // Phase 2 — Top-K nearest-neighbour queries (per-query latency for P99).
+            long sink = 0;
+            for (int q = 0; q < queries; q++)
+            {
+                long iterationStart = Stopwatch.GetTimestamp();
+                IReadOnlyList<long> ids = engine.Search(queryVectors[q], topK);
+                queryLatenciesMs[q] = (Stopwatch.GetTimestamp() - iterationStart) * 1000d / Stopwatch.Frequency;
+                sink += ids.Count;
+
+                int done = q + 1;
+                if (progressEvery > 0 && (done % Math.Max(1, progressEvery / 100) == 0 || done == queries))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {done:N0}/{queries:N0} queries, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            totalStopwatch.Stop();
+            long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(queryLatenciesMs);
+
+            if (sink == long.MinValue)
+            {
+                Console.Error.WriteLine(sink);
+            }
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                p50,
+                p99,
+                allocatedBytes / 1024d / 1024d);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static float[] RandomUnitVector(Random rng, int dimensions)
+{
+    var vector = new float[dimensions];
+    double sumSquares = 0d;
+    for (int i = 0; i < dimensions; i++)
+    {
+        float value = (float)(rng.NextDouble() * 2d - 1d);
+        vector[i] = value;
+        sumSquares += value * (double)value;
+    }
+
+    float norm = (float)Math.Sqrt(sumSquares);
+    if (norm > 0f)
+    {
+        for (int i = 0; i < dimensions; i++)
+        {
+            vector[i] /= norm;
+        }
+    }
+
+    return vector;
 }
 
 static DeepOrder BuildDeepOrder(long id)
