@@ -4,6 +4,7 @@ using Research.Benchmark.Host;
 using Research.Benchmark.Runners;
 using Research.Benchmark.Runners.ComplexVip;
 using Research.Benchmark.Runners.DataVo;
+using Research.Benchmark.Runners.DeepDocument;
 using Research.Benchmark.Runners.DuckDb;
 using Research.Benchmark.Runners.FlatCrud;
 using Research.Benchmark.Runners.Sqlite;
@@ -56,11 +57,24 @@ else if (benchmarkScenario.Equals("flat-crud", StringComparison.OrdinalIgnoreCas
         results.Add(RunFlatCrud(new DataVoFlatCrudEngine(), records, progressEvery));
     if (ShouldRun(engineFilter, "litedb"))
         results.Add(RunFlatCrud(new LiteDbFlatCrudEngine(), records, progressEvery));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(RunFlatCrud(new SqliteFlatCrudEngine(), records, progressEvery));
+}
+else if (benchmarkScenario.Equals("deep-document", StringComparison.OrdinalIgnoreCase))
+{
+    int orders = ReadIntArg(args, "--orders", 5_000);
+
+    if (ShouldRun(engineFilter, "datavo"))
+        results.Add(RunDeepDocument(new DataVoDeepDocumentEngine(), orders, progressEvery));
+    if (ShouldRun(engineFilter, "litedb"))
+        results.Add(RunDeepDocument(new LiteDbDeepDocumentEngine(), orders, progressEvery));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(RunDeepDocument(new SqliteDeepDocumentEngine(), orders, progressEvery));
 }
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, or flat-crud.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, or deep-document.");
 }
 
 if (outputFormat == "csv")
@@ -284,6 +298,112 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
             Console.SetOut(originalOut);
         }
     }
+}
+
+static BenchmarkMetrics RunDeepDocument(IDeepDocumentEngine engine, int orders, int progressEvery)
+{
+    using (engine)
+    {
+        Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: deep document — saving {orders:N0} nested orders (5 items, 2 addresses each) then loading {orders:N0}...");
+
+        // Build the dataset BEFORE the measured region.
+        var data = new DeepOrder[orders];
+        for (int i = 0; i < orders; i++)
+        {
+            data[i] = BuildDeepOrder(i + 1);
+        }
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            engine.Initialize();
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            double[] loadLatenciesMs = new double[orders];
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var totalStopwatch = Stopwatch.StartNew();
+
+            // Phase 1 — save nested orders.
+            engine.BeginBatch();
+            for (int i = 0; i < orders; i++)
+            {
+                engine.Save(data[i]);
+
+                int saved = i + 1;
+                if (progressEvery > 0 && (saved % progressEvery == 0 || saved == orders))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: saved {saved:N0}/{orders:N0}, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            engine.CompleteBatch();
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: save phase complete in {totalStopwatch.Elapsed.TotalSeconds:N1}s; starting {orders:N0} loads...");
+
+            // Phase 2 — load + reconstruct each order whole (per-op latency for P99).
+            long checksum = 0;
+            for (int i = 0; i < orders; i++)
+            {
+                long iterationStart = Stopwatch.GetTimestamp();
+                DeepOrder? loaded = engine.Load(i + 1);
+                loadLatenciesMs[i] = (Stopwatch.GetTimestamp() - iterationStart) * 1000d / Stopwatch.Frequency;
+                if (loaded is not null)
+                {
+                    checksum += loaded.Items.Count + loaded.Addresses.Count;
+                }
+
+                int done = i + 1;
+                if (progressEvery > 0 && (done % progressEvery == 0 || done == orders))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {done:N0}/{orders:N0} loads, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            totalStopwatch.Stop();
+            long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(loadLatenciesMs);
+
+            if (checksum == long.MinValue)
+            {
+                Console.Error.WriteLine(checksum);
+            }
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                p50,
+                p99,
+                allocatedBytes / 1024d / 1024d);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static DeepOrder BuildDeepOrder(long id)
+{
+    var items = new OrderItem[5];
+    for (int s = 0; s < items.Length; s++)
+    {
+        items[s] = new OrderItem(Sku: (int)(id * 10 + s), Name: $"item-{s}", Quantity: s + 1, UnitPrice: (s + 1) * 9.99d);
+    }
+
+    var addresses = new OrderAddress[]
+    {
+        new("billing", $"{id} Main St", "Springfield", "12345"),
+        new("shipping", $"{id} Oak Ave", "Shelbyville", "67890"),
+    };
+
+    double total = items.Sum(item => item.Quantity * item.UnitPrice);
+    return new DeepOrder(id, $"cust-{id}", total, items, addresses);
 }
 
 static int ReadIntArg(string[] args, string name, int defaultValue)
