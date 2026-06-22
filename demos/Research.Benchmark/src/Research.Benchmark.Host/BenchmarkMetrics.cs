@@ -57,4 +57,27 @@ public static class BenchmarkReportFormatter
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// Emits the exact CSV schema required for downstream graphing:
+    /// <c>Scenario,Engine,ExecutionTime_ms,P99Latency_ms,AllocatedMemory_MB</c>.
+    /// </summary>
+    public static string ToCsv(string scenarioLabel, IEnumerable<BenchmarkMetrics> rows)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Scenario,Engine,ExecutionTime_ms,P99Latency_ms,AllocatedMemory_MB");
+
+        foreach (BenchmarkMetrics row in rows)
+        {
+            builder
+                .Append(scenarioLabel).Append(',')
+                .Append(row.EngineName).Append(',')
+                .Append(row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
+                .Append(row.P99LatencyMs.ToString("F6", CultureInfo.InvariantCulture)).Append(',')
+                .Append(row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
+                .AppendLine();
+        }
+
+        return builder.ToString();
+    }
 }
