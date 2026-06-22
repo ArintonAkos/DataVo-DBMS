@@ -635,12 +635,13 @@ internal sealed class InsertRowService(
         string primaryKeyValue,
         IReadOnlyList<string> primaryKeys)
     {
+        // The _PK_ index is created with the table and maintained on every insert (it also backs keyed
+        // SELECTs), so it is authoritative: trust both a hit and a miss. Only when the index is genuinely
+        // unavailable (IndexException) do we fall back to a full-table scan. Trusting the miss keeps keyed
+        // bulk inserts at O(log n) per row instead of materializing+scanning the whole table each time.
         try
         {
-            if (indexes.IndexContainsKey(primaryKeyValue, $"_PK_{tableName}", tableName, databaseName))
-            {
-                return true;
-            }
+            return indexes.IndexContainsKey(primaryKeyValue, $"_PK_{tableName}", tableName, databaseName);
         }
         catch (IndexException)
         {
@@ -667,12 +668,11 @@ internal sealed class InsertRowService(
         string columnName,
         string uniqueValue)
     {
+        // The _UK_ index is created with the table and maintained on every insert, so it is authoritative:
+        // trust hit and miss alike; only scan when the index is genuinely unavailable (IndexException).
         try
         {
-            if (indexes.IndexContainsKey(uniqueValue, $"_UK_{columnName}", tableName, databaseName))
-            {
-                return true;
-            }
+            return indexes.IndexContainsKey(uniqueValue, $"_UK_{columnName}", tableName, databaseName);
         }
         catch (IndexException)
         {

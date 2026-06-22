@@ -25,6 +25,12 @@ public enum IndexPersistenceMode
     /// Buffer mutations in memory and flush them after a configured threshold is reached.
     /// </summary>
     Buffered,
+
+    /// <summary>
+    /// Never persist index mutations — the index lives purely in memory. Used by in-memory storage mode,
+    /// where serializing the index to disk on every write is both incorrect (no disk) and O(n) per write.
+    /// </summary>
+    None,
 }
 
 /// <summary>
@@ -109,6 +115,26 @@ public class IndexManager : IDisposable
         _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
         Directory.CreateDirectory(_indexRootDirectory);
         EnsureDefaultRegistrations();
+
+        // In-memory contexts never persist indexes: serializing the whole index to disk on every write is
+        // both wrong (no disk) and O(n) per write (O(n^2) bulk load). Disk mode keeps immediate persistence.
+        if (config?.StorageMode == StorageMode.InMemory)
+        {
+            _persistenceMode = IndexPersistenceMode.None;
+        }
+    }
+
+    /// <summary>
+    /// Persists the index now only in <see cref="IndexPersistenceMode.Immediate"/> mode. In
+    /// <see cref="IndexPersistenceMode.Buffered"/> mode the threshold flush handles it; in
+    /// <see cref="IndexPersistenceMode.None"/> mode the index is never serialized.
+    /// </summary>
+    private void FlushIfImmediate(string cacheKey)
+    {
+        if (_persistenceMode == IndexPersistenceMode.Immediate)
+        {
+            FlushInternal(cacheKey);
+        }
     }
 
     /// <summary>
@@ -265,6 +291,14 @@ public class IndexManager : IDisposable
 
     private void FlushInternal(string cacheKey)
     {
+        // In-memory contexts never serialize indexes. Guard here (not just at the call sites) so no flush
+        // path — explicit FlushAll, dirty-on-read flushes, disposal — ever serializes an in-memory index.
+        if (_persistenceMode == IndexPersistenceMode.None)
+        {
+            _dirtyIndices.Remove(cacheKey);
+            return;
+        }
+
         if (!_cache.TryGetValue(cacheKey, out IIndexBase? index))
             return;
         if (!_metadata.TryGetValue(cacheKey, out var metadata))
@@ -375,7 +409,7 @@ public class IndexManager : IDisposable
 
         _cachePaths[metadata.CacheKey] = BuildIndexPath(metadata);
         MarkDirty(metadata.CacheKey);
-        FlushInternal(metadata.CacheKey);
+        FlushIfImmediate(metadata.CacheKey);
     }
 
     /// <summary>
@@ -653,7 +687,7 @@ public class IndexManager : IDisposable
 
         _cachePaths[cacheKey] = BuildIndexPath(metadata);
         MarkDirty(cacheKey);
-        FlushInternal(cacheKey);
+        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -665,7 +699,7 @@ public class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         vectorIndex.Insert(rowId, [.. vector]);
         MarkDirty(cacheKey);
-        FlushInternal(cacheKey);
+        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -677,7 +711,7 @@ public class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         vectorIndex.Delete(toBeDeletedIds);
         MarkDirty(cacheKey);
-        FlushInternal(cacheKey);
+        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -707,7 +741,7 @@ public class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.Insert(value, rowId);
             MarkDirtyNoLock(cacheKey);
-            FlushInternal(cacheKey);
+            FlushIfImmediate(cacheKey);
         }
 
         TrackMutation(GetCacheKey(indexName, tableName, databaseName));
@@ -724,7 +758,7 @@ public class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.DeleteValues(toBeDeletedIds);
             MarkDirtyNoLock(cacheKey);
-            FlushInternal(cacheKey);
+            FlushIfImmediate(cacheKey);
         }
 
         TrackMutation(GetCacheKey(indexName, tableName, databaseName));
