@@ -13,4 +13,10 @@
     <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2067;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Hardware-accelerated, cross-platform vector math (ARM NEON / x86 AVX) used by the HNSW distance
+         kernels. AOT-safe: TensorPrimitives is intrinsics-based with no reflection. -->
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.0" />
+  </ItemGroup>
+
 </Project>

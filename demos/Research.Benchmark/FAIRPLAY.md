@@ -53,6 +53,10 @@ export SQLITE_VEC_PATH=/tmp/vec0.dylib
   before the fix — an ~89× speedup and ~232× less GC allocation on the same machine. The normalized
   three-table read still does more work than LiteDB's single BSON document, but it is no longer the
   quadratic bottleneck it was.
-- **Vector Search:** DataVo's HNSW gives fast queries (single-digit-ms p99) but a slow build at 1536-dim;
-  LiteDB brute force is ~900 ms p99 (no vector index); `sqlite-vec` is fastest end-to-end. HNSW build speed
-  is a DataVo optimization target.
+- **Vector Search:** DataVo's HNSW gives fast queries (single-digit-ms p99). The distance kernels are now
+  hardware-accelerated cross-platform via `TensorPrimitives` (ARM NEON / x86 AVX) — previously the hand-written
+  SIMD path was x86-only, so on Apple Silicon every distance fell back to a scalar loop. Building 10k × 1536-dim
+  vectors went 265.5 s → 131.2 s (~2.0×) on the same arm64 machine, with query p99 7.1 ms → 4.3 ms. The
+  remaining build cost is now HNSW graph construction (candidate/neighbour selection, locking, allocation),
+  not distance math — a separate optimization target. LiteDB brute force is ~900 ms p99 (no vector index);
+  `sqlite-vec` is fastest end-to-end.
