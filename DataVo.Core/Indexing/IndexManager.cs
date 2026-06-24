@@ -682,7 +682,9 @@ public class IndexManager : IDisposable
 
         foreach (var (rowId, vector) in vectors)
         {
-            vectorIndex.Insert(rowId, [.. vector]);
+            // No defensive copy: vector index implementations copy into their own backing store
+            // on insert, so [.. vector] here was a redundant per-insert float[] allocation.
+            vectorIndex.Insert(rowId, vector);
         }
 
         _cachePaths[cacheKey] = BuildIndexPath(metadata);
@@ -697,7 +699,8 @@ public class IndexManager : IDisposable
     {
         string cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        vectorIndex.Insert(rowId, [.. vector]);
+        // No defensive copy: the index copies into its own backing store on insert.
+        vectorIndex.Insert(rowId, vector);
         MarkDirty(cacheKey);
         FlushIfImmediate(cacheKey);
     }

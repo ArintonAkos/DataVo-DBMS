@@ -22,11 +22,23 @@ public class HNSWIndex : IVectorIndex
     [ThreadStatic] private static SearchWorkspace? _threadSearchWorkspace;
     [ThreadStatic] private static SelectionWorkspace? _threadSelectionWorkspace;
 
-    private float[] _vectorData = [];
+    // Paged (chunked) backing stores. Vectors and graph links grow by appending fixed-size pages
+    // instead of reallocating+copying one contiguous array, eliminating the ~2x doubling churn
+    // (and large-object-heap pressure) that dominated build allocation at high dimensions.
+    // Each ordinal's data is wholly contained in a single page; address = pages[ord >> shift][(ord & mask) * stride].
+    private float[][] _vectorPages = [];
+    private int _vectorPageShift;
+    private int _vectorPageMask;
+    private int _vectorPageOrdinals = 1;
+
+    private int[][] _graphPages = [];
+    private int _graphPageShift;
+    private int _graphPageMask;
+    private int _graphPageOrdinals = 1;
+
     private long[] _rowIdByOrdinal = [];
     private bool[] _isActive = [];
     private int[] _nodeLevels = [];
-    private int[] _graphLinks = [];
 
     private int[] _levelStrides = [];
     private int[] _levelOffsets = [];
@@ -580,11 +592,11 @@ public class HNSWIndex : IVectorIndex
         _rowIdToOrdinal.Clear();
         _freeOrdinals.Clear();
 
-        _vectorData = [];
+        _vectorPages = [];
+        _graphPages = [];
         _rowIdByOrdinal = [];
         _isActive = [];
         _nodeLevels = [];
-        _graphLinks = [];
 
         _vectorDimension = -1;
         _ordinalCapacity = 0;
@@ -594,6 +606,7 @@ public class HNSWIndex : IVectorIndex
         _levelOffsets = [];
         _levelStrides = [];
         _nodeGraphStride = 0;
+        ComputePageGeometry();
         _nodeLocks = [];
 
         EntryPointId = null;
@@ -638,11 +651,11 @@ public class HNSWIndex : IVectorIndex
             VectorDimension = _vectorDimension,
             OrdinalCapacity = _ordinalCapacity,
             NextOrdinal = _nextOrdinal,
-            VectorData = [.. _vectorData],
+            VectorData = FlattenVectorPages(),
             RowIdByOrdinal = [.. _rowIdByOrdinal],
             IsActive = [.. _isActive],
             NodeLevels = [.. _nodeLevels],
-            GraphLinks = [.. _graphLinks],
+            GraphLinks = FlattenGraphPages(),
             LevelStrides = [.. _levelStrides],
             LevelOffsets = [.. _levelOffsets],
             RowIds = rowIds,
@@ -676,14 +689,17 @@ public class HNSWIndex : IVectorIndex
         _nextOrdinal = state.NextOrdinal;
         _count = state.Count;
 
-        _vectorData = state.VectorData ?? [];
         _rowIdByOrdinal = state.RowIdByOrdinal ?? [];
         _isActive = state.IsActive ?? [];
         _nodeLevels = state.NodeLevels ?? [];
-        _graphLinks = state.GraphLinks ?? [];
         _levelStrides = state.LevelStrides ?? [];
         _levelOffsets = state.LevelOffsets ?? [];
         _nodeGraphStride = _levelStrides.Sum();
+
+        // Geometry depends on dimension + stride; rebuild paged stores from the flat persisted arrays.
+        ComputePageGeometry();
+        RebuildVectorPagesFromFlat(state.VectorData ?? []);
+        RebuildGraphPagesFromFlat(state.GraphLinks ?? []);
 
         _rowIdToOrdinal.Clear();
         if (state.RowIds != null && state.Ordinals != null)
@@ -738,6 +754,146 @@ public class HNSWIndex : IVectorIndex
         }
 
         _nodeGraphStride = offset;
+        ComputePageGeometry();
+    }
+
+    // Sizes each page to hold the largest power-of-two number of ordinals that keeps the page
+    // under the 85,000-byte large-object-heap threshold (floored at one ordinal per page for
+    // very wide rows). Power-of-two ordinals-per-page lets address resolution use shift/mask.
+    private void ComputePageGeometry()
+    {
+        (_vectorPageShift, _vectorPageMask, _vectorPageOrdinals) =
+            PageGeometryFor(_vectorDimension > 0 ? _vectorDimension * sizeof(float) : 1);
+        (_graphPageShift, _graphPageMask, _graphPageOrdinals) =
+            PageGeometryFor(_nodeGraphStride > 0 ? _nodeGraphStride * sizeof(int) : 1);
+    }
+
+    private static (int Shift, int Mask, int Ordinals) PageGeometryFor(int bytesPerOrdinal)
+    {
+        const int LohThreshold = 85_000;
+        int budgetOrdinals = Math.Max(1, (LohThreshold - 16) / Math.Max(1, bytesPerOrdinal));
+
+        int ordinals = 1;
+        int shift = 0;
+        while ((ordinals << 1) <= budgetOrdinals)
+        {
+            ordinals <<= 1;
+            shift++;
+        }
+
+        return (shift, ordinals - 1, ordinals);
+    }
+
+    private void EnsureVectorPages(int requiredOrdinals)
+    {
+        if (_vectorDimension <= 0 || requiredOrdinals <= 0)
+        {
+            return;
+        }
+
+        int neededPages = ((requiredOrdinals - 1) >> _vectorPageShift) + 1;
+        if (neededPages > _vectorPages.Length)
+        {
+            int previous = _vectorPages.Length;
+            Array.Resize(ref _vectorPages, neededPages);
+            int pageElements = _vectorPageOrdinals * _vectorDimension;
+            for (int page = previous; page < neededPages; page++)
+            {
+                _vectorPages[page] = new float[pageElements];
+            }
+        }
+    }
+
+    private void EnsureGraphPages(int requiredOrdinals)
+    {
+        if (_nodeGraphStride <= 0 || requiredOrdinals <= 0)
+        {
+            return;
+        }
+
+        int neededPages = ((requiredOrdinals - 1) >> _graphPageShift) + 1;
+        if (neededPages > _graphPages.Length)
+        {
+            int previous = _graphPages.Length;
+            Array.Resize(ref _graphPages, neededPages);
+            int pageElements = _graphPageOrdinals * _nodeGraphStride;
+            for (int page = previous; page < neededPages; page++)
+            {
+                int[] links = new int[pageElements];
+                Array.Fill(links, -1);
+                _graphPages[page] = links;
+            }
+        }
+    }
+
+    // Flatten the live ordinals [0, _nextOrdinal) into the contiguous layout the persisted
+    // (JSON) FlatState expects, preserving the on-disk format across the paging refactor.
+    private float[] FlattenVectorPages()
+    {
+        if (_vectorDimension <= 0 || _nextOrdinal <= 0)
+        {
+            return [];
+        }
+
+        var flat = new float[(long)_nextOrdinal * _vectorDimension];
+        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
+        {
+            int slot = (ordinal & _vectorPageMask) * _vectorDimension;
+            Array.Copy(_vectorPages[ordinal >> _vectorPageShift], slot, flat, ordinal * _vectorDimension, _vectorDimension);
+        }
+
+        return flat;
+    }
+
+    private int[] FlattenGraphPages()
+    {
+        if (_nodeGraphStride <= 0 || _nextOrdinal <= 0)
+        {
+            return [];
+        }
+
+        var flat = new int[(long)_nextOrdinal * _nodeGraphStride];
+        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
+        {
+            int slot = (ordinal & _graphPageMask) * _nodeGraphStride;
+            Array.Copy(_graphPages[ordinal >> _graphPageShift], slot, flat, ordinal * _nodeGraphStride, _nodeGraphStride);
+        }
+
+        return flat;
+    }
+
+    private void RebuildVectorPagesFromFlat(float[] flat)
+    {
+        _vectorPages = [];
+        if (_vectorDimension <= 0 || flat.Length == 0)
+        {
+            return;
+        }
+
+        int ordinals = flat.Length / _vectorDimension;
+        EnsureVectorPages(ordinals);
+        for (int ordinal = 0; ordinal < ordinals; ordinal++)
+        {
+            int slot = (ordinal & _vectorPageMask) * _vectorDimension;
+            Array.Copy(flat, ordinal * _vectorDimension, _vectorPages[ordinal >> _vectorPageShift], slot, _vectorDimension);
+        }
+    }
+
+    private void RebuildGraphPagesFromFlat(int[] flat)
+    {
+        _graphPages = [];
+        if (_nodeGraphStride <= 0 || flat.Length == 0)
+        {
+            return;
+        }
+
+        int ordinals = flat.Length / _nodeGraphStride;
+        EnsureGraphPages(ordinals);
+        for (int ordinal = 0; ordinal < ordinals; ordinal++)
+        {
+            int slot = (ordinal & _graphPageMask) * _nodeGraphStride;
+            Array.Copy(flat, ordinal * _nodeGraphStride, _graphPages[ordinal >> _graphPageShift], slot, _nodeGraphStride);
+        }
     }
 
     private int AcquireOrdinal(long rowId)
@@ -751,11 +907,18 @@ public class HNSWIndex : IVectorIndex
 
     private void EnsureCapacity(int requiredOrdinals)
     {
+        // Pages grow to exactly the required ordinal count (no doubling): the per-page buffer is
+        // the only large allocation, so over-allocating it would reintroduce the realloc churn we
+        // are eliminating. Pre-sizing callers (Reserve) pass the full expected count once.
+        EnsureVectorPages(requiredOrdinals);
+        EnsureGraphPages(requiredOrdinals);
+
         if (requiredOrdinals <= _ordinalCapacity)
         {
             return;
         }
 
+        // Scalar per-ordinal arrays are tiny (1-8 bytes each); keep amortized doubling for them.
         int newCapacity = Math.Max(requiredOrdinals, Math.Max(256, _ordinalCapacity * 2));
         int previousCapacity = _ordinalCapacity;
         _ordinalCapacity = newCapacity;
@@ -769,35 +932,18 @@ public class HNSWIndex : IVectorIndex
         {
             _nodeLocks[i] = new object();
         }
-
-        if (_vectorDimension > 0)
-        {
-            Array.Resize(ref _vectorData, newCapacity * _vectorDimension);
-        }
-
-        int oldGraphLength = _graphLinks.Length;
-        Array.Resize(ref _graphLinks, newCapacity * _nodeGraphStride);
-        if (_graphLinks.Length > oldGraphLength)
-        {
-            Array.Fill(_graphLinks, -1, oldGraphLength, _graphLinks.Length - oldGraphLength);
-        }
-
-        if (oldGraphLength == 0 && _graphLinks.Length > 0)
-        {
-            Array.Fill(_graphLinks, -1);
-        }
     }
 
     private void WriteVector(int ordinal, ReadOnlySpan<float> vector)
     {
-        int offset = ordinal * _vectorDimension;
-        vector.CopyTo(_vectorData.AsSpan(offset, _vectorDimension));
+        int slot = (ordinal & _vectorPageMask) * _vectorDimension;
+        vector.CopyTo(_vectorPages[ordinal >> _vectorPageShift].AsSpan(slot, _vectorDimension));
     }
 
     private ReadOnlySpan<float> GetVector(int ordinal)
     {
-        int offset = ordinal * _vectorDimension;
-        return _vectorData.AsSpan(offset, _vectorDimension);
+        int slot = (ordinal & _vectorPageMask) * _vectorDimension;
+        return _vectorPages[ordinal >> _vectorPageShift].AsSpan(slot, _vectorDimension);
     }
 
     private int SampleLevel()
@@ -813,15 +959,14 @@ public class HNSWIndex : IVectorIndex
 
     private Span<int> GetNeighborSpan(int ordinal, int level)
     {
-        int offset = (ordinal * _nodeGraphStride) + _levelOffsets[level];
-        int stride = _levelStrides[level];
-        return _graphLinks.AsSpan(offset, stride);
+        int baseSlot = (ordinal & _graphPageMask) * _nodeGraphStride;
+        return _graphPages[ordinal >> _graphPageShift].AsSpan(baseSlot + _levelOffsets[level], _levelStrides[level]);
     }
 
     private void ClearNodeLinks(int ordinal)
     {
-        int offset = ordinal * _nodeGraphStride;
-        _graphLinks.AsSpan(offset, _nodeGraphStride).Fill(-1);
+        int baseSlot = (ordinal & _graphPageMask) * _nodeGraphStride;
+        _graphPages[ordinal >> _graphPageShift].AsSpan(baseSlot, _nodeGraphStride).Fill(-1);
     }
 
     private int ResolveNeighborLimit(int level)
@@ -1032,7 +1177,16 @@ public class HNSWIndex : IVectorIndex
             return;
         }
 
-        WithNodeLock(source, () =>
+        // Direct per-node lock (no captured lambda): the edge-connection path runs once per
+        // directed edge (~M x bidirectional x N), so a closure+delegate here allocated heavily
+        // during build. The body is inlined under the lock to keep it allocation-free.
+        object? nodeLock = TryGetNodeLock(source);
+        if (nodeLock == null)
+        {
+            return;
+        }
+
+        lock (nodeLock)
         {
             Span<int> neighbors = GetNeighborSpan(source, level);
             for (int i = 0; i < neighbors.Length; i++)
@@ -1067,12 +1221,18 @@ public class HNSWIndex : IVectorIndex
             workspace.ExistingNeighbors[candidateCount++] = target;
 
             SelectNeighbors(level, source, workspace.ExistingNeighbors.AsSpan(0, candidateCount), neighbors);
-        });
+        }
     }
 
     private void RemoveEdgeOneWay(int source, int target, int level)
     {
-        WithNodeLock(source, () =>
+        object? nodeLock = TryGetNodeLock(source);
+        if (nodeLock == null)
+        {
+            return;
+        }
+
+        lock (nodeLock)
         {
             Span<int> neighbors = GetNeighborSpan(source, level);
             int foundAt = -1;
@@ -1104,7 +1264,7 @@ public class HNSWIndex : IVectorIndex
             }
 
             neighbors[count - 1] = -1;
-        });
+        }
     }
 
     // Zero-allocation selection path over spans. It writes the selected ordinals directly to destination.
@@ -1391,34 +1551,32 @@ public class HNSWIndex : IVectorIndex
             return;
         }
 
-        int offset = ordinal * _vectorDimension;
-        if ((uint)offset >= (uint)_vectorData.Length)
+        int page = ordinal >> _vectorPageShift;
+        if ((uint)page >= (uint)_vectorPages.Length)
         {
             return;
         }
 
-        fixed (float* ptr = &_vectorData[offset])
+        float[] data = _vectorPages[page];
+        int slot = (ordinal & _vectorPageMask) * _vectorDimension;
+        if ((uint)slot >= (uint)data.Length)
+        {
+            return;
+        }
+
+        fixed (float* ptr = &data[slot])
         {
             Sse.Prefetch0(ptr);
         }
     }
 
-    private void WithNodeLock(int ordinal, Action action)
+    private object? TryGetNodeLock(int ordinal)
     {
         if ((uint)ordinal >= (uint)_nodeLocks.Length)
         {
-            return;
+            return null;
         }
 
-        object? nodeLock = _nodeLocks[ordinal];
-        if (nodeLock == null)
-        {
-            return;
-        }
-
-        lock (nodeLock)
-        {
-            action();
-        }
+        return _nodeLocks[ordinal];
     }
 }
