@@ -107,6 +107,94 @@ public class CompiledQueryRuntimeTests
     }
 
     [Fact]
+    public void CompiledSelectMany_ByIndexedNonPrimaryKeyColumn_RoutesThroughSecondaryIndex()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.BulkInsert(
+            "Players",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada", ["Level"] = 5 },
+                new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "Grace", ["Level"] = 8 }
+            ]);
+        context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
+
+        // Force the secondary index to throw if (and only if) it is consulted. Before the planner learns
+        // to use secondary indexes it scans the table instead, never touching this index, so the throwing
+        // index is never reached and nothing is thrown.
+        ReplaceIndexWithThrowingIndex(context, "Players", "ix_players_name");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            DataVoCompiledQuery.SelectMany(
+                context,
+                DataVoCompiledQueryPlan.SelectMany(
+                    tableName: "Players",
+                    projectedColumns: ["Id", "Name", "Level"],
+                    whereColumn: "Name",
+                    parameterName: "name"),
+                [new DataVoCompiledQueryParameter("name", "Ada")],
+                static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!)));
+
+        Assert.Equal("boom", ex.Message);
+    }
+
+    [Fact]
+    public void CompiledSelectMany_ByIndexedNonPrimaryKeyColumn_ReturnsSameRowsAsScan()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.BulkInsert(
+            "Players",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada", ["Level"] = 5 },
+                new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "Grace", ["Level"] = 8 },
+                new Dictionary<string, object?> { ["Id"] = 3, ["Name"] = "Ada", ["Level"] = 9 }
+            ]);
+        context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
+
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+            context,
+            DataVoCompiledQueryPlan.SelectMany(
+                tableName: "Players",
+                projectedColumns: ["Id", "Name", "Level"],
+                whereColumn: "Name",
+                parameterName: "name"),
+            [new DataVoCompiledQueryParameter("name", "Ada")],
+            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+
+        // Index lookup returns the same rows the equivalent unindexed scan returns
+        // (CompiledSelectMany_ByNonPrimaryKeyColumn_FallsBackToScanAndReturnsTypedResults), order-independent.
+        Assert.Equal(
+            new[] { new PlayerProjection(1, "Ada", 5), new PlayerProjection(3, "Ada", 9) }.OrderBy(p => p.Id),
+            players.OrderBy(p => p.Id));
+    }
+
+    [Fact]
+    public void CompiledSelectMany_ByIndexedNonPrimaryKeyColumn_NoMatchingKey_ReturnsEmpty()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.BulkInsert(
+            "Players",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada", ["Level"] = 5 }
+            ]);
+        context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
+
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+            context,
+            DataVoCompiledQueryPlan.SelectMany(
+                tableName: "Players",
+                projectedColumns: ["Id", "Name", "Level"],
+                whereColumn: "Name",
+                parameterName: "name"),
+            [new DataVoCompiledQueryParameter("name", "Nobody")],
+            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+
+        Assert.Empty(players);
+    }
+
+    [Fact]
     public void CompiledSelectSingle_MissingPrimaryKeyIndex_FallsBackToScan()
     {
         using var context = CreateContext();
@@ -282,10 +370,15 @@ public class CompiledQueryRuntimeTests
 
     private static void ReplacePrimaryKeyIndexWithThrowingIndex(DataVoContext context, string tableName)
     {
+        ReplaceIndexWithThrowingIndex(context, tableName, "_PK_" + tableName);
+    }
+
+    private static void ReplaceIndexWithThrowingIndex(DataVoContext context, string tableName, string indexName)
+    {
         FieldInfo cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
         string databaseName = CurrentDatabase(context);
-        string cacheKey = $"{databaseName}/{tableName}_{"_PK_" + tableName}".ToLowerInvariant();
+        string cacheKey = $"{databaseName}/{tableName}_{indexName}".ToLowerInvariant();
         cache[cacheKey] = new ThrowingIndex();
     }
 }

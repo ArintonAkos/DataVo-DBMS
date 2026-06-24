@@ -46,9 +46,13 @@ export SQLITE_VEC_PATH=/tmp/vec0.dylib
 - **Flat CRUD:** DataVo beats LiteDB (typed in-memory vs BSON); SQLite (native) is fastest. Exposed and
   fixed two real engine bugs (O(n²) keyed-insert validation scan; in-memory index serialized to disk per
   write) — without them DataVo was ~95 s / 119 GB here.
-- **Deep Document:** DataVo is materially slower — its compiled-query path only index-accelerates PK/UK, so
-  multi-table child reconstruction by FK scans (O(n²)). LiteDB (single BSON doc) and SQLite (indexed FK)
-  win. Run at 2,000 orders to keep that O(n²) bounded. Known limitation, not a bug.
+- **Deep Document:** the compiled-query path now fully routes single-column non-PK equality predicates to
+  secondary indexes (not just PK/UK), so multi-table child reconstruction is O(log n) per child lookup
+  instead of an O(n²) full scan. With `CREATE INDEX` on the child `OrderId` columns, DataVo reconstructs
+  2,000 normalized orders sub-second (~238 ms total; p50 0.037 ms / p99 0.048 ms per load), versus ~21 s
+  before the fix — an ~89× speedup and ~232× less GC allocation on the same machine. The normalized
+  three-table read still does more work than LiteDB's single BSON document, but it is no longer the
+  quadratic bottleneck it was.
 - **Vector Search:** DataVo's HNSW gives fast queries (single-digit-ms p99) but a slow build at 1536-dim;
   LiteDB brute force is ~900 ms p99 (no vector index); `sqlite-vec` is fastest end-to-end. HNSW build speed
   is a DataVo optimization target.
