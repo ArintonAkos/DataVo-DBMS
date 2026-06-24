@@ -215,20 +215,8 @@ public static class DataVoCompiledQuery
 
             try
             {
-                List<long> ids =
-                [
-                    .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName)
-                ];
-
-                Dictionary<long, StoredRow> indexedRows =
-                    context.Engine.StorageContext.GetTypedTableContents(ids, plan.TableName, databaseName);
-
-                List<KeyValuePair<long, Dictionary<string, object?>>> matches = ids
-                    .Where(indexedRows.ContainsKey)
-                    .Select(id => new KeyValuePair<long, Dictionary<string, object?>>(
-                        id,
-                        MaterializeStoredRow(indexedRows[id])))
-                    .ToList();
+                List<KeyValuePair<long, Dictionary<string, object?>>> matches =
+                    ReadRowsViaIndex(context, plan, databaseName, primaryKeyIndexName, expectedKey);
 
                 if (matches.Count > 0)
                 {
@@ -236,6 +224,27 @@ public static class DataVoCompiledQuery
                 }
             }
             catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
+            {
+            }
+        }
+        else if (TryResolveSingleColumnIndex(context, plan.TableName, databaseName, plan.WhereColumn!, out string secondaryIndexName))
+        {
+            // A non-primary-key equality predicate covered by a single-column secondary (or unique) index
+            // routes through that index instead of scanning the whole table — this is the O(n) -> O(log n)
+            // path that mirrors the interpreted runtime (StatementEvaluatorWOJoin.HandleIndexableStatement).
+            // An empty or unhealthy index falls through to the typed full scan so results stay correct even
+            // when the index is stale, matching the primary-key branch's behavior.
+            try
+            {
+                List<KeyValuePair<long, Dictionary<string, object?>>> matches =
+                    ReadRowsViaIndex(context, plan, databaseName, secondaryIndexName, expectedKey);
+
+                if (matches.Count > 0)
+                {
+                    return matches;
+                }
+            }
+            catch (IndexException)
             {
             }
         }
@@ -267,6 +276,62 @@ public static class DataVoCompiledQuery
         }
 
         return scannedMatches;
+    }
+
+    /// <summary>
+    /// Reads the rows whose IDs the named B-Tree index returns for <paramref name="expectedKey"/>, materializing
+    /// only the rows the index points at. Shared by the primary-key and secondary-index access paths.
+    /// </summary>
+    private static List<KeyValuePair<long, Dictionary<string, object?>>> ReadRowsViaIndex(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        string databaseName,
+        string indexName,
+        string expectedKey)
+    {
+        List<long> ids =
+        [
+            .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, indexName, plan.TableName, databaseName)
+        ];
+
+        Dictionary<long, StoredRow> indexedRows =
+            context.Engine.StorageContext.GetTypedTableContents(ids, plan.TableName, databaseName);
+
+        return ids
+            .Where(indexedRows.ContainsKey)
+            .Select(id => new KeyValuePair<long, Dictionary<string, object?>>(
+                id,
+                MaterializeStoredRow(indexedRows[id])))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Finds a single-column scalar B-Tree index (secondary or unique) that exactly covers
+    /// <paramref name="whereColumn"/>. Only single-column indexes qualify because the compiled plan builds a
+    /// single-column comparison key; a composite index keys on the concatenation of its columns and would not
+    /// match. Vector indexes are excluded — they do not answer equality predicates.
+    /// </summary>
+    private static bool TryResolveSingleColumnIndex(
+        DataVoContext context,
+        string tableName,
+        string databaseName,
+        string whereColumn,
+        out string indexName)
+    {
+        foreach (IndexFile index in context.Engine.Catalog.GetTableIndexes(tableName, databaseName))
+        {
+            if (index.AttributeNames.Count == 1
+                && !string.IsNullOrWhiteSpace(index.IndexFileName)
+                && index.AttributeNames[0].Equals(whereColumn, StringComparison.OrdinalIgnoreCase)
+                && !context.Engine.IndexManager.SupportsVectorIndexType(index.IndexKind))
+            {
+                indexName = index.IndexFileName;
+                return true;
+            }
+        }
+
+        indexName = string.Empty;
+        return false;
     }
 
     private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)

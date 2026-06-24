@@ -53,6 +53,12 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
         ExecuteOk("CREATE TABLE Orders (Id INT PRIMARY KEY, Customer VARCHAR(40), Total FLOAT)");
         ExecuteOk("CREATE TABLE OrderItems (Id INT PRIMARY KEY, OrderId INT, Sku INT, Name VARCHAR(40), Quantity INT, UnitPrice FLOAT)");
         ExecuteOk("CREATE TABLE Addresses (Id INT PRIMARY KEY, OrderId INT, Kind VARCHAR(10), Street VARCHAR(40), City VARCHAR(40), PostalCode VARCHAR(12))");
+
+        // The order is loaded by its child rows' OrderId (a non-primary-key column). Index that column on
+        // both child tables so the compiled child queries use an O(log n) index lookup instead of scanning
+        // the whole child table once per loaded order (which is the O(n^2) reconstruction cost).
+        ExecuteOk("CREATE INDEX ix_OrderItems_OrderId ON OrderItems (OrderId)");
+        ExecuteOk("CREATE INDEX ix_Addresses_OrderId ON Addresses (OrderId)");
     }
 
     public void BeginBatch() { }
