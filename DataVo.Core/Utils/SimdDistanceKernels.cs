@@ -1,3 +1,4 @@
+using System.Numerics.Tensors;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -22,7 +23,7 @@ internal static class SimdDistanceKernels
             return avxResult;
         }
 
-        return ScalarCosineDistance(a, b);
+        return TensorCosineDistance(a, b);
     }
 
     public static float EuclideanDistance(float[] a, float[] b)
@@ -42,7 +43,8 @@ internal static class SimdDistanceKernels
             return avxResult;
         }
 
-        return ScalarEuclideanDistance(a, b);
+        // Cross-platform hardware acceleration: the runtime lowers this to ARM NEON or x86 AVX.
+        return TensorPrimitives.Distance(a, b);
     }
 
     private static unsafe bool TryCosineDistanceAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
@@ -287,38 +289,24 @@ internal static class SimdDistanceKernels
         return true;
     }
 
-    private static float ScalarCosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    /// <summary>
+    /// Cosine distance via <see cref="TensorPrimitives"/>, used wherever the x86 AVX path is unavailable
+    /// (notably ARM, where the runtime lowers these primitives to NEON). Computes the same
+    /// <c>1 - dot / (‖a‖·‖b‖)</c> as the intrinsic and scalar paths, and preserves the zero-vector contract
+    /// (distance 1, never NaN) that a raw <c>CosineSimilarity</c> divide-by-zero would violate.
+    /// </summary>
+    private static float TensorCosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-        float dot = 0f;
-        float magA = 0f;
-        float magB = 0f;
+        float normA = TensorPrimitives.Norm(a);
+        float normB = TensorPrimitives.Norm(b);
 
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            magA += a[i] * a[i];
-            magB += b[i] * b[i];
-        }
-
-        if (magA <= 0f || magB <= 0f)
+        if (normA <= 0f || normB <= 0f)
         {
             return 1f;
         }
 
-        float similarity = dot / (MathF.Sqrt(magA) * MathF.Sqrt(magB));
+        float similarity = TensorPrimitives.Dot(a, b) / (normA * normB);
         return 1f - similarity;
-    }
-
-    private static float ScalarEuclideanDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
-    {
-        float sum = 0f;
-        for (int i = 0; i < a.Length; i++)
-        {
-            float diff = a[i] - b[i];
-            sum += diff * diff;
-        }
-
-        return MathF.Sqrt(sum);
     }
 
     private static unsafe float HorizontalSum(Vector256<float> vector)
