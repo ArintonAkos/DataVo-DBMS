@@ -206,6 +206,26 @@ public static class DataVoCompiledQuery
         string databaseName,
         string expectedKey)
     {
+        // Compile-time fast path: a generator-resolved single-column index skips the per-call primary-key and
+        // index catalog lookups below. A wrong/missing tag (IndexException) or an empty result falls through to
+        // the runtime resolution, so correctness never depends on the compile-time bet being right.
+        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        {
+            try
+            {
+                List<KeyValuePair<long, Dictionary<string, object?>>> tagged =
+                    ReadRowsViaIndex(context, plan, databaseName, plan.ResolvedIndexName, expectedKey);
+
+                if (tagged.Count > 0)
+                {
+                    return tagged;
+                }
+            }
+            catch (IndexException)
+            {
+            }
+        }
+
         List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
         bool isPrimaryKeyPredicate = primaryKeys.Contains(plan.WhereColumn!, StringComparer.OrdinalIgnoreCase);
 
