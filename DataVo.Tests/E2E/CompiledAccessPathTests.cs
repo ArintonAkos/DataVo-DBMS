@@ -4,11 +4,16 @@ using DataVo.Core.BTree.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine.Config;
+using Xunit.Abstractions;
 
 namespace DataVo.Tests.E2E;
 
 public class CompiledAccessPathTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public CompiledAccessPathTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public void SelectMany_DefaultAccessPath_IsRuntimeResolve()
     {
@@ -129,6 +134,53 @@ public class CompiledAccessPathTests
         Assert.Equal(
             new[] { new PlayerProjection(1, "Ada", 5), new PlayerProjection(3, "Ada", 9) },
             players.OrderBy(p => p.Id));
+    }
+
+    [Fact]
+    public void TaggedPath_AllocatesLessPerCallThanRuntimeResolve()
+    {
+        // Both plans materialize the same rows through the same index; the only difference is that the tagged
+        // path skips GetTablePrimaryKeys (a List<string>) and the GetTableIndexes catalog scan on every call.
+        // Over many iterations that constant-factor re-derivation must show up as strictly lower allocation.
+        const int iterations = 2_000;
+
+        using var context = CreateContext();
+        SeedPlayers(context);
+        context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
+
+        DataVoCompiledQueryPlan tagged = DataVoCompiledQueryPlan.SelectMany(
+            "Players", ["Id", "Name", "Level"], "Name", "name",
+            accessPath: CompiledAccessPath.SingleColumnIndex,
+            resolvedIndexName: "ix_players_name");
+        DataVoCompiledQueryPlan runtimeResolve = DataVoCompiledQueryPlan.SelectMany(
+            "Players", ["Id", "Name", "Level"], "Name", "name");
+
+        // Warm up both paths so one-time allocations are excluded from the measurement.
+        QueryByName(context, tagged, "Ada");
+        QueryByName(context, runtimeResolve, "Ada");
+
+        long runtimeBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < iterations; i++)
+        {
+            QueryByName(context, runtimeResolve, "Ada");
+        }
+        long runtimeBytes = GC.GetAllocatedBytesForCurrentThread() - runtimeBefore;
+
+        long taggedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < iterations; i++)
+        {
+            QueryByName(context, tagged, "Ada");
+        }
+        long taggedBytes = GC.GetAllocatedBytesForCurrentThread() - taggedBefore;
+
+        _output.WriteLine($"RuntimeResolve: {runtimeBytes} B over {iterations} calls ({(double)runtimeBytes / iterations:F1} B/call)");
+        _output.WriteLine($"Tagged:         {taggedBytes} B over {iterations} calls ({(double)taggedBytes / iterations:F1} B/call)");
+        _output.WriteLine($"Reduction:      {runtimeBytes - taggedBytes} B total ({(double)(runtimeBytes - taggedBytes) / iterations:F1} B/call, {100.0 * (runtimeBytes - taggedBytes) / runtimeBytes:F1}%)");
+
+        Assert.True(
+            taggedBytes < runtimeBytes,
+            $"Expected tagged path to allocate less than RuntimeResolve over {iterations} calls; " +
+            $"tagged={taggedBytes} B, runtime={runtimeBytes} B.");
     }
 
     private sealed class ThrowingIndex : IIndex
