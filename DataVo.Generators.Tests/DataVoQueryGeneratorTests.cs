@@ -1,8 +1,13 @@
+using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
+using System.Threading;
 using DataVo.Core;
 using DataVo.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 
 namespace DataVo.Generators.Tests;
 
@@ -144,7 +149,68 @@ public class DataVoQueryGeneratorTests
         Assert.Equal("level", model.Assignments["Level"]);
     }
 
-    private static GeneratorDriverRunResult RunGenerator(string source)
+    private const string OrderItemsSource = """
+        using System.Collections.Generic;
+        using DataVo.Core;
+        using DataVo.Core.CompiledQueries;
+
+        public sealed record OrderItemRow(int OrderId, string Sku);
+
+        public static partial class OrderQueries
+        {
+            [DataVoQuery("SELECT OrderId, Sku FROM OrderItems WHERE OrderId = @orderId")]
+            public static partial IReadOnlyList<OrderItemRow> LoadItems(DataVoContext db, int orderId);
+        }
+        """;
+
+    [Fact]
+    public void Generator_WithManifestIndex_EmitsSingleColumnIndexTaggedSelectMany()
+    {
+        const string manifest = """
+            CREATE TABLE OrderItems (OrderItemId INT PRIMARY KEY, OrderId INT, Sku VARCHAR(50));
+            CREATE INDEX ix_OrderItems_OrderId ON OrderItems (OrderId);
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(OrderItemsSource, manifest);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex", generated);
+        Assert.Contains("resolvedIndexName: \"ix_OrderItems_OrderId\"", generated);
+    }
+
+    [Fact]
+    public void Generator_WithoutManifest_EmitsUntaggedSelectMany()
+    {
+        GeneratorDriverRunResult result = RunGenerator(OrderItemsSource);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("DataVoCompiledQueryPlan.SelectMany", generated);
+        Assert.DoesNotContain("CompiledAccessPath.SingleColumnIndex", generated);
+    }
+
+    [Fact]
+    public void Generator_ManifestColumnNotIndexed_EmitsUntaggedSelectMany()
+    {
+        const string manifest = "CREATE TABLE OrderItems (OrderItemId INT PRIMARY KEY, OrderId INT, Sku VARCHAR(50));";
+
+        GeneratorDriverRunResult result = RunGenerator(OrderItemsSource, manifest);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.DoesNotContain("CompiledAccessPath.SingleColumnIndex", generated);
+    }
+
+    [Fact]
+    public void Generator_ManifestFileNotMarked_IsIgnored_EmitsUntagged()
+    {
+        const string manifest = "CREATE INDEX ix_OrderItems_OrderId ON OrderItems (OrderId);";
+
+        GeneratorDriverRunResult result = RunGenerator(OrderItemsSource, manifest, markAsManifest: false);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.DoesNotContain("CompiledAccessPath.SingleColumnIndex", generated);
+    }
+
+    private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
     {
         CSharpCompilation compilation = CSharpCompilation.Create(
             "GeneratorTest",
@@ -152,10 +218,65 @@ public class DataVoQueryGeneratorTests
             GetMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        IIncrementalGenerator generator = new DataVoQueryGenerator();
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+        var additionalTexts = new List<AdditionalText>();
+        var fileOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (manifest is not null)
+        {
+            additionalTexts.Add(new InMemoryAdditionalText("schema.sql", manifest));
+            if (markAsManifest)
+            {
+                fileOptions["build_metadata.AdditionalFiles.DataVoSchemaManifest"] = "true";
+            }
+        }
+
+        var optionsProvider = new TestAnalyzerConfigOptionsProvider(new DictionaryOptions(fileOptions));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new DataVoQueryGenerator().AsSourceGenerator()],
+            additionalTexts,
+            parseOptions: null,
+            optionsProvider: optionsProvider);
         driver = driver.RunGenerators(compilation);
         return driver.GetRunResult();
+    }
+
+    private sealed class InMemoryAdditionalText : AdditionalText
+    {
+        private readonly string _text;
+
+        public InMemoryAdditionalText(string path, string text)
+        {
+            Path = path;
+            _text = text;
+        }
+
+        public override string Path { get; }
+
+        public override SourceText GetText(CancellationToken cancellationToken = default)
+            => SourceText.From(_text, Encoding.UTF8);
+    }
+
+    private sealed class TestAnalyzerConfigOptionsProvider : AnalyzerConfigOptionsProvider
+    {
+        private static readonly DictionaryOptions EmptyOptions = new(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        private readonly AnalyzerConfigOptions _fileOptions;
+
+        public TestAnalyzerConfigOptionsProvider(AnalyzerConfigOptions fileOptions) => _fileOptions = fileOptions;
+
+        public override AnalyzerConfigOptions GlobalOptions => EmptyOptions;
+
+        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => EmptyOptions;
+
+        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => _fileOptions;
+    }
+
+    private sealed class DictionaryOptions : AnalyzerConfigOptions
+    {
+        private readonly Dictionary<string, string> _values;
+
+        public DictionaryOptions(Dictionary<string, string> values) => _values = values;
+
+        public override bool TryGetValue(string key, out string value) => _values.TryGetValue(key, out value!);
     }
 
     private static MetadataReference[] GetMetadataReferences()

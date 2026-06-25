@@ -1,9 +1,11 @@
+using System.Collections.Immutable;
 using System.Text;
 using DataVo.Generators.Diagnostics;
 using DataVo.Generators.Sql;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace DataVo.Generators;
 
@@ -25,13 +27,27 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
 
         IncrementalValueProvider<Compilation> compilation = context.CompilationProvider;
 
-        context.RegisterSourceOutput(methods.Combine(compilation), static (spc, pair) =>
-        {
-            EmitForMethod(spc, pair.Left, pair.Right);
-        });
+        // Compile-time schema catalog built from AdditionalFiles flagged DataVoSchemaManifest="true".
+        IncrementalValueProvider<CompileTimeCatalog> catalog = context.AdditionalTextsProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Where(static pair => IsSchemaManifest(pair.Left, pair.Right))
+            .Select(static (pair, ct) => pair.Left.GetText(ct)?.ToString() ?? string.Empty)
+            .Collect()
+            .Select(static (texts, _) => DataVoDdlManifestParser.Parse(texts));
+
+        context.RegisterSourceOutput(
+            methods.Combine(compilation).Combine(catalog),
+            static (spc, pair) => EmitForMethod(spc, pair.Left.Left, pair.Left.Right, pair.Right));
     }
 
-    private static void EmitForMethod(SourceProductionContext context, MethodDeclarationSyntax method, Compilation compilation)
+    private static bool IsSchemaManifest(AdditionalText text, AnalyzerConfigOptionsProvider optionsProvider)
+    {
+        return optionsProvider.GetOptions(text)
+                   .TryGetValue("build_metadata.AdditionalFiles.DataVoSchemaManifest", out string? value)
+               && string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EmitForMethod(SourceProductionContext context, MethodDeclarationSyntax method, Compilation compilation, CompileTimeCatalog catalog)
     {
         SemanticModel semanticModel = compilation.GetSemanticModel(method.SyntaxTree);
         if (semanticModel.GetDeclaredSymbol(method) is not IMethodSymbol symbol)
@@ -78,7 +94,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
             return;
         }
 
-        string source = GenerateMethod(symbol, model);
+        string source = GenerateMethod(symbol, model, catalog);
         context.AddSource($"{symbol.ContainingType.Name}_{symbol.Name}.DataVo.g.cs", source);
     }
 
@@ -103,7 +119,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         return ResolveExecutionShape(method, model) != GeneratedExecutionShape.Unsupported;
     }
 
-    private static string GenerateMethod(IMethodSymbol method, GeneratedQueryModel model)
+    private static string GenerateMethod(IMethodSymbol method, GeneratedQueryModel model, CompileTimeCatalog catalog)
     {
         string namespaceDeclaration = method.ContainingNamespace.IsGlobalNamespace
             ? string.Empty
@@ -125,7 +141,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
 
         builder.AppendLine(containingType);
         builder.AppendLine("{");
-        builder.AppendLine($"    private static readonly global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan {planName} = {GeneratePlan(method, model)};");
+        builder.AppendLine($"    private static readonly global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan {planName} = {GeneratePlan(method, model, catalog)};");
         builder.AppendLine($"    public static partial {returnType} {method.Name}({parameterList})");
         builder.AppendLine("    {");
         builder.AppendLine($"        return {GenerateInvocation(method, model, planName)};");
@@ -134,18 +150,31 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         return builder.ToString();
     }
 
-    private static string GeneratePlan(IMethodSymbol method, GeneratedQueryModel model)
+    private static string GeneratePlan(IMethodSymbol method, GeneratedQueryModel model, CompileTimeCatalog catalog)
     {
         GeneratedExecutionShape executionShape = ResolveExecutionShape(method, model);
 
         return executionShape switch
         {
             GeneratedExecutionShape.SelectSingle => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectSingle(\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
-            GeneratedExecutionShape.SelectMany => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany(\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
+            GeneratedExecutionShape.SelectMany => GenerateSelectManyPlan(model, catalog),
             GeneratedExecutionShape.Insert => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Insert(\"{model.TableName}\", new string[] {{ {QuoteList(model.InsertColumns)} }}, new string[] {{ {QuoteList(model.InsertParameterNames)} }})",
             GeneratedExecutionShape.Update => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Update(\"{model.TableName}\", new global::System.Collections.Generic.Dictionary<string, string>(global::System.StringComparer.OrdinalIgnoreCase) {{ {AssignmentList(model.Assignments)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
             _ => throw new InvalidOperationException($"Unsupported query kind '{model.Kind}'.")
         };
+    }
+
+    private static string GenerateSelectManyPlan(GeneratedQueryModel model, CompileTimeCatalog catalog)
+    {
+        string baseArguments =
+            $"\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\"";
+
+        if (catalog.TryResolveSingleColumnIndex(model.TableName, model.WhereColumn!, out string indexName))
+        {
+            return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany({baseArguments}, accessPath: global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex, resolvedIndexName: \"{indexName}\")";
+        }
+
+        return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany({baseArguments})";
     }
 
     private static string GenerateInvocation(IMethodSymbol method, GeneratedQueryModel model, string planName)
