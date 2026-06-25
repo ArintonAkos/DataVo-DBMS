@@ -13,7 +13,9 @@ public sealed class DataVoCompiledQueryPlan
         string? whereParameterName,
         IReadOnlyList<string> insertColumns,
         IReadOnlyList<string> insertParameterNames,
-        IReadOnlyDictionary<string, string> assignments)
+        IReadOnlyDictionary<string, string> assignments,
+        CompiledAccessPath accessPath = CompiledAccessPath.RuntimeResolve,
+        string? resolvedIndexName = null)
     {
         if (string.IsNullOrWhiteSpace(tableName))
         {
@@ -28,6 +30,8 @@ public sealed class DataVoCompiledQueryPlan
         InsertColumns = insertColumns;
         InsertParameterNames = insertParameterNames;
         Assignments = assignments;
+        AccessPath = accessPath;
+        ResolvedIndexName = resolvedIndexName;
     }
 
     /// <summary>Gets the compiled-query execution kind.</summary>
@@ -54,6 +58,12 @@ public sealed class DataVoCompiledQueryPlan
     /// <summary>Gets update column assignments mapped to parameter names.</summary>
     public IReadOnlyDictionary<string, string> Assignments { get; }
 
+    /// <summary>Gets the access path pre-resolved at compile time, or <see cref="CompiledAccessPath.RuntimeResolve"/>.</summary>
+    public CompiledAccessPath AccessPath { get; }
+
+    /// <summary>Gets the index name resolved at compile time when <see cref="AccessPath"/> is <see cref="CompiledAccessPath.SingleColumnIndex"/>; otherwise null.</summary>
+    public string? ResolvedIndexName { get; }
+
     /// <summary>
     /// Creates a plan that returns the first row matching an equality predicate.
     /// </summary>
@@ -75,14 +85,25 @@ public sealed class DataVoCompiledQueryPlan
     }
 
     /// <summary>
-    /// Creates a plan that returns all rows matching an equality predicate.
+    /// Creates a plan that returns all rows matching an equality predicate. When <paramref name="accessPath"/>
+    /// is <see cref="CompiledAccessPath.SingleColumnIndex"/>, the runtime routes directly through
+    /// <paramref name="resolvedIndexName"/>, falling back to runtime resolution if that index is missing.
     /// </summary>
     public static DataVoCompiledQueryPlan SelectMany(
         string tableName,
         IReadOnlyList<string> projectedColumns,
         string whereColumn,
-        string parameterName)
+        string parameterName,
+        CompiledAccessPath accessPath = CompiledAccessPath.RuntimeResolve,
+        string? resolvedIndexName = null)
     {
+        if (accessPath == CompiledAccessPath.SingleColumnIndex && string.IsNullOrWhiteSpace(resolvedIndexName))
+        {
+            throw new ArgumentException(
+                "A SingleColumnIndex access path requires a resolved index name.",
+                nameof(resolvedIndexName));
+        }
+
         return new DataVoCompiledQueryPlan(
             DataVoCompiledQueryKind.SelectMany,
             tableName,
@@ -91,7 +112,9 @@ public sealed class DataVoCompiledQueryPlan
             RequireIdentifier(parameterName, nameof(parameterName)),
             [],
             [],
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            accessPath,
+            resolvedIndexName);
     }
 
     /// <summary>
