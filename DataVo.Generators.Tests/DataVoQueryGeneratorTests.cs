@@ -210,6 +210,34 @@ public class DataVoQueryGeneratorTests
         Assert.DoesNotContain("CompiledAccessPath.SingleColumnIndex", generated);
     }
 
+    [Fact]
+    public void Generator_WithManifestIndex_EmitsSingleColumnIndexTaggedSelectSingle()
+    {
+        const string source = """
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record OrderItemRow(int OrderId, string Sku);
+
+            public static partial class OrderQueries
+            {
+                [DataVoQuery("SELECT OrderId, Sku FROM OrderItems WHERE OrderId = @orderId")]
+                public static partial OrderItemRow? GetItem(DataVoContext db, int orderId);
+            }
+            """;
+        const string manifest = """
+            CREATE TABLE OrderItems (OrderItemId INT PRIMARY KEY, OrderId INT, Sku VARCHAR(50));
+            CREATE INDEX ix_OrderItems_OrderId ON OrderItems (OrderId);
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source, manifest);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("DataVoCompiledQueryPlan.SelectSingle", generated);
+        Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex", generated);
+        Assert.Contains("resolvedIndexName: \"ix_OrderItems_OrderId\"", generated);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
     {
         CSharpCompilation compilation = CSharpCompilation.Create(
