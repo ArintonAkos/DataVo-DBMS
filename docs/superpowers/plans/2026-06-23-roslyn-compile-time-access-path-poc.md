@@ -265,24 +265,49 @@ Then add these members inside the `CompiledAccessPathTests` class:
     }
 
     [Fact]
-    public void TaggedSingleColumnIndex_RoutesThroughTheNamedIndex()
+    public void TaggedSingleColumnIndex_RoutesThroughTheNamedIndex_NotRuntimeResolution()
     {
-        // Replace the named index with one that throws when searched. If the tagged branch consults it (as it
-        // must), the InvalidOperationException propagates — proving the tag was honored, not silently scanned.
+        // Distinguishing test (revised — see note below). The Step-1 runtime planner already routes a non-PK
+        // equality through a secondary index, so replacing a *catalog* index with a throwing one cannot tell
+        // "tag honored" apart from "runtime resolution found the same index" — that naive test passes either way.
+        // Instead inject a throwing index under a GHOST name that is NOT in the catalog and create no real index
+        // on Name. Runtime resolution (GetOrLoadScalarIndex via GetTableIndexes) can never find the ghost, so
+        // without the compile-time tag the query just scans and returns rows. Only the tagged branch, which
+        // consults plan.ResolvedIndexName directly via the cache, reaches the ghost — and its
+        // InvalidOperationException propagates (the branch catches only IndexException). A thrown "boom" therefore
+        // proves the tag was honored, not that runtime resolution coincidentally routed to the same index.
         using var context = CreateContext();
         SeedPlayers(context);
-        context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
-        ReplaceIndexWithThrowingIndex(context, "Players", "ix_players_name");
+        InjectThrowingIndex(context, "Players", "ix_ghost");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => QueryByName(
             context,
             DataVoCompiledQueryPlan.SelectMany(
                 "Players", ["Id", "Name", "Level"], "Name", "name",
                 accessPath: CompiledAccessPath.SingleColumnIndex,
-                resolvedIndexName: "ix_players_name"),
+                resolvedIndexName: "ix_ghost"),
             "Ada"));
 
         Assert.Equal("boom", ex.Message);
+    }
+
+    [Fact]
+    public void UntaggedRuntimeResolve_DoesNotReachGhostIndex()
+    {
+        // The negative half of the routing proof: the SAME ghost setup with a RuntimeResolve plan never touches
+        // the ghost index (runtime resolution only sees catalog indexes), so it scans and returns rows.
+        using var context = CreateContext();
+        SeedPlayers(context);
+        InjectThrowingIndex(context, "Players", "ix_ghost");
+
+        IReadOnlyList<PlayerProjection> players = QueryByName(
+            context,
+            DataVoCompiledQueryPlan.SelectMany("Players", ["Id", "Name", "Level"], "Name", "name"),
+            "Ada");
+
+        Assert.Equal(
+            new[] { new PlayerProjection(1, "Ada", 5), new PlayerProjection(3, "Ada", 9) },
+            players.OrderBy(p => p.Id));
     }
 
     [Fact]
@@ -354,7 +379,9 @@ Then add these members inside the `CompiledAccessPathTests` class:
             ?? throw new InvalidOperationException("Expected current database.");
     }
 
-    private static void ReplaceIndexWithThrowingIndex(DataVoContext context, string tableName, string indexName)
+    // Injects a search-throwing index directly into the IndexManager cache under the (db/table_index) key, with
+    // no catalog registration. Mirrors the cache-key format the engine builds in GetCacheKey.
+    private static void InjectThrowingIndex(DataVoContext context, string tableName, string indexName)
     {
         FieldInfo cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
@@ -367,7 +394,9 @@ Then add these members inside the `CompiledAccessPathTests` class:
 - [ ] **Step 2: Run the new tests to verify they fail**
 
 Run: `dotnet test DataVo.Tests/DataVo.Tests.csproj --filter "FullyQualifiedName~CompiledAccessPathTests"`
-Expected: `TaggedSingleColumnIndex_RoutesThroughTheNamedIndex` FAILS (no exception thrown — the tag is ignored, so the table is scanned and the throwing index is never consulted). The parity and fallback tests may pass coincidentally (untagged behavior already returns correct rows); the routing test is the one that pins the new behavior.
+Expected: `TaggedSingleColumnIndex_RoutesThroughTheNamedIndex_NotRuntimeResolution` FAILS (no exception thrown — without the branch, runtime resolution cannot see the ghost index, so the query scans and returns rows). The parity, fallback, and `UntaggedRuntimeResolve_DoesNotReachGhostIndex` tests pass either way (untagged behavior already returns correct rows); the ghost routing test is the one that genuinely pins the new behavior.
+
+> **Methodology note:** an earlier draft replaced a *catalog-registered* index with a throwing one and asserted the tag routed to it. That test was a false RED — it passed without the runtime branch, because the Step-1 planner (`fe7ae84`) already routes non-PK equality through a secondary index, so "tag honored" and "runtime resolution found the same index" were indistinguishable. The ghost-index approach (cache-only, not in the catalog) is what makes the test deterministic: only the compile-time tag can reach an index the runtime catalog cannot see.
 
 - [ ] **Step 3: Add the tagged-path branch**
 
