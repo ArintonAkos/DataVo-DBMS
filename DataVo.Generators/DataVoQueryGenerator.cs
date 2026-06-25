@@ -156,25 +156,27 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
 
         return executionShape switch
         {
-            GeneratedExecutionShape.SelectSingle => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectSingle(\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
-            GeneratedExecutionShape.SelectMany => GenerateSelectManyPlan(model, catalog),
+            GeneratedExecutionShape.SelectSingle => GenerateSelectPlan("SelectSingle", model, catalog),
+            GeneratedExecutionShape.SelectMany => GenerateSelectPlan("SelectMany", model, catalog),
             GeneratedExecutionShape.Insert => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Insert(\"{model.TableName}\", new string[] {{ {QuoteList(model.InsertColumns)} }}, new string[] {{ {QuoteList(model.InsertParameterNames)} }})",
             GeneratedExecutionShape.Update => $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.Update(\"{model.TableName}\", new global::System.Collections.Generic.Dictionary<string, string>(global::System.StringComparer.OrdinalIgnoreCase) {{ {AssignmentList(model.Assignments)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\")",
             _ => throw new InvalidOperationException($"Unsupported query kind '{model.Kind}'.")
         };
     }
 
-    private static string GenerateSelectManyPlan(GeneratedQueryModel model, CompileTimeCatalog catalog)
+    // Shared by the SelectSingle and SelectMany shapes: both honor the same compile-time tag and share the
+    // runtime path (DataVoCompiledQuery.ExecuteSelect -> TryReadMatchingRowEntries).
+    private static string GenerateSelectPlan(string factoryName, GeneratedQueryModel model, CompileTimeCatalog catalog)
     {
         string baseArguments =
             $"\"{model.TableName}\", new string[] {{ {QuoteList(model.ProjectedColumns)} }}, \"{model.WhereColumn}\", \"{model.WhereParameterName}\"";
 
         if (catalog.TryResolveSingleColumnIndex(model.TableName, model.WhereColumn!, out string indexName))
         {
-            return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany({baseArguments}, accessPath: global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex, resolvedIndexName: \"{indexName}\")";
+            return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.{factoryName}({baseArguments}, accessPath: global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex, resolvedIndexName: \"{indexName}\")";
         }
 
-        return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.SelectMany({baseArguments})";
+        return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan.{factoryName}({baseArguments})";
     }
 
     private static string GenerateInvocation(IMethodSymbol method, GeneratedQueryModel model, string planName)

@@ -45,6 +45,36 @@ public class CompiledAccessPathTests
     }
 
     [Fact]
+    public void SelectSingle_DefaultAccessPath_IsRuntimeResolve()
+    {
+        var plan = DataVoCompiledQueryPlan.SelectSingle("Players", ["Id", "Name"], "Name", "name");
+
+        Assert.Equal(CompiledAccessPath.RuntimeResolve, plan.AccessPath);
+        Assert.Null(plan.ResolvedIndexName);
+    }
+
+    [Fact]
+    public void SelectSingle_TaggedSingleColumnIndex_CarriesAccessPathAndIndexName()
+    {
+        var plan = DataVoCompiledQueryPlan.SelectSingle(
+            "Players", ["Id", "Name"], "Name", "name",
+            accessPath: CompiledAccessPath.SingleColumnIndex,
+            resolvedIndexName: "ix_players_name");
+
+        Assert.Equal(CompiledAccessPath.SingleColumnIndex, plan.AccessPath);
+        Assert.Equal("ix_players_name", plan.ResolvedIndexName);
+    }
+
+    [Fact]
+    public void SelectSingle_SingleColumnIndexWithoutIndexName_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => DataVoCompiledQueryPlan.SelectSingle(
+            "Players", ["Id", "Name"], "Name", "name",
+            accessPath: CompiledAccessPath.SingleColumnIndex,
+            resolvedIndexName: null));
+    }
+
+    [Fact]
     public void TaggedSingleColumnIndex_ReturnsSameRowsAsRuntimeResolve()
     {
         using var context = CreateContext();
@@ -182,6 +212,31 @@ public class CompiledAccessPathTests
             $"Expected tagged path to allocate less than RuntimeResolve over {iterations} calls; " +
             $"tagged={taggedBytes} B, runtime={runtimeBytes} B.");
     }
+
+    [Fact]
+    public void SelectSingle_TaggedSingleColumnIndex_RoutesThroughTheNamedIndex()
+    {
+        // SelectSingle shares ExecuteSelect -> TryReadMatchingRowEntries, so it honors the tag identically to
+        // SelectMany. Same ghost-index proof: only the tag can reach an index the runtime catalog cannot see.
+        using var context = CreateContext();
+        SeedPlayers(context);
+        InjectThrowingIndex(context, "Players", "ix_ghost");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => QuerySingleByName(
+            context,
+            DataVoCompiledQueryPlan.SelectSingle(
+                "Players", ["Id", "Name", "Level"], "Name", "name",
+                accessPath: CompiledAccessPath.SingleColumnIndex,
+                resolvedIndexName: "ix_ghost"),
+            "Ada"));
+
+        Assert.Equal("boom", ex.Message);
+    }
+
+    private static PlayerProjection? QuerySingleByName(DataVoContext context, DataVoCompiledQueryPlan plan, string name)
+        => DataVoCompiledQuery.SelectSingle(
+            context, plan, [new DataVoCompiledQueryParameter("name", name)],
+            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
 
     private sealed class ThrowingIndex : IIndex
     {
