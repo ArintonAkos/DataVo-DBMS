@@ -206,6 +206,24 @@ public static class DataVoCompiledQuery
         string databaseName,
         string expectedKey)
     {
+        return TryReadMatchingStoredRows(context, plan, databaseName, expectedKey)
+            .Select(static entry => new KeyValuePair<long, Dictionary<string, object?>>(
+                entry.Key,
+                MaterializeStoredRow(entry.Value)))
+            .ToList();
+    }
+
+    // Shared finder: resolves matching rows via the compile-time tag, then primary key, then a single-column
+    // secondary index, then a typed full scan — returning the StoredRow itself so callers choose how to read it
+    // (dictionary materialization for the legacy path, typed projection for the compiled path). Behavior is
+    // identical to the previous TryReadMatchingRowEntries; only the return element type changed (StoredRow
+    // instead of an already-materialized dictionary).
+    private static List<KeyValuePair<long, StoredRow>> TryReadMatchingStoredRows(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        string databaseName,
+        string expectedKey)
+    {
         // Compile-time fast path: a generator-resolved single-column index skips the per-call primary-key and
         // index catalog lookups below. A wrong/missing tag (IndexException) or an empty result falls through to
         // the runtime resolution, so correctness never depends on the compile-time bet being right.
@@ -213,8 +231,8 @@ public static class DataVoCompiledQuery
         {
             try
             {
-                List<KeyValuePair<long, Dictionary<string, object?>>> tagged =
-                    ReadRowsViaIndex(context, plan, databaseName, plan.ResolvedIndexName, expectedKey);
+                List<KeyValuePair<long, StoredRow>> tagged =
+                    ReadStoredRowsViaIndex(context, plan, databaseName, plan.ResolvedIndexName, expectedKey);
 
                 if (tagged.Count > 0)
                 {
@@ -235,8 +253,8 @@ public static class DataVoCompiledQuery
 
             try
             {
-                List<KeyValuePair<long, Dictionary<string, object?>>> matches =
-                    ReadRowsViaIndex(context, plan, databaseName, primaryKeyIndexName, expectedKey);
+                List<KeyValuePair<long, StoredRow>> matches =
+                    ReadStoredRowsViaIndex(context, plan, databaseName, primaryKeyIndexName, expectedKey);
 
                 if (matches.Count > 0)
                 {
@@ -256,8 +274,8 @@ public static class DataVoCompiledQuery
             // when the index is stale, matching the primary-key branch's behavior.
             try
             {
-                List<KeyValuePair<long, Dictionary<string, object?>>> matches =
-                    ReadRowsViaIndex(context, plan, databaseName, secondaryIndexName, expectedKey);
+                List<KeyValuePair<long, StoredRow>> matches =
+                    ReadStoredRowsViaIndex(context, plan, databaseName, secondaryIndexName, expectedKey);
 
                 if (matches.Count > 0)
                 {
@@ -272,10 +290,10 @@ public static class DataVoCompiledQuery
         Dictionary<long, StoredRow> scanned =
             context.Engine.StorageContext.GetTypedTableContents(plan.TableName, databaseName);
 
-        // Filter typed (ordinal access + typed key extraction) so only matching rows ever materialize a
-        // dictionary — non-matching scanned rows skip the public boundary materialization entirely.
+        // Filter typed (ordinal access + typed key extraction) so only matching rows are kept — non-matching
+        // scanned rows are skipped without any materialization.
         string[] whereColumns = [plan.WhereColumn!];
-        var scannedMatches = new List<KeyValuePair<long, Dictionary<string, object?>>>();
+        var scannedMatches = new List<KeyValuePair<long, StoredRow>>();
         foreach ((long rowId, StoredRow row) in scanned)
         {
             StoredRowView view = row.AsView();
@@ -292,17 +310,17 @@ public static class DataVoCompiledQuery
                 continue;
             }
 
-            scannedMatches.Add(new KeyValuePair<long, Dictionary<string, object?>>(rowId, MaterializeStoredRow(row)));
+            scannedMatches.Add(new KeyValuePair<long, StoredRow>(rowId, row));
         }
 
         return scannedMatches;
     }
 
     /// <summary>
-    /// Reads the rows whose IDs the named B-Tree index returns for <paramref name="expectedKey"/>, materializing
-    /// only the rows the index points at. Shared by the primary-key and secondary-index access paths.
+    /// Reads the StoredRows whose IDs the named B-Tree index returns for <paramref name="expectedKey"/>.
+    /// Shared by the tag, primary-key, and secondary-index access paths.
     /// </summary>
-    private static List<KeyValuePair<long, Dictionary<string, object?>>> ReadRowsViaIndex(
+    private static List<KeyValuePair<long, StoredRow>> ReadStoredRowsViaIndex(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
@@ -319,9 +337,7 @@ public static class DataVoCompiledQuery
 
         return ids
             .Where(indexedRows.ContainsKey)
-            .Select(id => new KeyValuePair<long, Dictionary<string, object?>>(
-                id,
-                MaterializeStoredRow(indexedRows[id])))
+            .Select(id => new KeyValuePair<long, StoredRow>(id, indexedRows[id]))
             .ToList();
     }
 
