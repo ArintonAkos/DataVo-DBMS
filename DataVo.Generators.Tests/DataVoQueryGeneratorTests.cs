@@ -117,7 +117,8 @@ public class DataVoQueryGeneratorTests
         string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
 
         Assert.Contains("DataVoCompiledQueryPlan.SelectMany", generated);
-        Assert.Contains("DataVoCompiledQuery.SelectMany<global::PlayerProjection>", generated);
+        // PlayerProjection is a clean ctor-name match, so the generator now emits the typed projector.
+        Assert.Contains("DataVoCompiledQuery.SelectManyTyped<global::PlayerProjection>", generated);
         Assert.Contains("new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter(\"name\", name)", generated);
     }
 
@@ -236,6 +237,134 @@ public class DataVoQueryGeneratorTests
         Assert.Contains("DataVoCompiledQueryPlan.SelectSingle", generated);
         Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledAccessPath.SingleColumnIndex", generated);
         Assert.Contains("resolvedIndexName: \"ix_OrderItems_OrderId\"", generated);
+    }
+
+    [Fact]
+    public void Generator_CleanCtorMatch_EmitsTypedSelectMany()
+    {
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record PlayerProjection(int Id, string Name, int Level);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Name = @name")]
+                public static partial IReadOnlyList<PlayerProjection> ByName(DataVoContext db, string name);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledRowReader", generated);
+        Assert.Contains("reader.GetInt32(\"Id\")", generated);
+        Assert.Contains("reader.GetString(\"Name\")!", generated);
+        Assert.Contains("reader.GetInt32(\"Level\")", generated);
+        Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledRowMapper<global::PlayerProjection>", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectManyTyped<global::PlayerProjection>", generated);
+    }
+
+    [Fact]
+    public void Generator_CleanCtorMatch_EmitsTypedSelectSingle()
+    {
+        string source = """
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record PlayerProjection(int Id, string Name, int Level);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Id = @id")]
+                public static partial PlayerProjection? Get(DataVoContext db, int id);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("DataVoCompiledQuery.SelectSingleTyped<global::PlayerProjection>", generated);
+        Assert.Contains("global::DataVo.Core.CompiledQueries.CompiledRowReader", generated);
+    }
+
+    [Fact]
+    public void Generator_NonNameMatchedCtor_FallsBackToDictMapper()
+    {
+        // Ctor params (a, b, c) do not match projected columns (Id, Name, Level) by name → not a clean match.
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Misnamed(int a, string b, int c);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Name = @name")]
+                public static partial IReadOnlyList<Misnamed> ByName(DataVoContext db, string name);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.DoesNotContain("CompiledRowReader", generated);
+        Assert.DoesNotContain("SelectManyTyped", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectMany<global::Misnamed>", generated);
+    }
+
+    [Fact]
+    public void Generator_UnsupportedCtorParamType_FallsBackToDictMapper()
+    {
+        // Guid is not a supported cell type → fall back to the dict mapper for the whole query.
+        string source = """
+            using System;
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record WithGuid(int Id, Guid Token);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Token FROM Sessions WHERE Id = @id")]
+                public static partial IReadOnlyList<WithGuid> Get(DataVoContext db, int id);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.DoesNotContain("CompiledRowReader", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectMany<global::WithGuid>", generated);
+    }
+
+    [Fact]
+    public void Generator_LongAndDecimalParams_EmitTypedGetters()
+    {
+        // Int64/Decimal have no storable column type, but the generator must still map them (emission only).
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Money(long Id, decimal Amount);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Amount FROM Ledger WHERE Id = @id")]
+                public static partial IReadOnlyList<Money> Get(DataVoContext db, long id);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("reader.GetInt64(\"Id\")", generated);
+        Assert.Contains("reader.GetDecimal(\"Amount\")", generated);
     }
 
     private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
