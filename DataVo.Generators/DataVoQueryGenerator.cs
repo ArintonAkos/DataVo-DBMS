@@ -139,12 +139,34 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
             builder.AppendLine(namespaceDeclaration);
         }
 
+        GeneratedExecutionShape shape = ResolveExecutionShape(method, model);
+        ITypeSymbol? rowType = shape is GeneratedExecutionShape.SelectSingle or GeneratedExecutionShape.SelectMany
+            ? GetSelectRowType(method)
+            : null;
+        string[]? typedGetters = rowType is null ? null : TryBuildTypedGetters(rowType, model.ProjectedColumns);
+
         builder.AppendLine(containingType);
         builder.AppendLine("{");
         builder.AppendLine($"    private static readonly global::DataVo.Core.CompiledQueries.DataVoCompiledQueryPlan {planName} = {GeneratePlan(method, model, catalog)};");
+
+        string invocation;
+        if (typedGetters is not null && rowType is not null)
+        {
+            string rowTypeName = rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string mapName = $"__DataVoMap_{method.Name}";
+            string mapperFieldName = $"__DataVoMapper_{method.Name}";
+            builder.AppendLine($"    private static {rowTypeName} {mapName}(global::DataVo.Core.CompiledQueries.CompiledRowReader reader) => new {rowTypeName}({string.Join(", ", typedGetters)});");
+            builder.AppendLine($"    private static readonly global::DataVo.Core.CompiledQueries.CompiledRowMapper<{rowTypeName}> {mapperFieldName} = {mapName};");
+            invocation = GenerateTypedInvocation(method, model, planName, shape, rowTypeName, mapperFieldName);
+        }
+        else
+        {
+            invocation = GenerateInvocation(method, model, planName);
+        }
+
         builder.AppendLine($"    public static partial {returnType} {method.Name}({parameterList})");
         builder.AppendLine("    {");
-        builder.AppendLine($"        return {GenerateInvocation(method, model, planName)};");
+        builder.AppendLine($"        return {invocation};");
         builder.AppendLine("    }");
         builder.AppendLine("}");
         return builder.ToString();
@@ -222,6 +244,102 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         }
 
         return string.Join(", ", columns.Select(column => $"({InferCastType(column)})row[\"{column}\"]!"));
+    }
+
+    // Builds the per-column typed getter calls when the projection is a clean ctor-name match with supported
+    // param types; returns null to signal "fall back to the dictionary mapper".
+    private static string[]? TryBuildTypedGetters(ITypeSymbol rowType, string[] columns)
+    {
+        if (rowType is not INamedTypeSymbol named)
+        {
+            return null;
+        }
+
+        IMethodSymbol? constructor = named.InstanceConstructors
+            .Where(static ctor => !ctor.IsImplicitlyDeclared)
+            .OrderByDescending(static ctor => ctor.Parameters.Length)
+            .FirstOrDefault();
+
+        if (constructor is null ||
+            constructor.Parameters.Length != columns.Length ||
+            !constructor.Parameters.All(parameter => columns.Any(column => string.Equals(column, parameter.Name, StringComparison.OrdinalIgnoreCase))))
+        {
+            return null;
+        }
+
+        var getters = new string[constructor.Parameters.Length];
+        for (int i = 0; i < constructor.Parameters.Length; i++)
+        {
+            IParameterSymbol parameter = constructor.Parameters[i];
+            string column = columns.First(candidate => string.Equals(candidate, parameter.Name, StringComparison.OrdinalIgnoreCase));
+            string? getter = TypedGetter(parameter.Type, column);
+            if (getter is null)
+            {
+                return null;
+            }
+
+            getters[i] = getter;
+        }
+
+        return getters;
+    }
+
+    private static string? TypedGetter(ITypeSymbol type, string column)
+    {
+        if (type is INamedTypeSymbol nullable &&
+            nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+            nullable.TypeArguments.Length == 1)
+        {
+            string? inner = ValueGetterName(nullable.TypeArguments[0]);
+            return inner is null ? null : $"reader.{inner}OrNull(\"{column}\")";
+        }
+
+        string? valueGetter = ValueGetterName(type);
+        if (valueGetter is not null)
+        {
+            return $"reader.{valueGetter}(\"{column}\")";
+        }
+
+        if (type.SpecialType == SpecialType.System_String)
+        {
+            return type.NullableAnnotation == NullableAnnotation.Annotated
+                ? $"reader.GetString(\"{column}\")"
+                : $"reader.GetString(\"{column}\")!";
+        }
+
+        if (type is IArrayTypeSymbol array && array.ElementType.SpecialType == SpecialType.System_Single)
+        {
+            return $"reader.GetVector(\"{column}\")";
+        }
+
+        return null;
+    }
+
+    private static string? ValueGetterName(ITypeSymbol type) => type.SpecialType switch
+    {
+        SpecialType.System_Int32 => "GetInt32",
+        SpecialType.System_Int64 => "GetInt64",
+        SpecialType.System_Double => "GetDouble",
+        SpecialType.System_Decimal => "GetDecimal",
+        SpecialType.System_Boolean => "GetBoolean",
+        _ => type.ToDisplayString() == "System.DateOnly" ? "GetDate" : null,
+    };
+
+    private static string GenerateTypedInvocation(
+        IMethodSymbol method,
+        GeneratedQueryModel model,
+        string planName,
+        GeneratedExecutionShape shape,
+        string rowTypeName,
+        string mapperFieldName)
+    {
+        string dbParameter = method.Parameters[0].Name;
+        string parameters = string.Join(
+            ", ",
+            GetSqlParameters(model).Select(name => $"new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter(\"{name}\", {FindMethodParameterName(method, name)})"));
+        string typedMethod = shape == GeneratedExecutionShape.SelectMany ? "SelectManyTyped" : "SelectSingleTyped";
+
+        return $"global::DataVo.Core.CompiledQueries.DataVoCompiledQuery.{typedMethod}<{rowTypeName}>({dbParameter}, {planName}, new global::DataVo.Core.CompiledQueries.DataVoCompiledQueryParameter[] {{ {parameters} }}, {mapperFieldName})";
     }
 
     private static string InferCastType(string column)
