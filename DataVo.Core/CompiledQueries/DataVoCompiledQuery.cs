@@ -60,6 +60,75 @@ public static class DataVoCompiledQuery
     }
 
     /// <summary>
+    /// Executes a select plan and returns every row projected by <paramref name="mapper"/> directly from typed
+    /// cells — no dictionary materialization, no boxing. Behavior matches <see cref="SelectMany{TResult}"/>.
+    /// </summary>
+    public static IReadOnlyList<T> SelectManyTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
+        CompiledRowMapper<T> mapper)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(mapper);
+
+        if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectMany.");
+        }
+
+        return ExecuteSelectTyped(context, plan, parameters, mapper);
+    }
+
+    /// <summary>
+    /// Executes a select plan and returns the first projected row, or <c>default</c> when none matches.
+    /// </summary>
+    public static T? SelectSingleTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
+        CompiledRowMapper<T> mapper)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(mapper);
+
+        if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectSingle.");
+        }
+
+        IReadOnlyList<T> rows = ExecuteSelectTyped(context, plan, parameters, mapper);
+        return rows.Count == 0 ? default : rows[0];
+    }
+
+    private static IReadOnlyList<T> ExecuteSelectTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
+        CompiledRowMapper<T> mapper)
+    {
+        string databaseName = ResolveCurrentDatabase(context);
+        Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
+        object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
+        string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
+
+        List<KeyValuePair<long, StoredRow>> matches =
+            TryReadMatchingStoredRows(context, plan, databaseName, expectedKey);
+
+        var results = new T[matches.Count];
+        for (int i = 0; i < matches.Count; i++)
+        {
+            results[i] = mapper(new CompiledRowReader(matches[i].Value.AsView()));
+        }
+
+        return results;
+    }
+
+    /// <summary>
     /// Executes an insert plan for a single row and returns inserted row identifiers.
     /// </summary>
     public static IReadOnlyList<long> Insert(
