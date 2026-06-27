@@ -17,14 +17,11 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
     private static readonly ReactiveRowSchema Schema = new("Id", "Name", "Value", "Score");
     private static readonly DataVoCompiledQueryPlan LookupPlan = DataVoCompiledQueryPlan.SelectSingle(
         "Records", ["Id", "Name", "Value", "Score"], whereColumn: "Id", parameterName: "id");
-    private static readonly Func<Dictionary<string, object?>, FlatRecord> RowMapper = row => new FlatRecord(
-        Convert.ToInt64(row["Id"]),
-        Convert.ToString(row["Name"]) ?? string.Empty,
-        Convert.ToInt32(row["Value"]),
-        Convert.ToDouble(row["Score"]));
+    private static readonly CompiledRowMapper<FlatRecord> RowMapper = MapRow;
 
     private readonly CellValue[] _cells = new CellValue[4];
     private DataVoContext? _context;
+    private DataVoPreparedSelectSingle<FlatRecord>? _lookup;
 
     public string Name => "DataVo";
 
@@ -35,6 +32,7 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
         ExecuteOk("CREATE DATABASE FlatCrudBenchmark");
         ExecuteOk("USE FlatCrudBenchmark");
         ExecuteOk("CREATE TABLE Records (Id INT PRIMARY KEY, Name VARCHAR(40), Value INT, Score FLOAT)");
+        _lookup = DataVoCompiledQuery.PrepareSelectSingleTyped(Ctx(), LookupPlan, RowMapper);
     }
 
     // DataVo's typed insert is in-memory with no per-write commit, so batching is a no-op.
@@ -53,21 +51,27 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
 
     public FlatRecord? GetById(long id)
     {
-        return DataVoCompiledQuery.SelectSingle(
-            Ctx(),
-            LookupPlan,
-            [new DataVoCompiledQueryParameter("id", (int)id)],
-            RowMapper);
+        return Lookup().Execute(checked((int)id));
     }
 
     public void Dispose()
     {
         _context?.Dispose();
         _context = null;
+        _lookup = null;
     }
 
     private DataVoContext Ctx() =>
         _context ?? throw new InvalidOperationException("DataVo flat-CRUD engine has not been initialized.");
+
+    private DataVoPreparedSelectSingle<FlatRecord> Lookup() =>
+        _lookup ?? throw new InvalidOperationException("DataVo flat-CRUD lookup has not been prepared.");
+
+    private static FlatRecord MapRow(CompiledRowReader row) => new(
+        row.GetInt32("Id"),
+        row.GetString("Name") ?? string.Empty,
+        row.GetInt32("Value"),
+        row.GetDouble("Score"));
 
     private void ExecuteOk(string sql)
     {

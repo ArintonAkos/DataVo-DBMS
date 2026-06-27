@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using DataVo.Core.BTree;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
@@ -16,6 +18,8 @@ namespace DataVo.Core.CompiledQueries;
 /// </summary>
 public static class DataVoCompiledQuery
 {
+    private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectSingleCacheKey, object>> PreparedSelectSingleCache = new();
+
     /// <summary>
     /// Executes a select plan and returns the first mapped row, or <c>default</c> when no row matches.
     /// </summary>
@@ -103,8 +107,33 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectSingle.");
         }
 
-        IReadOnlyList<T> rows = ExecuteSelectTyped(context, plan, parameters, mapper);
-        return rows.Count == 0 ? default : rows[0];
+        DataVoPreparedSelectSingle<T> prepared = GetOrPrepareSelectSingleTyped(context, plan, mapper);
+        return prepared.ExecuteParameterValue(RequiredSingleParameterValue(parameters, plan.WhereParameterName!));
+    }
+
+    /// <summary>
+    /// Prepares a typed point-lookup plan by resolving the access path and projection metadata once. The returned
+    /// handle is optimized for warm scalar key execution and avoids dictionary, StoredRow, and projection setup
+    /// allocations on the indexed hit path.
+    /// </summary>
+    public static DataVoPreparedSelectSingle<T> PrepareSelectSingleTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        CompiledRowMapper<T> mapper)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(mapper);
+
+        if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be prepared as SelectSingle.");
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        PreparedProjection projection = BuildPreparedProjection(context, plan, databaseName);
+        string? indexName = ResolvePreparedIndexName(context, plan, databaseName);
+        return new DataVoPreparedSelectSingle<T>(context, plan, databaseName, indexName, projection, mapper);
     }
 
     private static IReadOnlyList<T> ExecuteSelectTyped<T>(
@@ -182,6 +211,65 @@ public static class DataVoCompiledQuery
         }
 
         return false;
+    }
+
+    private static DataVoPreparedSelectSingle<T> GetOrPrepareSelectSingleTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        CompiledRowMapper<T> mapper)
+    {
+        ConcurrentDictionary<PreparedSelectSingleCacheKey, object> cache =
+            PreparedSelectSingleCache.GetValue(context, static _ => new ConcurrentDictionary<PreparedSelectSingleCacheKey, object>());
+        var key = new PreparedSelectSingleCacheKey(plan, mapper);
+        return (DataVoPreparedSelectSingle<T>)cache.GetOrAdd(
+            key,
+            static (_, state) => PrepareSelectSingleTyped(state.Context, state.Plan, state.Mapper),
+            (Context: context, Plan: plan, Mapper: mapper));
+    }
+
+    private static PreparedProjection BuildPreparedProjection(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        string databaseName)
+    {
+        IReadOnlyList<Column> columns = context.Engine.Catalog.GetTableColumns(plan.TableName, databaseName);
+        bool[] isProjected = new bool[columns.Count];
+        var projectedNames = new List<string>(plan.ProjectedColumns.Count);
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (ContainsIgnoreCase(plan.ProjectedColumns, columns[i].Name))
+            {
+                isProjected[i] = true;
+                projectedNames.Add(columns[i].Name);
+            }
+        }
+
+        return new PreparedProjection(
+            columns,
+            isProjected,
+            new ReactiveRowSchema(projectedNames),
+            new CellValue[projectedNames.Count]);
+    }
+
+    private static string? ResolvePreparedIndexName(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        string databaseName)
+    {
+        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        {
+            return plan.ResolvedIndexName;
+        }
+
+        List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
+        if (primaryKeys.Contains(plan.WhereColumn!, StringComparer.OrdinalIgnoreCase))
+        {
+            return $"_PK_{plan.TableName}";
+        }
+
+        return TryResolveSingleColumnIndex(context, plan.TableName, databaseName, plan.WhereColumn!, out string secondaryIndexName)
+            ? secondaryIndexName
+            : null;
     }
 
     /// <summary>
@@ -620,6 +708,43 @@ public static class DataVoCompiledQuery
     private static object? RequiredParameter(IReadOnlyDictionary<string, object?> parameters, string parameterName)
     {
         if (!parameters.TryGetValue(parameterName, out object? value))
+        {
+            throw new ArgumentException($"Missing compiled query parameter '{parameterName}'.", nameof(parameters));
+        }
+
+        return value;
+    }
+
+    private static object? RequiredSingleParameterValue(
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
+        string parameterName)
+    {
+        bool found = false;
+        object? value = null;
+
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            DataVoCompiledQueryParameter parameter = parameters[i];
+            if (string.IsNullOrWhiteSpace(parameter.Name))
+            {
+                throw new ArgumentException("Compiled query parameter names cannot be null or whitespace.", nameof(parameters));
+            }
+
+            if (!string.Equals(parameter.Name, parameterName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (found)
+            {
+                throw new ArgumentException($"Duplicate compiled query parameter '{parameterName}'.", nameof(parameters));
+            }
+
+            found = true;
+            value = parameter.Value;
+        }
+
+        if (!found)
         {
             throw new ArgumentException($"Missing compiled query parameter '{parameterName}'.", nameof(parameters));
         }
@@ -1086,11 +1211,44 @@ public static class DataVoCompiledQuery
 
     private static string BuildComparisonKey(string columnName, object? value)
     {
-        return IndexKeyEncoder.BuildKeyString(
-            new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-            {
-                [columnName] = value
-            },
-            [columnName]);
+        return BuildScalarComparisonKey(value);
+    }
+
+    internal static string BuildScalarComparisonKey(int value) =>
+        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+
+    internal static string BuildScalarComparisonKey(long value) =>
+        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+
+    internal static string BuildScalarComparisonKey(double value) =>
+        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+
+    internal static string BuildScalarComparisonKey(string? value)
+    {
+        if (value is null)
+        {
+            return string.Empty;
+        }
+
+        return VectorParser.TryParseVector(value, out float[] vector)
+            ? VectorParser.SerializeVector(vector)
+            : value;
+    }
+
+    internal static string BuildScalarComparisonKey(object? value)
+    {
+        return value switch
+        {
+            null => string.Empty,
+            int intValue => BuildScalarComparisonKey(intValue),
+            long longValue => BuildScalarComparisonKey(longValue),
+            double doubleValue => BuildScalarComparisonKey(doubleValue),
+            float floatValue => string.Create(CultureInfo.InvariantCulture, $"[{floatValue}]"),
+            decimal decimalValue => string.Create(CultureInfo.InvariantCulture, $"[{decimalValue}]"),
+            string stringValue => BuildScalarComparisonKey(stringValue),
+            _ => VectorParser.TryCoerceToVector(value, out float[] vector)
+                ? VectorParser.SerializeVector(vector)
+                : value.ToString() ?? string.Empty
+        };
     }
 }
