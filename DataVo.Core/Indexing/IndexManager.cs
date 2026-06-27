@@ -9,6 +9,11 @@ using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Runtime.Diagnostics;
 
+// Identifies a cached index by (database, table, index) without allocating a per-call string key.
+// Case-insensitivity (previously provided by ToLowerInvariant + StringComparer.OrdinalIgnoreCase) is
+// preserved by IndexManager.CacheKeyComparer.
+using IndexCacheKey = (string Database, string Table, string Index);
+
 namespace DataVo.Core.Indexing;
 
 /// <summary>
@@ -73,27 +78,27 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Unified index cache: maps CacheKey -> loaded index instance.
     /// </summary>
-    private readonly Dictionary<string, IIndexBase> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<IndexCacheKey, IIndexBase> _cache = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Metadata storage: maps CacheKey -> index metadata.
     /// </summary>
-    private readonly Dictionary<string, IndexMetadata> _metadata = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<IndexCacheKey, IndexMetadata> _metadata = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Tracks paths for cache entries: maps CacheKey -> file path.
     /// </summary>
-    private readonly Dictionary<string, string> _cachePaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<IndexCacheKey, string> _cachePaths = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Tracks dirty (modified) indices that need flushing.
     /// </summary>
-    private readonly HashSet<string> _dirtyIndices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<IndexCacheKey> _dirtyIndices = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Tracks mutation count per index for buffered persistence.
     /// </summary>
-    private readonly Dictionary<string, int> _pendingMutations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<IndexCacheKey, int> _pendingMutations = new(CacheKeyComparer.Instance);
 
     private readonly Lock _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
@@ -129,7 +134,7 @@ public class IndexManager : IDisposable
     /// <see cref="IndexPersistenceMode.Buffered"/> mode the threshold flush handles it; in
     /// <see cref="IndexPersistenceMode.None"/> mode the index is never serialized.
     /// </summary>
-    private void FlushIfImmediate(string cacheKey)
+    private void FlushIfImmediate(IndexCacheKey cacheKey)
     {
         if (_persistenceMode == IndexPersistenceMode.Immediate)
         {
@@ -201,11 +206,11 @@ public class IndexManager : IDisposable
                 throw new NotSupportedException($"Index type '{indexType}' not registered");
 
             object rawIndex = factory.CreateIndex(metadata.IndexName, metadata.ColumnName, @params);
-            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, metadata.CacheKey);
+            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, CacheKeyOf(metadata));
 
-            _cache[metadata.CacheKey] = index;
-            _metadata[metadata.CacheKey] = metadata;
-            _dirtyIndices.Add(metadata.CacheKey);
+            _cache[CacheKeyOf(metadata)] = index;
+            _metadata[CacheKeyOf(metadata)] = metadata;
+            _dirtyIndices.Add(CacheKeyOf(metadata));
 
             return index;
         }
@@ -219,7 +224,7 @@ public class IndexManager : IDisposable
         lock (_lock)
         {
             // Check if already loaded
-            if (_cache.TryGetValue(metadata.CacheKey, out IIndexBase? cached))
+            if (_cache.TryGetValue(CacheKeyOf(metadata), out IIndexBase? cached))
                 return cached;
 
             var type = metadata.IndexType.ToUpper();
@@ -231,10 +236,10 @@ public class IndexManager : IDisposable
                 return null;
 
             object rawIndex = persistence.LoadIndex(filePath);
-            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, metadata.CacheKey);
-            _cache[metadata.CacheKey] = index;
-            _metadata[metadata.CacheKey] = metadata;
-            _cachePaths[metadata.CacheKey] = filePath;
+            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, CacheKeyOf(metadata));
+            _cache[CacheKeyOf(metadata)] = index;
+            _metadata[CacheKeyOf(metadata)] = metadata;
+            _cachePaths[CacheKeyOf(metadata)] = filePath;
 
             return index;
         }
@@ -243,7 +248,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Marks an index as dirty (requiring flush to disk).
     /// </summary>
-    public void MarkDirty(string cacheKey)
+    public void MarkDirty(IndexCacheKey cacheKey)
     {
         lock (_lock)
             MarkDirtyNoLock(cacheKey);
@@ -251,7 +256,7 @@ public class IndexManager : IDisposable
         TrackMutation(cacheKey);
     }
 
-    private void MarkDirtyNoLock(string cacheKey)
+    private void MarkDirtyNoLock(IndexCacheKey cacheKey)
     {
         _dirtyIndices.Add(cacheKey);
     }
@@ -259,7 +264,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Tracks a mutation and flushes if threshold exceeded (buffered mode).
     /// </summary>
-    private void TrackMutation(string cacheKey)
+    private void TrackMutation(IndexCacheKey cacheKey)
     {
         if (_persistenceMode != IndexPersistenceMode.Buffered)
             return;
@@ -289,7 +294,7 @@ public class IndexManager : IDisposable
         }
     }
 
-    private void FlushInternal(string cacheKey)
+    private void FlushInternal(IndexCacheKey cacheKey)
     {
         // In-memory contexts never serialize indexes. Guard here (not just at the call sites) so no flush
         // path — explicit FlushAll, dirty-on-read flushes, disposal — ever serializes an in-memory index.
@@ -323,7 +328,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Gets an index from cache (no disk loading).
     /// </summary>
-    public IIndexBase? TryGetCached(string cacheKey)
+    public IIndexBase? TryGetCached(IndexCacheKey cacheKey)
     {
         lock (_lock)
             return _cache.TryGetValue(cacheKey, out var index) ? index : null;
@@ -332,7 +337,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Gets metadata for an index.
     /// </summary>
-    public IndexMetadata? TryGetMetadata(string cacheKey)
+    public IndexMetadata? TryGetMetadata(IndexCacheKey cacheKey)
     {
         lock (_lock)
             return _metadata.TryGetValue(cacheKey, out var meta) ? meta : null;
@@ -341,7 +346,7 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Removes an index from cache and optionally deletes its disk file.
     /// </summary>
-    public void RemoveIndex(string cacheKey, bool deleteFile = false)
+    public void RemoveIndex(IndexCacheKey cacheKey, bool deleteFile = false)
     {
         lock (_lock)
         {
@@ -407,9 +412,9 @@ public class IndexManager : IDisposable
             }
         }
 
-        _cachePaths[metadata.CacheKey] = BuildIndexPath(metadata);
-        MarkDirty(metadata.CacheKey);
-        FlushIfImmediate(metadata.CacheKey);
+        _cachePaths[CacheKeyOf(metadata)] = BuildIndexPath(metadata);
+        MarkDirty(CacheKeyOf(metadata));
+        FlushIfImmediate(CacheKeyOf(metadata));
     }
 
     /// <summary>
@@ -426,7 +431,7 @@ public class IndexManager : IDisposable
     /// </summary>
     public void DropIndex(string indexName, string tableName, string databaseName)
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         RemoveIndex(cacheKey);
 
         string[] tableDirectories =
@@ -509,15 +514,15 @@ public class IndexManager : IDisposable
             }
         }
 
-        List<string> keysToRemove;
+        List<IndexCacheKey> keysToRemove;
         lock (_lock)
         {
             keysToRemove = _cache.Keys
-                .Where(cacheKey => cacheKey.StartsWith($"{databaseName}/", StringComparison.OrdinalIgnoreCase))
+                .Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
 
-        foreach (string cacheKey in keysToRemove)
+        foreach (IndexCacheKey cacheKey in keysToRemove)
         {
             RemoveIndex(cacheKey);
         }
@@ -646,9 +651,36 @@ public class IndexManager : IDisposable
         RegisterIndexType("HNSW", new HNSWIndexFactory(), new HNSWIndexPersistence());
     }
 
-    private static string GetCacheKey(string indexName, string tableName, string databaseName)
+    private static IndexCacheKey GetCacheKey(string indexName, string tableName, string databaseName)
     {
-        return $"{databaseName}/{tableName}_{indexName}".ToLowerInvariant();
+        return (databaseName, tableName, indexName);
+    }
+
+    private static IndexCacheKey CacheKeyOf(IndexMetadata metadata)
+    {
+        return (metadata.DatabaseName, metadata.TableName, metadata.IndexName);
+    }
+
+    // Case-insensitive comparer for IndexCacheKey, preserving the previous OrdinalIgnoreCase semantics
+    // of the string cache key (database/table/index names match case-insensitively).
+    private sealed class CacheKeyComparer : IEqualityComparer<IndexCacheKey>
+    {
+        public static readonly CacheKeyComparer Instance = new();
+
+        public bool Equals(IndexCacheKey x, IndexCacheKey y)
+        {
+            return string.Equals(x.Database, y.Database, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.Index, y.Index, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public int GetHashCode(IndexCacheKey key)
+        {
+            return HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.Database),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.Table),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.Index));
+        }
     }
 
     /// <summary>
@@ -662,7 +694,7 @@ public class IndexManager : IDisposable
         string metric = "cosine",
         string indexType = "HNSW")
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric);
 
         if (!SupportsVectorIndexType(metadata.IndexType))
@@ -697,7 +729,7 @@ public class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         // No defensive copy: the index copies into its own backing store on insert.
         vectorIndex.Insert(rowId, vector);
@@ -710,7 +742,7 @@ public class IndexManager : IDisposable
     /// </summary>
     public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         vectorIndex.Delete(toBeDeletedIds);
         MarkDirty(cacheKey);
@@ -740,7 +772,7 @@ public class IndexManager : IDisposable
     {
         lock (_lock)
         {
-            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.Insert(value, rowId);
             MarkDirtyNoLock(cacheKey);
@@ -757,7 +789,7 @@ public class IndexManager : IDisposable
     {
         lock (_lock)
         {
-            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.DeleteValues(toBeDeletedIds);
             MarkDirtyNoLock(cacheKey);
@@ -770,12 +802,11 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Performs point lookup via scalar BTree index.
     /// </summary>
-    public HashSet<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
+    public IReadOnlyList<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        HashSet<long> results = [.. index.Search(columnValue)];
         RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
-        return results;
+        return index.SearchReadOnly(columnValue);
     }
 
     /// <summary>
@@ -802,7 +833,7 @@ public class IndexManager : IDisposable
 
     private IIndex GetOrLoadScalarIndex(string indexName, string tableName, string databaseName)
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_cache.TryGetValue(cacheKey, out var cached) && cached is IIndex scalar)
         {
             return scalar;
@@ -833,7 +864,7 @@ public class IndexManager : IDisposable
 
     private IVectorIndex GetOrLoadVectorIndex(string indexName, string tableName, string databaseName, string indexType)
     {
-        string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_cache.TryGetValue(cacheKey, out var cached) && cached is IVectorIndex cachedIndex)
         {
             return cachedIndex;
@@ -902,7 +933,7 @@ public class IndexManager : IDisposable
 
             CreateVectorIndex(vectors, indexName, tableName, databaseName, indexType: catalogIndex.IndexKind);
 
-            string cacheKey = GetCacheKey(indexName, tableName, databaseName);
+            var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             if (_cache.TryGetValue(cacheKey, out IIndexBase? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)
             {
                 rebuilt = rebuiltVector;
@@ -937,7 +968,7 @@ public class IndexManager : IDisposable
         };
     }
 
-    private static IIndexBase EnsureIndexBase(object index, string indexType, string cacheKey)
+    private static IIndexBase EnsureIndexBase(object index, string indexType, IndexCacheKey cacheKey)
     {
         if (index is IIndexBase typed)
         {

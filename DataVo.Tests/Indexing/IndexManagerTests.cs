@@ -152,10 +152,10 @@ public class IndexManagerTests : IDisposable
         var cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var metadataField = typeof(IndexManager).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(_manager)!;
-        var metadata = (Dictionary<string, IndexMetadata>)metadataField.GetValue(_manager)!;
+        var cache = (Dictionary<(string, string, string), IIndexBase>)cacheField.GetValue(_manager)!;
+        var metadata = (Dictionary<(string, string, string), IndexMetadata>)metadataField.GetValue(_manager)!;
 
-        const string cacheKey = "db/table_idx";
+        var cacheKey = ("db", "table", "idx");
         cache[cacheKey] = new FakeManagedIndex();
         metadata[cacheKey] = new IndexMetadata
         {

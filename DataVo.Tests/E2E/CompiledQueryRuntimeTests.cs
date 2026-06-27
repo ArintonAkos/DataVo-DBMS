@@ -376,9 +376,9 @@ public class CompiledQueryRuntimeTests
     private static void ReplaceIndexWithThrowingIndex(DataVoContext context, string tableName, string indexName)
     {
         FieldInfo cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
+        var cache = (Dictionary<(string, string, string), IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
         string databaseName = CurrentDatabase(context);
-        string cacheKey = $"{databaseName}/{tableName}_{indexName}".ToLowerInvariant();
+        var cacheKey = (databaseName, tableName, indexName);
         cache[cacheKey] = new ThrowingIndex();
     }
 }
