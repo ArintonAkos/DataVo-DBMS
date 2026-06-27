@@ -9,6 +9,7 @@ namespace DataVo.Core.StorageEngine.Disk;
 public class DiskStorageEngine : IStorageEngine
 {
     private readonly string _storageDirectory;
+    private readonly bool _syncWrites;
     private static readonly ConcurrentDictionary<string, object> GlobalFileLocks = new();
 
     // 8-byte file header: [4 bytes magic "DaVo"] + [4 bytes version].
@@ -22,9 +23,14 @@ public class DiskStorageEngine : IStorageEngine
     /// Initializes a disk storage engine rooted at the given directory.
     /// </summary>
     /// <param name="storageDirectory">The root directory used for database and table files.</param>
-    public DiskStorageEngine(string storageDirectory)
+    /// <param name="syncWrites">
+    /// When <see langword="true"/>, every row append/tombstone/compaction is flushed to the physical
+    /// device (<c>fsync</c>) before returning, making writes power-crash durable.
+    /// </param>
+    public DiskStorageEngine(string storageDirectory, bool syncWrites = false)
     {
         _storageDirectory = storageDirectory;
+        _syncWrites = syncWrites;
         if (!Directory.Exists(_storageDirectory))
         {
             Directory.CreateDirectory(_storageDirectory);
@@ -36,6 +42,22 @@ public class DiskStorageEngine : IStorageEngine
         string dbPath = Path.Combine(_storageDirectory, databaseName);
         if (!Directory.Exists(dbPath)) Directory.CreateDirectory(dbPath);
         return Path.Combine(dbPath, $"{tableName}.dat");
+    }
+
+    /// <summary>
+    /// Forces buffered writes to the physical device when durable writes are enabled. The
+    /// <see cref="BinaryWriter"/> is flushed first so its bytes reach the <see cref="FileStream"/>
+    /// buffer, then <see cref="FileStream.Flush(bool)"/> with <c>flushToDisk: true</c> issues the fsync.
+    /// </summary>
+    private void FlushIfDurable(BinaryWriter writer, FileStream fileStream)
+    {
+        if (!_syncWrites)
+        {
+            return;
+        }
+
+        writer.Flush();
+        fileStream.Flush(flushToDisk: true);
     }
 
     private object GetFileLock(string filePath)
@@ -104,6 +126,8 @@ public class DiskStorageEngine : IStorageEngine
             writer.Write(rowBytes.Length);
             writer.Write(rowBytes);
 
+            FlushIfDurable(writer, fileStream);
+
             return rawByteOffsetRowId;
         }
     }
@@ -134,6 +158,9 @@ public class DiskStorageEngine : IStorageEngine
                 writer.Write(bytes);
                 rowIds.Add(rowId);
             }
+
+            // One fsync amortizes the whole batch — the rows are durable as a unit on return.
+            FlushIfDurable(writer, fileStream);
         }
         return rowIds;
     }
@@ -236,6 +263,8 @@ public class DiskStorageEngine : IStorageEngine
             // This lets ReadAllRows know how many bytes to skip when scanning
             fileStream.Seek(rowId, SeekOrigin.Begin);
             writer.Write(-originalLength);
+
+            FlushIfDurable(writer, fileStream);
         }
     }
 
@@ -335,6 +364,8 @@ public class DiskStorageEngine : IStorageEngine
                     writer.Write(row);
                     compacted.Add((newRowId, row));
                 }
+
+                FlushIfDurable(writer, writeStream);
             }
         }
 

@@ -6,6 +6,7 @@ using Research.Benchmark.Runners.ComplexVip;
 using Research.Benchmark.Runners.ConcurrentOps;
 using Research.Benchmark.Runners.DataVo;
 using Research.Benchmark.Runners.DeepDocument;
+using Research.Benchmark.Runners.DiskCrud;
 using Research.Benchmark.Runners.DuckDb;
 using Research.Benchmark.Runners.FlatCrud;
 using Research.Benchmark.Runners.Sqlite;
@@ -62,6 +63,33 @@ else if (benchmarkScenario.Equals("flat-crud", StringComparison.OrdinalIgnoreCas
     if (ShouldRun(engineFilter, "sqlite"))
         results.Add(RunFlatCrud(new SqliteFlatCrudEngine(), records, progressEvery));
 }
+else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnoreCase))
+{
+    int records = ReadIntArg(args, "--records", 50_000);
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-disk-crud-wal-{Guid.NewGuid():N}");
+
+    try
+    {
+        // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
+        //   not power-durable: DataVo (Disk)        <-> SQLite (WAL, synchronous=NORMAL)
+        //   power-durable:     DataVo (Disk+fsync)  <-> SQLite (WAL, synchronous=FULL)
+        if (ShouldRun(engineFilter, "datavo"))
+            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: false), records, progressEvery, root));
+        if (ShouldRun(engineFilter, "sqlite"))
+            results.Add(RunDiskCrud(new SqliteDiskCrudEngine("NORMAL"), records, progressEvery, root));
+        if (ShouldRun(engineFilter, "datavo-fsync"))
+            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: true), records, progressEvery, root));
+        if (ShouldRun(engineFilter, "sqlite-full"))
+            results.Add(RunDiskCrud(new SqliteDiskCrudEngine("FULL"), records, progressEvery, root));
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+}
 else if (benchmarkScenario.Equals("deep-document", StringComparison.OrdinalIgnoreCase))
 {
     int orders = ReadIntArg(args, "--orders", 5_000);
@@ -106,7 +134,7 @@ else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnor
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, deep-document, concurrent-ops, or vector-search.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, or vector-search.");
 }
 
 if (outputFormat == "csv")
@@ -121,6 +149,7 @@ else
 static string CsvScenarioLabel(string scenario) => scenario.ToLowerInvariant() switch
 {
     "flat-crud" => "Flat_CRUD",
+    "disk-crud-wal" => "Disk_CRUD_WAL",
     "deep-document" => "Deep_Document",
     "concurrent-ops" => "Concurrent_Ops",
     "vector-search" => "Vector_Search",
@@ -336,6 +365,108 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
             Console.SetOut(originalOut);
         }
     }
+}
+
+static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int progressEvery, string rootDir)
+{
+    using (engine)
+    {
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: disk CRUD (WAL) — inserting {records:N0} records then {records:N0} durable point updates...");
+
+        // Build the dataset BEFORE the measured region so record construction is not attributed to any engine.
+        var data = new FlatRecord[records];
+        for (int i = 0; i < records; i++)
+        {
+            data[i] = new FlatRecord(i + 1, $"name-{i}", i, i * 1.5d);
+        }
+
+        string workingDir = Path.Combine(rootDir, SanitizeEngineDir(engine.Name));
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            engine.Initialize(workingDir);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            double[] updateLatenciesMs = new double[records];
+            var totalStopwatch = Stopwatch.StartNew();
+
+            // Phase 1 — bulk insert inside a single batch/transaction (one durable flush amortizes the load).
+            long insertAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var insertStopwatch = Stopwatch.StartNew();
+            engine.BeginInsertBatch();
+            for (int i = 0; i < records; i++)
+            {
+                engine.Insert(data[i]);
+
+                int inserted = i + 1;
+                if (progressEvery > 0 && (inserted % progressEvery == 0 || inserted == records))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: inserted {inserted:N0}/{records:N0}, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            engine.CompleteInsertBatch();
+            insertStopwatch.Stop();
+            long insertAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - insertAllocatedBefore;
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert phase complete in {insertStopwatch.Elapsed.TotalSeconds:N2}s; starting {records:N0} point updates...");
+
+            // Phase 2 — individual durable point updates (each is its own autocommit write → real disk flushes).
+            long updateAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var updateStopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < records; i++)
+            {
+                long id = i + 1;
+                int newValue = records - i;
+                double newScore = newValue * 0.5d;
+
+                long iterationStart = Stopwatch.GetTimestamp();
+                engine.Update(id, newValue, newScore);
+                updateLatenciesMs[i] = (Stopwatch.GetTimestamp() - iterationStart) * 1000d / Stopwatch.Frequency;
+
+                int completed = i + 1;
+                if (progressEvery > 0 && (completed % progressEvery == 0 || completed == records))
+                {
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {completed:N0}/{records:N0} updates, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                }
+            }
+
+            updateStopwatch.Stop();
+            long updateAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - updateAllocatedBefore;
+            totalStopwatch.Stop();
+
+            (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(updateLatenciesMs);
+            long allocatedBytes = insertAllocatedBytes + updateAllocatedBytes;
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalSeconds:N2}s | update {updateStopwatch.Elapsed.TotalSeconds:N2}s | update p50 {p50:F4}ms p99 {p99:F4}ms");
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                p50,
+                p99,
+                allocatedBytes / 1024d / 1024d);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static string SanitizeEngineDir(string engineName)
+{
+    var chars = engineName.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray();
+    return new string(chars);
 }
 
 static BenchmarkMetrics RunDeepDocument(IDeepDocumentEngine engine, int orders, int progressEvery)
