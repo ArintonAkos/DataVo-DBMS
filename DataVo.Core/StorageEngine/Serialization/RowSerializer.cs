@@ -182,16 +182,67 @@ public static class RowSerializer
     public static CellValue[] DeserializeCells(byte[] data, IReadOnlyList<Column> columns)
     {
         var cells = new CellValue[columns.Count];
-
-        using var memoryStream = new MemoryStream(data);
-        using var reader = new BinaryReader(memoryStream, Encoding.UTF8, leaveOpen: true);
+        var reader = new ByteSpanReader(data);
 
         for (int i = 0; i < columns.Count; i++)
         {
-            cells[i] = reader.ReadBoolean() ? CellValue.Null : ReadTypedCell(reader, columns[i]);
+            cells[i] = reader.ReadBoolean() ? CellValue.Null : DecodeTypedCell(ref reader, columns[i]);
         }
 
         return cells;
+    }
+
+    /// <summary>Decodes one non-null typed cell from the span reader (mirrors <see cref="ReadTypedCell"/>).</summary>
+    private static CellValue DecodeTypedCell(ref ByteSpanReader reader, Column column)
+    {
+        switch (column.Type.ToUpperInvariant())
+        {
+            case "INT":
+                return CellValue.From(reader.ReadInt32());
+            case "FLOAT":
+                return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
+            case "BIT":
+                return CellValue.From(reader.ReadBoolean());
+            case "DATE":
+                return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case "VECTOR":
+            {
+                int count = reader.ReadInt32();
+                float[] vector = new float[count];
+                for (int i = 0; i < count; i++)
+                {
+                    vector[i] = BitConverter.Int32BitsToSingle(reader.ReadInt32());
+                }
+
+                return CellValue.From(vector);
+            }
+            default:
+                return CellValue.From(reader.ReadString());
+        }
+    }
+
+    /// <summary>Advances the reader past one non-null typed cell without materializing it.</summary>
+    private static void SkipTypedCell(ref ByteSpanReader reader, Column column)
+    {
+        switch (column.Type.ToUpperInvariant())
+        {
+            case "INT":
+            case "FLOAT":
+                reader.Skip(sizeof(int));
+                return;
+            case "BIT":
+                reader.Skip(sizeof(bool));
+                return;
+            case "DATE":
+                reader.Skip(sizeof(long));
+                return;
+            case "VECTOR":
+                reader.Skip(reader.ReadInt32() * sizeof(int));
+                return;
+            default:
+                reader.SkipString();
+                return;
+        }
     }
 
     /// <summary>
