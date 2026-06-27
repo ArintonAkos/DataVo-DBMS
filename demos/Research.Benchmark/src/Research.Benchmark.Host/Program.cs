@@ -68,6 +68,10 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
 {
     int records = ReadIntArg(args, "--records", 50_000);
     int writerWorkers = Math.Max(1, ReadIntArg(args, "--writers", 1));
+    // Optional override for the GroupCommit background checkpoint cadence. A very large value parks the
+    // checkpointer for the measured window (Phase-3-like), enabling a same-session checkpointer-overhead A/B.
+    int checkpointIntervalArg = ReadIntArg(args, "--checkpoint-interval-ms", -1);
+    int? checkpointIntervalMs = checkpointIntervalArg > 0 ? checkpointIntervalArg : null;
     string root = Path.Combine(Path.GetTempPath(), $"datavo-disk-crud-wal-{Guid.NewGuid():N}");
 
     try
@@ -85,7 +89,7 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         if (ShouldRun(engineFilter, "datavo-pooled"))
             results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly)));
         if (ShouldRun(engineFilter, "datavo-groupcommit"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit)));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit, checkpointIntervalMs)));
         if (ShouldRun(engineFilter, "sqlite"))
             results.Add(RunDiskScenario(new SqliteDiskCrudEngine("NORMAL")));
         if (ShouldRun(engineFilter, "datavo-fsync"))
@@ -93,7 +97,7 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         if (ShouldRun(engineFilter, "datavo-pooled-fsync"))
             results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.PoolingOnly)));
         if (ShouldRun(engineFilter, "datavo-groupcommit-fsync"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.GroupCommit)));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.GroupCommit, checkpointIntervalMs)));
         if (ShouldRun(engineFilter, "sqlite-full"))
             results.Add(RunDiskScenario(new SqliteDiskCrudEngine("FULL")));
     }
