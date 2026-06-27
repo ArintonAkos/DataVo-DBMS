@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using DataVo.Core.Serialization;
+using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.Transactions;
@@ -34,6 +35,8 @@ internal sealed class WalFileStore
 
     private static readonly ConcurrentDictionary<string, object> FileLocks =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FileHandlePool BinaryFrameHandlePool = new(capacity: 128);
 
     // Source-gen context built with the WAL object converter so the heterogeneous object? row values
     // serialize without reflection (Native-AOT safe).
@@ -83,6 +86,23 @@ internal sealed class WalFileStore
             }
 
             stream.Flush(true);
+        });
+    }
+
+    /// <summary>
+    /// Appends an already-framed binary WAL record and forces it to disk.
+    /// </summary>
+    /// <param name="frame">The committed binary frame to persist.</param>
+    public void AppendFrame(WalFrame frame)
+    {
+        ExecuteLocked(() =>
+        {
+            EnsureDirectoryExists();
+
+            using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
+            long offset = RandomAccess.GetLength(lease.Handle);
+            RandomAccess.Write(lease.Handle, frame.Range.ReadOnlySpan, offset);
+            RandomAccess.FlushToDisk(lease.Handle);
         });
     }
 
@@ -180,6 +200,7 @@ internal sealed class WalFileStore
 
         stream.Flush(true);
 
+        BinaryFrameHandlePool.Remove(FilePath);
         AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
     }
 
@@ -194,6 +215,7 @@ internal sealed class WalFileStore
 
     private void DeleteIfExistsCore()
     {
+        BinaryFrameHandlePool.Remove(FilePath);
         if (File.Exists(FilePath))
         {
             File.Delete(FilePath);
