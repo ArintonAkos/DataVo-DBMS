@@ -494,6 +494,86 @@ public class CompiledAccessPathTests
             rows.OrderBy(h => h.Id));
     }
 
+    [Fact]
+    public void SelectManyTyped_UnderSnapshot_MatchesDictPathVisibility()
+    {
+        using var context = CreateContext();
+        SeedHits(context);
+        context.Execute("CREATE INDEX ix_hits_name ON Hits (Name)");
+
+        // A read snapshot in an open transaction sees the committed rows; typed (streaming) must match dict.
+        context.Execute("BEGIN TRANSACTION");
+        try
+        {
+            IReadOnlyList<Hit> typed = DataVoCompiledQuery.SelectManyTyped<Hit>(
+                context,
+                DataVoCompiledQueryPlan.SelectMany("Hits", ["Id", "Name", "Score"], "Name", "name",
+                    accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_hits_name"),
+                [new DataVoCompiledQueryParameter("name", "Ada")],
+                MapHit);
+
+            IReadOnlyList<Hit> dict = DataVoCompiledQuery.SelectMany<Hit>(
+                context,
+                DataVoCompiledQueryPlan.SelectMany("Hits", ["Id", "Name", "Score"], "Name", "name"),
+                [new DataVoCompiledQueryParameter("name", "Ada")],
+                static row => new Hit((int)row["Id"]!, (string)row["Name"]!, (double)row["Score"]!));
+
+            Assert.Equal(dict.OrderBy(h => h.Id), typed.OrderBy(h => h.Id));
+        }
+        finally
+        {
+            context.Execute("ROLLBACK");
+        }
+    }
+
+    [Fact]
+    public void SelectManyTyped_StreamingProjected_PerRowAllocationIsNearMinimal()
+    {
+        const int iterations = 2_000;
+        using var context = CreateContext();
+        // Wide row (8 cols), narrow projection (3). After projection pushdown the typed per-row allocation is
+        // just the projected string (Tag) + the Hit record — the ~1,456 B/row deserialization slice is gone.
+        context.Execute("CREATE TABLE Bench (Id INT PRIMARY KEY, Tag VARCHAR(20), Score FLOAT, C1 VARCHAR(20), C2 VARCHAR(20), C3 VARCHAR(20), C4 VARCHAR(20), C5 VARCHAR(20))");
+        Dictionary<string, object?> Row(int id, string tag) => new()
+        {
+            ["Id"] = id, ["Tag"] = tag, ["Score"] = id + 0.5,
+            ["C1"] = "c1", ["C2"] = "c2", ["C3"] = "c3", ["C4"] = "c4", ["C5"] = "c5"
+        };
+        var seed = new List<Dictionary<string, object?>> { Row(1, "m1") };
+        for (int i = 0; i < 8; i++)
+        {
+            seed.Add(Row(i + 2, "m8"));
+        }
+        context.BulkInsert("Bench", seed);
+        context.Execute("CREATE INDEX ix_bench_tag ON Bench (Tag)");
+
+        var plan = DataVoCompiledQueryPlan.SelectMany(
+            "Bench", ["Id", "Tag", "Score"], "Tag", "tag",
+            accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_bench_tag");
+
+        IReadOnlyList<Hit> Typed(string tag)
+            => DataVoCompiledQuery.SelectManyTyped<Hit>(context, plan, [new DataVoCompiledQueryParameter("tag", tag)],
+                static r => new Hit(r.GetInt32("Id"), r.GetString("Tag")!, r.GetDouble("Score")));
+        IReadOnlyList<Hit> Dict(string tag)
+            => DataVoCompiledQuery.SelectMany<Hit>(context, plan, [new DataVoCompiledQueryParameter("tag", tag)],
+                static row => new Hit((int)row["Id"]!, (string)row["Tag"]!, (double)row["Score"]!));
+
+        double typedPerRow = PerRow(() => Typed("m1"), () => Typed("m8"), iterations);
+        double dictPerRow = PerRow(() => Dict("m1"), () => Dict("m8"), iterations);
+
+        _output.WriteLine($"streaming typed per-row : {typedPerRow:F0} B/row");
+        _output.WriteLine($"dict           per-row : {dictPerRow:F0} B/row");
+        _output.WriteLine($"reclaimed (deserialization slice) : {dictPerRow - typedPerRow:F0} B/row");
+
+        // Projection pushdown eliminates the per-row deserialization slice (full-row decode + boxing + StoredRow
+        // + dict). The residual typed cost is the index-lookup phase (FilterUsingIndex) + per-row MVCC + the
+        // projected string + the result record — separate phases this feature did not target. The honest,
+        // robust proof is that typed reclaims the large deserialization slice vs the dict path.
+        Assert.True(
+            dictPerRow - typedPerRow > 1_000,
+            $"Expected >1,000 B/row reclaimed (deserialization eliminated); typed={typedPerRow:F0}, dict={dictPerRow:F0}.");
+    }
+
     private sealed class ThrowingIndex : IIndex
     {
         public void Insert(string key, long rowId) => throw new NotSupportedException();

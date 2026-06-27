@@ -118,7 +118,7 @@ public static class DataVoCompiledQuery
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
 
-        List<long>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
+        HashSet<long>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
         if (rowIds is null)
         {
             // Scan fallback: no index path resolved — reuse the full-decode finder + reader (unchanged behavior).
@@ -342,17 +342,18 @@ public static class DataVoCompiledQuery
     // then a single-column secondary index); returns null to signal the caller should use the full-decode scan
     // path. Mirrors the fall-through behavior of TryReadMatchingStoredRows (empty result or IndexException on an
     // index path falls through to scan).
-    private static List<long>? TryResolveMatchingRowIds(
+    private static HashSet<long>? TryResolveMatchingRowIds(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
         string expectedKey)
     {
+        // Returns FilterUsingIndex's HashSet directly (no List copy); the caller only enumerates it once.
         if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
         {
             try
             {
-                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName));
+                HashSet<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
@@ -369,7 +370,7 @@ public static class DataVoCompiledQuery
             string primaryKeyIndexName = $"_PK_{plan.TableName}";
             try
             {
-                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName));
+                HashSet<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
@@ -383,7 +384,7 @@ public static class DataVoCompiledQuery
         {
             try
             {
-                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName));
+                HashSet<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
