@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
 using DataVo.Tests.E2E;
 
@@ -204,6 +207,66 @@ public class BinaryWalRecoveryTests : SqlExecutionTestsBase
         // Checkpointing prunes the WAL but must never drop committed rows.
         var rows = ExecuteAndReturn($"SELECT Id FROM {table};");
         Assert.Equal(2, rows.Data.Count);
+    }
+
+    [Fact]
+    public void BinaryWal_UpdateFrameReplayedOnStartup_NewValueReadable()
+    {
+        const string table = "Records";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(40), Value INT, Score FLOAT);");
+        Execute($"INSERT INTO {table} (Id, Name, Value, Score) VALUES (1, 'a', 10, 1.5);");
+
+        string db = TestDb;
+        string walPath = Config.ResolveWalFilePath();
+
+        // Serialize the post-update row (Value 10 -> 99) in the engine's on-disk wire format, exactly as
+        // the live zero-alloc path will hand it to the WAL frame.
+        IReadOnlyList<Column> columns = Engine.Catalog.GetTableColumns(table, db);
+        byte[] newRowBytes = RowSerializer.SerializeCells(
+            columns,
+            [CellValue.From(1), CellValue.From("a"), CellValue.From(99), CellValue.From(1.5d)]);
+
+        Engine.Dispose();
+
+        // Drop the checkpoint watermark so the forged Update frame counts as an uncheckpointed tail.
+        string checkpointPath = Config.ResolveCheckpointStateFilePath();
+        if (File.Exists(checkpointPath))
+        {
+            File.Delete(checkpointPath);
+        }
+
+        // The sole row in a freshly created .dat lives at byte offset = the 8-byte file header size.
+        const long firstRowId = 8;
+        CraftUpdateFrameWal(walPath, db, table, firstRowId, newRowBytes);
+
+        Engine = DataVoEngine.Initialize(Config);
+        Execute($"USE {db};");
+
+        var rows = ExecuteAndReturn($"SELECT Value FROM {table} WHERE Id = 1;");
+        Assert.Single(rows.Data);
+        Assert.Equal(99, Convert.ToInt32(rows.Data[0]["Value"]));
+    }
+
+    /// <summary>
+    /// Forges a durable binary WAL containing a single <see cref="WalFrameOperationType.Update"/> frame,
+    /// using the exact appender + payload codec the live update path uses.
+    /// </summary>
+    private static void CraftUpdateFrameWal(string walPath, string databaseName, string tableName, long oldRowId, byte[] newRowBytes)
+    {
+        if (File.Exists(walPath))
+        {
+            File.Delete(walPath);
+        }
+
+        var appender = new WalAppender(1 << 20);
+        var store = new WalFileStore(walPath);
+
+        int size = WalUpdateFramePayload.MeasureSize(databaseName, tableName, newRowBytes.Length);
+        WalFrameReservation reservation =
+            appender.Reserve(WalFrameOperationType.Update, tableId: 0, rowId: oldRowId, size);
+        WalUpdateFramePayload.Write(reservation.PayloadSpan, databaseName, tableName, oldRowId, newRowBytes);
+        using WalFrame frame = reservation.Commit();
+        store.AppendFrame(frame);
     }
 
     /// <summary>

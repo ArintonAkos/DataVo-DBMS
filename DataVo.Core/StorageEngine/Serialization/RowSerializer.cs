@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using System.Collections.Concurrent;
 using DataVo.Core.Models.Catalog;
@@ -190,6 +191,178 @@ public static class RowSerializer
         }
 
         return cells;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when a column's storage type is fixed-width (<c>INT</c>, <c>FLOAT</c>,
+    /// or <c>BIT</c>) — the types the zero-allocation update path can overwrite in place.
+    /// </summary>
+    public static bool IsFixedWidthType(string columnType)
+    {
+        StorageColumnType type = ClassifyColumnType(columnType);
+        return type is StorageColumnType.Int or StorageColumnType.Float or StorageColumnType.Bit;
+    }
+
+    /// <summary>Returns <see langword="true"/> when a column's storage type is the 32-bit integer type.</summary>
+    public static bool IsIntegerType(string columnType) => ClassifyColumnType(columnType) == StorageColumnType.Int;
+
+    /// <summary>
+    /// Overwrites a single fixed-width cell (<c>INT</c>/<c>FLOAT</c>/<c>BIT</c>) in an already-serialized row
+    /// buffer, in place and without allocation. Returns <see langword="false"/> — leaving the buffer
+    /// untouched up to the failure point — when the cell cannot be patched in place: the column is
+    /// variable-width, the existing cell is null (no value slot), the new value is null, or the buffer is
+    /// malformed. Callers treat a <see langword="false"/> result as "fall back to the dictionary path".
+    /// </summary>
+    /// <param name="rowBytes">The serialized row to patch.</param>
+    /// <param name="columns">The table schema, in storage order.</param>
+    /// <param name="ordinal">The storage-order index of the column to overwrite.</param>
+    /// <param name="newValue">The replacement value; converted to the column's storage encoding.</param>
+    public static bool TryOverwriteFixedWidthCell(Span<byte> rowBytes, IReadOnlyList<Column> columns, int ordinal, object? newValue)
+    {
+        if ((uint)ordinal >= (uint)columns.Count || newValue is null)
+        {
+            return false;
+        }
+
+        int offset = 0;
+        for (int i = 0; i < ordinal; i++)
+        {
+            if (!TryAdvancePastCell(rowBytes, columns[i], ref offset))
+            {
+                return false;
+            }
+        }
+
+        if (offset >= rowBytes.Length)
+        {
+            return false;
+        }
+
+        bool isNull = rowBytes[offset] != 0;
+        offset += sizeof(bool);
+        if (isNull)
+        {
+            return false;
+        }
+
+        switch (ClassifyColumnType(columns[ordinal].Type))
+        {
+            case StorageColumnType.Int:
+                if (offset + sizeof(int) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt32LittleEndian(rowBytes.Slice(offset, sizeof(int)), Convert.ToInt32(newValue));
+                return true;
+            case StorageColumnType.Float:
+                if (offset + sizeof(int) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    rowBytes.Slice(offset, sizeof(int)),
+                    BitConverter.SingleToInt32Bits(Convert.ToSingle(newValue)));
+                return true;
+            case StorageColumnType.Bit:
+                if (offset + sizeof(bool) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                rowBytes[offset] = Convert.ToBoolean(newValue) ? (byte)1 : (byte)0;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Advances <paramref name="offset"/> past one serialized cell (its null flag and any value bytes),
+    /// matching the wire format <see cref="WriteTypedCell"/> produces. Returns <see langword="false"/> on a
+    /// truncated/malformed buffer.
+    /// </summary>
+    private static bool TryAdvancePastCell(ReadOnlySpan<byte> rowBytes, Column column, ref int offset)
+    {
+        if (offset >= rowBytes.Length)
+        {
+            return false;
+        }
+
+        bool isNull = rowBytes[offset] != 0;
+        offset += sizeof(bool);
+        if (isNull)
+        {
+            return true;
+        }
+
+        switch (ClassifyColumnType(column.Type))
+        {
+            case StorageColumnType.Int:
+            case StorageColumnType.Float:
+                offset += sizeof(int);
+                break;
+            case StorageColumnType.Bit:
+                offset += sizeof(bool);
+                break;
+            case StorageColumnType.Date:
+            case StorageColumnType.DateTime:
+                offset += sizeof(long);
+                break;
+            case StorageColumnType.Vector:
+                if (offset + sizeof(int) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                int count = BinaryPrimitives.ReadInt32LittleEndian(rowBytes.Slice(offset, sizeof(int)));
+                if (count < 0)
+                {
+                    return false;
+                }
+
+                offset += sizeof(int) + checked(count * sizeof(int));
+                break;
+            default:
+                if (!TryAdvancePastString(rowBytes, ref offset))
+                {
+                    return false;
+                }
+
+                break;
+        }
+
+        return offset <= rowBytes.Length;
+    }
+
+    /// <summary>
+    /// Advances past a <see cref="BinaryWriter"/>-encoded string: a 7-bit length prefix followed by its
+    /// UTF-8 bytes.
+    /// </summary>
+    private static bool TryAdvancePastString(ReadOnlySpan<byte> rowBytes, ref int offset)
+    {
+        int length = 0;
+        int shift = 0;
+        while (true)
+        {
+            if (offset >= rowBytes.Length || shift > 35)
+            {
+                return false;
+            }
+
+            byte b = rowBytes[offset++];
+            length |= (b & 0x7F) << shift;
+            if ((b & 0x80) == 0)
+            {
+                break;
+            }
+
+            shift += 7;
+        }
+
+        offset += length;
+        return length >= 0 && offset <= rowBytes.Length;
     }
 
     /// <summary>Decodes one non-null typed cell from the span reader (mirrors <see cref="ReadTypedCell"/>).</summary>
