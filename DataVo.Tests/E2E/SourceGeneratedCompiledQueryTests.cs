@@ -6,6 +6,8 @@ namespace DataVo.Tests.E2E;
 
 public sealed record GeneratedPlayer(int Id, string Name, int Level);
 
+public sealed record MixedRow(int Id, double Score, bool Active, DateOnly Day, string? Note);
+
 public static partial class GeneratedGameQueries
 {
     [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Id = @id")]
@@ -19,6 +21,9 @@ public static partial class GeneratedGameQueries
 
     [DataVoQuery("UPDATE Players SET Level = @level WHERE Id = @id")]
     public static partial int SetPlayerLevel(DataVoContext db, int id, int level);
+
+    [DataVoQuery("SELECT Id, Score, Active, Day, Note FROM Mixed WHERE Id = @id")]
+    public static partial MixedRow? GetMixed(DataVoContext db, int id);
 }
 
 public class SourceGeneratedCompiledQueryTests
@@ -74,6 +79,29 @@ public class SourceGeneratedCompiledQueryTests
 
         Assert.Equal(1, affected);
         Assert.Equal(9, (int)context.Execute("SELECT Level FROM Players WHERE Id = 1").Single().Data.Single()["Level"]!);
+    }
+
+    [Fact]
+    public void GeneratedTypedSelect_ReadsAllStorableTypesIncludingNull()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Mixed (Id INT PRIMARY KEY, Score FLOAT, Active BIT, Day DATE, Note VARCHAR(50))");
+        context.BulkInsert(
+            "Mixed",
+            [
+                new Dictionary<string, object?>
+                {
+                    ["Id"] = 7,
+                    ["Score"] = 4.25,
+                    ["Active"] = true,
+                    ["Day"] = new DateOnly(2026, 6, 24),
+                    ["Note"] = null
+                }
+            ]);
+
+        MixedRow? row = GeneratedGameQueries.GetMixed(context, 7);
+
+        Assert.Equal(new MixedRow(7, 4.25, true, new DateOnly(2026, 6, 24), null), row);
     }
 
     private static DataVoContext CreateContext()
