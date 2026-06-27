@@ -271,6 +271,43 @@ public class StorageContext(DataVoConfig config)
     }
 
     /// <summary>
+    /// Returns the stored serialized bytes for one row (in-memory: the stored reference, no copy), or
+    /// <c>null</c> when the row was deleted or does not exist.
+    /// </summary>
+    internal byte[]? TryReadRowBytes(string tableName, string databaseName, long rowId)
+    {
+        try
+        {
+            return _storageEngine.ReadRow(databaseName, tableName, rowId);
+        }
+        catch (RowDeletedException)
+        {
+            return null;
+        }
+        catch (RowNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Per-row MVCC visibility, identical in effect to <see cref="ApplyTypedMvccVisibilityFilter"/>: visible when
+    /// there is no active snapshot, otherwise gated by the row version's snapshot visibility.
+    /// </summary>
+    internal bool IsRowVisible(string tableName, string databaseName, long rowId)
+    {
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot == null)
+        {
+            return true;
+        }
+
+        DataVoEngine engine = DataVoEngine.Current();
+        RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+        return SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot);
+    }
+
+    /// <summary>
     /// Fetches specific records from a table as typed storage rows, bypassing dictionary materialization.
     /// </summary>
     internal Dictionary<long, StoredRow> GetTypedTableContents(List<long>? rowIds, string tableName, string databaseName)
