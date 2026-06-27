@@ -40,4 +40,44 @@ public class RowSerializerSpanTests
         Assert.Equal(new DateOnly(2026, 6, 24), decoded[4].AsDate());
         Assert.True(decoded[5].IsNull);
     }
+
+    [Fact]
+    public void DecodeProjectedCells_DecodesOnlyProjected_SkippingTheRest()
+    {
+        List<Column> columns = Schema(); // Id, Name, Score, Active, Day, Note
+        CellValue[] full =
+        [
+            CellValue.From(7),
+            CellValue.From("skip-me"),         // not projected (a string before a projected column)
+            CellValue.From((double)2.5f),
+            CellValue.From(false),             // not projected
+            CellValue.From(new DateOnly(2026, 1, 2)),
+            CellValue.From("note!"),
+        ];
+        byte[] bytes = RowSerializer.SerializeCells(columns, full);
+
+        // Project Id, Score, Day, Note (skip Name and Active — including a skipped string).
+        bool[] isProjected = [true, false, true, false, true, true];
+        var dest = new CellValue[4];
+
+        RowSerializer.DecodeProjectedCells(bytes, columns, isProjected, dest);
+
+        Assert.Equal(7, dest[0].AsInt32());                       // Id
+        Assert.Equal(2.5, dest[1].AsDouble(), 3);                 // Score
+        Assert.Equal(new DateOnly(2026, 1, 2), dest[2].AsDate()); // Day
+        Assert.Equal("note!", dest[3].AsString());                // Note
+    }
+
+    [Fact]
+    public void DecodeProjectedCells_ProjectedNull_IsNull()
+    {
+        List<Column> columns = [new Column { Name = "Id", Type = "INT" }, new Column { Name = "Note", Type = "VARCHAR" }];
+        byte[] bytes = RowSerializer.SerializeCells(columns, [CellValue.From(1), CellValue.Null]);
+
+        bool[] isProjected = [false, true];
+        var dest = new CellValue[1];
+        RowSerializer.DecodeProjectedCells(bytes, columns, isProjected, dest);
+
+        Assert.True(dest[0].IsNull);
+    }
 }

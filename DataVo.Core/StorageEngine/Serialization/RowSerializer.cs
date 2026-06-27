@@ -221,6 +221,34 @@ public static class RowSerializer
         }
     }
 
+    /// <summary>
+    /// Decodes only the columns flagged in <paramref name="isProjected"/> into <paramref name="destination"/>
+    /// (in storage order), advancing past the rest without allocating. <paramref name="destination"/> must have
+    /// room for the number of projected columns. The forward-only wire format is walked once.
+    /// </summary>
+    public static void DecodeProjectedCells(
+        ReadOnlySpan<byte> data,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<bool> isProjected,
+        Span<CellValue> destination)
+    {
+        var reader = new ByteSpanReader(data);
+        int next = 0;
+
+        for (int i = 0; i < columns.Count; i++)
+        {
+            bool isNull = reader.ReadBoolean();
+            if (isProjected[i])
+            {
+                destination[next++] = isNull ? CellValue.Null : DecodeTypedCell(ref reader, columns[i]);
+            }
+            else if (!isNull)
+            {
+                SkipTypedCell(ref reader, columns[i]);
+            }
+        }
+    }
+
     /// <summary>Advances the reader past one non-null typed cell without materializing it.</summary>
     private static void SkipTypedCell(ref ByteSpanReader reader, Column column)
     {
