@@ -2,11 +2,11 @@ namespace DataVo.Core.StorageEngine.Memory;
 
 internal sealed class InMemoryStorageSnapshot
 {
-    private readonly Dictionary<string, List<byte[]?>> _tables;
+    private readonly Dictionary<(string DatabaseName, string TableName), List<byte[]?>> _tables;
 
-    internal InMemoryStorageSnapshot(Dictionary<string, List<byte[]?>> tables)
+    internal InMemoryStorageSnapshot(Dictionary<(string DatabaseName, string TableName), List<byte[]?>> tables)
     {
-        _tables = new Dictionary<string, List<byte[]?>>(tables.Count, StringComparer.Ordinal);
+        _tables = new Dictionary<(string DatabaseName, string TableName), List<byte[]?>>(tables.Count);
 
         foreach (var entry in tables)
         {
@@ -14,11 +14,11 @@ internal sealed class InMemoryStorageSnapshot
         }
     }
 
-    internal IEnumerable<KeyValuePair<string, List<byte[]?>>> EnumerateTables()
+    internal IEnumerable<KeyValuePair<(string DatabaseName, string TableName), List<byte[]?>>> EnumerateTables()
     {
         foreach (var entry in _tables)
         {
-            yield return new KeyValuePair<string, List<byte[]?>>(entry.Key, CloneRows(entry.Value));
+            yield return new KeyValuePair<(string DatabaseName, string TableName), List<byte[]?>>(entry.Key, CloneRows(entry.Value));
         }
     }
 
