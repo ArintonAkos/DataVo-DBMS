@@ -61,6 +61,12 @@ public sealed class DataVoEngine : IDisposable
         {
             WalFrameAppender = new WalAppender(DefaultWalAppenderCapacityBytes);
             WalGroupCommitter = new GroupCommitter(new WalFileStore(Config.ResolveWalFilePath()));
+            WalCheckpointer = new WalCheckpointer(
+                durableLsnProvider: () => WalGroupCommitter.DurableLsn,
+                flushDataToDisk: StorageContext.FlushBackendToDisk,
+                stateStore: new CheckpointStateStore(Config),
+                walStore: new WalFileStore(Config.ResolveWalFilePath()),
+                intervalMs: Config.WalCheckpointIntervalMs);
         }
 
         if (Config.StorageMode == StorageMode.Disk)
@@ -148,6 +154,8 @@ public sealed class DataVoEngine : IDisposable
 
     internal GroupCommitter? WalGroupCommitter { get; }
 
+    internal WalCheckpointer? WalCheckpointer { get; }
+
     internal static bool UsesGroupCommitWal(DataVoConfig config)
     {
         return config.StorageMode == StorageMode.Disk
@@ -185,7 +193,15 @@ public sealed class DataVoEngine : IDisposable
 
         SetFallback(engine);
 
-        if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
+        if (UsesGroupCommitWal(config))
+        {
+            // Binary WAL recovery: replay the uncheckpointed tail, then checkpoint through the recovered
+            // LSN so the replayed effects are durable and the WAL prefix is pruned before serving traffic.
+            long recoveredLsn = new BinaryWalRecovery(config, engine).Recover();
+            engine.WalCheckpointer!.CheckpointTo(recoveredLsn);
+            engine.WalCheckpointer!.Start();
+        }
+        else if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
         {
             new RecoveryManager(config, engine).Recover();
         }
@@ -633,6 +649,14 @@ public sealed class DataVoEngine : IDisposable
         if (WalGroupCommitter != null)
         {
             WalGroupCommitter.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        if (WalCheckpointer != null)
+        {
+            // Final checkpoint: the committer has drained, so DurableLsn is stable. Make the data files
+            // durable, advance the watermark, and prune the WAL so a clean restart replays nothing.
+            WalCheckpointer.Checkpoint();
+            WalCheckpointer.Dispose();
         }
 
         IndexManager.Dispose();

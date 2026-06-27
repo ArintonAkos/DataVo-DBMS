@@ -543,6 +543,15 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
     }
 
     /// <summary>
+    /// Forces all buffered data-file writes to the physical device. Only meaningful when the I/O
+    /// scheduler keeps file handles pooled; otherwise writes are flushed when their stream closes.
+    /// </summary>
+    public void FlushToDisk()
+    {
+        _handlePool?.FlushToDisk();
+    }
+
+    /// <summary>
     /// Releases pooled file handles owned by this engine.
     /// </summary>
     public void Dispose()

@@ -57,6 +57,44 @@ internal sealed class FileHandlePool : IDisposable
         }
     }
 
+    /// <summary>
+    /// Forces every open pooled handle to the physical device (<c>fsync</c>). Because a handle only ever
+    /// leaves the pool through <see cref="Close"/> — which already fsyncs — flushing the open handles is
+    /// sufficient to make all buffered data-file writes durable.
+    /// </summary>
+    public void FlushToDisk()
+    {
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            foreach (Entry entry in _entries.Values)
+            {
+                if (entry.Handle.IsClosed)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    RandomAccess.FlushToDisk(entry.Handle);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+        }
+    }
+
     public void Remove(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

@@ -24,6 +24,11 @@ namespace DataVo.Core.Transactions;
 /// List&lt;WalEntry&gt; entries = store.ReadEntries();
 /// </code>
 /// </example>
+/// <summary>
+/// A decoded binary WAL frame: its fixed-size header plus the application payload bytes that follow it.
+/// </summary>
+internal readonly record struct WalFrameRecord(WalFrameHeader Header, byte[] Payload);
+
 internal sealed class WalFileStore
 {
     internal sealed class WalRecordEnvelope
@@ -150,6 +155,114 @@ internal sealed class WalFileStore
         RandomAccess.Write(lease.Handle, bytes, offset);
         RandomAccess.FlushToDisk(lease.Handle);
         Interlocked.Increment(ref _durableFlushCount);
+    }
+
+    /// <summary>
+    /// Sequentially scans the binary WAL, returning every frame that passes <c>FrameLen</c> and
+    /// <c>Crc32C</c> validation. Scanning stops at the first torn tail — a partial header, a frame whose
+    /// declared length runs past the file, or a checksum mismatch — so a crash mid-append is tolerated.
+    /// </summary>
+    /// <returns>The ordered, validated frames preceding the first torn tail.</returns>
+    public List<WalFrameRecord> ReadBinaryFrames()
+    {
+        return ExecuteLocked(() =>
+        {
+            var records = new List<WalFrameRecord>();
+            if (!File.Exists(FilePath))
+            {
+                return records;
+            }
+
+            byte[] bytes = File.ReadAllBytes(FilePath);
+            int offset = 0;
+            while (TryReadValidFrame(bytes, offset, out WalFrameHeader header))
+            {
+                ReadOnlySpan<byte> payload = bytes.AsSpan(
+                    offset + WalAppender.FrameHeaderSize,
+                    header.FrameLength - WalAppender.FrameHeaderSize);
+                records.Add(new WalFrameRecord(header, payload.ToArray()));
+                offset += header.FrameLength;
+            }
+
+            return records;
+        });
+    }
+
+    /// <summary>
+    /// Rewrites the binary WAL so only frames with an LSN greater than <paramref name="checkpointLsn"/>
+    /// survive, discarding any torn tail. When no frames remain the file is removed entirely. The rewrite
+    /// runs under the shared file lock, so it is atomic with respect to concurrent appends.
+    /// </summary>
+    /// <param name="checkpointLsn">The highest LSN whose effects are already durable in the data files.</param>
+    public void TruncateThroughLsn(long checkpointLsn)
+    {
+        ExecuteLocked(() =>
+        {
+            if (!File.Exists(FilePath))
+            {
+                return;
+            }
+
+            byte[] bytes = File.ReadAllBytes(FilePath);
+            int offset = 0;
+            int keepStart = -1;
+            int keepEnd = 0;
+            while (TryReadValidFrame(bytes, offset, out WalFrameHeader header))
+            {
+                if (header.Lsn > checkpointLsn && keepStart < 0)
+                {
+                    keepStart = offset;
+                }
+
+                offset += header.FrameLength;
+                keepEnd = offset;
+            }
+
+            BinaryFrameHandlePool.Remove(FilePath);
+
+            if (keepStart < 0)
+            {
+                DeleteIfExistsCore();
+                return;
+            }
+
+            byte[] retained = bytes.AsSpan(keepStart, keepEnd - keepStart).ToArray();
+
+            string tmpPath = FilePath + ".tmp";
+            using (var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(retained, 0, retained.Length);
+                stream.Flush(true);
+            }
+
+            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
+        });
+    }
+
+    /// <summary>
+    /// Attempts to decode and CRC-validate the frame starting at <paramref name="offset"/>.
+    /// </summary>
+    private static bool TryReadValidFrame(byte[] bytes, int offset, out WalFrameHeader header)
+    {
+        header = default;
+        if (offset < 0 || offset + WalAppender.FrameHeaderSize > bytes.Length)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> remaining = bytes.AsSpan(offset);
+        if (!WalAppender.TryReadFrameHeader(remaining, out header))
+        {
+            return false;
+        }
+
+        if (header.FrameLength < WalAppender.FrameHeaderSize || offset + header.FrameLength > bytes.Length)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> frame = bytes.AsSpan(offset, header.FrameLength);
+        return WalAppender.ValidateFrame(frame, header);
     }
 
     /// <summary>
@@ -296,6 +409,15 @@ internal sealed class WalFileStore
     {
         WalEntry prepared = PrepareWalEntryForSerialization(entry);
         return JsonSerializer.SerializeToUtf8Bytes(prepared, WalJson.WalEntry);
+    }
+
+    /// <summary>
+    /// Decodes a binary WAL frame payload produced by <see cref="SerializeWalEntryPayload"/> back into a
+    /// <see cref="WalEntry"/>. Vector envelopes are decoded lazily by <see cref="WalEntry.ToTransactionContext"/>.
+    /// </summary>
+    internal static WalEntry? DeserializeWalEntryPayload(byte[] payload)
+    {
+        return JsonSerializer.Deserialize(payload, WalJson.WalEntry);
     }
 
     private static WalEntry PrepareWalEntryForSerialization(WalEntry entry)
