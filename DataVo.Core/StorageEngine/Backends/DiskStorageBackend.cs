@@ -1,18 +1,22 @@
 using DataVo.Core.StorageEngine.Backends.Abstractions;
+using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Disk;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class DiskStorageBackend : IStorageBackend
+internal sealed class DiskStorageBackend : IStorageBackend, IDisposable
 {
     private readonly DiskStorageEngine _inner;
 
-    public DiskStorageBackend(string storagePath, bool syncWrites = false)
+    public DiskStorageBackend(string storagePath, bool syncWrites = false, IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off)
     {
-        _inner = new DiskStorageEngine(storagePath, syncWrites);
+        IoSchedulerMode = ioSchedulerMode;
+        _inner = new DiskStorageEngine(storagePath, syncWrites, ioSchedulerMode);
     }
 
     public string BackendKind => "Disk";
+
+    internal IoSchedulerMode IoSchedulerMode { get; }
 
     public void CreateTable(string databaseName, string tableName) => _inner.CreateTable(databaseName, tableName);
 
@@ -24,4 +28,5 @@ internal sealed class DiskStorageBackend : IStorageBackend
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);
+    public void Dispose() => _inner.Dispose();
 }

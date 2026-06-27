@@ -28,15 +28,18 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         whereParameterName: "id");
 
     private readonly bool _durable;
+    private readonly IoSchedulerMode _ioSchedulerMode;
     private readonly string _name;
     private string? _workingDirectory;
     private DataVoContext? _context;
     private List<CellValue[]>? _batchRows;
 
-    public DataVoDiskCrudEngine(bool durable)
+    public DataVoDiskCrudEngine(bool durable, IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off)
     {
         _durable = durable;
-        _name = durable ? "DataVo (Disk+fsync)" : "DataVo (Disk)";
+        _ioSchedulerMode = ioSchedulerMode;
+        string poolingSuffix = ioSchedulerMode == IoSchedulerMode.PoolingOnly ? "+pooled" : string.Empty;
+        _name = durable ? $"DataVo (Disk{poolingSuffix}+fsync)" : $"DataVo (Disk{poolingSuffix})";
     }
 
     public string Name => _name;
@@ -54,6 +57,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             WalEnabled = true,
             WalFilePath = "datavo.wal",
             SyncDiskWrites = _durable,
+            IoSchedulerMode = _ioSchedulerMode,
         });
 
         ExecuteOk("CREATE DATABASE DiskCrudBenchmark");

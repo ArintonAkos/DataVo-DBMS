@@ -58,6 +58,21 @@ public enum StorageMode
 }
 
 /// <summary>
+/// Defines the disk I/O scheduler implementation used by the storage engine.
+/// </summary>
+public enum IoSchedulerMode
+{
+    /// <summary>Use the legacy synchronous disk path.</summary>
+    Off,
+
+    /// <summary>Reuse file handles and positioned I/O while keeping legacy synchronous locking.</summary>
+    PoolingOnly,
+
+    /// <summary>Reserve value for the future asynchronous WAL/group-commit scheduler.</summary>
+    GroupCommit
+}
+
+/// <summary>
 /// Represents the runtime configuration used to initialize a <c>DataVo</c> engine instance.
 /// </summary>
 /// <example>
@@ -317,6 +332,12 @@ public class DataVoConfig
     /// </para>
     /// </summary>
     public bool SyncDiskWrites { get; set; }
+
+    /// <summary>
+    /// Gets or sets the disk I/O scheduler mode. Phase 1 enables only pooled file handles and
+    /// positioned I/O; group commit is reserved for the WAL-as-commit-point implementation.
+    /// </summary>
+    public IoSchedulerMode IoSchedulerMode { get; set; } = IoSchedulerMode.Off;
 
     /// <summary>
     /// Gets or sets a value indicating whether write-ahead logging is enabled.
