@@ -87,6 +87,18 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Forces all buffered disk writes to the physical device, when the active backend is disk-backed.
+    /// Used by the WAL checkpointer to make data-file writes durable before advancing the checkpoint LSN.
+    /// </summary>
+    internal void FlushBackendToDisk()
+    {
+        if (_storageEngine is DiskStorageBackend diskBackend)
+        {
+            diskBackend.FlushToDisk();
+        }
+    }
+
+    /// <summary>
     /// Releases resources owned by the resolved storage backend.
     /// </summary>
     public void Dispose()

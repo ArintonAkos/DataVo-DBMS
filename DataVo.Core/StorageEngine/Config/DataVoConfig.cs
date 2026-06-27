@@ -364,6 +364,18 @@ public class DataVoConfig
     public string TransactionIdStateFilePath { get; set; } = "datavo.txid";
 
     /// <summary>
+    /// Gets or sets the file name or path used to persist the binary WAL checkpoint LSN watermark.
+    /// </summary>
+    public string CheckpointStateFilePath { get; set; } = "datavo.ckpt";
+
+    /// <summary>
+    /// Gets or sets the interval, in milliseconds, between background WAL checkpoints in
+    /// <see cref="IoSchedulerMode.GroupCommit"/>. A checkpoint fsyncs the data files, advances the
+    /// persisted checkpoint LSN, and prunes the WAL.
+    /// </summary>
+    public int WalCheckpointIntervalMs { get; set; } = 1000;
+
+    /// <summary>
     /// Resolves the effective WAL file path for the current configuration.
     /// </summary>
     /// <returns>An absolute or base-directory-relative path to the WAL file.</returns>
@@ -397,6 +409,24 @@ public class DataVoConfig
             : Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, TransactionIdStateFilePath);
+    }
+
+    /// <summary>
+    /// Resolves the effective checkpoint-LSN state file path for the current configuration.
+    /// </summary>
+    /// <returns>An absolute or base-directory-relative path to the checkpoint state file.</returns>
+    public string ResolveCheckpointStateFilePath()
+    {
+        if (Path.IsPathRooted(CheckpointStateFilePath))
+        {
+            return CheckpointStateFilePath;
+        }
+
+        string baseDirectory = StorageMode == StorageMode.Disk
+            ? (DiskStoragePath ?? "./datavo_data")
+            : Directory.GetCurrentDirectory();
+
+        return Path.Combine(baseDirectory, CheckpointStateFilePath);
     }
 
     /// <summary>

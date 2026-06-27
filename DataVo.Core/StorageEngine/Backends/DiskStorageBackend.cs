@@ -28,5 +28,6 @@ internal sealed class DiskStorageBackend : IStorageBackend, IDisposable
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);
+    public void FlushToDisk() => _inner.FlushToDisk();
     public void Dispose() => _inner.Dispose();
 }
