@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DataVo.Core.BTree;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
@@ -105,8 +106,10 @@ public class IndexManager : IDisposable
     /// <summary>
     /// Fast lane for integer primary keys: logical integer key -> physical row id.
     /// This is intentionally in-memory only and mirrors the authoritative scalar index for hot point lookups.
+    /// Concurrent on both levels so point lookups (the hot read path) never serialize on <see cref="_lock"/>;
+    /// upserts/removals during inserts and updates are individually atomic.
     /// </summary>
-    private readonly Dictionary<IndexCacheKey, Dictionary<long, long>> _integerPrimaryKeyMaps = new(CacheKeyComparer.Instance);
+    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentDictionary<long, long>> _integerPrimaryKeyMaps = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Fast lane for single-column integer indexes: logical integer key -> physical row ids.
@@ -892,19 +895,11 @@ public class IndexManager : IDisposable
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        lock (_lock)
+        ConcurrentDictionary<long, long> map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentDictionary<long, long>());
+        for (int i = 0; i < entries.Count; i++)
         {
-            if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map))
-            {
-                map = [];
-                _integerPrimaryKeyMaps[cacheKey] = map;
-            }
-
-            for (int i = 0; i < entries.Count; i++)
-            {
-                (long key, long rowId) = entries[i];
-                map[key] = rowId;
-            }
+            (long key, long rowId) = entries[i];
+            map[key] = rowId; // lock-free upsert
         }
     }
 
@@ -946,6 +941,60 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Returns whether the named index is backed by an integer primary-key fast lane.
+    /// </summary>
+    public bool HasIntegerPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
+    {
+        return _integerPrimaryKeyMaps.ContainsKey(GetCacheKey(indexName, tableName, databaseName));
+    }
+
+    /// <summary>
+    /// Returns whether the named index is backed by a single-column integer fast lane.
+    /// </summary>
+    public bool HasIntegerIndexFastLane(string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            return _integerIndexMaps.ContainsKey(cacheKey);
+        }
+    }
+
+    /// <summary>
+    /// Removes an integer primary-key entry by key, in O(1). Used by the UPDATE path when a row's primary
+    /// key changes; the unchanged-key case is handled by an upsert through <see cref="InsertIntegerPrimaryKeys"/>.
+    /// </summary>
+    public void RemoveIntegerPrimaryKey(long key, string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map))
+        {
+            map.TryRemove(key, out _);
+        }
+    }
+
+    /// <summary>
+    /// Removes a single (key, rowId) pair from the integer single-column fast lane, in O(bucket). Used by the
+    /// UPDATE path so a moved row's stale row id is dropped from its key bucket before the new id is added.
+    /// </summary>
+    public void RemoveIntegerIndexEntry(long key, long rowId, string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map)
+                && map.TryGetValue(key, out List<long>? rowIds))
+            {
+                rowIds.Remove(rowId);
+                if (rowIds.Count == 0)
+                {
+                    map.Remove(key);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Looks up an integer primary key without building a string key or traversing the generic BTree.
     /// </summary>
     public bool TryLookupIntegerPrimaryKey(
@@ -956,14 +1005,12 @@ public class IndexManager : IDisposable
         out long rowId)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        lock (_lock)
+        // Lock-free: the hot point-lookup path must not serialize 8 concurrent readers on _lock.
+        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map)
+            && map.TryGetValue(key, out rowId))
         {
-            if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map)
-                && map.TryGetValue(key, out rowId))
-            {
-                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
-                return true;
-            }
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            return true;
         }
 
         rowId = 0;
@@ -1097,7 +1144,7 @@ public class IndexManager : IDisposable
 
     private void DeleteIntegerPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
     {
-        if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map) || map.Count == 0)
+        if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map) || map.IsEmpty)
         {
             return;
         }
@@ -1117,7 +1164,7 @@ public class IndexManager : IDisposable
 
             if (keyToRemove.HasValue)
             {
-                map.Remove(keyToRemove.Value);
+                map.TryRemove(keyToRemove.Value, out _);
             }
         }
     }

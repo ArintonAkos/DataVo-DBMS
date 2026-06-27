@@ -7,9 +7,9 @@ internal sealed class DiskStorageBackend : IStorageBackend
 {
     private readonly DiskStorageEngine _inner;
 
-    public DiskStorageBackend(string storagePath)
+    public DiskStorageBackend(string storagePath, bool syncWrites = false)
     {
-        _inner = new DiskStorageEngine(storagePath);
+        _inner = new DiskStorageEngine(storagePath, syncWrites);
     }
 
     public string BackendKind => "Disk";

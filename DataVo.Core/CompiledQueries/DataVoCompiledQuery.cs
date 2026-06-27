@@ -397,7 +397,10 @@ public static class DataVoCompiledQuery
             ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows);
 
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(context.Engine, null);
-            ReplaceRows(context, plan.TableName, databaseName, orderedRowIds, newRows, statementTxId);
+            List<Dictionary<string, object?>> oldRows = orderedRowIds
+                .Select(rowId => existingRows[rowId])
+                .ToList();
+            ReplaceRows(context, plan.TableName, databaseName, orderedRowIds, oldRows, newRows, statementTxId);
             return newRows.Count;
         }
         finally
@@ -1170,72 +1173,159 @@ public static class DataVoCompiledQuery
         string tableName,
         string databaseName,
         IReadOnlyList<long> oldRowIds,
+        IReadOnlyList<Dictionary<string, object?>> oldRows,
         IReadOnlyList<Dictionary<string, object?>> newRows,
         long statementTxId)
     {
         List<IndexFile> indexFiles = context.Engine.Catalog.GetTableIndexes(tableName, databaseName);
 
+        // Tombstone the old physical rows, then append the new versions and capture their row ids.
         context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
+
+        var newRowIds = new long[newRows.Count];
+        for (int i = 0; i < newRows.Count; i++)
+        {
+            long assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRows[i], tableName, databaseName);
+            newRowIds[i] = assignedRowId;
+            MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], assignedRowId, statementTxId);
+        }
+
         foreach (IndexFile index in indexFiles)
         {
-            string indexName = index.IndexFileName ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(indexName))
+            MaintainIndexForUpdate(context, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
+        }
+    }
+
+    /// <summary>
+    /// Maintains one index across an UPDATE batch. Integer single-column indexes are kept on their O(1) fast lane
+    /// (point-lookup parity with INSERT) so an updated row stays index-resolvable instead of falling into the
+    /// full-table-scan fallback; other indexes use the delete-by-row-id + reinsert path. This is the fix for the
+    /// concurrent-ops allocation trap where every UPDATE evicted its row from the fast lane.
+    /// </summary>
+    private static void MaintainIndexForUpdate(
+        DataVoContext context,
+        string tableName,
+        string databaseName,
+        IndexFile index,
+        IReadOnlyList<long> oldRowIds,
+        IReadOnlyList<Dictionary<string, object?>> oldRows,
+        IReadOnlyList<long> newRowIds,
+        IReadOnlyList<Dictionary<string, object?>> newRows)
+    {
+        string indexName = index.IndexFileName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(indexName))
+        {
+            return;
+        }
+
+        var indexes = context.Engine.IndexManager;
+        string indexKind = index.IndexKind ?? string.Empty;
+
+        if (indexes.SupportsVectorIndexType(indexKind))
+        {
+            indexes.DeleteFromVectorIndex(oldRowIds.ToList(), indexName, tableName, databaseName, indexKind);
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                Dictionary<string, object?> newRow = newRows[i];
+                if (index.AttributeNames.Count != 1)
+                {
+                    throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+                }
+
+                string vectorColumn = index.AttributeNames[0];
+                if (!newRow.TryGetValue(vectorColumn, out object? vectorValue) || vectorValue is null)
+                {
+                    continue;
+                }
+
+                if (!VectorParser.TryCoerceToVector(vectorValue, out float[] vector))
+                {
+                    throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                }
+
+                indexes.InsertIntoVectorIndex(vector, newRowIds[i], indexName, tableName, databaseName, indexKind);
+            }
+
+            return;
+        }
+
+        bool isPrimaryKeyIndex = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
+        if (isPrimaryKeyIndex && indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
+        {
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                bool oldOk = TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
+                bool newOk = TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
+
+                if (oldOk && (!newOk || oldKey != newKey))
+                {
+                    indexes.RemoveIntegerPrimaryKey(oldKey, indexName, tableName, databaseName);
+                }
+
+                if (newOk)
+                {
+                    // Upsert: overwrites the previous row id when the key is unchanged (gap-free for readers).
+                    indexes.InsertIntegerPrimaryKeys([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+            }
+
+            return;
+        }
+
+        if (indexes.HasIntegerIndexFastLane(indexName, tableName, databaseName))
+        {
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                if (TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey))
+                {
+                    indexes.RemoveIntegerIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
+                }
+
+                if (TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey))
+                {
+                    indexes.InsertIntegerIndexEntries([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+            }
+
+            return;
+        }
+
+        // Generic scalar (string BTree) path: delete the old row ids, then reinsert non-null keys.
+        indexes.DeleteFromIndex(oldRowIds.ToList(), indexName, tableName, databaseName);
+        for (int i = 0; i < newRows.Count; i++)
+        {
+            Dictionary<string, object?> newRow = newRows[i];
+            if (index.AttributeNames.Any(attributeName => !newRow.TryGetValue(attributeName, out object? attributeValue) || attributeValue == null))
             {
                 continue;
             }
 
-            string indexKind = index.IndexKind ?? string.Empty;
-            if (context.Engine.IndexManager.SupportsVectorIndexType(indexKind))
-            {
-                context.Engine.IndexManager.DeleteFromVectorIndex(oldRowIds.ToList(), indexName, tableName, databaseName, indexKind);
-            }
-            else
-            {
-                context.Engine.IndexManager.DeleteFromIndex(oldRowIds.ToList(), indexName, tableName, databaseName);
-            }
+            string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
+            indexes.InsertIntoIndex(indexValue, newRowIds[i], indexName, tableName, databaseName);
+        }
+    }
+
+    private static bool TryGetSingleIntegerKey(
+        IReadOnlyDictionary<string, object?> row,
+        IReadOnlyList<string> attributes,
+        out long key)
+    {
+        key = 0;
+        if (attributes.Count != 1 || !row.TryGetValue(attributes[0], out object? value) || value is null)
+        {
+            return false;
         }
 
-        for (int i = 0; i < newRows.Count; i++)
+        switch (value)
         {
-            Dictionary<string, object?> newRow = newRows[i];
-            long oldRowId = oldRowIds[i];
-            long assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
-            MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowId, assignedRowId, statementTxId);
-
-            foreach (IndexFile index in indexFiles)
-            {
-                if (index.AttributeNames.Any(attributeName => !newRow.TryGetValue(attributeName, out object? attributeValue) || attributeValue == null))
-                {
-                    continue;
-                }
-
-                string indexName = index.IndexFileName ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(indexName))
-                {
-                    continue;
-                }
-
-                string indexKind = index.IndexKind ?? string.Empty;
-                if (context.Engine.IndexManager.SupportsVectorIndexType(indexKind))
-                {
-                    if (index.AttributeNames.Count != 1)
-                    {
-                        throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
-                    }
-
-                    string vectorColumn = index.AttributeNames[0];
-                    if (!VectorParser.TryCoerceToVector(newRow[vectorColumn], out float[] vector))
-                    {
-                        throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
-                    }
-
-                    context.Engine.IndexManager.InsertIntoVectorIndex(vector, assignedRowId, indexName, tableName, databaseName, indexKind);
-                    continue;
-                }
-
-                string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                context.Engine.IndexManager.InsertIntoIndex(indexValue, assignedRowId, indexName, tableName, databaseName);
-            }
+            case int intValue:
+                key = intValue;
+                return true;
+            case long longValue:
+                key = longValue;
+                return true;
+            default:
+                return false;
         }
     }
 

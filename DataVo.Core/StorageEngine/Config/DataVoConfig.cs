@@ -305,6 +305,20 @@ public class DataVoConfig
     public int LockAcquireTimeoutMs { get; set; } = 30000;
 
     /// <summary>
+    /// Gets or sets a value indicating whether disk row writes are flushed to physical storage
+    /// (<c>fsync</c>) before the call returns. Only relevant when <see cref="StorageMode"/> is
+    /// <see cref="StorageMode.Disk"/>.
+    /// <para>
+    /// When <see langword="false"/> (the default), disk appends are flushed to the OS page cache on
+    /// stream close but are not forced to the physical device — durable across a process crash, but a
+    /// power/OS crash can lose the most recent writes. When <see langword="true"/>, every row append,
+    /// tombstone, and compaction is fsync'd, making writes power-crash durable at the cost of one
+    /// device flush per write (comparable to SQLite's <c>synchronous=FULL</c>).
+    /// </para>
+    /// </summary>
+    public bool SyncDiskWrites { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether write-ahead logging is enabled.
     /// </summary>
     public bool WalEnabled
