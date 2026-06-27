@@ -73,7 +73,9 @@ public sealed class RecoveryManager(DataVoConfig config, DataVoEngine? engine = 
     /// <returns><c>true</c> when recovery should run; otherwise, <c>false</c>.</returns>
     private bool ShouldRecover()
     {
-        return _config.StorageMode == StorageMode.Disk && _config.WalEnabled;
+        return _config.StorageMode == StorageMode.Disk
+            && _config.WalEnabled
+            && _config.IoSchedulerMode != IoSchedulerMode.GroupCommit;
     }
 
     /// <summary>

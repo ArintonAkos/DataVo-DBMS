@@ -227,6 +227,22 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             {
                 Indexes.DeleteFromIndex(toBeDeleted, indexFile, tableName, databaseName);
             });
+
+        if (ImplicitWalCommit.IsEnabled(Engine))
+        {
+            var operations = new List<WalOperation>(toBeDeleted.Count);
+            foreach (long rowId in toBeDeleted)
+            {
+                operations.Add(new WalOperation
+                {
+                    OperationType = WalOperationType.Delete,
+                    TableName = tableName,
+                    RowId = rowId,
+                });
+            }
+
+            ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
+        }
     }
 
     /// <summary>

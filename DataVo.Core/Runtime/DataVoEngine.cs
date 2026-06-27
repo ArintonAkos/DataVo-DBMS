@@ -33,6 +33,7 @@ public sealed class DataVoEngine : IDisposable
 {
     private static readonly AsyncLocal<DataVoEngine?> ScopedCurrent = new();
     private static readonly object SyncRoot = new();
+    private const int DefaultWalAppenderCapacityBytes = 64 * 1024 * 1024;
     private static DataVoEngine? _fallbackCurrent;
     private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
@@ -55,6 +56,12 @@ public sealed class DataVoEngine : IDisposable
         Diagnostics = new DataVoDiagnostics();
         Changes = new ChangeCapture();
         Reactive = new ReactiveRegistry(this);
+
+        if (UsesGroupCommitWal(Config))
+        {
+            WalFrameAppender = new WalAppender(DefaultWalAppenderCapacityBytes);
+            WalGroupCommitter = new GroupCommitter(new WalFileStore(Config.ResolveWalFilePath()));
+        }
 
         if (Config.StorageMode == StorageMode.Disk)
         {
@@ -136,6 +143,35 @@ public sealed class DataVoEngine : IDisposable
     /// Gets the reactive subscription registry implementing pull-drain incremental query notifications.
     /// </summary>
     public ReactiveRegistry Reactive { get; }
+
+    internal WalAppender? WalFrameAppender { get; }
+
+    internal GroupCommitter? WalGroupCommitter { get; }
+
+    internal static bool UsesGroupCommitWal(DataVoConfig config)
+    {
+        return config.StorageMode == StorageMode.Disk
+            && config.WalEnabled
+            && config.IoSchedulerMode == IoSchedulerMode.GroupCommit;
+    }
+
+    internal void CommitWalEntryThroughGroupCommit(WalEntry entry)
+    {
+        if (WalFrameAppender == null || WalGroupCommitter == null)
+        {
+            throw new InvalidOperationException("The WAL group committer is not enabled for this engine.");
+        }
+
+        byte[] payload = WalFileStore.SerializeWalEntryPayload(entry);
+        WalFrameReservation reservation = WalFrameAppender.Reserve(
+            WalFrameOperationType.TxnCommit,
+            tableId: 0,
+            rowId: 0,
+            payloadLength: payload.Length);
+        payload.CopyTo(reservation.PayloadSpan);
+        WalFrame frame = reservation.Commit();
+        WalGroupCommitter.CommitAsync(frame).AsTask().GetAwaiter().GetResult();
+    }
 
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
@@ -592,6 +628,11 @@ public sealed class DataVoEngine : IDisposable
         if (_transactionIdStateStore != null)
         {
             _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
+        }
+
+        if (WalGroupCommitter != null)
+        {
+            WalGroupCommitter.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
         IndexManager.Dispose();

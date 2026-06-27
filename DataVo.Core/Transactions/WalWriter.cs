@@ -1,3 +1,4 @@
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Core.Transactions;
@@ -34,6 +35,12 @@ public sealed class WalWriter(DataVoConfig config)
     /// <param name="entry">The entry to append.</param>
     public void Append(WalEntry entry)
     {
+        if (DataVoEngine.UsesGroupCommitWal(_config))
+        {
+            DataVoEngine.Current().CommitWalEntryThroughGroupCommit(entry);
+            return;
+        }
+
         _fileStore.AppendEntry(entry);
     }
 
@@ -43,6 +50,11 @@ public sealed class WalWriter(DataVoConfig config)
     /// <param name="transactionId">The committed transaction identifier to mark.</param>
     public void MarkCheckpointed(Guid transactionId)
     {
+        if (DataVoEngine.UsesGroupCommitWal(_config))
+        {
+            return;
+        }
+
         _fileStore.ExecuteLocked(() =>
         {
             List<WalEntry> entries = _fileStore.ReadEntries();
@@ -64,6 +76,11 @@ public sealed class WalWriter(DataVoConfig config)
     /// </param>
     public void PruneCheckpointedEntries(bool forceIfAllCheckpointed)
     {
+        if (DataVoEngine.UsesGroupCommitWal(_config))
+        {
+            return;
+        }
+
         _fileStore.ExecuteLocked(() =>
         {
             List<WalEntry> entries = _fileStore.ReadEntries();

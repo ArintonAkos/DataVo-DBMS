@@ -67,25 +67,35 @@ else if (benchmarkScenario.Equals("flat-crud", StringComparison.OrdinalIgnoreCas
 else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnoreCase))
 {
     int records = ReadIntArg(args, "--records", 50_000);
+    int writerWorkers = Math.Max(1, ReadIntArg(args, "--writers", 1));
     string root = Path.Combine(Path.GetTempPath(), $"datavo-disk-crud-wal-{Guid.NewGuid():N}");
 
     try
     {
+        BenchmarkMetrics RunDiskScenario(IDiskCrudEngine engine) =>
+            writerWorkers == 1
+                ? RunDiskCrud(engine, records, progressEvery, root)
+                : RunDiskCrudConcurrent(engine, records, writerWorkers, progressEvery, root);
+
         // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
         //   not power-durable: DataVo (Disk)        <-> SQLite (WAL, synchronous=NORMAL)
         //   power-durable:     DataVo (Disk+fsync)  <-> SQLite (WAL, synchronous=FULL)
         if (ShouldRun(engineFilter, "datavo"))
-            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: false), records, progressEvery, root));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false)));
         if (ShouldRun(engineFilter, "datavo-pooled"))
-            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly), records, progressEvery, root));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly)));
+        if (ShouldRun(engineFilter, "datavo-groupcommit"))
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit)));
         if (ShouldRun(engineFilter, "sqlite"))
-            results.Add(RunDiskCrud(new SqliteDiskCrudEngine("NORMAL"), records, progressEvery, root));
+            results.Add(RunDiskScenario(new SqliteDiskCrudEngine("NORMAL")));
         if (ShouldRun(engineFilter, "datavo-fsync"))
-            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: true), records, progressEvery, root));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true)));
         if (ShouldRun(engineFilter, "datavo-pooled-fsync"))
-            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.PoolingOnly), records, progressEvery, root));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.PoolingOnly)));
+        if (ShouldRun(engineFilter, "datavo-groupcommit-fsync"))
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.GroupCommit)));
         if (ShouldRun(engineFilter, "sqlite-full"))
-            results.Add(RunDiskCrud(new SqliteDiskCrudEngine("FULL"), records, progressEvery, root));
+            results.Add(RunDiskScenario(new SqliteDiskCrudEngine("FULL")));
     }
     finally
     {
@@ -456,6 +466,106 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
 
             return new BenchmarkMetrics(
                 engine.Name,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                p50,
+                p99,
+                allocatedBytes / 1024d / 1024d);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static BenchmarkMetrics RunDiskCrudConcurrent(IDiskCrudEngine engine, int records, int writers, int progressEvery, string rootDir)
+{
+    using (engine)
+    {
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: concurrent disk CRUD (WAL) — inserting {records:N0} records then {records:N0} point updates across {writers:N0} writers...");
+
+        var data = new FlatRecord[records];
+        for (int i = 0; i < records; i++)
+        {
+            data[i] = new FlatRecord(i + 1, $"name-{i}", i, i * 1.5d);
+        }
+
+        string workingDir = Path.Combine(rootDir, SanitizeEngineDir(engine.Name));
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            engine.Initialize(workingDir);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            double[] updateLatenciesMs = new double[records];
+            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+            var totalStopwatch = Stopwatch.StartNew();
+
+            var insertStopwatch = Stopwatch.StartNew();
+            engine.BeginInsertBatch();
+            for (int i = 0; i < records; i++)
+            {
+                engine.Insert(data[i]);
+            }
+
+            engine.CompleteInsertBatch();
+            insertStopwatch.Stop();
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert phase complete in {insertStopwatch.Elapsed.TotalSeconds:N2}s; starting concurrent updates...");
+
+            long nextIndex = -1;
+            int completed = 0;
+            var updateStopwatch = Stopwatch.StartNew();
+            Task[] tasks = new Task[writers];
+            for (int worker = 0; worker < writers; worker++)
+            {
+                tasks[worker] = Task.Run(() =>
+                {
+                    while (true)
+                    {
+                        long index = Interlocked.Increment(ref nextIndex);
+                        if (index >= records)
+                        {
+                            return;
+                        }
+
+                        long id = index + 1;
+                        int newValue = records - (int)index;
+                        double newScore = newValue * 0.5d;
+
+                        long iterationStart = Stopwatch.GetTimestamp();
+                        engine.Update(id, newValue, newScore);
+                        updateLatenciesMs[index] = (Stopwatch.GetTimestamp() - iterationStart) * 1000d / Stopwatch.Frequency;
+
+                        int current = Interlocked.Increment(ref completed);
+                        if (progressEvery > 0 && (current % progressEvery == 0 || current == records))
+                        {
+                            Console.Error.WriteLine(
+                                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {current:N0}/{records:N0} concurrent updates, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
+                        }
+                    }
+                });
+            }
+
+            Task.WaitAll(tasks);
+            updateStopwatch.Stop();
+            totalStopwatch.Stop();
+
+            long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+            (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(updateLatenciesMs);
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalSeconds:N2}s | concurrent update {updateStopwatch.Elapsed.TotalSeconds:N2}s | update p50 {p50:F4}ms p99 {p99:F4}ms");
+
+            return new BenchmarkMetrics(
+                $"{engine.Name} ({writers} writers)",
                 totalStopwatch.Elapsed.TotalMilliseconds,
                 p50,
                 p99,

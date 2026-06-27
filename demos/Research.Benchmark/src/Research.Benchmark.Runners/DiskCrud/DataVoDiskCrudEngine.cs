@@ -38,7 +38,12 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     {
         _durable = durable;
         _ioSchedulerMode = ioSchedulerMode;
-        string poolingSuffix = ioSchedulerMode == IoSchedulerMode.PoolingOnly ? "+pooled" : string.Empty;
+        string poolingSuffix = ioSchedulerMode switch
+        {
+            IoSchedulerMode.PoolingOnly => "+pooled",
+            IoSchedulerMode.GroupCommit => "+groupcommit",
+            _ => string.Empty,
+        };
         _name = durable ? $"DataVo (Disk{poolingSuffix}+fsync)" : $"DataVo (Disk{poolingSuffix})";
     }
 

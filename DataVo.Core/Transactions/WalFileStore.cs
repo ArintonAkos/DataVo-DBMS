@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
@@ -38,6 +39,8 @@ internal sealed class WalFileStore
 
     private static readonly FileHandlePool BinaryFrameHandlePool = new(capacity: 128);
 
+    private int _durableFlushCount;
+
     // Source-gen context built with the WAL object converter so the heterogeneous object? row values
     // serialize without reflection (Native-AOT safe).
     private static readonly DataVoJsonContext WalJson =
@@ -56,6 +59,8 @@ internal sealed class WalFileStore
     /// Gets the path of the WAL file managed by this store.
     /// </summary>
     public string FilePath { get; }
+
+    internal int DurableFlushCount => Volatile.Read(ref _durableFlushCount);
 
     /// <summary>
     /// Reads and deserializes every WAL entry currently present in the file.
@@ -95,15 +100,56 @@ internal sealed class WalFileStore
     /// <param name="frame">The committed binary frame to persist.</param>
     public void AppendFrame(WalFrame frame)
     {
+        AppendFrames([frame]);
+    }
+
+    /// <summary>
+    /// Appends committed binary WAL frames as one contiguous durable write.
+    /// </summary>
+    /// <param name="frames">The committed binary frames to persist in LSN order.</param>
+    public void AppendFrames(IReadOnlyList<WalFrame> frames)
+    {
         ExecuteLocked(() =>
         {
+            if (frames.Count == 0)
+            {
+                return;
+            }
+
             EnsureDirectoryExists();
 
-            using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
-            long offset = RandomAccess.GetLength(lease.Handle);
-            RandomAccess.Write(lease.Handle, frame.Range.ReadOnlySpan, offset);
-            RandomAccess.FlushToDisk(lease.Handle);
+            int totalLength = 0;
+            foreach (WalFrame frame in frames)
+            {
+                totalLength = checked(totalLength + frame.Range.Length);
+            }
+
+            byte[] rented = ArrayPool<byte>.Shared.Rent(totalLength);
+            try
+            {
+                int offset = 0;
+                foreach (WalFrame frame in frames)
+                {
+                    frame.Range.ReadOnlySpan.CopyTo(rented.AsSpan(offset, frame.Range.Length));
+                    offset += frame.Range.Length;
+                }
+
+                AppendFrameBytes(rented.AsSpan(0, totalLength));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         });
+    }
+
+    private void AppendFrameBytes(ReadOnlySpan<byte> bytes)
+    {
+        using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
+        long offset = RandomAccess.GetLength(lease.Handle);
+        RandomAccess.Write(lease.Handle, bytes, offset);
+        RandomAccess.FlushToDisk(lease.Handle);
+        Interlocked.Increment(ref _durableFlushCount);
     }
 
     /// <summary>
@@ -244,6 +290,12 @@ internal sealed class WalFileStore
         };
 
         return JsonSerializer.Serialize(envelope, WalJson.WalRecordEnvelope);
+    }
+
+    internal static byte[] SerializeWalEntryPayload(WalEntry entry)
+    {
+        WalEntry prepared = PrepareWalEntryForSerialization(entry);
+        return JsonSerializer.SerializeToUtf8Bytes(prepared, WalJson.WalEntry);
     }
 
     private static WalEntry PrepareWalEntryForSerialization(WalEntry entry)
