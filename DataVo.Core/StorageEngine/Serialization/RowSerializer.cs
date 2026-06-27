@@ -193,19 +193,33 @@ public static class RowSerializer
     }
 
     /// <summary>Decodes one non-null typed cell from the span reader (mirrors <see cref="ReadTypedCell"/>).</summary>
+    // Storage type categories, resolved without allocation. column.Type is stored in the catalog as the
+    // DataTypes enum name (PascalCase, e.g. "Int"/"Varchar"), so a ToUpperInvariant() switch re-cased and
+    // allocated a string per column, per row. OrdinalIgnoreCase comparison classifies in place — zero alloc.
+    private enum StorageColumnType { Int, Float, Bit, Date, DateTime, Vector, String }
+
+    private static StorageColumnType ClassifyColumnType(string type) =>
+        string.Equals(type, "INT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Int :
+        string.Equals(type, "FLOAT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Float :
+        string.Equals(type, "BIT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Bit :
+        string.Equals(type, "DATE", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Date :
+        string.Equals(type, "DATETIME", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.DateTime :
+        string.Equals(type, "VECTOR", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Vector :
+        StorageColumnType.String;
+
     private static CellValue DecodeTypedCell(ref ByteSpanReader reader, Column column)
     {
-        switch (column.Type.ToUpperInvariant())
+        switch (ClassifyColumnType(column.Type))
         {
-            case "INT":
+            case StorageColumnType.Int:
                 return CellValue.From(reader.ReadInt32());
-            case "FLOAT":
+            case StorageColumnType.Float:
                 return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
-            case "BIT":
+            case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
-            case "DATE":
+            case StorageColumnType.Date:
                 return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
-            case "VECTOR":
+            case StorageColumnType.Vector:
             {
                 int count = reader.ReadInt32();
                 float[] vector = new float[count];
@@ -252,19 +266,19 @@ public static class RowSerializer
     /// <summary>Advances the reader past one non-null typed cell without materializing it.</summary>
     private static void SkipTypedCell(ref ByteSpanReader reader, Column column)
     {
-        switch (column.Type.ToUpperInvariant())
+        switch (ClassifyColumnType(column.Type))
         {
-            case "INT":
-            case "FLOAT":
+            case StorageColumnType.Int:
+            case StorageColumnType.Float:
                 reader.Skip(sizeof(int));
                 return;
-            case "BIT":
+            case StorageColumnType.Bit:
                 reader.Skip(sizeof(bool));
                 return;
-            case "DATE":
+            case StorageColumnType.Date:
                 reader.Skip(sizeof(long));
                 return;
-            case "VECTOR":
+            case StorageColumnType.Vector:
                 reader.Skip(reader.ReadInt32() * sizeof(int));
                 return;
             default:
@@ -302,33 +316,33 @@ public static class RowSerializer
     private static void WriteNonNullValue(BinaryWriter writer, Column column, object value)
     {
         object boxed = value;
-        string type = column.Type.ToUpperInvariant();
-        if (type == "INT")
+        StorageColumnType type = ClassifyColumnType(column.Type);
+        if (type == StorageColumnType.Int)
         {
             writer.Write(Convert.ToInt32(boxed));
             return;
         }
 
-        if (type == "FLOAT")
+        if (type == StorageColumnType.Float)
         {
             float floatValue = Convert.ToSingle(boxed);
             writer.Write(BitConverter.SingleToInt32Bits(floatValue));
             return;
         }
 
-        if (type == "BIT")
+        if (type == StorageColumnType.Bit)
         {
             writer.Write(Convert.ToBoolean(boxed));
             return;
         }
 
-        if (type == "DATE" || type == "DATETIME")
+        if (type == StorageColumnType.Date || type == StorageColumnType.DateTime)
         {
             writer.Write(ToBinaryDateValue(boxed));
             return;
         }
 
-        if (type == "VECTOR")
+        if (type == StorageColumnType.Vector)
         {
             if (!VectorParser.TryCoerceToVector(boxed, out float[] vector))
             {
@@ -351,33 +365,33 @@ public static class RowSerializer
     /// </summary>
     private static object ReadNonNullValue(BinaryReader reader, Column column)
     {
-        string type = column.Type.ToUpperInvariant();
-        if (type == "INT")
+        StorageColumnType type = ClassifyColumnType(column.Type);
+        if (type == StorageColumnType.Int)
         {
             return reader.ReadInt32();
         }
 
-        if (type == "FLOAT")
+        if (type == StorageColumnType.Float)
         {
             return BitConverter.Int32BitsToSingle(reader.ReadInt32());
         }
 
-        if (type == "BIT")
+        if (type == StorageColumnType.Bit)
         {
             return reader.ReadBoolean();
         }
 
-        if (type == "DATE")
+        if (type == StorageColumnType.Date)
         {
             return DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
         }
 
-        if (type == "DATETIME")
+        if (type == StorageColumnType.DateTime)
         {
             return DateTime.FromBinary(reader.ReadInt64());
         }
 
-        if (type == "VECTOR")
+        if (type == StorageColumnType.Vector)
         {
             int count = reader.ReadInt32();
             float[] vector = new float[count];
@@ -395,21 +409,21 @@ public static class RowSerializer
     /// <summary>Writes a non-null typed cell using the column type encoding (matches <see cref="WriteNonNullValue"/>).</summary>
     private static void WriteTypedCell(BinaryWriter writer, Column column, CellValue cell)
     {
-        switch (column.Type.ToUpperInvariant())
+        switch (ClassifyColumnType(column.Type))
         {
-            case "INT":
+            case StorageColumnType.Int:
                 writer.Write(cell.AsInt32());
                 return;
-            case "FLOAT":
+            case StorageColumnType.Float:
                 writer.Write(BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
                 return;
-            case "BIT":
+            case StorageColumnType.Bit:
                 writer.Write(cell.AsBoolean());
                 return;
-            case "DATE":
+            case StorageColumnType.Date:
                 writer.Write(cell.AsDate().ToDateTime(TimeOnly.MinValue).ToBinary());
                 return;
-            case "VECTOR":
+            case StorageColumnType.Vector:
             {
                 float[] vector = cell.AsVector();
                 writer.Write(vector.Length);
@@ -429,17 +443,17 @@ public static class RowSerializer
     /// <summary>Reads a non-null typed cell using the column type encoding (matches <see cref="ReadNonNullValue"/>).</summary>
     private static CellValue ReadTypedCell(BinaryReader reader, Column column)
     {
-        switch (column.Type.ToUpperInvariant())
+        switch (ClassifyColumnType(column.Type))
         {
-            case "INT":
+            case StorageColumnType.Int:
                 return CellValue.From(reader.ReadInt32());
-            case "FLOAT":
+            case StorageColumnType.Float:
                 return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
-            case "BIT":
+            case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
-            case "DATE":
+            case StorageColumnType.Date:
                 return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
-            case "VECTOR":
+            case StorageColumnType.Vector:
             {
                 int count = reader.ReadInt32();
                 float[] vector = new float[count];
