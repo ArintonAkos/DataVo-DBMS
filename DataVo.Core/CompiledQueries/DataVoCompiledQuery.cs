@@ -4,7 +4,9 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
+using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.CompiledQueries;
@@ -116,16 +118,70 @@ public static class DataVoCompiledQuery
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
 
-        List<KeyValuePair<long, StoredRow>> matches =
-            TryReadMatchingStoredRows(context, plan, databaseName, expectedKey);
-
-        var results = new T[matches.Count];
-        for (int i = 0; i < matches.Count; i++)
+        List<long>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
+        if (rowIds is null)
         {
-            results[i] = mapper(new CompiledRowReader(matches[i].Value.AsView()));
+            // Scan fallback: no index path resolved — reuse the full-decode finder + reader (unchanged behavior).
+            List<KeyValuePair<long, StoredRow>> scanned =
+                TryReadMatchingStoredRows(context, plan, databaseName, expectedKey);
+            var scannedResults = new T[scanned.Count];
+            for (int i = 0; i < scanned.Count; i++)
+            {
+                scannedResults[i] = mapper(new CompiledRowReader(scanned[i].Value.AsView()));
+            }
+
+            return scannedResults;
+        }
+
+        // Streaming projection pushdown: decode only the projected columns of each visible row into a reused
+        // buffer, mapping straight to T — no StoredRow, no dictionary, no decode of unprojected columns.
+        IReadOnlyList<Column> columns = context.Engine.Catalog.GetTableColumns(plan.TableName, databaseName);
+        bool[] isProjected = new bool[columns.Count];
+        var projectedNames = new List<string>(plan.ProjectedColumns.Count);
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (ContainsIgnoreCase(plan.ProjectedColumns, columns[i].Name))
+            {
+                isProjected[i] = true;
+                projectedNames.Add(columns[i].Name);
+            }
+        }
+
+        var projectedSchema = new ReactiveRowSchema(projectedNames);
+        var buffer = new CellValue[projectedNames.Count];
+
+        var results = new List<T>(rowIds.Count);
+        foreach (long rowId in rowIds)
+        {
+            if (!context.Engine.StorageContext.IsRowVisible(plan.TableName, databaseName, rowId))
+            {
+                continue;
+            }
+
+            byte[]? bytes = context.Engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
+            if (bytes is null)
+            {
+                continue;
+            }
+
+            RowSerializer.DecodeProjectedCells(bytes, columns, isProjected, buffer);
+            results.Add(mapper(new CompiledRowReader(new StoredRowView(projectedSchema, buffer))));
         }
 
         return results;
+    }
+
+    private static bool ContainsIgnoreCase(IReadOnlyList<string> values, string candidate)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -280,6 +336,65 @@ public static class DataVoCompiledQuery
                 entry.Key,
                 MaterializeStoredRow(entry.Value)))
             .ToList();
+    }
+
+    // Returns the matching row ids when an index access path resolves them (compile-time tag, then primary key,
+    // then a single-column secondary index); returns null to signal the caller should use the full-decode scan
+    // path. Mirrors the fall-through behavior of TryReadMatchingStoredRows (empty result or IndexException on an
+    // index path falls through to scan).
+    private static List<long>? TryResolveMatchingRowIds(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        string databaseName,
+        string expectedKey)
+    {
+        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        {
+            try
+            {
+                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName));
+                if (ids.Count > 0)
+                {
+                    return ids;
+                }
+            }
+            catch (IndexException)
+            {
+            }
+        }
+
+        List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
+        if (primaryKeys.Contains(plan.WhereColumn!, StringComparer.OrdinalIgnoreCase))
+        {
+            string primaryKeyIndexName = $"_PK_{plan.TableName}";
+            try
+            {
+                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName));
+                if (ids.Count > 0)
+                {
+                    return ids;
+                }
+            }
+            catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
+            {
+            }
+        }
+        else if (TryResolveSingleColumnIndex(context, plan.TableName, databaseName, plan.WhereColumn!, out string secondaryIndexName))
+        {
+            try
+            {
+                var ids = new List<long>(context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName));
+                if (ids.Count > 0)
+                {
+                    return ids;
+                }
+            }
+            catch (IndexException)
+            {
+            }
+        }
+
+        return null;
     }
 
     // Shared finder: resolves matching rows via the compile-time tag, then primary key, then a single-column

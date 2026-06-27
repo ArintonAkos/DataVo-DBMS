@@ -414,6 +414,86 @@ public class CompiledAccessPathTests
         return (bytes8 - bytes1) / 7.0;
     }
 
+    [Fact]
+    public void SelectManyTyped_StreamsProjected_WideRow_MatchesDictPath()
+    {
+        using var context = CreateContext();
+        // Wide row, narrow projection: only Id/Tag/Score are projected; C1..C5 must be skipped, not decoded.
+        context.Execute("CREATE TABLE Wide (Id INT PRIMARY KEY, Tag VARCHAR(20), Score FLOAT, C1 VARCHAR(20), C2 VARCHAR(20), C3 VARCHAR(20), C4 VARCHAR(20), C5 VARCHAR(20))");
+        context.BulkInsert(
+            "Wide",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Tag"] = "x", ["Score"] = 1.5, ["C1"] = "a", ["C2"] = "b", ["C3"] = "c", ["C4"] = "d", ["C5"] = "e" },
+                new Dictionary<string, object?> { ["Id"] = 2, ["Tag"] = "x", ["Score"] = 2.5, ["C1"] = "a", ["C2"] = "b", ["C3"] = "c", ["C4"] = "d", ["C5"] = "e" }
+            ]);
+        context.Execute("CREATE INDEX ix_wide_tag ON Wide (Tag)");
+
+        IReadOnlyList<Hit> typed = DataVoCompiledQuery.SelectManyTyped<Hit>(
+            context,
+            DataVoCompiledQueryPlan.SelectMany("Wide", ["Id", "Tag", "Score"], "Tag", "tag",
+                accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_wide_tag"),
+            [new DataVoCompiledQueryParameter("tag", "x")],
+            static r => new Hit(r.GetInt32("Id"), r.GetString("Tag")!, r.GetDouble("Score")));
+
+        Assert.Equal(
+            new[] { new Hit(1, "x", 1.5), new Hit(2, "x", 2.5) },
+            typed.OrderBy(h => h.Id));
+    }
+
+    [Fact]
+    public void SelectSingleTyped_ByPrimaryKey_StreamsProjected()
+    {
+        using var context = CreateContext();
+        SeedHits(context); // Hits(Id INT PK, Name VARCHAR, Score FLOAT), 3 rows
+
+        Hit? hit = DataVoCompiledQuery.SelectSingleTyped<Hit>(
+            context,
+            DataVoCompiledQueryPlan.SelectSingle("Hits", ["Id", "Name", "Score"], "Id", "id"),
+            [new DataVoCompiledQueryParameter("id", 2)],
+            MapHit);
+
+        Assert.Equal(new Hit(2, "Grace", 2.5), hit);
+    }
+
+    [Fact]
+    public void SelectManyTyped_NullProjectedColumn_StreamsNull()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(20), Body VARCHAR(50))");
+        context.BulkInsert(
+            "Notes",
+            [
+                new Dictionary<string, object?> { ["Id"] = 1, ["Tag"] = "n", ["Body"] = null }
+            ]);
+        context.Execute("CREATE INDEX ix_notes_tag ON Notes (Tag)");
+
+        IReadOnlyList<(int, string?)> rows = DataVoCompiledQuery.SelectManyTyped<(int, string?)>(
+            context,
+            DataVoCompiledQueryPlan.SelectMany("Notes", ["Id", "Body"], "Tag", "tag",
+                accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_notes_tag"),
+            [new DataVoCompiledQueryParameter("tag", "n")],
+            static r => (r.GetInt32("Id"), r.GetString("Body")));
+
+        Assert.Equal((1, (string?)null), Assert.Single(rows));
+    }
+
+    [Fact]
+    public void SelectManyTyped_ScanFallback_UnindexedColumn_StillReturnsRows()
+    {
+        using var context = CreateContext();
+        SeedHits(context); // no index on Name
+
+        IReadOnlyList<Hit> rows = DataVoCompiledQuery.SelectManyTyped<Hit>(
+            context,
+            DataVoCompiledQueryPlan.SelectMany("Hits", ["Id", "Name", "Score"], "Name", "name"),
+            [new DataVoCompiledQueryParameter("name", "Ada")],
+            MapHit);
+
+        Assert.Equal(
+            new[] { new Hit(1, "Ada", 1.5), new Hit(3, "Ada", 3.5) },
+            rows.OrderBy(h => h.Id));
+    }
+
     private sealed class ThrowingIndex : IIndex
     {
         public void Insert(string key, long rowId) => throw new NotSupportedException();
