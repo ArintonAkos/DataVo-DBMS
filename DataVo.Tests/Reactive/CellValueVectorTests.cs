@@ -54,6 +54,21 @@ public class CellValueVectorTests
     }
 
     [Fact]
+    public void InternalVectorSpanAccess_DoesNotClone()
+    {
+        CellValue cell = CellValue.From(new float[] { 1f, 2f, 3f });
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ReadOnlySpan<float> span = cell.AsVectorReadOnlySpan();
+        int length = cell.VectorLength;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(3, length);
+        Assert.Equal(2f, span[1]);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public void FromObject_BoxedVector_ProducesVectorCell()
     {
         object boxed = new float[] { 4f, 5f };

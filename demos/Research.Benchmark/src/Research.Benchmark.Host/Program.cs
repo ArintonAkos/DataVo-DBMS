@@ -81,6 +81,8 @@ else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnor
 
     if (ShouldRun(engineFilter, "datavo"))
         results.Add(RunVectorSearch(new DataVoVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
+    if (ShouldRun(engineFilter, "datavo-flat"))
+        results.Add(RunVectorSearch(new DataVoVectorSearchEngine("FLAT", "DataVo-Flat", vectors), vectors, dimensions, queries, topK, progressEvery));
     if (ShouldRun(engineFilter, "litedb"))
         results.Add(RunVectorSearch(new LiteDbVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
     if (ShouldRun(engineFilter, "sqlite"))

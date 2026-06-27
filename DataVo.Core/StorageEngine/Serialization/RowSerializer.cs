@@ -425,7 +425,7 @@ public static class RowSerializer
                 return;
             case StorageColumnType.Vector:
             {
-                float[] vector = cell.AsVector();
+                ReadOnlySpan<float> vector = cell.AsVectorReadOnlySpan();
                 writer.Write(vector.Length);
                 foreach (float item in vector)
                 {

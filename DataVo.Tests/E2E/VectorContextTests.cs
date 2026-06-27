@@ -27,6 +27,25 @@ public class VectorContextTests
     }
 
     [Fact]
+    public void DataVoContext_SearchNearest_UsesFlatIndexKindFromCatalog()
+    {
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        string dbName = $"VecCtxFlat_{Guid.NewGuid():N}";
+
+        context.Execute($"CREATE DATABASE {dbName}");
+        context.Execute($"USE {dbName}");
+        context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
+        context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
+        context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
+        context.Execute("CREATE INDEX idx_flat_emb ON Embeddings (Emb) USING FLAT");
+
+        List<Dictionary<string, object?>> results = context.SearchNearest("Embeddings", "idx_flat_emb", "[0.9,0.1,0]", topK: 1);
+
+        Assert.Single(results);
+        Assert.Equal("A", results[0]["Label"]);
+    }
+
+    [Fact]
     public void DataVoContext_SearchNearest_UsesPrimaryIndexManager_WhenPolymorphicIndexExists()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });

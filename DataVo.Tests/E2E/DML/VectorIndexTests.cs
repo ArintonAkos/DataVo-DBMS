@@ -59,6 +59,21 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
     }
 
     [Fact]
+    public void CreateIndex_UsingFlat_SearchNearestReturnsClosestRow()
+    {
+        Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
+        Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
+        Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
+        var createIndexResult = ExecuteAndReturn("CREATE INDEX idx_flat_emb ON Embeddings (Emb) USING FLAT");
+        Assert.DoesNotContain(createIndexResult.Messages, message => message.Contains("Error", StringComparison.OrdinalIgnoreCase));
+
+        List<long> rowIds = Engine.IndexManager.SearchVector([0.95f, 0.05f, 0f], 1, "idx_flat_emb", "Embeddings", TestDb, indexType: "FLAT");
+
+        Assert.Single(rowIds);
+        Assert.True(rowIds[0] >= 0);
+    }
+
+    [Fact]
     public void HnswIndex_NewInsert_IsSearchable()
     {
         Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");

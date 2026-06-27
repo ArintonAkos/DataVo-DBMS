@@ -4,6 +4,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
+using DataVo.Core.Indexing.Flat;
 using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
@@ -59,7 +60,8 @@ public class IndexManager : IDisposable
 {
     private static readonly HashSet<string> KnownVectorTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "HNSW"
+        "HNSW",
+        "FLAT"
     };
 
     private static IndexManager? _instance;
@@ -649,6 +651,7 @@ public class IndexManager : IDisposable
     {
         RegisterIndexType("BTREE", new BTreeIndexFactory(), new BTreeIndexPersistence());
         RegisterIndexType("HNSW", new HNSWIndexFactory(), new HNSWIndexPersistence());
+        RegisterIndexType("FLAT", new FlatVectorIndexFactory(), new FlatVectorIndexPersistence());
     }
 
     private static IndexCacheKey GetCacheKey(string indexName, string tableName, string databaseName)
@@ -729,10 +732,23 @@ public class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
+        ArgumentNullException.ThrowIfNull(vector);
+        InsertIntoVectorIndex(vector.AsSpan(), rowId, indexName, tableName, databaseName, indexType);
+    }
+
+    internal void InsertIntoVectorIndex(ReadOnlySpan<float> vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        // No defensive copy: the index copies into its own backing store on insert.
-        vectorIndex.Insert(rowId, vector);
+        if (vectorIndex is ISpanVectorIndex spanVectorIndex)
+        {
+            spanVectorIndex.Insert(rowId, vector);
+        }
+        else
+        {
+            vectorIndex.Insert(rowId, vector.ToArray());
+        }
+
         MarkDirty(cacheKey);
         FlushIfImmediate(cacheKey);
     }
@@ -747,6 +763,23 @@ public class IndexManager : IDisposable
         vectorIndex.Delete(toBeDeletedIds);
         MarkDirty(cacheKey);
         FlushIfImmediate(cacheKey);
+    }
+
+    /// <summary>
+    /// Pre-allocates storage for vector index implementations that support reservation.
+    /// </summary>
+    public void ReserveVectorIndex(string indexName, string tableName, string databaseName, string indexType, int expectedCount, int vectorDimension)
+    {
+        if (expectedCount <= 0)
+        {
+            return;
+        }
+
+        var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
+        if (vectorIndex is IReservableVectorIndex reservable)
+        {
+            reservable.Reserve(expectedCount, vectorDimension);
+        }
     }
 
     /// <summary>
