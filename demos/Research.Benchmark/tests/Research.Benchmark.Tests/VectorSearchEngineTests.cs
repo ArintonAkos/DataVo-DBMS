@@ -16,7 +16,16 @@ public sealed class VectorSearchEngineTests
     public static IEnumerable<object[]> AlwaysAvailableEngines()
     {
         yield return [new DataVoVectorSearchEngine()];
+        yield return [new DataVoVectorSearchEngine("FLAT", "DataVo-Flat")];
         yield return [new LiteDbVectorSearchEngine()];
+    }
+
+    [Fact]
+    public void DataVoVectorSearchEngine_FlatVariant_HasDistinctBenchmarkName()
+    {
+        using var engine = new DataVoVectorSearchEngine("FLAT", "DataVo-Flat");
+
+        Assert.Equal("DataVo-Flat", engine.Name);
     }
 
     [Theory]

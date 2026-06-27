@@ -75,6 +75,9 @@ public readonly struct CellValue
     public static CellValue From(float[]? value) =>
         value is null ? Null : new(CellType.Vector, 0L, 0m, (float[])value.Clone());
 
+    internal static CellValue FromVectorOwned(float[]? value) =>
+        value is null ? Null : new(CellType.Vector, 0L, 0m, value);
+
     /// <summary>
     /// Compatibility-only: builds a cell from a boxed value. NOT for the hot path — operators must
     /// construct cells from typed values.
@@ -135,6 +138,12 @@ public readonly struct CellValue
     /// the stored array can never be mutated through the result.</summary>
     public float[] AsVector() =>
         _type == CellType.Vector ? (float[])((float[])_reference!).Clone() : throw Mismatch(CellType.Vector);
+
+    internal int VectorLength =>
+        _type == CellType.Vector ? ((float[])_reference!).Length : throw Mismatch(CellType.Vector);
+
+    internal ReadOnlySpan<float> AsVectorReadOnlySpan() =>
+        _type == CellType.Vector ? ((float[])_reference!).AsSpan() : throw Mismatch(CellType.Vector);
 
     /// <summary>
     /// Compatibility-only: boxes the cell into <c>object?</c> for materialization. NOT for the hot path.

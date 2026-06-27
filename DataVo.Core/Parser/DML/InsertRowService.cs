@@ -279,7 +279,7 @@ internal sealed class InsertRowService(
 
         if (expected == CellType.Vector
             && column.Length > 0
-            && cell.AsVector().Length != column.Length)
+            && cell.VectorLength != column.Length)
         {
             throw new NotSupportedException(
                 $"Typed insert cell for column {column.Name} must have VECTOR({column.Length}) dimensions; use the dictionary BulkInsert path.");
@@ -802,7 +802,7 @@ internal sealed class InsertRowService(
                     throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
                 }
 
-                indexes.InsertIntoVectorIndex(vectorCell.AsVector(), rowId, indexName, tableName, databaseName, indexKind);
+                indexes.InsertIntoVectorIndex(vectorCell.AsVectorReadOnlySpan(), rowId, indexName, tableName, databaseName, indexKind);
                 continue;
             }
 

@@ -394,7 +394,12 @@ public sealed class DataVoContext : IDisposable
         List<long> rowIds;
         try
         {
-            rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName);
+            string indexKind = Engine.Catalog
+                .GetTableIndexes(tableName, databaseName)
+                .FirstOrDefault(index => index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase))
+                ?.IndexKind ?? "HNSW";
+
+            rowIds = Engine.IndexManager.SearchVector(queryVector, topK, indexName, tableName, databaseName, indexKind);
         }
         catch (Exception ex)
         {

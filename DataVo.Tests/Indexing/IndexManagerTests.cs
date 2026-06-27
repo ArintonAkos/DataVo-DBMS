@@ -106,6 +106,7 @@ public class IndexManagerTests : IDisposable
     public void SupportsVectorIndexType_ReturnsExpectedCapabilities()
     {
         Assert.True(_manager.SupportsVectorIndexType("HNSW"));
+        Assert.True(_manager.SupportsVectorIndexType("FLAT"));
         Assert.False(_manager.SupportsVectorIndexType("BTREE"));
         Assert.False(_manager.SupportsVectorIndexType(""));
     }
@@ -128,6 +129,48 @@ public class IndexManagerTests : IDisposable
 
         Assert.Single(rowIds);
         Assert.Equal(10L, rowIds[0]);
+    }
+
+    [Fact]
+    public void VectorIndex_WithFlatIndexType_RoundTrips()
+    {
+        _manager.CreateVectorIndex(
+            [
+                (10L, new[] { 10f, 0f }),
+                (20L, new[] { 1f, 1f })
+            ],
+            "idx_flat",
+            "Embeddings",
+            "DbFlat",
+            metric: "euclidean",
+            indexType: "FLAT");
+
+        List<long> rowIds = _manager.SearchVector([1f, 0f], 1, "idx_flat", "Embeddings", "DbFlat", indexType: "FLAT");
+
+        Assert.Single(rowIds);
+        Assert.Equal(20L, rowIds[0]);
+    }
+
+    [Fact]
+    public void VectorIndex_WithFlatIndexType_PersistsAndReloads()
+    {
+        _manager.CreateVectorIndex(
+            [
+                (10L, new[] { 10f, 0f }),
+                (20L, new[] { 1f, 1f })
+            ],
+            "idx_flat_persisted",
+            "Embeddings",
+            "DbFlat",
+            metric: "euclidean",
+            indexType: "FLAT");
+
+        using var reloaded = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
+
+        List<long> rowIds = reloaded.SearchVector([1f, 0f], 1, "idx_flat_persisted", "Embeddings", "DbFlat", indexType: "FLAT");
+
+        Assert.Single(rowIds);
+        Assert.Equal(20L, rowIds[0]);
     }
 
     [Fact]

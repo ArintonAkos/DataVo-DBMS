@@ -9,6 +9,14 @@
 *.user
 *.userosscache
 *.sln.docstates
+.DS_Store
+.serena/
+
+# Local ad-hoc run outputs
+/benchmark_*.md
+/output.md
+/output.txt
+/test.md
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
