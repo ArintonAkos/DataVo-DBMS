@@ -249,10 +249,10 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
             GC.Collect();
 
             double[] lookupLatenciesMs = new double[records];
-            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var totalStopwatch = Stopwatch.StartNew();
 
             // Phase 1 — insert (batched so per-write-commit engines aren't penalized).
+            long insertAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             engine.BeginBatch();
             for (int i = 0; i < records; i++)
             {
@@ -267,11 +267,13 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
             }
 
             engine.CompleteBatch();
+            long insertAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - insertAllocatedBefore;
             Console.Error.WriteLine(
                 $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert phase complete in {totalStopwatch.Elapsed.TotalSeconds:N1}s; starting {records:N0} lookups...");
 
             // Phase 2 — point lookup by id (per-op latency captured for P99).
             long checksum = 0;
+            long lookupAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < records; i++)
             {
                 long id = i + 1;
@@ -290,9 +292,10 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
                         $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {completed:N0}/{records:N0} lookups, elapsed {totalStopwatch.Elapsed.TotalSeconds:N1}s");
                 }
             }
+            long lookupAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - lookupAllocatedBefore;
 
             totalStopwatch.Stop();
-            long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            long allocatedBytes = insertAllocatedBytes + lookupAllocatedBytes;
             (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(lookupLatenciesMs);
 
             // Guard against dead-code elimination of the lookups.
@@ -306,7 +309,9 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
                 totalStopwatch.Elapsed.TotalMilliseconds,
                 p50,
                 p99,
-                allocatedBytes / 1024d / 1024d);
+                allocatedBytes / 1024d / 1024d,
+                insertAllocatedBytes / 1024d / 1024d,
+                lookupAllocatedBytes / 1024d / 1024d);
         }
         finally
         {

@@ -8,7 +8,9 @@ public sealed record BenchmarkMetrics(
     double TotalExecutionTimeMs,
     double P50LatencyMs,
     double P99LatencyMs,
-    double TotalGcAllocatedMb);
+    double TotalGcAllocatedMb,
+    double? InsertGcAllocatedMb = null,
+    double? LookupGcAllocatedMb = null);
 
 public static class BenchmarkMetricsCalculator
 {
@@ -36,11 +38,23 @@ public static class BenchmarkReportFormatter
 {
     public static string ToMarkdown(IEnumerable<BenchmarkMetrics> rows)
     {
-        var builder = new StringBuilder();
-        builder.AppendLine("| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |");
-        builder.AppendLine("|---|---:|---:|---:|---:|");
+        BenchmarkMetrics[] materializedRows = rows.ToArray();
+        bool includePhaseAllocations = materializedRows.Any(row =>
+            row.InsertGcAllocatedMb.HasValue || row.LookupGcAllocatedMb.HasValue);
 
-        foreach (BenchmarkMetrics row in rows)
+        var builder = new StringBuilder();
+        if (includePhaseAllocations)
+        {
+            builder.AppendLine("| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Insert GC Allocated (MB) | Lookup GC Allocated (MB) | Total GC Allocated (MB) |");
+            builder.AppendLine("|---|---:|---:|---:|---:|---:|---:|");
+        }
+        else
+        {
+            builder.AppendLine("| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |");
+            builder.AppendLine("|---|---:|---:|---:|---:|");
+        }
+
+        foreach (BenchmarkMetrics row in materializedRows)
         {
             builder.Append("| ")
                 .Append(row.EngineName)
@@ -50,7 +64,18 @@ public static class BenchmarkReportFormatter
                 .Append(row.P50LatencyMs.ToString("F6", CultureInfo.InvariantCulture))
                 .Append(" | ")
                 .Append(row.P99LatencyMs.ToString("F6", CultureInfo.InvariantCulture))
-                .Append(" | ")
+                .Append(" | ");
+
+            if (includePhaseAllocations)
+            {
+                builder
+                    .Append(FormatOptionalMb(row.InsertGcAllocatedMb))
+                    .Append(" | ")
+                    .Append(FormatOptionalMb(row.LookupGcAllocatedMb))
+                    .Append(" | ");
+            }
+
+            builder
                 .Append(row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
                 .AppendLine(" |");
         }
@@ -65,7 +90,7 @@ public static class BenchmarkReportFormatter
     public static string ToCsv(string scenarioLabel, IEnumerable<BenchmarkMetrics> rows)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("Scenario,Engine,ExecutionTime_ms,P99Latency_ms,AllocatedMemory_MB");
+        builder.AppendLine("Scenario,Engine,ExecutionTime_ms,P99Latency_ms,AllocatedMemory_MB,InsertAllocatedMemory_MB,LookupAllocatedMemory_MB");
 
         foreach (BenchmarkMetrics row in rows)
         {
@@ -77,10 +102,18 @@ public static class BenchmarkReportFormatter
                 .Append(row.EngineName).Append(',')
                 .Append(unavailable ? "n/a" : row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
                 .Append(unavailable ? "n/a" : row.P99LatencyMs.ToString("F6", CultureInfo.InvariantCulture)).Append(',')
-                .Append(unavailable ? "n/a" : row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
+                .Append(unavailable ? "n/a" : row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
+                .Append(unavailable ? "n/a" : FormatOptionalCsvMb(row.InsertGcAllocatedMb)).Append(',')
+                .Append(unavailable ? "n/a" : FormatOptionalCsvMb(row.LookupGcAllocatedMb))
                 .AppendLine();
         }
 
         return builder.ToString();
     }
+
+    private static string FormatOptionalMb(double? value) =>
+        value.HasValue ? value.Value.ToString("F3", CultureInfo.InvariantCulture) : "n/a";
+
+    private static string FormatOptionalCsvMb(double? value) =>
+        value.HasValue ? value.Value.ToString("F3", CultureInfo.InvariantCulture) : "n/a";
 }
