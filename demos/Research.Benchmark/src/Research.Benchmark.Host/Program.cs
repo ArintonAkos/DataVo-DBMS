@@ -3,6 +3,7 @@ using Research.Benchmark.Abstractions;
 using Research.Benchmark.Host;
 using Research.Benchmark.Runners;
 using Research.Benchmark.Runners.ComplexVip;
+using Research.Benchmark.Runners.ConcurrentOps;
 using Research.Benchmark.Runners.DataVo;
 using Research.Benchmark.Runners.DeepDocument;
 using Research.Benchmark.Runners.DuckDb;
@@ -72,6 +73,20 @@ else if (benchmarkScenario.Equals("deep-document", StringComparison.OrdinalIgnor
     if (ShouldRun(engineFilter, "sqlite"))
         results.Add(RunDeepDocument(new SqliteDeepDocumentEngine(), orders, progressEvery));
 }
+else if (benchmarkScenario.Equals("concurrent-ops", StringComparison.OrdinalIgnoreCase))
+{
+    var options = new ConcurrentOpsOptions(
+        InitialRecords: ReadIntArg(args, "--records", ConcurrentOpsOptions.Default.InitialRecords),
+        Duration: TimeSpan.FromSeconds(ReadIntArg(args, "--duration-seconds", (int)ConcurrentOpsOptions.Default.Duration.TotalSeconds)),
+        ReaderWorkers: ReadIntArg(args, "--readers", ConcurrentOpsOptions.Default.ReaderWorkers),
+        WriterWorkers: ReadIntArg(args, "--writers", ConcurrentOpsOptions.Default.WriterWorkers),
+        BusyTimeout: TimeSpan.FromSeconds(ReadIntArg(args, "--busy-timeout-seconds", (int)ConcurrentOpsOptions.Default.BusyTimeout.TotalSeconds)));
+
+    if (ShouldRun(engineFilter, "datavo"))
+        results.Add(await RunConcurrentOps(new DataVoConcurrentOpsEngine(), options));
+    if (ShouldRun(engineFilter, "sqlite"))
+        results.Add(await RunConcurrentOps(new SqliteConcurrentOpsEngine(), options));
+}
 else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnoreCase))
 {
     int vectors = ReadIntArg(args, "--vectors", 10_000);
@@ -91,7 +106,7 @@ else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnor
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, deep-document, or vector-search.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, deep-document, concurrent-ops, or vector-search.");
 }
 
 if (outputFormat == "csv")
@@ -107,6 +122,7 @@ static string CsvScenarioLabel(string scenario) => scenario.ToLowerInvariant() s
 {
     "flat-crud" => "Flat_CRUD",
     "deep-document" => "Deep_Document",
+    "concurrent-ops" => "Concurrent_Ops",
     "vector-search" => "Vector_Search",
     _ => scenario,
 };
@@ -402,6 +418,47 @@ static BenchmarkMetrics RunDeepDocument(IDeepDocumentEngine engine, int orders, 
                 p50,
                 p99,
                 allocatedBytes / 1024d / 1024d);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static async Task<BenchmarkMetrics> RunConcurrentOps(IConcurrentOpsEngine engine, ConcurrentOpsOptions options)
+{
+    await using (engine)
+    {
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: concurrent ops — preloading {options.InitialRecords:N0} records, then {options.ReaderWorkers} readers + {options.WriterWorkers} writers for {options.Duration.TotalSeconds:N0}s...");
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            await engine.InitializeAsync(options);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+            ConcurrentOpsResult result = await engine.RunAsync(options);
+            long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {result.ReadOperations:N0} reads + {result.WriteOperations:N0} writes, {result.TotalOperationsPerSecond:N0} OPS");
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                result.ElapsedMs,
+                0d,
+                0d,
+                allocatedBytes / 1024d / 1024d,
+                OpsPerSecond: result.TotalOperationsPerSecond,
+                ReadP99LatencyMs: result.ReadP99LatencyMs,
+                WriteP99LatencyMs: result.WriteP99LatencyMs);
         }
         finally
         {
