@@ -78,6 +78,19 @@ public interface IIndex : IIndexBase
     List<long> Search(string key);
 
     /// <summary>
+    /// Returns the row IDs associated with the given key without copying, as a read-only view.
+    /// Implementations that can expose their backing storage safely (e.g. the in-memory
+    /// <c>JsonBTreeIndex</c>) override this for an allocation-free point lookup; the default
+    /// falls back to the copying <see cref="Search"/>.
+    /// </summary>
+    /// <example>
+    /// // Given: "Alice" → [1, 5]
+    /// index.SearchReadOnly("Alice");   // returns [1, 5] without allocating a copy
+    /// index.SearchReadOnly("Unknown"); // returns []
+    /// </example>
+    IReadOnlyList<long> SearchReadOnly(string key) => Search(key);
+
+    /// <summary>
     /// Checks whether any key in the index maps to the given row ID.
     /// Used to verify if a row is referenced by this index (e.g., for constraint checks).
     /// </summary>

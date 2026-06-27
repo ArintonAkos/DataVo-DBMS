@@ -622,14 +622,14 @@ public class CompiledAccessPathTests
             ?? throw new InvalidOperationException("Expected current database.");
     }
 
-    // Injects a search-throwing index directly into the IndexManager cache under the (db/table_index) key, with
-    // no catalog registration. Mirrors the cache-key format the engine builds in GetCacheKey.
+    // Injects a search-throwing index directly into the IndexManager cache under the (database, table, index)
+    // tuple key, with no catalog registration. Mirrors the cache key the engine builds in GetCacheKey.
     private static void InjectThrowingIndex(DataVoContext context, string tableName, string indexName)
     {
         FieldInfo cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var cache = (Dictionary<string, IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
+        var cache = (Dictionary<(string, string, string), IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
         string databaseName = CurrentDatabase(context);
-        string cacheKey = $"{databaseName}/{tableName}_{indexName}".ToLowerInvariant();
+        var cacheKey = (databaseName, tableName, indexName);
         cache[cacheKey] = new ThrowingIndex();
     }
 }

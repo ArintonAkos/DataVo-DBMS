@@ -113,6 +113,36 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
     }
 
     /// <summary>
+    /// Searches this node and its subtree for the specified key, returning the values without copying.
+    /// </summary>
+    /// <param name="key">The key to search for.</param>
+    /// <returns>
+    /// The internal value list associated with <paramref name="key"/> exposed as read-only, or an empty
+    /// list if the key is not present. The returned reference is only safe to enumerate while published
+    /// value lists are never mutated in place (see the copy-on-write inserts in <see cref="InsertNonFull"/>).
+    /// </returns>
+    public IReadOnlyList<TValue> SearchReadOnly(TKey key)
+    {
+        int i = 0;
+        while (i < Keys.Count && key.CompareTo(Keys[i]) > 0)
+        {
+            i++;
+        }
+
+        if (i < Keys.Count && key.CompareTo(Keys[i]) == 0)
+        {
+            return Values[i];
+        }
+
+        if (IsLeaf)
+        {
+            return Array.Empty<TValue>();
+        }
+
+        return Children![i].SearchReadOnly(key);
+    }
+
+    /// <summary>
     /// Determines whether the specified key exists in this node or any descendant node.
     /// </summary>
     /// <param name="key">The key to locate.</param>
@@ -190,8 +220,9 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
 
             if (pos < Keys.Count && key.CompareTo(Keys[pos]) == 0)
             {
-                // Duplicate key — append value to existing list
-                Values[pos].Add(value);
+                // Duplicate key — copy-on-write append so a value list already handed to a reader
+                // (via SearchReadOnly) is never mutated in place.
+                Values[pos] = AppendCopyOnWrite(Values[pos], value);
                 return;
             }
 
@@ -210,7 +241,7 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
             // Check for duplicate key at this internal node
             if (i >= 0 && key.CompareTo(Keys[i]) == 0)
             {
-                Values[i].Add(value);
+                Values[i] = AppendCopyOnWrite(Values[i], value);
                 return;
             }
 
@@ -223,7 +254,7 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
                 // After split, determine which of the two children gets the new key
                 if (key.CompareTo(Keys[i]) == 0)
                 {
-                    Values[i].Add(value);
+                    Values[i] = AppendCopyOnWrite(Values[i], value);
                     return;
                 }
 
@@ -235,6 +266,20 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
 
             Children[i].InsertNonFull(key, value);
         }
+    }
+
+    /// <summary>
+    /// Returns a new list containing the existing values plus the appended value.
+    /// </summary>
+    /// <param name="existing">The value list currently published for an index key.</param>
+    /// <param name="value">The value to append.</param>
+    /// <returns>A fresh list containing all previous values followed by <paramref name="value"/>.</returns>
+    private static List<TValue> AppendCopyOnWrite(List<TValue> existing, TValue value)
+    {
+        var copy = new List<TValue>(existing.Count + 1);
+        copy.AddRange(existing);
+        copy.Add(value);
+        return copy;
     }
 
     /// <summary>

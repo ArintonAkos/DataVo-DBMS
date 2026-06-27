@@ -64,7 +64,8 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             int i = 0;
             if (key.CompareTo(newRoot.Keys[0]) == 0)
             {
-                newRoot.Values[0].Add(value);
+                // Copy-on-write append: the promoted median's value list may already be published to a reader.
+                newRoot.Values[0] = [.. newRoot.Values[0], value];
                 Root = newRoot;
                 return;
             }
@@ -97,6 +98,21 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     }
 
     /// <summary>
+    /// Point lookup that returns the matching row IDs without copying the value list.
+    /// The traversal runs under the tree lock; the returned snapshot stays valid because published
+    /// value lists are never mutated in place (duplicate-key appends replace the reference instead).
+    /// </summary>
+    /// <param name="key">The logical key to search for.</param>
+    /// <returns>The matching row IDs as a read-only list, or an empty list if the key is not present.</returns>
+    public IReadOnlyList<long> SearchReadOnly(string key)
+    {
+        lock (_treeLock)
+        {
+            return Root.SearchReadOnly(key);
+        }
+    }
+
+    /// <summary>
     /// Determines whether the specified row ID exists anywhere in the index.
     /// </summary>
     /// <param name="rowId">The row ID to search for.</param>
@@ -125,13 +141,16 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             var allEntries = new List<KeyValuePair<string, List<long>>>();
             Root.CollectAll(allEntries);
 
-            // Remove the specific value from the matching key
+            // Remove the specific value from the matching key. Copy-on-write: filter into a fresh list
+            // rather than mutating the collected list in place, which may already be published to a reader.
             bool modified = false;
-            foreach (var entry in allEntries)
+            for (int idx = 0; idx < allEntries.Count; idx++)
             {
-                if (entry.Key == key)
+                if (allEntries[idx].Key == key)
                 {
-                    entry.Value.Remove(value);
+                    var filtered = new List<long>(allEntries[idx].Value);
+                    filtered.Remove(value);
+                    allEntries[idx] = new KeyValuePair<string, List<long>>(key, filtered);
                     modified = true;
                     break;
                 }
