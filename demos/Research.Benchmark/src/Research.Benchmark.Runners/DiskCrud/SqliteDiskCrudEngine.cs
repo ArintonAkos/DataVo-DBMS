@@ -23,6 +23,12 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
     private SqliteCommand? _updateCommand;
     private SqliteTransaction? _transaction;
 
+    // Concurrent updates: SQLite forbids sharing a connection/command across threads, and WAL serializes
+    // writers through its own write lock. Each writer thread therefore gets its own connection + prepared
+    // UPDATE command (the canonical multi-writer pattern); busy_timeout lets writers wait for the lock
+    // instead of erroring with SQLITE_BUSY.
+    private ThreadLocal<SqliteCommand>? _threadUpdateCommands;
+
     public SqliteDiskCrudEngine(string synchronous)
     {
         _synchronous = synchronous.ToUpperInvariant();
@@ -74,6 +80,32 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
         _updateCommand.Parameters.Add("$score", SqliteType.Real);
         _updateCommand.Parameters.Add("$id", SqliteType.Integer);
         _updateCommand.Prepare();
+
+        _threadUpdateCommands = new ThreadLocal<SqliteCommand>(CreateThreadUpdateCommand, trackAllValues: true);
+    }
+
+    /// <summary>
+    /// Opens a per-thread WAL connection and prepares its own UPDATE command, so concurrent writer threads
+    /// never share SQLite state. The main connection's <see cref="_updateCommand"/> serves single-writer runs.
+    /// </summary>
+    private SqliteCommand CreateThreadUpdateCommand()
+    {
+        var connection = new SqliteConnection($"Data Source={_dbPath}");
+        connection.Open();
+
+        using (SqliteCommand pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = $"PRAGMA synchronous={_synchronous}; PRAGMA busy_timeout=60000;";
+            pragma.ExecuteNonQuery();
+        }
+
+        SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "UPDATE Records SET Value = $value, Score = $score WHERE Id = $id;";
+        command.Parameters.Add("$value", SqliteType.Integer);
+        command.Parameters.Add("$score", SqliteType.Real);
+        command.Parameters.Add("$id", SqliteType.Integer);
+        command.Prepare();
+        return command;
     }
 
     public void BeginInsertBatch()
@@ -102,7 +134,8 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 
     public void Update(long id, int newValue, double newScore)
     {
-        SqliteCommand command = UpdateCommand();
+        // Use the calling thread's own connection/command so concurrent writers stay isolated.
+        SqliteCommand command = _threadUpdateCommands?.Value ?? UpdateCommand();
         command.Parameters["$value"].Value = newValue;
         command.Parameters["$score"].Value = newScore;
         command.Parameters["$id"].Value = id;
@@ -135,6 +168,19 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 
     private void DisposeCore()
     {
+        if (_threadUpdateCommands is not null)
+        {
+            foreach (SqliteCommand command in _threadUpdateCommands.Values)
+            {
+                SqliteConnection? threadConnection = command.Connection;
+                command.Dispose();
+                threadConnection?.Dispose();
+            }
+
+            _threadUpdateCommands.Dispose();
+            _threadUpdateCommands = null;
+        }
+
         _transaction?.Dispose();
         _transaction = null;
         _insertCommand?.Dispose();

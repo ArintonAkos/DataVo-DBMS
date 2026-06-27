@@ -29,22 +29,33 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
     private readonly bool _durable;
     private readonly IoSchedulerMode _ioSchedulerMode;
+    private readonly int? _walCheckpointIntervalMs;
     private readonly string _name;
     private string? _workingDirectory;
     private DataVoContext? _context;
     private List<CellValue[]>? _batchRows;
 
-    public DataVoDiskCrudEngine(bool durable, IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off)
+    public DataVoDiskCrudEngine(
+        bool durable,
+        IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off,
+        int? walCheckpointIntervalMs = null)
     {
         _durable = durable;
         _ioSchedulerMode = ioSchedulerMode;
+        _walCheckpointIntervalMs = walCheckpointIntervalMs;
         string poolingSuffix = ioSchedulerMode switch
         {
             IoSchedulerMode.PoolingOnly => "+pooled",
             IoSchedulerMode.GroupCommit => "+groupcommit",
             _ => string.Empty,
         };
-        _name = durable ? $"DataVo (Disk{poolingSuffix}+fsync)" : $"DataVo (Disk{poolingSuffix})";
+        // Surface a non-default checkpoint cadence in the engine label so A/B runs are self-describing.
+        string checkpointSuffix = ioSchedulerMode == IoSchedulerMode.GroupCommit && walCheckpointIntervalMs is int ms
+            ? $"+ckpt{ms}ms"
+            : string.Empty;
+        _name = durable
+            ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}+fsync)"
+            : $"DataVo (Disk{poolingSuffix}{checkpointSuffix})";
     }
 
     public string Name => _name;
@@ -55,7 +66,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         _workingDirectory = workingDirectory;
         Directory.CreateDirectory(workingDirectory);
 
-        _context = new DataVoContext(new DataVoConfig
+        var config = new DataVoConfig
         {
             StorageMode = StorageMode.Disk,
             DiskStoragePath = workingDirectory,
@@ -63,7 +74,14 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             WalFilePath = "datavo.wal",
             SyncDiskWrites = _durable,
             IoSchedulerMode = _ioSchedulerMode,
-        });
+        };
+
+        if (_walCheckpointIntervalMs is int intervalMs)
+        {
+            config.WalCheckpointIntervalMs = intervalMs;
+        }
+
+        _context = new DataVoContext(config);
 
         ExecuteOk("CREATE DATABASE DiskCrudBenchmark");
         ExecuteOk("USE DiskCrudBenchmark");
