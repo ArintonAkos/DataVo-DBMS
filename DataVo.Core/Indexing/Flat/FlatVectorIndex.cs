@@ -10,6 +10,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     private readonly Dictionary<long, int> _rowIdToOrdinal = [];
     private readonly object _stateGate = new();
     private float[] _vectorData = [];
+    private float[] _inverseNormByOrdinal = [];
     private long[] _rowIdByOrdinal = [];
     private bool[] _isActive = [];
     private int[] _freeOrdinals = [];
@@ -97,11 +98,13 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             if (_rowIdToOrdinal.TryGetValue(rowId, out int existingOrdinal))
             {
                 vector.CopyTo(GetVectorSpan(existingOrdinal));
+                _inverseNormByOrdinal[existingOrdinal] = ComputeInverseNorm(vector);
                 return;
             }
 
             int ordinal = AcquireOrdinal(rowId);
             vector.CopyTo(GetVectorSpan(ordinal));
+            _inverseNormByOrdinal[ordinal] = ComputeInverseNorm(vector);
         }
     }
 
@@ -126,6 +129,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
                 _isActive[ordinal] = false;
                 _rowIdByOrdinal[ordinal] = 0;
+                _inverseNormByOrdinal[ordinal] = 0f;
                 PushFreeOrdinal(ordinal);
                 _count--;
             }
@@ -159,12 +163,13 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             int take = Math.Min(topK, _count);
             int resultCount = 0;
             bool useEuclidean = UsesEuclideanMetric();
+            float queryInvNorm = useEuclidean ? 0f : ComputeInverseNorm(queryVector);
 
             if (take <= 128)
             {
                 Span<long> rowIds = stackalloc long[take];
                 Span<float> distances = stackalloc float[take];
-                SearchIntoTopK(queryVector, useEuclidean, rowIds, distances, ref resultCount);
+                SearchIntoTopK(queryVector, useEuclidean, queryInvNorm, rowIds, distances, ref resultCount);
                 return BuildResult(rowIds, resultCount);
             }
 
@@ -174,7 +179,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             {
                 Span<long> rowIds = rentedRowIds.AsSpan(0, take);
                 Span<float> distances = rentedDistances.AsSpan(0, take);
-                SearchIntoTopK(queryVector, useEuclidean, rowIds, distances, ref resultCount);
+                SearchIntoTopK(queryVector, useEuclidean, queryInvNorm, rowIds, distances, ref resultCount);
                 return BuildResult(rowIds, resultCount);
             }
             finally
@@ -188,6 +193,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     private void SearchIntoTopK(
         ReadOnlySpan<float> queryVector,
         bool useEuclidean,
+        float queryInvNorm,
         Span<long> rowIds,
         Span<float> distances,
         ref int resultCount)
@@ -202,7 +208,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             ReadOnlySpan<float> candidate = GetVectorReadOnlySpan(ordinal);
             float distance = useEuclidean
                 ? SimdDistanceKernels.EuclideanDistance(queryVector, candidate)
-                : SimdDistanceKernels.CosineDistance(queryVector, candidate);
+                : CosineDistanceFromDot(queryVector, candidate, queryInvNorm, _inverseNormByOrdinal[ordinal]);
 
             long rowId = _rowIdByOrdinal[ordinal];
             if (resultCount < rowIds.Length)
@@ -267,6 +273,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             _vectorData = state.VectorData ?? [];
             _rowIdByOrdinal = state.RowIds ?? [];
             _isActive = state.IsActive ?? [];
+            _inverseNormByOrdinal = new float[Math.Max(0, _ordinalCapacity)];
             _freeOrdinals = new int[Math.Max(4, _ordinalCapacity)];
             _freeCount = 0;
 
@@ -281,6 +288,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
                 }
 
                 _rowIdToOrdinal[_rowIdByOrdinal[ordinal]] = ordinal;
+                _inverseNormByOrdinal[ordinal] = ComputeInverseNorm(GetVectorReadOnlySpan(ordinal));
             }
 
             EnsureCapacity(_ordinalCapacity);
@@ -341,6 +349,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
         int newCapacity = Math.Max(requiredOrdinals, Math.Max(4, _ordinalCapacity * 2));
         Array.Resize(ref _vectorData, checked(newCapacity * _vectorDimension));
+        Array.Resize(ref _inverseNormByOrdinal, newCapacity);
         Array.Resize(ref _rowIdByOrdinal, newCapacity);
         Array.Resize(ref _isActive, newCapacity);
 
@@ -399,6 +408,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             _rowIdToOrdinal.Clear();
             Array.Clear(_isActive, 0, _isActive.Length);
             Array.Clear(_rowIdByOrdinal, 0, _rowIdByOrdinal.Length);
+            Array.Clear(_inverseNormByOrdinal, 0, _inverseNormByOrdinal.Length);
             _vectorDimension = -1;
             _nextOrdinal = 0;
             _freeCount = 0;
@@ -458,6 +468,26 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     {
         return Metric.Equals("l2", StringComparison.OrdinalIgnoreCase)
             || Metric.Equals("euclidean", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static float CosineDistanceFromDot(
+        ReadOnlySpan<float> query,
+        ReadOnlySpan<float> candidate,
+        float queryInvNorm,
+        float candidateInvNorm)
+    {
+        if (queryInvNorm <= 0f || candidateInvNorm <= 0f)
+        {
+            return 1f;
+        }
+
+        return 1f - SimdDistanceKernels.Dot(query, candidate) * queryInvNorm * candidateInvNorm;
+    }
+
+    private static float ComputeInverseNorm(ReadOnlySpan<float> vector)
+    {
+        float norm = System.Numerics.Tensors.TensorPrimitives.Norm(vector);
+        return norm > 0f ? 1f / norm : 0f;
     }
 
     private static void ValidateFiniteVector(ReadOnlySpan<float> vector, string parameterName)

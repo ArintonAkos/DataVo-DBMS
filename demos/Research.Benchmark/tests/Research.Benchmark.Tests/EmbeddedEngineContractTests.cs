@@ -2,6 +2,7 @@ using Research.Benchmark.Abstractions;
 using Research.Benchmark.Runners.DataVo;
 using Research.Benchmark.Runners.DuckDb;
 using Research.Benchmark.Runners.Sqlite;
+using DataVo.Core;
 
 namespace Research.Benchmark.Tests;
 
@@ -160,6 +161,29 @@ public sealed class EmbeddedEngineContractTests
     }
 
     [Fact]
+    public async Task DataVoSimpleExposureUsesBooleanOpenFlag()
+    {
+        await using var engine = new DataVoEngine();
+        var scenario = new BettingRiskScenario(
+            MarketCount: 2,
+            RunnersPerMarket: 2,
+            AccountCount: 4,
+            InitialOrderCount: 0,
+            SubscriberCount: 5);
+
+        await engine.InitializeAsync(scenario);
+
+        DataVoContext context = GetDataVoContext(engine);
+        var columns = context.Engine.Catalog.GetTableColumns("Orders", "ResearchBenchmark");
+
+        Assert.Contains(columns, column =>
+            column.Name.Equals("IsOpen", StringComparison.OrdinalIgnoreCase)
+            && column.Type.Equals("BIT", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(columns, column =>
+            column.Name.Equals("Status", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task DataVoIngestUsesStructuredInsertWithoutSqlParserOutput()
     {
         await using var engine = new DataVoEngine();
@@ -196,5 +220,14 @@ public sealed class EmbeddedEngineContractTests
 
         Assert.DoesNotContain("Parser", captured.ToString());
         Assert.DoesNotContain("Rows", captured.ToString());
+    }
+
+    private static DataVoContext GetDataVoContext(DataVoEngine engine)
+    {
+        object? value = typeof(DataVoEngine)
+            .GetField("_context", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.GetValue(engine);
+
+        return Assert.IsType<DataVoContext>(value);
     }
 }

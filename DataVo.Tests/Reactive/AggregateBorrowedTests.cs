@@ -18,6 +18,9 @@ public class AggregateBorrowedTests
     private const string GroupBySql =
         "SELECT Category, SUM(Stake) AS Total, COUNT(*) AS Cnt FROM Orders GROUP BY Category";
 
+    private const string TypedOpenGroupBySql =
+        "SELECT MarketId, SUM(Stake) AS Total FROM Orders WHERE IsOpen = true GROUP BY MarketId";
+
     private static DataVoContext NewContext()
     {
         var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
@@ -72,6 +75,38 @@ public class AggregateBorrowedTests
 
         return d;
     }
+
+    [Fact]
+    public void AggregateDispatch_TypedInsert_DoesNotMaterializeOwnedAfterDictionary()
+    {
+        var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(TypedOpenGroupBySql);
+        using DataVoEngine engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        var op = new AggregateReactiveQuery(select, engine, "AggDb");
+        var builder = new QueryChangeBuilder(op.OutputSchema);
+        var schema = new ReactiveRowSchema("Id", "MarketId", "Stake", "IsOpen");
+        CellValue[] cells =
+        [
+            CellValue.From(1),
+            CellValue.From(7),
+            CellValue.From(100),
+            CellValue.From(true)
+        ];
+        var change = new RowChange("Orders", 1, TypedRow.FromOwnedCells(schema, cells));
+
+        Assert.Null(MaterializedAfter(change));
+
+        op.ApplyInto([change], builder);
+        QueryChangeRef delta = builder.Build();
+
+        Assert.Equal(7, delta.Added[0]["MarketId"].AsInt32());
+        Assert.Equal(100, Num(delta.Added[0]["Total"]));
+        Assert.Null(MaterializedAfter(change));
+    }
+
+    private static object? MaterializedAfter(RowChange change) =>
+        typeof(RowChange)
+            .GetField("_after", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(change);
 
     // Operator-level construction: parse the GROUP BY into a SelectStatement and seed one existing
     // "sports" group, so the steady-state loop only ever updates an existing group (no group creation).

@@ -3,6 +3,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using Research.Benchmark.Abstractions;
+using Research.Benchmark.Runners;
 
 namespace Research.Benchmark.Runners.DataVo;
 
@@ -11,16 +12,19 @@ public sealed class DataVoEngine : IBettingRiskEngine
     private const string RunnerRiskSql = """
         SELECT MarketId, RunnerId, MAX(Price) AS BestBack, MIN(Price) AS BestLay, SUM(Stake) AS OpenExposure
         FROM Orders
-        WHERE Status = 'OPEN'
+        WHERE IsOpen = true
         GROUP BY MarketId, RunnerId
         """;
 
     private const string AccountRiskSql = """
         SELECT AccountId, MarketId, SUM(Stake) AS OpenExposure
         FROM Orders
-        WHERE Status = 'OPEN'
+        WHERE IsOpen = true
         GROUP BY AccountId, MarketId
         """;
+
+    private static readonly ReactiveRowSchema OrdersSchema =
+        new("OrderId", "MarketId", "RunnerId", "AccountId", "Side", "Price", "Stake", "IsOpen");
 
     private readonly object _gate = new();
     private readonly Dictionary<RunnerExposureKey, RunnerExposure> _runnerExposure = [];
@@ -30,6 +34,7 @@ public sealed class DataVoEngine : IBettingRiskEngine
     private readonly List<MarketRiskSummary> _defaultMarketRisk = [];
     private readonly IReadOnlyList<RunnerExposure> _runnerExposureView;
     private readonly IReadOnlyList<AccountExposure> _accountExposureView;
+    private readonly CellValue[] _orderCells = new CellValue[8];
     private DataVoContext? _context;
     private IDisposable? _runnerSubscription;
     private IDisposable? _accountSubscription;
@@ -66,32 +71,25 @@ public sealed class DataVoEngine : IBettingRiskEngine
                 Side VARCHAR(8),
                 Price INT,
                 Stake INT,
-                Status VARCHAR(12)
+                IsOpen BIT
             )
             """);
 
-        List<IReadOnlyDictionary<string, object?>> baseline = Enumerable
-            .Range(0, scenario.InitialOrderCount)
-            .Select(i => Research.Benchmark.Runners.BenchmarkTickFactory.CreateBaselineOrder(_nextOrderId + i, scenario))
-            .Select(tick => ToRow(tick))
-            .ToList();
-
-        if (baseline.Count > 0)
+        for (int i = 0; i < scenario.InitialOrderCount; i++)
         {
-            _context.BulkInsert("Orders", baseline);
-            _nextOrderId += baseline.Count;
-            foreach (IReadOnlyDictionary<string, object?> row in baseline)
-            {
-                AddPointExposure(
-                    RiskModelProjection.ToInt32(row["RunnerId"]),
-                    RiskModelProjection.ToInt32(row["AccountId"]),
-                    RiskModelProjection.ToDecimal(row["Stake"]));
-            }
+            MarketTick tick = BenchmarkTickFactory.CreateBaselineOrder(_nextOrderId + i, scenario);
+            InsertTickTyped(_context, tick, _nextOrderId + i);
+            AddBaselineExposure(tick);
+            AddPointExposure(tick.RunnerId, tick.AccountId, tick.Stake);
         }
 
-        _runnerSubscription = _context.Subscribe(RunnerRiskSql, ApplyRunnerChange);
-        _accountSubscription = _context.Subscribe(AccountRiskSql, ApplyAccountChange);
-        LoadInitialReadModel();
+        _nextOrderId += scenario.InitialOrderCount;
+        _runnerSubscription = _context.SubscribeZeroAlloc(RunnerRiskSql, ApplyRunnerChange);
+        _accountSubscription = _context.SubscribeZeroAlloc(AccountRiskSql, ApplyAccountChange);
+        lock (_gate)
+        {
+            RefreshDefaultReadModelLocked();
+        }
 
         return ValueTask.CompletedTask;
     }
@@ -101,7 +99,7 @@ public sealed class DataVoEngine : IBettingRiskEngine
         cancellationToken.ThrowIfCancellationRequested();
         long orderId = OrderIdFor(tick);
         DataVoContext context = EnsureContext();
-        context.BulkInsert("Orders", [ToRow(tick, orderId)]);
+        InsertTickTyped(context, tick, orderId);
         context.DispatchPendingNotifications();
         AddPointExposure(tick.RunnerId, tick.AccountId, tick.Stake);
         _nextOrderId = Math.Max(_nextOrderId, tick.Sequence + 1);
@@ -117,7 +115,11 @@ public sealed class DataVoEngine : IBettingRiskEngine
         }
 
         DataVoContext context = EnsureContext();
-        context.BulkInsert("Orders", ticks.Select(tick => ToRow(tick)));
+        foreach (MarketTick tick in ticks)
+        {
+            InsertTickTyped(context, tick, OrderIdFor(tick));
+        }
+
         context.DispatchPendingNotifications();
 
         foreach (MarketTick tick in ticks)
@@ -180,72 +182,53 @@ public sealed class DataVoEngine : IBettingRiskEngine
         return ValueTask.CompletedTask;
     }
 
-    private void LoadInitialReadModel()
+    private void ApplyRunnerChange(in QueryChangeRef change)
     {
         lock (_gate)
         {
-            _runnerExposure.Clear();
-            _marketOpenExposure.Clear();
-            foreach (Dictionary<string, object?> row in QueryRows(RunnerRiskSql))
+            for (int i = 0; i < change.Removed.Count; i++)
             {
-                UpsertRunner(row);
-            }
-
-            _accountExposure.Clear();
-            foreach (Dictionary<string, object?> row in QueryRows(AccountRiskSql))
-            {
-                UpsertAccount(row);
-            }
-
-            RefreshDefaultReadModelLocked();
-        }
-    }
-
-    private void ApplyRunnerChange(QueryChange change)
-    {
-        lock (_gate)
-        {
-            foreach (IReadOnlyDictionary<string, object?> row in change.Removed)
-            {
+                RowRef row = change.Removed[i];
                 var key = new RunnerExposureKey(
-                    RiskModelProjection.ToInt32(row["MarketId"]),
-                    RiskModelProjection.ToInt32(row["RunnerId"]));
+                    row["MarketId"].AsInt32(),
+                    row["RunnerId"].AsInt32());
                 RemoveRunner(key);
             }
 
-            foreach (IReadOnlyDictionary<string, object?> row in change.Added)
+            for (int i = 0; i < change.Added.Count; i++)
             {
-                UpsertRunner(row);
+                UpsertRunner(change.Added[i]);
             }
 
-            foreach (IReadOnlyDictionary<string, object?> row in change.Updated)
+            for (int i = 0; i < change.Updated.Count; i++)
             {
-                UpsertRunner(row);
+                UpsertRunner(change.Updated[i]);
             }
 
             RefreshDefaultReadModelLocked();
         }
     }
 
-    private void ApplyAccountChange(QueryChange change)
+    private void ApplyAccountChange(in QueryChangeRef change)
     {
         lock (_gate)
         {
-            foreach (IReadOnlyDictionary<string, object?> row in change.Removed)
+            for (int i = 0; i < change.Removed.Count; i++)
             {
+                RowRef row = change.Removed[i];
                 _accountExposure.Remove(new AccountExposureKey(
-                    RiskModelProjection.ToInt32(row["AccountId"]),
-                    RiskModelProjection.ToInt32(row["MarketId"])));
+                    row["AccountId"].AsInt32(),
+                    row["MarketId"].AsInt32()));
             }
 
-            foreach (IReadOnlyDictionary<string, object?> row in change.Added)
+            for (int i = 0; i < change.Added.Count; i++)
             {
-                UpsertAccount(row);
+                UpsertAccount(change.Added[i]);
             }
 
-            foreach (IReadOnlyDictionary<string, object?> row in change.Updated)
+            for (int i = 0; i < change.Updated.Count; i++)
             {
-                UpsertAccount(row);
+                UpsertAccount(change.Updated[i]);
             }
 
             TouchDefaultReadModelAsOfLocked();
@@ -274,6 +257,28 @@ public sealed class DataVoEngine : IBettingRiskEngine
         AddMarketExposure(marketId, exposure.OpenExposure);
     }
 
+    private void UpsertRunner(RowRef row)
+    {
+        int marketId = row["MarketId"].AsInt32();
+        int runnerId = row["RunnerId"].AsInt32();
+        var key = new RunnerExposureKey(marketId, runnerId);
+        var exposure = new RunnerExposure(
+            marketId,
+            runnerId,
+            ToDecimal(row["BestBack"]),
+            ToDecimal(row["BestLay"]),
+            0m,
+            ToDecimal(row["OpenExposure"]));
+
+        if (_runnerExposure.TryGetValue(key, out RunnerExposure? old))
+        {
+            AddMarketExposure(marketId, -old.OpenExposure);
+        }
+
+        _runnerExposure[key] = exposure;
+        AddMarketExposure(marketId, exposure.OpenExposure);
+    }
+
     private void UpsertAccount(IReadOnlyDictionary<string, object?> row)
     {
         int accountId = RiskModelProjection.ToInt32(row["AccountId"]);
@@ -285,26 +290,96 @@ public sealed class DataVoEngine : IBettingRiskEngine
             0m);
     }
 
+    private void UpsertAccount(RowRef row)
+    {
+        int accountId = row["AccountId"].AsInt32();
+        int marketId = row["MarketId"].AsInt32();
+        _accountExposure[new AccountExposureKey(accountId, marketId)] = new AccountExposure(
+            accountId,
+            marketId,
+            ToDecimal(row["OpenExposure"]),
+            0m);
+    }
+
     private long OrderIdFor(MarketTick tick) => tick.Sequence > 0 ? tick.Sequence : _nextOrderId;
 
-    private static IReadOnlyDictionary<string, object?> ToRow(MarketTick tick, long? orderId = null) =>
-        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+    private void AddBaselineExposure(MarketTick tick)
+    {
+        if (tick.Kind == TickKind.OrderCancelled)
         {
-            ["OrderId"] = orderId ?? tick.Sequence,
-            ["MarketId"] = tick.MarketId,
-            ["RunnerId"] = tick.RunnerId,
-            ["AccountId"] = tick.AccountId,
-            ["Side"] = tick.Side,
-            ["Price"] = Decimal.ToInt64(decimal.Round(tick.Price, 0)),
-            ["Stake"] = Decimal.ToInt64(decimal.Round(tick.Stake, 0)),
-            ["Status"] = StatusFor(tick)
-        };
+            return;
+        }
 
-    private static string StatusFor(MarketTick tick) =>
-        tick.Kind == TickKind.OrderCancelled ? "CANCELLED" : "OPEN";
+        decimal price = decimal.Round(tick.Price, 0);
+        decimal stake = decimal.Round(tick.Stake, 0);
+
+        lock (_gate)
+        {
+            var runnerKey = new RunnerExposureKey(tick.MarketId, tick.RunnerId);
+            if (_runnerExposure.TryGetValue(runnerKey, out RunnerExposure? existingRunner))
+            {
+                _runnerExposure[runnerKey] = existingRunner with
+                {
+                    BestBack = Math.Max(existingRunner.BestBack, price),
+                    BestLay = Math.Min(existingRunner.BestLay, price),
+                    OpenExposure = existingRunner.OpenExposure + stake
+                };
+            }
+            else
+            {
+                _runnerExposure[runnerKey] = new RunnerExposure(
+                    tick.MarketId,
+                    tick.RunnerId,
+                    price,
+                    price,
+                    0m,
+                    stake);
+            }
+
+            AddMarketExposure(tick.MarketId, stake);
+
+            var accountKey = new AccountExposureKey(tick.AccountId, tick.MarketId);
+            if (_accountExposure.TryGetValue(accountKey, out AccountExposure? existingAccount))
+            {
+                _accountExposure[accountKey] = existingAccount with
+                {
+                    OpenExposure = existingAccount.OpenExposure + stake
+                };
+            }
+            else
+            {
+                _accountExposure[accountKey] = new AccountExposure(tick.AccountId, tick.MarketId, stake, 0m);
+            }
+        }
+    }
+
+    private void InsertTickTyped(DataVoContext context, MarketTick tick, long orderId)
+    {
+        _orderCells[0] = CellValue.From(checked((int)orderId));
+        _orderCells[1] = CellValue.From(tick.MarketId);
+        _orderCells[2] = CellValue.From(tick.RunnerId);
+        _orderCells[3] = CellValue.From(tick.AccountId);
+        _orderCells[4] = CellValue.From(tick.Side);
+        _orderCells[5] = CellValue.From(ToInt32Rounded(tick.Price));
+        _orderCells[6] = CellValue.From(ToInt32Rounded(tick.Stake));
+        _orderCells[7] = CellValue.From(tick.Kind != TickKind.OrderCancelled);
+        context.InsertTyped("Orders", OrdersSchema, _orderCells);
+    }
+
+    private static int ToInt32Rounded(decimal value) => checked((int)decimal.Round(value, 0));
 
     private static bool IsDefaultQuery(RiskQuery query) =>
         query.MarketId is null && query.AccountId is null && query.RunnerId is null && query.TopMarkets == 10;
+
+    private static decimal ToDecimal(CellValue value) => value.Type switch
+    {
+        CellType.Null => 0m,
+        CellType.Int32 => value.AsInt32(),
+        CellType.Int64 => value.AsInt64(),
+        CellType.Double => Convert.ToDecimal(value.AsDouble()),
+        CellType.Decimal => value.AsDecimal(),
+        _ => Convert.ToDecimal(value.ToObject())
+    };
 
     private void AddPointExposure(int runnerId, int accountId, decimal exposure)
     {
@@ -326,13 +401,49 @@ public sealed class DataVoEngine : IBettingRiskEngine
     private void RefreshDefaultReadModelLocked()
     {
         _defaultMarketRisk.Clear();
-        _defaultMarketRisk.AddRange(_marketOpenExposure
-            .Where(row => row.Value != 0m)
-            .Select(row => new MarketRiskSummary(row.Key, row.Value, 0m, _scenario.SubscriberCount))
-            .OrderByDescending(row => row.TotalOpenExposure)
-            .ThenBy(row => row.MarketId)
-            .Take(10));
+        foreach ((int marketId, decimal exposure) in _marketOpenExposure)
+        {
+            if (exposure == 0m)
+            {
+                continue;
+            }
+
+            InsertDefaultMarketRisk(new MarketRiskSummary(marketId, exposure, 0m, _scenario.SubscriberCount));
+        }
+
         TouchDefaultReadModelAsOfLocked();
+    }
+
+    private void InsertDefaultMarketRisk(MarketRiskSummary candidate)
+    {
+        int insertAt = 0;
+        while (insertAt < _defaultMarketRisk.Count
+               && ComesBeforeOrEqual(_defaultMarketRisk[insertAt], candidate))
+        {
+            insertAt++;
+        }
+
+        if (insertAt >= 10)
+        {
+            return;
+        }
+
+        _defaultMarketRisk.Insert(insertAt, candidate);
+        if (_defaultMarketRisk.Count > 10)
+        {
+            _defaultMarketRisk.RemoveAt(_defaultMarketRisk.Count - 1);
+        }
+    }
+
+    private static bool ComesBeforeOrEqual(MarketRiskSummary current, MarketRiskSummary candidate)
+    {
+        int exposureOrder = current.TotalOpenExposure.CompareTo(candidate.TotalOpenExposure);
+        if (exposureOrder != 0)
+        {
+            return exposureOrder > 0;
+        }
+
+        return current.MarketId <= candidate.MarketId;
     }
 
     private void TouchDefaultReadModelAsOfLocked()
@@ -372,17 +483,6 @@ public sealed class DataVoEngine : IBettingRiskEngine
         {
             throw new InvalidOperationException($"{sql}{Environment.NewLine}{string.Join(" | ", result.Messages)}");
         }
-    }
-
-    private IReadOnlyList<Dictionary<string, object?>> QueryRows(string sql)
-    {
-        QueryResult result = EnsureContext().Execute(sql).Last();
-        if (result.IsError)
-        {
-            throw new InvalidOperationException($"{sql}{Environment.NewLine}{string.Join(" | ", result.Messages)}");
-        }
-
-        return result.Data;
     }
 
     private void DisposeDataVo()

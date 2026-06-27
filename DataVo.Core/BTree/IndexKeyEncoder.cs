@@ -1,4 +1,5 @@
 using System.Text;
+using System.Globalization;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Utils;
@@ -115,10 +116,69 @@ public static class IndexKeyEncoder
         return cells[ordinal];
     }
 
-    // Typed cells normalize through the exact same value-normalization as the dictionary path (operating on
-    // the boxed cell value) so typed and dictionary index keys are byte-for-byte identical — including the
-    // dictionary path's quirk of coercing numeric scalars to a "[n]" vector serialization.
-    private static string NormalizeCell(CellValue cell) => NormalizeValue(cell.ToObject());
+    // Preserve dictionary-path key compatibility without boxing typed scalar cells or allocating transient
+    // vector arrays for numeric values. The legacy dictionary path treats parseable numeric strings as a
+    // single-element vector, so typed numeric keys keep the same "[n]" logical key shape.
+    private static string NormalizeCell(CellValue cell) => cell.Type switch
+    {
+        CellType.Null => string.Empty,
+        CellType.Int32 => FormatSingleElementVector(cell.AsInt32()),
+        CellType.Int64 => FormatSingleElementVector(cell.AsInt64()),
+        CellType.Double => FormatSingleElementVector(cell.AsDouble()),
+        CellType.Decimal => FormatSingleElementVector(cell.AsDecimal()),
+        CellType.Boolean => cell.AsBoolean().ToString(),
+        CellType.String => NormalizeStringCell(cell.AsString()),
+        CellType.Date => cell.AsDate().ToString(),
+        CellType.Vector => SerializeVector(cell.AsVectorReadOnlySpan()),
+        _ => string.Empty
+    };
+
+    private static string NormalizeStringCell(string? value)
+    {
+        if (value == null)
+        {
+            return string.Empty;
+        }
+
+        return VectorParser.TryParseVector(value, out float[] vector)
+            ? VectorParser.SerializeVector(vector)
+            : value;
+    }
+
+    private static string FormatSingleElementVector(int value) =>
+        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+
+    private static string FormatSingleElementVector(long value) =>
+        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+
+    private static string FormatSingleElementVector(double value) =>
+        string.Create(CultureInfo.CurrentCulture, $"[{value}]");
+
+    private static string FormatSingleElementVector(decimal value) =>
+        string.Create(CultureInfo.CurrentCulture, $"[{value}]");
+
+    private static string SerializeVector(ReadOnlySpan<float> vector)
+    {
+        if (vector.Length == 0)
+        {
+            return "[]";
+        }
+
+        var builder = new StringBuilder();
+        builder.Append('[');
+        for (int i = 0; i < vector.Length; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append(vector[i].ToString(CultureInfo.InvariantCulture));
+        }
+
+        builder.Append(']');
+        return builder.ToString();
+    }
 
     private static string NormalizeValue(object? value)
     {

@@ -1,18 +1,14 @@
-using System.Runtime.CompilerServices;
 using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
-using DataVo.Core.Models.Catalog;
-using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Core.CompiledQueries;
 
 /// <summary>
-/// Prepared typed point lookup for a <see cref="DataVoCompiledQueryPlan"/>. Projection metadata and the indexed
-/// access path are resolved once; warm indexed hits decode raw row bytes straight into a reused typed buffer.
+/// Prepared typed multi-row lookup for a <see cref="DataVoCompiledQueryPlan"/>.
 /// </summary>
-public sealed class DataVoPreparedSelectSingle<T>
+public sealed class DataVoPreparedSelectMany<T>
 {
     private readonly DataVoContext _context;
     private readonly DataVoCompiledQueryPlan _plan;
@@ -21,7 +17,7 @@ public sealed class DataVoPreparedSelectSingle<T>
     private readonly PreparedProjection _projection;
     private readonly CompiledRowMapper<T> _mapper;
 
-    internal DataVoPreparedSelectSingle(
+    internal DataVoPreparedSelectMany(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
@@ -38,50 +34,46 @@ public sealed class DataVoPreparedSelectSingle<T>
     }
 
     /// <summary>Executes the prepared lookup for an INT predicate value.</summary>
-    public T? Execute(int value) => ExecuteIntegerKey(value);
+    public IReadOnlyList<T> Execute(int value) => ExecuteIntegerKey(value);
 
     /// <summary>Executes the prepared lookup for a BIGINT predicate value.</summary>
-    public T? Execute(long value) => ExecuteIntegerKey(value);
+    public IReadOnlyList<T> Execute(long value) => ExecuteIntegerKey(value);
 
     /// <summary>Executes the prepared lookup for a FLOAT predicate value.</summary>
-    public T? Execute(double value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
+    public IReadOnlyList<T> Execute(double value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
 
     /// <summary>Executes the prepared lookup for a text predicate value.</summary>
-    public T? Execute(string? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
+    public IReadOnlyList<T> Execute(string? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
 
     /// <summary>Executes the prepared lookup for a general predicate value.</summary>
-    public T? Execute(object? value) => ExecuteParameterValue(value);
+    public IReadOnlyList<T> Execute(object? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
 
-    internal T? ExecuteParameterValue(object? value)
-    {
-        return value switch
-        {
-            int intValue => Execute(intValue),
-            long longValue => Execute(longValue),
-            double doubleValue => Execute(doubleValue),
-            string stringValue => Execute(stringValue),
-            null => Execute((string?)null),
-            _ => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value))
-        };
-    }
-
-    private T? ExecuteIntegerKey(long value)
+    private IReadOnlyList<T> ExecuteIntegerKey(long value)
     {
         if (_indexName is not null
-            && _context.Engine.IndexManager.TryLookupIntegerPrimaryKey(
+            && _context.Engine.IndexManager.TryLookupIntegerIndex(
                 value,
                 _indexName,
                 _plan.TableName,
                 _databaseName,
-                out long rowId))
+                out IReadOnlyList<long> rowIds))
         {
-            return TryProjectRow(rowId, out T? result) ? result : default;
+            var results = new List<T>(rowIds.Count);
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                if (TryProjectRow(rowIds[i], out T? result))
+                {
+                    results.Add(result!);
+                }
+            }
+
+            return results;
         }
 
         return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
     }
 
-    private T? ExecuteKey(string expectedKey)
+    private IReadOnlyList<T> ExecuteKey(string expectedKey)
     {
         if (_indexName is not null)
         {
@@ -93,13 +85,16 @@ public sealed class DataVoPreparedSelectSingle<T>
                     _plan.TableName,
                     _databaseName);
 
+                var results = new List<T>(rowIds.Count);
                 for (int i = 0; i < rowIds.Count; i++)
                 {
                     if (TryProjectRow(rowIds[i], out T? result))
                     {
-                        return result;
+                        results.Add(result!);
                     }
                 }
+
+                return results;
             }
             catch (IndexException)
             {
@@ -139,10 +134,11 @@ public sealed class DataVoPreparedSelectSingle<T>
         return true;
     }
 
-    private T? ExecuteScanFallback(string expectedKey)
+    private IReadOnlyList<T> ExecuteScanFallback(string expectedKey)
     {
         Dictionary<long, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
         string[] whereColumns = [_plan.WhereColumn!];
+        var results = new List<T>();
         foreach ((_, StoredRow row) in rows)
         {
             StoredRowView view = row.AsView();
@@ -159,53 +155,9 @@ public sealed class DataVoPreparedSelectSingle<T>
                 continue;
             }
 
-            return _mapper(new CompiledRowReader(view));
+            results.Add(_mapper(new CompiledRowReader(view)));
         }
 
-        return default;
+        return results;
     }
-}
-
-internal sealed class PreparedProjection
-{
-    public PreparedProjection(
-        IReadOnlyList<Column> columns,
-        bool[] isProjected,
-        ReactiveRowSchema projectedSchema,
-        CellValue[] buffer)
-    {
-        Columns = columns;
-        IsProjected = isProjected;
-        ProjectedSchema = projectedSchema;
-        Buffer = buffer;
-    }
-
-    public IReadOnlyList<Column> Columns { get; }
-
-    public bool[] IsProjected { get; }
-
-    public ReactiveRowSchema ProjectedSchema { get; }
-
-    public CellValue[] Buffer { get; }
-}
-
-internal readonly struct PreparedSelectSingleCacheKey : IEquatable<PreparedSelectSingleCacheKey>
-{
-    private readonly DataVoCompiledQueryPlan _plan;
-    private readonly Delegate _mapper;
-
-    public PreparedSelectSingleCacheKey(DataVoCompiledQueryPlan plan, Delegate mapper)
-    {
-        _plan = plan;
-        _mapper = mapper;
-    }
-
-    public bool Equals(PreparedSelectSingleCacheKey other) =>
-        ReferenceEquals(_plan, other._plan) && ReferenceEquals(_mapper, other._mapper);
-
-    public override bool Equals(object? obj) =>
-        obj is PreparedSelectSingleCacheKey other && Equals(other);
-
-    public override int GetHashCode() =>
-        HashCode.Combine(RuntimeHelpers.GetHashCode(_plan), RuntimeHelpers.GetHashCode(_mapper));
 }

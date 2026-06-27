@@ -11,6 +11,21 @@ internal static class SimdDistanceKernels
         return CosineDistance(a.AsSpan(), b.AsSpan());
     }
 
+    public static float Dot(float[] a, float[] b)
+    {
+        return Dot(a.AsSpan(), b.AsSpan());
+    }
+
+    public static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        if (a.Length != b.Length)
+        {
+            throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
+        }
+
+        return TensorPrimitives.Dot(a, b);
+    }
+
     public static float CosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length != b.Length)

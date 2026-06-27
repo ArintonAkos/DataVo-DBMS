@@ -43,6 +43,8 @@ internal sealed class StoredRow
 
     internal static StoredRow FromOwnedCells(ReactiveRowSchema schema, CellValue[] ownedCells) => new(schema, ownedCells);
 
+    internal StoredRow Clone() => new(_schema, _cells.ToArray());
+
     /// <summary>The shared column layout.</summary>
     public ReactiveRowSchema Schema => _schema;
 

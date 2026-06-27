@@ -39,6 +39,7 @@ namespace DataVo.Core;
 public sealed class DataVoContext : IDisposable
 {
     private InsertRowService? _typedInsertService;
+    private readonly Dictionary<(string DatabaseName, string TableName), string> _retainedWriteLockKeys = [];
 
     /// <summary>
     /// Initializes a new context and underlying engine using the supplied configuration.
@@ -299,7 +300,7 @@ public sealed class DataVoContext : IDisposable
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
-        string tableLockKey = $"{databaseName}.{tableName}";
+        string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
         Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
 
         try
@@ -318,6 +319,97 @@ public sealed class DataVoContext : IDisposable
         {
             Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
         }
+    }
+
+    /// <summary>
+    /// Inserts multiple full typed rows under one runtime scope, table write lock, and statement transaction id.
+    /// The supplied cell arrays are consumed as immutable row buffers and must not be mutated after this call.
+    /// </summary>
+    public IReadOnlyList<long> InsertTypedBatch(string tableName, ReactiveRowSchema columns, IReadOnlyList<CellValue[]> rows)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
+
+        RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
+        if (Engine.Diagnostics.Enabled)
+        {
+            diagnosticsBuilder = new RuntimeQueryStatsBuilder
+            {
+                QueryText = $"TYPED BATCH INSERT {tableName}",
+                StorageMode = Engine.Config.StorageMode,
+                DatabaseName = TryGetCurrentDatabaseName()
+            };
+            diagnosticsBuilder.SetOperation("TYPED BATCH INSERT");
+            diagnosticsBuilder.AddTable(tableName);
+        }
+
+        using RuntimeQueryDiagnosticsScope? diagnosticsScope =
+            RuntimeQueryDiagnosticsScope.Start(Engine.Diagnostics, diagnosticsBuilder);
+
+        string databaseName;
+        try
+        {
+            databaseName = ResolveCurrentDatabase();
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+
+        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        {
+            const string transactionError = "InsertTypedBatch cannot run while the current session has an active transaction.";
+            diagnosticsBuilder?.RecordError(transactionError);
+            throw new InvalidOperationException(transactionError);
+        }
+
+        InsertRowService service = _typedInsertService ??= new InsertRowService(
+            Engine,
+            Engine.StorageContext,
+            Engine.Catalog,
+            Engine.IndexManager);
+
+        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
+        string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
+        Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
+
+        try
+        {
+            IReadOnlyList<long> rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder);
+            diagnosticsBuilder?.AddRowsAffected(rowIds.Count);
+            recorder?.Publish();
+            return rowIds;
+        }
+        catch (Exception ex)
+        {
+            diagnosticsBuilder?.RecordError(ex.Message);
+            throw;
+        }
+        finally
+        {
+            Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
+        }
+    }
+
+    private string GetRetainedWriteLockKey(string databaseName, string tableName)
+    {
+        (string DatabaseName, string TableName) lookupKey = (databaseName, tableName);
+        if (_retainedWriteLockKeys.TryGetValue(lookupKey, out string? tableLockKey))
+        {
+            return tableLockKey;
+        }
+
+        tableLockKey = $"{databaseName}.{tableName}";
+        _retainedWriteLockKeys[lookupKey] = tableLockKey;
+        return tableLockKey;
     }
 
     /// <summary>

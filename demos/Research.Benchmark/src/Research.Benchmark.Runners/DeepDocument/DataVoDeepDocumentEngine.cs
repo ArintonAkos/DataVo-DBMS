@@ -20,23 +20,22 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
     private static readonly ReactiveRowSchema AddressSchema = new("Id", "OrderId", "Kind", "Street", "City", "PostalCode");
 
     private static readonly DataVoCompiledQueryPlan OrderByIdPlan = DataVoCompiledQueryPlan.SelectSingle(
-        "Orders", ["Id", "Customer", "Total"], whereColumn: "Id", parameterName: "id");
+        "Orders", ["Id", "Customer", "Total"], whereColumn: "Id", parameterName: "id",
+        accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "_PK_Orders");
     private static readonly DataVoCompiledQueryPlan ItemsByOrderPlan = DataVoCompiledQueryPlan.SelectMany(
-        "OrderItems", ["Sku", "Name", "Quantity", "UnitPrice"], whereColumn: "OrderId", parameterName: "orderId");
+        "OrderItems", ["Sku", "Name", "Quantity", "UnitPrice"], whereColumn: "OrderId", parameterName: "orderId",
+        accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_OrderItems_OrderId");
     private static readonly DataVoCompiledQueryPlan AddressesByOrderPlan = DataVoCompiledQueryPlan.SelectMany(
-        "Addresses", ["Kind", "Street", "City", "PostalCode"], whereColumn: "OrderId", parameterName: "orderId");
+        "Addresses", ["Kind", "Street", "City", "PostalCode"], whereColumn: "OrderId", parameterName: "orderId",
+        accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_Addresses_OrderId");
 
-    private static readonly Func<Dictionary<string, object?>, OrderItem> ItemMapper = row => new OrderItem(
-        Convert.ToInt32(row["Sku"]), Convert.ToString(row["Name"]) ?? string.Empty,
-        Convert.ToInt32(row["Quantity"]), Convert.ToDouble(row["UnitPrice"]));
-    private static readonly Func<Dictionary<string, object?>, OrderAddress> AddressMapper = row => new OrderAddress(
-        Convert.ToString(row["Kind"]) ?? string.Empty, Convert.ToString(row["Street"]) ?? string.Empty,
-        Convert.ToString(row["City"]) ?? string.Empty, Convert.ToString(row["PostalCode"]) ?? string.Empty);
-
-    private readonly CellValue[] _orderCells = new CellValue[3];
-    private readonly CellValue[] _itemCells = new CellValue[6];
-    private readonly CellValue[] _addressCells = new CellValue[6];
     private DataVoContext? _context;
+    private DataVoPreparedSelectSingle<OrderHeader>? _orderById;
+    private DataVoPreparedSelectMany<OrderItem>? _itemsByOrder;
+    private DataVoPreparedSelectMany<OrderAddress>? _addressesByOrder;
+    private List<CellValue[]>? _orderBatch;
+    private List<CellValue[]>? _itemBatch;
+    private List<CellValue[]>? _addressBatch;
     private int _nextItemId = 1;
     private int _nextAddressId = 1;
 
@@ -59,40 +58,103 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
         // the whole child table once per loaded order (which is the O(n^2) reconstruction cost).
         ExecuteOk("CREATE INDEX ix_OrderItems_OrderId ON OrderItems (OrderId)");
         ExecuteOk("CREATE INDEX ix_Addresses_OrderId ON Addresses (OrderId)");
+
+        _orderById = DataVoCompiledQuery.PrepareSelectSingleTyped(Ctx(), OrderByIdPlan, MapOrderHeader);
+        _itemsByOrder = DataVoCompiledQuery.PrepareSelectManyTyped(Ctx(), ItemsByOrderPlan, MapItem);
+        _addressesByOrder = DataVoCompiledQuery.PrepareSelectManyTyped(Ctx(), AddressesByOrderPlan, MapAddress);
     }
 
-    public void BeginBatch() { }
+    public void BeginBatch()
+    {
+        _orderBatch = new List<CellValue[]>(8192);
+        _itemBatch = new List<CellValue[]>(40_960);
+        _addressBatch = new List<CellValue[]>(16_384);
+    }
 
-    public void CompleteBatch() { }
+    public void CompleteBatch()
+    {
+        DataVoContext context = Ctx();
+        if (_orderBatch is { Count: > 0 } orders)
+        {
+            context.InsertTypedBatch("Orders", OrderSchema, orders);
+        }
+
+        if (_itemBatch is { Count: > 0 } items)
+        {
+            context.InsertTypedBatch("OrderItems", ItemSchema, items);
+        }
+
+        if (_addressBatch is { Count: > 0 } addresses)
+        {
+            context.InsertTypedBatch("Addresses", AddressSchema, addresses);
+        }
+
+        _orderBatch = null;
+        _itemBatch = null;
+        _addressBatch = null;
+    }
 
     public void Save(DeepOrder order)
     {
         int orderId = checked((int)order.Id);
-        _orderCells[0] = CellValue.From(orderId);
-        _orderCells[1] = CellValue.From(order.Customer);
-        _orderCells[2] = CellValue.From(order.Total);
-        Ctx().InsertTyped("Orders", OrderSchema, _orderCells);
+        CellValue[] orderCells =
+        [
+            CellValue.From(orderId),
+            CellValue.From(order.Customer),
+            CellValue.From(order.Total)
+        ];
+
+        if (_orderBatch is not null)
+        {
+            _orderBatch.Add(orderCells);
+        }
+        else
+        {
+            Ctx().InsertTyped("Orders", OrderSchema, orderCells);
+        }
 
         foreach (OrderItem item in order.Items)
         {
-            _itemCells[0] = CellValue.From(_nextItemId++);
-            _itemCells[1] = CellValue.From(orderId);
-            _itemCells[2] = CellValue.From(item.Sku);
-            _itemCells[3] = CellValue.From(item.Name);
-            _itemCells[4] = CellValue.From(item.Quantity);
-            _itemCells[5] = CellValue.From(item.UnitPrice);
-            Ctx().InsertTyped("OrderItems", ItemSchema, _itemCells);
+            CellValue[] itemCells =
+            [
+                CellValue.From(_nextItemId++),
+                CellValue.From(orderId),
+                CellValue.From(item.Sku),
+                CellValue.From(item.Name),
+                CellValue.From(item.Quantity),
+                CellValue.From(item.UnitPrice)
+            ];
+
+            if (_itemBatch is not null)
+            {
+                _itemBatch.Add(itemCells);
+            }
+            else
+            {
+                Ctx().InsertTyped("OrderItems", ItemSchema, itemCells);
+            }
         }
 
         foreach (OrderAddress address in order.Addresses)
         {
-            _addressCells[0] = CellValue.From(_nextAddressId++);
-            _addressCells[1] = CellValue.From(orderId);
-            _addressCells[2] = CellValue.From(address.Kind);
-            _addressCells[3] = CellValue.From(address.Street);
-            _addressCells[4] = CellValue.From(address.City);
-            _addressCells[5] = CellValue.From(address.PostalCode);
-            Ctx().InsertTyped("Addresses", AddressSchema, _addressCells);
+            CellValue[] addressCells =
+            [
+                CellValue.From(_nextAddressId++),
+                CellValue.From(orderId),
+                CellValue.From(address.Kind),
+                CellValue.From(address.Street),
+                CellValue.From(address.City),
+                CellValue.From(address.PostalCode)
+            ];
+
+            if (_addressBatch is not null)
+            {
+                _addressBatch.Add(addressCells);
+            }
+            else
+            {
+                Ctx().InsertTyped("Addresses", AddressSchema, addressCells);
+            }
         }
     }
 
@@ -101,20 +163,14 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
         int orderId = checked((int)id);
         DataVoContext context = Ctx();
 
-        // Map the header to a reference type so an absent order is genuinely null. (SelectSingle returns
-        // default(TResult) for "no row", which for a value tuple would be a non-null (null, 0).)
-        OrderHeader? header = DataVoCompiledQuery.SelectSingle(
-            context, OrderByIdPlan, [new DataVoCompiledQueryParameter("id", orderId)],
-            static row => new OrderHeader(Convert.ToString(row["Customer"]) ?? string.Empty, Convert.ToDouble(row["Total"])));
+        OrderHeader? header = OrderById().Execute(orderId);
         if (header is null)
         {
             return null;
         }
 
-        IReadOnlyList<OrderItem> items = DataVoCompiledQuery.SelectMany(
-            context, ItemsByOrderPlan, [new DataVoCompiledQueryParameter("orderId", orderId)], ItemMapper);
-        IReadOnlyList<OrderAddress> addresses = DataVoCompiledQuery.SelectMany(
-            context, AddressesByOrderPlan, [new DataVoCompiledQueryParameter("orderId", orderId)], AddressMapper);
+        IReadOnlyList<OrderItem> items = ItemsByOrder().Execute(orderId);
+        IReadOnlyList<OrderAddress> addresses = AddressesByOrder().Execute(orderId);
 
         return new DeepOrder(id, header.Customer, header.Total, items, addresses);
     }
@@ -123,10 +179,41 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
     {
         _context?.Dispose();
         _context = null;
+        _orderById = null;
+        _itemsByOrder = null;
+        _addressesByOrder = null;
+        _orderBatch = null;
+        _itemBatch = null;
+        _addressBatch = null;
     }
 
     private DataVoContext Ctx() =>
         _context ?? throw new InvalidOperationException("DataVo deep-document engine has not been initialized.");
+
+    private DataVoPreparedSelectSingle<OrderHeader> OrderById() =>
+        _orderById ?? throw new InvalidOperationException("DataVo deep-document order lookup has not been prepared.");
+
+    private DataVoPreparedSelectMany<OrderItem> ItemsByOrder() =>
+        _itemsByOrder ?? throw new InvalidOperationException("DataVo deep-document item lookup has not been prepared.");
+
+    private DataVoPreparedSelectMany<OrderAddress> AddressesByOrder() =>
+        _addressesByOrder ?? throw new InvalidOperationException("DataVo deep-document address lookup has not been prepared.");
+
+    private static OrderHeader MapOrderHeader(CompiledRowReader row) => new(
+        row.GetString(1) ?? string.Empty,
+        row.GetDouble(2));
+
+    private static OrderItem MapItem(CompiledRowReader row) => new(
+        row.GetInt32(2),
+        row.GetString(3) ?? string.Empty,
+        row.GetInt32(4),
+        row.GetDouble(5));
+
+    private static OrderAddress MapAddress(CompiledRowReader row) => new(
+        row.GetString(2) ?? string.Empty,
+        row.GetString(3) ?? string.Empty,
+        row.GetString(4) ?? string.Empty,
+        row.GetString(5) ?? string.Empty);
 
     private void ExecuteOk(string sql)
     {
