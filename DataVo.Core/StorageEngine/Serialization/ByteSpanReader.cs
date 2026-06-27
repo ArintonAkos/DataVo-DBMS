@@ -43,7 +43,13 @@ internal ref struct ByteSpanReader
         return value;
     }
 
-    public void SkipString() => _position += Read7BitEncodedInt();
+    public void SkipString()
+    {
+        // Two statements, not `_position += Read7BitEncodedInt()`: the compound assignment would read _position
+        // before Read7BitEncodedInt advances it past the length prefix, losing the prefix advance.
+        int length = Read7BitEncodedInt();
+        _position += length;
+    }
 
     public void Skip(int byteCount) => _position += byteCount;
 
