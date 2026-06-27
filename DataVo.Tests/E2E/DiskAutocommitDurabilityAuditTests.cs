@@ -100,6 +100,44 @@ public class DiskAutocommitDurabilityAuditTests : SqlExecutionTestsBase
     }
 }
 
+public class DiskGroupCommitAutocommitTests : SqlExecutionTestsBase
+{
+    public DiskGroupCommitAutocommitTests()
+        : base(new DataVoConfig
+        {
+            StorageMode = StorageMode.Disk,
+            DiskStoragePath = "./test_datavo_group_commit_autocommit",
+            WalFilePath = "datavo.walbin",
+            WalCheckpointThreshold = 1000,
+            IoSchedulerMode = IoSchedulerMode.GroupCommit,
+        }, "GroupCommitAutocommitDb")
+    {
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("Binary WAL frame inspection is disk-specific and outside browser SQL parity")]
+    public void AutocommitInsert_WritesBinaryWalFrame_WhenGroupCommitSchedulerIsEnabled()
+    {
+        string table = $"GcInsert_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, Name VARCHAR(50));");
+
+        string walPath = Config.ResolveWalFilePath();
+        if (File.Exists(walPath))
+        {
+            File.Delete(walPath);
+        }
+
+        Execute($"INSERT INTO {table} (Id, Name) VALUES (1, 'Alice');");
+
+        Assert.True(File.Exists(walPath));
+        byte[] bytes = File.ReadAllBytes(walPath);
+        Assert.True(bytes.Length >= WalAppender.FrameHeaderSize);
+        Assert.True(WalAppender.TryReadFrameHeader(bytes, out WalFrameHeader header));
+        Assert.Equal(WalFrameOperationType.TxnCommit, header.OpType);
+        Assert.True(WalAppender.ValidateFrame(bytes, header));
+    }
+}
+
 /// <summary>
 /// Functional coverage for the durable (fsync) disk write mode introduced via
 /// <see cref="DataVoConfig.SyncDiskWrites"/>. We can't unit-test power-loss durability, but we can

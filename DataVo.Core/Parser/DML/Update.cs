@@ -507,6 +507,23 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 Indexes.InsertIntoIndex(indexValue, assignedRowId, indexName, _model.TableName, databaseName);
             }
         }
+
+        if (ImplicitWalCommit.IsEnabled(Engine))
+        {
+            var operations = new List<WalOperation>(newRows.Count);
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                operations.Add(new WalOperation
+                {
+                    OperationType = WalOperationType.Update,
+                    TableName = _model.TableName,
+                    RowId = oldRowIds[i],
+                    UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
+                });
+            }
+
+            ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
+        }
     }
 
     /// <summary>

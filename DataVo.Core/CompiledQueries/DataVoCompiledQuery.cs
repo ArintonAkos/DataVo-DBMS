@@ -9,6 +9,7 @@ using DataVo.Core.MVCC;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
 
 namespace DataVo.Core.CompiledQueries;
@@ -1193,6 +1194,23 @@ public static class DataVoCompiledQuery
         foreach (IndexFile index in indexFiles)
         {
             MaintainIndexForUpdate(context, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
+        }
+
+        if (ImplicitWalCommit.IsEnabled(context.Engine))
+        {
+            var operations = new List<WalOperation>(newRows.Count);
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                operations.Add(new WalOperation
+                {
+                    OperationType = WalOperationType.Update,
+                    TableName = tableName,
+                    RowId = oldRowIds[i],
+                    UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
+                });
+            }
+
+            ImplicitWalCommit.CommitIfEnabled(context.Engine, databaseName, statementTxId, operations);
         }
     }
 
