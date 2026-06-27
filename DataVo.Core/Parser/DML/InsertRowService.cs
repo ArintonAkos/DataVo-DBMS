@@ -203,6 +203,150 @@ internal sealed class InsertRowService(
         return rowId;
     }
 
+    public IReadOnlyList<long> InsertTypedRows(
+        string databaseName,
+        string tableName,
+        ReactiveRowSchema columns,
+        IReadOnlyList<CellValue[]> rows,
+        long statementTxId,
+        ChangeRecorder? recorder = null)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name is required.", nameof(tableName));
+        }
+
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
+        IReadOnlyList<Column> tableColumns = metadata.Columns;
+        IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
+        IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
+        IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
+
+        EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
+
+        bool hasIntegerPrimaryKey = TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, out int integerPrimaryKeyOrdinal);
+        bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
+        List<string>? messages = hasConstraints ? [] : null;
+        HashSet<string>? acceptedPrimaryKeys = hasConstraints && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
+        HashSet<long>? acceptedIntegerPrimaryKeys = hasIntegerPrimaryKey ? [] : null;
+        IReadOnlyDictionary<string, HashSet<string>>? acceptedUniqueValues = hasConstraints
+            ? uniqueKeys.ToDictionary(
+                key => key,
+                _ => new HashSet<string>(StringComparer.Ordinal),
+                StringComparer.OrdinalIgnoreCase)
+            : null;
+        bool skipExistingPrimaryKeyLookup = primaryKeys.Count > 0 && context.IsTableEmpty(tableName, databaseName);
+
+        string[]? primaryKeyValues = primaryKeys.Count > 0 && !hasIntegerPrimaryKey ? new string[rows.Count] : null;
+        long[]? integerPrimaryKeyValues = hasIntegerPrimaryKey ? new long[rows.Count] : null;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            CellValue[] row = rows[i];
+            if (columns.ColumnCount != row.Length)
+            {
+                throw new ArgumentException(
+                    $"Typed row schema has {columns.ColumnCount} columns but row {i + 1} has {row.Length} cells.",
+                    nameof(rows));
+            }
+
+            ValidateTypedCells(tableColumns, row);
+
+            if (!hasConstraints)
+            {
+                continue;
+            }
+
+            int rowNumber = i + 1;
+            string? primaryKeyValue = null;
+            bool primaryKeyValid = hasIntegerPrimaryKey
+                ? ValidateTypedIntegerPrimaryKey(
+                    tableName,
+                    databaseName,
+                    rowNumber,
+                    row,
+                    integerPrimaryKeyOrdinal,
+                    acceptedIntegerPrimaryKeys!,
+                    messages!,
+                    skipExistingPrimaryKeyLookup,
+                    out integerPrimaryKeyValues![i])
+                : ValidateTypedPrimaryKeys(
+                    tableName,
+                    databaseName,
+                    rowNumber,
+                    row,
+                    columns,
+                    primaryKeys,
+                    acceptedPrimaryKeys!,
+                    messages!,
+                    skipExistingPrimaryKeyLookup,
+                    out primaryKeyValue);
+
+            if (!primaryKeyValid
+                || !ValidateTypedUniqueKeys(
+                    tableName,
+                    databaseName,
+                    rowNumber,
+                    row,
+                    columns,
+                    uniqueKeys,
+                    acceptedUniqueValues!,
+                    messages!)
+                || !ValidateTypedForeignKeys(
+                    databaseName,
+                    rowNumber,
+                    row,
+                    columns,
+                    foreignKeysByAttribute,
+                    messages!))
+            {
+                string message = messages!.Count == 0
+                    ? $"Typed insert into {tableName} was rejected."
+                    : string.Join(" ", messages);
+                throw new InvalidOperationException(message);
+            }
+
+            if (primaryKeyValues is not null)
+            {
+                primaryKeyValues[i] = primaryKeyValue!;
+            }
+        }
+
+        var storedRows = new List<StoredRow>(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            storedRows.Add(StoredRow.FromOwnedCells(columns, rows[i]));
+        }
+
+        IReadOnlyList<long> rowIds = context.InsertTypedRows(storedRows, tableName, databaseName);
+        MvccCoordinator.RegisterInsertVersions(engine, databaseName, tableName, rowIds, statementTxId);
+        InsertTypedIndexesBatch(
+            tableName,
+            databaseName,
+            columns,
+            rows,
+            rowIds,
+            indexFiles,
+            primaryKeys,
+            primaryKeyValues,
+            integerPrimaryKeyValues);
+
+        if (recorder is not null)
+        {
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                recorder.RecordTypedInsert(tableName, rowIds[i], TypedRow.FromOwnedCells(columns, rows[i]));
+            }
+        }
+
+        return rowIds;
+    }
+
     private static Dictionary<string, object?> MaterializeRow(IReadOnlyDictionary<string, object?> row)
     {
         return row is Dictionary<string, object?> dict && dict.Comparer.Equals(StringComparer.OrdinalIgnoreCase)
@@ -243,19 +387,26 @@ internal sealed class InsertRowService(
         return normalized;
     }
 
+    private static void ValidateTypedCells(IReadOnlyList<Column> tableColumns, ReadOnlySpan<CellValue> row)
+    {
+        for (int i = 0; i < row.Length; i++)
+        {
+            ValidateTypedCell(tableColumns[i], row[i]);
+        }
+    }
+
+    private static bool TryResolveIntegerPrimaryKeyOrdinal(
+        IReadOnlyList<string> primaryKeys,
+        ReactiveRowSchema schema,
+        out int ordinal)
+    {
+        ordinal = -1;
+        return primaryKeys.Count == 1 && schema.TryGetOrdinal(primaryKeys[0], out ordinal);
+    }
+
     private static void ValidateTypedCell(Column column, CellValue cell)
     {
-        CellType expected = column.Type.ToUpperInvariant() switch
-        {
-            "INT" => CellType.Int32,
-            "FLOAT" => CellType.Double,
-            "BIT" => CellType.Boolean,
-            "DATE" => CellType.Date,
-            "VARCHAR" => CellType.String,
-            "VECTOR" => CellType.Vector,
-            _ => throw new NotSupportedException(
-                $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.")
-        };
+        CellType expected = ExpectedCellType(column);
 
         if (cell.IsNull)
         {
@@ -286,6 +437,43 @@ internal sealed class InsertRowService(
         }
     }
 
+    private static CellType ExpectedCellType(Column column)
+    {
+        string type = column.Type;
+        if (type.Equals("INT", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Int32;
+        }
+
+        if (type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Double;
+        }
+
+        if (type.Equals("BIT", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Boolean;
+        }
+
+        if (type.Equals("DATE", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Date;
+        }
+
+        if (type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.String;
+        }
+
+        if (type.Equals("VECTOR", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Vector;
+        }
+
+        throw new NotSupportedException(
+            $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.");
+    }
+
     private bool ValidateTypedPrimaryKeys(
         string tableName,
         string databaseName,
@@ -296,6 +484,55 @@ internal sealed class InsertRowService(
         HashSet<string> acceptedPrimaryKeys,
         List<string> messages)
     {
+        return ValidateTypedPrimaryKeys(
+            tableName,
+            databaseName,
+            rowNumber,
+            cells,
+            schema,
+            primaryKeys,
+            acceptedPrimaryKeys,
+            messages,
+            out _);
+    }
+
+    private bool ValidateTypedPrimaryKeys(
+        string tableName,
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyList<string> primaryKeys,
+        HashSet<string> acceptedPrimaryKeys,
+        List<string> messages,
+        out string? primaryKeyValue)
+    {
+        return ValidateTypedPrimaryKeys(
+            tableName,
+            databaseName,
+            rowNumber,
+            cells,
+            schema,
+            primaryKeys,
+            acceptedPrimaryKeys,
+            messages,
+            skipExistingPrimaryKeyLookup: false,
+            out primaryKeyValue);
+    }
+
+    private bool ValidateTypedPrimaryKeys(
+        string tableName,
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyList<string> primaryKeys,
+        HashSet<string> acceptedPrimaryKeys,
+        List<string> messages,
+        bool skipExistingPrimaryKeyLookup,
+        out string? primaryKeyValue)
+    {
+        primaryKeyValue = null;
         if (primaryKeys.Count == 0)
         {
             return true;
@@ -312,9 +549,48 @@ internal sealed class InsertRowService(
             return false;
         }
 
-        string primaryKeyValue = IndexKeyEncoder.BuildKeyString(schema, cells, primaryKeys);
+        primaryKeyValue = IndexKeyEncoder.BuildKeyString(schema, cells, primaryKeys);
         if (acceptedPrimaryKeys.Contains(primaryKeyValue)
-            || PrimaryKeyExists(tableName, databaseName, primaryKeyValue, primaryKeys))
+            || (!skipExistingPrimaryKeyLookup && PrimaryKeyExists(tableName, databaseName, primaryKeyValue, primaryKeys)))
+        {
+            messages.Add($"Primary key violation in row {rowNumber}!");
+            return false;
+        }
+
+        acceptedPrimaryKeys.Add(primaryKeyValue);
+        return true;
+    }
+
+    private bool ValidateTypedIntegerPrimaryKey(
+        string tableName,
+        string databaseName,
+        int rowNumber,
+        ReadOnlySpan<CellValue> cells,
+        int primaryKeyOrdinal,
+        HashSet<long> acceptedPrimaryKeys,
+        List<string> messages,
+        bool skipExistingPrimaryKeyLookup,
+        out long primaryKeyValue)
+    {
+        CellValue cell = cells[primaryKeyOrdinal];
+        primaryKeyValue = 0;
+
+        if (cell.IsNull)
+        {
+            messages.Add($"Primary key cannot be null in row {rowNumber}!");
+            return false;
+        }
+
+        primaryKeyValue = cell.Type switch
+        {
+            CellType.Int32 => cell.AsInt32(),
+            CellType.Int64 => cell.AsInt64(),
+            _ => throw new NotSupportedException(
+                $"Typed integer primary key for row {rowNumber} must be INT or BIGINT; use the dictionary BulkInsert path.")
+        };
+
+        if (acceptedPrimaryKeys.Contains(primaryKeyValue)
+            || (!skipExistingPrimaryKeyLookup && IntegerPrimaryKeyExists(tableName, databaseName, primaryKeyValue)))
         {
             messages.Add($"Primary key violation in row {rowNumber}!");
             return false;
@@ -652,6 +928,24 @@ internal sealed class InsertRowService(
             string.Equals(IndexKeyEncoder.BuildKeyString(existingRow, primaryKeys), primaryKeyValue, StringComparison.Ordinal));
     }
 
+    private bool IntegerPrimaryKeyExists(string tableName, string databaseName, long primaryKeyValue)
+    {
+        string indexName = $"_PK_{tableName}";
+        if (indexes.TryLookupIntegerPrimaryKey(primaryKeyValue, indexName, tableName, databaseName, out _))
+        {
+            return true;
+        }
+
+        try
+        {
+            return indexes.IndexContainsKey($"[{primaryKeyValue}]", indexName, tableName, databaseName);
+        }
+        catch (IndexException)
+        {
+            return false;
+        }
+    }
+
     private bool UniqueValueExists(
         string tableName,
         string databaseName,
@@ -806,9 +1100,237 @@ internal sealed class InsertRowService(
                 continue;
             }
 
+            if (IsPrimaryKeyIndex(tableName, indexName)
+                && TryGetSingleIntegerKey(schema, cells, index.AttributeNames, out long integerKey))
+            {
+                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName);
+                continue;
+            }
+
+            if (TryGetSingleIntegerKey(schema, cells, index.AttributeNames, out long integerIndexKey))
+            {
+                indexes.InsertIntegerIndexEntries([(integerIndexKey, rowId)], indexName, tableName, databaseName);
+                continue;
+            }
+
             string indexValue = IndexKeyEncoder.BuildKeyString(schema, cells, index.AttributeNames);
             indexes.InsertIntoIndex(indexValue, rowId, indexName, tableName, databaseName);
         }
+    }
+
+    private void InsertTypedIndexesBatch(
+        string tableName,
+        string databaseName,
+        ReactiveRowSchema schema,
+        IReadOnlyList<CellValue[]> rows,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyList<IndexFile> indexFiles,
+        IReadOnlyList<string> primaryKeys,
+        string[]? primaryKeyValues,
+        long[]? integerPrimaryKeyValues)
+    {
+        foreach (IndexFile index in indexFiles)
+        {
+            string indexName = index.IndexFileName ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(indexName))
+            {
+                continue;
+            }
+
+            string indexKind = index.IndexKind ?? string.Empty;
+            if (indexes.SupportsVectorIndexType(indexKind))
+            {
+                InsertTypedVectorIndexBatch(tableName, databaseName, schema, rows, rowIds, index, indexName, indexKind);
+                continue;
+            }
+
+            var entries = new List<(string Value, long RowId)>(rowIds.Count);
+            bool canReusePrimaryKey = primaryKeyValues is not null
+                && IsPrimaryKeyIndex(tableName, indexName)
+                && AttributeNamesEqual(index.AttributeNames, primaryKeys);
+            bool canUseIntegerPrimaryKey = integerPrimaryKeyValues is not null
+                && IsPrimaryKeyIndex(tableName, indexName)
+                && AttributeNamesEqual(index.AttributeNames, primaryKeys);
+
+            if (canUseIntegerPrimaryKey)
+            {
+                var integerEntries = new List<(long Key, long RowId)>(rowIds.Count);
+                for (int i = 0; i < rowIds.Count; i++)
+                {
+                    integerEntries.Add((integerPrimaryKeyValues![i], rowIds[i]));
+                }
+
+                indexes.InsertIntegerPrimaryKeys(integerEntries, indexName, tableName, databaseName);
+                continue;
+            }
+
+            if (TryBuildIntegerIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerIndexEntries)
+                && integerIndexEntries is not null)
+            {
+                indexes.InsertIntegerIndexEntries(integerIndexEntries, indexName, tableName, databaseName);
+                continue;
+            }
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                ReadOnlySpan<CellValue> cells = rows[i];
+                if (!canReusePrimaryKey && HasNullKeyPart(cells, schema, index.AttributeNames))
+                {
+                    continue;
+                }
+
+                string indexValue = canReusePrimaryKey
+                    ? primaryKeyValues![i]
+                    : IndexKeyEncoder.BuildKeyString(schema, cells, index.AttributeNames);
+                entries.Add((indexValue, rowIds[i]));
+            }
+
+            indexes.InsertManyIntoIndex(entries, indexName, tableName, databaseName);
+        }
+    }
+
+    private static bool TryBuildIntegerIndexEntries(
+        ReactiveRowSchema schema,
+        IReadOnlyList<CellValue[]> rows,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyList<string> attributes,
+        out List<(long Key, long RowId)>? entries)
+    {
+        entries = null;
+        if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
+        {
+            return false;
+        }
+
+        var result = new List<(long Key, long RowId)>(rowIds.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            CellValue cell = rows[i][ordinal];
+            if (cell.IsNull)
+            {
+                continue;
+            }
+
+            if (cell.Type == CellType.Int32)
+            {
+                result.Add((cell.AsInt32(), rowIds[i]));
+                continue;
+            }
+
+            if (cell.Type == CellType.Int64)
+            {
+                result.Add((cell.AsInt64(), rowIds[i]));
+                continue;
+            }
+
+            return false;
+        }
+
+        entries = result;
+        return true;
+    }
+
+    private void InsertTypedVectorIndexBatch(
+        string tableName,
+        string databaseName,
+        ReactiveRowSchema schema,
+        IReadOnlyList<CellValue[]> rows,
+        IReadOnlyList<long> rowIds,
+        IndexFile index,
+        string indexName,
+        string indexKind)
+    {
+        if (index.AttributeNames.Count != 1)
+        {
+            throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+        }
+
+        string vectorColumn = index.AttributeNames[0];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            CellValue vectorCell = GetTypedCell(rows[i], schema, vectorColumn);
+            if (vectorCell.IsNull)
+            {
+                continue;
+            }
+
+            if (vectorCell.Type != CellType.Vector)
+            {
+                throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+            }
+
+            indexes.InsertIntoVectorIndex(vectorCell.AsVectorReadOnlySpan(), rowIds[i], indexName, tableName, databaseName, indexKind);
+        }
+    }
+
+    private static bool HasNullKeyPart(
+        ReadOnlySpan<CellValue> cells,
+        ReactiveRowSchema schema,
+        IReadOnlyList<string> attributes)
+    {
+        foreach (string attribute in attributes)
+        {
+            if (GetTypedCell(cells, schema, attribute).IsNull)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetSingleIntegerKey(
+        ReactiveRowSchema schema,
+        ReadOnlySpan<CellValue> cells,
+        IReadOnlyList<string> attributes,
+        out long key)
+    {
+        key = 0;
+        if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
+        {
+            return false;
+        }
+
+        CellValue cell = cells[ordinal];
+        if (cell.IsNull)
+        {
+            return false;
+        }
+
+        if (cell.Type == CellType.Int32)
+        {
+            key = cell.AsInt32();
+            return true;
+        }
+
+        if (cell.Type == CellType.Int64)
+        {
+            key = cell.AsInt64();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsPrimaryKeyIndex(string tableName, string indexName) =>
+        indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
+
+    private static bool AttributeNamesEqual(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            if (!left[i].Equals(right[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

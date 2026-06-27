@@ -113,6 +113,19 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     }
 
     /// <summary>
+    /// Determines whether the specified logical key exists without copying the associated row IDs.
+    /// </summary>
+    /// <param name="key">The logical key to search for.</param>
+    /// <returns><see langword="true"/> if the key exists; otherwise, <see langword="false"/>.</returns>
+    public bool ContainsKey(string key)
+    {
+        lock (_treeLock)
+        {
+            return Root.ContainsKey(key);
+        }
+    }
+
+    /// <summary>
     /// Determines whether the specified row ID exists anywhere in the index.
     /// </summary>
     /// <param name="rowId">The row ID to search for.</param>

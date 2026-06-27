@@ -19,45 +19,90 @@ public readonly ref struct CompiledRowReader
     /// <summary>Whether the named column holds SQL NULL.</summary>
     public bool IsNull(string column) => _view[column].IsNull;
 
+    /// <summary>Whether the ordinal column holds SQL NULL.</summary>
+    public bool IsNull(int ordinal) => _view[ordinal].IsNull;
+
     /// <summary>Reads an <see cref="int"/> column; throws if the cell is not Int32 or is NULL.</summary>
     public int GetInt32(string column) => _view[column].AsInt32();
+
+    /// <summary>Reads an <see cref="int"/> column by ordinal; throws if the cell is not Int32 or is NULL.</summary>
+    public int GetInt32(int ordinal) => _view[ordinal].AsInt32();
 
     /// <summary>Reads a <see cref="long"/> column; throws if the cell is not Int64 or is NULL.</summary>
     public long GetInt64(string column) => _view[column].AsInt64();
 
+    /// <summary>Reads a <see cref="long"/> column by ordinal; throws if the cell is not Int64 or is NULL.</summary>
+    public long GetInt64(int ordinal) => _view[ordinal].AsInt64();
+
     /// <summary>Reads a <see cref="double"/> column; throws if the cell is not Double or is NULL.</summary>
     public double GetDouble(string column) => _view[column].AsDouble();
+
+    /// <summary>Reads a <see cref="double"/> column by ordinal; throws if the cell is not Double or is NULL.</summary>
+    public double GetDouble(int ordinal) => _view[ordinal].AsDouble();
 
     /// <summary>Reads a <see cref="decimal"/> column; throws if the cell is not Decimal or is NULL.</summary>
     public decimal GetDecimal(string column) => _view[column].AsDecimal();
 
+    /// <summary>Reads a <see cref="decimal"/> column by ordinal; throws if the cell is not Decimal or is NULL.</summary>
+    public decimal GetDecimal(int ordinal) => _view[ordinal].AsDecimal();
+
     /// <summary>Reads a <see cref="bool"/> column; throws if the cell is not Boolean or is NULL.</summary>
     public bool GetBoolean(string column) => _view[column].AsBoolean();
+
+    /// <summary>Reads a <see cref="bool"/> column by ordinal; throws if the cell is not Boolean or is NULL.</summary>
+    public bool GetBoolean(int ordinal) => _view[ordinal].AsBoolean();
 
     /// <summary>Reads a <see cref="DateOnly"/> column; throws if the cell is not Date or is NULL.</summary>
     public DateOnly GetDate(string column) => _view[column].AsDate();
 
+    /// <summary>Reads a <see cref="DateOnly"/> column by ordinal; throws if the cell is not Date or is NULL.</summary>
+    public DateOnly GetDate(int ordinal) => _view[ordinal].AsDate();
+
     /// <summary>Reads a VECTOR (<see cref="float"/>[]) column, returning a defensive clone.</summary>
     public float[] GetVector(string column) => _view[column].AsVector();
+
+    /// <summary>Reads a VECTOR column by ordinal, returning a defensive clone.</summary>
+    public float[] GetVector(int ordinal) => _view[ordinal].AsVector();
 
     /// <summary>Reads a string column; SQL NULL returns <c>null</c>.</summary>
     public string? GetString(string column) => _view[column].AsString();
 
+    /// <summary>Reads a string column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public string? GetString(int ordinal) => _view[ordinal].AsString();
+
     /// <summary>Reads a nullable <see cref="int"/> column; SQL NULL returns <c>null</c>.</summary>
     public int? GetInt32OrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsInt32(); }
+
+    /// <summary>Reads a nullable <see cref="int"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public int? GetInt32OrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsInt32(); }
 
     /// <summary>Reads a nullable <see cref="long"/> column; SQL NULL returns <c>null</c>.</summary>
     public long? GetInt64OrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsInt64(); }
 
+    /// <summary>Reads a nullable <see cref="long"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public long? GetInt64OrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsInt64(); }
+
     /// <summary>Reads a nullable <see cref="double"/> column; SQL NULL returns <c>null</c>.</summary>
     public double? GetDoubleOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDouble(); }
+
+    /// <summary>Reads a nullable <see cref="double"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public double? GetDoubleOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDouble(); }
 
     /// <summary>Reads a nullable <see cref="decimal"/> column; SQL NULL returns <c>null</c>.</summary>
     public decimal? GetDecimalOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDecimal(); }
 
+    /// <summary>Reads a nullable <see cref="decimal"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public decimal? GetDecimalOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDecimal(); }
+
     /// <summary>Reads a nullable <see cref="bool"/> column; SQL NULL returns <c>null</c>.</summary>
     public bool? GetBooleanOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsBoolean(); }
 
+    /// <summary>Reads a nullable <see cref="bool"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public bool? GetBooleanOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsBoolean(); }
+
     /// <summary>Reads a nullable <see cref="DateOnly"/> column; SQL NULL returns <c>null</c>.</summary>
     public DateOnly? GetDateOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDate(); }
+
+    /// <summary>Reads a nullable <see cref="DateOnly"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public DateOnly? GetDateOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDate(); }
 }

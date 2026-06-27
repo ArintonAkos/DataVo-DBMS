@@ -1,4 +1,6 @@
 using DataVo.Core.Utils;
+using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace DataVo.Tests.Indexing;
 
@@ -9,10 +11,54 @@ namespace DataVo.Tests.Indexing;
 /// </summary>
 public class SimdDistanceKernelsTests
 {
+    [Fact]
+    public void CosineDistance_OnArm64_DoesNotUseManualAdvSimdPath()
+    {
+        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+        {
+            return;
+        }
+
+        MethodInfo? method = typeof(SimdDistanceKernels).GetMethod(
+            "TryCosineDistanceAdvSimd",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.Null(method);
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(8)]
+    [InlineData(1536)]
+    public void Dot_MatchesIndependentReference(int dimension)
+    {
+        float[] a = RandomVector(new Random(20260624 + dimension), dimension);
+        float[] b = RandomVector(new Random(990002 + dimension), dimension);
+
+        MethodInfo? dotMethod = typeof(SimdDistanceKernels).GetMethod(
+            "Dot",
+            BindingFlags.Public | BindingFlags.Static,
+            [typeof(float[]), typeof(float[])]);
+
+        Assert.NotNull(dotMethod);
+        float actual = (float)dotMethod.Invoke(null, [a, b])!;
+
+        double expected = 0d;
+        for (int i = 0; i < a.Length; i++)
+        {
+            expected += (double)a[i] * b[i];
+        }
+
+        AssertClose(expected, actual);
+    }
+
     [Theory]
     [InlineData(3)]    // below SIMD width — exercises the fallback directly
     [InlineData(8)]
     [InlineData(16)]
+    [InlineData(17)]   // unrolled SIMD body plus scalar tail
+    [InlineData(31)]
+    [InlineData(33)]
     [InlineData(1536)] // the Scenario C embedding width
     public void CosineDistance_MatchesIndependentReference(int dimension)
     {

@@ -28,6 +28,29 @@ public class IndexKeyEncoderTypedTests
     }
 
     [Fact]
+    public void IntKey_WarmTypedExtraction_DoesNotBoxOrAllocateMaterially()
+    {
+        var schema = new ReactiveRowSchema("Id");
+        CellValue[] cells = [CellValue.From(42)];
+        string[] attributes = ["Id"];
+
+        for (int i = 0; i < 1_000; i++)
+        {
+            _ = IndexKeyEncoder.BuildKeyString(schema, cells, attributes);
+        }
+
+        const int measured = 10_000;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < measured; i++)
+        {
+            _ = IndexKeyEncoder.BuildKeyString(schema, cells, attributes);
+        }
+
+        long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / measured;
+        Assert.True(perCall <= 96, $"typed INT key allocated {perCall} B per call");
+    }
+
+    [Fact]
     public void FloatKey_MatchesDictionary()
     {
         var schema = new ReactiveRowSchema("Score");

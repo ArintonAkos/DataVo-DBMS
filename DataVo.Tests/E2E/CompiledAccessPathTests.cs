@@ -279,6 +279,25 @@ public class CompiledAccessPathTests
     }
 
     [Fact]
+    public void PreparedSelectManyTyped_ReturnsSameRowsAsTypedPath()
+    {
+        using var context = CreateContext();
+        SeedHits(context);
+        context.Execute("CREATE INDEX ix_hits_name ON Hits (Name)");
+
+        var plan = DataVoCompiledQueryPlan.SelectMany(
+            "Hits", ["Id", "Name", "Score"], "Name", "name",
+            accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: "ix_hits_name");
+
+        DataVoPreparedSelectMany<Hit> prepared =
+            DataVoCompiledQuery.PrepareSelectManyTyped(context, plan, MapHit);
+
+        IReadOnlyList<Hit> rows = prepared.Execute("Ada");
+
+        Assert.Equal(new[] { new Hit(1, "Ada", 1.5), new Hit(3, "Ada", 3.5) }, rows.OrderBy(h => h.Id));
+    }
+
+    [Fact]
     public void SelectSingleTyped_ReturnsFirstMatchOrDefault()
     {
         using var context = CreateContext();

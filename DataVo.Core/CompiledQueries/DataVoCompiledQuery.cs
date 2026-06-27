@@ -136,6 +136,29 @@ public static class DataVoCompiledQuery
         return new DataVoPreparedSelectSingle<T>(context, plan, databaseName, indexName, projection, mapper);
     }
 
+    /// <summary>
+    /// Prepares a typed multi-row equality lookup by resolving the access path and projection metadata once.
+    /// </summary>
+    public static DataVoPreparedSelectMany<T> PrepareSelectManyTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        CompiledRowMapper<T> mapper)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(mapper);
+
+        if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be prepared as SelectMany.");
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        PreparedProjection projection = BuildPreparedProjection(context, plan, databaseName);
+        string? indexName = ResolvePreparedIndexName(context, plan, databaseName);
+        return new DataVoPreparedSelectMany<T>(context, plan, databaseName, indexName, projection, mapper);
+    }
+
     private static IReadOnlyList<T> ExecuteSelectTyped<T>(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
@@ -184,6 +207,13 @@ public static class DataVoCompiledQuery
         {
             if (!context.Engine.StorageContext.IsRowVisible(plan.TableName, databaseName, rowId))
             {
+                continue;
+            }
+
+            if (context.Engine.StorageContext.TryReadStoredRow(plan.TableName, databaseName, rowId, out StoredRow? storedRow)
+                && storedRow is not null)
+            {
+                results.Add(mapper(new CompiledRowReader(storedRow.AsView())));
                 continue;
             }
 

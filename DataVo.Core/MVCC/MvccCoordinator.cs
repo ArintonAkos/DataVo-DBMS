@@ -70,6 +70,19 @@ public static class MvccCoordinator
     }
 
     /// <summary>
+    /// Registers version metadata for a committed insert batch.
+    /// </summary>
+    public static void RegisterInsertVersions(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        IReadOnlyList<long> rowIds,
+        long transactionId)
+    {
+        engine.VersionStorageManager.AllocateInsertVersions(databaseName, tableName, rowIds, transactionId);
+    }
+
+    /// <summary>
     /// Registers version metadata transitions for an update (old version obsoleted, new version linked).
     /// </summary>
     public static void RegisterUpdateVersion(

@@ -49,4 +49,17 @@ public class FilterUsingIndexAllocationTests : IDisposable
         Assert.Equal(new[] { 500L }, _manager.FilterUsingIndex("k500", "idx", Table, _db));
         Assert.Empty(_manager.FilterUsingIndex("nope", "idx", Table, _db));
     }
+
+    [Fact]
+    public void IndexContainsKey_WarmPointLookup_DoesNotAllocate()
+    {
+        for (int i = 0; i < 1000; i++) _ = _manager.IndexContainsKey("k500", "idx", Table, _db);
+
+        const int n = 100_000;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < n; i++) _ = _manager.IndexContainsKey("k500", "idx", Table, _db);
+        long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / n;
+
+        Assert.True(perCall <= 16, $"IndexContainsKey warm point lookup {perCall} B exceeds 16 B (row-id copy not eliminated)");
+    }
 }

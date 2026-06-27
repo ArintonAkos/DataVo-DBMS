@@ -294,6 +294,82 @@ public class InsertTypedTests
         Assert.Equal("Primary key violation in row 1!", ex.Message);
     }
 
+    [Fact]
+    public void InsertTypedBatch_InsertsRowsAndRejectsDuplicatePrimaryKeyWithinBatch()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+
+        IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+        [
+            [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)],
+            [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
+        ]);
+
+        Assert.Equal([1L, 2L], rowIds);
+        List<Dictionary<string, object?>> rows = Select(ctx, "SELECT Id, Name, Level FROM Players");
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, row => Equals(row["Id"], 1) && Equals(row["Name"], "Ada"));
+        Assert.Contains(rows, row => Equals(row["Id"], 2) && Equals(row["Name"], "Bob"));
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            ctx.InsertTypedBatch("Players", PlayerSchema,
+            [
+                [CellValue.From(3), CellValue.From("Cara"), CellValue.From(4)],
+                [CellValue.From(3), CellValue.From("Duplicate"), CellValue.From(5)]
+            ]));
+
+        Assert.Equal("Primary key violation in row 2!", ex.Message);
+    }
+
+    [Fact]
+    public void InsertTypedBatch_IntPrimaryKey_PopulatesIntegerFastLane()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+
+        ctx.InsertTypedBatch("Players", PlayerSchema,
+        [
+            [CellValue.From(10), CellValue.From("Ada"), CellValue.From(7)],
+            [CellValue.From(20), CellValue.From("Bob"), CellValue.From(3)]
+        ]);
+
+        string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
+            ?? throw new InvalidOperationException("Expected selected database.");
+        Assert.True(ctx.Engine.IndexManager.TryLookupIntegerPrimaryKey(
+            20,
+            "_PK_Players",
+            "Players",
+            databaseName,
+            out long rowId));
+        Assert.Equal(2L, rowId);
+    }
+
+    [Fact]
+    public void InsertTypedBatch_IntSecondaryIndex_PopulatesIntegerFastLane()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Items (Id INT PRIMARY KEY, OrderId INT, Sku INT)");
+        ctx.Execute("CREATE INDEX ix_Items_OrderId ON Items (OrderId)");
+
+        ctx.InsertTypedBatch("Items", new ReactiveRowSchema("Id", "OrderId", "Sku"),
+        [
+            [CellValue.From(1), CellValue.From(7), CellValue.From(100)],
+            [CellValue.From(2), CellValue.From(7), CellValue.From(101)],
+            [CellValue.From(3), CellValue.From(8), CellValue.From(102)]
+        ]);
+
+        string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
+            ?? throw new InvalidOperationException("Expected selected database.");
+        IReadOnlyList<long> rowIds = ctx.Engine.IndexManager.LookupIntegerIndex(
+            7,
+            "ix_Items_OrderId",
+            "Items",
+            databaseName);
+
+        Assert.Equal([1L, 2L], rowIds);
+    }
+
     private static long MeasureOrderInsertLoop(bool useTypedInsert, int startId)
     {
         using DataVoContext ctx = CreateContext();

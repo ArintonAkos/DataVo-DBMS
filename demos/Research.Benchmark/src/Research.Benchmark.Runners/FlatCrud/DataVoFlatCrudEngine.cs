@@ -22,6 +22,7 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
     private readonly CellValue[] _cells = new CellValue[4];
     private DataVoContext? _context;
     private DataVoPreparedSelectSingle<FlatRecord>? _lookup;
+    private List<CellValue[]>? _batchRows;
 
     public string Name => "DataVo";
 
@@ -35,13 +36,35 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
         _lookup = DataVoCompiledQuery.PrepareSelectSingleTyped(Ctx(), LookupPlan, RowMapper);
     }
 
-    // DataVo's typed insert is in-memory with no per-write commit, so batching is a no-op.
-    public void BeginBatch() { }
+    public void BeginBatch()
+    {
+        _batchRows = new List<CellValue[]>(65_536);
+    }
 
-    public void CompleteBatch() { }
+    public void CompleteBatch()
+    {
+        if (_batchRows is { Count: > 0 } rows)
+        {
+            Ctx().InsertTypedBatch("Records", Schema, rows);
+        }
+
+        _batchRows = null;
+    }
 
     public void Insert(FlatRecord record)
     {
+        if (_batchRows is not null)
+        {
+            _batchRows.Add(
+            [
+                CellValue.From(checked((int)record.Id)),
+                CellValue.From(record.Name),
+                CellValue.From(record.Value),
+                CellValue.From(record.Score)
+            ]);
+            return;
+        }
+
         _cells[0] = CellValue.From(checked((int)record.Id));
         _cells[1] = CellValue.From(record.Name);
         _cells[2] = CellValue.From(record.Value);
@@ -59,6 +82,7 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
         _context?.Dispose();
         _context = null;
         _lookup = null;
+        _batchRows = null;
     }
 
     private DataVoContext Ctx() =>
@@ -68,10 +92,10 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
         _lookup ?? throw new InvalidOperationException("DataVo flat-CRUD lookup has not been prepared.");
 
     private static FlatRecord MapRow(CompiledRowReader row) => new(
-        row.GetInt32("Id"),
-        row.GetString("Name") ?? string.Empty,
-        row.GetInt32("Value"),
-        row.GetDouble("Score"));
+        row.GetInt32(0),
+        row.GetString(1) ?? string.Empty,
+        row.GetInt32(2),
+        row.GetDouble(3));
 
     private void ExecuteOk(string sql)
     {

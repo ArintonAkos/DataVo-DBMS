@@ -164,28 +164,40 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         for (int i = 0; i < tableChanges.Count; i++)
         {
             RowChange change = tableChanges[i];
-            bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
-            bool afterMatches = change.After is not null && _predicate.Matches(change.After);
 
             switch (change.Kind)
             {
                 case ChangeKind.Insert:
-                    if (afterMatches)
+                    if (change.TypedAfter is { } typedAfter)
                     {
-                        _touched.Add(AddRow(change.After!));
+                        RowRef row = typedAfter.AsRowRef();
+                        if (_predicate.Matches(row))
+                        {
+                            _touched.Add(AddRow(row));
+                        }
+                    }
+                    else if (change.After is not null && _predicate.Matches(change.After))
+                    {
+                        _touched.Add(AddRow(change.After));
                     }
 
                     break;
 
                 case ChangeKind.Delete:
+                {
+                    bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
                     if (beforeMatches)
                     {
                         _touched.Add(RemoveRow(change.Before!));
                     }
 
                     break;
+                }
 
                 case ChangeKind.Update:
+                {
+                    bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
+                    bool afterMatches = change.After is not null && _predicate.Matches(change.After);
                     if (beforeMatches)
                     {
                         _touched.Add(RemoveRow(change.Before!));
@@ -197,6 +209,7 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
                     }
 
                     break;
+                }
             }
         }
 
@@ -338,7 +351,66 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     }
 
     /// <summary>
-    /// Subtracts a matching row's contribution from its group (the inverse of <see cref="AddRow"/>):
+    /// Adds a matching typed row without forcing <see cref="RowChange.After"/> dictionary materialization.
+    /// </summary>
+    private string AddRow(RowRef row)
+    {
+        ReadOnlySpan<char> keySpan = BuildGroupKey(row);
+        string key;
+        GroupState state;
+        if (_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existing, out GroupState? existingState))
+        {
+            key = existing!;
+            state = existingState!;
+        }
+        else
+        {
+            key = new string(keySpan);
+            state = new GroupState();
+            _groups[key] = state;
+            _groupKeyValues[key] = CaptureGroupValues(row);
+        }
+
+        state.Count++;
+
+        foreach (AggregateSpec spec in _aggregates)
+        {
+            if (spec.IsStar || spec.Column is null)
+            {
+                continue;
+            }
+
+            if (!row.TryGet(spec.Column, out CellValue value) || value.IsNull)
+            {
+                continue;
+            }
+
+            switch (spec.Function)
+            {
+                case AggregateFunction.Count:
+                    state.NonNullCount[spec.Column] = GetOrZero(state.NonNullCount, spec.Column) + 1;
+                    break;
+
+                case AggregateFunction.Sum:
+                case AggregateFunction.Avg:
+                    state.NonNullCount[spec.Column] = GetOrZero(state.NonNullCount, spec.Column) + 1;
+                    state.Sum[spec.Column] = GetOrZeroDecimal(state.Sum, spec.Column) + ToDecimal(value);
+                    state.SumIsIntegral[spec.Column] =
+                        (!state.SumIsIntegral.TryGetValue(spec.Column, out bool integral) || integral) && IsIntegral(value);
+                    break;
+
+                case AggregateFunction.Min:
+                case AggregateFunction.Max:
+                    GetExtremes(state, spec.Column).Add(value.ToObject()!);
+                    break;
+            }
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// Subtracts a matching row's contribution from its group (the inverse of the row-add path):
     /// invertible aggregates decrement, MIN/MAX remove one occurrence from the value multiset so the next
     /// extreme surfaces. A group whose row count falls to zero is dropped. Returns the affected group key.
     /// </summary>
@@ -483,6 +555,30 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         return _keyBuffer.AsSpan(0, pos);
     }
 
+    private ReadOnlySpan<char> BuildGroupKey(RowRef row)
+    {
+        int pos = 0;
+        for (int i = 0; i < _groupColumns.Count; i++)
+        {
+            if (i > 0)
+            {
+                AppendChars(ref pos, "");
+            }
+
+            if (!row.TryGet(_groupColumns[i], out CellValue value) || value.IsNull)
+            {
+                AppendChars(ref pos, "\0NULL");
+            }
+            else
+            {
+                AppendChars(ref pos, "v:");
+                AppendValue(ref pos, value);
+            }
+        }
+
+        return _keyBuffer.AsSpan(0, pos);
+    }
+
     private void AppendChars(ref int pos, ReadOnlySpan<char> text)
     {
         EnsureKeyCapacity(pos + text.Length);
@@ -522,6 +618,56 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         }
     }
 
+    private void AppendValue(ref int pos, CellValue value)
+    {
+        switch (value.Type)
+        {
+            case CellType.Boolean:
+                AppendChars(ref pos, value.AsBoolean() ? "True" : "False");
+                return;
+
+            case CellType.Int32:
+                AppendFormattable(ref pos, value.AsInt32());
+                return;
+
+            case CellType.Int64:
+                AppendFormattable(ref pos, value.AsInt64());
+                return;
+
+            case CellType.Double:
+                AppendFormattable(ref pos, value.AsDouble());
+                return;
+
+            case CellType.Decimal:
+                AppendFormattable(ref pos, value.AsDecimal());
+                return;
+
+            case CellType.String:
+                AppendChars(ref pos, value.AsString() ?? string.Empty);
+                return;
+
+            case CellType.Date:
+                AppendFormattable(ref pos, value.AsDate());
+                return;
+
+            default:
+                AppendChars(ref pos, Convert.ToString(value.ToObject(), CultureInfo.InvariantCulture) ?? string.Empty);
+                return;
+        }
+    }
+
+    private void AppendFormattable<T>(ref int pos, T value)
+        where T : ISpanFormattable
+    {
+        int written;
+        while (!value.TryFormat(_keyBuffer.AsSpan(pos), out written, default, CultureInfo.InvariantCulture))
+        {
+            EnsureKeyCapacity(Math.Max(_keyBuffer.Length * 2, pos + 64));
+        }
+
+        pos += written;
+    }
+
     private void EnsureKeyCapacity(int min)
     {
         if (_keyBuffer.Length < min)
@@ -536,6 +682,17 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         for (int i = 0; i < _groupColumns.Count; i++)
         {
             values[i] = CellValue.From(row.TryGetValue(_groupColumns[i], out object? v) ? v : null);
+        }
+
+        return values;
+    }
+
+    private CellValue[] CaptureGroupValues(RowRef row)
+    {
+        var values = new CellValue[_groupColumns.Count];
+        for (int i = 0; i < _groupColumns.Count; i++)
+        {
+            values[i] = row.TryGet(_groupColumns[i], out CellValue value) ? value : CellValue.Null;
         }
 
         return values;
@@ -659,6 +816,19 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     private static decimal ToDecimal(object value) =>
         Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
 
+    private static decimal ToDecimal(CellValue value) => value.Type switch
+    {
+        CellType.Int32 => value.AsInt32(),
+        CellType.Int64 => value.AsInt64(),
+        CellType.Double => Convert.ToDecimal(value.AsDouble()),
+        CellType.Decimal => value.AsDecimal(),
+        CellType.String => Convert.ToDecimal(value.AsString(), CultureInfo.InvariantCulture),
+        _ => Convert.ToDecimal(value.ToObject(), CultureInfo.InvariantCulture)
+    };
+
     private static bool IsIntegral(object value) =>
         value is byte or sbyte or short or ushort or int or uint or long or ulong;
+
+    private static bool IsIntegral(CellValue value) =>
+        value.Type is CellType.Int32 or CellType.Int64;
 }

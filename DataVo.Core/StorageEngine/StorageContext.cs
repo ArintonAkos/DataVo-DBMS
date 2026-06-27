@@ -148,6 +148,11 @@ public class StorageContext(DataVoConfig config)
     {
         if (rows.Count == 0) return [];
 
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            return typedStorage.InsertTypedRows(databaseName, tableName, rows);
+        }
+
         IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
         var serializedRows = new List<byte[]>(rows.Count);
         foreach (StoredRow row in rows)
@@ -164,6 +169,11 @@ public class StorageContext(DataVoConfig config)
     /// </summary>
     internal long InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
     {
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            return typedStorage.InsertTypedRow(databaseName, tableName, row);
+        }
+
         byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
         return _storageEngine.InsertRow(databaseName, tableName, serialized);
     }
@@ -276,6 +286,12 @@ public class StorageContext(DataVoConfig config)
     /// </summary>
     internal byte[]? TryReadRowBytes(string tableName, string databaseName, long rowId)
     {
+        if (_storageEngine is ITypedRowStorageEngine typedStorage
+            && typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out _))
+        {
+            return null;
+        }
+
         try
         {
             return _storageEngine.ReadRow(databaseName, tableName, rowId);
@@ -288,6 +304,41 @@ public class StorageContext(DataVoConfig config)
         {
             return null;
         }
+    }
+
+    internal bool TryReadStoredRow(string tableName, string databaseName, long rowId, out StoredRow? row)
+    {
+        if (_storageEngine is ITypedRowStorageEngine typedStorage
+            && typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out row))
+        {
+            return true;
+        }
+
+        row = null;
+        byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
+        if (bytes is null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+        row = StoredRow.FromOwnedCells(BuildReactiveSchema(columns), RowSerializer.DeserializeCells(bytes, columns));
+        return true;
+    }
+
+    internal bool IsTableEmpty(string tableName, string databaseName)
+    {
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            return !typedStorage.HasAnyRows(databaseName, tableName);
+        }
+
+        foreach ((_, byte[] _) in _storageEngine.ReadAllRows(databaseName, tableName))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -488,6 +539,32 @@ public class StorageContext(DataVoConfig config)
             return parsedTableData;
         }
 
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+            foreach (long rowId in rowIds)
+            {
+                if (typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out StoredRow? typedRow)
+                    && typedRow is not null)
+                {
+                    parsedTableData[rowId] = CopyStoredRowToLegacyDictionary(typedRow, columns, selectedColumns);
+                    continue;
+                }
+
+                byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                parsedTableData[rowId] = RowSerializer.Deserialize(
+                    databaseName,
+                    tableName,
+                    rawRow,
+                    selectedColumns,
+                    ResolveCatalog(),
+                    ResolveSerializerSchemaScopeKey());
+            }
+
+            RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
+            return parsedTableData;
+        }
+
         foreach (long rowId in rowIds)
         {
             byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
@@ -520,6 +597,25 @@ public class StorageContext(DataVoConfig config)
         IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
         ReactiveRowSchema schema = BuildReactiveSchema(columns);
 
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            foreach (long rowId in rowIds)
+            {
+                if (typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out StoredRow? typedRow)
+                    && typedRow is not null)
+                {
+                    parsedTableData[rowId] = typedRow;
+                    continue;
+                }
+
+                byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                parsedTableData[rowId] = StoredRow.FromOwnedCells(schema, RowSerializer.DeserializeCells(rawRow, columns));
+            }
+
+            RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
+            return parsedTableData;
+        }
+
         foreach (long rowId in rowIds)
         {
             byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
@@ -538,6 +634,15 @@ public class StorageContext(DataVoConfig config)
         HashSet<string>? selectedColumns)
     {
         var parsedTableData = new Dictionary<long, Dictionary<string, object?>>();
+
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+            foreach ((long rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            {
+                parsedTableData[rowId] = CopyStoredRowToLegacyDictionary(row, columns, selectedColumns);
+            }
+        }
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
@@ -564,6 +669,14 @@ public class StorageContext(DataVoConfig config)
         IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
         ReactiveRowSchema schema = BuildReactiveSchema(columns);
 
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            foreach ((long rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            {
+                parsedTableData[rowId] = row;
+            }
+        }
+
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
             parsedTableData[rowTuple.RowId] = StoredRow.FromOwnedCells(
@@ -574,6 +687,42 @@ public class StorageContext(DataVoConfig config)
         RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, parsedTableData.Count);
 
         return parsedTableData;
+    }
+
+    private static Dictionary<string, object?> CopyStoredRowToLegacyDictionary(
+        StoredRow row,
+        IReadOnlyList<Column> columns,
+        HashSet<string>? selectedColumns)
+    {
+        StoredRowView view = row.AsView();
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < view.Count; i++)
+        {
+            string column = view.Schema.ColumnAt(i);
+            if (selectedColumns is not null && !selectedColumns.Contains(column))
+            {
+                continue;
+            }
+
+            result[column] = ConvertCellForLegacyDictionary(columns[i], view[i]);
+        }
+
+        return result;
+    }
+
+    private static object? ConvertCellForLegacyDictionary(Column column, CellValue cell)
+    {
+        if (cell.IsNull)
+        {
+            return null;
+        }
+
+        if (column.Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase))
+        {
+            return (float)cell.AsDouble();
+        }
+
+        return cell.ToObject();
     }
 
     private static ReactiveRowSchema BuildReactiveSchema(IReadOnlyList<Column> columns)

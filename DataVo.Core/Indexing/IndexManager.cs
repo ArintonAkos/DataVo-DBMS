@@ -102,6 +102,18 @@ public class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<IndexCacheKey, int> _pendingMutations = new(CacheKeyComparer.Instance);
 
+    /// <summary>
+    /// Fast lane for integer primary keys: logical integer key -> physical row id.
+    /// This is intentionally in-memory only and mirrors the authoritative scalar index for hot point lookups.
+    /// </summary>
+    private readonly Dictionary<IndexCacheKey, Dictionary<long, long>> _integerPrimaryKeyMaps = new(CacheKeyComparer.Instance);
+
+    /// <summary>
+    /// Fast lane for single-column integer indexes: logical integer key -> physical row ids.
+    /// Mirrors scalar BTree indexes for hot in-memory equality predicates.
+    /// </summary>
+    private readonly Dictionary<IndexCacheKey, Dictionary<long, List<long>>> _integerIndexMaps = new(CacheKeyComparer.Instance);
+
     private readonly Lock _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
@@ -277,6 +289,25 @@ public class IndexManager : IDisposable
             _pendingMutations[cacheKey] = count + 1;
 
             if (_pendingMutations[cacheKey] >= _flushMutationThreshold)
+            {
+                FlushInternal(cacheKey);
+                _pendingMutations[cacheKey] = 0;
+            }
+        }
+    }
+
+    private void TrackMutations(IndexCacheKey cacheKey, int count)
+    {
+        if (_persistenceMode != IndexPersistenceMode.Buffered || count <= 0)
+            return;
+
+        lock (_lock)
+        {
+            _pendingMutations.TryGetValue(cacheKey, out var current);
+            int next = current + count;
+            _pendingMutations[cacheKey] = next;
+
+            if (next >= _flushMutationThreshold)
             {
                 FlushInternal(cacheKey);
                 _pendingMutations[cacheKey] = 0;
@@ -816,20 +847,199 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Deletes row IDs from a scalar BTree index.
+    /// Inserts a batch of scalar keys into one BTree index under one manager lock.
     /// </summary>
-    public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    public void InsertManyIntoIndex(
+        IReadOnlyList<(string Value, long RowId)> entries,
+        string indexName,
+        string tableName,
+        string databaseName)
     {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-            index.DeleteValues(toBeDeletedIds);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (string value, long rowId) = entries[i];
+                index.Insert(value, rowId);
+            }
+
             MarkDirtyNoLock(cacheKey);
             FlushIfImmediate(cacheKey);
         }
 
-        TrackMutation(GetCacheKey(indexName, tableName, databaseName));
+        TrackMutations(cacheKey, entries.Count);
+    }
+
+    /// <summary>
+    /// Inserts integer primary-key entries into the direct key -> row-id fast lane.
+    /// </summary>
+    public void InsertIntegerPrimaryKeys(
+        IReadOnlyList<(long Key, long RowId)> entries,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map))
+            {
+                map = [];
+                _integerPrimaryKeyMaps[cacheKey] = map;
+            }
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (long key, long rowId) = entries[i];
+                map[key] = rowId;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inserts integer scalar-index entries into the direct key -> row-ids fast lane.
+    /// </summary>
+    public void InsertIntegerIndexEntries(
+        IReadOnlyList<(long Key, long RowId)> entries,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
+            {
+                map = [];
+                _integerIndexMaps[cacheKey] = map;
+            }
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (long key, long rowId) = entries[i];
+                if (!map.TryGetValue(key, out List<long>? rowIds))
+                {
+                    rowIds = [];
+                    map[key] = rowIds;
+                }
+
+                rowIds.Add(rowId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Looks up an integer primary key without building a string key or traversing the generic BTree.
+    /// </summary>
+    public bool TryLookupIntegerPrimaryKey(
+        long key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        out long rowId)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map)
+                && map.TryGetValue(key, out rowId))
+            {
+                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                return true;
+            }
+        }
+
+        rowId = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Looks up a single-column integer index without building a string key or traversing the generic BTree.
+    /// </summary>
+    public IReadOnlyList<long> LookupIntegerIndex(
+        long key,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        return TryLookupIntegerIndex(key, indexName, tableName, databaseName, out IReadOnlyList<long>? rowIds)
+            ? rowIds
+            : Array.Empty<long>();
+    }
+
+    /// <summary>
+    /// Attempts to look up a single-column integer index. Returns true when the index has an integer fast lane,
+    /// even if the specific key has no rows.
+    /// </summary>
+    public bool TryLookupIntegerIndex(
+        long key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        out IReadOnlyList<long> rowIds)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
+            {
+                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                rowIds = map.TryGetValue(key, out List<long>? rows)
+                    ? rows
+                    : Array.Empty<long>();
+                return true;
+            }
+        }
+
+        rowIds = Array.Empty<long>();
+        return false;
+    }
+
+    /// <summary>
+    /// Deletes row IDs from a scalar BTree index.
+    /// </summary>
+    public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_integerPrimaryKeyMaps.ContainsKey(cacheKey))
+            {
+                DeleteIntegerPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
+            }
+
+            DeleteIntegerIndexRowsByRowIdNoLock(cacheKey, toBeDeletedIds);
+
+            IIndex? index = TryGetScalarIndexNoLock(indexName, tableName, databaseName);
+            if (index is null)
+            {
+                return;
+            }
+
+            index.DeleteValues(toBeDeletedIds);
+            DeleteIntegerPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutation(cacheKey);
     }
 
     /// <summary>
@@ -837,6 +1047,24 @@ public class IndexManager : IDisposable
     /// </summary>
     public IReadOnlyList<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
+        if (TryParseIntegerPrimaryKey(columnValue, out long integerKey)
+            && TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out long rowId))
+        {
+            return [rowId];
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_integerPrimaryKeyMaps.ContainsKey(cacheKey))
+        {
+            return [];
+        }
+
+        if (TryParseIntegerPrimaryKey(columnValue, out long integerIndexKey)
+            && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> rowIds))
+        {
+            return rowIds;
+        }
+
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
         RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
         return index.SearchReadOnly(columnValue);
@@ -847,10 +1075,106 @@ public class IndexManager : IDisposable
     /// </summary>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (TryParseIntegerPrimaryKey(key, out long integerKey))
+        {
+            if (TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out _))
+            {
+                return true;
+            }
+
+            if (_integerPrimaryKeyMaps.ContainsKey(cacheKey))
+            {
+                return false;
+            }
+        }
+
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        bool exists = index.Search(key).Any();
+        bool exists = index.ContainsKey(key);
         RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
         return exists;
+    }
+
+    private void DeleteIntegerPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    {
+        if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out Dictionary<long, long>? map) || map.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < rowIds.Count; i++)
+        {
+            long rowId = rowIds[i];
+            long? keyToRemove = null;
+            foreach (KeyValuePair<long, long> pair in map)
+            {
+                if (pair.Value == rowId)
+                {
+                    keyToRemove = pair.Key;
+                    break;
+                }
+            }
+
+            if (keyToRemove.HasValue)
+            {
+                map.Remove(keyToRemove.Value);
+            }
+        }
+    }
+
+    private void DeleteIntegerIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    {
+        if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map) || map.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < rowIds.Count; i++)
+        {
+            long rowId = rowIds[i];
+            long? keyToRemove = null;
+            foreach (KeyValuePair<long, List<long>> pair in map)
+            {
+                if (pair.Value.Remove(rowId) && pair.Value.Count == 0)
+                {
+                    keyToRemove = pair.Key;
+                    break;
+                }
+            }
+
+            if (keyToRemove.HasValue)
+            {
+                map.Remove(keyToRemove.Value);
+            }
+        }
+    }
+
+    private IIndex? TryGetScalarIndexNoLock(string indexName, string tableName, string databaseName)
+    {
+        try
+        {
+            return GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        }
+        catch (IndexException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryParseIntegerPrimaryKey(string key, out long value)
+    {
+        if (long.TryParse(key, out value))
+        {
+            return true;
+        }
+
+        if (key.Length >= 3 && key[0] == '[' && key[^1] == ']')
+        {
+            return long.TryParse(key.AsSpan(1, key.Length - 2), out value);
+        }
+
+        value = 0;
+        return false;
     }
 
     /// <summary>

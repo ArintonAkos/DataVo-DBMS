@@ -20,9 +20,7 @@ public sealed class ChangeSet
         SequenceId = sequenceId;
         DatabaseName = databaseName;
         Changes = changes;
-        Tables = changes.Select(c => c.Table)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        Tables = BuildTables(changes);
     }
 
     /// <summary>Gets the monotonically increasing identifier for this change set.</summary>
@@ -36,4 +34,39 @@ public sealed class ChangeSet
 
     /// <summary>Gets the distinct table names touched by this change set.</summary>
     public IReadOnlyList<string> Tables { get; }
+
+    private static IReadOnlyList<string> BuildTables(IReadOnlyList<RowChange> changes)
+    {
+        if (changes.Count == 0)
+        {
+            return [];
+        }
+
+        if (changes.Count == 1)
+        {
+            return [changes[0].Table];
+        }
+
+        var tables = new List<string>();
+        for (int i = 0; i < changes.Count; i++)
+        {
+            string table = changes[i].Table;
+            bool seen = false;
+            for (int j = 0; j < tables.Count; j++)
+            {
+                if (tables[j].Equals(table, StringComparison.OrdinalIgnoreCase))
+                {
+                    seen = true;
+                    break;
+                }
+            }
+
+            if (!seen)
+            {
+                tables.Add(table);
+            }
+        }
+
+        return tables;
+    }
 }

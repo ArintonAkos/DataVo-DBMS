@@ -91,6 +91,13 @@ public interface IIndex : IIndexBase
     IReadOnlyList<long> SearchReadOnly(string key) => Search(key);
 
     /// <summary>
+    /// Checks whether the index contains the supplied logical key without materializing the row-id list.
+    /// Implementations that can traverse their backing tree directly should override this; the default
+    /// falls back to the read-only lookup.
+    /// </summary>
+    bool ContainsKey(string key) => SearchReadOnly(key).Count != 0;
+
+    /// <summary>
     /// Checks whether any key in the index maps to the given row ID.
     /// Used to verify if a row is referenced by this index (e.g., for constraint checks).
     /// </summary>

@@ -43,6 +43,32 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>
+    /// Allocates version metadata for a contiguous or non-contiguous insert batch under one write lock.
+    /// </summary>
+    public void AllocateInsertVersions(string databaseName, string tableName, IReadOnlyList<long> rowIds, long xmin)
+    {
+        if (rowIds.Count == 0)
+        {
+            return;
+        }
+
+        var version = new RowVersion(xmin: xmin, xmax: 0, versionChain: 0);
+
+        _versionLock.EnterWriteLock();
+        try
+        {
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                _versionMetadata[(databaseName, tableName, rowIds[i])] = version;
+            }
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     /// Retrieves the current version metadata for a row.
     /// </summary>
     public RowVersion? GetVersion(string databaseName, string tableName, long rowId)
