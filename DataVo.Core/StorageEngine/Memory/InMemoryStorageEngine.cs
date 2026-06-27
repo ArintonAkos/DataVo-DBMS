@@ -8,11 +8,13 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// </summary>
 public class InMemoryStorageEngine : IStorageEngine, IInMemoryStorageSnapshotProvider
 {
-    // A thread-safe, purely RAM-based mapping of DatabaseName.TableName -> List<byte[]>
-    private readonly ConcurrentDictionary<string, List<byte[]?>> _databases = new();
+    // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> List<byte[]>. A value-tuple key
+    // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs
+    // "a"+"b.c" collision); tuple equality uses ordinal string comparison, matching the previous string key.
+    private readonly ConcurrentDictionary<(string DatabaseName, string TableName), List<byte[]?>> _databases = new();
     private readonly object _syncRoot = new();
 
-    private string GetKey(string databaseName, string tableName) => $"{databaseName}.{tableName}";
+    private static (string DatabaseName, string TableName) GetKey(string databaseName, string tableName) => (databaseName, tableName);
 
     private List<byte[]?> GetOrAddTable(string databaseName, string tableName)
     {
@@ -179,8 +181,9 @@ public class InMemoryStorageEngine : IStorageEngine, IInMemoryStorageSnapshotPro
     {
         lock (_syncRoot)
         {
-            string prefix = $"{databaseName}.";
-            var keysToRemove = _databases.Keys.Where(k => k.StartsWith(prefix)).ToList();
+            var keysToRemove = _databases.Keys
+                .Where(k => string.Equals(k.DatabaseName, databaseName, StringComparison.Ordinal))
+                .ToList();
             foreach (var key in keysToRemove)
             {
                 _databases.TryRemove(key, out _);
@@ -218,7 +221,7 @@ public class InMemoryStorageEngine : IStorageEngine, IInMemoryStorageSnapshotPro
             }
 
             // Replace the table with the compacted version
-            string key = GetKey(databaseName, tableName);
+            var key = GetKey(databaseName, tableName);
             _databases[key] = newTable;
         }
 
@@ -227,7 +230,7 @@ public class InMemoryStorageEngine : IStorageEngine, IInMemoryStorageSnapshotPro
 
     InMemoryStorageSnapshot IInMemoryStorageSnapshotProvider.CreateSnapshot()
     {
-        var tables = new Dictionary<string, List<byte[]?>>(StringComparer.Ordinal);
+        var tables = new Dictionary<(string DatabaseName, string TableName), List<byte[]?>>();
 
         lock (_syncRoot)
         {
