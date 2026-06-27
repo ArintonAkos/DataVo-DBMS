@@ -340,6 +340,15 @@ public class DataVoConfig
     public IoSchedulerMode IoSchedulerMode { get; set; } = IoSchedulerMode.Off;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the zero-allocation compiled UPDATE fast path is enabled.
+    /// When <see langword="true"/> (the default), eligible fixed-width single-row updates against the
+    /// disk backend byte-patch the serialized row in place and emit a binary WAL Update frame, bypassing
+    /// the dictionary materialization of the legacy update path. When <see langword="false"/>, all updates
+    /// take the legacy dictionary path. Disabling exists for A/B measurement and as a safety fallback.
+    /// </summary>
+    public bool EnableZeroAllocCompiledUpdate { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether write-ahead logging is enabled.
     /// </summary>
     public bool WalEnabled

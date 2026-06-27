@@ -182,6 +182,29 @@ public sealed class DataVoEngine : IDisposable
     }
 
     /// <summary>
+    /// Durably records a single zero-allocation update as a binary <see cref="WalFrameOperationType.Update"/>
+    /// frame: the new-row bytes are written straight into the WAL ring buffer with no JSON, no dictionary,
+    /// and no intermediate heap buffer, then flushed through group commit.
+    /// </summary>
+    internal void CommitBinaryUpdateFrameThroughGroupCommit(string databaseName, string tableName, long oldRowId, ReadOnlySpan<byte> newRowBytes)
+    {
+        if (WalFrameAppender == null || WalGroupCommitter == null)
+        {
+            throw new InvalidOperationException("The WAL group committer is not enabled for this engine.");
+        }
+
+        int payloadLength = WalUpdateFramePayload.MeasureSize(databaseName, tableName, newRowBytes.Length);
+        WalFrameReservation reservation = WalFrameAppender.Reserve(
+            WalFrameOperationType.Update,
+            tableId: 0,
+            rowId: oldRowId,
+            payloadLength);
+        WalUpdateFramePayload.Write(reservation.PayloadSpan, databaseName, tableName, oldRowId, newRowBytes);
+        WalFrame frame = reservation.Commit();
+        WalGroupCommitter.CommitAsync(frame).AsTask().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
     /// </summary>
     /// <param name="config">The configuration to initialize.</param>

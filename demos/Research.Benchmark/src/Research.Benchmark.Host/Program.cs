@@ -72,6 +72,9 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
     // checkpointer for the measured window (Phase-3-like), enabling a same-session checkpointer-overhead A/B.
     int checkpointIntervalArg = ReadIntArg(args, "--checkpoint-interval-ms", -1);
     int? checkpointIntervalMs = checkpointIntervalArg > 0 ? checkpointIntervalArg : null;
+    // --legacy-update forces the legacy dictionary update path (disables the zero-alloc byte-patch fast path),
+    // so the same session can A/B the update-phase allocation and CPU cost against the zero-alloc default.
+    bool zeroAllocUpdate = !HasFlag(args, "--legacy-update");
     string root = Path.Combine(Path.GetTempPath(), $"datavo-disk-crud-wal-{Guid.NewGuid():N}");
 
     try
@@ -89,7 +92,7 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         if (ShouldRun(engineFilter, "datavo-pooled"))
             results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly)));
         if (ShouldRun(engineFilter, "datavo-groupcommit"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit, checkpointIntervalMs)));
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit, checkpointIntervalMs, zeroAllocUpdate)));
         if (ShouldRun(engineFilter, "sqlite"))
             results.Add(RunDiskScenario(new SqliteDiskCrudEngine("NORMAL")));
         if (ShouldRun(engineFilter, "datavo-fsync"))
@@ -465,8 +468,12 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
             (double p50, double p99) = BenchmarkMetricsCalculator.CalculatePercentiles(updateLatenciesMs);
             long allocatedBytes = insertAllocatedBytes + updateAllocatedBytes;
 
+            double updateBytesPerOp = records > 0 ? (double)updateAllocatedBytes / records : 0d;
+            double updateMicrosPerOp = records > 0 ? updateStopwatch.Elapsed.TotalMilliseconds * 1000d / records : 0d;
             Console.Error.WriteLine(
                 $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalSeconds:N2}s | update {updateStopwatch.Elapsed.TotalSeconds:N2}s | update p50 {p50:F4}ms p99 {p99:F4}ms");
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: UPDATE alloc {updateAllocatedBytes / 1024d / 1024d:N2} MB total = {updateBytesPerOp:N1} B/op | UPDATE cpu {updateMicrosPerOp:N2} us/op | insert alloc {insertAllocatedBytes / 1024d / 1024d:N2} MB");
 
             return new BenchmarkMetrics(
                 engine.Name,
@@ -879,5 +886,8 @@ static string ReadStringArg(string[] args, string name, string defaultValue)
 
     return string.IsNullOrWhiteSpace(args[index + 1]) ? defaultValue : args[index + 1];
 }
+
+static bool HasFlag(string[] args, string name) =>
+    Array.IndexOf(args, name) >= 0;
 
 static bool ShouldRun(string filter, string engine) => filter is "all" || filter == engine;

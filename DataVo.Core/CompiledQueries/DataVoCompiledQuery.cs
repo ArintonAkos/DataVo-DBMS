@@ -6,8 +6,10 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
+using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
+using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
@@ -353,6 +355,13 @@ public static class DataVoCompiledQuery
             throw new NotSupportedException("Compiled update plans do not support active transactions.");
         }
 
+        // Zero-allocation byte-patch path for fixed-width, index-resolved single-row updates. Returns false
+        // for any shape it cannot handle, falling through to the dictionary path below.
+        if (TryUpdateFixedWidthFastPath(context, plan, parameters, out int fastPathAffected))
+        {
+            return fastPathAffected;
+        }
+
         string databaseName = ResolveCurrentDatabase(context);
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
@@ -408,6 +417,256 @@ public static class DataVoCompiledQuery
         {
             context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
         }
+    }
+
+    /// <summary>
+    /// Per-(plan, database) cache of the resolved fast-path schema, keyed off the table schema version so it
+    /// invalidates on DDL. Resolving it once keeps the steady-state update path free of catalog allocations.
+    /// </summary>
+    private static readonly ConcurrentDictionary<(DataVoCompiledQueryPlan Plan, string Database), UpdateFastPathSchema> UpdateFastPathSchemaCache = new();
+
+    /// <summary>
+    /// Attempts the zero-allocation update: a fixed-width, index-resolved, single-row UPDATE that byte-patches
+    /// the stored row in place and logs a binary WAL frame. Returns <see langword="false"/> — without mutating
+    /// storage — for any shape it cannot handle, so the caller runs the legacy dictionary path instead.
+    /// </summary>
+    private static bool TryUpdateFixedWidthFastPath(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
+        out int affected)
+    {
+        affected = 0;
+        DataVoEngine engine = context.Engine;
+
+        // The dictionary cost this path removes only exists for the disk backend, and reactive change
+        // capture needs after-image materialization the byte-patch path deliberately skips.
+        if (!engine.Config.EnableZeroAllocCompiledUpdate
+            || engine.Config.StorageMode != StorageMode.Disk
+            || engine.Changes.Enabled)
+        {
+            return false;
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName);
+        if (!schema.Eligible
+            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+        {
+            return false;
+        }
+
+        object? whereValue = FindParameterValue(parameters, plan.WhereParameterName!);
+        if (whereValue is null || !TryConvertToInt64(whereValue, out long primaryKey))
+        {
+            return false;
+        }
+
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        {
+            affected = 0; // No row matches the predicate — a legitimate zero-row update.
+            return true;
+        }
+
+        List<long> rowWriteLocks = engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, [rowId]);
+        try
+        {
+            // Re-resolve under the lock: a concurrent update may have moved the row to a new id.
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            {
+                affected = 0;
+                return true;
+            }
+
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+
+            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
+            if (rowBytes is null)
+            {
+                affected = 0;
+                return true;
+            }
+
+            // Byte-patch each assigned fixed-width cell in place. A cell that cannot be patched (null slot,
+            // null new value) aborts BEFORE any storage mutation, so the dictionary path can take over.
+            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
+            {
+                object? newValue = FindParameterValue(parameters, schema.AssignParameterNames[i]);
+                if (newValue is null
+                    || !RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], newValue))
+                {
+                    return false;
+                }
+            }
+
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
+
+            // Out-of-place: tombstone the old row, append the patched bytes as the new row.
+            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
+            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+
+            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
+
+            // The primary key is unchanged, so the fast-lane entry just re-points to the new row id (upsert).
+            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
+
+            if (ImplicitWalCommit.IsEnabled(engine))
+            {
+                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
+            }
+
+            affected = 1;
+            return true;
+        }
+        finally
+        {
+            engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
+        }
+    }
+
+    private static UpdateFastPathSchema ResolveUpdateFastPathSchema(DataVoEngine engine, DataVoCompiledQueryPlan plan, string databaseName)
+    {
+        var key = (plan, databaseName);
+        int schemaVersion = engine.Catalog.GetTableSchemaVersion(plan.TableName, databaseName);
+        if (UpdateFastPathSchemaCache.TryGetValue(key, out UpdateFastPathSchema? cached) && cached.SchemaVersion == schemaVersion)
+        {
+            return cached;
+        }
+
+        UpdateFastPathSchema schema = BuildUpdateFastPathSchema(engine, plan, databaseName, schemaVersion);
+        UpdateFastPathSchemaCache[key] = schema;
+        return schema;
+    }
+
+    private static UpdateFastPathSchema BuildUpdateFastPathSchema(DataVoEngine engine, DataVoCompiledQueryPlan plan, string databaseName, int schemaVersion)
+    {
+        UpdateFastPathSchema Ineligible() => new() { SchemaVersion = schemaVersion, Eligible = false };
+
+        IReadOnlyList<Column> columns = engine.Catalog.GetTableColumns(plan.TableName, databaseName);
+
+        // The predicate must be the table's single integer primary key.
+        List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
+        if (primaryKeys.Count != 1 || !string.Equals(primaryKeys[0], plan.WhereColumn, StringComparison.OrdinalIgnoreCase))
+        {
+            return Ineligible();
+        }
+
+        int primaryKeyOrdinal = IndexOfColumn(columns, primaryKeys[0]);
+        if (primaryKeyOrdinal < 0 || !RowSerializer.IsIntegerType(columns[primaryKeyOrdinal].Type))
+        {
+            return Ineligible();
+        }
+
+        // Only the primary-key index may exist: a secondary index would need key maintenance across the
+        // out-of-place row move that the fast path does not perform.
+        string primaryKeyIndexName = $"_PK_{plan.TableName}";
+        foreach (IndexFile index in engine.Catalog.GetTableIndexes(plan.TableName, databaseName))
+        {
+            if (!string.Equals(index.IndexFileName, primaryKeyIndexName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Ineligible();
+            }
+        }
+
+        List<string> uniqueKeys = engine.Catalog.GetTableUniqueKeys(plan.TableName, databaseName);
+        List<ForeignKey> foreignKeys = engine.Catalog.GetTableForeignKeys(plan.TableName, databaseName);
+
+        var ordinals = new int[plan.Assignments.Count];
+        var parameterNames = new string[plan.Assignments.Count];
+        int next = 0;
+        foreach ((string columnName, string parameterName) in plan.Assignments)
+        {
+            int ordinal = IndexOfColumn(columns, columnName);
+
+            // Assigned columns must be non-key, fixed-width, and free of unique/foreign-key constraints so no
+            // validation or index-key maintenance is required.
+            if (ordinal < 0
+                || ordinal == primaryKeyOrdinal
+                || !RowSerializer.IsFixedWidthType(columns[ordinal].Type)
+                || uniqueKeys.Contains(columnName, StringComparer.OrdinalIgnoreCase)
+                || foreignKeys.Any(foreignKey => string.Equals(foreignKey.AttributeName, columnName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return Ineligible();
+            }
+
+            ordinals[next] = ordinal;
+            parameterNames[next] = parameterName;
+            next++;
+        }
+
+        return new UpdateFastPathSchema
+        {
+            SchemaVersion = schemaVersion,
+            Eligible = true,
+            PkIndexName = primaryKeyIndexName,
+            Columns = columns,
+            AssignOrdinals = ordinals,
+            AssignParameterNames = parameterNames,
+        };
+    }
+
+    private static int IndexOfColumn(IReadOnlyList<Column> columns, string columnName)
+    {
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (string.Equals(columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static object? FindParameterValue(IReadOnlyList<DataVoCompiledQueryParameter> parameters, string name)
+    {
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            if (string.Equals(parameters[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return parameters[i].Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryConvertToInt64(object value, out long result)
+    {
+        switch (value)
+        {
+            case long l: result = l; return true;
+            case int i: result = i; return true;
+            case short s: result = s; return true;
+            case byte b: result = b; return true;
+            default:
+                try
+                {
+                    result = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                    return true;
+                }
+                catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+                {
+                    result = 0;
+                    return false;
+                }
+        }
+    }
+
+    /// <summary>Resolved metadata that makes a compiled UPDATE eligible for the zero-allocation byte-patch path.</summary>
+    private sealed class UpdateFastPathSchema
+    {
+        public required int SchemaVersion { get; init; }
+
+        public required bool Eligible { get; init; }
+
+        public string PkIndexName { get; init; } = string.Empty;
+
+        public IReadOnlyList<Column> Columns { get; init; } = [];
+
+        public int[] AssignOrdinals { get; init; } = [];
+
+        public string[] AssignParameterNames { get; init; } = [];
     }
 
     private static IReadOnlyList<TResult> ExecuteSelect<TResult>(

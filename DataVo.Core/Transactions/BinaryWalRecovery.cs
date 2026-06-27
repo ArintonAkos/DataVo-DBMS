@@ -1,7 +1,10 @@
 using DataVo.Core.Logging;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.Transactions;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Core.Transactions;
 
@@ -61,13 +64,12 @@ public sealed class BinaryWalRecovery
 
         foreach (WalFrameRecord record in frames)
         {
-            if (record.Header.Lsn <= checkpointLsn || record.Header.OpType != WalFrameOperationType.TxnCommit)
+            if (record.Header.Lsn <= checkpointLsn)
             {
                 continue;
             }
 
-            WalEntry? entry = WalFileStore.DeserializeWalEntryPayload(record.Payload);
-            if (entry == null)
+            if (!TryDecodeReplayableEntry(record, out WalEntry? entry) || entry is null)
             {
                 continue;
             }
@@ -93,6 +95,71 @@ public sealed class BinaryWalRecovery
         }
 
         return maxLsn;
+    }
+
+    /// <summary>
+    /// Decodes one frame into a replayable <see cref="WalEntry"/>, dispatching on its operation type:
+    /// the legacy JSON <see cref="WalFrameOperationType.TxnCommit"/> payload, or the binary
+    /// <see cref="WalFrameOperationType.Update"/> payload written by the zero-allocation update path.
+    /// </summary>
+    private bool TryDecodeReplayableEntry(WalFrameRecord record, out WalEntry? entry)
+    {
+        switch (record.Header.OpType)
+        {
+            case WalFrameOperationType.TxnCommit:
+                entry = WalFileStore.DeserializeWalEntryPayload(record.Payload);
+                return entry is not null;
+            case WalFrameOperationType.Update:
+                return TryDecodeBinaryUpdate(record, out entry);
+            default:
+                entry = null;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Reconstructs a single-operation update <see cref="WalEntry"/> from a binary Update frame. The frame
+    /// carries the full post-update row, decoded here (a cold path, so allocation is fine) and replayed
+    /// through the same <see cref="Commit.FlushContext"/> path as any other update — identical index and
+    /// MVCC maintenance.
+    /// </summary>
+    private bool TryDecodeBinaryUpdate(WalFrameRecord record, out WalEntry? entry)
+    {
+        entry = null;
+        if (!WalUpdateFramePayload.TryRead(
+                record.Payload, out string databaseName, out string tableName, out long oldRowId, out byte[] newRowBytes))
+        {
+            return false;
+        }
+
+        IReadOnlyList<Column> columns = _engine.Catalog.GetTableColumns(tableName, databaseName);
+        CellValue[] cells = RowSerializer.DeserializeCells(newRowBytes, columns);
+
+        var updatedColumns = new Dictionary<string, object?>(columns.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columns.Count; i++)
+        {
+            updatedColumns[columns[i].Name] = cells[i].ToObject();
+        }
+
+        entry = new WalEntry
+        {
+            TransactionId = Guid.NewGuid(),
+            MvccTransactionId = 0,
+            Timestamp = DateTime.UtcNow.Ticks,
+            DatabaseName = databaseName,
+            Operations =
+            [
+                new WalOperation
+                {
+                    OperationType = WalOperationType.Update,
+                    TableName = tableName,
+                    RowId = oldRowId,
+                    UpdatedColumns = updatedColumns,
+                },
+            ],
+            IsCheckpointed = false,
+        };
+        return true;
     }
 
     private void RecoverEntry(WalEntry entry)

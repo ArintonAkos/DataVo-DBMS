@@ -151,6 +151,20 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Appends an already-serialized row payload to a table, skipping dictionary materialization and
+    /// re-serialization. Used by the zero-allocation update path, which produces the new-row bytes by
+    /// byte-patching the previous row in place.
+    /// </summary>
+    /// <param name="rowBytes">The serialized row payload, already in the on-disk wire format.</param>
+    /// <param name="tableName">The target table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The assigned row identifier.</returns>
+    internal long InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
+    {
+        return _storageEngine.InsertRow(databaseName, tableName, rowBytes);
+    }
+
+    /// <summary>
     /// Serializes and inserts multiple rows into a table.
     /// </summary>
     /// <param name="rows">The rows to insert.</param>

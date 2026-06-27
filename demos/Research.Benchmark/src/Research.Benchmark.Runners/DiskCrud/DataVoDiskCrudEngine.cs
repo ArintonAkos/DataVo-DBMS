@@ -30,6 +30,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private readonly bool _durable;
     private readonly IoSchedulerMode _ioSchedulerMode;
     private readonly int? _walCheckpointIntervalMs;
+    private readonly bool _zeroAllocUpdate;
     private readonly string _name;
     private string? _workingDirectory;
     private DataVoContext? _context;
@@ -38,11 +39,13 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     public DataVoDiskCrudEngine(
         bool durable,
         IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off,
-        int? walCheckpointIntervalMs = null)
+        int? walCheckpointIntervalMs = null,
+        bool zeroAllocUpdate = true)
     {
         _durable = durable;
         _ioSchedulerMode = ioSchedulerMode;
         _walCheckpointIntervalMs = walCheckpointIntervalMs;
+        _zeroAllocUpdate = zeroAllocUpdate;
         string poolingSuffix = ioSchedulerMode switch
         {
             IoSchedulerMode.PoolingOnly => "+pooled",
@@ -53,9 +56,11 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         string checkpointSuffix = ioSchedulerMode == IoSchedulerMode.GroupCommit && walCheckpointIntervalMs is int ms
             ? $"+ckpt{ms}ms"
             : string.Empty;
+        // The legacy dictionary update path is the A/B baseline; flag it so the two runs are distinguishable.
+        string updateSuffix = zeroAllocUpdate ? string.Empty : "+legacyupd";
         _name = durable
-            ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}+fsync)"
-            : $"DataVo (Disk{poolingSuffix}{checkpointSuffix})";
+            ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix}+fsync)"
+            : $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix})";
     }
 
     public string Name => _name;
@@ -74,6 +79,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             WalFilePath = "datavo.wal",
             SyncDiskWrites = _durable,
             IoSchedulerMode = _ioSchedulerMode,
+            EnableZeroAllocCompiledUpdate = _zeroAllocUpdate,
         };
 
         if (_walCheckpointIntervalMs is int intervalMs)
