@@ -596,6 +596,7 @@ public sealed class DataVoEngine : IDisposable
 
         IndexManager.Dispose();
         VersionStorageManager.Dispose();
+        StorageContext.Dispose();
         _snapshotLock.Dispose();
 
         lock (SyncRoot)

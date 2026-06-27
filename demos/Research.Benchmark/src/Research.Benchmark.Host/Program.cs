@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DataVo.Core.StorageEngine.Config;
 using Research.Benchmark.Abstractions;
 using Research.Benchmark.Host;
 using Research.Benchmark.Runners;
@@ -75,10 +76,14 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         //   power-durable:     DataVo (Disk+fsync)  <-> SQLite (WAL, synchronous=FULL)
         if (ShouldRun(engineFilter, "datavo"))
             results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: false), records, progressEvery, root));
+        if (ShouldRun(engineFilter, "datavo-pooled"))
+            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly), records, progressEvery, root));
         if (ShouldRun(engineFilter, "sqlite"))
             results.Add(RunDiskCrud(new SqliteDiskCrudEngine("NORMAL"), records, progressEvery, root));
         if (ShouldRun(engineFilter, "datavo-fsync"))
             results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: true), records, progressEvery, root));
+        if (ShouldRun(engineFilter, "datavo-pooled-fsync"))
+            results.Add(RunDiskCrud(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.PoolingOnly), records, progressEvery, root));
         if (ShouldRun(engineFilter, "sqlite-full"))
             results.Add(RunDiskCrud(new SqliteDiskCrudEngine("FULL"), records, progressEvery, root));
     }

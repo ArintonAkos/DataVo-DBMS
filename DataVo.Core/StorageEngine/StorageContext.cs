@@ -24,7 +24,7 @@ namespace DataVo.Core.StorageEngine;
 /// context.InsertOneIntoTable(new Dictionary&lt;string, object?&gt; { ["Id"] = 1 }, "Users", "DemoDb");
 /// </code>
 /// </example>
-public class StorageContext(DataVoConfig config)
+public class StorageContext(DataVoConfig config) : IDisposable
 {
     /// <summary>
     /// Gets the configuration that created this context.
@@ -79,11 +79,22 @@ public class StorageContext(DataVoConfig config)
         return config.StorageMode switch
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
-            StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data", config.SyncDiskWrites),
+            StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data", config.SyncDiskWrites, config.IoSchedulerMode),
             StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
             _ => throw new ArgumentOutOfRangeException()
         };
+    }
+
+    /// <summary>
+    /// Releases resources owned by the resolved storage backend.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_storageEngine is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     /// <summary>
