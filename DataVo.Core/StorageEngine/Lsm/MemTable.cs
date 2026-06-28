@@ -254,6 +254,32 @@ public sealed class MemTable : IDisposable
         return x;
     }
 
+    /// <summary>Returns a forward iterator over all entries in <see cref="InternalKey"/> order.</summary>
+    public Enumerator GetEnumerator() => new(this);
+
+    /// <summary>Forward iterator over the skiplist's level-0 chain (fully sorted).</summary>
+    public ref struct Enumerator
+    {
+        private readonly MemTable _table;
+        private long _node;
+
+        internal Enumerator(MemTable table)
+        {
+            _table = table;
+            _node = table._head;
+        }
+
+        /// <summary>The current entry. Valid only after a successful <see cref="MoveNext"/>.</summary>
+        public readonly MemTableEntry Current => new(_table.GetKey(_node), _table.GetValue(_node));
+
+        /// <summary>Advances to the next entry; returns <see langword="false"/> at the end.</summary>
+        public bool MoveNext()
+        {
+            _node = _table.GetForward(_node, 0);
+            return _node != Null;
+        }
+    }
+
     /// <summary>Releases the backing arena. The MemTable must not be used afterwards.</summary>
     public void Dispose()
     {
@@ -264,5 +290,21 @@ public sealed class MemTable : IDisposable
 
         _disposed = true;
         _arena.Dispose();
+    }
+}
+
+/// <summary>One entry yielded by the MemTable enumerator: its full internal key and value bytes.</summary>
+public readonly ref struct MemTableEntry
+{
+    /// <summary>The entry's internal key (<c>userKey ‖ tag</c>).</summary>
+    public readonly ReadOnlySpan<byte> InternalKey;
+
+    /// <summary>The entry's value bytes (empty for a tombstone).</summary>
+    public readonly ReadOnlySpan<byte> Value;
+
+    internal MemTableEntry(ReadOnlySpan<byte> internalKey, ReadOnlySpan<byte> value)
+    {
+        InternalKey = internalKey;
+        Value = value;
     }
 }
