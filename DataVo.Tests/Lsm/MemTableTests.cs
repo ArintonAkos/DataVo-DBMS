@@ -119,4 +119,41 @@ public class MemTableTests
         Assert.False(tomb);
         Assert.Equal("v9", System.Text.Encoding.UTF8.GetString(v));
     }
+
+    [Fact]
+    public void Enumerator_YieldsEntriesInInternalKeyOrder()
+    {
+        using var table = new MemTable();
+        // Insert out of order, including two versions of key 5.
+        table.Put(Key(5), 2, LsmValueType.Put, Val("five-old"));
+        table.Put(Key(1), 1, LsmValueType.Put, Val("one"));
+        table.Put(Key(5), 8, LsmValueType.Put, Val("five-new"));
+        table.Put(Key(3), 4, LsmValueType.Put, Val("three"));
+
+        var keys = new List<byte[]>();
+        foreach (MemTableEntry entry in table)
+        {
+            keys.Add(entry.InternalKey.ToArray());
+        }
+
+        // Adjacent internal keys are strictly non-decreasing under InternalKey.Compare.
+        for (int i = 1; i < keys.Count; i++)
+        {
+            Assert.True(InternalKey.Compare(keys[i - 1], keys[i]) <= 0, $"out of order at {i}");
+        }
+
+        // For user key 5, the newer seqno (8) sorts before the older (2).
+        var fiveSeqnos = new List<ulong>();
+        foreach (byte[] k in keys)
+        {
+            if (InternalKey.UserKey(k).SequenceEqual(Key(5)))
+            {
+                fiveSeqnos.Add(InternalKey.Sequence(k));
+            }
+        }
+
+        Assert.Equal(2, fiveSeqnos.Count);
+        Assert.Equal(8UL, fiveSeqnos[0]);
+        Assert.Equal(2UL, fiveSeqnos[1]);
+    }
 }
