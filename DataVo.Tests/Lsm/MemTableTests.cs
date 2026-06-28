@@ -156,4 +156,48 @@ public class MemTableTests
         Assert.Equal(8UL, fiveSeqnos[0]);
         Assert.Equal(2UL, fiveSeqnos[1]);
     }
+
+    [Fact]
+    public void Freeze_RejectsFurtherWrites_ButAllowsReads()
+    {
+        using var table = new MemTable();
+        table.Put(Key(1), 1, LsmValueType.Put, Val("v"));
+        table.Freeze();
+
+        Assert.True(table.IsFrozen);
+        Assert.Throws<InvalidOperationException>(() => table.Put(Key(2), 2, LsmValueType.Put, Val("x")));
+        Assert.Throws<InvalidOperationException>(() => table.Delete(Key(3), 3));
+
+        // Reads still work after freeze.
+        Assert.True(table.TryGet(Key(1), 10, out _, out _));
+    }
+
+    [Fact]
+    public void Put_SteadyState_IsAllocationFree()
+    {
+        // A large slab keeps the measured loop inside one slab (no slab rents → no GC).
+        using var table = new MemTable(slabSize: 16 << 20);
+
+        // Reuse the key buffer and value so the test harness itself allocates nothing per iteration —
+        // any per-op allocation measured then comes from Put, which must be zero within a slab.
+        var keyBuf = new byte[8];
+        byte[] value = Val("payload");
+
+        for (int i = 0; i < 200; i++) // warm
+        {
+            InternalKey.EncodeInt64UserKey(keyBuf, i);
+            table.Put(keyBuf, (ulong)(i + 1), LsmValueType.Put, value);
+        }
+
+        const int n = 10_000;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < n; i++)
+        {
+            InternalKey.EncodeInt64UserKey(keyBuf, 1_000_000 + i);
+            table.Put(keyBuf, (ulong)(i + 1), LsmValueType.Put, value);
+        }
+        long perOp = (GC.GetAllocatedBytesForCurrentThread() - before) / n;
+
+        Assert.True(perOp == 0, $"MemTable.Put steady-state allocated {perOp} B/op (expected 0)");
+    }
 }

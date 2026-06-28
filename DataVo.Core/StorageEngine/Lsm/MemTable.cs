@@ -98,6 +98,13 @@ public sealed class MemTable : IDisposable
         _count++;
     }
 
+    /// <summary>Marks the MemTable immutable. Subsequent writes throw; reads and iteration remain valid.</summary>
+    public void Freeze()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _frozen = true;
+    }
+
     /// <summary>Inserts a tombstone for <paramref name="userKey"/> at <paramref name="seqno"/>.</summary>
     public void Delete(ReadOnlySpan<byte> userKey, ulong seqno)
     {
