@@ -175,4 +175,13 @@ public class ArenaTests
         arena.Dispose();
         Assert.Throws<ObjectDisposedException>(() => arena.Allocate(8, out _));
     }
+
+    [Fact]
+    public void Resolve_AfterDispose_Throws()
+    {
+        var arena = new Arena(slabSize: 64);
+        arena.Allocate(8, out long h);
+        arena.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => arena.Resolve(h, 8));
+    }
 }
