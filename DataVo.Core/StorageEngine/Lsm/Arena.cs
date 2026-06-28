@@ -16,6 +16,7 @@ public sealed class Arena : IDisposable
     private byte[] _current;
     private int _offset;
     private long _bytesAllocated;
+    private bool _disposed;
 
     /// <summary>Creates an arena whose standard slab is <paramref name="slabSize"/> bytes.</summary>
     public Arena(int slabSize = 1 << 20)
@@ -39,6 +40,8 @@ public sealed class Arena : IDisposable
     /// </summary>
     public Span<byte> Allocate(int size)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         if (size < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(size));
@@ -62,6 +65,8 @@ public sealed class Arena : IDisposable
     /// <summary>Returns every slab to the pool and re-arms the arena with a single fresh slab.</summary>
     public void Reset()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         foreach (byte[] slab in _slabs)
         {
             ArrayPool<byte>.Shared.Return(slab);
@@ -77,6 +82,13 @@ public sealed class Arena : IDisposable
     /// <summary>Returns all slabs to the pool. The arena must not be used after disposal.</summary>
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
         foreach (byte[] slab in _slabs)
         {
             ArrayPool<byte>.Shared.Return(slab);

@@ -108,4 +108,29 @@ public class ArenaTests
 
         Assert.True(perOp == 0, $"Arena.Allocate within a slab allocated {perOp} B/op (expected 0)");
     }
+
+    [Fact]
+    public void Allocate_AfterDispose_Throws()
+    {
+        var arena = new Arena(slabSize: 64);
+        arena.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => arena.Allocate(8));
+    }
+
+    [Fact]
+    public void Reset_AfterDispose_Throws()
+    {
+        var arena = new Arena(slabSize: 64);
+        arena.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => arena.Reset());
+    }
+
+    [Fact]
+    public void Dispose_IsIdempotent()
+    {
+        var arena = new Arena(slabSize: 64);
+        arena.Allocate(8);
+        arena.Dispose();
+        arena.Dispose(); // must not throw or double-return to the pool
+    }
 }
