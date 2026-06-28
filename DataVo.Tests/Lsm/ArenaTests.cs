@@ -133,4 +133,46 @@ public class ArenaTests
         arena.Dispose();
         arena.Dispose(); // must not throw or double-return to the pool
     }
+
+    [Fact]
+    public void Allocate_WithHandle_ResolvesBackToSameBytes()
+    {
+        using var arena = new Arena(slabSize: 1024);
+
+        Span<byte> a = arena.Allocate(4, out long ha);
+        a[0] = 11; a[1] = 22; a[2] = 33; a[3] = 44;
+        Span<byte> b = arena.Allocate(8, out long hb);
+        b[0] = 99;
+
+        Span<byte> ra = arena.Resolve(ha, 4);
+        Span<byte> rb = arena.Resolve(hb, 8);
+        Assert.Equal(11, ra[0]);
+        Assert.Equal(44, ra[3]);
+        Assert.Equal(99, rb[0]);
+        Assert.NotEqual(ha, hb);
+    }
+
+    [Fact]
+    public void Resolve_StaysValid_AcrossSlabBoundary()
+    {
+        using var arena = new Arena(slabSize: 16);
+
+        Span<byte> first = arena.Allocate(12, out long h1);
+        first[0] = 7;
+        Span<byte> second = arena.Allocate(12, out long h2); // forces a new slab
+        second[0] = 8;
+
+        // The first handle still resolves correctly after the second allocation moved to a new slab.
+        Assert.Equal(7, arena.Resolve(h1, 12)[0]);
+        Assert.Equal(8, arena.Resolve(h2, 12)[0]);
+        Assert.NotEqual(h1, h2);
+    }
+
+    [Fact]
+    public void Allocate_WithHandle_AfterDispose_Throws()
+    {
+        var arena = new Arena(slabSize: 64);
+        arena.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => arena.Allocate(8, out _));
+    }
 }
