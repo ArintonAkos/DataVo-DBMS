@@ -98,6 +98,12 @@ public sealed class MemTable : IDisposable
         _count++;
     }
 
+    /// <summary>Inserts a tombstone for <paramref name="userKey"/> at <paramref name="seqno"/>.</summary>
+    public void Delete(ReadOnlySpan<byte> userKey, ulong seqno)
+    {
+        Put(userKey, seqno, LsmValueType.Deletion, ReadOnlySpan<byte>.Empty);
+    }
+
     /// <summary>
     /// Returns the newest version of <paramref name="userKey"/> with sequence number ≤
     /// <paramref name="snapshotSeqno"/>. A tombstone sets <paramref name="isTombstone"/> and returns

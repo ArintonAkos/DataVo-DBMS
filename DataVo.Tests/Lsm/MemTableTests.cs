@@ -80,4 +80,43 @@ public class MemTableTests
         table.Put(Key(1), 1, LsmValueType.Put, Val("xyz"));
         Assert.True(table.ApproximateBytes > before);
     }
+
+    [Fact]
+    public void Delete_ShadowsOlderPut_AtNewerSnapshot()
+    {
+        using var table = new MemTable();
+        table.Put(Key(1), 3, LsmValueType.Put, Val("alive"));
+        table.Delete(Key(1), 7);
+
+        bool found = table.TryGet(Key(1), 10, out _, out bool tomb);
+
+        Assert.False(found);
+        Assert.True(tomb);
+    }
+
+    [Fact]
+    public void Delete_DoesNotAffectReadsBelowTombstoneSeqno()
+    {
+        using var table = new MemTable();
+        table.Put(Key(1), 3, LsmValueType.Put, Val("alive"));
+        table.Delete(Key(1), 7);
+
+        // A snapshot below the tombstone still sees the live value.
+        Assert.True(table.TryGet(Key(1), 5, out ReadOnlySpan<byte> v, out bool tomb));
+        Assert.False(tomb);
+        Assert.Equal("alive", System.Text.Encoding.UTF8.GetString(v));
+    }
+
+    [Fact]
+    public void Put_AfterDelete_Resurrects()
+    {
+        using var table = new MemTable();
+        table.Put(Key(1), 3, LsmValueType.Put, Val("v3"));
+        table.Delete(Key(1), 7);
+        table.Put(Key(1), 9, LsmValueType.Put, Val("v9"));
+
+        Assert.True(table.TryGet(Key(1), 10, out ReadOnlySpan<byte> v, out bool tomb));
+        Assert.False(tomb);
+        Assert.Equal("v9", System.Text.Encoding.UTF8.GetString(v));
+    }
 }
