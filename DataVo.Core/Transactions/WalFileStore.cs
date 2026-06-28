@@ -105,7 +105,12 @@ internal sealed class WalFileStore
     /// <param name="frame">The committed binary frame to persist.</param>
     public void AppendFrame(WalFrame frame)
     {
-        AppendFrames([frame]);
+        AppendSingleFrame(frame, flushToDisk: true);
+    }
+
+    internal void AppendFrame(WalFrame frame, bool flushToDisk)
+    {
+        AppendSingleFrame(frame, flushToDisk);
     }
 
     /// <summary>
@@ -113,6 +118,11 @@ internal sealed class WalFileStore
     /// </summary>
     /// <param name="frames">The committed binary frames to persist in LSN order.</param>
     public void AppendFrames(IReadOnlyList<WalFrame> frames)
+    {
+        AppendFrames(frames, flushToDisk: true);
+    }
+
+    internal void AppendFrames(IReadOnlyList<WalFrame> frames, bool flushToDisk)
     {
         ExecuteLocked(() =>
         {
@@ -139,7 +149,7 @@ internal sealed class WalFileStore
                     offset += frame.Range.Length;
                 }
 
-                AppendFrameBytes(rented.AsSpan(0, totalLength));
+                AppendFrameBytes(rented.AsSpan(0, totalLength), flushToDisk);
             }
             finally
             {
@@ -148,13 +158,25 @@ internal sealed class WalFileStore
         });
     }
 
-    private void AppendFrameBytes(ReadOnlySpan<byte> bytes)
+    private void AppendSingleFrame(WalFrame frame, bool flushToDisk)
+    {
+        ExecuteLocked(() =>
+        {
+            EnsureDirectoryExists();
+            AppendFrameBytes(frame.Range.ReadOnlySpan, flushToDisk);
+        });
+    }
+
+    private void AppendFrameBytes(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
         using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
         long offset = RandomAccess.GetLength(lease.Handle);
         RandomAccess.Write(lease.Handle, bytes, offset);
-        RandomAccess.FlushToDisk(lease.Handle);
-        Interlocked.Increment(ref _durableFlushCount);
+        if (flushToDisk)
+        {
+            RandomAccess.FlushToDisk(lease.Handle);
+            Interlocked.Increment(ref _durableFlushCount);
+        }
     }
 
     /// <summary>
