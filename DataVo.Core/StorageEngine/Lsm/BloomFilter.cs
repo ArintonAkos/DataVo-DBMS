@@ -54,9 +54,24 @@ public sealed class BloomFilter
     /// <summary>Wraps a persisted header + bitset for read-time probing (used by the SSTable reader).</summary>
     public static BloomFilter FromBytes(ReadOnlySpan<byte> serialized)
     {
+        if (serialized.Length < HeaderSize)
+        {
+            throw new ArgumentException(
+                $"Bloom filter blob too small: {serialized.Length} bytes is shorter than the {HeaderSize}-byte header.",
+                nameof(serialized));
+        }
+
         int bitCount = BinaryPrimitives.ReadInt32LittleEndian(serialized);
         int numProbes = serialized[4];
         byte[] bits = serialized[HeaderSize..].ToArray();
+
+        if (bitCount <= 0 || numProbes < 1 || (long)bits.Length * 8 < bitCount)
+        {
+            throw new ArgumentException(
+                $"Corrupt Bloom filter: bitCount={bitCount}, numProbes={numProbes}, bitset={bits.Length} bytes.",
+                nameof(serialized));
+        }
+
         return new BloomFilter(bits, bitCount, numProbes);
     }
 

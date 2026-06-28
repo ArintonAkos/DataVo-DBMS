@@ -94,4 +94,20 @@ public class BloomFilterTests
 
         Assert.True(perOp == 0, $"MightContain allocated {perOp} B/op (expected 0)");
     }
+
+    [Fact]
+    public void FromBytes_ThrowsOnTruncatedHeader()
+    {
+        Assert.Throws<ArgumentException>(() => BloomFilter.FromBytes(new byte[4]));
+    }
+
+    [Fact]
+    public void FromBytes_ThrowsOnInconsistentBitCount()
+    {
+        // Header claims 100_000 bits but supplies only 2 bytes of bitset.
+        var blob = new byte[8 + 2];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(blob, 100_000);
+        blob[4] = 7; // numProbes
+        Assert.Throws<ArgumentException>(() => BloomFilter.FromBytes(blob));
+    }
 }
