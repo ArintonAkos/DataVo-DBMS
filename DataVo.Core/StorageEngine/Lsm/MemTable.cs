@@ -12,7 +12,10 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// [internalKey bytes][value bytes]</c>. A null forward link is <see cref="Null"/> (-1). The head is a
 /// keyless sentinel of maximum height.
 /// </para>
-/// <para>Single-writer: only one thread calls <see cref="Put"/>. Readers may run concurrently.</para>
+/// <para>Single-writer: only one thread calls <see cref="Put"/>/<see cref="Delete"/>. The design targets
+/// multi-reader concurrency, but concurrent-reader memory-ordering hardening (release/acquire fences on forward
+/// links) is DEFERRED — it is not yet safe for live concurrent readers on weak memory models (e.g. ARM64).
+/// Current tests are single-threaded.</para>
 /// </summary>
 public sealed class MemTable : IDisposable
 {
@@ -203,8 +206,6 @@ public sealed class MemTable : IDisposable
         value.CopyTo(rec.Slice(keyStart + keyLen, value.Length));
         return handle;
     }
-
-    private int GetHeight(long node) => _arena.Resolve(node, ForwardOffset)[HeightOffset];
 
     private long GetForward(long node, int level)
     {
