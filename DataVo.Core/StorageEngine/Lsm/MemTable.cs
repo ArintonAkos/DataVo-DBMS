@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Threading;
 
 namespace DataVo.Core.StorageEngine.Lsm;
 
@@ -8,14 +9,13 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// contiguous record carved from an <see cref="Arena"/>; forward pointers are stable arena handles, so the
 /// structure is pointer-linked with no managed object per insert (zero per-<see cref="Put"/> GC).
 /// <para>
-/// Node record layout (little-endian): <c>[int valueLen][int keyLen][byte height][long forward[height]]
+/// Node record layout (little-endian): <c>[int valueLen][int keyLen][byte height][7 byte padding][long forward[height]]
 /// [internalKey bytes][value bytes]</c>. A null forward link is <see cref="Null"/> (-1). The head is a
 /// keyless sentinel of maximum height.
 /// </para>
-/// <para>Single-writer: only one thread calls <see cref="Put"/>/<see cref="Delete"/>. The design targets
-/// multi-reader concurrency, but concurrent-reader memory-ordering hardening (release/acquire fences on forward
-/// links) is DEFERRED — it is not yet safe for live concurrent readers on weak memory models (e.g. ARM64).
-/// Current tests are single-threaded.</para>
+/// <para>Single-writer: only one thread calls <see cref="Put"/>/<see cref="Delete"/>. Forward links are
+/// 8-byte aligned and published with release writes; readers follow them with acquire reads so live readers
+/// cannot observe a node before its key/value bytes and successor links are initialized on weak memory models.</para>
 /// </summary>
 public sealed class MemTable : IDisposable
 {
@@ -26,7 +26,7 @@ public sealed class MemTable : IDisposable
     private const int ValueLenOffset = 0;
     private const int KeyLenOffset = 4;
     private const int HeightOffset = 8;
-    private const int ForwardOffset = 9; // forward[0] starts here; each link is 8 bytes.
+    private const int ForwardOffset = 16; // forward[0] starts here; each link is an 8-byte-aligned long.
 
     private readonly Arena _arena;
     private readonly long _head;
@@ -44,13 +44,15 @@ public sealed class MemTable : IDisposable
     }
 
     /// <summary>Number of entries (versions) inserted, including tombstones.</summary>
-    public int Count => _count;
+    public int Count => Volatile.Read(ref _count);
 
     /// <summary>Approximate resident size in bytes (the arena's handed-out total).</summary>
     public long ApproximateBytes => _arena.BytesAllocated;
 
     /// <summary>Whether the MemTable has been frozen (no further writes accepted).</summary>
     public bool IsFrozen => _frozen;
+
+    internal static int ForwardOffsetForTesting => ForwardOffset;
 
     /// <summary>
     /// Inserts a versioned entry. Each call inserts a new node; multiple versions of a user key coexist,
@@ -70,7 +72,8 @@ public sealed class MemTable : IDisposable
 
         Span<long> update = stackalloc long[MaxHeight];
         long x = _head;
-        for (int level = _maxHeight - 1; level >= 0; level--)
+        int currentMaxHeight = Volatile.Read(ref _maxHeight);
+        for (int level = currentMaxHeight - 1; level >= 0; level--)
         {
             long next = GetForward(x, level);
             while (next != Null && InternalKey.Compare(GetKey(next), internalKey) < 0)
@@ -84,12 +87,12 @@ public sealed class MemTable : IDisposable
 
         if (height > _maxHeight)
         {
-            for (int level = _maxHeight; level < height; level++)
+            for (int level = currentMaxHeight; level < height; level++)
             {
                 update[level] = _head;
             }
 
-            _maxHeight = height;
+            Volatile.Write(ref _maxHeight, height);
         }
 
         for (int level = 0; level < height; level++)
@@ -98,7 +101,7 @@ public sealed class MemTable : IDisposable
             SetForward(update[level], level, node);
         }
 
-        _count++;
+        Volatile.Write(ref _count, _count + 1);
     }
 
     /// <summary>Marks the MemTable immutable. Subsequent writes throw; reads and iteration remain valid.</summary>
@@ -159,7 +162,8 @@ public sealed class MemTable : IDisposable
     private long FindGreaterOrEqual(ReadOnlySpan<byte> internalKey)
     {
         long x = _head;
-        for (int level = _maxHeight - 1; level >= 0; level--)
+        int currentMaxHeight = Volatile.Read(ref _maxHeight);
+        for (int level = currentMaxHeight - 1; level >= 0; level--)
         {
             long next = GetForward(x, level);
             while (next != Null && InternalKey.Compare(GetKey(next), internalKey) < 0)
@@ -181,7 +185,7 @@ public sealed class MemTable : IDisposable
         rec[HeightOffset] = MaxHeight;
         for (int level = 0; level < MaxHeight; level++)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(rec.Slice(ForwardOffset + (8 * level), 8), Null);
+            SetForward(handle, level, Null);
         }
 
         return handle;
@@ -199,7 +203,7 @@ public sealed class MemTable : IDisposable
         rec[HeightOffset] = (byte)height;
         for (int level = 0; level < height; level++)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(rec.Slice(ForwardOffset + (8 * level), 8), Null);
+            SetForward(handle, level, Null);
         }
 
         InternalKey.Write(rec.Slice(keyStart, keyLen), userKey, seqno, valueType);
@@ -209,14 +213,14 @@ public sealed class MemTable : IDisposable
 
     private long GetForward(long node, int level)
     {
-        Span<byte> rec = _arena.Resolve(node, ForwardOffset + (8 * (level + 1)));
-        return BinaryPrimitives.ReadInt64LittleEndian(rec.Slice(ForwardOffset + (8 * level), 8));
+        ref long link = ref _arena.ResolveInt64Reference(node, ForwardOffset + (8 * level));
+        return Volatile.Read(ref link);
     }
 
     private void SetForward(long node, int level, long next)
     {
-        Span<byte> rec = _arena.Resolve(node, ForwardOffset + (8 * (level + 1)));
-        BinaryPrimitives.WriteInt64LittleEndian(rec.Slice(ForwardOffset + (8 * level), 8), next);
+        ref long link = ref _arena.ResolveInt64Reference(node, ForwardOffset + (8 * level));
+        Volatile.Write(ref link, next);
     }
 
     private ReadOnlySpan<byte> GetKey(long node)

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 
 namespace DataVo.Core.StorageEngine.Lsm;
 
@@ -11,6 +12,8 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// </summary>
 public sealed class Arena : IDisposable
 {
+    private const int Alignment = 8;
+
     private readonly int _slabSize;
     private readonly List<byte[]> _slabs = [];
     private byte[] _current;
@@ -55,20 +58,21 @@ public sealed class Arena : IDisposable
             throw new ArgumentOutOfRangeException(nameof(size));
         }
 
-        if (_offset + size > _current.Length)
+        int alignedOffset = AlignUp(_offset);
+        if (alignedOffset + size > _current.Length)
         {
             // Oversized requests get a dedicated exact slab; otherwise rent a fresh standard slab.
             int rent = Math.Max(size, _slabSize);
             _current = ArrayPool<byte>.Shared.Rent(rent);
             _slabs.Add(_current);
-            _offset = 0;
+            alignedOffset = 0;
         }
 
         int slabIndex = _slabs.Count - 1;
-        handle = ((long)slabIndex << 32) | (uint)_offset;
+        handle = ((long)slabIndex << 32) | (uint)alignedOffset;
 
-        Span<byte> span = _current.AsSpan(_offset, size);
-        _offset += size;
+        Span<byte> span = _current.AsSpan(alignedOffset, size);
+        _offset = alignedOffset + size;
         _bytesAllocated += size;
         return span;
     }
@@ -84,6 +88,15 @@ public sealed class Arena : IDisposable
         int slabIndex = (int)(handle >> 32);
         int offset = (int)(handle & 0xFFFFFFFF);
         return _slabs[slabIndex].AsSpan(offset, length);
+    }
+
+    internal ref long ResolveInt64Reference(long handle, int offsetInAllocation)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int slabIndex = (int)(handle >> 32);
+        int offset = (int)(handle & 0xFFFFFFFF) + offsetInAllocation;
+        return ref Unsafe.As<byte, long>(ref _slabs[slabIndex][offset]);
     }
 
     /// <summary>Returns every slab to the pool and re-arms the arena with a single fresh slab.</summary>
@@ -120,4 +133,6 @@ public sealed class Arena : IDisposable
 
         _slabs.Clear();
     }
+
+    private static int AlignUp(int value) => (value + (Alignment - 1)) & ~(Alignment - 1);
 }
