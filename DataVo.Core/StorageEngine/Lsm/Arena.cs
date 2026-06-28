@@ -38,7 +38,15 @@ public sealed class Arena : IDisposable
     /// Carves <paramref name="size"/> bytes from the arena and returns a writable span over them. The
     /// span stays valid until the next <see cref="Reset"/> or <see cref="Dispose"/>.
     /// </summary>
-    public Span<byte> Allocate(int size)
+    public Span<byte> Allocate(int size) => Allocate(size, out _);
+
+    /// <summary>
+    /// Carves <paramref name="size"/> bytes and returns both the writable span and a stable
+    /// <paramref name="handle"/> that <see cref="Resolve"/> maps back to those bytes. The handle packs the
+    /// slab index in the high 32 bits and the in-slab offset in the low 32 bits; it stays valid until the
+    /// next <see cref="Reset"/> or <see cref="Dispose"/>.
+    /// </summary>
+    public Span<byte> Allocate(int size, out long handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -56,10 +64,26 @@ public sealed class Arena : IDisposable
             _offset = 0;
         }
 
+        int slabIndex = _slabs.Count - 1;
+        handle = ((long)slabIndex << 32) | (uint)_offset;
+
         Span<byte> span = _current.AsSpan(_offset, size);
         _offset += size;
         _bytesAllocated += size;
         return span;
+    }
+
+    /// <summary>
+    /// Maps a handle returned by <see cref="Allocate(int, out long)"/> back to its bytes. The returned span
+    /// is valid until the next <see cref="Reset"/> or <see cref="Dispose"/>.
+    /// </summary>
+    public Span<byte> Resolve(long handle, int length)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int slabIndex = (int)(handle >> 32);
+        int offset = (int)(handle & 0xFFFFFFFF);
+        return _slabs[slabIndex].AsSpan(offset, length);
     }
 
     /// <summary>Returns every slab to the pool and re-arms the arena with a single fresh slab.</summary>
