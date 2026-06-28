@@ -465,7 +465,7 @@ These sites are DML, DDL, and transaction-commit paths that call `GetTableConten
 | `Transactions/LockManager.cs:167` `AcquireRowWriteLock(string databaseName, string tableName, long rowId)` | Same | Same |
 | `Transactions/LockManager.cs:202` `ReleaseRowReadLock(string databaseName, string tableName, long rowId)` | Same | Same |
 | `Transactions/LockManager.cs:221` `ReleaseRowWriteLock(string databaseName, string tableName, long rowId)` | Same | Same |
-| `Transactions/LockManager.cs:488` `BuildRowKey(string databaseName, string tableName, long rowId)` | `$"{databaseName}:{tableName}:{rowId}"` — byte offset in key string | Must become `$"{databaseName}:{tableName}:{pk}"` or equivalent PK-based key |
+| `Transactions/LockManager.cs:488` `BuildRowKey(string databaseName, string tableName, long rowId)` | `$"{databaseName}.{tableName}#row:{rowId}"` — byte offset in key string | Must become `$"{databaseName}.{tableName}#row:{pk}"` or equivalent PK-based key |
 
 ### 5l. DataVoContext (application API level)
 
