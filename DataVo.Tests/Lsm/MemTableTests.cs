@@ -200,4 +200,61 @@ public class MemTableTests
 
         Assert.True(perOp == 0, $"MemTable.Put steady-state allocated {perOp} B/op (expected 0)");
     }
+
+    [Fact]
+    public void ForwardPointerSlots_AreEightByteAlignedForVolatileReadsAndWrites()
+    {
+        Assert.Equal(0, MemTable.ForwardOffsetForTesting & 7);
+    }
+
+    [Fact]
+    public async Task ConcurrentReaders_DoNotObserveCorruptSkiplistWhileSingleWriterPublishesNodes()
+    {
+        using var table = new MemTable(slabSize: 16 << 20);
+        byte[] value = Val("v");
+        using var cts = new CancellationTokenSource();
+        Exception? readerFailure = null;
+
+        Task[] readers = Enumerable.Range(0, Environment.ProcessorCount).Select(readerId => Task.Run(() =>
+        {
+            var key = new byte[8];
+            int probe = readerId;
+            try
+            {
+                while (Volatile.Read(ref readerFailure) is null && !cts.IsCancellationRequested)
+                {
+                    probe = unchecked((probe * 1103515245) + 12345);
+                    int id = (probe & int.MaxValue) % 20_000;
+                    InternalKey.EncodeInt64UserKey(key, id);
+                    if (table.TryGet(key, InternalKey.MaxSequenceNumber, out ReadOnlySpan<byte> found, out bool tombstone))
+                    {
+                        if (tombstone || found.Length != value.Length || found[0] != value[0])
+                        {
+                            throw new InvalidOperationException("Reader observed a corrupt value.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref readerFailure, ex, null);
+                cts.Cancel();
+            }
+        })).ToArray();
+
+        var writerKey = new byte[8];
+        for (int i = 0; i < 20_000 && Volatile.Read(ref readerFailure) is null; i++)
+        {
+            InternalKey.EncodeInt64UserKey(writerKey, i);
+            table.Put(writerKey, (ulong)(i + 1), LsmValueType.Put, value);
+        }
+
+        cts.Cancel();
+        await Task.WhenAll(readers);
+
+        if (readerFailure is not null)
+        {
+            throw readerFailure;
+        }
+    }
 }

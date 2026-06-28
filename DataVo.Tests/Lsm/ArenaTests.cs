@@ -153,6 +153,18 @@ public class ArenaTests
     }
 
     [Fact]
+    public void Allocate_WithHandle_ReturnsEightByteAlignedHandles()
+    {
+        using var arena = new Arena(slabSize: 1024);
+
+        _ = arena.Allocate(1, out long first);
+        _ = arena.Allocate(8, out long second);
+
+        Assert.Equal(0, first & 7);
+        Assert.Equal(0, second & 7);
+    }
+
+    [Fact]
     public void Resolve_StaysValid_AcrossSlabBoundary()
     {
         using var arena = new Arena(slabSize: 16);
