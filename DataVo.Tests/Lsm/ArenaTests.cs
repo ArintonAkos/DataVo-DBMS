@@ -72,6 +72,20 @@ public class ArenaTests
     }
 
     [Fact]
+    public void Reset_WithMultipleSlabs_ReturnsAllAndRearmsOne()
+    {
+        using var arena = new Arena(slabSize: 16);
+        arena.Allocate(12);
+        arena.Allocate(12); // forces a second slab
+
+        arena.Reset();
+
+        Assert.Equal(0, arena.BytesAllocated);
+        Assert.Equal(8, arena.Allocate(8).Length); // arena is live with exactly one fresh slab
+        Assert.Equal(8, arena.BytesAllocated);
+    }
+
+    [Fact]
     public void Allocate_WithinSlab_IsAllocationFreeInSteadyState()
     {
         using var arena = new Arena(slabSize: 1 << 20);
