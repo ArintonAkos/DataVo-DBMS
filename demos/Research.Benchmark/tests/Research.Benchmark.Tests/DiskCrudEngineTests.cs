@@ -6,13 +6,34 @@ namespace Research.Benchmark.Tests;
 public sealed class DiskCrudEngineTests
 {
     [Fact]
-    public void DataVoLsmVariant_HasDistinctBenchmarkName()
+    public void DataVoLsmVariants_HaveDistinctBenchmarkNames()
     {
-        using var engine = new DataVoDiskCrudEngine(
+        using var production = new DataVoDiskCrudEngine(
+            durable: true,
+            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var relaxed = new DataVoDiskCrudEngine(
             durable: false,
             storageMode: DataVoDiskCrudStorageMode.Lsm);
 
-        Assert.Equal("DataVo (LSM experimental)", engine.Name);
+        Assert.Equal("DataVo (LSM Production)", production.Name);
+        Assert.Equal("DataVo (LSM Relaxed)", relaxed.Name);
+    }
+
+    [Fact]
+    public void DiskCrudWalAllMatrix_ContainsOnlyModernCompetitiveEngines()
+    {
+        using var engines = new CompositeDisposable(
+            DiskCrudEngineMatrix.Create(engineFilter: "all", checkpointIntervalMs: null, zeroAllocUpdate: true));
+
+        string[] names = engines.Items.Select(engine => engine.Name).ToArray();
+
+        Assert.Equal(
+        [
+            "DataVo (LSM Production)",
+            "DataVo (LSM Relaxed)",
+            "SQLite (WAL,normal)",
+            "SQLite (WAL,full)",
+        ], names);
     }
 
     [Fact]
@@ -84,6 +105,24 @@ public sealed class DiskCrudEngineTests
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private sealed class CompositeDisposable : IDisposable
+    {
+        public CompositeDisposable(IReadOnlyList<IDiskCrudEngine> items)
+        {
+            Items = items;
+        }
+
+        public IReadOnlyList<IDiskCrudEngine> Items { get; }
+
+        public void Dispose()
+        {
+            foreach (IDiskCrudEngine item in Items)
+            {
+                item.Dispose();
             }
         }
     }

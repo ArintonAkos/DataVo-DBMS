@@ -67,16 +67,11 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             : string.Empty;
         // The legacy dictionary update path is the A/B baseline; flag it so the two runs are distinguishable.
         string updateSuffix = zeroAllocUpdate ? string.Empty : "+legacyupd";
-        if (storageMode == DataVoDiskCrudStorageMode.Lsm)
-        {
-            _name = "DataVo (LSM experimental)";
-        }
-        else
-        {
-            _name = durable
+        _name = storageMode == DataVoDiskCrudStorageMode.Lsm
+            ? durable ? "DataVo (LSM Production)" : "DataVo (LSM Relaxed)"
+            : durable
                 ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix}+fsync)"
                 : $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix})";
-        }
     }
 
     public string Name => _name;
@@ -94,6 +89,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             WalEnabled = _storageMode == DataVoDiskCrudStorageMode.Disk,
             WalFilePath = "datavo.wal",
             SyncDiskWrites = _storageMode == DataVoDiskCrudStorageMode.Disk && _durable,
+            LsmStrictFsync = _storageMode != DataVoDiskCrudStorageMode.Lsm || _durable,
             IoSchedulerMode = _storageMode == DataVoDiskCrudStorageMode.Disk ? _ioSchedulerMode : IoSchedulerMode.Off,
             EnableZeroAllocCompiledUpdate = _zeroAllocUpdate,
         };

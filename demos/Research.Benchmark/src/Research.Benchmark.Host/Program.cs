@@ -85,26 +85,12 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
                 : RunDiskCrudConcurrent(engine, records, writerWorkers, progressEvery, root);
 
         // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
-        //   not power-durable: DataVo (Disk)        <-> SQLite (WAL, synchronous=NORMAL)
-        //   power-durable:     DataVo (Disk+fsync)  <-> SQLite (WAL, synchronous=FULL)
-        if (ShouldRun(engineFilter, "datavo"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false)));
-        if (ShouldRun(engineFilter, "datavo-lsm"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, storageMode: DataVoDiskCrudStorageMode.Lsm)));
-        if (ShouldRun(engineFilter, "datavo-pooled"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly)));
-        if (ShouldRun(engineFilter, "datavo-groupcommit"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.GroupCommit, checkpointIntervalMs, zeroAllocUpdate)));
-        if (ShouldRun(engineFilter, "sqlite"))
-            results.Add(RunDiskScenario(new SqliteDiskCrudEngine("NORMAL")));
-        if (ShouldRun(engineFilter, "datavo-fsync"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true)));
-        if (ShouldRun(engineFilter, "datavo-pooled-fsync"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.PoolingOnly)));
-        if (ShouldRun(engineFilter, "datavo-groupcommit-fsync"))
-            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: true, IoSchedulerMode.GroupCommit, checkpointIntervalMs)));
-        if (ShouldRun(engineFilter, "sqlite-full"))
-            results.Add(RunDiskScenario(new SqliteDiskCrudEngine("FULL")));
+        //   not power-durable: DataVo (Disk), DataVo (LSM Relaxed) <-> SQLite (WAL, synchronous=NORMAL)
+        //   power-durable:     DataVo (Disk+fsync), DataVo (LSM Production) <-> SQLite (WAL, synchronous=FULL)
+        foreach (IDiskCrudEngine engine in DiskCrudEngineMatrix.Create(engineFilter, checkpointIntervalMs, zeroAllocUpdate))
+        {
+            results.Add(RunDiskScenario(engine));
+        }
     }
     finally
     {
