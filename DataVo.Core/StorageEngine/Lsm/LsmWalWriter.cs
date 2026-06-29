@@ -28,6 +28,33 @@ internal sealed class LsmWalWriter
         LsmValueType valueType,
         ReadOnlySpan<byte> value)
     {
+        AppendMutation(userKey, seqno, valueType, value, flushToDisk: _durabilityMode == LsmWalDurabilityMode.StrictFsync);
+    }
+
+    internal void AppendMutationBuffered(
+        ReadOnlySpan<byte> userKey,
+        ulong seqno,
+        LsmValueType valueType,
+        ReadOnlySpan<byte> value)
+    {
+        AppendMutation(userKey, seqno, valueType, value, flushToDisk: false);
+    }
+
+    internal void FlushBufferedMutations()
+    {
+        if (_durabilityMode == LsmWalDurabilityMode.StrictFsync)
+        {
+            _store.FlushToDisk();
+        }
+    }
+
+    private void AppendMutation(
+        ReadOnlySpan<byte> userKey,
+        ulong seqno,
+        LsmValueType valueType,
+        ReadOnlySpan<byte> value,
+        bool flushToDisk)
+    {
         ValidateMutation(seqno, valueType, value);
 
         int payloadLength = LsmWalRecordCodec.MeasureSize(userKey, value);
@@ -39,7 +66,7 @@ internal sealed class LsmWalWriter
         LsmWalRecordCodec.Write(reservation.PayloadSpan, userKey, seqno, valueType, value);
 
         using WalFrame frame = reservation.Commit();
-        _store.AppendFrame(frame, flushToDisk: _durabilityMode == LsmWalDurabilityMode.StrictFsync);
+        _store.AppendFrame(frame, flushToDisk);
     }
 
     public void ReplayInto(MemTable memTable)

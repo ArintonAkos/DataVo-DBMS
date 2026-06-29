@@ -59,17 +59,23 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             var rowIds = new List<long>(rowsBytes.Count);
-            Span<byte> userKey = stackalloc byte[UserKeySize];
+            var batch = new List<LsmBatchPutEntry>(rowsBytes.Count);
             foreach (byte[] rowBytes in rowsBytes)
             {
                 ArgumentNullException.ThrowIfNull(rowBytes);
                 long rowId = state.NextRowId++;
                 ulong seqno = state.NextSeqno++;
                 byte[] value = rowBytes.ToArray();
-                EncodeRowId(rowId, userKey);
-                state.Table.Put(userKey, seqno, value);
-                state.LatestRows[rowId] = new LatestRowVersion(value, IsTombstone: false, seqno);
+                byte[] userKey = EncodeRowId(rowId);
+                batch.Add(new LsmBatchPutEntry(userKey, seqno, value));
                 rowIds.Add(rowId);
+            }
+
+            state.Table.PutBatch(batch);
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                LsmBatchPutEntry entry = batch[i];
+                state.LatestRows[rowIds[i]] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
             }
 
             return rowIds;

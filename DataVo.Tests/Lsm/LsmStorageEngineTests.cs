@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Lsm;
@@ -140,6 +141,49 @@ public sealed class LsmStorageEngineTests
         }
     }
 
+    [Fact]
+    public async Task InsertRows_StrictDurability_AmortizesWalFlushWhileSnapshotsOpenConcurrently()
+    {
+        const int rows = 1024;
+        using var fixture = new LsmStorageEngineFixture();
+        fixture.Engine.InsertRow("db", "users", Val("seed"));
+        LsmFileRegistry registry = GetFileRegistry(fixture.Engine);
+        int flushesBeforeBatch = GetWalDurableFlushCount(fixture.Engine);
+        using var snapshotsCanRun = new CancellationTokenSource();
+
+        Task snapshotLoop = Task.Run(() =>
+        {
+            while (!snapshotsCanRun.IsCancellationRequested)
+            {
+                using LsmReadSnapshot snapshot = registry.OpenSnapshot();
+                foreach (LsmTableFileMetadata file in snapshot.Files)
+                {
+                    _ = snapshot.ReadAllBytes(file.FileNumber);
+                }
+            }
+        });
+
+        Task<List<long>> insertTask = Task.Run(() =>
+            fixture.Engine.InsertRows(
+                "db",
+                "users",
+                Enumerable.Range(0, rows).Select(i => Val($"bulk-{i}")).ToList()));
+
+        List<long> rowIds;
+        try
+        {
+            rowIds = await insertTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            snapshotsCanRun.Cancel();
+            await snapshotLoop.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(rows, rowIds.Count);
+        Assert.Equal(1, GetWalDurableFlushCount(fixture.Engine) - flushesBeforeBatch);
+    }
+
     private static byte[] Val(string value) => Encoding.UTF8.GetBytes(value);
 
     private static byte[] Internal(long rowId, ulong seqno, LsmValueType valueType)
@@ -185,6 +229,45 @@ public sealed class LsmStorageEngineTests
             Assert.Equal(expected[i].RowId, actual[i].RowId);
             Assert.Equal(expected[i].RawRow, actual[i].RawRow);
         }
+    }
+
+    private static LsmFileRegistry GetFileRegistry(LsmStorageEngine engine)
+    {
+        object tableState = GetSingleTableState(engine);
+        return (LsmFileRegistry)tableState
+            .GetType()
+            .GetProperty("FileRegistry", BindingFlags.Instance | BindingFlags.Public)!
+            .GetValue(tableState)!;
+    }
+
+    private static int GetWalDurableFlushCount(LsmStorageEngine engine)
+    {
+        object tableState = GetSingleTableState(engine);
+        object table = tableState
+            .GetType()
+            .GetProperty("Table", BindingFlags.Instance | BindingFlags.Public)!
+            .GetValue(tableState)!;
+        object walWriter = table
+            .GetType()
+            .GetField("_walWriter", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(table)!;
+
+        return (int)walWriter
+            .GetType()
+            .GetProperty("DurableFlushCount", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(walWriter)!;
+    }
+
+    private static object GetSingleTableState(LsmStorageEngine engine)
+    {
+        object tables = typeof(LsmStorageEngine)
+            .GetField("_tables", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(engine)!;
+        object values = tables
+            .GetType()
+            .GetProperty("Values")!
+            .GetValue(tables)!;
+        return ((System.Collections.IEnumerable)values).Cast<object>().Single();
     }
 
     private sealed class LsmStorageEngineFixture : IDisposable
