@@ -28,8 +28,8 @@ public class TableValidationMetadataCacheTests
 
         Assert.Equal(new[] { "Id" }, m.PrimaryKeys);
         Assert.Contains(m.Columns, c => c.Name.Equals("Name", StringComparison.OrdinalIgnoreCase));
-        Assert.True(m.ColumnNames.Contains("Id"));
-        Assert.True(m.ColumnNames.Contains("Name"));
+        Assert.Contains("Id", m.ColumnNames);
+        Assert.Contains("Name", m.ColumnNames);
     }
 
     [Fact]

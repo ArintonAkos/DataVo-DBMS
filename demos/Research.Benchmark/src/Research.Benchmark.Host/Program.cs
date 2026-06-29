@@ -89,6 +89,8 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         //   power-durable:     DataVo (Disk+fsync)  <-> SQLite (WAL, synchronous=FULL)
         if (ShouldRun(engineFilter, "datavo"))
             results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false)));
+        if (ShouldRun(engineFilter, "datavo-lsm"))
+            results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, storageMode: DataVoDiskCrudStorageMode.Lsm)));
         if (ShouldRun(engineFilter, "datavo-pooled"))
             results.Add(RunDiskScenario(new DataVoDiskCrudEngine(durable: false, IoSchedulerMode.PoolingOnly)));
         if (ShouldRun(engineFilter, "datavo-groupcommit"))

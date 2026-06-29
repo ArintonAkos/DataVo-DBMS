@@ -420,6 +420,87 @@ public static class DataVoCompiledQuery
     }
 
     /// <summary>
+    /// Executes a fixed-width update plan with unboxed primitive parameters. This is the hot-path overload used
+    /// by allocation-sensitive loops after the plan has already proven eligible for byte patching.
+    /// </summary>
+    public static int UpdateFixedWidth(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (plan.Kind != DataVoCompiledQueryKind.Update)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as Update.");
+        }
+
+        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
+        {
+            throw new NotSupportedException("Compiled update plans do not support active transactions.");
+        }
+
+        if (TryUpdateFixedWidthFastPath(context, plan, parameters, out int fastPathAffected))
+        {
+            return fastPathAffected;
+        }
+
+        var boxed = new DataVoCompiledQueryParameter[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            boxed[i] = new DataVoCompiledQueryParameter(parameters[i].Name, parameters[i].Value.ToObject());
+        }
+
+        return Update(context, plan, boxed);
+    }
+
+    /// <summary>
+    /// Executes a fixed-width update where assignment values are supplied in plan assignment order and the
+    /// predicate is the integer primary key. This overload is fully allocation-free at the parameter boundary.
+    /// </summary>
+    public static int UpdateFixedWidthByPrimaryKey(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        DataVoFixedWidthValue primaryKeyValue,
+        ReadOnlySpan<DataVoFixedWidthValue> assignmentValues)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (plan.Kind != DataVoCompiledQueryKind.Update)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as Update.");
+        }
+
+        if (assignmentValues.Length != plan.Assignments.Count)
+        {
+            throw new ArgumentException("Assignment values must match the compiled update assignment count.", nameof(assignmentValues));
+        }
+
+        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
+        {
+            throw new NotSupportedException("Compiled update plans do not support active transactions.");
+        }
+
+        if (TryUpdateFixedWidthFastPath(context, plan, primaryKeyValue, assignmentValues, out int fastPathAffected))
+        {
+            return fastPathAffected;
+        }
+
+        var boxed = new DataVoCompiledQueryParameter[assignmentValues.Length + 1];
+        int index = 0;
+        foreach ((_, string parameterName) in plan.Assignments)
+        {
+            boxed[index] = new DataVoCompiledQueryParameter(parameterName, assignmentValues[index].ToObject());
+            index++;
+        }
+
+        boxed[index] = new DataVoCompiledQueryParameter(plan.WhereParameterName!, primaryKeyValue.ToObject());
+        return Update(context, plan, boxed);
+    }
+
+    /// <summary>
     /// Per-(plan, database) cache of the resolved fast-path schema, keyed off the table schema version so it
     /// invalidates on DDL. Resolving it once keeps the steady-state update path free of catalog allocations.
     /// </summary>
@@ -439,17 +520,16 @@ public static class DataVoCompiledQuery
         affected = 0;
         DataVoEngine engine = context.Engine;
 
-        // The dictionary cost this path removes only exists for the disk backend, and reactive change
-        // capture needs after-image materialization the byte-patch path deliberately skips.
+        // Reactive change capture needs after-image materialization the byte-patch path deliberately skips.
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || engine.Config.StorageMode != StorageMode.Disk
+            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
             || engine.Changes.Enabled)
         {
             return false;
         }
 
         string databaseName = ResolveCurrentDatabase(context);
-        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName);
+        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
         if (!schema.Eligible
             || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
         {
@@ -465,6 +545,18 @@ public static class DataVoCompiledQuery
         if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
         {
             affected = 0; // No row matches the predicate — a legitimate zero-row update.
+            return true;
+        }
+
+        if (engine.Config.StorageMode == StorageMode.Lsm)
+        {
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+            if (!TryPatchLsmFixedWidthRow(context, plan, schema, databaseName, rowId, parameters))
+            {
+                return false;
+            }
+
+            affected = 1;
             return true;
         }
 
@@ -524,11 +616,281 @@ public static class DataVoCompiledQuery
         }
     }
 
-    private static UpdateFastPathSchema ResolveUpdateFastPathSchema(DataVoEngine engine, DataVoCompiledQueryPlan plan, string databaseName)
+    private static bool TryUpdateFixedWidthFastPath(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters,
+        out int affected)
+    {
+        affected = 0;
+        DataVoEngine engine = context.Engine;
+
+        if (!engine.Config.EnableZeroAllocCompiledUpdate
+            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
+            || engine.Changes.Enabled)
+        {
+            return false;
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
+        if (!schema.Eligible
+            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+        {
+            return false;
+        }
+
+        if (!TryFindParameterValue(parameters, plan.WhereParameterName!, out DataVoFixedWidthValue whereValue)
+            || !TryConvertToInt64(whereValue, out long primaryKey))
+        {
+            return false;
+        }
+
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        {
+            affected = 0;
+            return true;
+        }
+
+        if (engine.Config.StorageMode == StorageMode.Lsm)
+        {
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+            if (!TryPatchLsmFixedWidthRow(context, plan, schema, databaseName, rowId, parameters))
+            {
+                return false;
+            }
+
+            affected = 1;
+            return true;
+        }
+
+        engine.LockManager.AcquireRowWriteLock(databaseName, plan.TableName, rowId);
+        try
+        {
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            {
+                affected = 0;
+                return true;
+            }
+
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+
+            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
+            if (rowBytes is null)
+            {
+                affected = 0;
+                return true;
+            }
+
+            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
+            {
+                if (!TryFindParameterValue(parameters, schema.AssignParameterNames[i], out DataVoFixedWidthValue newValue)
+                    || !RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], newValue))
+                {
+                    return false;
+                }
+            }
+
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
+            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
+            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+
+            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
+            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
+
+            if (ImplicitWalCommit.IsEnabled(engine))
+            {
+                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
+            }
+
+            affected = 1;
+            return true;
+        }
+        finally
+        {
+            engine.LockManager.ReleaseRowWriteLock(databaseName, plan.TableName, rowId);
+        }
+    }
+
+    private static bool TryUpdateFixedWidthFastPath(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        DataVoFixedWidthValue primaryKeyValue,
+        ReadOnlySpan<DataVoFixedWidthValue> assignmentValues,
+        out int affected)
+    {
+        affected = 0;
+        DataVoEngine engine = context.Engine;
+
+        if (!engine.Config.EnableZeroAllocCompiledUpdate
+            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
+            || engine.Changes.Enabled)
+        {
+            return false;
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: true);
+        if (!schema.Eligible
+            || schema.AssignOrdinals.Length != assignmentValues.Length
+            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName)
+            || !TryConvertToInt64(primaryKeyValue, out long primaryKey))
+        {
+            return false;
+        }
+
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        {
+            affected = 0;
+            return true;
+        }
+
+        if (engine.Config.StorageMode == StorageMode.Lsm)
+        {
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+            if (!context.Engine.StorageContext.TryPatchFixedWidthRow(
+                plan.TableName,
+                databaseName,
+                rowId,
+                schema.Columns,
+                schema.AssignOrdinals,
+                assignmentValues))
+            {
+                return false;
+            }
+
+            affected = 1;
+            return true;
+        }
+
+        engine.LockManager.AcquireRowWriteLock(databaseName, plan.TableName, rowId);
+        try
+        {
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            {
+                affected = 0;
+                return true;
+            }
+
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+
+            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
+            if (rowBytes is null)
+            {
+                affected = 0;
+                return true;
+            }
+
+            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
+            {
+                if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], assignmentValues[i]))
+                {
+                    return false;
+                }
+            }
+
+            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
+            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
+            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+
+            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
+            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
+
+            if (ImplicitWalCommit.IsEnabled(engine))
+            {
+                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
+            }
+
+            affected = 1;
+            return true;
+        }
+        finally
+        {
+            engine.LockManager.ReleaseRowWriteLock(databaseName, plan.TableName, rowId);
+        }
+    }
+
+    private static bool TryPatchLsmFixedWidthRow(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        UpdateFastPathSchema schema,
+        string databaseName,
+        long rowId,
+        IReadOnlyList<DataVoCompiledQueryParameter> parameters)
+    {
+        Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
+            ? stackalloc DataVoFixedWidthValue[schema.AssignOrdinals.Length]
+            : new DataVoFixedWidthValue[schema.AssignOrdinals.Length];
+
+        for (int i = 0; i < schema.AssignOrdinals.Length; i++)
+        {
+            object? newValue = FindParameterValue(parameters, schema.AssignParameterNames[i]);
+            if (newValue is null)
+            {
+                return false;
+            }
+
+            if (!DataVoFixedWidthValue.TryFromObject(newValue, out values[i]))
+            {
+                return false;
+            }
+        }
+
+        return context.Engine.StorageContext.TryPatchFixedWidthRow(
+            plan.TableName,
+            databaseName,
+            rowId,
+            schema.Columns,
+            schema.AssignOrdinals,
+            values);
+    }
+
+    private static bool TryPatchLsmFixedWidthRow(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        UpdateFastPathSchema schema,
+        string databaseName,
+        long rowId,
+        ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters)
+    {
+        Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
+            ? stackalloc DataVoFixedWidthValue[schema.AssignOrdinals.Length]
+            : new DataVoFixedWidthValue[schema.AssignOrdinals.Length];
+
+        for (int i = 0; i < schema.AssignOrdinals.Length; i++)
+        {
+            if (!TryFindParameterValue(parameters, schema.AssignParameterNames[i], out DataVoFixedWidthValue newValue))
+            {
+                return false;
+            }
+
+            values[i] = newValue;
+        }
+
+        return context.Engine.StorageContext.TryPatchFixedWidthRow(
+            plan.TableName,
+            databaseName,
+            rowId,
+            schema.Columns,
+            schema.AssignOrdinals,
+            values);
+    }
+
+    private static UpdateFastPathSchema ResolveUpdateFastPathSchema(
+        DataVoEngine engine,
+        DataVoCompiledQueryPlan plan,
+        string databaseName,
+        bool trustCachedSchema)
     {
         var key = (plan, databaseName);
+        if (trustCachedSchema && UpdateFastPathSchemaCache.TryGetValue(key, out UpdateFastPathSchema? cachedFastPath))
+        {
+            return cachedFastPath;
+        }
+
         int schemaVersion = engine.Catalog.GetTableSchemaVersion(plan.TableName, databaseName);
-        if (UpdateFastPathSchemaCache.TryGetValue(key, out UpdateFastPathSchema? cached) && cached.SchemaVersion == schemaVersion)
+        if (UpdateFastPathSchemaCache.TryGetValue(key, out UpdateFastPathSchema? cached)
+            && cached.SchemaVersion == schemaVersion)
         {
             return cached;
         }
@@ -629,6 +991,24 @@ public static class DataVoCompiledQuery
         }
 
         return null;
+    }
+
+    private static bool TryFindParameterValue(
+        ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters,
+        string name,
+        out DataVoFixedWidthValue value)
+    {
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            if (string.Equals(parameters[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = parameters[i].Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static bool TryConvertToInt64(object value, out long result)
@@ -1291,6 +1671,22 @@ public static class DataVoCompiledQuery
             {
                 throw new EvaluationException($"Constraint violation: Duplicate value '{valueText}' for unique column {columnName} in row {rowNumber}.");
             }
+        }
+    }
+
+    private static bool TryConvertToInt64(DataVoFixedWidthValue value, out long result)
+    {
+        switch (value.Type)
+        {
+            case DataVoFixedWidthValueType.Int32:
+                result = value.AsInt32();
+                return true;
+            case DataVoFixedWidthValueType.Int64:
+                result = value.AsInt64();
+                return true;
+            default:
+                result = 0;
+                return false;
         }
     }
 

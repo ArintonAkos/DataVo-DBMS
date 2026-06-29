@@ -1,0 +1,780 @@
+(base) arintonakos@akoss-mac-mini2 DataVo-DBMS % for scenario in simple-exposure complex-vip flat-crud deep-document vector-search; do
+    echo -e "\n========================================"
+    echo "FUTTATÁS: $scenario"
+    echo "========================================"
+    dotnet run --project demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj -c Release --no-build -- --scenario $scenario --format markdown
+done
+
+========================================
+FUTTATÁS: simple-exposure
+========================================
+[22:49:19] DataVo: preloading 10 000 baseline orders...
+[22:49:19] DataVo: measuring 50 000 insert+read iterations...
+[22:49:19] DataVo: 1 000/50 000 iterations, elapsed 0,0s
+[22:49:19] DataVo: 2 000/50 000 iterations, elapsed 0,0s
+[22:49:19] DataVo: 3 000/50 000 iterations, elapsed 0,1s
+[22:49:19] DataVo: 4 000/50 000 iterations, elapsed 0,1s
+[22:49:19] DataVo: 5 000/50 000 iterations, elapsed 0,1s
+[22:49:19] DataVo: 6 000/50 000 iterations, elapsed 0,1s
+[22:49:19] DataVo: 7 000/50 000 iterations, elapsed 0,1s
+[22:49:19] DataVo: 8 000/50 000 iterations, elapsed 0,2s
+[22:49:19] DataVo: 9 000/50 000 iterations, elapsed 0,2s
+[22:49:20] DataVo: 10 000/50 000 iterations, elapsed 0,2s
+[22:49:20] DataVo: 11 000/50 000 iterations, elapsed 0,2s
+[22:49:20] DataVo: 12 000/50 000 iterations, elapsed 0,2s
+[22:49:20] DataVo: 13 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 14 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 15 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 16 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 17 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 18 000/50 000 iterations, elapsed 0,3s
+[22:49:20] DataVo: 19 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 20 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 21 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 22 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 23 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 24 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 25 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 26 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 27 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 28 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 29 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 30 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 31 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 32 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 33 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 34 000/50 000 iterations, elapsed 0,4s
+[22:49:20] DataVo: 35 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 36 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 37 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 38 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 39 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 40 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 41 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 42 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 43 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 44 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 45 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 46 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 47 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 48 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 49 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DataVo: 50 000/50 000 iterations, elapsed 0,5s
+[22:49:20] DuckDB: preloading 10 000 baseline orders...
+[22:49:29] DuckDB: measuring 50 000 insert+read iterations...
+[22:49:30] DuckDB: 1 000/50 000 iterations, elapsed 1,1s
+[22:49:31] DuckDB: 2 000/50 000 iterations, elapsed 2,2s
+[22:49:32] DuckDB: 3 000/50 000 iterations, elapsed 3,2s
+[22:49:33] DuckDB: 4 000/50 000 iterations, elapsed 4,2s
+[22:49:34] DuckDB: 5 000/50 000 iterations, elapsed 5,2s
+[22:49:35] DuckDB: 6 000/50 000 iterations, elapsed 6,3s
+[22:49:36] DuckDB: 7 000/50 000 iterations, elapsed 7,4s
+[22:49:37] DuckDB: 8 000/50 000 iterations, elapsed 8,4s
+[22:49:38] DuckDB: 9 000/50 000 iterations, elapsed 9,5s
+[22:49:39] DuckDB: 10 000/50 000 iterations, elapsed 10,5s
+[22:49:40] DuckDB: 11 000/50 000 iterations, elapsed 11,6s
+[22:49:41] DuckDB: 12 000/50 000 iterations, elapsed 12,6s
+[22:49:42] DuckDB: 13 000/50 000 iterations, elapsed 13,7s
+[22:49:43] DuckDB: 14 000/50 000 iterations, elapsed 14,8s
+[22:49:44] DuckDB: 15 000/50 000 iterations, elapsed 15,8s
+[22:49:45] DuckDB: 16 000/50 000 iterations, elapsed 16,8s
+[22:49:46] DuckDB: 17 000/50 000 iterations, elapsed 17,8s
+[22:49:47] DuckDB: 18 000/50 000 iterations, elapsed 18,9s
+[22:49:48] DuckDB: 19 000/50 000 iterations, elapsed 19,9s
+[22:49:50] DuckDB: 20 000/50 000 iterations, elapsed 21,0s
+[22:49:51] DuckDB: 21 000/50 000 iterations, elapsed 22,0s
+[22:49:52] DuckDB: 22 000/50 000 iterations, elapsed 23,1s
+[22:49:53] DuckDB: 23 000/50 000 iterations, elapsed 24,1s
+[22:49:54] DuckDB: 24 000/50 000 iterations, elapsed 25,2s
+[22:49:55] DuckDB: 25 000/50 000 iterations, elapsed 26,3s
+[22:49:56] DuckDB: 26 000/50 000 iterations, elapsed 27,4s
+[22:49:57] DuckDB: 27 000/50 000 iterations, elapsed 28,4s
+[22:49:58] DuckDB: 28 000/50 000 iterations, elapsed 29,5s
+[22:49:59] DuckDB: 29 000/50 000 iterations, elapsed 30,5s
+[22:50:00] DuckDB: 30 000/50 000 iterations, elapsed 31,6s
+[22:50:01] DuckDB: 31 000/50 000 iterations, elapsed 32,7s
+[22:50:02] DuckDB: 32 000/50 000 iterations, elapsed 33,8s
+[22:50:03] DuckDB: 33 000/50 000 iterations, elapsed 34,8s
+[22:50:04] DuckDB: 34 000/50 000 iterations, elapsed 35,9s
+[22:50:05] DuckDB: 35 000/50 000 iterations, elapsed 37,0s
+[22:50:07] DuckDB: 36 000/50 000 iterations, elapsed 38,0s
+[22:50:08] DuckDB: 37 000/50 000 iterations, elapsed 39,1s
+[22:50:09] DuckDB: 38 000/50 000 iterations, elapsed 40,2s
+[22:50:10] DuckDB: 39 000/50 000 iterations, elapsed 41,2s
+[22:50:11] DuckDB: 40 000/50 000 iterations, elapsed 42,3s
+[22:50:12] DuckDB: 41 000/50 000 iterations, elapsed 43,4s
+[22:50:13] DuckDB: 42 000/50 000 iterations, elapsed 44,4s
+[22:50:14] DuckDB: 43 000/50 000 iterations, elapsed 45,5s
+[22:50:15] DuckDB: 44 000/50 000 iterations, elapsed 46,6s
+[22:50:16] DuckDB: 45 000/50 000 iterations, elapsed 47,7s
+[22:50:17] DuckDB: 46 000/50 000 iterations, elapsed 48,8s
+[22:50:18] DuckDB: 47 000/50 000 iterations, elapsed 49,9s
+[22:50:19] DuckDB: 48 000/50 000 iterations, elapsed 50,9s
+[22:50:21] DuckDB: 49 000/50 000 iterations, elapsed 52,1s
+[22:50:22] DuckDB: 50 000/50 000 iterations, elapsed 53,1s
+[22:50:22] SQLite: preloading 10 000 baseline orders...
+[22:50:22] SQLite: measuring 50 000 insert+read iterations...
+[22:50:22] SQLite: 1 000/50 000 iterations, elapsed 0,0s
+[22:50:22] SQLite: 2 000/50 000 iterations, elapsed 0,0s
+[22:50:22] SQLite: 3 000/50 000 iterations, elapsed 0,0s
+[22:50:22] SQLite: 4 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 5 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 6 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 7 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 8 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 9 000/50 000 iterations, elapsed 0,1s
+[22:50:22] SQLite: 10 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 11 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 12 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 13 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 14 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 15 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 16 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 17 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 18 000/50 000 iterations, elapsed 0,2s
+[22:50:22] SQLite: 19 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 20 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 21 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 22 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 23 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 24 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 25 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 26 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 27 000/50 000 iterations, elapsed 0,3s
+[22:50:22] SQLite: 28 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 29 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 30 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 31 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 32 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 33 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 34 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 35 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 36 000/50 000 iterations, elapsed 0,4s
+[22:50:22] SQLite: 37 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 38 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 39 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 40 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 41 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 42 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 43 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 44 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 45 000/50 000 iterations, elapsed 0,5s
+[22:50:22] SQLite: 46 000/50 000 iterations, elapsed 0,6s
+[22:50:22] SQLite: 47 000/50 000 iterations, elapsed 0,6s
+[22:50:22] SQLite: 48 000/50 000 iterations, elapsed 0,6s
+[22:50:22] SQLite: 49 000/50 000 iterations, elapsed 0,6s
+[22:50:22] SQLite: 50 000/50 000 iterations, elapsed 0,6s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 536.015 | 0.005791 | 0.028708 | 367.000 |
+| DuckDB | 53098.054 | 0.992333 | 3.040125 | 208.323 |
+| SQLite | 596.907 | 0.009125 | 0.026708 | 200.217 |
+
+========================================
+FUTTATÁS: complex-vip
+========================================
+[22:50:23] DataVo: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[22:50:23] DataVo: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[22:50:23] DataVo: 1 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 2 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 3 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 4 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 5 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 6 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 7 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 8 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 9 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 10 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 11 000/50 000 iterations, elapsed 0,0s
+[22:50:23] DataVo: 12 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 13 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 14 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 15 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 16 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 17 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 18 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 19 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 20 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 21 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 22 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 23 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 24 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 25 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 26 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 27 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 28 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 29 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 30 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 31 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 32 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 33 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 34 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 35 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 36 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 37 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 38 000/50 000 iterations, elapsed 0,1s
+[22:50:23] DataVo: 39 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 40 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 41 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 42 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 43 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 44 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 45 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 46 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 47 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 48 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 49 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DataVo: 50 000/50 000 iterations, elapsed 0,2s
+[22:50:23] DuckDB: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[22:50:24] DuckDB: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[22:50:25] DuckDB: 1 000/50 000 iterations, elapsed 0,7s
+[22:50:25] DuckDB: 2 000/50 000 iterations, elapsed 1,4s
+[22:50:26] DuckDB: 3 000/50 000 iterations, elapsed 2,0s
+[22:50:27] DuckDB: 4 000/50 000 iterations, elapsed 2,7s
+[22:50:27] DuckDB: 5 000/50 000 iterations, elapsed 3,3s
+[22:50:28] DuckDB: 6 000/50 000 iterations, elapsed 4,0s
+[22:50:28] DuckDB: 7 000/50 000 iterations, elapsed 4,6s
+[22:50:29] DuckDB: 8 000/50 000 iterations, elapsed 5,3s
+[22:50:30] DuckDB: 9 000/50 000 iterations, elapsed 6,0s
+[22:50:30] DuckDB: 10 000/50 000 iterations, elapsed 6,6s
+[22:50:31] DuckDB: 11 000/50 000 iterations, elapsed 7,3s
+[22:50:32] DuckDB: 12 000/50 000 iterations, elapsed 8,0s
+[22:50:33] DuckDB: 13 000/50 000 iterations, elapsed 8,7s
+[22:50:33] DuckDB: 14 000/50 000 iterations, elapsed 9,3s
+[22:50:34] DuckDB: 15 000/50 000 iterations, elapsed 10,0s
+[22:50:35] DuckDB: 16 000/50 000 iterations, elapsed 10,7s
+[22:50:35] DuckDB: 17 000/50 000 iterations, elapsed 11,4s
+[22:50:36] DuckDB: 18 000/50 000 iterations, elapsed 12,1s
+[22:50:37] DuckDB: 19 000/50 000 iterations, elapsed 12,8s
+[22:50:37] DuckDB: 20 000/50 000 iterations, elapsed 13,5s
+[22:50:38] DuckDB: 21 000/50 000 iterations, elapsed 14,1s
+[22:50:39] DuckDB: 22 000/50 000 iterations, elapsed 14,8s
+[22:50:39] DuckDB: 23 000/50 000 iterations, elapsed 15,6s
+[22:50:40] DuckDB: 24 000/50 000 iterations, elapsed 16,3s
+[22:50:41] DuckDB: 25 000/50 000 iterations, elapsed 17,0s
+[22:50:42] DuckDB: 26 000/50 000 iterations, elapsed 17,7s
+[22:50:42] DuckDB: 27 000/50 000 iterations, elapsed 18,4s
+[22:50:43] DuckDB: 28 000/50 000 iterations, elapsed 19,1s
+[22:50:44] DuckDB: 29 000/50 000 iterations, elapsed 19,9s
+[22:50:44] DuckDB: 30 000/50 000 iterations, elapsed 20,6s
+[22:50:45] DuckDB: 31 000/50 000 iterations, elapsed 21,3s
+[22:50:46] DuckDB: 32 000/50 000 iterations, elapsed 22,0s
+[22:50:47] DuckDB: 33 000/50 000 iterations, elapsed 22,7s
+[22:50:47] DuckDB: 34 000/50 000 iterations, elapsed 23,5s
+[22:50:48] DuckDB: 35 000/50 000 iterations, elapsed 24,2s
+[22:50:49] DuckDB: 36 000/50 000 iterations, elapsed 24,9s
+[22:50:50] DuckDB: 37 000/50 000 iterations, elapsed 25,7s
+[22:50:50] DuckDB: 38 000/50 000 iterations, elapsed 26,4s
+[22:50:51] DuckDB: 39 000/50 000 iterations, elapsed 27,2s
+[22:50:52] DuckDB: 40 000/50 000 iterations, elapsed 27,9s
+[22:50:52] DuckDB: 41 000/50 000 iterations, elapsed 28,6s
+[22:50:53] DuckDB: 42 000/50 000 iterations, elapsed 29,4s
+[22:50:54] DuckDB: 43 000/50 000 iterations, elapsed 30,1s
+[22:50:55] DuckDB: 44 000/50 000 iterations, elapsed 30,9s
+[22:50:56] DuckDB: 45 000/50 000 iterations, elapsed 31,7s
+[22:50:56] DuckDB: 46 000/50 000 iterations, elapsed 32,4s
+[22:50:57] DuckDB: 47 000/50 000 iterations, elapsed 33,2s
+[22:50:58] DuckDB: 48 000/50 000 iterations, elapsed 34,0s
+[22:50:59] DuckDB: 49 000/50 000 iterations, elapsed 34,7s
+[22:50:59] DuckDB: 50 000/50 000 iterations, elapsed 35,5s
+[22:50:59] SQLite: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[22:50:59] SQLite: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[22:51:00] SQLite: 1 000/50 000 iterations, elapsed 0,7s
+[22:51:01] SQLite: 2 000/50 000 iterations, elapsed 1,5s
+[22:51:02] SQLite: 3 000/50 000 iterations, elapsed 2,3s
+[22:51:03] SQLite: 4 000/50 000 iterations, elapsed 3,2s
+[22:51:04] SQLite: 5 000/50 000 iterations, elapsed 4,2s
+[22:51:05] SQLite: 6 000/50 000 iterations, elapsed 5,3s
+[22:51:06] SQLite: 7 000/50 000 iterations, elapsed 6,4s
+[22:51:07] SQLite: 8 000/50 000 iterations, elapsed 7,6s
+[22:51:08] SQLite: 9 000/50 000 iterations, elapsed 8,9s
+[22:51:10] SQLite: 10 000/50 000 iterations, elapsed 10,3s
+[22:51:11] SQLite: 11 000/50 000 iterations, elapsed 11,7s
+[22:51:13] SQLite: 12 000/50 000 iterations, elapsed 13,2s
+[22:51:14] SQLite: 13 000/50 000 iterations, elapsed 14,8s
+[22:51:16] SQLite: 14 000/50 000 iterations, elapsed 16,5s
+[22:51:18] SQLite: 15 000/50 000 iterations, elapsed 18,2s
+[22:51:19] SQLite: 16 000/50 000 iterations, elapsed 20,1s
+[22:51:21] SQLite: 17 000/50 000 iterations, elapsed 22,0s
+[22:51:23] SQLite: 18 000/50 000 iterations, elapsed 24,0s
+[22:51:25] SQLite: 19 000/50 000 iterations, elapsed 26,0s
+[22:51:28] SQLite: 20 000/50 000 iterations, elapsed 28,1s
+[22:51:30] SQLite: 21 000/50 000 iterations, elapsed 30,3s
+[22:51:32] SQLite: 22 000/50 000 iterations, elapsed 32,7s
+[22:51:34] SQLite: 23 000/50 000 iterations, elapsed 35,0s
+[22:51:37] SQLite: 24 000/50 000 iterations, elapsed 37,4s
+[22:51:39] SQLite: 25 000/50 000 iterations, elapsed 39,9s
+[22:51:42] SQLite: 26 000/50 000 iterations, elapsed 42,5s
+[22:51:45] SQLite: 27 000/50 000 iterations, elapsed 45,2s
+[22:51:47] SQLite: 28 000/50 000 iterations, elapsed 47,9s
+[22:51:50] SQLite: 29 000/50 000 iterations, elapsed 50,7s
+[22:51:53] SQLite: 30 000/50 000 iterations, elapsed 53,6s
+[22:51:56] SQLite: 31 000/50 000 iterations, elapsed 56,5s
+[22:51:59] SQLite: 32 000/50 000 iterations, elapsed 59,5s
+[22:52:02] SQLite: 33 000/50 000 iterations, elapsed 62,6s
+[22:52:05] SQLite: 34 000/50 000 iterations, elapsed 65,9s
+[22:52:08] SQLite: 35 000/50 000 iterations, elapsed 69,1s
+[22:52:12] SQLite: 36 000/50 000 iterations, elapsed 72,5s
+[22:52:15] SQLite: 37 000/50 000 iterations, elapsed 75,9s
+[22:52:19] SQLite: 38 000/50 000 iterations, elapsed 79,4s
+[22:52:22] SQLite: 39 000/50 000 iterations, elapsed 83,0s
+[22:52:26] SQLite: 40 000/50 000 iterations, elapsed 86,7s
+[22:52:30] SQLite: 41 000/50 000 iterations, elapsed 90,4s
+[22:52:34] SQLite: 42 000/50 000 iterations, elapsed 94,3s
+[22:52:37] SQLite: 43 000/50 000 iterations, elapsed 98,1s
+[22:52:41] SQLite: 44 000/50 000 iterations, elapsed 102,1s
+[22:52:46] SQLite: 45 000/50 000 iterations, elapsed 106,2s
+[22:52:50] SQLite: 46 000/50 000 iterations, elapsed 110,3s
+[22:52:54] SQLite: 47 000/50 000 iterations, elapsed 114,5s
+[22:52:58] SQLite: 48 000/50 000 iterations, elapsed 118,7s
+[22:53:02] SQLite: 49 000/50 000 iterations, elapsed 123,1s
+[22:53:07] SQLite: 50 000/50 000 iterations, elapsed 127,5s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 199.009 | 0.002917 | 0.006625 | 108.092 |
+| DuckDB | 35470.675 | 0.670250 | 1.173042 | 131.254 |
+| SQLite | 127491.325 | 2.535875 | 4.429208 | 115.618 |
+
+========================================
+FUTTATÁS: flat-crud
+========================================
+[22:53:07] DataVo: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[22:53:07] DataVo: inserted 1 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 2 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 3 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 4 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 5 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 6 000/50 000, elapsed 0,0s
+[22:53:07] DataVo: inserted 7 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 8 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 9 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 10 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 11 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 12 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 13 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 14 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 15 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 16 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 17 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 18 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 19 000/50 000, elapsed 0,1s
+[22:53:07] DataVo: inserted 20 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 21 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 22 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 23 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 24 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 25 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 26 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 27 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 28 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 29 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 30 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 31 000/50 000, elapsed 0,2s
+[22:53:07] DataVo: inserted 32 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 33 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 34 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 35 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 36 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 37 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 38 000/50 000, elapsed 0,3s
+[22:53:07] DataVo: inserted 39 000/50 000, elapsed 0,3s
+[22:53:08] DataVo: inserted 40 000/50 000, elapsed 0,3s
+[22:53:08] DataVo: inserted 41 000/50 000, elapsed 0,3s
+[22:53:08] DataVo: inserted 42 000/50 000, elapsed 0,3s
+[22:53:08] DataVo: inserted 43 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 44 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 45 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 46 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 47 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 48 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 49 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: inserted 50 000/50 000, elapsed 0,4s
+[22:53:08] DataVo: insert phase complete in 0,4s; starting 50 000 lookups...
+[22:53:08] DataVo: 1 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 2 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 3 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 4 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 5 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 6 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 7 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 8 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 9 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 10 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 11 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 12 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 13 000/50 000 lookups, elapsed 0,4s
+[22:53:08] DataVo: 14 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 15 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 16 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 17 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 18 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 19 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 20 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 21 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 22 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 23 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 24 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 25 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 26 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 27 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 28 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 29 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 30 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 31 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 32 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 33 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 34 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 35 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 36 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 37 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 38 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 39 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 40 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 41 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 42 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 43 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 44 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 45 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 46 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 47 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 48 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 49 000/50 000 lookups, elapsed 0,5s
+[22:53:08] DataVo: 50 000/50 000 lookups, elapsed 0,5s
+[22:53:08] LiteDB: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[22:53:08] LiteDB: inserted 1 000/50 000, elapsed 0,0s
+[22:53:08] LiteDB: inserted 2 000/50 000, elapsed 0,0s
+[22:53:08] LiteDB: inserted 3 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 4 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 5 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 6 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 7 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 8 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 9 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 10 000/50 000, elapsed 0,1s
+[22:53:08] LiteDB: inserted 11 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 12 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 13 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 14 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 15 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 16 000/50 000, elapsed 0,2s
+[22:53:08] LiteDB: inserted 17 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 18 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 19 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 20 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 21 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 22 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 23 000/50 000, elapsed 0,3s
+[22:53:08] LiteDB: inserted 24 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 25 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 26 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 27 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 28 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 29 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 30 000/50 000, elapsed 0,4s
+[22:53:08] LiteDB: inserted 31 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 32 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 33 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 34 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 35 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 36 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 37 000/50 000, elapsed 0,5s
+[22:53:08] LiteDB: inserted 38 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 39 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 40 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 41 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 42 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 43 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 44 000/50 000, elapsed 0,6s
+[22:53:08] LiteDB: inserted 45 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: inserted 46 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: inserted 47 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: inserted 48 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: inserted 49 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: inserted 50 000/50 000, elapsed 0,7s
+[22:53:08] LiteDB: insert phase complete in 0,7s; starting 50 000 lookups...
+[22:53:09] LiteDB: 1 000/50 000 lookups, elapsed 0,8s
+[22:53:09] LiteDB: 2 000/50 000 lookups, elapsed 0,8s
+[22:53:09] LiteDB: 3 000/50 000 lookups, elapsed 0,9s
+[22:53:09] LiteDB: 4 000/50 000 lookups, elapsed 0,9s
+[22:53:09] LiteDB: 5 000/50 000 lookups, elapsed 0,9s
+[22:53:09] LiteDB: 6 000/50 000 lookups, elapsed 1,0s
+[22:53:09] LiteDB: 7 000/50 000 lookups, elapsed 1,0s
+[22:53:09] LiteDB: 8 000/50 000 lookups, elapsed 1,0s
+[22:53:09] LiteDB: 9 000/50 000 lookups, elapsed 1,1s
+[22:53:09] LiteDB: 10 000/50 000 lookups, elapsed 1,1s
+[22:53:09] LiteDB: 11 000/50 000 lookups, elapsed 1,2s
+[22:53:09] LiteDB: 12 000/50 000 lookups, elapsed 1,2s
+[22:53:09] LiteDB: 13 000/50 000 lookups, elapsed 1,2s
+[22:53:09] LiteDB: 14 000/50 000 lookups, elapsed 1,3s
+[22:53:09] LiteDB: 15 000/50 000 lookups, elapsed 1,3s
+[22:53:09] LiteDB: 16 000/50 000 lookups, elapsed 1,4s
+[22:53:09] LiteDB: 17 000/50 000 lookups, elapsed 1,4s
+[22:53:09] LiteDB: 18 000/50 000 lookups, elapsed 1,4s
+[22:53:09] LiteDB: 19 000/50 000 lookups, elapsed 1,5s
+[22:53:09] LiteDB: 20 000/50 000 lookups, elapsed 1,5s
+[22:53:09] LiteDB: 21 000/50 000 lookups, elapsed 1,5s
+[22:53:09] LiteDB: 22 000/50 000 lookups, elapsed 1,6s
+[22:53:09] LiteDB: 23 000/50 000 lookups, elapsed 1,6s
+[22:53:09] LiteDB: 24 000/50 000 lookups, elapsed 1,6s
+[22:53:09] LiteDB: 25 000/50 000 lookups, elapsed 1,7s
+[22:53:09] LiteDB: 26 000/50 000 lookups, elapsed 1,7s
+[22:53:09] LiteDB: 27 000/50 000 lookups, elapsed 1,8s
+[22:53:10] LiteDB: 28 000/50 000 lookups, elapsed 1,8s
+[22:53:10] LiteDB: 29 000/50 000 lookups, elapsed 1,8s
+[22:53:10] LiteDB: 30 000/50 000 lookups, elapsed 1,8s
+[22:53:10] LiteDB: 31 000/50 000 lookups, elapsed 1,8s
+[22:53:10] LiteDB: 32 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 33 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 34 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 35 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 36 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 37 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 38 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 39 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 40 000/50 000 lookups, elapsed 1,9s
+[22:53:10] LiteDB: 41 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 42 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 43 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 44 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 45 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 46 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 47 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 48 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 49 000/50 000 lookups, elapsed 2,0s
+[22:53:10] LiteDB: 50 000/50 000 lookups, elapsed 2,0s
+[22:53:10] SQLite: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[22:53:10] SQLite: inserted 1 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 2 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 3 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 4 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 5 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 6 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 7 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 8 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 9 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 10 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 11 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 12 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 13 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 14 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 15 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 16 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 17 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 18 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 19 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 20 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 21 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 22 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 23 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 24 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 25 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 26 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 27 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 28 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 29 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 30 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 31 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 32 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 33 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 34 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 35 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 36 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 37 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 38 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 39 000/50 000, elapsed 0,0s
+[22:53:10] SQLite: inserted 40 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 41 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 42 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 43 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 44 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 45 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 46 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 47 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 48 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 49 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: inserted 50 000/50 000, elapsed 0,1s
+[22:53:10] SQLite: insert phase complete in 0,1s; starting 50 000 lookups...
+[22:53:10] SQLite: 1 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 2 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 3 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 4 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 5 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 6 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 7 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 8 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 9 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 10 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 11 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 12 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 13 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 14 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 15 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 16 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 17 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 18 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 19 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 20 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 21 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 22 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 23 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 24 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 25 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 26 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 27 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 28 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 29 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 30 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 31 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 32 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 33 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 34 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 35 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 36 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 37 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 38 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 39 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 40 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 41 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 42 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 43 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 44 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 45 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 46 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 47 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 48 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 49 000/50 000 lookups, elapsed 0,1s
+[22:53:10] SQLite: 50 000/50 000 lookups, elapsed 0,1s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Insert GC Allocated (MB) | Lookup GC Allocated (MB) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|---:|
+| DataVo | 517.490 | 0.001625 | 0.002792 | 93.962 | 6.409 | 100.371 |
+| LiteDB | 2040.641 | 0.031959 | 0.050042 | 642.628 | 1843.788 | 2486.416 |
+| SQLite | 117.247 | 0.001000 | 0.001334 | 31.291 | 30.829 | 62.121 |
+
+========================================
+FUTTATÁS: deep-document
+========================================
+[22:53:10] DataVo: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[22:53:10] DataVo: saved 1 000/5 000, elapsed 0,1s
+[22:53:10] DataVo: saved 2 000/5 000, elapsed 0,1s
+[22:53:10] DataVo: saved 3 000/5 000, elapsed 0,2s
+[22:53:11] DataVo: saved 4 000/5 000, elapsed 0,3s
+[22:53:11] DataVo: saved 5 000/5 000, elapsed 0,4s
+[22:53:11] DataVo: save phase complete in 0,4s; starting 5 000 loads...
+[22:53:11] DataVo: 1 000/5 000 loads, elapsed 0,5s
+[22:53:11] DataVo: 2 000/5 000 loads, elapsed 0,5s
+[22:53:11] DataVo: 3 000/5 000 loads, elapsed 0,5s
+[22:53:11] DataVo: 4 000/5 000 loads, elapsed 0,6s
+[22:53:11] DataVo: 5 000/5 000 loads, elapsed 0,6s
+[22:53:11] LiteDB: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[22:53:11] LiteDB: saved 1 000/5 000, elapsed 0,0s
+[22:53:11] LiteDB: saved 2 000/5 000, elapsed 0,1s
+[22:53:11] LiteDB: saved 3 000/5 000, elapsed 0,1s
+[22:53:11] LiteDB: saved 4 000/5 000, elapsed 0,1s
+[22:53:11] LiteDB: saved 5 000/5 000, elapsed 0,2s
+[22:53:11] LiteDB: save phase complete in 0,2s; starting 5 000 loads...
+[22:53:11] LiteDB: 1 000/5 000 loads, elapsed 0,2s
+[22:53:11] LiteDB: 2 000/5 000 loads, elapsed 0,3s
+[22:53:11] LiteDB: 3 000/5 000 loads, elapsed 0,3s
+[22:53:11] LiteDB: 4 000/5 000 loads, elapsed 0,4s
+[22:53:11] LiteDB: 5 000/5 000 loads, elapsed 0,4s
+[22:53:11] SQLite: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[22:53:11] SQLite: saved 1 000/5 000, elapsed 0,0s
+[22:53:11] SQLite: saved 2 000/5 000, elapsed 0,0s
+[22:53:11] SQLite: saved 3 000/5 000, elapsed 0,1s
+[22:53:11] SQLite: saved 4 000/5 000, elapsed 0,1s
+[22:53:11] SQLite: saved 5 000/5 000, elapsed 0,1s
+[22:53:11] SQLite: save phase complete in 0,1s; starting 5 000 loads...
+[22:53:11] SQLite: 1 000/5 000 loads, elapsed 0,1s
+[22:53:11] SQLite: 2 000/5 000 loads, elapsed 0,1s
+[22:53:11] SQLite: 3 000/5 000 loads, elapsed 0,1s
+[22:53:11] SQLite: 4 000/5 000 loads, elapsed 0,1s
+[22:53:11] SQLite: 5 000/5 000 loads, elapsed 0,1s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 630.908 | 0.042458 | 0.059208 | 202.382 |
+| LiteDB | 436.276 | 0.046792 | 0.143208 | 332.295 |
+| SQLite | 125.724 | 0.006750 | 0.008916 | 46.050 |
+
+========================================
+FUTTATÁS: vector-search
+========================================
+[22:53:12] DataVo: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[28/06/26 22:53:12:410] New database VectorBenchmark successfully created!
+[28/06/26 22:53:12:415] New table Vectors successfully created!
+[28/06/26 22:53:12:418] New index file vidx successfully created!
+[22:53:19] DataVo: inserted 1 000/10 000, elapsed 7,4s
+[22:53:31] DataVo: inserted 2 000/10 000, elapsed 18,8s
+[22:53:43] DataVo: inserted 3 000/10 000, elapsed 30,9s
+[22:53:56] DataVo: inserted 4 000/10 000, elapsed 44,1s
+[22:54:10] DataVo: inserted 5 000/10 000, elapsed 58,0s
+[22:54:25] DataVo: inserted 6 000/10 000, elapsed 72,7s
+[22:54:40] DataVo: inserted 7 000/10 000, elapsed 88,0s
+[22:54:56] DataVo: inserted 8 000/10 000, elapsed 104,1s
+[22:55:13] DataVo: inserted 9 000/10 000, elapsed 120,7s
+[22:55:30] DataVo: inserted 10 000/10 000, elapsed 137,8s
+[22:55:30] DataVo: insert phase complete in 137,8s; starting 100 top-10 queries...
+[22:55:30] DataVo: 10/100 queries, elapsed 137,8s
+[22:55:30] DataVo: 20/100 queries, elapsed 137,9s
+[22:55:30] DataVo: 30/100 queries, elapsed 137,9s
+[22:55:30] DataVo: 40/100 queries, elapsed 137,9s
+[22:55:30] DataVo: 50/100 queries, elapsed 138,0s
+[22:55:30] DataVo: 60/100 queries, elapsed 138,0s
+[22:55:30] DataVo: 70/100 queries, elapsed 138,1s
+[22:55:30] DataVo: 80/100 queries, elapsed 138,1s
+[22:55:30] DataVo: 90/100 queries, elapsed 138,1s
+[22:55:30] DataVo: 100/100 queries, elapsed 138,2s
+[22:55:30] DataVo-Flat: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[28/06/26 22:55:30:713] New database VectorBenchmark successfully created!
+[28/06/26 22:55:30:714] New table Vectors successfully created!
+[28/06/26 22:55:30:715] New index file vidx successfully created!
+[22:55:30] DataVo-Flat: inserted 1 000/10 000, elapsed 0,0s
+[22:55:30] DataVo-Flat: inserted 2 000/10 000, elapsed 0,0s
+[22:55:30] DataVo-Flat: inserted 3 000/10 000, elapsed 0,0s
+[22:55:30] DataVo-Flat: inserted 4 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 5 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 6 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 7 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 8 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 9 000/10 000, elapsed 0,1s
+[22:55:30] DataVo-Flat: inserted 10 000/10 000, elapsed 0,2s
+[22:55:30] DataVo-Flat: insert phase complete in 0,2s; starting 100 top-10 queries...
+[22:55:30] DataVo-Flat: 10/100 queries, elapsed 0,2s
+[22:55:30] DataVo-Flat: 20/100 queries, elapsed 0,2s
+[22:55:30] DataVo-Flat: 30/100 queries, elapsed 0,2s
+[22:55:30] DataVo-Flat: 40/100 queries, elapsed 0,3s
+[22:55:30] DataVo-Flat: 50/100 queries, elapsed 0,3s
+[22:55:31] DataVo-Flat: 60/100 queries, elapsed 0,3s
+[22:55:31] DataVo-Flat: 70/100 queries, elapsed 0,3s
+[22:55:31] DataVo-Flat: 80/100 queries, elapsed 0,3s
+[22:55:31] DataVo-Flat: 90/100 queries, elapsed 0,4s
+[22:55:31] DataVo-Flat: 100/100 queries, elapsed 0,4s
+[22:55:31] LiteDB: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[22:55:31] LiteDB: inserted 1 000/10 000, elapsed 0,3s
+[22:55:31] LiteDB: inserted 2 000/10 000, elapsed 0,6s
+[22:55:31] LiteDB: inserted 3 000/10 000, elapsed 0,7s
+[22:55:31] LiteDB: inserted 4 000/10 000, elapsed 0,7s
+[22:55:32] LiteDB: inserted 5 000/10 000, elapsed 0,8s
+[22:55:32] LiteDB: inserted 6 000/10 000, elapsed 0,9s
+[22:55:32] LiteDB: inserted 7 000/10 000, elapsed 1,0s
+[22:55:32] LiteDB: inserted 8 000/10 000, elapsed 1,1s
+[22:55:32] LiteDB: inserted 9 000/10 000, elapsed 1,2s
+[22:55:32] LiteDB: inserted 10 000/10 000, elapsed 1,3s
+[22:55:32] LiteDB: insert phase complete in 1,4s; starting 100 top-10 queries...
+[22:55:41] LiteDB: 10/100 queries, elapsed 10,1s
+[22:55:49] LiteDB: 20/100 queries, elapsed 18,5s
+[22:55:58] LiteDB: 30/100 queries, elapsed 27,0s
+[22:56:06] LiteDB: 40/100 queries, elapsed 35,4s
+[22:56:14] LiteDB: 50/100 queries, elapsed 43,8s
+[22:56:23] LiteDB: 60/100 queries, elapsed 52,2s
+[22:56:31] LiteDB: 70/100 queries, elapsed 60,5s
+[22:56:40] LiteDB: 80/100 queries, elapsed 68,9s
+[22:56:48] LiteDB: 90/100 queries, elapsed 77,3s
+[22:56:56] LiteDB: 100/100 queries, elapsed 85,8s
+[22:56:56] SQLite: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[22:56:57] SQLite: unavailable — sqlite-vec extension not available: set SQLITE_VEC_PATH to a vec0 loadable library. (reported as n/a)
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 138152.530 | 3.394458 | 3.891083 | 223.389 |
+| DataVo-Flat | 370.050 | 1.990042 | 3.772417 | 76.462 |
+| LiteDB | 85782.992 | 839.915625 | 875.634167 | 208915.034 |
+| SQLite | NaN | NaN | NaN | NaN |
