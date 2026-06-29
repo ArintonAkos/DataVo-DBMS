@@ -192,16 +192,15 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         TableState state = GetOrCreateTable(databaseName, tableName);
         lock (state.SyncRoot)
         {
-            var batch = new List<LsmBatchPutEntry>(operations.Count);
-            var patchedRows = new List<(long RowId, byte[] Value, ulong Seqno)>(operations.Count);
+            if (ordinals.Length > 2)
+            {
+                throw new NotSupportedException("LSM fixed-width batch patch currently supports up to two assignments.");
+            }
+
+            var batch = new List<LsmBatchRowPutEntry>(operations.Count);
 
             foreach (FixedWidthPatchOperation operation in operations)
             {
-                if (operation.Values.Length != ordinals.Length)
-                {
-                    throw new ArgumentException("Patch operation values must match patch ordinals.", nameof(operations));
-                }
-
                 if (!state.LatestRows.TryGetValue(operation.RowId, out LatestRowVersion latest) || latest.IsTombstone)
                 {
                     continue;
@@ -210,25 +209,23 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 byte[] rowBytes = latest.Value;
                 for (int i = 0; i < ordinals.Length; i++)
                 {
-                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.Values[i]))
+                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
                     {
                         throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
                     }
                 }
 
                 ulong seqno = state.NextSeqno++;
-                byte[] userKey = EncodeRowId(operation.RowId);
-                batch.Add(new LsmBatchPutEntry(userKey, seqno, rowBytes));
-                patchedRows.Add((operation.RowId, rowBytes, seqno));
+                batch.Add(new LsmBatchRowPutEntry(operation.RowId, seqno, rowBytes));
             }
 
-            state.Table.PutBatch(batch);
-            foreach ((long rowId, byte[] value, ulong seqno) in patchedRows)
+            state.Table.PutRowIdBatch(batch);
+            foreach (LsmBatchRowPutEntry entry in batch)
             {
-                state.LatestRows[rowId] = new LatestRowVersion(value, IsTombstone: false, seqno);
+                state.LatestRows[entry.RowId] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
             }
 
-            return patchedRows.Count;
+            return batch.Count;
         }
     }
 

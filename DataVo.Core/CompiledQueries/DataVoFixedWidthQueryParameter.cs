@@ -96,3 +96,11 @@ public readonly record struct DataVoFixedWidthValue(DataVoFixedWidthValueType Ty
 /// so primitive update loops avoid boxing.
 /// </summary>
 public readonly record struct DataVoFixedWidthQueryParameter(string Name, DataVoFixedWidthValue Value);
+
+/// <summary>
+/// A fixed-width primary-key update batch entry carrying the benchmark hot-path shape without per-row arrays.
+/// </summary>
+public readonly record struct DataVoFixedWidthUpdateBatchEntry(
+    DataVoFixedWidthValue PrimaryKey,
+    DataVoFixedWidthValue Value0,
+    DataVoFixedWidthValue Value1);

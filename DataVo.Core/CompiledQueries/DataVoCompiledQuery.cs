@@ -507,11 +507,11 @@ public static class DataVoCompiledQuery
     public static int UpdateFixedWidthByPrimaryKeyBatch(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
-        ReadOnlySpan<DataVoFixedWidthValue> primaryKeyValues,
-        ReadOnlySpan<DataVoFixedWidthValue> assignmentValues)
+        IReadOnlyList<DataVoFixedWidthUpdateBatchEntry> updates)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(updates);
 
         if (plan.Kind != DataVoCompiledQueryKind.Update)
         {
@@ -531,18 +531,19 @@ public static class DataVoCompiledQuery
         int assignmentWidth = schema.AssignOrdinals.Length;
         if (!schema.Eligible
             || assignmentWidth != plan.Assignments.Count
-            || assignmentValues.Length != checked(primaryKeyValues.Length * assignmentWidth)
+            || assignmentWidth > 2
             || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
         {
             throw new NotSupportedException("Batched fixed-width primary-key updates require an eligible integer primary-key update plan.");
         }
 
-        var operations = new List<FixedWidthPatchOperation>(primaryKeyValues.Length);
-        for (int i = 0; i < primaryKeyValues.Length; i++)
+        var operations = new List<FixedWidthPatchOperation>(updates.Count);
+        for (int i = 0; i < updates.Count; i++)
         {
-            if (!TryConvertToInt64(primaryKeyValues[i], out long primaryKey))
+            DataVoFixedWidthUpdateBatchEntry update = updates[i];
+            if (!TryConvertToInt64(update.PrimaryKey, out long primaryKey))
             {
-                throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(primaryKeyValues));
+                throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(updates));
             }
 
             if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
@@ -551,10 +552,7 @@ public static class DataVoCompiledQuery
             }
 
             MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-
-            var values = new DataVoFixedWidthValue[assignmentWidth];
-            assignmentValues.Slice(i * assignmentWidth, assignmentWidth).CopyTo(values);
-            operations.Add(new FixedWidthPatchOperation(rowId, values));
+            operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
         }
 
         return engine.StorageContext.TryPatchFixedWidthRows(
