@@ -7,6 +7,8 @@ public readonly record struct LsmFlushResult(
     string FilePath,
     byte[] Bytes);
 
+internal readonly record struct LsmBatchPutEntry(byte[] UserKey, ulong Seqno, byte[] Value);
+
 /// <summary>Coordinates one active MemTable generation with SSTable flushes and manifest registration.</summary>
 public sealed class LsmTable : IDisposable
 {
@@ -92,6 +94,35 @@ public sealed class LsmTable : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             _walWriter?.AppendMutation(userKey, seqno, LsmValueType.Put, value);
             _active.Put(userKey, seqno, LsmValueType.Put, value);
+        }
+    }
+
+    internal void PutBatch(IReadOnlyList<LsmBatchPutEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (entries.Count == 0)
+            {
+                return;
+            }
+
+            if (_walWriter is not null)
+            {
+                foreach (LsmBatchPutEntry entry in entries)
+                {
+                    _walWriter.AppendMutationBuffered(entry.UserKey, entry.Seqno, LsmValueType.Put, entry.Value);
+                }
+
+                _walWriter.FlushBufferedMutations();
+            }
+
+            foreach (LsmBatchPutEntry entry in entries)
+            {
+                _active.Put(entry.UserKey, entry.Seqno, LsmValueType.Put, entry.Value);
+            }
         }
     }
 

@@ -113,6 +113,17 @@ internal sealed class WalFileStore
         AppendSingleFrame(frame, flushToDisk);
     }
 
+    internal void FlushToDisk()
+    {
+        ExecuteLocked(() =>
+        {
+            EnsureDirectoryExists();
+            using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
+            RandomAccess.FlushToDisk(lease.Handle);
+            Interlocked.Increment(ref _durableFlushCount);
+        });
+    }
+
     /// <summary>
     /// Appends committed binary WAL frames as one contiguous durable write.
     /// </summary>
