@@ -63,6 +63,36 @@ public sealed class DiskCrudEngineTests
     }
 
     [Fact]
+    public void DataVoLsmVariant_RunsExplicitUpdateBatch()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-update-batch-test-{Guid.NewGuid():N}");
+        using var engine = new DataVoDiskCrudEngine(
+            durable: false,
+            storageMode: DataVoDiskCrudStorageMode.Lsm);
+
+        try
+        {
+            engine.Initialize(root);
+            engine.BeginInsertBatch();
+            engine.Insert(new FlatRecord(1, "one", 10, 1.5d));
+            engine.Insert(new FlatRecord(2, "two", 20, 2.5d));
+            engine.CompleteInsertBatch();
+
+            engine.BeginUpdateBatch();
+            engine.Update(id: 1, newValue: 99, newScore: 9.5d);
+            engine.Update(id: 2, newValue: 88, newScore: 8.5d);
+            engine.CompleteUpdateBatch();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void DataVoLsmVariant_UpdateAllocationsStayBelowOneHundredBytesPerOperation()
     {
         const int records = 1_024;

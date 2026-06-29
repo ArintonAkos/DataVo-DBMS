@@ -177,6 +177,61 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
     }
 
+    int IFixedWidthPatchStorageEngine.TryPatchFixedWidthRows(
+        string databaseName,
+        string tableName,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        IReadOnlyList<FixedWidthPatchOperation> operations)
+    {
+        if (operations.Count == 0)
+        {
+            return 0;
+        }
+
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        lock (state.SyncRoot)
+        {
+            var batch = new List<LsmBatchPutEntry>(operations.Count);
+            var patchedRows = new List<(long RowId, byte[] Value, ulong Seqno)>(operations.Count);
+
+            foreach (FixedWidthPatchOperation operation in operations)
+            {
+                if (operation.Values.Length != ordinals.Length)
+                {
+                    throw new ArgumentException("Patch operation values must match patch ordinals.", nameof(operations));
+                }
+
+                if (!state.LatestRows.TryGetValue(operation.RowId, out LatestRowVersion latest) || latest.IsTombstone)
+                {
+                    continue;
+                }
+
+                byte[] rowBytes = latest.Value;
+                for (int i = 0; i < ordinals.Length; i++)
+                {
+                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.Values[i]))
+                    {
+                        throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
+                    }
+                }
+
+                ulong seqno = state.NextSeqno++;
+                byte[] userKey = EncodeRowId(operation.RowId);
+                batch.Add(new LsmBatchPutEntry(userKey, seqno, rowBytes));
+                patchedRows.Add((operation.RowId, rowBytes, seqno));
+            }
+
+            state.Table.PutBatch(batch);
+            foreach ((long rowId, byte[] value, ulong seqno) in patchedRows)
+            {
+                state.LatestRows[rowId] = new LatestRowVersion(value, IsTombstone: false, seqno);
+            }
+
+            return patchedRows.Count;
+        }
+    }
+
     /// <inheritdoc />
     public void DropTable(string databaseName, string tableName)
     {

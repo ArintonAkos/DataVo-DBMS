@@ -36,6 +36,14 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
         ReadOnlySpan<DataVoFixedWidthValue> values) =>
         ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
 
+    int IFixedWidthPatchStorageEngine.TryPatchFixedWidthRows(
+        string databaseName,
+        string tableName,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        IReadOnlyList<FixedWidthPatchOperation> operations) =>
+        ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRows(databaseName, tableName, columns, ordinals, operations);
+
     public void Dispose()
     {
         if (_inner is IDisposable disposable)
