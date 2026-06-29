@@ -4,6 +4,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.StorageEngine.Backends;
 using DataVo.Core.StorageEngine.Backends.Abstractions;
+using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Memory;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
@@ -81,7 +82,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
             StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data", config.SyncDiskWrites, config.IoSchedulerMode),
-            StorageMode.Lsm => new LsmStorageBackend(config.DiskStoragePath ?? "./datavo_lsm_data"),
+            StorageMode.Lsm => new LsmStorageBackend(
+                config.DiskStoragePath ?? "./datavo_lsm_data",
+                config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer),
             StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
             _ => throw new ArgumentOutOfRangeException()

@@ -337,6 +337,13 @@ public class DataVoConfig
     public bool SyncDiskWrites { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether LSM WAL appends synchronously force bytes to stable storage
+    /// before the write returns. Only relevant when <see cref="StorageMode"/> is <see cref="StorageMode.Lsm"/>.
+    /// Defaults to <see langword="true"/> for production ACID durability.
+    /// </summary>
+    public bool LsmStrictFsync { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the disk I/O scheduler mode. Phase 1 enables only pooled file handles and
     /// positioned I/O; group commit is reserved for the WAL-as-commit-point implementation.
     /// </summary>
