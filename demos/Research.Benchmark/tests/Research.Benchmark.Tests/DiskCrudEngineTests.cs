@@ -139,6 +139,54 @@ public sealed class DiskCrudEngineTests
         }
     }
 
+    [Fact]
+    public void DataVoLsmVariant_BatchedUpdateAllocationsStayBelowNineHundredBytesPerOperation()
+    {
+        const int records = 4_096;
+        string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-batch-alloc-test-{Guid.NewGuid():N}");
+        using var engine = new DataVoDiskCrudEngine(
+            durable: false,
+            storageMode: DataVoDiskCrudStorageMode.Lsm);
+
+        try
+        {
+            engine.Initialize(root);
+            engine.BeginInsertBatch();
+            for (int i = 1; i <= records; i++)
+            {
+                engine.Insert(new FlatRecord(i, $"r{i}", i, i * 0.5d));
+            }
+
+            engine.CompleteInsertBatch();
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            engine.BeginUpdateBatch();
+            for (int i = 1; i <= records; i++)
+            {
+                engine.Update(id: i, newValue: records - i, newScore: i * 1.25d);
+            }
+
+            engine.CompleteUpdateBatch();
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            double bytesPerOperation = (double)allocated / records;
+
+            Assert.True(
+                bytesPerOperation < 900d,
+                $"Expected < 900 B/op, got {bytesPerOperation:N1} B/op ({allocated:N0} bytes total).");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private sealed class CompositeDisposable : IDisposable
     {
         public CompositeDisposable(IReadOnlyList<IDiskCrudEngine> items)

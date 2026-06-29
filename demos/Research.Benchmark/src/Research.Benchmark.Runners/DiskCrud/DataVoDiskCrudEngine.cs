@@ -44,7 +44,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private DataVoContext? _context;
     private List<CellValue[]>? _batchRows;
     private bool _updateTransactionActive;
-    private List<PendingUpdate>? _pendingLsmUpdates;
+    private List<DataVoFixedWidthUpdateBatchEntry>? _pendingLsmUpdates;
 
     public DataVoDiskCrudEngine(
         bool durable,
@@ -152,7 +152,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
         if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
         {
-            _pendingLsmUpdates = new List<PendingUpdate>(65_536);
+            _pendingLsmUpdates = new List<DataVoFixedWidthUpdateBatchEntry>(65_536);
         }
         else
         {
@@ -168,7 +168,10 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         {
             if (_pendingLsmUpdates is not null)
             {
-                _pendingLsmUpdates.Add(new PendingUpdate(id, newValue, newScore));
+                _pendingLsmUpdates.Add(new DataVoFixedWidthUpdateBatchEntry(
+                    DataVoFixedWidthValue.From(checked((int)id)),
+                    DataVoFixedWidthValue.From(newValue),
+                    DataVoFixedWidthValue.From(newScore)));
             }
             else
             {
@@ -216,18 +219,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
         if (_pendingLsmUpdates is { Count: > 0 } updates)
         {
-            var primaryKeys = new DataVoFixedWidthValue[updates.Count];
-            var assignmentValues = new DataVoFixedWidthValue[checked(updates.Count * UpdatePlan.Assignments.Count)];
-            for (int i = 0; i < updates.Count; i++)
-            {
-                PendingUpdate update = updates[i];
-                primaryKeys[i] = DataVoFixedWidthValue.From(checked((int)update.Id));
-                int offset = i * UpdatePlan.Assignments.Count;
-                assignmentValues[offset] = DataVoFixedWidthValue.From(update.NewValue);
-                assignmentValues[offset + 1] = DataVoFixedWidthValue.From(update.NewScore);
-            }
-
-            int affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(Ctx(), UpdatePlan, primaryKeys, assignmentValues);
+            int affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(Ctx(), UpdatePlan, updates);
             if (affected != updates.Count)
             {
                 throw new InvalidOperationException(
@@ -301,5 +293,4 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         }
     }
 
-    private readonly record struct PendingUpdate(long Id, int NewValue, double NewScore);
 }

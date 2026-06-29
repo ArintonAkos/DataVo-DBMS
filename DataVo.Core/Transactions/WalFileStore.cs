@@ -113,6 +113,15 @@ internal sealed class WalFileStore
         AppendSingleFrame(frame, flushToDisk);
     }
 
+    internal void AppendFrameBytes(ReadOnlySpan<byte> bytes, bool flushToDisk)
+    {
+        lock (GetLock())
+        {
+            EnsureDirectoryExists();
+            AppendFrameBytesCore(bytes, flushToDisk);
+        }
+    }
+
     internal void FlushToDisk()
     {
         ExecuteLocked(() =>
@@ -160,7 +169,7 @@ internal sealed class WalFileStore
                     offset += frame.Range.Length;
                 }
 
-                AppendFrameBytes(rented.AsSpan(0, totalLength), flushToDisk);
+                AppendFrameBytesCore(rented.AsSpan(0, totalLength), flushToDisk);
             }
             finally
             {
@@ -174,11 +183,11 @@ internal sealed class WalFileStore
         ExecuteLocked(() =>
         {
             EnsureDirectoryExists();
-            AppendFrameBytes(frame.Range.ReadOnlySpan, flushToDisk);
+            AppendFrameBytesCore(frame.Range.ReadOnlySpan, flushToDisk);
         });
     }
 
-    private void AppendFrameBytes(ReadOnlySpan<byte> bytes, bool flushToDisk)
+    private void AppendFrameBytesCore(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
         using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
         long offset = RandomAccess.GetLength(lease.Handle);
