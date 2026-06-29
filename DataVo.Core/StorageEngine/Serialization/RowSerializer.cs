@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Collections.Concurrent;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
@@ -272,6 +273,74 @@ public static class RowSerializer
                 }
 
                 rowBytes[offset] = Convert.ToBoolean(newValue) ? (byte)1 : (byte)0;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Overwrites a non-null fixed-width cell with an unboxed primitive value.
+    /// </summary>
+    public static bool TryOverwriteFixedWidthCell(
+        Span<byte> rowBytes,
+        IReadOnlyList<Column> columns,
+        int ordinal,
+        DataVoFixedWidthValue newValue)
+    {
+        if ((uint)ordinal >= (uint)columns.Count)
+        {
+            return false;
+        }
+
+        int offset = 0;
+        for (int i = 0; i < ordinal; i++)
+        {
+            if (!TryAdvancePastCell(rowBytes, columns[i], ref offset))
+            {
+                return false;
+            }
+        }
+
+        if (offset >= rowBytes.Length)
+        {
+            return false;
+        }
+
+        bool isNull = rowBytes[offset] != 0;
+        offset += sizeof(bool);
+        if (isNull)
+        {
+            return false;
+        }
+
+        switch (ClassifyColumnType(columns[ordinal].Type))
+        {
+            case StorageColumnType.Int:
+                if (newValue.Type != DataVoFixedWidthValueType.Int32 || offset + sizeof(int) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt32LittleEndian(rowBytes.Slice(offset, sizeof(int)), newValue.AsInt32());
+                return true;
+            case StorageColumnType.Float:
+                if (newValue.Type != DataVoFixedWidthValueType.Double || offset + sizeof(int) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    rowBytes.Slice(offset, sizeof(int)),
+                    BitConverter.SingleToInt32Bits((float)newValue.AsDouble()));
+                return true;
+            case StorageColumnType.Bit:
+                if (newValue.Type != DataVoFixedWidthValueType.Boolean || offset + sizeof(bool) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                rowBytes[offset] = newValue.AsBoolean() ? (byte)1 : (byte)0;
                 return true;
             default:
                 return false;

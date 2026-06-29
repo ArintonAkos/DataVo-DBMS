@@ -7,6 +7,12 @@ using Research.Benchmark.Abstractions;
 
 namespace Research.Benchmark.Runners.DiskCrud;
 
+public enum DataVoDiskCrudStorageMode
+{
+    Disk,
+    Lsm
+}
+
 /// <summary>
 /// DataVo disk-CRUD engine: a Disk-mode, WAL-enabled table that bulk-inserts via the typed insert fast lane
 /// and applies point updates via a prepared compiled UPDATE plan (index-accelerated by the integer primary
@@ -31,6 +37,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private readonly IoSchedulerMode _ioSchedulerMode;
     private readonly int? _walCheckpointIntervalMs;
     private readonly bool _zeroAllocUpdate;
+    private readonly DataVoDiskCrudStorageMode _storageMode;
     private readonly string _name;
     private string? _workingDirectory;
     private DataVoContext? _context;
@@ -40,12 +47,14 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         bool durable,
         IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off,
         int? walCheckpointIntervalMs = null,
-        bool zeroAllocUpdate = true)
+        bool zeroAllocUpdate = true,
+        DataVoDiskCrudStorageMode storageMode = DataVoDiskCrudStorageMode.Disk)
     {
         _durable = durable;
         _ioSchedulerMode = ioSchedulerMode;
         _walCheckpointIntervalMs = walCheckpointIntervalMs;
         _zeroAllocUpdate = zeroAllocUpdate;
+        _storageMode = storageMode;
         string poolingSuffix = ioSchedulerMode switch
         {
             IoSchedulerMode.PoolingOnly => "+pooled",
@@ -58,9 +67,16 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             : string.Empty;
         // The legacy dictionary update path is the A/B baseline; flag it so the two runs are distinguishable.
         string updateSuffix = zeroAllocUpdate ? string.Empty : "+legacyupd";
-        _name = durable
-            ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix}+fsync)"
-            : $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix})";
+        if (storageMode == DataVoDiskCrudStorageMode.Lsm)
+        {
+            _name = "DataVo (LSM experimental)";
+        }
+        else
+        {
+            _name = durable
+                ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix}+fsync)"
+                : $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix})";
+        }
     }
 
     public string Name => _name;
@@ -73,12 +89,12 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
         var config = new DataVoConfig
         {
-            StorageMode = StorageMode.Disk,
+            StorageMode = _storageMode == DataVoDiskCrudStorageMode.Lsm ? StorageMode.Lsm : StorageMode.Disk,
             DiskStoragePath = workingDirectory,
-            WalEnabled = true,
+            WalEnabled = _storageMode == DataVoDiskCrudStorageMode.Disk,
             WalFilePath = "datavo.wal",
-            SyncDiskWrites = _durable,
-            IoSchedulerMode = _ioSchedulerMode,
+            SyncDiskWrites = _storageMode == DataVoDiskCrudStorageMode.Disk && _durable,
+            IoSchedulerMode = _storageMode == DataVoDiskCrudStorageMode.Disk ? _ioSchedulerMode : IoSchedulerMode.Off,
             EnableZeroAllocCompiledUpdate = _zeroAllocUpdate,
         };
 
@@ -130,12 +146,27 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
     public void Update(long id, int newValue, double newScore)
     {
-        int affected = DataVoCompiledQuery.Update(Ctx(), UpdatePlan,
-        [
-            new DataVoCompiledQueryParameter("value", newValue),
-            new DataVoCompiledQueryParameter("score", newScore),
-            new DataVoCompiledQueryParameter("id", checked((int)id)),
-        ]);
+        int affected;
+        if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
+        {
+            Span<DataVoFixedWidthValue> assignments = stackalloc DataVoFixedWidthValue[2];
+            assignments[0] = DataVoFixedWidthValue.From(newValue);
+            assignments[1] = DataVoFixedWidthValue.From(newScore);
+            affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKey(
+                Ctx(),
+                UpdatePlan,
+                DataVoFixedWidthValue.From(checked((int)id)),
+                assignments);
+        }
+        else
+        {
+            affected = DataVoCompiledQuery.Update(Ctx(), UpdatePlan,
+            [
+                new DataVoCompiledQueryParameter("value", newValue),
+                new DataVoCompiledQueryParameter("score", newScore),
+                new DataVoCompiledQueryParameter("id", checked((int)id)),
+            ]);
+        }
 
         if (affected != 1)
         {

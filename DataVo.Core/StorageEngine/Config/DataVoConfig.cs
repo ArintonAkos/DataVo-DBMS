@@ -50,6 +50,9 @@ public enum StorageMode
     /// <summary>Stores data in on-disk table files.</summary>
     Disk,
 
+    /// <summary>Stores data using an LSM-tree storage engine.</summary>
+    Lsm,
+
     /// <summary>Stores data in a browser/WASM backend (intended for OPFS-capable engines).</summary>
     Wasm,
 

@@ -95,7 +95,7 @@ public class SearchReadOnlyTests
     // Readers enumerate SearchReadOnly snapshots in full while writers append to the same keys.
     // With copy-on-write this never throws and every snapshot is a self-consistent contiguous prefix.
     [Fact]
-    public void SearchReadOnly_ConcurrentReadersAndWriters_NoExceptionAndConsistent()
+    public async Task SearchReadOnly_ConcurrentReadersAndWriters_NoExceptionAndConsistent()
     {
         var index = new JsonBTreeIndex(minDegree: 8);
         index.Insert("hot", 0);
@@ -139,7 +139,7 @@ public class SearchReadOnlyTests
             }
         })).ToArray();
 
-        Task.WaitAll([writer, .. readers]);
+        await Task.WhenAll([writer, .. readers]);
 
         Assert.True(errors.IsEmpty, errors.TryDequeue(out var first) ? first.ToString() : "no error");
     }

@@ -1,4 +1,5 @@
 using DataVo.Core.Exceptions;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.StorageEngine.Backends;
@@ -80,6 +81,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
             StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data", config.SyncDiskWrites, config.IoSchedulerMode),
+            StorageMode.Lsm => new LsmStorageBackend(config.DiskStoragePath ?? "./datavo_lsm_data"),
             StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
             _ => throw new ArgumentOutOfRangeException()
@@ -162,6 +164,18 @@ public class StorageContext(DataVoConfig config) : IDisposable
     internal long InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
     {
         return _storageEngine.InsertRow(databaseName, tableName, rowBytes);
+    }
+
+    internal bool TryPatchFixedWidthRow(
+        string tableName,
+        string databaseName,
+        long rowId,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        ReadOnlySpan<DataVoFixedWidthValue> values)
+    {
+        return _storageEngine is IFixedWidthPatchStorageEngine patchStorage
+            && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
     }
 
     /// <summary>
