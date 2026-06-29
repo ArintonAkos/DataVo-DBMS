@@ -2,11 +2,12 @@ namespace Research.Benchmark.Abstractions;
 
 /// <summary>
 /// A disk-durable CRUD benchmark engine (Scenario: <c>disk-crud-wal</c>): bulk-insert a batch, then
-/// apply many individual point updates where each update is its own durable, autocommit write — the
-/// regime where physical disk flushes (WAL append / fsync) dominate latency.
+/// apply many point updates. Engines may choose whether the update phase is autocommit or an explicit
+/// transaction batch; the benchmark host drives the phase boundary through <see cref="BeginUpdateBatch"/>
+/// and <see cref="CompleteUpdateBatch"/>.
 /// <para>
 /// Reuses <see cref="FlatRecord"/> as the row shape. Inserts run inside a single batch/transaction
-/// (one flush amortizes the bulk load); updates run one-by-one so per-write durability cost is exposed.
+/// (one flush amortizes the bulk load); updates are driven one-by-one inside the configured update phase.
 /// The interface is synchronous so per-op <c>Task</c>/<c>ValueTask</c> allocations don't distort the
 /// measured allocation figures.
 /// </para>
@@ -28,6 +29,16 @@ public interface IDiskCrudEngine : IDisposable
     /// <summary>Inserts a single record into the active batch.</summary>
     void Insert(FlatRecord record);
 
+    /// <summary>Opens the update phase transaction/batch. Engines that intentionally use autocommit may no-op.</summary>
+    void BeginUpdateBatch()
+    {
+    }
+
     /// <summary>Applies one durable point update (by primary key). Implementations must throw if no row was updated.</summary>
     void Update(long id, int newValue, double newScore);
+
+    /// <summary>Commits the update phase transaction/batch opened by <see cref="BeginUpdateBatch"/>.</summary>
+    void CompleteUpdateBatch()
+    {
+    }
 }

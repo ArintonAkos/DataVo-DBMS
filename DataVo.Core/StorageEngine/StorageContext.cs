@@ -181,6 +181,18 @@ public class StorageContext(DataVoConfig config) : IDisposable
             && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
     }
 
+    internal int TryPatchFixedWidthRows(
+        string tableName,
+        string databaseName,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        IReadOnlyList<FixedWidthPatchOperation> operations)
+    {
+        return _storageEngine is IFixedWidthPatchStorageEngine patchStorage
+            ? patchStorage.TryPatchFixedWidthRows(databaseName, tableName, columns, ordinals, operations)
+            : 0;
+    }
+
     /// <summary>
     /// Serializes and inserts multiple rows into a table.
     /// </summary>

@@ -501,6 +501,71 @@ public static class DataVoCompiledQuery
     }
 
     /// <summary>
+    /// Executes many fixed-width primary-key updates as one LSM storage batch. This preserves the LSM
+    /// byte-patch fast lane while allowing a benchmark phase to amortize strict WAL fsync cost.
+    /// </summary>
+    public static int UpdateFixedWidthByPrimaryKeyBatch(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        ReadOnlySpan<DataVoFixedWidthValue> primaryKeyValues,
+        ReadOnlySpan<DataVoFixedWidthValue> assignmentValues)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (plan.Kind != DataVoCompiledQueryKind.Update)
+        {
+            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as Update.");
+        }
+
+        DataVoEngine engine = context.Engine;
+        if (!engine.Config.EnableZeroAllocCompiledUpdate
+            || engine.Config.StorageMode != StorageMode.Lsm
+            || engine.Changes.Enabled)
+        {
+            throw new NotSupportedException("Batched fixed-width primary-key updates currently require the LSM fast path.");
+        }
+
+        string databaseName = ResolveCurrentDatabase(context);
+        UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: true);
+        int assignmentWidth = schema.AssignOrdinals.Length;
+        if (!schema.Eligible
+            || assignmentWidth != plan.Assignments.Count
+            || assignmentValues.Length != checked(primaryKeyValues.Length * assignmentWidth)
+            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+        {
+            throw new NotSupportedException("Batched fixed-width primary-key updates require an eligible integer primary-key update plan.");
+        }
+
+        var operations = new List<FixedWidthPatchOperation>(primaryKeyValues.Length);
+        for (int i = 0; i < primaryKeyValues.Length; i++)
+        {
+            if (!TryConvertToInt64(primaryKeyValues[i], out long primaryKey))
+            {
+                throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(primaryKeyValues));
+            }
+
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+            {
+                continue;
+            }
+
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+
+            var values = new DataVoFixedWidthValue[assignmentWidth];
+            assignmentValues.Slice(i * assignmentWidth, assignmentWidth).CopyTo(values);
+            operations.Add(new FixedWidthPatchOperation(rowId, values));
+        }
+
+        return engine.StorageContext.TryPatchFixedWidthRows(
+            plan.TableName,
+            databaseName,
+            schema.Columns,
+            schema.AssignOrdinals,
+            operations);
+    }
+
+    /// <summary>
     /// Per-(plan, database) cache of the resolved fast-path schema, keyed off the table schema version so it
     /// invalidates on DDL. Resolving it once keeps the steady-state update path free of catalog allocations.
     /// </summary>

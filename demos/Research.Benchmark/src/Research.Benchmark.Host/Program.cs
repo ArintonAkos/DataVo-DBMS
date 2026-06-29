@@ -428,9 +428,10 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
             Console.Error.WriteLine(
                 $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert phase complete in {insertStopwatch.Elapsed.TotalSeconds:N2}s; starting {records:N0} point updates...");
 
-            // Phase 2 — individual durable point updates (each is its own autocommit write → real disk flushes).
+            // Phase 2 — point updates. Engines may open an explicit update batch here to amortize commit cost.
             long updateAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var updateStopwatch = Stopwatch.StartNew();
+            engine.BeginUpdateBatch();
             for (int i = 0; i < records; i++)
             {
                 long id = i + 1;
@@ -449,6 +450,7 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
                 }
             }
 
+            engine.CompleteUpdateBatch();
             updateStopwatch.Stop();
             long updateAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - updateAllocatedBefore;
             totalStopwatch.Stop();

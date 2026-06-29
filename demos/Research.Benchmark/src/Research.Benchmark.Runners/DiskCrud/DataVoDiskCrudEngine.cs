@@ -4,6 +4,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using Research.Benchmark.Abstractions;
+using System.Globalization;
 
 namespace Research.Benchmark.Runners.DiskCrud;
 
@@ -42,6 +43,8 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private string? _workingDirectory;
     private DataVoContext? _context;
     private List<CellValue[]>? _batchRows;
+    private bool _updateTransactionActive;
+    private List<PendingUpdate>? _pendingLsmUpdates;
 
     public DataVoDiskCrudEngine(
         bool durable,
@@ -140,8 +143,41 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         Ctx().InsertTyped("Records", Schema, cells);
     }
 
+    public void BeginUpdateBatch()
+    {
+        if (_updateTransactionActive)
+        {
+            throw new InvalidOperationException("DataVo disk-CRUD update batch is already active.");
+        }
+
+        if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
+        {
+            _pendingLsmUpdates = new List<PendingUpdate>(65_536);
+        }
+        else
+        {
+            ExecuteOk("BEGIN TRANSACTION");
+        }
+
+        _updateTransactionActive = true;
+    }
+
     public void Update(long id, int newValue, double newScore)
     {
+        if (_updateTransactionActive)
+        {
+            if (_pendingLsmUpdates is not null)
+            {
+                _pendingLsmUpdates.Add(new PendingUpdate(id, newValue, newScore));
+            }
+            else
+            {
+                ExecuteTransactionalUpdate(id, newValue, newScore);
+            }
+
+            return;
+        }
+
         int affected;
         if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
         {
@@ -171,8 +207,60 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         }
     }
 
+    public void CompleteUpdateBatch()
+    {
+        if (!_updateTransactionActive)
+        {
+            return;
+        }
+
+        if (_pendingLsmUpdates is { Count: > 0 } updates)
+        {
+            var primaryKeys = new DataVoFixedWidthValue[updates.Count];
+            var assignmentValues = new DataVoFixedWidthValue[checked(updates.Count * UpdatePlan.Assignments.Count)];
+            for (int i = 0; i < updates.Count; i++)
+            {
+                PendingUpdate update = updates[i];
+                primaryKeys[i] = DataVoFixedWidthValue.From(checked((int)update.Id));
+                int offset = i * UpdatePlan.Assignments.Count;
+                assignmentValues[offset] = DataVoFixedWidthValue.From(update.NewValue);
+                assignmentValues[offset + 1] = DataVoFixedWidthValue.From(update.NewScore);
+            }
+
+            int affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(Ctx(), UpdatePlan, primaryKeys, assignmentValues);
+            if (affected != updates.Count)
+            {
+                throw new InvalidOperationException(
+                    $"DataVo disk-CRUD update batch affected {affected} rows (expected {updates.Count}).");
+            }
+
+            _pendingLsmUpdates = null;
+        }
+        else if (_pendingLsmUpdates is not null)
+        {
+            _pendingLsmUpdates = null;
+        }
+        else
+        {
+            ExecuteOk("COMMIT");
+        }
+
+        _updateTransactionActive = false;
+    }
+
     public void Dispose()
     {
+        if (_updateTransactionActive && _context is not null)
+        {
+            if (_pendingLsmUpdates is null)
+            {
+                try { ExecuteOk("ROLLBACK"); } catch { /* best-effort cleanup */ }
+            }
+
+            _pendingLsmUpdates = null;
+            _updateTransactionActive = false;
+        }
+
         _context?.Dispose();
         _context = null;
         _batchRows = null;
@@ -186,6 +274,24 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private DataVoContext Ctx() =>
         _context ?? throw new InvalidOperationException("DataVo disk-CRUD engine has not been initialized.");
 
+    private void ExecuteTransactionalUpdate(long id, int newValue, double newScore)
+    {
+        string score = newScore.ToString("R", CultureInfo.InvariantCulture);
+        QueryResult result = Ctx().Execute(
+            $"UPDATE Records SET Value = {newValue}, Score = {score} WHERE Id = {checked((int)id)}").Last();
+        if (result.IsError)
+        {
+            throw new InvalidOperationException(
+                $"DataVo disk-CRUD transactional update for Id={id} failed: {string.Join(" | ", result.Messages)}");
+        }
+
+        if (!result.Messages.Any(static message => message.Equals("Rows affected: 1", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"DataVo disk-CRUD transactional update for Id={id} did not report one affected row ({string.Join(" | ", result.Messages)}).");
+        }
+    }
+
     private void ExecuteOk(string sql)
     {
         QueryResult result = Ctx().Execute(sql).Last();
@@ -194,4 +300,6 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             throw new InvalidOperationException($"{sql}{Environment.NewLine}{string.Join(" | ", result.Messages)}");
         }
     }
+
+    private readonly record struct PendingUpdate(long Id, int NewValue, double NewScore);
 }
