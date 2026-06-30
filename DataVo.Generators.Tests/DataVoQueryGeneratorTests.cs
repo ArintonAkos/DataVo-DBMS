@@ -317,9 +317,8 @@ public class DataVoQueryGeneratorTests
     }
 
     [Fact]
-    public void Generator_UnsupportedCtorParamType_FallsBackToDictMapper()
+    public void Generator_GuidCtorParam_EmitsTypedGetter()
     {
-        // Guid is not a supported cell type → fall back to the dict mapper for the whole query.
         string source = """
             using System;
             using System.Collections.Generic;
@@ -338,8 +337,9 @@ public class DataVoQueryGeneratorTests
         GeneratorDriverRunResult result = RunGenerator(source);
         string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
 
-        Assert.DoesNotContain("CompiledRowReader", generated);
-        Assert.Contains("DataVoCompiledQuery.SelectMany<global::WithGuid>", generated);
+        Assert.Contains("CompiledRowReader", generated);
+        Assert.Contains("SelectManyTyped", generated);
+        Assert.Contains("reader.GetGuid(\"Token\")", generated);
     }
 
     [Fact]

@@ -322,7 +322,8 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         SpecialType.System_Double => "GetDouble",
         SpecialType.System_Decimal => "GetDecimal",
         SpecialType.System_Boolean => "GetBoolean",
-        _ => type.ToDisplayString() == "System.DateOnly" ? "GetDate" : null,
+        _ => type.ToDisplayString() == "System.DateOnly" ? "GetDate" :
+             type.ToDisplayString() == "System.Guid" ? "GetGuid" : null,
     };
 
     private static string GenerateTypedInvocation(
