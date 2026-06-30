@@ -10,6 +10,7 @@ internal static class ColumnDefinitionParser
     public static DataTypes ParseType(string typeStr)
     {
         string t = typeStr.ToLowerInvariant();
+        if (t.Contains("guid") || t.Contains("uuid") || t.Contains("uniqueidentifier")) return DataTypes.Guid;
         if (t.Contains("int")) return DataTypes.Int;
         if (t.Contains("float")) return DataTypes.Float;
         if (t.Contains("bit")) return DataTypes.Bit;

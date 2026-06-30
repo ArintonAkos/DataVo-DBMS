@@ -67,6 +67,7 @@ public class Column : IColumn
         {
             "VARCHAR" => (Length > 0 && Length < rawValue.Length) ? rawValue[..Length] : rawValue,
             "DATE" => TryParseDate(rawValue, out DateOnly parsedDate) ? parsedDate : rawValue,
+            "GUID" => Guid.TryParse(rawValue, out Guid parsedGuid) ? parsedGuid : rawValue,
             "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,
             "INT" => int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) ? parsedInt : rawValue,
             "FLOAT" => TryParseFloatingPoint(rawValue, out double parsedFloat) ? parsedFloat : rawValue,
