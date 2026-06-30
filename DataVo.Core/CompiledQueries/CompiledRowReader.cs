@@ -58,6 +58,12 @@ public readonly ref struct CompiledRowReader
     /// <summary>Reads a <see cref="DateOnly"/> column by ordinal; throws if the cell is not Date or is NULL.</summary>
     public DateOnly GetDate(int ordinal) => _view[ordinal].AsDate();
 
+    /// <summary>Reads a <see cref="Guid"/> column; throws if the cell is not Guid or is NULL.</summary>
+    public Guid GetGuid(string column) => _view[column].AsGuid();
+
+    /// <summary>Reads a <see cref="Guid"/> column by ordinal; throws if the cell is not Guid or is NULL.</summary>
+    public Guid GetGuid(int ordinal) => _view[ordinal].AsGuid();
+
     /// <summary>Reads a VECTOR (<see cref="float"/>[]) column, returning a defensive clone.</summary>
     public float[] GetVector(string column) => _view[column].AsVector();
 
@@ -105,4 +111,10 @@ public readonly ref struct CompiledRowReader
 
     /// <summary>Reads a nullable <see cref="DateOnly"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
     public DateOnly? GetDateOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDate(); }
+
+    /// <summary>Reads a nullable <see cref="Guid"/> column; SQL NULL returns <c>null</c>.</summary>
+    public Guid? GetGuidOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsGuid(); }
+
+    /// <summary>Reads a nullable <see cref="Guid"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public Guid? GetGuidOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsGuid(); }
 }
