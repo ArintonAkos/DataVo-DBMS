@@ -15,6 +15,7 @@ namespace Research.Benchmark.Runners.DiskCrud;
 public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 {
     private readonly string _synchronous;
+    private readonly bool _fullFsync;
     private readonly string _name;
     private string? _workingDirectory;
     private string? _dbPath;
@@ -32,6 +33,7 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
     public SqliteDiskCrudEngine(string synchronous)
     {
         _synchronous = synchronous.ToUpperInvariant();
+        _fullFsync = string.Equals(_synchronous, "FULL", StringComparison.Ordinal);
         _name = $"SQLite (WAL,{_synchronous.ToLowerInvariant()})";
     }
 
@@ -58,7 +60,7 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
         _connection.Open();
 
         ExecutePragma("PRAGMA journal_mode=WAL;");
-        ExecutePragma($"PRAGMA synchronous={_synchronous};");
+        ExecutePragma(CreateDurabilityPragmas(includeBusyTimeout: false));
 
         using (SqliteCommand schema = _connection.CreateCommand())
         {
@@ -95,7 +97,7 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 
         using (SqliteCommand pragma = connection.CreateCommand())
         {
-            pragma.CommandText = $"PRAGMA synchronous={_synchronous}; PRAGMA busy_timeout=60000;";
+            pragma.CommandText = CreateDurabilityPragmas(includeBusyTimeout: true);
             pragma.ExecuteNonQuery();
         }
 
@@ -120,6 +122,13 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
         _transaction?.Dispose();
         _transaction = null;
         InsertCommand().Transaction = null;
+    }
+
+    public void BeginUpdateBatch()
+    {
+        // Keep the update phase in SQLite autocommit mode. For WAL,FULL plus fullfsync this intentionally
+        // forces one physical synchronization boundary per point update, matching the hardware-durability
+        // hypothesis tested by the disk-crud-wal scenario.
     }
 
     public void Insert(FlatRecord record)
@@ -148,6 +157,11 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
         }
     }
 
+    public void CompleteUpdateBatch()
+    {
+        // See BeginUpdateBatch: SQLite updates are intentionally unbatched for the fullfsync durability test.
+    }
+
     public void Dispose() => DisposeCore();
 
     private SqliteConnection Connection() =>
@@ -164,6 +178,23 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
         using SqliteCommand command = Connection().CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    private string CreateDurabilityPragmas(bool includeBusyTimeout)
+    {
+        string sql = $"PRAGMA synchronous={_synchronous};";
+
+        if (_fullFsync)
+        {
+            sql += " PRAGMA fullfsync=1;";
+        }
+
+        if (includeBusyTimeout)
+        {
+            sql += " PRAGMA busy_timeout=60000;";
+        }
+
+        return sql;
     }
 
     private void DisposeCore()
