@@ -35,6 +35,13 @@ internal ref struct ByteSpanReader
         return value;
     }
 
+    public Guid ReadGuid()
+    {
+        Guid value = new(_data.Slice(_position, 16));
+        _position += 16;
+        return value;
+    }
+
     public string ReadString()
     {
         int length = Read7BitEncodedInt();

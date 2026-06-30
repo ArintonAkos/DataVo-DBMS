@@ -508,6 +508,11 @@ internal sealed class InsertRowService(
             return CellType.Date;
         }
 
+        if (type.Equals("GUID", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Guid;
+        }
+
         if (type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase))
         {
             return CellType.String;
@@ -841,6 +846,7 @@ internal sealed class InsertRowService(
             "FLOAT" => parsedValue is double,
             "BIT" => parsedValue is bool,
             "DATE" => parsedValue is DateOnly,
+            "GUID" => parsedValue is Guid,
             "VECTOR" => parsedValue is float[] vector && (column.Length <= 0 || vector.Length == column.Length),
             _ => true
         };
@@ -856,6 +862,13 @@ internal sealed class InsertRowService(
         if (column.Type.Equals("DATE", StringComparison.OrdinalIgnoreCase) && parsedValue is DateTime dateTime)
         {
             return DateOnly.FromDateTime(dateTime);
+        }
+
+        if (column.Type.Equals("GUID", StringComparison.OrdinalIgnoreCase)
+            && parsedValue is string text
+            && Guid.TryParse(text, out Guid parsedGuid))
+        {
+            return parsedGuid;
         }
 
         return parsedValue;

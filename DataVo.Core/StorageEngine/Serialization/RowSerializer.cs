@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Collections.Concurrent;
+using System.Globalization;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
@@ -379,6 +380,9 @@ public static class RowSerializer
             case StorageColumnType.DateTime:
                 offset += sizeof(long);
                 break;
+            case StorageColumnType.Guid:
+                offset += 16;
+                break;
             case StorageColumnType.Vector:
                 if (offset + sizeof(int) > rowBytes.Length)
                 {
@@ -438,7 +442,7 @@ public static class RowSerializer
     // Storage type categories, resolved without allocation. column.Type is stored in the catalog as the
     // DataTypes enum name (PascalCase, e.g. "Int"/"Varchar"), so a ToUpperInvariant() switch re-cased and
     // allocated a string per column, per row. OrdinalIgnoreCase comparison classifies in place — zero alloc.
-    private enum StorageColumnType { Int, Float, Bit, Date, DateTime, Vector, String }
+    private enum StorageColumnType { Int, Float, Bit, Date, DateTime, Guid, Vector, String }
 
     private static StorageColumnType ClassifyColumnType(string type) =>
         string.Equals(type, "INT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Int :
@@ -446,6 +450,7 @@ public static class RowSerializer
         string.Equals(type, "BIT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Bit :
         string.Equals(type, "DATE", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Date :
         string.Equals(type, "DATETIME", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.DateTime :
+        string.Equals(type, "GUID", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Guid :
         string.Equals(type, "VECTOR", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Vector :
         StorageColumnType.String;
 
@@ -461,6 +466,8 @@ public static class RowSerializer
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
                 return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case StorageColumnType.Guid:
+                return CellValue.From(reader.ReadGuid());
             case StorageColumnType.Vector:
             {
                 int count = reader.ReadInt32();
@@ -519,6 +526,9 @@ public static class RowSerializer
                 return;
             case StorageColumnType.Date:
                 reader.Skip(sizeof(long));
+                return;
+            case StorageColumnType.Guid:
+                reader.Skip(16);
                 return;
             case StorageColumnType.Vector:
                 reader.Skip(reader.ReadInt32() * sizeof(int));
@@ -584,6 +594,21 @@ public static class RowSerializer
             return;
         }
 
+        if (type == StorageColumnType.Guid)
+        {
+            Guid guid = boxed switch
+            {
+                Guid g => g,
+                string s when Guid.TryParse(s, out Guid parsed) => parsed,
+                _ => Guid.Parse(Convert.ToString(boxed, CultureInfo.InvariantCulture)!)
+            };
+
+            Span<byte> bytes = stackalloc byte[16];
+            guid.TryWriteBytes(bytes);
+            writer.Write(bytes);
+            return;
+        }
+
         if (type == StorageColumnType.Vector)
         {
             if (!VectorParser.TryCoerceToVector(boxed, out float[] vector))
@@ -633,6 +658,11 @@ public static class RowSerializer
             return DateTime.FromBinary(reader.ReadInt64());
         }
 
+        if (type == StorageColumnType.Guid)
+        {
+            return new Guid(reader.ReadBytes(16));
+        }
+
         if (type == StorageColumnType.Vector)
         {
             int count = reader.ReadInt32();
@@ -665,6 +695,13 @@ public static class RowSerializer
             case StorageColumnType.Date:
                 writer.Write(cell.AsDate().ToDateTime(TimeOnly.MinValue).ToBinary());
                 return;
+            case StorageColumnType.Guid:
+            {
+                Span<byte> bytes = stackalloc byte[16];
+                cell.AsGuid().TryWriteBytes(bytes);
+                writer.Write(bytes);
+                return;
+            }
             case StorageColumnType.Vector:
             {
                 ReadOnlySpan<float> vector = cell.AsVectorReadOnlySpan();
@@ -695,6 +732,8 @@ public static class RowSerializer
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
                 return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case StorageColumnType.Guid:
+                return CellValue.From(new Guid(reader.ReadBytes(16)));
             case StorageColumnType.Vector:
             {
                 int count = reader.ReadInt32();
