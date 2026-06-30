@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace DataVo.Core.Runtime.Reactive;
 
 /// <summary>Discriminator for the scalar held by a <see cref="CellValue"/>.</summary>
@@ -21,6 +23,8 @@ public enum CellType : byte
     Date = 7,
     /// <summary>A dense <see cref="float"/>[] (the SQL VECTOR type); the cell owns a clone of the array.</summary>
     Vector = 8,
+    /// <summary>A 128-bit <see cref="Guid"/>.</summary>
+    Guid = 9,
 }
 
 /// <summary>
@@ -33,13 +37,20 @@ public readonly struct CellValue
 {
     private readonly CellType _type;
     private readonly long _numeric;     // bool/int/long/double bits (reinterpreted)
+    private readonly long _numeric2;    // second half of Guid bytes when Type == Guid
     private readonly decimal _decimal;  // inline; never boxed
     private readonly object? _reference; // string today; reference types later
 
     private CellValue(CellType type, long numeric, decimal dec, object? reference)
+        : this(type, numeric, 0L, dec, reference)
+    {
+    }
+
+    private CellValue(CellType type, long numeric, long numeric2, decimal dec, object? reference)
     {
         _type = type;
         _numeric = numeric;
+        _numeric2 = numeric2;
         _decimal = dec;
         _reference = reference;
     }
@@ -70,6 +81,16 @@ public readonly struct CellValue
     /// <summary>Creates a <see cref="DateOnly"/> cell (stored inline as its day number; no boxing).</summary>
     public static CellValue From(DateOnly value) => new(CellType.Date, value.DayNumber, 0m, null);
 
+    /// <summary>Creates a <see cref="Guid"/> cell (stored inline as two 64-bit halves; no boxing).</summary>
+    public static CellValue From(Guid value)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        value.TryWriteBytes(bytes);
+        long low = BinaryPrimitives.ReadInt64LittleEndian(bytes[..8]);
+        long high = BinaryPrimitives.ReadInt64LittleEndian(bytes.Slice(8, 8));
+        return new CellValue(CellType.Guid, low, high, 0m, null);
+    }
+
     /// <summary>Creates a VECTOR (<see cref="float"/>[]) cell; the array is <b>cloned</b> so the cell owns
     /// it (callers cannot mutate stored state). <c>null</c> maps to <see cref="Null"/>.</summary>
     public static CellValue From(float[]? value) =>
@@ -92,6 +113,7 @@ public readonly struct CellValue
         decimal m => From(m),
         string s => From(s),
         DateOnly d => From(d),
+        Guid g => From(g),
         float[] v => From(v),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
     };
@@ -134,6 +156,20 @@ public readonly struct CellValue
     public DateOnly AsDate() =>
         _type == CellType.Date ? DateOnly.FromDayNumber((int)_numeric) : throw Mismatch(CellType.Date);
 
+    /// <summary>Reads the cell as a <see cref="Guid"/>.</summary>
+    public Guid AsGuid()
+    {
+        if (_type != CellType.Guid)
+        {
+            throw Mismatch(CellType.Guid);
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        BinaryPrimitives.WriteInt64LittleEndian(bytes[..8], _numeric);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(8, 8), _numeric2);
+        return new Guid(bytes);
+    }
+
     /// <summary>Reads the cell as a VECTOR (<see cref="float"/>[]), returning a defensive <b>clone</b> so
     /// the stored array can never be mutated through the result.</summary>
     public float[] AsVector() =>
@@ -159,6 +195,7 @@ public readonly struct CellValue
         CellType.String => _reference,
         CellType.Date => DateOnly.FromDayNumber((int)_numeric),
         CellType.Vector => ((float[])_reference!).Clone(),
+        CellType.Guid => AsGuid(),
         _ => null,
     };
 
