@@ -117,6 +117,16 @@ public class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<IndexCacheKey, Dictionary<long, List<long>>> _integerIndexMaps = new(CacheKeyComparer.Instance);
 
+    /// <summary>
+    /// Fast lane for GUID primary keys: logical GUID key -> physical row id.
+    /// </summary>
+    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentDictionary<Guid, long>> _guidPrimaryKeyMaps = new(CacheKeyComparer.Instance);
+
+    /// <summary>
+    /// Fast lane for single-column GUID indexes: logical GUID key -> physical row ids.
+    /// </summary>
+    private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<long>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
+
     private readonly Lock _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
@@ -941,6 +951,66 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Inserts GUID primary-key entries into the direct key -> row-id fast lane.
+    /// </summary>
+    public void InsertGuidPrimaryKeys(
+        IReadOnlyList<(Guid Key, long RowId)> entries,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        ConcurrentDictionary<Guid, long> map = _guidPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentDictionary<Guid, long>());
+        for (int i = 0; i < entries.Count; i++)
+        {
+            (Guid key, long rowId) = entries[i];
+            map[key] = rowId;
+        }
+    }
+
+    /// <summary>
+    /// Inserts GUID scalar-index entries into the direct key -> row-ids fast lane.
+    /// </summary>
+    public void InsertGuidIndexEntries(
+        IReadOnlyList<(Guid Key, long RowId)> entries,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
+            {
+                map = [];
+                _guidIndexMaps[cacheKey] = map;
+            }
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (Guid key, long rowId) = entries[i];
+                if (!map.TryGetValue(key, out List<long>? rowIds))
+                {
+                    rowIds = [];
+                    map[key] = rowIds;
+                }
+
+                rowIds.Add(rowId);
+            }
+        }
+    }
+
+    /// <summary>
     /// Returns whether the named index is backed by an integer primary-key fast lane.
     /// </summary>
     public bool HasIntegerPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
@@ -961,6 +1031,26 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Returns whether the named index is backed by a GUID primary-key fast lane.
+    /// </summary>
+    public bool HasGuidPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
+    {
+        return _guidPrimaryKeyMaps.ContainsKey(GetCacheKey(indexName, tableName, databaseName));
+    }
+
+    /// <summary>
+    /// Returns whether the named index is backed by a single-column GUID fast lane.
+    /// </summary>
+    public bool HasGuidIndexFastLane(string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            return _guidIndexMaps.ContainsKey(cacheKey);
+        }
+    }
+
+    /// <summary>
     /// Removes an integer primary-key entry by key, in O(1). Used by the UPDATE path when a row's primary
     /// key changes; the unchanged-key case is handled by an upsert through <see cref="InsertIntegerPrimaryKeys"/>.
     /// </summary>
@@ -968,6 +1058,18 @@ public class IndexManager : IDisposable
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map))
+        {
+            map.TryRemove(key, out _);
+        }
+    }
+
+    /// <summary>
+    /// Removes a GUID primary-key entry by key, in O(1).
+    /// </summary>
+    public void RemoveGuidPrimaryKey(Guid key, string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map))
         {
             map.TryRemove(key, out _);
         }
@@ -995,6 +1097,26 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Removes a single (key, rowId) pair from the GUID single-column fast lane, in O(bucket).
+    /// </summary>
+    public void RemoveGuidIndexEntry(Guid key, long rowId, string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map)
+                && map.TryGetValue(key, out List<long>? rowIds))
+            {
+                rowIds.Remove(rowId);
+                if (rowIds.Count == 0)
+                {
+                    map.Remove(key);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Looks up an integer primary key without building a string key or traversing the generic BTree.
     /// </summary>
     public bool TryLookupIntegerPrimaryKey(
@@ -1007,6 +1129,28 @@ public class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         // Lock-free: the hot point-lookup path must not serialize 8 concurrent readers on _lock.
         if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map)
+            && map.TryGetValue(key, out rowId))
+        {
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            return true;
+        }
+
+        rowId = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Looks up a GUID primary key without building a string key or traversing the generic BTree.
+    /// </summary>
+    public bool TryLookupGuidPrimaryKey(
+        Guid key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        out long rowId)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
             && map.TryGetValue(key, out rowId))
         {
             RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
@@ -1060,6 +1204,34 @@ public class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Attempts to look up a single-column GUID index. Returns true when the index has a GUID fast lane,
+    /// even if the specific key has no rows.
+    /// </summary>
+    public bool TryLookupGuidIndex(
+        Guid key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        out IReadOnlyList<long> rowIds)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
+            {
+                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                rowIds = map.TryGetValue(key, out List<long>? rows)
+                    ? rows
+                    : Array.Empty<long>();
+                return true;
+            }
+        }
+
+        rowIds = Array.Empty<long>();
+        return false;
+    }
+
+    /// <summary>
     /// Deletes row IDs from a scalar BTree index.
     /// </summary>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
@@ -1073,6 +1245,8 @@ public class IndexManager : IDisposable
             }
 
             DeleteIntegerIndexRowsByRowIdNoLock(cacheKey, toBeDeletedIds);
+            DeleteGuidPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
+            DeleteGuidIndexRowsByRowIdNoLock(cacheKey, toBeDeletedIds);
 
             IIndex? index = TryGetScalarIndexNoLock(indexName, tableName, databaseName);
             if (index is null)
@@ -1082,6 +1256,7 @@ public class IndexManager : IDisposable
 
             index.DeleteValues(toBeDeletedIds);
             DeleteIntegerPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
+            DeleteGuidPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
             MarkDirtyNoLock(cacheKey);
             FlushIfImmediate(cacheKey);
         }
@@ -1106,10 +1281,27 @@ public class IndexManager : IDisposable
             return [];
         }
 
+        if (TryParseGuidKey(columnValue, out Guid guidKey)
+            && TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out long guidRowId))
+        {
+            return [guidRowId];
+        }
+
+        if (_guidPrimaryKeyMaps.ContainsKey(cacheKey))
+        {
+            return [];
+        }
+
         if (TryParseIntegerPrimaryKey(columnValue, out long integerIndexKey)
             && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> rowIds))
         {
             return rowIds;
+        }
+
+        if (TryParseGuidKey(columnValue, out Guid guidIndexKey)
+            && TryLookupGuidIndex(guidIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> guidRowIds))
+        {
+            return guidRowIds;
         }
 
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
@@ -1136,6 +1328,19 @@ public class IndexManager : IDisposable
             }
         }
 
+        if (TryParseGuidKey(key, out Guid guidKey))
+        {
+            if (TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out _))
+            {
+                return true;
+            }
+
+            if (_guidPrimaryKeyMaps.ContainsKey(cacheKey))
+            {
+                return false;
+            }
+        }
+
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
         bool exists = index.ContainsKey(key);
         RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
@@ -1154,6 +1359,33 @@ public class IndexManager : IDisposable
             long rowId = rowIds[i];
             long? keyToRemove = null;
             foreach (KeyValuePair<long, long> pair in map)
+            {
+                if (pair.Value == rowId)
+                {
+                    keyToRemove = pair.Key;
+                    break;
+                }
+            }
+
+            if (keyToRemove.HasValue)
+            {
+                map.TryRemove(keyToRemove.Value, out _);
+            }
+        }
+    }
+
+    private void DeleteGuidPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    {
+        if (!_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map) || map.IsEmpty)
+        {
+            return;
+        }
+
+        for (int i = 0; i < rowIds.Count; i++)
+        {
+            long rowId = rowIds[i];
+            Guid? keyToRemove = null;
+            foreach (KeyValuePair<Guid, long> pair in map)
             {
                 if (pair.Value == rowId)
                 {
@@ -1196,6 +1428,33 @@ public class IndexManager : IDisposable
         }
     }
 
+    private void DeleteGuidIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    {
+        if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map) || map.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < rowIds.Count; i++)
+        {
+            long rowId = rowIds[i];
+            Guid? keyToRemove = null;
+            foreach (KeyValuePair<Guid, List<long>> pair in map)
+            {
+                if (pair.Value.Remove(rowId) && pair.Value.Count == 0)
+                {
+                    keyToRemove = pair.Key;
+                    break;
+                }
+            }
+
+            if (keyToRemove.HasValue)
+            {
+                map.Remove(keyToRemove.Value);
+            }
+        }
+    }
+
     private IIndex? TryGetScalarIndexNoLock(string indexName, string tableName, string databaseName)
     {
         try
@@ -1223,6 +1482,9 @@ public class IndexManager : IDisposable
         value = 0;
         return false;
     }
+
+    private static bool TryParseGuidKey(string key, out Guid value) =>
+        Guid.TryParse(key, out value);
 
     /// <summary>
     /// Checks whether a scalar index references a row ID.

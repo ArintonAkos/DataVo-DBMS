@@ -130,6 +130,7 @@ public static class IndexKeyEncoder
         CellType.String => NormalizeStringCell(cell.AsString()),
         CellType.Date => cell.AsDate().ToString(),
         CellType.Vector => SerializeVector(cell.AsVectorReadOnlySpan()),
+        CellType.Guid => cell.AsGuid().ToString("D"),
         _ => string.Empty
     };
 
@@ -185,6 +186,11 @@ public static class IndexKeyEncoder
         if (value == null)
         {
             return string.Empty;
+        }
+
+        if (value is Guid guid)
+        {
+            return guid.ToString("D");
         }
 
         if (VectorParser.TryCoerceToVector(value, out float[] vector))
