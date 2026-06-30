@@ -12,6 +12,7 @@ using Research.Benchmark.Runners.DuckDb;
 using Research.Benchmark.Runners.FlatCrud;
 using Research.Benchmark.Runners.Sqlite;
 using Research.Benchmark.Runners.VectorSearch;
+using Research.Benchmark.Runners.Whitepaper;
 
 string benchmarkScenario = ReadStringArg(args, "--scenario", "complex-vip");
 int baselineOrders = ReadIntArg(args, "--baseline", 10_000);
@@ -141,10 +142,75 @@ else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnor
     if (ShouldRun(engineFilter, "sqlite"))
         results.Add(RunVectorSearch(new SqliteVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
 }
+else if (benchmarkScenario.Equals("thread-scaling", StringComparison.OrdinalIgnoreCase))
+{
+    int records = ReadIntArg(args, "--records", 100_000);
+    int reads = ReadIntArg(args, "--reads", 100_000);
+    int updates = ReadIntArg(args, "--updates", 10_000);
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-thread-scaling-{Guid.NewGuid():N}");
+
+    try
+    {
+        foreach (IWhitepaperBenchmarkEngine engine in WhitepaperEngineMatrix.Create(engineFilter))
+        {
+            results.AddRange(RunThreadScaling(engine, records, reads, updates, progressEvery, root));
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+}
+else if (benchmarkScenario.Equals("ycsb-mixed", StringComparison.OrdinalIgnoreCase))
+{
+    int records = ReadIntArg(args, "--records", 100_000);
+    int operations = ReadIntArg(args, "--operations", 100_000);
+    int dop = Math.Max(1, ReadIntArg(args, "--threads", Environment.ProcessorCount));
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-ycsb-mixed-{Guid.NewGuid():N}");
+
+    try
+    {
+        foreach (IWhitepaperBenchmarkEngine engine in WhitepaperEngineMatrix.Create(engineFilter))
+        {
+            results.Add(RunYcsbMixed(engine, records, operations, dop, progressEvery, root));
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+}
+else if (benchmarkScenario.Equals("space-and-recovery", StringComparison.OrdinalIgnoreCase) ||
+    benchmarkScenario.Equals("space-recovery", StringComparison.OrdinalIgnoreCase))
+{
+    int records = ReadIntArg(args, "--records", 1_000_000);
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-space-recovery-{Guid.NewGuid():N}");
+
+    try
+    {
+        foreach (IWhitepaperBenchmarkEngine engine in WhitepaperEngineMatrix.Create(engineFilter))
+        {
+            results.Add(RunSpaceAndRecovery(engine, records, progressEvery, root));
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+}
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, or vector-search.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, or space-and-recovery.");
 }
 
 if (outputFormat == "csv")
@@ -163,6 +229,10 @@ static string CsvScenarioLabel(string scenario) => scenario.ToLowerInvariant() s
     "deep-document" => "Deep_Document",
     "concurrent-ops" => "Concurrent_Ops",
     "vector-search" => "Vector_Search",
+    "thread-scaling" => "Thread_Scaling",
+    "ycsb-mixed" => "YCSB_Mixed",
+    "space-and-recovery" => "Space_Recovery",
+    "space-recovery" => "Space_Recovery",
     _ => scenario,
 };
 
@@ -714,6 +784,259 @@ static async Task<BenchmarkMetrics> RunConcurrentOps(IConcurrentOpsEngine engine
     }
 }
 
+static IReadOnlyList<BenchmarkMetrics> RunThreadScaling(
+    IWhitepaperBenchmarkEngine engine,
+    int records,
+    int reads,
+    int updates,
+    int progressEvery,
+    string rootDir)
+{
+    using (engine)
+    {
+        int[] degrees = [1, 2, 4, 8, 16, 32];
+        int totalOperations = checked(reads + updates);
+        WhitepaperOperation[] operations = BuildMixedOperations(records, reads, updates, seed: 20260701);
+        string workingDir = Path.Combine(rootDir, SanitizeEngineDir(engine.Name));
+
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: thread scaling — preloading {records:N0} records, then {reads:N0} reads + {updates:N0} updates at 1..32 threads...");
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            engine.Initialize(workingDir, fresh: true);
+            engine.Preload(records);
+
+            var rows = new List<BenchmarkMetrics>(degrees.Length);
+            foreach (int degree in degrees)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+                var stopwatch = Stopwatch.StartNew();
+                RunOperationsParallel(engine, operations, degree, recordLatencies: false, readLatenciesMs: null, writeLatenciesMs: null);
+                stopwatch.Stop();
+                long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+                double ops = totalOperations / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.000001d);
+
+                Console.Error.WriteLine(
+                    $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: {degree:N0} threads completed {totalOperations:N0} ops in {stopwatch.Elapsed.TotalMilliseconds:N1}ms ({ops:N0} OPS)");
+
+                rows.Add(new BenchmarkMetrics(
+                    $"{engine.Name} ({degree} threads)",
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    0d,
+                    0d,
+                    allocatedBytes / 1024d / 1024d,
+                    OpsPerSecond: ops));
+            }
+
+            return rows;
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static BenchmarkMetrics RunYcsbMixed(
+    IWhitepaperBenchmarkEngine engine,
+    int records,
+    int operations,
+    int degreeOfParallelism,
+    int progressEvery,
+    string rootDir)
+{
+    using (engine)
+    {
+        int reads = checked((int)Math.Round(operations * 0.80d));
+        int updates = operations - reads;
+        WhitepaperOperation[] workload = BuildMixedOperations(records, reads, updates, seed: 20260702);
+        double[] readLatenciesMs = new double[reads];
+        double[] writeLatenciesMs = new double[updates];
+        string workingDir = Path.Combine(rootDir, SanitizeEngineDir(engine.Name));
+
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: YCSB mixed — preloading {records:N0}, then {reads:N0} reads + {updates:N0} updates across {degreeOfParallelism:N0} threads...");
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            engine.Initialize(workingDir, fresh: true);
+            engine.Preload(records);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+            var stopwatch = Stopwatch.StartNew();
+            RunOperationsParallel(engine, workload, degreeOfParallelism, recordLatencies: true, readLatenciesMs, writeLatenciesMs);
+            stopwatch.Stop();
+            long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+
+            (_, double readP99) = BenchmarkMetricsCalculator.CalculatePercentiles(readLatenciesMs);
+            (_, double writeP99) = BenchmarkMetricsCalculator.CalculatePercentiles(writeLatenciesMs);
+            double ops = operations / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.000001d);
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: YCSB completed in {stopwatch.Elapsed.TotalMilliseconds:N1}ms ({ops:N0} OPS), read p99 {readP99:F4}ms write p99 {writeP99:F4}ms");
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                stopwatch.Elapsed.TotalMilliseconds,
+                0d,
+                0d,
+                allocatedBytes / 1024d / 1024d,
+                OpsPerSecond: ops,
+                ReadP99LatencyMs: readP99,
+                WriteP99LatencyMs: writeP99);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static BenchmarkMetrics RunSpaceAndRecovery(
+    IWhitepaperBenchmarkEngine engine,
+    int records,
+    int progressEvery,
+    string rootDir)
+{
+    using (engine)
+    {
+        string workingDir = Path.Combine(rootDir, SanitizeEngineDir(engine.Name));
+        Console.Error.WriteLine(
+            $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: space/recovery — inserting {records:N0} records, measuring footprint and cold-open RTO...");
+
+        TextWriter originalOut = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+            engine.Initialize(workingDir, fresh: true);
+            var insertStopwatch = Stopwatch.StartNew();
+            engine.Preload(records);
+            insertStopwatch.Stop();
+            long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+
+            double diskSizeMb = DirectorySizeBytes(workingDir) / 1024d / 1024d;
+            engine.CloseForRecovery();
+
+            var recoveryStopwatch = Stopwatch.StartNew();
+            engine.OpenExisting();
+            recoveryStopwatch.Stop();
+
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalMilliseconds:N1}ms | size {diskSizeMb:N2} MB | recovery {recoveryStopwatch.Elapsed.TotalMilliseconds:N1}ms");
+
+            return new BenchmarkMetrics(
+                engine.Name,
+                insertStopwatch.Elapsed.TotalMilliseconds,
+                0d,
+                0d,
+                allocatedBytes / 1024d / 1024d,
+                DiskSizeMb: diskSizeMb,
+                RecoveryTimeMs: recoveryStopwatch.Elapsed.TotalMilliseconds);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+}
+
+static void RunOperationsParallel(
+    IWhitepaperBenchmarkEngine engine,
+    IReadOnlyList<WhitepaperOperation> operations,
+    int degreeOfParallelism,
+    bool recordLatencies,
+    double[]? readLatenciesMs,
+    double[]? writeLatenciesMs)
+{
+    var options = new ParallelOptions { MaxDegreeOfParallelism = degreeOfParallelism };
+    Parallel.For(
+        0,
+        operations.Count,
+        options,
+        i =>
+        {
+            WhitepaperOperation operation = operations[i];
+            long start = recordLatencies ? Stopwatch.GetTimestamp() : 0;
+            if (operation.IsUpdate)
+            {
+                engine.Update(operation.Id, operation.NewValue, operation.NewScore);
+                if (recordLatencies && writeLatenciesMs is not null)
+                {
+                    writeLatenciesMs[operation.Ordinal] = ElapsedMs(start);
+                }
+            }
+            else
+            {
+                _ = engine.Read(operation.Id);
+                if (recordLatencies && readLatenciesMs is not null)
+                {
+                    readLatenciesMs[operation.Ordinal] = ElapsedMs(start);
+                }
+            }
+        });
+}
+
+static WhitepaperOperation[] BuildMixedOperations(int records, int reads, int updates, int seed)
+{
+    var operations = new WhitepaperOperation[checked(reads + updates)];
+    var random = new Random(seed);
+    int readOrdinal = 0;
+    int updateOrdinal = 0;
+    int index = 0;
+    for (; readOrdinal < reads; readOrdinal++)
+    {
+        long id = random.NextInt64(1, records + 1L);
+        operations[index++] = WhitepaperOperation.Read(id, readOrdinal);
+    }
+
+    for (; updateOrdinal < updates; updateOrdinal++)
+    {
+        long id = random.NextInt64(1, records + 1L);
+        int newValue = unchecked((int)(seed + updateOrdinal));
+        operations[index++] = WhitepaperOperation.Update(id, updateOrdinal, newValue, newValue * 0.5d);
+    }
+
+    random.Shuffle(operations);
+    return operations;
+}
+
+static double ElapsedMs(long startTimestamp) =>
+    (Stopwatch.GetTimestamp() - startTimestamp) * 1000d / Stopwatch.Frequency;
+
+static long DirectorySizeBytes(string directory)
+{
+    if (!Directory.Exists(directory))
+    {
+        return 0;
+    }
+
+    long bytes = 0;
+    foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+    {
+        bytes += new FileInfo(file).Length;
+    }
+
+    return bytes;
+}
+
 static BenchmarkMetrics RunVectorSearch(IVectorSearchEngine engine, int vectors, int dimensions, int queries, int topK, int progressEvery)
 {
     using (engine)
@@ -881,3 +1204,17 @@ static bool HasFlag(string[] args, string name) =>
     Array.IndexOf(args, name) >= 0;
 
 static bool ShouldRun(string filter, string engine) => filter is "all" || filter == engine;
+
+readonly record struct WhitepaperOperation(
+    bool IsUpdate,
+    long Id,
+    int Ordinal,
+    int NewValue,
+    double NewScore)
+{
+    public static WhitepaperOperation Read(long id, int ordinal) =>
+        new(IsUpdate: false, id, ordinal, NewValue: 0, NewScore: 0d);
+
+    public static WhitepaperOperation Update(long id, int ordinal, int newValue, double newScore) =>
+        new(IsUpdate: true, id, ordinal, newValue, newScore);
+}

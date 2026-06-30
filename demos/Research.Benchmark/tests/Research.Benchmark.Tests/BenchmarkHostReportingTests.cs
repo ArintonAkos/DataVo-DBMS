@@ -105,4 +105,46 @@ public sealed class BenchmarkHostReportingTests
         Assert.Contains("Scenario,Engine,ExecutionTime_ms,OPS,ReadP99Latency_ms,WriteP99Latency_ms,AllocatedMemory_MB", csv);
         Assert.Contains("Concurrent_Ops,SQLite,5000.000,90000.000,0.500000,10.500000,1.500", csv);
     }
+
+    [Fact]
+    public void FormatsMarkdownWithSpaceRecoveryColumnsWhenPresent()
+    {
+        var rows = new[]
+        {
+            new BenchmarkMetrics(
+                "DataVo (LSM Relaxed)",
+                10_000d,
+                0d,
+                0d,
+                0d,
+                DiskSizeMb: 128.25d,
+                RecoveryTimeMs: 42.5d)
+        };
+
+        string markdown = BenchmarkReportFormatter.ToMarkdown(rows);
+
+        Assert.Contains("| Engine Name | Insert Execution Time (ms) | Disk Size (MB) | Recovery Time (ms) | Total GC Allocated (MB) |", markdown);
+        Assert.Contains("| DataVo (LSM Relaxed) | 10000.000 | 128.250 | 42.500 | 0.000 |", markdown);
+    }
+
+    [Fact]
+    public void FormatsCsvWithSpaceRecoveryColumnsWhenPresent()
+    {
+        var rows = new[]
+        {
+            new BenchmarkMetrics(
+                "LiteDB",
+                2500d,
+                0d,
+                0d,
+                3.5d,
+                DiskSizeMb: 64.125d,
+                RecoveryTimeMs: 12.75d)
+        };
+
+        string csv = BenchmarkReportFormatter.ToCsv("Space_Recovery", rows);
+
+        Assert.Contains("Scenario,Engine,InsertExecutionTime_ms,DiskSize_MB,RecoveryTime_ms,AllocatedMemory_MB", csv);
+        Assert.Contains("Space_Recovery,LiteDB,2500.000,64.125,12.750,3.500", csv);
+    }
 }

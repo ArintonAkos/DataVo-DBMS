@@ -13,7 +13,9 @@ public sealed record BenchmarkMetrics(
     double? LookupGcAllocatedMb = null,
     double? OpsPerSecond = null,
     double? ReadP99LatencyMs = null,
-    double? WriteP99LatencyMs = null);
+    double? WriteP99LatencyMs = null,
+    double? DiskSizeMb = null,
+    double? RecoveryTimeMs = null);
 
 public static class BenchmarkMetricsCalculator
 {
@@ -44,11 +46,18 @@ public static class BenchmarkReportFormatter
         BenchmarkMetrics[] materializedRows = rows.ToArray();
         bool includeConcurrentOps = materializedRows.Any(row =>
             row.OpsPerSecond.HasValue || row.ReadP99LatencyMs.HasValue || row.WriteP99LatencyMs.HasValue);
+        bool includeSpaceRecovery = materializedRows.Any(row =>
+            row.DiskSizeMb.HasValue || row.RecoveryTimeMs.HasValue);
         bool includePhaseAllocations = materializedRows.Any(row =>
             row.InsertGcAllocatedMb.HasValue || row.LookupGcAllocatedMb.HasValue);
 
         var builder = new StringBuilder();
-        if (includeConcurrentOps)
+        if (includeSpaceRecovery)
+        {
+            builder.AppendLine("| Engine Name | Insert Execution Time (ms) | Disk Size (MB) | Recovery Time (ms) | Total GC Allocated (MB) |");
+            builder.AppendLine("|---|---:|---:|---:|---:|");
+        }
+        else if (includeConcurrentOps)
         {
             builder.AppendLine("| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |");
             builder.AppendLine("|---|---:|---:|---:|---:|---:|");
@@ -72,7 +81,15 @@ public static class BenchmarkReportFormatter
                 .Append(row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture))
                 .Append(" | ");
 
-            if (includeConcurrentOps)
+            if (includeSpaceRecovery)
+            {
+                builder
+                    .Append(FormatOptional(row.DiskSizeMb, "F3"))
+                    .Append(" | ")
+                    .Append(FormatOptional(row.RecoveryTimeMs, "F3"))
+                    .Append(" | ");
+            }
+            else if (includeConcurrentOps)
             {
                 builder
                     .Append(FormatOptional(row.OpsPerSecond, "F3"))
@@ -117,8 +134,30 @@ public static class BenchmarkReportFormatter
         BenchmarkMetrics[] materializedRows = rows.ToArray();
         bool includeConcurrentOps = materializedRows.Any(row =>
             row.OpsPerSecond.HasValue || row.ReadP99LatencyMs.HasValue || row.WriteP99LatencyMs.HasValue);
+        bool includeSpaceRecovery = materializedRows.Any(row =>
+            row.DiskSizeMb.HasValue || row.RecoveryTimeMs.HasValue);
 
         var builder = new StringBuilder();
+        if (includeSpaceRecovery)
+        {
+            builder.AppendLine("Scenario,Engine,InsertExecutionTime_ms,DiskSize_MB,RecoveryTime_ms,AllocatedMemory_MB");
+
+            foreach (BenchmarkMetrics row in materializedRows)
+            {
+                bool unavailable = double.IsNaN(row.TotalExecutionTimeMs);
+                builder
+                    .Append(scenarioLabel).Append(',')
+                    .Append(row.EngineName).Append(',')
+                    .Append(unavailable ? "n/a" : row.TotalExecutionTimeMs.ToString("F3", CultureInfo.InvariantCulture)).Append(',')
+                    .Append(unavailable ? "n/a" : FormatOptional(row.DiskSizeMb, "F3")).Append(',')
+                    .Append(unavailable ? "n/a" : FormatOptional(row.RecoveryTimeMs, "F3")).Append(',')
+                    .Append(unavailable ? "n/a" : row.TotalGcAllocatedMb.ToString("F3", CultureInfo.InvariantCulture))
+                    .AppendLine();
+            }
+
+            return builder.ToString();
+        }
+
         if (includeConcurrentOps)
         {
             builder.AppendLine("Scenario,Engine,ExecutionTime_ms,OPS,ReadP99Latency_ms,WriteP99Latency_ms,AllocatedMemory_MB");
