@@ -18,6 +18,9 @@ public enum DataTypes
     /// <summary>Date-only values.</summary>
     Date,
 
+    /// <summary>128-bit globally unique identifier values.</summary>
+    Guid,
+
     /// <summary>Variable-length UTF-16 string values.</summary>
     Varchar,
 
