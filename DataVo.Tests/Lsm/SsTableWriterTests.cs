@@ -72,6 +72,50 @@ public class SsTableWriterTests
     }
 
     [Fact]
+    public void Write_MatchesEntryCopyingWriterByteForByte()
+    {
+        using var table = new MemTable();
+        for (long pk = 0; pk < 500; pk++)
+        {
+            table.Put(Key((pk * 37) % 500), (ulong)(pk + 1), LsmValueType.Put, Val($"value-{pk}"));
+        }
+
+        table.Delete(Key(42), 1000);
+        table.Freeze();
+
+        var copyingWriter = new SsTableWriter(expectedEntries: table.Count);
+        foreach (MemTableEntry entry in table)
+        {
+            copyingWriter.Add(entry.InternalKey, entry.Value);
+        }
+
+        Assert.Equal(copyingWriter.Finish(), SsTableWriter.Write(table));
+    }
+
+    [Fact]
+    public void Write_StreamsEntriesWithoutPerEntryCopies()
+    {
+        using var table = new MemTable();
+        for (long pk = 0; pk < 2000; pk++)
+        {
+            table.Put(Key(pk), (ulong)(pk + 1), LsmValueType.Put, Val($"value-{pk}"));
+        }
+
+        table.Freeze();
+        byte[] warmup = SsTableWriter.Write(table); // JIT + tier-up outside the measured window
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        byte[] sstable = SsTableWriter.Write(table);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(warmup, sstable);
+        // Budget: the sstable image itself + Bloom filter bits/bytes + small constants. Per-entry
+        // key/value copies would blow well past this.
+        long budget = sstable.Length + (sstable.Length / 2) + 16 * 1024;
+        Assert.True(allocated <= budget, $"Write allocated {allocated} bytes for a {sstable.Length}-byte sstable.");
+    }
+
+    [Fact]
     public void Write_PreservesTombstoneWithEmptyValue()
     {
         using var table = new MemTable();

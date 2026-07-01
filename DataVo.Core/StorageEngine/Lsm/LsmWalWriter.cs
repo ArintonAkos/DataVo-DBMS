@@ -43,24 +43,6 @@ internal sealed class LsmWalWriter
         AppendMutation(userKey, seqno, valueType, value, flushToDisk: false);
     }
 
-    internal void AppendPutMutationsBatch(IReadOnlyList<LsmBatchPutEntry> entries)
-    {
-        ArgumentNullException.ThrowIfNull(entries);
-        if (entries.Count == 0)
-        {
-            return;
-        }
-
-        int offset = 0;
-        foreach (LsmBatchPutEntry entry in entries)
-        {
-            ValidateMutation(entry.Seqno, LsmValueType.Put, entry.Value);
-            offset = WriteBatchFrameOrFlush(offset, entry.UserKey, entry.Seqno, entry.Value);
-        }
-
-        FlushBatchBuffer(offset);
-    }
-
     internal void AppendRowIdPutMutationsBatch(IReadOnlyList<LsmBatchRowPutEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);

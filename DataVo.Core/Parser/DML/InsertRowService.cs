@@ -241,7 +241,8 @@ internal sealed class InsertRowService(
         ReactiveRowSchema columns,
         IReadOnlyList<CellValue[]> rows,
         long statementTxId,
-        ChangeRecorder? recorder = null)
+        ChangeRecorder? recorder = null,
+        bool callerOwnsRowBuffers = false)
     {
         if (string.IsNullOrWhiteSpace(tableName))
         {
@@ -266,7 +267,7 @@ internal sealed class InsertRowService(
         bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
         List<string>? messages = hasConstraints ? [] : null;
         HashSet<string>? acceptedPrimaryKeys = hasConstraints && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
-        HashSet<long>? acceptedIntegerPrimaryKeys = hasIntegerPrimaryKey ? [] : null;
+        HashSet<long>? acceptedIntegerPrimaryKeys = hasIntegerPrimaryKey ? new HashSet<long>(rows.Count) : null;
         IReadOnlyDictionary<string, HashSet<string>>? acceptedUniqueValues = hasConstraints
             ? uniqueKeys.ToDictionary(
                 key => key,
@@ -349,10 +350,25 @@ internal sealed class InsertRowService(
             }
         }
 
+        // Caller-owned buffers are copied only when something retains cells past this call: in-memory
+        // typed storage keeps the StoredRow itself, and a change recorder captures the after-image.
+        // Serialize-through backends (LSM/disk) read the cells transiently, so no copy is needed.
+        IReadOnlyList<CellValue[]> ownedRows = rows;
+        if (callerOwnsRowBuffers && (context.RetainsTypedRowBuffers || recorder is not null))
+        {
+            var copies = new CellValue[rows.Count][];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                copies[i] = [.. rows[i]];
+            }
+
+            ownedRows = copies;
+        }
+
         var storedRows = new List<StoredRow>(rows.Count);
         for (int i = 0; i < rows.Count; i++)
         {
-            storedRows.Add(StoredRow.FromOwnedCells(columns, rows[i]));
+            storedRows.Add(StoredRow.FromOwnedCells(columns, ownedRows[i]));
         }
 
         IReadOnlyList<long> rowIds = context.InsertTypedRows(storedRows, tableName, databaseName);
@@ -372,7 +388,7 @@ internal sealed class InsertRowService(
         {
             for (int i = 0; i < rowIds.Count; i++)
             {
-                recorder.RecordTypedInsert(tableName, rowIds[i], TypedRow.FromOwnedCells(columns, rows[i]));
+                recorder.RecordTypedInsert(tableName, rowIds[i], TypedRow.FromOwnedCells(columns, ownedRows[i]));
             }
         }
 
@@ -991,10 +1007,17 @@ internal sealed class InsertRowService(
 
     private bool IntegerPrimaryKeyExists(string tableName, string databaseName, long primaryKeyValue)
     {
-        string indexName = $"_PK_{tableName}";
+        string indexName = GetPrimaryKeyIndexName(tableName);
         if (indexes.TryLookupIntegerPrimaryKey(primaryKeyValue, indexName, tableName, databaseName, out _))
         {
             return true;
+        }
+
+        // A populated integer fast lane is authoritative (IndexContainsKey treats a miss the same way),
+        // so a miss means the key is absent: skip the bracketed key string and generic BTree probe.
+        if (indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
+        {
+            return false;
         }
 
         try
@@ -1005,6 +1028,25 @@ internal sealed class InsertRowService(
         {
             return false;
         }
+    }
+
+    // Memoizes the "_PK_{table}" index-name string: existence checks run once per row during batch
+    // validation and must not allocate a fresh name each time. Single reference write keeps the
+    // (table, name) pair consistent under concurrent readers.
+    private PkIndexName? _pkIndexNameCache;
+
+    private sealed record PkIndexName(string TableName, string IndexName);
+
+    private string GetPrimaryKeyIndexName(string tableName)
+    {
+        PkIndexName? cached = _pkIndexNameCache;
+        if (cached is null || !string.Equals(cached.TableName, tableName, StringComparison.Ordinal))
+        {
+            cached = new PkIndexName(tableName, $"_PK_{tableName}");
+            _pkIndexNameCache = cached;
+        }
+
+        return cached.IndexName;
     }
 
     private bool UniqueValueExists(
@@ -1218,7 +1260,6 @@ internal sealed class InsertRowService(
                 continue;
             }
 
-            var entries = new List<(string Value, long RowId)>(rowIds.Count);
             bool canReusePrimaryKey = primaryKeyValues is not null
                 && IsPrimaryKeyIndex(tableName, indexName)
                 && AttributeNamesEqual(index.AttributeNames, primaryKeys);
@@ -1261,6 +1302,7 @@ internal sealed class InsertRowService(
                 continue;
             }
 
+            var entries = new List<(string Value, long RowId)>(rowIds.Count);
             for (int i = 0; i < rows.Count; i++)
             {
                 ReadOnlySpan<CellValue> cells = rows[i];

@@ -62,15 +62,24 @@ public static class MvccCoordinator
     }
 
     /// <summary>
-    /// Registers version metadata for a committed insert.
+    /// Registers version metadata for a committed insert. Skipped in auto-commit mode with no open
+    /// transactions, for the same reason as <see cref="RegisterInsertVersions"/>.
     /// </summary>
     public static void RegisterInsertVersion(DataVoEngine engine, string databaseName, string tableName, long rowId, long transactionId)
     {
+        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            return;
+        }
+
         engine.VersionStorageManager.AllocateVersion(databaseName, tableName, rowId, transactionId);
     }
 
     /// <summary>
-    /// Registers version metadata for a committed insert batch.
+    /// Registers version metadata for a committed insert batch. When no session holds an open
+    /// transaction there is no snapshot the metadata could gate — absent metadata is bootstrapped as an
+    /// always-visible base version (<see cref="EnsureRowVersionExists"/>) — so auto-commit bulk ingest
+    /// skips the per-row entries entirely.
     /// </summary>
     public static void RegisterInsertVersions(
         DataVoEngine engine,
@@ -79,6 +88,11 @@ public static class MvccCoordinator
         IReadOnlyList<long> rowIds,
         long transactionId)
     {
+        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            return;
+        }
+
         engine.VersionStorageManager.AllocateInsertVersions(databaseName, tableName, rowIds, transactionId);
     }
 

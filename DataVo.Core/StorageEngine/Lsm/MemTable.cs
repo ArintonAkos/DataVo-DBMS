@@ -266,6 +266,38 @@ public sealed class MemTable : IDisposable
         return x;
     }
 
+    /// <summary>
+    /// Copies the smallest and largest internal keys into fresh arrays. The chain is sorted, so the
+    /// bounds are the first node (level-0 successor of the head) and the last node (found by
+    /// descending the forward levels), with no per-entry work or copies.
+    /// </summary>
+    public bool TryGetInternalKeyBounds(out byte[] smallestInternalKey, out byte[] largestInternalKey)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        long first = GetForward(_head, 0);
+        if (first == Null)
+        {
+            smallestInternalKey = [];
+            largestInternalKey = [];
+            return false;
+        }
+
+        long last = _head;
+        for (int level = Volatile.Read(ref _maxHeight) - 1; level >= 0; level--)
+        {
+            long next = GetForward(last, level);
+            while (next != Null)
+            {
+                last = next;
+                next = GetForward(last, level);
+            }
+        }
+
+        smallestInternalKey = GetKey(first).ToArray();
+        largestInternalKey = GetKey(last).ToArray();
+        return true;
+    }
+
     /// <summary>Returns a forward iterator over all entries in <see cref="InternalKey"/> order.</summary>
     public Enumerator GetEnumerator() => new(this);
 
