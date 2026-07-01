@@ -45,13 +45,50 @@ public sealed class DataVoPreparedSelectMany<T>
     /// <summary>Executes the prepared lookup for a text predicate value.</summary>
     public IReadOnlyList<T> Execute(string? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
 
+    /// <summary>Executes the prepared lookup for a GUID predicate value.</summary>
+    public IReadOnlyList<T> Execute(Guid value) => ExecuteGuidKey(value);
+
     /// <summary>Executes the prepared lookup for a general predicate value.</summary>
-    public IReadOnlyList<T> Execute(object? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
+    public IReadOnlyList<T> Execute(object? value) => value switch
+    {
+        int intValue => Execute(intValue),
+        long longValue => Execute(longValue),
+        double doubleValue => Execute(doubleValue),
+        string stringValue => Execute(stringValue),
+        Guid guidValue => Execute(guidValue),
+        null => Execute((string?)null),
+        _ => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value))
+    };
 
     private IReadOnlyList<T> ExecuteIntegerKey(long value)
     {
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupIntegerIndex(
+                value,
+                _indexName,
+                _plan.TableName,
+                _databaseName,
+                out IReadOnlyList<long> rowIds))
+        {
+            var results = new List<T>(rowIds.Count);
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                if (TryProjectRow(rowIds[i], out T? result))
+                {
+                    results.Add(result!);
+                }
+            }
+
+            return results;
+        }
+
+        return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
+    }
+
+    private IReadOnlyList<T> ExecuteGuidKey(Guid value)
+    {
+        if (_indexName is not null
+            && _context.Engine.IndexManager.TryLookupGuidIndex(
                 value,
                 _indexName,
                 _plan.TableName,
