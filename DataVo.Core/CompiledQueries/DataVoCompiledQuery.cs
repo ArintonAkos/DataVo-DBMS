@@ -2026,6 +2026,45 @@ public static class DataVoCompiledQuery
             return;
         }
 
+        if (isPrimaryKeyIndex && indexes.HasGuidPrimaryKeyFastLane(indexName, tableName, databaseName))
+        {
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                bool oldOk = TryGetSingleGuidKey(oldRows[i], index.AttributeNames, out Guid oldKey);
+                bool newOk = TryGetSingleGuidKey(newRows[i], index.AttributeNames, out Guid newKey);
+
+                if (oldOk && (!newOk || oldKey != newKey))
+                {
+                    indexes.RemoveGuidPrimaryKey(oldKey, indexName, tableName, databaseName);
+                }
+
+                if (newOk)
+                {
+                    indexes.InsertGuidPrimaryKeys([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+            }
+
+            return;
+        }
+
+        if (indexes.HasGuidIndexFastLane(indexName, tableName, databaseName))
+        {
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                if (TryGetSingleGuidKey(oldRows[i], index.AttributeNames, out Guid oldKey))
+                {
+                    indexes.RemoveGuidIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
+                }
+
+                if (TryGetSingleGuidKey(newRows[i], index.AttributeNames, out Guid newKey))
+                {
+                    indexes.InsertGuidIndexEntries([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+            }
+
+            return;
+        }
+
         // Generic scalar (string BTree) path: delete the old row ids, then reinsert non-null keys.
         indexes.DeleteFromIndex(oldRowIds.ToList(), indexName, tableName, databaseName);
         for (int i = 0; i < newRows.Count; i++)
@@ -2063,6 +2102,32 @@ public static class DataVoCompiledQuery
             default:
                 return false;
         }
+    }
+
+    private static bool TryGetSingleGuidKey(
+        IReadOnlyDictionary<string, object?> row,
+        IReadOnlyList<string> attributes,
+        out Guid key)
+    {
+        key = default;
+        if (attributes.Count != 1 || !row.TryGetValue(attributes[0], out object? value) || value is null)
+        {
+            return false;
+        }
+
+        if (value is Guid guid)
+        {
+            key = guid;
+            return true;
+        }
+
+        if (value is string text && Guid.TryParse(text, out Guid parsed))
+        {
+            key = parsed;
+            return true;
+        }
+
+        return false;
     }
 
     private static string BuildComparisonKey(string columnName, object? value)

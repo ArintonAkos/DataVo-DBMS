@@ -1168,9 +1168,22 @@ internal sealed class InsertRowService(
                 continue;
             }
 
+            if (IsPrimaryKeyIndex(tableName, indexName)
+                && TryGetSingleGuidKey(schema, cells, index.AttributeNames, out Guid guidKey))
+            {
+                indexes.InsertGuidPrimaryKeys([(guidKey, rowId)], indexName, tableName, databaseName);
+                continue;
+            }
+
             if (TryGetSingleIntegerKey(schema, cells, index.AttributeNames, out long integerIndexKey))
             {
                 indexes.InsertIntegerIndexEntries([(integerIndexKey, rowId)], indexName, tableName, databaseName);
+                continue;
+            }
+
+            if (TryGetSingleGuidKey(schema, cells, index.AttributeNames, out Guid guidIndexKey))
+            {
+                indexes.InsertGuidIndexEntries([(guidIndexKey, rowId)], indexName, tableName, databaseName);
                 continue;
             }
 
@@ -1225,10 +1238,26 @@ internal sealed class InsertRowService(
                 continue;
             }
 
+            if (IsPrimaryKeyIndex(tableName, indexName)
+                && AttributeNamesEqual(index.AttributeNames, primaryKeys)
+                && TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidPrimaryEntries)
+                && guidPrimaryEntries is not null)
+            {
+                indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, tableName, databaseName);
+                continue;
+            }
+
             if (TryBuildIntegerIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerIndexEntries)
                 && integerIndexEntries is not null)
             {
                 indexes.InsertIntegerIndexEntries(integerIndexEntries, indexName, tableName, databaseName);
+                continue;
+            }
+
+            if (TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidIndexEntries)
+                && guidIndexEntries is not null)
+            {
+                indexes.InsertGuidIndexEntries(guidIndexEntries, indexName, tableName, databaseName);
                 continue;
             }
 
@@ -1285,6 +1314,40 @@ internal sealed class InsertRowService(
             }
 
             return false;
+        }
+
+        entries = result;
+        return true;
+    }
+
+    private static bool TryBuildGuidIndexEntries(
+        ReactiveRowSchema schema,
+        IReadOnlyList<CellValue[]> rows,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyList<string> attributes,
+        out List<(Guid Key, long RowId)>? entries)
+    {
+        entries = null;
+        if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
+        {
+            return false;
+        }
+
+        var result = new List<(Guid Key, long RowId)>(rowIds.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            CellValue cell = rows[i][ordinal];
+            if (cell.IsNull)
+            {
+                continue;
+            }
+
+            if (cell.Type != CellType.Guid)
+            {
+                return false;
+            }
+
+            result.Add((cell.AsGuid(), rowIds[i]));
         }
 
         entries = result;
@@ -1371,6 +1434,28 @@ internal sealed class InsertRowService(
         }
 
         return false;
+    }
+
+    private static bool TryGetSingleGuidKey(
+        ReactiveRowSchema schema,
+        ReadOnlySpan<CellValue> cells,
+        IReadOnlyList<string> attributes,
+        out Guid key)
+    {
+        key = default;
+        if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
+        {
+            return false;
+        }
+
+        CellValue cell = cells[ordinal];
+        if (cell.Type != CellType.Guid)
+        {
+            return false;
+        }
+
+        key = cell.AsGuid();
+        return true;
     }
 
     private static bool IsPrimaryKeyIndex(string tableName, string indexName) =>
