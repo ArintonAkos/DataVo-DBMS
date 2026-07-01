@@ -13,6 +13,7 @@ public sealed class CompiledQueryReadAllocationGuardTests
     private const int Iterations = 20_000;
     private const long PreparedPointLookupCeilingBytes = 160;
     private const long SelectSingleTypedPointLookupCeilingBytes = 192;
+    private const long GuidPreparedPointLookupCeilingBytes = 192;
 
     private static readonly ReactiveRowSchema Schema = new("Id", "Name", "Value", "Score");
     private static readonly DataVoCompiledQueryPlan TaggedPrimaryKeyPlan = DataVoCompiledQueryPlan.SelectSingle(
@@ -61,6 +62,51 @@ public sealed class CompiledQueryReadAllocationGuardTests
             $"SelectSingleTyped point lookup {sample.BytesPerCall:N1} B/call exceeds {SelectSingleTypedPointLookupCeilingBytes} B/call");
     }
 
+    [Fact]
+    public void PreparedSelectSingleTyped_GuidWarmPointLookup_StaysNearMaterializationFloor()
+    {
+        using DataVoContext context = CreateGuidContext();
+        Guid[] ids = SeedGuidRecords(context);
+
+        var plan = DataVoCompiledQueryPlan.SelectSingle(
+            "GuidRecords",
+            ["Id", "Name"],
+            "Id",
+            "id",
+            CompiledAccessPath.SingleColumnIndex,
+            "_PK_GuidRecords");
+
+        DataVoPreparedSelectSingle<GuidHit> prepared =
+            DataVoCompiledQuery.PrepareSelectSingleTyped(
+                context,
+                plan,
+                static row => new GuidHit(row.GetGuid("Id"), row.GetString("Name")!));
+
+        object? sink = null;
+        for (int i = 0; i < 1_000; i++)
+        {
+            sink = prepared.Execute(ids[i % ids.Length]);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < Iterations; i++)
+        {
+            sink = prepared.Execute(ids[i % ids.Length]);
+        }
+
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        double bytesPerCall = bytes / (double)Iterations;
+        GC.KeepAlive(sink);
+
+        _output.WriteLine($"PreparedSelectSingleTyped GUID warm point lookup: {bytesPerCall:N1} B/call");
+        Assert.True(bytesPerCall <= GuidPreparedPointLookupCeilingBytes,
+            $"GUID prepared point lookup {bytesPerCall:N1} B/call exceeds {GuidPreparedPointLookupCeilingBytes} B/call");
+    }
+
     private static AllocationSample Measure(Func<int, object?> action)
     {
         object? sink = null;
@@ -106,6 +152,30 @@ public sealed class CompiledQueryReadAllocationGuardTests
         }
     }
 
+    private static DataVoContext CreateGuidContext()
+    {
+        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        ExecuteOk(context, "CREATE DATABASE CompiledGuidReadGuard");
+        ExecuteOk(context, "USE CompiledGuidReadGuard");
+        ExecuteOk(context, "CREATE TABLE GuidRecords (Id GUID PRIMARY KEY, Name VARCHAR(40))");
+        return context;
+    }
+
+    private static Guid[] SeedGuidRecords(DataVoContext context)
+    {
+        var ids = new Guid[RowCount];
+        var cells = new CellValue[2];
+        for (int i = 0; i < RowCount; i++)
+        {
+            ids[i] = Guid.CreateVersion7();
+            cells[0] = CellValue.From(ids[i]);
+            cells[1] = CellValue.From($"Guid {i}");
+            context.InsertTyped("GuidRecords", new ReactiveRowSchema("Id", "Name"), cells);
+        }
+
+        return ids;
+    }
+
     private static void ExecuteOk(DataVoContext context, string sql)
     {
         QueryResult result = context.Execute(sql).Last();
@@ -122,6 +192,8 @@ public sealed class CompiledQueryReadAllocationGuardTests
         row.GetDouble("Score"));
 
     private sealed record Hit(int Id, string Name, int Value, double Score);
+
+    private sealed record GuidHit(Guid Id, string Name);
 
     private readonly record struct AllocationSample(long TotalBytes, double BytesPerCall);
 }
