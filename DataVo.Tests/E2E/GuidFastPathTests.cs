@@ -57,6 +57,37 @@ public sealed class GuidFastPathTests
         Assert.Equal(["one", "two"], hits.Select(static x => x.Name).Order());
     }
 
+    [Fact]
+    public void PreparedSelectSingle_GuidPrimaryKey_UsesDirectGuidLookup()
+    {
+        using DataVoContext context = CreateContext();
+        Guid id = Guid.Parse("dab9e9b5-b3f4-4686-92f1-c175986fae15");
+        Insert(context, id, Guid.NewGuid(), "prepared");
+
+        var plan = DataVoCompiledQueryPlan.SelectSingle(
+            "Sessions",
+            ["Id", "Name"],
+            "Id",
+            "id",
+            CompiledAccessPath.SingleColumnIndex,
+            "_PK_Sessions");
+
+        DataVoPreparedSelectSingle<SessionProjection> prepared =
+            DataVoCompiledQuery.PrepareSelectSingleTyped(
+                context,
+                plan,
+                static row => new SessionProjection(row.GetGuid("Id"), row.GetString("Name")!));
+
+        Assert.Contains(
+            typeof(DataVoPreparedSelectSingle<SessionProjection>).GetMethods().Where(static method => method.Name == "Execute"),
+            static method => method.GetParameters() is [{ ParameterType: var parameterType }] && parameterType == typeof(Guid));
+
+        SessionProjection? hit = prepared.Execute(id);
+
+        Assert.NotNull(hit);
+        Assert.Equal("prepared", hit.Name);
+    }
+
     private static DataVoContext CreateContext()
     {
         var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });

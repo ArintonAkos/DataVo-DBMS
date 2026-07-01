@@ -2144,6 +2144,9 @@ public static class DataVoCompiledQuery
     internal static string BuildScalarComparisonKey(double value) =>
         string.Create(CultureInfo.InvariantCulture, $"[{value}]");
 
+    internal static string BuildScalarComparisonKey(Guid value) =>
+        value.ToString("D");
+
     internal static string BuildScalarComparisonKey(string? value)
     {
         if (value is null)
@@ -2166,6 +2169,7 @@ public static class DataVoCompiledQuery
             double doubleValue => BuildScalarComparisonKey(doubleValue),
             float floatValue => string.Create(CultureInfo.InvariantCulture, $"[{floatValue}]"),
             decimal decimalValue => string.Create(CultureInfo.InvariantCulture, $"[{decimalValue}]"),
+            Guid guidValue => BuildScalarComparisonKey(guidValue),
             string stringValue => BuildScalarComparisonKey(stringValue),
             _ => VectorParser.TryCoerceToVector(value, out float[] vector)
                 ? VectorParser.SerializeVector(vector)

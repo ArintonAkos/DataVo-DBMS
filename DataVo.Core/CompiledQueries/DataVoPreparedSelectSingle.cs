@@ -49,6 +49,9 @@ public sealed class DataVoPreparedSelectSingle<T>
     /// <summary>Executes the prepared lookup for a text predicate value.</summary>
     public T? Execute(string? value) => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
 
+    /// <summary>Executes the prepared lookup for a GUID predicate value.</summary>
+    public T? Execute(Guid value) => ExecuteGuidKey(value);
+
     /// <summary>Executes the prepared lookup for a general predicate value.</summary>
     public T? Execute(object? value) => ExecuteParameterValue(value);
 
@@ -60,6 +63,7 @@ public sealed class DataVoPreparedSelectSingle<T>
             long longValue => Execute(longValue),
             double doubleValue => Execute(doubleValue),
             string stringValue => Execute(stringValue),
+            Guid guidValue => Execute(guidValue),
             null => Execute((string?)null),
             _ => ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value))
         };
@@ -69,6 +73,22 @@ public sealed class DataVoPreparedSelectSingle<T>
     {
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupIntegerPrimaryKey(
+                value,
+                _indexName,
+                _plan.TableName,
+                _databaseName,
+                out long rowId))
+        {
+            return TryProjectRow(rowId, out T? result) ? result : default;
+        }
+
+        return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
+    }
+
+    private T? ExecuteGuidKey(Guid value)
+    {
+        if (_indexName is not null
+            && _context.Engine.IndexManager.TryLookupGuidPrimaryKey(
                 value,
                 _indexName,
                 _plan.TableName,
