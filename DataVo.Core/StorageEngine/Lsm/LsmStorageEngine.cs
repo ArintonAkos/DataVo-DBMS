@@ -31,7 +31,11 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         Directory.CreateDirectory(_storageDirectory);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Inserts a row and takes ownership of <paramref name="rowBytes"/>: the buffer is retained as the
+    /// latest in-memory row version (the MemTable copies it into its arena) and must not be mutated by
+    /// the caller afterwards.
+    /// </summary>
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         ArgumentNullException.ThrowIfNull(rowBytes);
@@ -41,16 +45,19 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             long rowId = state.NextRowId++;
             ulong seqno = state.NextSeqno++;
-            byte[] value = rowBytes.ToArray();
             Span<byte> userKey = stackalloc byte[UserKeySize];
             EncodeRowId(rowId, userKey);
-            state.Table.Put(userKey, seqno, value);
-            state.LatestRows[rowId] = new LatestRowVersion(value, IsTombstone: false, seqno);
+            state.Table.Put(userKey, seqno, rowBytes);
+            state.LatestRows[rowId] = new LatestRowVersion(rowBytes, IsTombstone: false, seqno);
             return rowId;
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Inserts rows and takes ownership of every buffer in <paramref name="rowsBytes"/> (see
+    /// <see cref="InsertRow"/>). Row keys are encoded on the stack per entry — no per-row key or
+    /// value copies.
+    /// </summary>
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
         ArgumentNullException.ThrowIfNull(rowsBytes);
@@ -59,26 +66,48 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             var rowIds = new List<long>(rowsBytes.Count);
-            var batch = new List<LsmBatchPutEntry>(rowsBytes.Count);
+            var batch = new List<LsmBatchRowPutEntry>(rowsBytes.Count);
             foreach (byte[] rowBytes in rowsBytes)
             {
                 ArgumentNullException.ThrowIfNull(rowBytes);
                 long rowId = state.NextRowId++;
                 ulong seqno = state.NextSeqno++;
-                byte[] value = rowBytes.ToArray();
-                byte[] userKey = EncodeRowId(rowId);
-                batch.Add(new LsmBatchPutEntry(userKey, seqno, value));
+                batch.Add(new LsmBatchRowPutEntry(rowId, seqno, rowBytes));
                 rowIds.Add(rowId);
             }
 
-            state.Table.PutBatch(batch);
-            for (int i = 0; i < rowIds.Count; i++)
+            state.Table.PutRowIdBatch(batch);
+            foreach (LsmBatchRowPutEntry entry in batch)
             {
-                LsmBatchPutEntry entry = batch[i];
-                state.LatestRows[rowIds[i]] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
+                state.LatestRows[entry.RowId] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
             }
 
             return rowIds;
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the table currently holds any live (non-tombstoned) rows, without rescanning
+    /// SSTables: <see cref="TableState.LatestRows"/> is authoritative (rebuilt on open, maintained on
+    /// every mutation). Flushes the active MemTable first to keep the flush cadence of the scan-based
+    /// probes this replaces, so bulk-ingest disk layout is unchanged.
+    /// </summary>
+    public bool HasAnyRows(string databaseName, string tableName)
+    {
+        TableState state = GetOrCreateTable(databaseName, tableName);
+
+        lock (state.SyncRoot)
+        {
+            state.Table.FlushActiveMemTable();
+            foreach (LatestRowVersion version in state.LatestRows.Values)
+            {
+                if (!version.IsTombstone)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 
@@ -506,13 +535,6 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         ReadOnlySpan<byte> span = source.Slice(offset, length);
         offset += length;
         return span;
-    }
-
-    private static byte[] EncodeRowId(long rowId)
-    {
-        var userKey = new byte[UserKeySize];
-        EncodeRowId(rowId, userKey);
-        return userKey;
     }
 
     private static void EncodeRowId(long rowId, Span<byte> destination)

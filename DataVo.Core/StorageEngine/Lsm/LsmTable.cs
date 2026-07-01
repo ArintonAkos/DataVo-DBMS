@@ -7,8 +7,6 @@ public readonly record struct LsmFlushResult(
     string FilePath,
     byte[] Bytes);
 
-internal readonly record struct LsmBatchPutEntry(byte[] UserKey, ulong Seqno, byte[] Value);
-
 internal readonly record struct LsmBatchRowPutEntry(long RowId, ulong Seqno, byte[] Value);
 
 /// <summary>Coordinates one active MemTable generation with SSTable flushes and manifest registration.</summary>
@@ -96,30 +94,6 @@ public sealed class LsmTable : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             _walWriter?.AppendMutation(userKey, seqno, LsmValueType.Put, value);
             _active.Put(userKey, seqno, LsmValueType.Put, value);
-        }
-    }
-
-    internal void PutBatch(IReadOnlyList<LsmBatchPutEntry> entries)
-    {
-        ArgumentNullException.ThrowIfNull(entries);
-
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (entries.Count == 0)
-            {
-                return;
-            }
-
-            if (_walWriter is not null)
-            {
-                _walWriter.AppendPutMutationsBatch(entries);
-            }
-
-            foreach (LsmBatchPutEntry entry in entries)
-            {
-                _active.Put(entry.UserKey, entry.Seqno, LsmValueType.Put, entry.Value);
-            }
         }
     }
 
@@ -242,23 +216,7 @@ public sealed class LsmTable : IDisposable
 
     private static (byte[] Smallest, byte[] Largest) ComputeBounds(MemTable memTable)
     {
-        byte[]? smallest = null;
-        byte[]? largest = null;
-        foreach (MemTableEntry entry in memTable)
-        {
-            byte[] key = entry.InternalKey.ToArray();
-            if (smallest is null || InternalKey.Compare(key, smallest) < 0)
-            {
-                smallest = key;
-            }
-
-            if (largest is null || InternalKey.Compare(key, largest) > 0)
-            {
-                largest = key;
-            }
-        }
-
-        if (smallest is null || largest is null)
+        if (!memTable.TryGetInternalKeyBounds(out byte[] smallest, out byte[] largest))
         {
             throw new InvalidOperationException("Cannot flush an empty MemTable.");
         }

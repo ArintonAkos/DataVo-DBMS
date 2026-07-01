@@ -101,18 +101,79 @@ public sealed class SsTableWriter
         return sstable;
     }
 
-    /// <summary>Synchronously consumes a MemTable enumerator and returns a complete SSTable byte image.</summary>
+    /// <summary>
+    /// Synchronously streams a MemTable into a complete SSTable byte image. The skiplist's level-0
+    /// chain is already in <see cref="InternalKey"/> order, so entries are measured and written
+    /// directly from arena memory — no per-entry key/value copies and no re-sort. Byte-identical to
+    /// adding every entry to a writer and calling <see cref="Finish"/>.
+    /// </summary>
     public static byte[] Write(MemTable memTable)
     {
         ArgumentNullException.ThrowIfNull(memTable);
-
-        var writer = new SsTableWriter(memTable.Count);
-        foreach (MemTableEntry entry in memTable)
+        if (memTable.Count == 0)
         {
-            writer.Add(entry.InternalKey, entry.Value);
+            throw new InvalidOperationException("Cannot finish an empty SSTable.");
         }
 
-        return writer.Finish();
+        // Pass 1 — measure the data block, note key bound lengths, and populate the Bloom filter.
+        BloomFilter filter = BloomFilter.Create(memTable.Count, bitsPerKey: 10);
+        int dataLength = 0;
+        int firstKeyLength = 0;
+        int lastKeyLength = 0;
+        foreach (MemTableEntry entry in memTable)
+        {
+            if (firstKeyLength == 0)
+            {
+                firstKeyLength = entry.InternalKey.Length;
+            }
+
+            lastKeyLength = entry.InternalKey.Length;
+            dataLength = checked(dataLength + sizeof(int) + sizeof(int) + entry.InternalKey.Length + entry.Value.Length);
+            filter.Add(InternalKey.UserKey(entry.InternalKey));
+        }
+
+        byte[] filterBytes = filter.ToBytes();
+        int indexLength = checked(
+            sizeof(int)
+            + SsTableFormat.BlockHandleSize
+            + sizeof(int)
+            + sizeof(int)
+            + firstKeyLength
+            + lastKeyLength);
+        int totalLength = checked(dataLength + indexLength + filterBytes.Length + SsTableFormat.FooterSize);
+        byte[] sstable = new byte[totalLength];
+
+        // Pass 2 — write the data block in enumeration (= key) order, tracking the last key's offset.
+        int offset = 0;
+        int lastKeyOffset = 0;
+        foreach (MemTableEntry entry in memTable)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(sstable.AsSpan(offset, sizeof(int)), entry.InternalKey.Length);
+            offset += sizeof(int);
+            BinaryPrimitives.WriteInt32LittleEndian(sstable.AsSpan(offset, sizeof(int)), entry.Value.Length);
+            offset += sizeof(int);
+            lastKeyOffset = offset;
+            entry.InternalKey.CopyTo(sstable.AsSpan(offset, entry.InternalKey.Length));
+            offset += entry.InternalKey.Length;
+            entry.Value.CopyTo(sstable.AsSpan(offset, entry.Value.Length));
+            offset += entry.Value.Length;
+        }
+
+        var dataBlock = new SsTableBlockHandle(0, dataLength);
+        ReadOnlySpan<byte> firstKey = sstable.AsSpan(sizeof(int) + sizeof(int), firstKeyLength);
+        ReadOnlySpan<byte> lastKey = sstable.AsSpan(lastKeyOffset, lastKeyLength);
+        WriteIndexBlock(sstable.AsSpan(dataLength, indexLength), dataBlock, firstKey, lastKey);
+        var indexBlock = new SsTableBlockHandle(dataLength, indexLength);
+
+        int filterOffset = dataLength + indexLength;
+        filterBytes.CopyTo(sstable.AsSpan(filterOffset));
+        var filterBlock = new SsTableBlockHandle(filterOffset, filterBytes.Length);
+
+        SsTableFormat.WriteFooter(
+            sstable.AsSpan(filterOffset + filterBytes.Length, SsTableFormat.FooterSize),
+            indexBlock,
+            filterBlock);
+        return sstable;
     }
 
     private void WriteDataBlock(Span<byte> destination)

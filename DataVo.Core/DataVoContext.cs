@@ -323,9 +323,16 @@ public sealed class DataVoContext : IDisposable
 
     /// <summary>
     /// Inserts multiple full typed rows under one runtime scope, table write lock, and statement transaction id.
-    /// The supplied cell arrays are consumed as immutable row buffers and must not be mutated after this call.
+    /// By default the supplied cell arrays are consumed as immutable row buffers and must not be mutated after
+    /// this call. With <paramref name="callerOwnsRowBuffers"/> the caller keeps ownership and may reuse the
+    /// arrays immediately after the call returns (e.g. pooled row buffers during bulk ingest); the engine
+    /// copies a row only when something actually retains it (in-memory typed storage, change capture).
     /// </summary>
-    public IReadOnlyList<long> InsertTypedBatch(string tableName, ReactiveRowSchema columns, IReadOnlyList<CellValue[]> rows)
+    public IReadOnlyList<long> InsertTypedBatch(
+        string tableName,
+        ReactiveRowSchema columns,
+        IReadOnlyList<CellValue[]> rows,
+        bool callerOwnsRowBuffers = false)
     {
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(rows);
@@ -383,7 +390,7 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            IReadOnlyList<long> rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder);
+            IReadOnlyList<long> rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder, callerOwnsRowBuffers);
             diagnosticsBuilder?.AddRowsAffected(rowIds.Count);
             recorder?.Publish();
             return rowIds;

@@ -392,11 +392,22 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Whether the active backend retains typed row cell buffers as its storage representation
+    /// (in-memory typed storage) rather than serializing them transiently during the insert call.
+    /// </summary>
+    internal bool RetainsTypedRowBuffers => _storageEngine is ITypedRowStorageEngine;
+
     internal bool IsTableEmpty(string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
             return !typedStorage.HasAnyRows(databaseName, tableName);
+        }
+
+        if (_storageEngine is IRowExistenceProbe probe)
+        {
+            return !probe.HasAnyRows(databaseName, tableName);
         }
 
         foreach ((_, byte[] _) in _storageEngine.ReadAllRows(databaseName, tableName))

@@ -323,6 +323,129 @@ public class InsertTypedTests
     }
 
     [Fact]
+    public void InsertTypedBatch_RejectsDuplicatePrimaryKeyFromEarlierBatch()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        ctx.InsertTypedBatch("Players", PlayerSchema,
+        [
+            [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)],
+            [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
+        ]);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            ctx.InsertTypedBatch("Players", PlayerSchema,
+            [
+                [CellValue.From(3), CellValue.From("Cara"), CellValue.From(4)],
+                [CellValue.From(2), CellValue.From("Duplicate"), CellValue.From(5)]
+            ]));
+
+        Assert.Equal("Primary key violation in row 2!", ex.Message);
+    }
+
+    [Fact]
+    public void InsertTypedBatch_CallerOwnedBuffers_InMemoryStorageIsIsolatedFromLaterMutation()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        CellValue[] buffer = [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)];
+
+        ctx.InsertTypedBatch("Players", PlayerSchema, [buffer], callerOwnsRowBuffers: true);
+
+        // Caller-owned mode lets bulk loaders reuse row buffers: mutating the buffer afterwards must
+        // not reach into retained storage.
+        buffer[1] = CellValue.From("Mutated");
+        buffer[2] = CellValue.From(999);
+
+        Dictionary<string, object?> row = Select(ctx, "SELECT Id, Name, Level FROM Players").Single();
+        Assert.Equal("Ada", row["Name"]);
+        Assert.Equal(7, row["Level"]);
+    }
+
+    [Fact]
+    public void InsertTypedBatch_CallerOwnedBuffers_LsmStorageIsIsolatedFromLaterMutation()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "datavo-typed-lsm-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            using DataVoContext ctx = new(new DataVoConfig
+            {
+                StorageMode = StorageMode.Lsm,
+                DiskStoragePath = root,
+                LsmStrictFsync = false,
+            });
+            string dbName = $"TypedInsertLsm_{Guid.NewGuid():N}";
+            ctx.Execute($"CREATE DATABASE {dbName}");
+            ctx.Execute($"USE {dbName}");
+            ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+            CellValue[] buffer = [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)];
+
+            ctx.InsertTypedBatch("Players", PlayerSchema, [buffer], callerOwnsRowBuffers: true);
+
+            buffer[1] = CellValue.From("Mutated");
+            buffer[2] = CellValue.From(999);
+
+            Dictionary<string, object?> row = Select(ctx, "SELECT Id, Name, Level FROM Players").Single();
+            Assert.Equal("Ada", row["Name"]);
+            Assert.Equal(7, row["Level"]);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void InsertTypedBatch_AutoCommitWithNoOpenTransactions_SkipsPerRowVersionMetadata()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+
+        IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+        [
+            [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)],
+            [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
+        ]);
+
+        // No snapshot can exist without an open transaction, and absent metadata already means
+        // "always-visible base version" — bulk auto-commit ingest must not pay a per-row entry.
+        string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
+            ?? throw new InvalidOperationException("Expected selected database.");
+        foreach (long rowId in rowIds)
+        {
+            Assert.Null(ctx.Engine.VersionStorageManager.GetVersion(databaseName, "Players", rowId));
+        }
+    }
+
+    [Fact]
+    public void InsertTypedBatch_WhileAnotherSessionHoldsTransaction_RegistersPerRowVersionMetadata()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        Guid otherSession = Guid.NewGuid();
+        ctx.Engine.TransactionManager.Begin(otherSession, ctx.Engine.TransactionIdAllocator);
+
+        try
+        {
+            IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+            [
+                [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]
+            ]);
+
+            string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
+                ?? throw new InvalidOperationException("Expected selected database.");
+            Assert.NotNull(ctx.Engine.VersionStorageManager.GetVersion(databaseName, "Players", rowIds[0]));
+        }
+        finally
+        {
+            ctx.Engine.TransactionManager.Rollback(otherSession);
+        }
+    }
+
+    [Fact]
     public void InsertTypedBatch_IntPrimaryKey_PopulatesIntegerFastLane()
     {
         using DataVoContext ctx = CreateContext();

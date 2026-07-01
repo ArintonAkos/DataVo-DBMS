@@ -69,27 +69,36 @@ public sealed class DataVoWhitepaperBenchmarkEngine : IWhitepaperBenchmarkEngine
 
     public void Preload(int records)
     {
-        var rows = new List<CellValue[]>(Math.Min(records, BatchSize));
+        // One pre-allocated buffer per batch slot, reused across every batch: the caller-owned-buffers
+        // insert mode means the engine never retains them, so the whole preload allocates no per-row
+        // CellValue[] churn (the Name string is the payload itself).
+        int batchCapacity = Math.Min(records, BatchSize);
+        var buffers = new CellValue[batchCapacity][];
+        for (int i = 0; i < batchCapacity; i++)
+        {
+            buffers[i] = new CellValue[4];
+        }
+
+        var rows = new List<CellValue[]>(batchCapacity);
         for (int i = 1; i <= records; i++)
         {
-            rows.Add(
-            [
-                CellValue.From(i),
-                CellValue.From($"name-{i}"),
-                CellValue.From(i),
-                CellValue.From(i * 1.5d),
-            ]);
+            CellValue[] row = buffers[rows.Count];
+            row[0] = CellValue.From(i);
+            row[1] = CellValue.From($"name-{i}");
+            row[2] = CellValue.From(i);
+            row[3] = CellValue.From(i * 1.5d);
+            rows.Add(row);
 
-            if (rows.Count == BatchSize)
+            if (rows.Count == batchCapacity)
             {
-                Ctx().InsertTypedBatch("Records", Schema, rows);
+                Ctx().InsertTypedBatch("Records", Schema, rows, callerOwnsRowBuffers: true);
                 rows.Clear();
             }
         }
 
         if (rows.Count > 0)
         {
-            Ctx().InsertTypedBatch("Records", Schema, rows);
+            Ctx().InsertTypedBatch("Records", Schema, rows, callerOwnsRowBuffers: true);
         }
     }
 

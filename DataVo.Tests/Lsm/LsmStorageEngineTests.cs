@@ -184,6 +184,80 @@ public sealed class LsmStorageEngineTests
         Assert.Equal(1, GetWalDurableFlushCount(fixture.Engine) - flushesBeforeBatch);
     }
 
+    [Fact]
+    public void HasAnyRows_EmptyTableReturnsFalse()
+    {
+        using var fixture = new LsmStorageEngineFixture();
+
+        Assert.False(fixture.Engine.HasAnyRows("db", "users"));
+    }
+
+    [Fact]
+    public void HasAnyRows_AfterInsertReturnsTrue()
+    {
+        using var fixture = new LsmStorageEngineFixture();
+        fixture.Engine.InsertRow("db", "users", Val("alice"));
+
+        Assert.True(fixture.Engine.HasAnyRows("db", "users"));
+    }
+
+    [Fact]
+    public void HasAnyRows_AfterDeletingAllRowsReturnsFalse()
+    {
+        using var fixture = new LsmStorageEngineFixture();
+        long rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
+        fixture.Engine.DeleteRow("db", "users", rowId);
+
+        Assert.False(fixture.Engine.HasAnyRows("db", "users"));
+    }
+
+    [Fact]
+    public void HasAnyRows_PersistsAcrossReopen()
+    {
+        using var fixture = new LsmStorageEngineFixture();
+        fixture.Engine.InsertRow("db", "users", Val("alice"));
+        fixture.Engine.Dispose();
+
+        using var reopened = new LsmStorageEngine(fixture.RootDirectory);
+
+        Assert.True(reopened.HasAnyRows("db", "users"));
+    }
+
+    [Fact]
+    public void HasAnyRows_FlushesBufferedMutationsLikeScanProbes()
+    {
+        // Read probes historically flushed the active MemTable before answering (via ReadAllRows);
+        // bulk-ingest disk layout depends on that cadence, so the cheap probe must keep it.
+        using var fixture = new LsmStorageEngineFixture();
+        fixture.Engine.InsertRow("db", "users", Val("alice"));
+
+        Assert.True(fixture.Engine.HasAnyRows("db", "users"));
+
+        string tableDirectory = Path.Combine(fixture.RootDirectory, "db", "users");
+        Assert.NotEmpty(Directory.GetFiles(tableDirectory, "*.sst"));
+    }
+
+    [Fact]
+    public void HasAnyRows_DoesNotRescanSstablesOnLargeTables()
+    {
+        using var fixture = new LsmStorageEngineFixture();
+        var rows = new List<byte[]>(4096);
+        for (int i = 0; i < 4096; i++)
+        {
+            rows.Add(Val($"row-{i}"));
+        }
+
+        fixture.Engine.InsertRows("db", "users", rows);
+        Assert.True(fixture.Engine.HasAnyRows("db", "users")); // warm-up: flush + JIT
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool hasRows = fixture.Engine.HasAnyRows("db", "users");
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(hasRows);
+        Assert.True(allocated < 1024, $"HasAnyRows allocated {allocated} bytes; expected a rescan-free probe.");
+    }
+
     private static byte[] Val(string value) => Encoding.UTF8.GetBytes(value);
 
     private static byte[] Internal(long rowId, ulong seqno, LsmValueType valueType)
