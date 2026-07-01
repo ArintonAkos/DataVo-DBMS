@@ -37,20 +37,13 @@ public readonly struct CellValue
 {
     private readonly CellType _type;
     private readonly long _numeric;     // bool/int/long/double bits (reinterpreted)
-    private readonly long _numeric2;    // second half of Guid bytes when Type == Guid
-    private readonly decimal _decimal;  // inline; never boxed
+    private readonly decimal _decimal;  // inline decimal, or second half of Guid bytes when Type == Guid
     private readonly object? _reference; // string today; reference types later
 
     private CellValue(CellType type, long numeric, decimal dec, object? reference)
-        : this(type, numeric, 0L, dec, reference)
-    {
-    }
-
-    private CellValue(CellType type, long numeric, long numeric2, decimal dec, object? reference)
     {
         _type = type;
         _numeric = numeric;
-        _numeric2 = numeric2;
         _decimal = dec;
         _reference = reference;
     }
@@ -88,7 +81,7 @@ public readonly struct CellValue
         value.TryWriteBytes(bytes);
         long low = BinaryPrimitives.ReadInt64LittleEndian(bytes[..8]);
         long high = BinaryPrimitives.ReadInt64LittleEndian(bytes.Slice(8, 8));
-        return new CellValue(CellType.Guid, low, high, 0m, null);
+        return new CellValue(CellType.Guid, low, DecimalFromInt64Bits(high), null);
     }
 
     /// <summary>Creates a VECTOR (<see cref="float"/>[]) cell; the array is <b>cloned</b> so the cell owns
@@ -166,7 +159,7 @@ public readonly struct CellValue
 
         Span<byte> bytes = stackalloc byte[16];
         BinaryPrimitives.WriteInt64LittleEndian(bytes[..8], _numeric);
-        BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(8, 8), _numeric2);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(8, 8), Int64BitsFromDecimal(_decimal));
         return new Guid(bytes);
     }
 
@@ -201,4 +194,23 @@ public readonly struct CellValue
 
     private InvalidOperationException Mismatch(CellType expected) =>
         new($"CellValue holds {_type}, not {expected}.");
+
+    private static decimal DecimalFromInt64Bits(long value)
+    {
+        ulong bits = unchecked((ulong)value);
+        return new decimal(
+            unchecked((int)(bits & 0xFFFFFFFFUL)),
+            unchecked((int)(bits >> 32)),
+            0,
+            false,
+            0);
+    }
+
+    private static long Int64BitsFromDecimal(decimal value)
+    {
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(value, bits);
+        ulong raw = (uint)bits[0] | ((ulong)(uint)bits[1] << 32);
+        return unchecked((long)raw);
+    }
 }
