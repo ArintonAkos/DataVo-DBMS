@@ -99,9 +99,11 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             state.Table.FlushActiveMemTable();
-            foreach (LatestRowVersion version in state.LatestRows.Values)
+            // Enumerate the dictionary itself: ConcurrentDictionary.Values would materialize an
+            // O(n) snapshot list per probe.
+            foreach (KeyValuePair<long, LatestRowVersion> pair in state.LatestRows)
             {
-                if (!version.IsTombstone)
+                if (!pair.Value.IsTombstone)
                 {
                     return true;
                 }
@@ -111,25 +113,26 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Lock-free point read. <see cref="TableState.LatestRows"/> is a concurrent map whose published
+    /// value arrays are immutable (patches are copy-on-write), so readers never wait on writers —
+    /// a writer parked in its WAL/MemTable critical section cannot stall the read tail.
+    /// </summary>
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        lock (state.SyncRoot)
+        if (!state.LatestRows.TryGetValue(rowId, out LatestRowVersion latest))
         {
-            if (!state.LatestRows.TryGetValue(rowId, out LatestRowVersion latest))
-            {
-                throw new RowNotFoundException(rowId, tableName);
-            }
-
-            if (latest.IsTombstone)
-            {
-                throw new RowDeletedException(rowId, tableName);
-            }
-
-            return latest.Value.ToArray();
+            throw new RowNotFoundException(rowId, tableName);
         }
+
+        if (latest.IsTombstone)
+        {
+            throw new RowDeletedException(rowId, tableName);
+        }
+
+        return latest.Value.ToArray();
     }
 
     /// <inheritdoc />
@@ -188,7 +191,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 return false;
             }
 
-            byte[] rowBytes = latest.Value;
+            // Copy-on-write: published row buffers are immutable so lock-free readers can never
+            // observe a half-applied patch; the new version becomes visible in one reference publish.
+            byte[] rowBytes = latest.Value.ToArray();
             for (int i = 0; i < ordinals.Length; i++)
             {
                 if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], values[i]))
@@ -235,7 +240,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                     continue;
                 }
 
-                byte[] rowBytes = latest.Value;
+                // Copy-on-write, same as the single-row patch: keep published buffers immutable.
+                byte[] rowBytes = latest.Value.ToArray();
                 for (int i = 0; i < ordinals.Length; i++)
                 {
                     if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
@@ -391,21 +397,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private string GetTableDirectory(string databaseName, string tableName) =>
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
-    private static LatestRowVersion? TryReadLatestVersion(TableState state, long rowId)
-    {
-        state.Table.FlushActiveMemTable();
-        return RebuildLatestRowsFromSstables(state).GetValueOrDefault(rowId);
-    }
-
     private static Dictionary<long, LatestRowVersion> ReadLatestRows(TableState state)
     {
+        // LatestRows is authoritative (seeded from SSTables on open, maintained on every mutation),
+        // so scans snapshot it directly instead of rescanning SSTables. No destructive rebuild:
+        // lock-free point readers must never observe a transiently-emptied map.
         state.Table.FlushActiveMemTable();
-        state.LatestRows.Clear();
-        foreach ((long rowId, LatestRowVersion version) in RebuildLatestRowsFromSstables(state))
-        {
-            state.LatestRows[rowId] = version;
-        }
-
         return new Dictionary<long, LatestRowVersion>(state.LatestRows);
     }
 
@@ -578,7 +575,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         public LsmFileRegistry FileRegistry { get; }
 
-        public Dictionary<long, LatestRowVersion> LatestRows { get; } = [];
+        /// <summary>
+        /// Authoritative row-id → latest-version map. Read lock-free by point reads; mutated only
+        /// under <see cref="SyncRoot"/>. Published <see cref="LatestRowVersion.Value"/> arrays are
+        /// immutable (patches copy-on-write), so a published entry is always a complete row image.
+        /// </summary>
+        public ConcurrentDictionary<long, LatestRowVersion> LatestRows { get; } = new();
 
         public long NextRowId { get; set; } = 1;
 

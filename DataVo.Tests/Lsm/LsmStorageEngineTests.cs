@@ -1,7 +1,11 @@
 using System.Reflection;
 using System.Text;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Models.Catalog;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Lsm;
+using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Tests.Lsm;
 
@@ -256,6 +260,82 @@ public sealed class LsmStorageEngineTests
 
         Assert.True(hasRows);
         Assert.True(allocated < 1024, $"HasAnyRows allocated {allocated} bytes; expected a rescan-free probe.");
+    }
+
+    [Fact]
+    public void ReadRow_CompletesWhileWriterHoldsTableSyncRoot()
+    {
+        // Point reads must be lock-free: a writer parked inside the table's write critical section
+        // (e.g. mid-WAL-append) must not stall readers. Monitor is thread-affine, so the test stays
+        // synchronous — enter and exit must happen on the same thread.
+        using var fixture = new LsmStorageEngineFixture();
+        long rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
+        object syncRoot = GetSyncRoot(fixture.Engine);
+
+        Monitor.Enter(syncRoot);
+        try
+        {
+            Task<byte[]> read = Task.Run(() => fixture.Engine.ReadRow("db", "users", rowId));
+            Assert.True(read.Wait(TimeSpan.FromSeconds(5)), "ReadRow blocked behind the writer's SyncRoot.");
+            Assert.Equal(Val("alice"), read.Result);
+        }
+        finally
+        {
+            Monitor.Exit(syncRoot);
+        }
+    }
+
+    [Fact]
+    public async Task ReadRow_NeverObservesTornFixedWidthPatch()
+    {
+        // Concurrent patches publish (Value, Score) pairs where Score == Value * 2. A reader that
+        // ever sees a mismatched pair has observed a torn (in-place, half-applied) patch.
+        using var fixture = new LsmStorageEngineFixture();
+        var columns = new List<Column>
+        {
+            new() { Name = "Value", Type = "INT" },
+            new() { Name = "Score", Type = "INT" },
+        };
+        byte[] initial = new byte[10]; // [notnull][int32][notnull][int32]
+        RowSerializer.TryOverwriteFixedWidthCell(initial, columns, 0, 0);
+        RowSerializer.TryOverwriteFixedWidthCell(initial, columns, 1, 0);
+        long rowId = fixture.Engine.InsertRow("db", "pairs", initial);
+        var patcher = (IFixedWidthPatchStorageEngine)fixture.Engine;
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        Task writer = Task.Run(() =>
+        {
+            Span<int> ordinals = stackalloc int[] { 0, 1 };
+            Span<DataVoFixedWidthValue> values = stackalloc DataVoFixedWidthValue[2];
+            for (int i = 1; !stop.IsCancellationRequested; i++)
+            {
+                values[0] = DataVoFixedWidthValue.From(i);
+                values[1] = DataVoFixedWidthValue.From(i * 2);
+                Assert.True(patcher.TryPatchFixedWidthRow("db", "pairs", rowId, columns, ordinals, values));
+            }
+        });
+
+        Task[] readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                byte[] bytes = fixture.Engine.ReadRow("db", "pairs", rowId);
+                int value = BitConverter.ToInt32(bytes, 1);
+                int score = BitConverter.ToInt32(bytes, 6);
+                Assert.Equal(value * 2, score);
+            }
+        })).ToArray();
+
+        await Task.WhenAll(readers.Append(writer)).WaitAsync(TimeSpan.FromSeconds(15));
+    }
+
+    private static object GetSyncRoot(LsmStorageEngine engine)
+    {
+        object tableState = GetSingleTableState(engine);
+        return tableState
+            .GetType()
+            .GetProperty("SyncRoot", BindingFlags.Instance | BindingFlags.Public)!
+            .GetValue(tableState)!;
     }
 
     private static byte[] Val(string value) => Encoding.UTF8.GetBytes(value);
