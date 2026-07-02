@@ -71,6 +71,32 @@ public sealed class GuidFastPathTests
     }
 
     [Fact]
+    public void Update_GuidSecondaryIndex_RepopulatesFastLaneAndScalarIndex()
+    {
+        using DataVoContext context = CreateContext();
+        Guid id = Guid.Parse("858efdd5-cd05-48fc-889e-411eb336353a");
+        Guid oldTenant = Guid.Parse("157e397d-a77d-4a6e-bcbd-d38144dd64c7");
+        Guid newTenant = Guid.Parse("5a95187f-2428-4543-8f59-774654026df0");
+        Insert(context, id, oldTenant, "updated");
+
+        ExecuteOk(context, $"UPDATE Sessions SET TenantId = '{newTenant:D}' WHERE Id = '{id:D}'");
+
+        string databaseName = CurrentDatabase(context);
+        Assert.True(context.Engine.IndexManager.TryLookupGuidIndex(
+            newTenant,
+            "IX_Sessions_TenantId",
+            "Sessions",
+            databaseName,
+            out IReadOnlyList<long> fastLaneRows));
+        Assert.Contains(2L, fastLaneRows);
+        Assert.True(context.Engine.IndexManager.IndexContainsKey(
+            newTenant.ToString("D"),
+            "IX_Sessions_TenantId",
+            "Sessions",
+            databaseName));
+    }
+
+    [Fact]
     public void PreparedSelectSingle_GuidPrimaryKey_UsesDirectGuidLookup()
     {
         using DataVoContext context = CreateContext();

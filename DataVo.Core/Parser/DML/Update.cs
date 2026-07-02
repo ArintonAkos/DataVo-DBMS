@@ -514,21 +514,56 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 continue;
             }
 
-            var entries = new List<(string Value, long RowId)>(newRows.Count);
-            for (int i = 0; i < newRows.Count; i++)
-            {
-                Dictionary<string, object?> newRow = newRows[i];
-                if (index.AttributeNames.Any(attr => !newRow.TryGetValue(attr, out var attrValue) || attrValue == null))
-                {
-                    continue;
-                }
+            List<(string Value, long RowId)> entries = BuildScalarIndexEntries(newRows, assignedRowIds, index.AttributeNames);
 
-                string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                entries.Add((indexValue, assignedRowIds[i]));
+            if (IsPrimaryKeyIndex(indexName)
+                && TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerPrimaryEntries)
+                && integerPrimaryEntries is not null)
+            {
+                Indexes.InsertIntegerPrimaryKeys(integerPrimaryEntries, indexName, _model.TableName, databaseName);
+            }
+            else if (IsPrimaryKeyIndex(indexName)
+                && TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidPrimaryEntries)
+                && guidPrimaryEntries is not null)
+            {
+                Indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, _model.TableName, databaseName);
+            }
+            else if (TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerIndexEntries)
+                && integerIndexEntries is not null)
+            {
+                Indexes.InsertIntegerIndexEntries(integerIndexEntries, indexName, _model.TableName, databaseName);
+            }
+            else if (TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidIndexEntries)
+                && guidIndexEntries is not null)
+            {
+                Indexes.InsertGuidIndexEntries(guidIndexEntries, indexName, _model.TableName, databaseName);
             }
 
+            // Fast lanes mirror hot equality lookups. The scalar BTree remains the authoritative index
+            // representation for dirty tracking, persistence, and snapshot rebuild semantics.
             Indexes.InsertManyIntoIndex(entries, indexName, _model.TableName, databaseName);
         }
+    }
+
+    private static List<(string Value, long RowId)> BuildScalarIndexEntries(
+        IReadOnlyList<Dictionary<string, object?>> newRows,
+        IReadOnlyList<long> assignedRowIds,
+        IReadOnlyList<string> attributeNames)
+    {
+        var entries = new List<(string Value, long RowId)>(newRows.Count);
+        for (int i = 0; i < newRows.Count; i++)
+        {
+            Dictionary<string, object?> newRow = newRows[i];
+            if (attributeNames.Any(attr => !newRow.TryGetValue(attr, out var attrValue) || attrValue == null))
+            {
+                continue;
+            }
+
+            string indexValue = IndexKeyEncoder.BuildKeyString(newRow, attributeNames);
+            entries.Add((indexValue, assignedRowIds[i]));
+        }
+
+        return entries;
     }
 
     private void InsertUpdatedVectorIndex(
@@ -560,6 +595,101 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
             Indexes.InsertIntoVectorIndex(vector, assignedRowIds[i], indexName, _model.TableName, databaseName, indexKind);
         }
+    }
+
+    private bool IsPrimaryKeyIndex(string indexName) =>
+        string.Equals(indexName, $"_PK_{_model.TableName}", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryBuildIntegerIndexEntries(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyList<string> attributeNames,
+        out List<(long Key, long RowId)>? entries)
+    {
+        entries = null;
+        if (attributeNames.Count != 1)
+        {
+            return false;
+        }
+
+        string column = attributeNames[0];
+        var built = new List<(long Key, long RowId)>(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (!rows[i].TryGetValue(column, out object? value) || value is null)
+            {
+                continue;
+            }
+
+            if (!TryCoerceInt64(value, out long key))
+            {
+                return false;
+            }
+
+            built.Add((key, rowIds[i]));
+        }
+
+        entries = built;
+        return true;
+    }
+
+    private static bool TryBuildGuidIndexEntries(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyList<string> attributeNames,
+        out List<(Guid Key, long RowId)>? entries)
+    {
+        entries = null;
+        if (attributeNames.Count != 1)
+        {
+            return false;
+        }
+
+        string column = attributeNames[0];
+        var built = new List<(Guid Key, long RowId)>(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (!rows[i].TryGetValue(column, out object? value) || value is null)
+            {
+                continue;
+            }
+
+            if (!TryCoerceGuid(value, out Guid key))
+            {
+                return false;
+            }
+
+            built.Add((key, rowIds[i]));
+        }
+
+        entries = built;
+        return true;
+    }
+
+    private static bool TryCoerceInt64(object value, out long key)
+    {
+        switch (value)
+        {
+            case int intValue:
+                key = intValue;
+                return true;
+            case long longValue:
+                key = longValue;
+                return true;
+            default:
+                return long.TryParse(value.ToString(), out key);
+        }
+    }
+
+    private static bool TryCoerceGuid(object value, out Guid key)
+    {
+        if (value is Guid guid)
+        {
+            key = guid;
+            return true;
+        }
+
+        return Guid.TryParse(value.ToString(), out key);
     }
 
     /// <summary>

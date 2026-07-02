@@ -402,6 +402,10 @@ public class IndexManager : IDisposable
             _metadata.Remove(cacheKey);
             _dirtyIndices.Remove(cacheKey);
             _pendingMutations.Remove(cacheKey);
+            _integerPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            _integerIndexMaps.Remove(cacheKey);
+            _guidIndexMaps.Remove(cacheKey);
 
             if (deleteFile && _cachePaths.TryGetValue(cacheKey, out var path))
             {
@@ -566,6 +570,26 @@ public class IndexManager : IDisposable
             keysToRemove = _cache.Keys
                 .Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            foreach (IndexCacheKey cacheKey in _integerPrimaryKeyMaps.Keys.Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                _integerPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            }
+
+            foreach (IndexCacheKey cacheKey in _guidPrimaryKeyMaps.Keys.Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            }
+
+            foreach (IndexCacheKey cacheKey in _integerIndexMaps.Keys.Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                _integerIndexMaps.Remove(cacheKey);
+            }
+
+            foreach (IndexCacheKey cacheKey in _guidIndexMaps.Keys.Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                _guidIndexMaps.Remove(cacheKey);
+            }
         }
 
         foreach (IndexCacheKey cacheKey in keysToRemove)
@@ -586,6 +610,10 @@ public class IndexManager : IDisposable
             _cachePaths.Clear();
             _dirtyIndices.Clear();
             _pendingMutations.Clear();
+            _integerPrimaryKeyMaps.Clear();
+            _integerIndexMaps.Clear();
+            _guidPrimaryKeyMaps.Clear();
+            _guidIndexMaps.Clear();
         }
 
         if (!Directory.Exists(_indexRootDirectory))
@@ -1277,31 +1305,22 @@ public class IndexManager : IDisposable
             return [rowId];
         }
 
-        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_integerPrimaryKeyMaps.ContainsKey(cacheKey))
-        {
-            return [];
-        }
-
         if (TryParseGuidKey(columnValue, out Guid guidKey)
             && TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out long guidRowId))
         {
             return [guidRowId];
         }
 
-        if (_guidPrimaryKeyMaps.ContainsKey(cacheKey))
-        {
-            return [];
-        }
-
         if (TryParseIntegerPrimaryKey(columnValue, out long integerIndexKey)
-            && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> rowIds))
+            && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> rowIds)
+            && rowIds.Count > 0)
         {
             return rowIds;
         }
 
         if (TryParseGuidKey(columnValue, out Guid guidIndexKey)
-            && TryLookupGuidIndex(guidIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> guidRowIds))
+            && TryLookupGuidIndex(guidIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> guidRowIds)
+            && guidRowIds.Count > 0)
         {
             return guidRowIds;
         }
@@ -1316,17 +1335,11 @@ public class IndexManager : IDisposable
     /// </summary>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
-        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (TryParseIntegerPrimaryKey(key, out long integerKey))
         {
             if (TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out _))
             {
                 return true;
-            }
-
-            if (_integerPrimaryKeyMaps.ContainsKey(cacheKey))
-            {
-                return false;
             }
         }
 
@@ -1337,10 +1350,6 @@ public class IndexManager : IDisposable
                 return true;
             }
 
-            if (_guidPrimaryKeyMaps.ContainsKey(cacheKey))
-            {
-                return false;
-            }
         }
 
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
