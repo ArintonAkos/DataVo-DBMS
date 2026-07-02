@@ -965,7 +965,9 @@ public class IndexManager : IDisposable
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        ConcurrentDictionary<Guid, long> map = _guidPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentDictionary<Guid, long>());
+        ConcurrentDictionary<Guid, long> map = _guidPrimaryKeyMaps.GetOrAdd(
+            cacheKey,
+            static _ => new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance));
         for (int i = 0; i < entries.Count; i++)
         {
             (Guid key, long rowId) = entries[i];
@@ -992,7 +994,7 @@ public class IndexManager : IDisposable
         {
             if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
             {
-                map = [];
+                map = new Dictionary<Guid, List<long>>(GuidSimdEqualityComparer.Instance);
                 _guidIndexMaps[cacheKey] = map;
             }
 

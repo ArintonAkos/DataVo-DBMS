@@ -12,18 +12,13 @@ namespace DataVo.Tests.Indexing;
 public class SimdDistanceKernelsTests
 {
     [Fact]
-    public void CosineDistance_OnArm64_DoesNotUseManualAdvSimdPath()
+    public void CosineDistance_ExposesManualAdvSimdPath()
     {
-        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
-        {
-            return;
-        }
-
         MethodInfo? method = typeof(SimdDistanceKernels).GetMethod(
             "TryCosineDistanceAdvSimd",
             BindingFlags.NonPublic | BindingFlags.Static);
 
-        Assert.Null(method);
+        Assert.NotNull(method);
     }
 
     [Theory]

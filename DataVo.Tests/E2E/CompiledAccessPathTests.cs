@@ -240,7 +240,12 @@ public class CompiledAccessPathTests
 
     public sealed record Hit(int Id, string Name, double Score);
 
+    public sealed record LevelProjection(int Id, int Level, string Name);
+
     private static Hit MapHit(CompiledRowReader r) => new(r.GetInt32("Id"), r.GetString("Name")!, r.GetDouble("Score"));
+
+    private static LevelProjection MapLevel(CompiledRowReader r) =>
+        new(r.GetInt32("Id"), r.GetInt32("Level"), r.GetString("Name")!);
 
     private static void SeedHits(DataVoContext context)
     {
@@ -295,6 +300,44 @@ public class CompiledAccessPathTests
         IReadOnlyList<Hit> rows = prepared.Execute("Ada");
 
         Assert.Equal(new[] { new Hit(1, "Ada", 1.5), new Hit(3, "Ada", 3.5) }, rows.OrderBy(h => h.Id));
+    }
+
+    [Fact]
+    public void PreparedSelectManyTyped_UnindexedIntPredicate_ReturnsRowsFromIntegerScan()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Levels (Id INT PRIMARY KEY, Level INT, Name VARCHAR(50))");
+        for (int i = 1; i <= 24; i++)
+        {
+            context.Execute($"INSERT INTO Levels VALUES ({i}, {i % 4}, 'P{i}')");
+        }
+
+        var plan = DataVoCompiledQueryPlan.SelectMany("Levels", ["Id", "Level", "Name"], "Level", "level");
+        DataVoPreparedSelectMany<LevelProjection> prepared =
+            DataVoCompiledQuery.PrepareSelectManyTyped(context, plan, MapLevel);
+
+        IReadOnlyList<LevelProjection> rows = prepared.Execute(2);
+
+        Assert.Equal([2, 6, 10, 14, 18, 22], rows.Select(static row => row.Id).Order());
+    }
+
+    [Fact]
+    public void PreparedSelectSingleTyped_UnindexedIntPredicate_ReturnsFirstIntegerScanMatch()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Levels (Id INT PRIMARY KEY, Level INT, Name VARCHAR(50))");
+        context.Execute("INSERT INTO Levels VALUES (1, 1, 'one')");
+        context.Execute("INSERT INTO Levels VALUES (2, 2, 'two')");
+        context.Execute("INSERT INTO Levels VALUES (3, 2, 'also-two')");
+
+        var plan = DataVoCompiledQueryPlan.SelectSingle("Levels", ["Id", "Level", "Name"], "Level", "level");
+        DataVoPreparedSelectSingle<LevelProjection> prepared =
+            DataVoCompiledQuery.PrepareSelectSingleTyped(context, plan, MapLevel);
+
+        LevelProjection? row = prepared.Execute(2);
+
+        Assert.NotNull(row);
+        Assert.Equal(2, row.Level);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using DataVo.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Indexing;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 
@@ -8,6 +9,18 @@ namespace DataVo.Tests.E2E;
 
 public sealed class GuidFastPathTests
 {
+    [Fact]
+    public void GuidFastLaneComparer_MatchesGuidValueSemantics()
+    {
+        Guid value = Guid.Parse("3d09eb2f-0a62-4c5d-a8c3-f314d4e18664");
+        Guid sameValue = Guid.Parse(value.ToString("D"));
+        Guid differentValue = Guid.Parse("3d09eb2f-0a62-4c5d-a8c3-f314d4e18665");
+
+        Assert.True(GuidSimdEqualityComparer.Instance.Equals(value, sameValue));
+        Assert.False(GuidSimdEqualityComparer.Instance.Equals(value, differentValue));
+        Assert.Equal(value.GetHashCode(), GuidSimdEqualityComparer.Instance.GetHashCode(value));
+    }
+
     [Fact]
     public void TypedInsert_GuidPrimaryKey_UsesGuidPrimaryKeyFastLane()
     {
