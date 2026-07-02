@@ -1,0 +1,234 @@
+% DataVo DBMS native PGFPlots figures.
+% Exact coordinates are hardcoded from benchmark_results.txt.
+% Preamble requirements:
+% \usepackage{pgfplots}
+% \usepackage{xcolor}
+% \usepackage{graphicx}
+% \pgfplotsset{compat=1.18}
+
+\definecolor{datavoBlue}{HTML}{0072B2}
+\definecolor{datavoGreen}{HTML}{009E73}
+\definecolor{datavoDarkGreen}{HTML}{004D40}
+\definecolor{datavoFreshGreen}{HTML}{2FBF71}
+\definecolor{datavoLightBlue}{HTML}{56B4E9}
+\definecolor{datavoTeal}{HTML}{0A9396}
+\definecolor{sqliteOrange}{HTML}{E69F00}
+\definecolor{sqliteRed}{HTML}{D55E00}
+\definecolor{sqliteDarkRed}{HTML}{8B1E00}
+\definecolor{liteDbPink}{HTML}{CC79A7}
+\definecolor{neutralGray}{HTML}{7A869A}
+
+% Figure 1: Disk CRUD WAL Log-Scale Time Comparison
+\begin{center}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    xbar,
+    xmode=log,
+    width=\linewidth,
+    height=8.5cm,
+    xlabel={Total execution time (ms, log scale)},
+    symbolic y coords={
+        {SQLite (WAL,normal)},
+        {DataVo (LSM Relaxed)},
+        {SQLite (WAL,full)},
+        {DataVo (LSM Production)},
+        {SQLite (WAL,full+fullfsync)}
+    },
+    ytick=data,
+    nodes near coords,
+    nodes near coords align={horizontal},
+    every node near coord/.append style={font=\scriptsize},
+    grid=major,
+    title={Disk CRUD WAL Time Comparison with macOS Full Fsync},
+]
+\addplot[fill=sqliteOrange] coordinates {(367.254,{SQLite (WAL,normal)})};
+\addplot[fill=datavoFreshGreen] coordinates {(243.615,{DataVo (LSM Relaxed)})};
+\addplot[fill=sqliteRed] coordinates {(4250.816,{SQLite (WAL,full)})};
+\addplot[fill=datavoDarkGreen] coordinates {(205309.000,{DataVo (LSM Production)})};
+\addplot[fill=sqliteDarkRed] coordinates {(209282.571,{SQLite (WAL,full+fullfsync)})};
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}
+
+% Figure 4: Thread Scaling OPS Curve
+\begin{center}
+\resizebox{0.9\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.86\linewidth,
+    height=6.2cm,
+    xmode=log,
+    log basis x=2,
+    xtick={1,2,4,8,16,32},
+    xlabel={Worker threads},
+    ylabel={Operations per second},
+    ymin=300000,
+    ymax=760000,
+    yticklabel={\pgfmathprintnumber{\tick}},
+    grid=major,
+    legend pos=south east,
+    title={Thread Scaling OPS},
+]
+\addplot[color=datavoFreshGreen, mark=*, line width=1.2pt] coordinates {
+    (1,723307.329)
+    (2,727112.642)
+    (4,645039.471)
+    (8,608467.657)
+    (16,616969.926)
+    (32,604661.390)
+};
+\addlegendentry{DataVo (LSM Relaxed)}
+\addplot[color=sqliteOrange, mark=square*, line width=1.2pt] coordinates {
+    (1,347639.653)
+    (2,505938.569)
+    (4,534829.560)
+    (8,578359.572)
+    (16,599309.378)
+    (32,597648.416)
+};
+\addlegendentry{SQLite (WAL,normal)}
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}
+
+% Figure 5: YCSB Mixed Write Tail
+% Verified Table 9 metrics: DataVo (LSM Relaxed) = 352,000 OPS, read P99 0.0092 ms, write P99 1.14 ms.
+% SQLite (WAL,normal) read P99 = 0.0100 ms.
+\begin{center}
+\resizebox{0.86\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=0.8\linewidth,
+    height=5.8cm,
+    ylabel={Write P99 latency (ms)},
+    symbolic x coords={{DataVo (LSM Relaxed)},{SQLite (WAL,normal)},LiteDB},
+    xtick=data,
+    x tick label style={rotate=12, anchor=east},
+    ymin=0,
+    ymax=4.3,
+    nodes near coords,
+    nodes near coords align={vertical},
+    every node near coord/.append style={font=\scriptsize},
+    grid=major,
+    title={YCSB Mixed Workload Write Tail},
+]
+\addplot[fill=datavoFreshGreen] coordinates {({DataVo (LSM Relaxed)},1.140000)};
+\addplot[fill=sqliteOrange] coordinates {({SQLite (WAL,normal)},3.403125)};
+\addplot[fill=liteDbPink] coordinates {(LiteDB,2.912250)};
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}
+
+% Figure 6: Space Amplification
+% Verified Table 10 metrics: DataVo (LSM Relaxed) disk 51.242 MB, recovery 0.606 ms, GC 579.000 MB.
+\begin{center}
+\resizebox{0.86\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=0.8\linewidth,
+    height=5.8cm,
+    ylabel={Database size after 1,000,000 records (MB)},
+    symbolic x coords={{DataVo (LSM Relaxed)},{SQLite (WAL,normal)},LiteDB},
+    xtick=data,
+    x tick label style={rotate=12, anchor=east},
+    ymin=0,
+    ymax=190,
+    nodes near coords,
+    nodes near coords align={vertical},
+    every node near coord/.append style={font=\scriptsize},
+    grid=major,
+    title={Space Amplification After One Million Records},
+]
+\addplot[fill=datavoFreshGreen] coordinates {({DataVo (LSM Relaxed)},51.242)};
+\addplot[fill=sqliteOrange] coordinates {({SQLite (WAL,normal)},58.405)};
+\addplot[fill=liteDbPink] coordinates {(LiteDB,154.461)};
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}
+
+% Figure 2: Vector Search Latency vs Allocation Double-Axis Bar
+\begin{center}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth,
+    height=7.0cm,
+    ymode=log,
+    ylabel={P99 latency (ms, log scale)},
+    symbolic x coords={DataVo,{DataVo-Flat},LiteDB,{SQLite (sqlite-vec)}},
+    xtick=data,
+    x tick label style={rotate=15, anchor=east},
+    ybar,
+    bar width=9pt,
+    ymin=1,
+    title={Vector Search P99 Latency vs Allocation},
+    legend style={at={(0.02,0.98)},anchor=north west},
+    grid=major,
+]
+\addplot[fill=datavoBlue] coordinates {
+    (DataVo,4.374166)
+    ({DataVo-Flat},2.917208)
+    (LiteDB,1004.167208)
+    ({SQLite (sqlite-vec)},5.367500)
+};
+\addlegendentry{P99 latency (ms)}
+\end{axis}
+\begin{axis}[
+    width=\linewidth,
+    height=7.0cm,
+    axis y line*=right,
+    axis x line=none,
+    ymode=log,
+    ylabel={Total GC allocated (MB, log scale)},
+    symbolic x coords={DataVo,{DataVo-Flat},LiteDB,{SQLite (sqlite-vec)}},
+    xtick=data,
+    ybar,
+    bar width=9pt,
+    bar shift=10pt,
+    ymin=10,
+    legend style={at={(0.02,0.86)},anchor=north west},
+]
+\addplot[fill=liteDbPink] coordinates {
+    (DataVo,159.833)
+    ({DataVo-Flat},12.931)
+    (LiteDB,208914.953)
+    ({SQLite (sqlite-vec)},63.308)
+};
+\addlegendentry{GC allocated (MB)}
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}
+
+% Figure 3: Concurrent Operations Throughput OPS Comparison
+\begin{center}
+\resizebox{0.8\linewidth}{!}{%
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=0.75\linewidth,
+    height=6.0cm,
+    ylabel={Operations per second},
+    symbolic x coords={DataVo,SQLite},
+    xtick=data,
+    ymin=0,
+    ymax=2200000,
+    nodes near coords,
+    nodes near coords align={vertical},
+    every node near coord/.append style={font=\scriptsize},
+    grid=major,
+    title={Concurrent Operations Throughput},
+]
+\addplot[fill=datavoBlue] coordinates {(DataVo,1786977.904)};
+\addplot[fill=sqliteOrange] coordinates {(SQLite,364277.845)};
+\end{axis}
+\end{tikzpicture}
+}
+\end{center}

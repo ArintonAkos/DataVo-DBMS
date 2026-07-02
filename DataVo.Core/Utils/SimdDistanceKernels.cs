@@ -1,4 +1,5 @@
 using System.Numerics.Tensors;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -23,6 +24,16 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
+        if (TryDotAvx(a, b, out float avxResult))
+        {
+            return avxResult;
+        }
+
+        if (TryDotAdvSimd(a, b, out float advSimdResult))
+        {
+            return advSimdResult;
+        }
+
         return TensorPrimitives.Dot(a, b);
     }
 
@@ -36,6 +47,11 @@ internal static class SimdDistanceKernels
         if (TryCosineDistanceAvx(a, b, out float avxResult))
         {
             return avxResult;
+        }
+
+        if (TryCosineDistanceAdvSimd(a, b, out float advSimdResult))
+        {
+            return advSimdResult;
         }
 
         return TensorCosineDistance(a, b);
@@ -58,8 +74,113 @@ internal static class SimdDistanceKernels
             return avxResult;
         }
 
+        if (TryEuclideanDistanceAdvSimd(a, b, out float advSimdResult))
+        {
+            return advSimdResult;
+        }
+
         // Cross-platform hardware acceleration: the runtime lowers this to ARM NEON or x86 AVX.
         return TensorPrimitives.Distance(a, b);
+    }
+
+    private static unsafe bool TryDotAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
+    {
+        result = 0f;
+        if (!Avx.IsSupported || a.Length < Vector256<float>.Count)
+        {
+            return false;
+        }
+
+        Vector256<float> sum = Vector256<float>.Zero;
+        int i = 0;
+        int width = Vector256<float>.Count;
+
+        fixed (float* pa = a)
+        fixed (float* pb = b)
+        {
+            int unrolledStep = width * 2;
+            for (; i <= a.Length - unrolledStep; i += unrolledStep)
+            {
+                Vector256<float> va0 = Avx.LoadVector256(pa + i);
+                Vector256<float> vb0 = Avx.LoadVector256(pb + i);
+                Vector256<float> va1 = Avx.LoadVector256(pa + i + width);
+                Vector256<float> vb1 = Avx.LoadVector256(pb + i + width);
+
+                if (Fma.IsSupported)
+                {
+                    sum = Fma.MultiplyAdd(va0, vb0, sum);
+                    sum = Fma.MultiplyAdd(va1, vb1, sum);
+                }
+                else
+                {
+                    sum = Avx.Add(sum, Avx.Multiply(va0, vb0));
+                    sum = Avx.Add(sum, Avx.Multiply(va1, vb1));
+                }
+            }
+
+            for (; i <= a.Length - width; i += width)
+            {
+                Vector256<float> va = Avx.LoadVector256(pa + i);
+                Vector256<float> vb = Avx.LoadVector256(pb + i);
+                sum = Fma.IsSupported
+                    ? Fma.MultiplyAdd(va, vb, sum)
+                    : Avx.Add(sum, Avx.Multiply(va, vb));
+            }
+        }
+
+        float total = HorizontalSum(sum);
+        for (; i < a.Length; i++)
+        {
+            total += a[i] * b[i];
+        }
+
+        result = total;
+        return true;
+    }
+
+    private static unsafe bool TryDotAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
+    {
+        result = 0f;
+        if (!AdvSimd.IsSupported || a.Length < Vector128<float>.Count)
+        {
+            return false;
+        }
+
+        Vector128<float> sum = Vector128<float>.Zero;
+        int i = 0;
+        int width = Vector128<float>.Count;
+
+        fixed (float* pa = a)
+        fixed (float* pb = b)
+        {
+            int unrolledStep = width * 2;
+            for (; i <= a.Length - unrolledStep; i += unrolledStep)
+            {
+                Vector128<float> va0 = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb0 = AdvSimd.LoadVector128(pb + i);
+                Vector128<float> va1 = AdvSimd.LoadVector128(pa + i + width);
+                Vector128<float> vb1 = AdvSimd.LoadVector128(pb + i + width);
+
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(va0, vb0));
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(va1, vb1));
+            }
+
+            for (; i <= a.Length - width; i += width)
+            {
+                Vector128<float> va = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb = AdvSimd.LoadVector128(pb + i);
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(va, vb));
+            }
+        }
+
+        float total = HorizontalSum(sum);
+        for (; i < a.Length; i++)
+        {
+            total += a[i] * b[i];
+        }
+
+        result = total;
+        return true;
     }
 
     private static unsafe bool TryCosineDistanceAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
@@ -229,6 +350,121 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    private static unsafe bool TryCosineDistanceAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
+    {
+        distance = 0f;
+        if (!AdvSimd.IsSupported || a.Length < Vector128<float>.Count)
+        {
+            return false;
+        }
+
+        Vector128<float> dot = Vector128<float>.Zero;
+        Vector128<float> magnitudeA = Vector128<float>.Zero;
+        Vector128<float> magnitudeB = Vector128<float>.Zero;
+        int i = 0;
+        int width = Vector128<float>.Count;
+
+        fixed (float* pa = a)
+        fixed (float* pb = b)
+        {
+            int unrolledStep = width * 2;
+            for (; i <= a.Length - unrolledStep; i += unrolledStep)
+            {
+                Vector128<float> va0 = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb0 = AdvSimd.LoadVector128(pb + i);
+                Vector128<float> va1 = AdvSimd.LoadVector128(pa + i + width);
+                Vector128<float> vb1 = AdvSimd.LoadVector128(pb + i + width);
+
+                dot = AdvSimd.Add(dot, AdvSimd.Multiply(va0, vb0));
+                dot = AdvSimd.Add(dot, AdvSimd.Multiply(va1, vb1));
+                magnitudeA = AdvSimd.Add(magnitudeA, AdvSimd.Multiply(va0, va0));
+                magnitudeA = AdvSimd.Add(magnitudeA, AdvSimd.Multiply(va1, va1));
+                magnitudeB = AdvSimd.Add(magnitudeB, AdvSimd.Multiply(vb0, vb0));
+                magnitudeB = AdvSimd.Add(magnitudeB, AdvSimd.Multiply(vb1, vb1));
+            }
+
+            for (; i <= a.Length - width; i += width)
+            {
+                Vector128<float> va = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb = AdvSimd.LoadVector128(pb + i);
+
+                dot = AdvSimd.Add(dot, AdvSimd.Multiply(va, vb));
+                magnitudeA = AdvSimd.Add(magnitudeA, AdvSimd.Multiply(va, va));
+                magnitudeB = AdvSimd.Add(magnitudeB, AdvSimd.Multiply(vb, vb));
+            }
+        }
+
+        float dotSum = HorizontalSum(dot);
+        float magASum = HorizontalSum(magnitudeA);
+        float magBSum = HorizontalSum(magnitudeB);
+
+        for (; i < a.Length; i++)
+        {
+            dotSum += a[i] * b[i];
+            magASum += a[i] * a[i];
+            magBSum += b[i] * b[i];
+        }
+
+        if (magASum <= 0f || magBSum <= 0f)
+        {
+            distance = 1f;
+            return true;
+        }
+
+        float similarity = dotSum / (MathF.Sqrt(magASum) * MathF.Sqrt(magBSum));
+        distance = 1f - similarity;
+        return true;
+    }
+
+    private static unsafe bool TryEuclideanDistanceAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
+    {
+        distance = 0f;
+        if (!AdvSimd.IsSupported || a.Length < Vector128<float>.Count)
+        {
+            return false;
+        }
+
+        Vector128<float> sum = Vector128<float>.Zero;
+        int i = 0;
+        int width = Vector128<float>.Count;
+
+        fixed (float* pa = a)
+        fixed (float* pb = b)
+        {
+            int unrolledStep = width * 2;
+            for (; i <= a.Length - unrolledStep; i += unrolledStep)
+            {
+                Vector128<float> va0 = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb0 = AdvSimd.LoadVector128(pb + i);
+                Vector128<float> va1 = AdvSimd.LoadVector128(pa + i + width);
+                Vector128<float> vb1 = AdvSimd.LoadVector128(pb + i + width);
+
+                Vector128<float> diff0 = AdvSimd.Subtract(va0, vb0);
+                Vector128<float> diff1 = AdvSimd.Subtract(va1, vb1);
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(diff0, diff0));
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(diff1, diff1));
+            }
+
+            for (; i <= a.Length - width; i += width)
+            {
+                Vector128<float> va = AdvSimd.LoadVector128(pa + i);
+                Vector128<float> vb = AdvSimd.LoadVector128(pb + i);
+                Vector128<float> diff = AdvSimd.Subtract(va, vb);
+                sum = AdvSimd.Add(sum, AdvSimd.Multiply(diff, diff));
+            }
+        }
+
+        float sumSquares = HorizontalSum(sum);
+        for (; i < a.Length; i++)
+        {
+            float diff = a[i] - b[i];
+            sumSquares += diff * diff;
+        }
+
+        distance = MathF.Sqrt(sumSquares);
+        return true;
+    }
+
     private static unsafe bool TryCosineDistanceAvx512(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -344,6 +580,20 @@ internal static class SimdDistanceKernels
     private static float HorizontalSum(Vector512<float> vector)
     {
         Span<float> buffer = stackalloc float[Vector512<float>.Count];
+        vector.CopyTo(buffer);
+
+        float sum = 0f;
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            sum += buffer[i];
+        }
+
+        return sum;
+    }
+
+    private static float HorizontalSum(Vector128<float> vector)
+    {
+        Span<float> buffer = stackalloc float[Vector128<float>.Count];
         vector.CopyTo(buffer);
 
         float sum = 0f;

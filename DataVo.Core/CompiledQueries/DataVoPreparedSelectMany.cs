@@ -82,6 +82,15 @@ public sealed class DataVoPreparedSelectMany<T>
             return results;
         }
 
+        if (value is >= int.MinValue and <= int.MaxValue)
+        {
+            Dictionary<long, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
+            if (CompiledIntegerScan.TryScanMany(rows, _plan.WhereColumn!, (int)value, _mapper, out List<T> scanResults))
+            {
+                return scanResults;
+            }
+        }
+
         return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
     }
 

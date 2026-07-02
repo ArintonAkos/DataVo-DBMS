@@ -82,6 +82,15 @@ public sealed class DataVoPreparedSelectSingle<T>
             return TryProjectRow(rowId, out T? result) ? result : default;
         }
 
+        if (value is >= int.MinValue and <= int.MaxValue)
+        {
+            Dictionary<long, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
+            if (CompiledIntegerScan.TryScanSingle(rows, _plan.WhereColumn!, (int)value, _mapper, out T? scanResult))
+            {
+                return scanResult;
+            }
+        }
+
         return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
     }
 
