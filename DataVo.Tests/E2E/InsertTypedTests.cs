@@ -493,6 +493,36 @@ public class InsertTypedTests
         Assert.Equal([1L, 2L], rowIds);
     }
 
+    [Fact]
+    public void Update_IntSecondaryIndex_RepopulatesFastLaneAndScalarIndex()
+    {
+        using DataVoContext ctx = CreateContext();
+        ctx.Execute("CREATE TABLE Items (Id INT PRIMARY KEY, OrderId INT, Sku INT)");
+        ctx.Execute("CREATE INDEX ix_Items_OrderId ON Items (OrderId)");
+
+        ctx.InsertTypedBatch("Items", new ReactiveRowSchema("Id", "OrderId", "Sku"),
+        [
+            [CellValue.From(1), CellValue.From(7), CellValue.From(100)]
+        ]);
+
+        ctx.Execute("UPDATE Items SET OrderId = 9 WHERE Id = 1");
+
+        string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
+            ?? throw new InvalidOperationException("Expected selected database.");
+        IReadOnlyList<long> fastLaneRows = ctx.Engine.IndexManager.LookupIntegerIndex(
+            9,
+            "ix_Items_OrderId",
+            "Items",
+            databaseName);
+
+        Assert.Contains(2L, fastLaneRows);
+        Assert.True(ctx.Engine.IndexManager.IndexContainsKey(
+            "[9]",
+            "ix_Items_OrderId",
+            "Items",
+            databaseName));
+    }
+
     private static long MeasureOrderInsertLoop(bool useTypedInsert, int startId)
     {
         using DataVoContext ctx = CreateContext();

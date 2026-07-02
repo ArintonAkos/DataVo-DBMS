@@ -90,6 +90,18 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
     }
 
     [Fact]
+    public void Update_IntPrimaryKey_DoesNotCreatePartialFastLaneThatMasksScalarIndex()
+    {
+        Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Value INT)");
+        Execute("INSERT INTO Items VALUES (1, 10)");
+        Execute("INSERT INTO Items VALUES (2, 20)");
+
+        Execute("UPDATE Items SET Value = 11 WHERE Id = 1");
+
+        Assert.True(Engine.IndexManager.IndexContainsKey("[2]", "_PK_Items", "Items", TestDb));
+    }
+
+    [Fact]
     public void Update_PrimaryKey_Duplicate_IsRejected()
     {
         Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Val INT)");
