@@ -151,7 +151,12 @@ public sealed class CompiledQueryReadAllocationSpikeTests
             Format("SelectSingleTyped tagged reused parameter array", typedTaggedReusedParameterArray));
 
         _output.WriteLine(report);
-        Assert.Fail(report);
+        Assert.True(typedPostIndexCachedSetup.BytesPerCall <= 1.0,
+            $"Cached projected decode should be allocation-free.{Environment.NewLine}{report}");
+        Assert.True(typedRuntime.BytesPerCall <= 192.0,
+            $"Runtime typed point lookup allocation regressed.{Environment.NewLine}{report}");
+        Assert.True(typedTaggedReusedParameterArray.BytesPerCall <= 128.0,
+            $"Tagged typed point lookup with reused parameters allocation regressed.{Environment.NewLine}{report}");
     }
 
     private static AllocationSample Measure(Func<int, object?> action)

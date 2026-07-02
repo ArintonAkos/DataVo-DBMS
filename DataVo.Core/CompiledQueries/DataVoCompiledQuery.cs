@@ -22,6 +22,7 @@ namespace DataVo.Core.CompiledQueries;
 public static class DataVoCompiledQuery
 {
     private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectSingleCacheKey, object>> PreparedSelectSingleCache = new();
+    private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectManyCacheKey, object>> PreparedSelectManyCache = new();
 
     /// <summary>
     /// Executes a select plan and returns the first mapped row, or <c>default</c> when no row matches.
@@ -88,7 +89,8 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectMany.");
         }
 
-        return ExecuteSelectTyped(context, plan, parameters, mapper);
+        DataVoPreparedSelectMany<T> prepared = GetOrPrepareSelectManyTyped(context, plan, mapper);
+        return prepared.Execute(RequiredSingleParameterValue(parameters, plan.WhereParameterName!));
     }
 
     /// <summary>
@@ -257,6 +259,20 @@ public static class DataVoCompiledQuery
         return (DataVoPreparedSelectSingle<T>)cache.GetOrAdd(
             key,
             static (_, state) => PrepareSelectSingleTyped(state.Context, state.Plan, state.Mapper),
+            (Context: context, Plan: plan, Mapper: mapper));
+    }
+
+    private static DataVoPreparedSelectMany<T> GetOrPrepareSelectManyTyped<T>(
+        DataVoContext context,
+        DataVoCompiledQueryPlan plan,
+        CompiledRowMapper<T> mapper)
+    {
+        ConcurrentDictionary<PreparedSelectManyCacheKey, object> cache =
+            PreparedSelectManyCache.GetValue(context, static _ => new ConcurrentDictionary<PreparedSelectManyCacheKey, object>());
+        var key = new PreparedSelectManyCacheKey(plan, mapper);
+        return (DataVoPreparedSelectMany<T>)cache.GetOrAdd(
+            key,
+            static (_, state) => PrepareSelectManyTyped(state.Context, state.Plan, state.Mapper),
             (Context: context, Plan: plan, Mapper: mapper));
     }
 
