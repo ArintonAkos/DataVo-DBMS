@@ -14,9 +14,27 @@
 
 # Local ad-hoc run outputs
 /benchmark_*.md
+/benchmark_results.txt
+/final_benchmark_results.txt
+/latest-results.txt
 /output.md
 /output.txt
 /test.md
+/whitepaper_metrics.txt
+/with-sqlite-vec.txt
+/sqlite-vec-*-loadable-*.tar.gz
+/vec0.dylib
+/tmp/
+/.matplotlib-cache/
+/docs/research/datavo-engine-whitepaper.md
+
+# Generated publication outputs
+/output/pdf/*.aux
+/output/pdf/*.out
+/output/pdf/*.pdf
+/output/pdf/datavo_executable_artifacts.md
+/output/pdf/figures/
+/output/pdf/references/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
