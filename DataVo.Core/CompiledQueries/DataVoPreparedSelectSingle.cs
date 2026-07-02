@@ -146,26 +146,47 @@ public sealed class DataVoPreparedSelectSingle<T>
             return false;
         }
 
-        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
-            && storedRow is not null)
+        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
+        if (bytes is not null)
         {
-            result = _mapper(new CompiledRowReader(storedRow.AsView()));
+            lock (_projection.Buffer)
+            {
+                RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
+                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+            }
+
             return true;
         }
 
-        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
-        if (bytes is null)
+        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
+            && storedRow is not null)
         {
-            return false;
+            lock (_projection.Buffer)
+            {
+                ProjectStoredRow(storedRow.AsView(), _projection);
+                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+            }
+
+            return true;
         }
 
-        lock (_projection.Buffer)
-        {
-            RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
-            result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-        }
+        return false;
+    }
 
-        return true;
+    private static void ProjectStoredRow(StoredRowView view, PreparedProjection projection)
+    {
+        int projectedOrdinal = 0;
+        for (int ordinal = 0; ordinal < projection.Columns.Count; ordinal++)
+        {
+            if (!projection.IsProjected[ordinal])
+            {
+                continue;
+            }
+
+            projection.Buffer[projectedOrdinal++] = ordinal < view.Count
+                ? view[ordinal]
+                : CellValue.Null;
+        }
     }
 
     private T? ExecuteScanFallback(string expectedKey)
@@ -230,11 +251,42 @@ internal readonly struct PreparedSelectSingleCacheKey : IEquatable<PreparedSelec
     }
 
     public bool Equals(PreparedSelectSingleCacheKey other) =>
-        ReferenceEquals(_plan, other._plan) && ReferenceEquals(_mapper, other._mapper);
+        ReferenceEquals(_plan, other._plan)
+        && Equals(_mapper.Method, other._mapper.Method)
+        && ReferenceEquals(_mapper.Target, other._mapper.Target);
 
     public override bool Equals(object? obj) =>
         obj is PreparedSelectSingleCacheKey other && Equals(other);
 
     public override int GetHashCode() =>
-        HashCode.Combine(RuntimeHelpers.GetHashCode(_plan), RuntimeHelpers.GetHashCode(_mapper));
+        HashCode.Combine(
+            RuntimeHelpers.GetHashCode(_plan),
+            _mapper.Method,
+            _mapper.Target is null ? 0 : RuntimeHelpers.GetHashCode(_mapper.Target));
+}
+
+internal readonly struct PreparedSelectManyCacheKey : IEquatable<PreparedSelectManyCacheKey>
+{
+    private readonly DataVoCompiledQueryPlan _plan;
+    private readonly Delegate _mapper;
+
+    public PreparedSelectManyCacheKey(DataVoCompiledQueryPlan plan, Delegate mapper)
+    {
+        _plan = plan;
+        _mapper = mapper;
+    }
+
+    public bool Equals(PreparedSelectManyCacheKey other) =>
+        ReferenceEquals(_plan, other._plan)
+        && Equals(_mapper.Method, other._mapper.Method)
+        && ReferenceEquals(_mapper.Target, other._mapper.Target);
+
+    public override bool Equals(object? obj) =>
+        obj is PreparedSelectManyCacheKey other && Equals(other);
+
+    public override int GetHashCode() =>
+        HashCode.Combine(
+            RuntimeHelpers.GetHashCode(_plan),
+            _mapper.Method,
+            _mapper.Target is null ? 0 : RuntimeHelpers.GetHashCode(_mapper.Target));
 }

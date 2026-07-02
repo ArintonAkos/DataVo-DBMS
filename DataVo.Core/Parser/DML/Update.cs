@@ -459,54 +459,21 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         // Insert new records into storage & indexes
+        List<long> assignedRowIds = Context.InsertIntoTable(newRows, _model.TableName, databaseName);
         for (int i = 0; i < newRows.Count; i++)
         {
             var newRow = newRows[i];
             long oldRowId = oldRowIds[i];
-            long assignedRowId = Context.InsertOneIntoTable(newRow, _model.TableName, databaseName);
+            long assignedRowId = assignedRowIds[i];
             MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId);
 
             if (recorder is { IsEnabled: true } && oldRowsById.TryGetValue(oldRowId, out var oldRow))
             {
                 recorder.RecordUpdate(_model.TableName, assignedRowId, oldRow, newRow);
             }
-
-            foreach (var index in indexFiles)
-            {
-                if (index.AttributeNames.Any(attr => !newRow.TryGetValue(attr, out var attrValue) || attrValue == null))
-                {
-                    continue;
-                }
-
-                string indexName = index.IndexFileName ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(indexName))
-                {
-                    continue;
-                }
-
-                string indexKind = index.IndexKind ?? string.Empty;
-
-                if (Indexes.SupportsVectorIndexType(indexKind))
-                {
-                    if (index.AttributeNames.Count != 1)
-                    {
-                        throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
-                    }
-
-                    string vectorColumn = index.AttributeNames[0];
-                    if (!VectorParser.TryCoerceToVector(newRow[vectorColumn], out float[] vector))
-                    {
-                        throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
-                    }
-
-                    Indexes.InsertIntoVectorIndex(vector, assignedRowId, indexName, _model.TableName, databaseName, indexKind);
-                    continue;
-                }
-
-                string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-                Indexes.InsertIntoIndex(indexValue, assignedRowId, indexName, _model.TableName, databaseName);
-            }
         }
+
+        InsertUpdatedIndexesBatch(newRows, assignedRowIds, indexFiles, databaseName);
 
         if (ImplicitWalCommit.IsEnabled(Engine))
         {
@@ -523,6 +490,75 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
 
             ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
+        }
+    }
+
+    private void InsertUpdatedIndexesBatch(
+        IReadOnlyList<Dictionary<string, object?>> newRows,
+        IReadOnlyList<long> assignedRowIds,
+        IReadOnlyList<IndexFile> indexFiles,
+        string databaseName)
+    {
+        foreach (var index in indexFiles)
+        {
+            string indexName = index.IndexFileName ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(indexName))
+            {
+                continue;
+            }
+
+            string indexKind = index.IndexKind ?? string.Empty;
+            if (Indexes.SupportsVectorIndexType(indexKind))
+            {
+                InsertUpdatedVectorIndex(newRows, assignedRowIds, index, indexName, indexKind, databaseName);
+                continue;
+            }
+
+            var entries = new List<(string Value, long RowId)>(newRows.Count);
+            for (int i = 0; i < newRows.Count; i++)
+            {
+                Dictionary<string, object?> newRow = newRows[i];
+                if (index.AttributeNames.Any(attr => !newRow.TryGetValue(attr, out var attrValue) || attrValue == null))
+                {
+                    continue;
+                }
+
+                string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
+                entries.Add((indexValue, assignedRowIds[i]));
+            }
+
+            Indexes.InsertManyIntoIndex(entries, indexName, _model.TableName, databaseName);
+        }
+    }
+
+    private void InsertUpdatedVectorIndex(
+        IReadOnlyList<Dictionary<string, object?>> newRows,
+        IReadOnlyList<long> assignedRowIds,
+        IndexFile index,
+        string indexName,
+        string indexKind,
+        string databaseName)
+    {
+        if (index.AttributeNames.Count != 1)
+        {
+            throw new BindingException($"Vector index '{indexName}' (type '{indexKind}') must reference exactly one VECTOR column.");
+        }
+
+        string vectorColumn = index.AttributeNames[0];
+        for (int i = 0; i < newRows.Count; i++)
+        {
+            Dictionary<string, object?> newRow = newRows[i];
+            if (!newRow.TryGetValue(vectorColumn, out object? value) || value is null)
+            {
+                continue;
+            }
+
+            if (!VectorParser.TryCoerceToVector(value, out float[] vector))
+            {
+                throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+            }
+
+            Indexes.InsertIntoVectorIndex(vector, assignedRowIds[i], indexName, _model.TableName, databaseName, indexKind);
         }
     }
 

@@ -1,5 +1,6 @@
 using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 
@@ -158,26 +159,47 @@ public sealed class DataVoPreparedSelectMany<T>
             return false;
         }
 
-        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
-            && storedRow is not null)
+        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
+        if (bytes is not null)
         {
-            result = _mapper(new CompiledRowReader(storedRow.AsView()));
+            lock (_projection.Buffer)
+            {
+                RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
+                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+            }
+
             return true;
         }
 
-        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
-        if (bytes is null)
+        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
+            && storedRow is not null)
         {
-            return false;
+            lock (_projection.Buffer)
+            {
+                ProjectStoredRow(storedRow.AsView(), _projection);
+                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+            }
+
+            return true;
         }
 
-        lock (_projection.Buffer)
-        {
-            RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
-            result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-        }
+        return false;
+    }
 
-        return true;
+    private static void ProjectStoredRow(StoredRowView view, PreparedProjection projection)
+    {
+        int projectedOrdinal = 0;
+        for (int ordinal = 0; ordinal < projection.Columns.Count; ordinal++)
+        {
+            if (!projection.IsProjected[ordinal])
+            {
+                continue;
+            }
+
+            projection.Buffer[projectedOrdinal++] = ordinal < view.Count
+                ? view[ordinal]
+                : CellValue.Null;
+        }
     }
 
     private IReadOnlyList<T> ExecuteScanFallback(string expectedKey)
