@@ -145,6 +145,8 @@ public sealed class LockManager
                 throw new TimeoutException($"Timed out acquiring row read lock for '{rowKey}'.");
             }
 
+            // See AcquireTableLock: edges must be gone before ownership becomes visible.
+            waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
             RegisterRowReadOwner(rowLock, threadId);
         }
         catch
@@ -180,6 +182,8 @@ public sealed class LockManager
                 throw new TimeoutException($"Timed out acquiring row write lock for '{rowKey}'.");
             }
 
+            // See AcquireTableLock: edges must be gone before ownership becomes visible.
+            waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
             RegisterRowWriteOwner(rowLock, threadId);
         }
         catch
@@ -207,8 +211,8 @@ public sealed class LockManager
             throw new InvalidOperationException($"Row read lock not found for key '{rowKey}'.");
         }
 
-        rowLock.Lock.ExitReadLock();
         UnregisterRowReadOwner(rowLock, Environment.CurrentManagedThreadId);
+        rowLock.Lock.ExitReadLock();
         ReleaseRowLock(rowKey, rowLock);
     }
 
@@ -226,8 +230,8 @@ public sealed class LockManager
             throw new InvalidOperationException($"Row write lock not found for key '{rowKey}'.");
         }
 
-        rowLock.Lock.ExitWriteLock();
         UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
+        rowLock.Lock.ExitWriteLock();
         ReleaseRowLock(rowKey, rowLock);
     }
 
@@ -365,6 +369,10 @@ public sealed class LockManager
                     throw new TimeoutException($"Timed out acquiring table write lock for '{tableKey}'.");
                 }
 
+                // Clear wait edges BEFORE becoming a visible owner: a thread that is owner while its
+                // stale edge (to the previous owner) is still in the graph lets that previous owner,
+                // re-requesting the same lock, walk the stale edge into a phantom cycle.
+                waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
                 RegisterTableWriteOwner(tableLock, threadId);
             }
             else
@@ -374,6 +382,7 @@ public sealed class LockManager
                     throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
                 }
 
+                waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
                 RegisterTableReadOwner(tableLock, threadId);
             }
         }
@@ -397,13 +406,13 @@ public sealed class LockManager
 
         if (write)
         {
-            tableLock.Lock.ExitWriteLock();
             UnregisterTableWriteOwner(tableLock, Environment.CurrentManagedThreadId);
+            tableLock.Lock.ExitWriteLock();
         }
         else
         {
-            tableLock.Lock.ExitReadLock();
             UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
+            tableLock.Lock.ExitReadLock();
         }
 
         ReleaseTableLockEntry(tableKey, tableLock, removeWhenIdle);
@@ -658,6 +667,16 @@ public sealed class LockManager
 
             return new WaitRegistration(waitingThreadId, true);
         }
+    }
+
+    /// <summary>
+    /// Clears a wait registration as soon as the lock is acquired and returns
+    /// <see cref="WaitRegistration.None"/> so the routine <c>finally</c> clear becomes a no-op.
+    /// </summary>
+    private WaitRegistration ClearWaitRegistrationEarly(WaitRegistration waitRegistration)
+    {
+        ClearWaitRegistration(waitRegistration);
+        return WaitRegistration.None;
     }
 
     private void ClearWaitRegistration(WaitRegistration waitRegistration)

@@ -230,6 +230,53 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Scratch list handed to <see cref="IStorageEngine.InsertRows"/>, which only iterates it (no
+    /// backend retains the list itself — the LSM/disk engines retain or write the row buffers).
+    /// Thread-static so concurrent sessions never share it; cleared after use so it doesn't pin
+    /// row buffers between batches.
+    /// </summary>
+    [ThreadStatic]
+    private static List<byte[]>? _typedInsertSerializeScratch;
+
+    /// <summary>
+    /// Serializes and inserts full typed cell rows for serialize-through backends without
+    /// materializing per-row <see cref="StoredRow"/> wrappers. Wire-identical to
+    /// <see cref="InsertTypedRows(IReadOnlyList{StoredRow}, string, string)"/>. Must not be used
+    /// when <see cref="RetainsTypedRowBuffers"/> is <see langword="true"/> — in-memory typed storage
+    /// needs the row wrappers themselves.
+    /// </summary>
+    internal List<long> InsertTypedCellRows(
+        IReadOnlyList<Column> columns,
+        IReadOnlyList<CellValue[]> rows,
+        string tableName,
+        string databaseName)
+    {
+        if (rows.Count == 0) return [];
+
+        if (_storageEngine is ITypedRowStorageEngine)
+        {
+            throw new InvalidOperationException(
+                "InsertTypedCellRows is only valid for serialize-through backends; typed storage retains row buffers.");
+        }
+
+        List<byte[]> serializedRows = _typedInsertSerializeScratch ??= [];
+        try
+        {
+            serializedRows.EnsureCapacity(rows.Count);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                serializedRows.Add(RowSerializer.SerializeCells(columns, rows[i]));
+            }
+
+            return _storageEngine.InsertRows(databaseName, tableName, serializedRows);
+        }
+        finally
+        {
+            serializedRows.Clear();
+        }
+    }
+
+    /// <summary>
     /// Serializes and inserts a single typed storage row via the single-row backend path, without
     /// per-row List churn or a redundant catalog column lookup. Wire-identical to the batch path.
     /// </summary>
@@ -628,7 +675,16 @@ public class StorageContext(DataVoConfig config) : IDisposable
                     continue;
                 }
 
-                byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                byte[] rawRow;
+                try
+                {
+                    rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                }
+                catch (RowDeletedException)
+                {
+                    continue;
+                }
+
                 parsedTableData[rowId] = RowSerializer.Deserialize(
                     databaseName,
                     tableName,
@@ -644,7 +700,16 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (long rowId in rowIds)
         {
-            byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+            byte[] rawRow;
+            try
+            {
+                rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+            }
+            catch (RowDeletedException)
+            {
+                continue;
+            }
+
             parsedTableData[rowId] = RowSerializer.Deserialize(
                 databaseName,
                 tableName,
@@ -685,7 +750,16 @@ public class StorageContext(DataVoConfig config) : IDisposable
                     continue;
                 }
 
-                byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                byte[] rawRow;
+                try
+                {
+                    rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+                }
+                catch (RowDeletedException)
+                {
+                    continue;
+                }
+
                 parsedTableData[rowId] = StoredRow.FromOwnedCells(schema, RowSerializer.DeserializeCells(rawRow, columns));
             }
 
@@ -695,7 +769,16 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (long rowId in rowIds)
         {
-            byte[] rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+            byte[] rawRow;
+            try
+            {
+                rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+            }
+            catch (RowDeletedException)
+            {
+                continue;
+            }
+
             parsedTableData[rowId] = StoredRow.FromOwnedCells(schema, RowSerializer.DeserializeCells(rawRow, columns));
         }
 

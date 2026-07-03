@@ -107,7 +107,19 @@ public sealed class SsTableWriter
     /// directly from arena memory — no per-entry key/value copies and no re-sort. Byte-identical to
     /// adding every entry to a writer and calling <see cref="Finish"/>.
     /// </summary>
-    public static byte[] Write(MemTable memTable)
+    public static byte[] Write(MemTable memTable) =>
+        WriteCore(memTable, static required => new byte[required], out _);
+
+    /// <summary>
+    /// Same as <see cref="Write"/> but into a buffer rented from
+    /// <see cref="System.Buffers.ArrayPool{T}.Shared"/> (which may be longer than the image).
+    /// The caller owns the buffer and must return it to the pool; <paramref name="length"/> is the
+    /// image's exact byte count.
+    /// </summary>
+    internal static byte[] WriteRented(MemTable memTable, out int length) =>
+        WriteCore(memTable, static required => System.Buffers.ArrayPool<byte>.Shared.Rent(required), out length);
+
+    private static byte[] WriteCore(MemTable memTable, Func<int, byte[]> allocate, out int length)
     {
         ArgumentNullException.ThrowIfNull(memTable);
         if (memTable.Count == 0)
@@ -141,7 +153,8 @@ public sealed class SsTableWriter
             + firstKeyLength
             + lastKeyLength);
         int totalLength = checked(dataLength + indexLength + filterBytes.Length + SsTableFormat.FooterSize);
-        byte[] sstable = new byte[totalLength];
+        length = totalLength;
+        byte[] sstable = allocate(totalLength);
 
         // Pass 2 — write the data block in enumeration (= key) order, tracking the last key's offset.
         int offset = 0;

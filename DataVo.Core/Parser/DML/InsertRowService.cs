@@ -19,6 +19,13 @@ internal sealed class InsertRowService(
     EngineCatalog catalog,
     PolyIndexManager indexes)
 {
+    /// <summary>
+    /// Scratch set for batch-local integer primary-key duplicate detection. Thread-static because a
+    /// service instance can be shared by sessions on different threads; cleared before every use.
+    /// </summary>
+    [ThreadStatic]
+    private static HashSet<long>? _integerPrimaryKeyScratch;
+
     public InsertRowsResult InsertRows(
         string databaseName,
         string tableName,
@@ -267,7 +274,14 @@ internal sealed class InsertRowService(
         bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
         List<string>? messages = hasConstraints ? [] : null;
         HashSet<string>? acceptedPrimaryKeys = hasConstraints && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
-        HashSet<long>? acceptedIntegerPrimaryKeys = hasIntegerPrimaryKey ? new HashSet<long>(rows.Count) : null;
+        HashSet<long>? acceptedIntegerPrimaryKeys = null;
+        if (hasIntegerPrimaryKey)
+        {
+            // Per-thread scratch: batch-local duplicate detection only, so reuse across calls
+            // (cleared each time) instead of allocating a fresh set per batch.
+            acceptedIntegerPrimaryKeys = _integerPrimaryKeyScratch ??= [];
+            acceptedIntegerPrimaryKeys.Clear();
+        }
         IReadOnlyDictionary<string, HashSet<string>>? acceptedUniqueValues = hasConstraints
             ? uniqueKeys.ToDictionary(
                 key => key,
@@ -275,6 +289,13 @@ internal sealed class InsertRowService(
                 StringComparer.OrdinalIgnoreCase)
             : null;
         bool skipExistingPrimaryKeyLookup = primaryKeys.Count > 0 && context.IsTableEmpty(tableName, databaseName);
+
+        // Resolve the fast lane once per batch: the per-row existence probe then skips the
+        // cache-key hash and dictionary hop that dominated validation CPU on bulk ingest.
+        Indexing.ConcurrentInt64Int64Map? integerPrimaryKeyLane =
+            hasIntegerPrimaryKey && !skipExistingPrimaryKeyLookup
+                ? indexes.GetIntegerPrimaryKeyLane(GetPrimaryKeyIndexName(tableName), tableName, databaseName)
+                : null;
 
         string[]? primaryKeyValues = primaryKeys.Count > 0 && !hasIntegerPrimaryKey ? new string[rows.Count] : null;
         long[]? integerPrimaryKeyValues = hasIntegerPrimaryKey ? new long[rows.Count] : null;
@@ -307,6 +328,7 @@ internal sealed class InsertRowService(
                     acceptedIntegerPrimaryKeys!,
                     messages!,
                     skipExistingPrimaryKeyLookup,
+                    integerPrimaryKeyLane,
                     out integerPrimaryKeyValues![i])
                 : ValidateTypedPrimaryKeys(
                     tableName,
@@ -365,13 +387,23 @@ internal sealed class InsertRowService(
             ownedRows = copies;
         }
 
-        var storedRows = new List<StoredRow>(rows.Count);
-        for (int i = 0; i < rows.Count; i++)
+        IReadOnlyList<long> rowIds;
+        if (context.RetainsTypedRowBuffers)
         {
-            storedRows.Add(StoredRow.FromOwnedCells(columns, ownedRows[i]));
-        }
+            var storedRows = new List<StoredRow>(rows.Count);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                storedRows.Add(StoredRow.FromOwnedCells(columns, ownedRows[i]));
+            }
 
-        IReadOnlyList<long> rowIds = context.InsertTypedRows(storedRows, tableName, databaseName);
+            rowIds = context.InsertTypedRows(storedRows, tableName, databaseName);
+        }
+        else
+        {
+            // Serialize-through backends (LSM/disk) read the cells transiently, so skip the
+            // per-row StoredRow wrappers entirely and serialize straight from the cell buffers.
+            rowIds = context.InsertTypedCellRows(tableColumns, ownedRows, tableName, databaseName);
+        }
         MvccCoordinator.RegisterInsertVersions(engine, databaseName, tableName, rowIds, statementTxId);
         InsertTypedIndexesBatch(
             tableName,
@@ -639,6 +671,7 @@ internal sealed class InsertRowService(
         HashSet<long> acceptedPrimaryKeys,
         List<string> messages,
         bool skipExistingPrimaryKeyLookup,
+        Indexing.ConcurrentInt64Int64Map? existingKeyLane,
         out long primaryKeyValue)
     {
         CellValue cell = cells[primaryKeyOrdinal];
@@ -658,8 +691,13 @@ internal sealed class InsertRowService(
                 $"Typed integer primary key for row {rowNumber} must be INT or BIGINT; use the dictionary BulkInsert path.")
         };
 
-        if (acceptedPrimaryKeys.Contains(primaryKeyValue)
-            || (!skipExistingPrimaryKeyLookup && IntegerPrimaryKeyExists(tableName, databaseName, primaryKeyValue)))
+        // A populated fast lane is authoritative for existence, so the resolved lane replaces the
+        // per-row cache-key lookup; the generic probe remains the fallback for lane-less indexes.
+        bool existing = !skipExistingPrimaryKeyLookup
+            && (existingKeyLane is not null
+                ? existingKeyLane.TryGetValue(primaryKeyValue, out _)
+                : IntegerPrimaryKeyExists(tableName, databaseName, primaryKeyValue));
+        if (acceptedPrimaryKeys.Contains(primaryKeyValue) || existing)
         {
             messages.Add($"Primary key violation in row {rowNumber}!");
             return false;
@@ -1269,13 +1307,12 @@ internal sealed class InsertRowService(
 
             if (canUseIntegerPrimaryKey)
             {
-                var integerEntries = new List<(long Key, long RowId)>(rowIds.Count);
-                for (int i = 0; i < rowIds.Count; i++)
-                {
-                    integerEntries.Add((integerPrimaryKeyValues![i], rowIds[i]));
-                }
-
-                indexes.InsertIntegerPrimaryKeys(integerEntries, indexName, tableName, databaseName);
+                indexes.InsertIntegerPrimaryKeys(
+                    integerPrimaryKeyValues.AsSpan(0, rowIds.Count),
+                    AsRowIdSpan(rowIds),
+                    indexName,
+                    tableName,
+                    databaseName);
                 continue;
             }
 
@@ -1320,6 +1357,13 @@ internal sealed class InsertRowService(
             indexes.InsertManyIntoIndex(entries, indexName, tableName, databaseName);
         }
     }
+
+    private static ReadOnlySpan<long> AsRowIdSpan(IReadOnlyList<long> rowIds) => rowIds switch
+    {
+        List<long> list => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list),
+        long[] array => array,
+        _ => rowIds.ToArray(),
+    };
 
     private static bool TryBuildIntegerIndexEntries(
         ReactiveRowSchema schema,
