@@ -33,7 +33,7 @@ LiteDB,38719.294,2.619792,2.91225,litedb,verified Table 9 metrics
 
 ## SPACE_AMPLIFICATION
 engine,disk_mb,recovery_ms,gc_mb,color_key,source
-DataVo (LSM Relaxed),51.242,0.606,579.0,datavo_lsm_relaxed,whitepaper_metrics.txt
+DataVo (LSM Relaxed),50.7,0.606,204.0,datavo_lsm_relaxed,whitepaper_metrics.txt
 "SQLite (WAL,normal)",58.405,0.414,634.17,sqlite,whitepaper_metrics.txt
 LiteDB,154.461,0.61,15159.987,litedb,whitepaper_metrics.txt
 
@@ -44,6 +44,6 @@ sqlite_normal_vs_datavo_lsm_relaxed_disk_crud_time_ratio,1.5075180099747554,367.
 datavo_lsm_relaxed_vs_sqlite_normal_thread1_ops_ratio,2.0806237802797485,723307.329 / 347639.653
 sqlite_normal_vs_datavo_lsm_relaxed_ycsb_write_p99_ratio,2.985197368421053,3.403125 / 1.140000
 sqlite_normal_vs_datavo_lsm_relaxed_ycsb_read_p99_ratio,1.0869565217391304,0.010000 / 0.009200
-datavo_lsm_relaxed_ingest_gc_mb,579.0,verified Table 10 GC MB = 579.000
-sqlite_space_over_datavo_space_percent,12.264360928002747,(58.405 - 51.242) / 58.405 * 100
-litedb_space_vs_datavo_space_ratio,3.0143437024315993,154.461 / 51.242
+datavo_lsm_relaxed_ingest_gc_mb,204.0,verified Table 10 GC MB = 204.000
+sqlite_space_over_datavo_space_percent,13.18694769849076,(58.405 - 50.700) / 58.405 * 100
+litedb_space_vs_datavo_space_ratio,3.045267489711934,154.461 / 50.700

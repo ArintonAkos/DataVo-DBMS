@@ -125,7 +125,7 @@
 \end{center}
 
 % Figure 6: Space Amplification
-% Verified Table 10 metrics: DataVo (LSM Relaxed) disk 51.242 MB, recovery 0.606 ms, GC 579.000 MB.
+% Verified Table 10 metrics: DataVo (LSM Relaxed) disk 50.700 MB, recovery 0.606 ms, GC 204.000 MB.
 \begin{center}
 \resizebox{0.86\linewidth}{!}{%
 \begin{tikzpicture}
@@ -145,7 +145,7 @@
     grid=major,
     title={Space Amplification After One Million Records},
 ]
-\addplot[fill=datavoFreshGreen] coordinates {({DataVo (LSM Relaxed)},51.242)};
+\addplot[fill=datavoFreshGreen] coordinates {({DataVo (LSM Relaxed)},50.700)};
 \addplot[fill=sqliteOrange] coordinates {({SQLite (WAL,normal)},58.405)};
 \addplot[fill=liteDbPink] coordinates {(LiteDB,154.461)};
 \end{axis}

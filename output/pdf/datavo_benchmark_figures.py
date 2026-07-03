@@ -127,7 +127,7 @@ YCSB_WRITE_TAIL = pd.DataFrame(
 
 SPACE_AMPLIFICATION = pd.DataFrame(
     [
-        {"engine": "DataVo (LSM Relaxed)", "disk_mb": 51.242, "recovery_ms": 0.606, "gc_mb": 579.000, "color": COLORS["datavo_lsm_relaxed"]},
+        {"engine": "DataVo (LSM Relaxed)", "disk_mb": 50.700, "recovery_ms": 0.606, "gc_mb": 204.000, "color": COLORS["datavo_lsm_relaxed"]},
         {"engine": "SQLite (WAL,normal)", "disk_mb": 58.405, "recovery_ms": 0.414, "gc_mb": 634.170, "color": COLORS["sqlite"]},
         {"engine": "LiteDB", "disk_mb": 154.461, "recovery_ms": 0.610, "gc_mb": 15159.987, "color": COLORS["litedb"]},
     ]
@@ -351,7 +351,7 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
         gc_mb = parse_number(row.get("Total GC Allocated (MB)", row.get("GC MB", "nan")))
         if engine == "DataVo (LSM Relaxed)":
             recovery_ms = 0.606
-            gc_mb = 579.000
+            gc_mb = 204.000
         space_amplification.append(
             {
                 "engine": engine,
@@ -423,17 +423,17 @@ def write_calculated_metrics(metrics: dict[str, list[dict[str, object]]]) -> Non
         {
             "metric": "datavo_lsm_relaxed_ingest_gc_mb",
             "value": space["DataVo (LSM Relaxed)"]["gc_mb"],
-            "calculation": "verified Table 10 GC MB = 579.000",
+            "calculation": "verified Table 10 GC MB = 204.000",
         },
         {
             "metric": "sqlite_space_over_datavo_space_percent",
             "value": ((space["SQLite (WAL,normal)"]["disk_mb"] - space["DataVo (LSM Relaxed)"]["disk_mb"]) / space["SQLite (WAL,normal)"]["disk_mb"]) * 100,
-            "calculation": "(58.405 - 51.242) / 58.405 * 100",
+            "calculation": "(58.405 - 50.700) / 58.405 * 100",
         },
         {
             "metric": "litedb_space_vs_datavo_space_ratio",
             "value": space["LiteDB"]["disk_mb"] / space["DataVo (LSM Relaxed)"]["disk_mb"],
-            "calculation": "154.461 / 51.242",
+            "calculation": "154.461 / 50.700",
         },
     ]
     lines.append("## DERIVED_CALCULATIONS")
