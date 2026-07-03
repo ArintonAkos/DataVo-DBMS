@@ -109,7 +109,7 @@ public class IndexManager : IDisposable
     /// Concurrent on both levels so point lookups (the hot read path) never serialize on <see cref="_lock"/>;
     /// upserts/removals during inserts and updates are individually atomic.
     /// </summary>
-    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentDictionary<long, long>> _integerPrimaryKeyMaps = new(CacheKeyComparer.Instance);
+    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentInt64Int64Map> _integerPrimaryKeyMaps = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Fast lane for single-column integer indexes: logical integer key -> physical row ids.
@@ -933,12 +933,43 @@ public class IndexManager : IDisposable
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        ConcurrentDictionary<long, long> map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentDictionary<long, long>());
+        ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
         for (int i = 0; i < entries.Count; i++)
         {
             (long key, long rowId) = entries[i];
-            map[key] = rowId; // lock-free upsert
+            map.Set(key, rowId); // reads stay lock-free
         }
+    }
+
+    /// <summary>
+    /// Resolves the integer primary-key fast lane once, so batch validation can probe per row
+    /// without re-hashing the cache key for every key. Returns <see langword="null"/> when the
+    /// index has no fast lane (callers must fall back to the generic probe).
+    /// </summary>
+    internal ConcurrentInt64Int64Map? GetIntegerPrimaryKeyLane(string indexName, string tableName, string databaseName) =>
+        _integerPrimaryKeyMaps.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out ConcurrentInt64Int64Map? map)
+            ? map
+            : null;
+
+    /// <summary>
+    /// Inserts integer primary-key entries into the direct key -> row-id fast lane from parallel
+    /// key/row-id arrays, without materializing a tuple list per batch.
+    /// </summary>
+    public void InsertIntegerPrimaryKeys(
+        ReadOnlySpan<long> keys,
+        ReadOnlySpan<long> rowIds,
+        string indexName,
+        string tableName,
+        string databaseName)
+    {
+        if (keys.IsEmpty)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
+        map.SetRange(keys, rowIds);
     }
 
     /// <summary>
@@ -1082,14 +1113,15 @@ public class IndexManager : IDisposable
 
     /// <summary>
     /// Removes an integer primary-key entry by key, in O(1). Used by the UPDATE path when a row's primary
-    /// key changes; the unchanged-key case is handled by an upsert through <see cref="InsertIntegerPrimaryKeys"/>.
+    /// key changes; the unchanged-key case is handled by an upsert through
+    /// <see cref="InsertIntegerPrimaryKeys(IReadOnlyList{ValueTuple{long, long}}, string, string, string)"/>.
     /// </summary>
     public void RemoveIntegerPrimaryKey(long key, string indexName, string tableName, string databaseName)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map))
+        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map))
         {
-            map.TryRemove(key, out _);
+            map.TryRemove(key);
         }
     }
 
@@ -1158,7 +1190,7 @@ public class IndexManager : IDisposable
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         // Lock-free: the hot point-lookup path must not serialize 8 concurrent readers on _lock.
-        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map)
+        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
             && map.TryGetValue(key, out rowId))
         {
             RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
@@ -1360,7 +1392,7 @@ public class IndexManager : IDisposable
 
     private void DeleteIntegerPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
     {
-        if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<long, long>? map) || map.IsEmpty)
+        if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map) || map.IsEmpty)
         {
             return;
         }
@@ -1368,21 +1400,31 @@ public class IndexManager : IDisposable
         for (int i = 0; i < rowIds.Count; i++)
         {
             long rowId = rowIds[i];
-            long? keyToRemove = null;
-            foreach (KeyValuePair<long, long> pair in map)
+            var search = new IntegerPrimaryKeySearch(rowId);
+            map.ForEach(search, static (search, key, value) =>
             {
-                if (pair.Value == rowId)
+                if (value != search.RowId)
                 {
-                    keyToRemove = pair.Key;
-                    break;
+                    return true;
                 }
-            }
 
-            if (keyToRemove.HasValue)
+                search.Key = key;
+                search.Found = true;
+                return false;
+            });
+
+            if (search.Found)
             {
-                map.TryRemove(keyToRemove.Value, out _);
+                map.TryRemove(search.Key);
             }
         }
+    }
+
+    private sealed class IntegerPrimaryKeySearch(long rowId)
+    {
+        public long RowId { get; } = rowId;
+        public long Key { get; set; }
+        public bool Found { get; set; }
     }
 
     private void DeleteGuidPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)

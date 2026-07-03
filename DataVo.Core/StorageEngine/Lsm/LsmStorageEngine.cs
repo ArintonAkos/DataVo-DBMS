@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using DataVo.Core.CompiledQueries;
@@ -41,16 +42,23 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         ArgumentNullException.ThrowIfNull(rowBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
 
+        long insertedRowId;
+        LsmWalDurabilityTicket ticket;
         lock (state.SyncRoot)
         {
             long rowId = state.NextRowId++;
             ulong seqno = state.NextSeqno++;
             Span<byte> userKey = stackalloc byte[UserKeySize];
             EncodeRowId(rowId, userKey);
-            state.Table.Put(userKey, seqno, rowBytes);
-            state.LatestRows[rowId] = new LatestRowVersion(rowBytes, IsTombstone: false, seqno);
-            return rowId;
+            ticket = state.Table.PutDeferDurability(userKey, seqno, rowBytes);
+            state.LatestRows.Set(rowId, rowBytes);
+            insertedRowId = rowId;
         }
+
+        // Group commit: durability is awaited outside the table lock so concurrent strict-mode
+        // writers share one fsync instead of serializing one fsync per operation.
+        ticket.Wait();
+        return insertedRowId;
     }
 
     /// <summary>
@@ -63,34 +71,49 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         ArgumentNullException.ThrowIfNull(rowsBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
 
+        List<long> insertedRowIds;
+        LsmWalDurabilityTicket ticket;
         lock (state.SyncRoot)
         {
             var rowIds = new List<long>(rowsBytes.Count);
-            var batch = new List<LsmBatchRowPutEntry>(rowsBytes.Count);
-            foreach (byte[] rowBytes in rowsBytes)
+            LsmBatchRowPutEntry[] batch = ArrayPool<LsmBatchRowPutEntry>.Shared.Rent(rowsBytes.Count);
+            try
             {
-                ArgumentNullException.ThrowIfNull(rowBytes);
-                long rowId = state.NextRowId++;
-                ulong seqno = state.NextSeqno++;
-                batch.Add(new LsmBatchRowPutEntry(rowId, seqno, rowBytes));
-                rowIds.Add(rowId);
-            }
+                int count = 0;
+                foreach (byte[] rowBytes in rowsBytes)
+                {
+                    ArgumentNullException.ThrowIfNull(rowBytes);
+                    long rowId = state.NextRowId++;
+                    ulong seqno = state.NextSeqno++;
+                    batch[count++] = new LsmBatchRowPutEntry(rowId, seqno, rowBytes);
+                    rowIds.Add(rowId);
+                }
 
-            state.Table.PutRowIdBatch(batch);
-            foreach (LsmBatchRowPutEntry entry in batch)
+                ReadOnlySpan<LsmBatchRowPutEntry> entries = batch.AsSpan(0, count);
+                ticket = state.Table.PutRowIdBatch(entries);
+                foreach (LsmBatchRowPutEntry entry in entries)
+                {
+                    state.LatestRows.Set(entry.RowId, entry.Value);
+                }
+
+                insertedRowIds = rowIds;
+            }
+            finally
             {
-                state.LatestRows[entry.RowId] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
+                // Entries hold row-buffer references; clear so the pool doesn't pin them.
+                ArrayPool<LsmBatchRowPutEntry>.Shared.Return(batch, clearArray: true);
             }
-
-            return rowIds;
         }
+
+        ticket.Wait();
+        return insertedRowIds;
     }
 
     /// <summary>
     /// Returns whether the table currently holds any live (non-tombstoned) rows, without rescanning
-    /// SSTables: <see cref="TableState.LatestRows"/> is authoritative (rebuilt on open, maintained on
-    /// every mutation). Flushes the active MemTable first to keep the flush cadence of the scan-based
-    /// probes this replaces, so bulk-ingest disk layout is unchanged.
+    /// SSTables or touching the flush cadence: <see cref="TableState.LatestRows"/> is authoritative
+    /// (rebuilt on open, maintained on every mutation). MemTable flushes are size-triggered by
+    /// <see cref="LsmTable"/> itself.
     /// </summary>
     public bool HasAnyRows(string databaseName, string tableName)
     {
@@ -98,18 +121,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         lock (state.SyncRoot)
         {
-            state.Table.FlushActiveMemTable();
-            // Enumerate the dictionary itself: ConcurrentDictionary.Values would materialize an
-            // O(n) snapshot list per probe.
-            foreach (KeyValuePair<long, LatestRowVersion> pair in state.LatestRows)
-            {
-                if (!pair.Value.IsTombstone)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return state.LatestRows.HasAnyLive();
         }
     }
 
@@ -122,17 +134,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        if (!state.LatestRows.TryGetValue(rowId, out LatestRowVersion latest))
+        return state.LatestRows.TryGet(rowId, out byte[] rowBytes) switch
         {
-            throw new RowNotFoundException(rowId, tableName);
-        }
-
-        if (latest.IsTombstone)
-        {
-            throw new RowDeletedException(rowId, tableName);
-        }
-
-        return latest.Value.ToArray();
+            LatestRowLookup.Live => rowBytes.ToArray(),
+            LatestRowLookup.Tombstone => throw new RowDeletedException(rowId, tableName),
+            _ => throw new RowNotFoundException(rowId, tableName),
+        };
     }
 
     /// <inheritdoc />
@@ -142,11 +149,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         lock (state.SyncRoot)
         {
-            return ReadLatestRows(state)
-                .Where(pair => !pair.Value.IsTombstone)
-                .OrderBy(pair => pair.Key)
-                .Select(pair => (pair.Key, pair.Value.Value.ToArray()))
-                .ToList();
+            return CollectLiveRowsSorted(state);
         }
     }
 
@@ -155,9 +158,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
+        LsmWalDurabilityTicket ticket;
         lock (state.SyncRoot)
         {
-            if (!state.LatestRows.TryGetValue(rowId, out LatestRowVersion latest) || latest.IsTombstone)
+            if (state.LatestRows.TryGet(rowId, out _) != LatestRowLookup.Live)
             {
                 return;
             }
@@ -165,9 +169,11 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             ulong seqno = state.NextSeqno++;
             Span<byte> userKey = stackalloc byte[UserKeySize];
             EncodeRowId(rowId, userKey);
-            state.Table.Delete(userKey, seqno);
-            state.LatestRows[rowId] = new LatestRowVersion([], IsTombstone: true, seqno);
+            ticket = state.Table.DeleteDeferDurability(userKey, seqno);
+            state.LatestRows.SetTombstone(rowId);
         }
+
+        ticket.Wait();
     }
 
     bool IFixedWidthPatchStorageEngine.TryPatchFixedWidthRow(
@@ -184,16 +190,17 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         TableState state = GetOrCreateTable(databaseName, tableName);
+        LsmWalDurabilityTicket ticket;
         lock (state.SyncRoot)
         {
-            if (!state.LatestRows.TryGetValue(rowId, out LatestRowVersion latest) || latest.IsTombstone)
+            if (state.LatestRows.TryGet(rowId, out byte[] latest) != LatestRowLookup.Live)
             {
                 return false;
             }
 
             // Copy-on-write: published row buffers are immutable so lock-free readers can never
             // observe a half-applied patch; the new version becomes visible in one reference publish.
-            byte[] rowBytes = latest.Value.ToArray();
+            byte[] rowBytes = latest.ToArray();
             for (int i = 0; i < ordinals.Length; i++)
             {
                 if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], values[i]))
@@ -205,10 +212,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             ulong seqno = state.NextSeqno++;
             Span<byte> userKey = stackalloc byte[UserKeySize];
             EncodeRowId(rowId, userKey);
-            state.Table.Put(userKey, seqno, rowBytes);
-            state.LatestRows[rowId] = new LatestRowVersion(rowBytes, IsTombstone: false, seqno);
-            return true;
+            ticket = state.Table.PutDeferDurability(userKey, seqno, rowBytes);
+            state.LatestRows.Set(rowId, rowBytes);
         }
+
+        ticket.Wait();
+        return true;
     }
 
     int IFixedWidthPatchStorageEngine.TryPatchFixedWidthRows(
@@ -224,6 +233,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         TableState state = GetOrCreateTable(databaseName, tableName);
+        int patched;
+        LsmWalDurabilityTicket pendingTicket;
         lock (state.SyncRoot)
         {
             if (ordinals.Length > 2)
@@ -231,37 +242,50 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 throw new NotSupportedException("LSM fixed-width batch patch currently supports up to two assignments.");
             }
 
-            var batch = new List<LsmBatchRowPutEntry>(operations.Count);
-
-            foreach (FixedWidthPatchOperation operation in operations)
+            LsmBatchRowPutEntry[] batch = ArrayPool<LsmBatchRowPutEntry>.Shared.Rent(operations.Count);
+            try
             {
-                if (!state.LatestRows.TryGetValue(operation.RowId, out LatestRowVersion latest) || latest.IsTombstone)
+                int count = 0;
+                foreach (FixedWidthPatchOperation operation in operations)
                 {
-                    continue;
-                }
-
-                // Copy-on-write, same as the single-row patch: keep published buffers immutable.
-                byte[] rowBytes = latest.Value.ToArray();
-                for (int i = 0; i < ordinals.Length; i++)
-                {
-                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
+                    if (state.LatestRows.TryGet(operation.RowId, out byte[] latest) != LatestRowLookup.Live)
                     {
-                        throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
+                        continue;
                     }
+
+                    // Copy-on-write, same as the single-row patch: keep published buffers immutable.
+                    byte[] rowBytes = latest.ToArray();
+                    for (int i = 0; i < ordinals.Length; i++)
+                    {
+                        if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
+                        {
+                            throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
+                        }
+                    }
+
+                    ulong seqno = state.NextSeqno++;
+                    batch[count++] = new LsmBatchRowPutEntry(operation.RowId, seqno, rowBytes);
                 }
 
-                ulong seqno = state.NextSeqno++;
-                batch.Add(new LsmBatchRowPutEntry(operation.RowId, seqno, rowBytes));
-            }
+                ReadOnlySpan<LsmBatchRowPutEntry> entries = batch.AsSpan(0, count);
+                LsmWalDurabilityTicket ticket = state.Table.PutRowIdBatch(entries);
+                foreach (LsmBatchRowPutEntry entry in entries)
+                {
+                    state.LatestRows.Set(entry.RowId, entry.Value);
+                }
 
-            state.Table.PutRowIdBatch(batch);
-            foreach (LsmBatchRowPutEntry entry in batch)
+                patched = count;
+                pendingTicket = ticket;
+            }
+            finally
             {
-                state.LatestRows[entry.RowId] = new LatestRowVersion(entry.Value, IsTombstone: false, entry.Seqno);
+                // Entries hold row-buffer references; clear so the pool doesn't pin them.
+                ArrayPool<LsmBatchRowPutEntry>.Shared.Return(batch, clearArray: true);
             }
-
-            return batch.Count;
         }
+
+        pendingTicket.Wait();
+        return patched;
     }
 
     /// <inheritdoc />
@@ -315,14 +339,13 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             state.Table.FlushActiveMemTable();
-            var compactor = new LsmCompactor(state.TableDirectory, state.Manifest, state.FileRegistry);
-            compactor.CompactLevel(sourceLevel: 0, targetLevel: 1);
+            lock (state.Table.MaintenanceGate)
+            {
+                var compactor = new LsmCompactor(state.TableDirectory, state.Manifest, state.FileRegistry);
+                compactor.CompactLevel(sourceLevel: 0, targetLevel: 1);
+            }
 
-            return ReadLatestRows(state)
-                .Where(pair => !pair.Value.IsTombstone)
-                .OrderBy(pair => pair.Key)
-                .Select(pair => (pair.Key, pair.Value.Value.ToArray()))
-                .ToList();
+            return CollectLiveRowsSorted(state);
         }
     }
 
@@ -358,6 +381,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             this);
     }
 
+    /// <summary>Test hook: overrides the MemTable rotation threshold for tables created afterwards.</summary>
+    internal long? MemTableFlushThresholdOverrideBytes { get; set; }
+
     private TableState CreateTableState(string databaseName, string tableName)
     {
         string tableDirectory = GetTableDirectory(databaseName, tableName);
@@ -369,7 +395,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             manifest,
             Path.Combine(tableDirectory, "active.wal"),
             _walDurabilityMode);
+        if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
+        {
+            table.FlushThresholdBytes = thresholdOverride;
+        }
         var registry = new LsmFileRegistry(tableDirectory, manifest);
+        table.CompactionRegistry = registry;
         var state = new TableState(tableDirectory, manifest, table, registry);
 
         state.Table.FlushActiveMemTable();
@@ -385,7 +416,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 state.NextSeqno = version.Sequence + 1;
             }
 
-            state.LatestRows[rowId] = version;
+            if (version.IsTombstone)
+            {
+                state.LatestRows.SetTombstone(rowId);
+            }
+            else
+            {
+                state.LatestRows.Set(rowId, version.Value);
+            }
         }
 
         return state;
@@ -397,13 +435,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private string GetTableDirectory(string databaseName, string tableName) =>
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
-    private static Dictionary<long, LatestRowVersion> ReadLatestRows(TableState state)
+    private static List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
     {
         // LatestRows is authoritative (seeded from SSTables on open, maintained on every mutation),
-        // so scans snapshot it directly instead of rescanning SSTables. No destructive rebuild:
-        // lock-free point readers must never observe a transiently-emptied map.
-        state.Table.FlushActiveMemTable();
-        return new Dictionary<long, LatestRowVersion>(state.LatestRows);
+        // so scans read it directly instead of rescanning SSTables — no flush needed. Slots are laid
+        // out by row id, so the collected rows come out already sorted. Caller holds SyncRoot.
+        var rows = new List<(long RowId, byte[] RawRow)>();
+        state.LatestRows.ForEachLive(rows, static (rows, rowId, value) => rows.Add((rowId, value.ToArray())));
+        return rows;
     }
 
     private static Dictionary<long, LatestRowVersion> RebuildLatestRowsFromSstables(TableState state)
@@ -577,10 +616,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         /// <summary>
         /// Authoritative row-id → latest-version map. Read lock-free by point reads; mutated only
-        /// under <see cref="SyncRoot"/>. Published <see cref="LatestRowVersion.Value"/> arrays are
-        /// immutable (patches copy-on-write), so a published entry is always a complete row image.
+        /// under <see cref="SyncRoot"/>. Published row buffers are immutable (patches copy-on-write),
+        /// so a published slot is always a complete row image.
         /// </summary>
-        public ConcurrentDictionary<long, LatestRowVersion> LatestRows { get; } = new();
+        public LsmLatestRowStore LatestRows { get; } = new();
 
         public long NextRowId { get; set; } = 1;
 

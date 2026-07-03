@@ -204,16 +204,16 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
         row.GetDouble(2));
 
     private static OrderItem MapItem(CompiledRowReader row) => new(
+        row.GetInt32(0),
+        row.GetString(1) ?? string.Empty,
         row.GetInt32(2),
-        row.GetString(3) ?? string.Empty,
-        row.GetInt32(4),
-        row.GetDouble(5));
+        row.GetDouble(3));
 
     private static OrderAddress MapAddress(CompiledRowReader row) => new(
+        row.GetString(0) ?? string.Empty,
+        row.GetString(1) ?? string.Empty,
         row.GetString(2) ?? string.Empty,
-        row.GetString(3) ?? string.Empty,
-        row.GetString(4) ?? string.Empty,
-        row.GetString(5) ?? string.Empty);
+        row.GetString(3) ?? string.Empty);
 
     private void ExecuteOk(string sql)
     {

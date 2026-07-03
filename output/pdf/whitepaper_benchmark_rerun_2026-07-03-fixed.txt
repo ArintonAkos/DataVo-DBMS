@@ -1,0 +1,439 @@
+DataVo whitepaper benchmark rerun after benchmark fixes
+Date: 2026-07-03T10:58:09Z
+Whitepaper: /Users/arintonakos/Projects/DataVo-DBMS/output/pdf/datavo_managed_database_benchmark_whitepaper.tex
+Project: /Users/arintonakos/Projects/DataVo-DBMS
+Host: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host
+dotnet: 10.0.103
+SQLITE_VEC_PATH: /Users/arintonakos/Projects/DataVo-DBMS/vec0.dylib
+
+========================================
+Streamed risk profile A / simple-exposure
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario simple-exposure --format markdown --progress-every 10000
+========================================
+[12:58:09] DataVo: preloading 10 000 baseline orders...
+[12:58:09] DataVo: measuring 50 000 insert+read iterations...
+[12:58:10] DataVo: 10 000/50 000 iterations, elapsed 0,2s
+[12:58:10] DataVo: 20 000/50 000 iterations, elapsed 0,4s
+[12:58:10] DataVo: 30 000/50 000 iterations, elapsed 0,5s
+[12:58:10] DataVo: 40 000/50 000 iterations, elapsed 0,6s
+[12:58:10] DataVo: 50 000/50 000 iterations, elapsed 0,7s
+[12:58:10] DuckDB: preloading 10 000 baseline orders...
+[12:58:19] DuckDB: measuring 50 000 insert+read iterations...
+[12:58:30] DuckDB: 10 000/50 000 iterations, elapsed 11,2s
+[12:58:41] DuckDB: 20 000/50 000 iterations, elapsed 22,5s
+[12:58:53] DuckDB: 30 000/50 000 iterations, elapsed 33,9s
+[12:59:04] DuckDB: 40 000/50 000 iterations, elapsed 45,2s
+[12:59:15] DuckDB: 50 000/50 000 iterations, elapsed 56,5s
+[12:59:15] SQLite: preloading 10 000 baseline orders...
+[12:59:15] SQLite: measuring 50 000 insert+read iterations...
+[12:59:16] SQLite: 10 000/50 000 iterations, elapsed 0,2s
+[12:59:16] SQLite: 20 000/50 000 iterations, elapsed 0,3s
+[12:59:16] SQLite: 30 000/50 000 iterations, elapsed 0,4s
+[12:59:16] SQLite: 40 000/50 000 iterations, elapsed 0,5s
+[12:59:16] SQLite: 50 000/50 000 iterations, elapsed 0,7s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 676.329 | 0.006750 | 0.024916 | 355.575 |
+| DuckDB | 56547.371 | 1.018583 | 4.237875 | 208.316 |
+| SQLite | 656.277 | 0.009667 | 0.038042 | 200.109 |
+
+========================================
+Streamed risk profile B / complex-vip
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario complex-vip --format markdown --progress-every 10000
+========================================
+[12:59:16] DataVo: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[12:59:16] DataVo: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[12:59:16] DataVo: 10 000/50 000 iterations, elapsed 0,0s
+[12:59:16] DataVo: 20 000/50 000 iterations, elapsed 0,1s
+[12:59:16] DataVo: 30 000/50 000 iterations, elapsed 0,1s
+[12:59:16] DataVo: 40 000/50 000 iterations, elapsed 0,1s
+[12:59:16] DataVo: 50 000/50 000 iterations, elapsed 0,2s
+[12:59:16] DuckDB: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[12:59:17] DuckDB: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[12:59:24] DuckDB: 10 000/50 000 iterations, elapsed 6,8s
+[12:59:31] DuckDB: 20 000/50 000 iterations, elapsed 13,9s
+[12:59:39] DuckDB: 30 000/50 000 iterations, elapsed 21,3s
+[12:59:46] DuckDB: 40 000/50 000 iterations, elapsed 28,9s
+[12:59:54] DuckDB: 50 000/50 000 iterations, elapsed 36,7s
+[12:59:54] SQLite: preloading 10 000 orders, 1 000 accounts, 50 markets...
+[12:59:54] SQLite: measuring 50 000 complex JOIN+GROUP BY insert+read iterations...
+[13:00:05] SQLite: 10 000/50 000 iterations, elapsed 10,4s
+[13:00:23] SQLite: 20 000/50 000 iterations, elapsed 28,6s
+[13:00:49] SQLite: 30 000/50 000 iterations, elapsed 54,7s
+[13:01:23] SQLite: 40 000/50 000 iterations, elapsed 88,6s
+[13:02:06] SQLite: 50 000/50 000 iterations, elapsed 132,0s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 176.748 | 0.002625 | 0.007583 | 97.469 |
+| DuckDB | 36738.006 | 0.684333 | 2.205750 | 131.246 |
+| SQLite | 131982.914 | 2.587041 | 5.179500 | 115.611 |
+
+========================================
+Flat CRUD
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario flat-crud --format markdown --progress-every 10000
+========================================
+[13:02:06] DataVo: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[13:02:06] DataVo: inserted 10 000/50 000, elapsed 0,0s
+[13:02:06] DataVo: inserted 20 000/50 000, elapsed 0,0s
+[13:02:06] DataVo: inserted 30 000/50 000, elapsed 0,0s
+[13:02:06] DataVo: inserted 40 000/50 000, elapsed 0,0s
+[13:02:06] DataVo: inserted 50 000/50 000, elapsed 0,0s
+[13:02:06] DataVo: insert phase complete in 0,0s; starting 50 000 lookups...
+[13:02:06] DataVo: 10 000/50 000 lookups, elapsed 0,0s
+[13:02:06] DataVo: 20 000/50 000 lookups, elapsed 0,1s
+[13:02:06] DataVo: 30 000/50 000 lookups, elapsed 0,1s
+[13:02:06] DataVo: 40 000/50 000 lookups, elapsed 0,1s
+[13:02:06] DataVo: 50 000/50 000 lookups, elapsed 0,1s
+[13:02:06] LiteDB: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[13:02:07] LiteDB: inserted 10 000/50 000, elapsed 0,2s
+[13:02:07] LiteDB: inserted 20 000/50 000, elapsed 0,3s
+[13:02:07] LiteDB: inserted 30 000/50 000, elapsed 0,4s
+[13:02:07] LiteDB: inserted 40 000/50 000, elapsed 0,4s
+[13:02:07] LiteDB: inserted 50 000/50 000, elapsed 0,4s
+[13:02:07] LiteDB: insert phase complete in 0,5s; starting 50 000 lookups...
+[13:02:07] LiteDB: 10 000/50 000 lookups, elapsed 0,7s
+[13:02:07] LiteDB: 20 000/50 000 lookups, elapsed 0,9s
+[13:02:07] LiteDB: 30 000/50 000 lookups, elapsed 1,1s
+[13:02:08] LiteDB: 40 000/50 000 lookups, elapsed 1,3s
+[13:02:08] LiteDB: 50 000/50 000 lookups, elapsed 1,5s
+[13:02:08] SQLite: flat CRUD — inserting 50 000 records then 50 000 point lookups...
+[13:02:08] SQLite: inserted 10 000/50 000, elapsed 0,0s
+[13:02:08] SQLite: inserted 20 000/50 000, elapsed 0,0s
+[13:02:08] SQLite: inserted 30 000/50 000, elapsed 0,0s
+[13:02:08] SQLite: inserted 40 000/50 000, elapsed 0,1s
+[13:02:08] SQLite: inserted 50 000/50 000, elapsed 0,1s
+[13:02:08] SQLite: insert phase complete in 0,1s; starting 50 000 lookups...
+[13:02:08] SQLite: 10 000/50 000 lookups, elapsed 0,1s
+[13:02:08] SQLite: 20 000/50 000 lookups, elapsed 0,1s
+[13:02:08] SQLite: 30 000/50 000 lookups, elapsed 0,1s
+[13:02:08] SQLite: 40 000/50 000 lookups, elapsed 0,1s
+[13:02:08] SQLite: 50 000/50 000 lookups, elapsed 0,1s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Insert GC Allocated (MB) | Lookup GC Allocated (MB) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|---:|
+| DataVo | 73.055 | 0.000542 | 0.000792 | 19.396 | 2.290 | 21.686 |
+| LiteDB | 1511.246 | 0.018791 | 0.067208 | 638.365 | 1862.207 | 2500.572 |
+| SQLite | 132.720 | 0.001083 | 0.001708 | 31.286 | 30.824 | 62.110 |
+
+========================================
+Disk CRUD WAL
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario disk-crud-wal --records 20000 --format markdown --progress-every 5000
+========================================
+[13:02:08] DataVo (LSM Production): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[13:02:08] DataVo (LSM Production): inserted 5 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Production): inserted 10 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Production): inserted 15 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Production): inserted 20 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Production): insert phase complete in 0,07s; starting 20 000 point updates...
+[13:02:08] DataVo (LSM Production): 5 000/20 000 updates, elapsed 0,1s
+[13:02:08] DataVo (LSM Production): 10 000/20 000 updates, elapsed 0,1s
+[13:02:08] DataVo (LSM Production): 15 000/20 000 updates, elapsed 0,1s
+[13:02:08] DataVo (LSM Production): 20 000/20 000 updates, elapsed 0,1s
+[13:02:08] DataVo (LSM Production): insert 0,07s | update 0,06s | update p50 0,0000ms p99 0,0001ms
+[13:02:08] DataVo (LSM Production): UPDATE alloc 11,68 MB total = 612,5 B/op | UPDATE cpu 3,15 us/op | insert alloc 12,23 MB
+[13:02:08] DataVo (LSM Relaxed): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[13:02:08] DataVo (LSM Relaxed): inserted 5 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): inserted 10 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): inserted 15 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): inserted 20 000/20 000, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): insert phase complete in 0,03s; starting 20 000 point updates...
+[13:02:08] DataVo (LSM Relaxed): 5 000/20 000 updates, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): 10 000/20 000 updates, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): 15 000/20 000 updates, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): 20 000/20 000 updates, elapsed 0,0s
+[13:02:08] DataVo (LSM Relaxed): insert 0,03s | update 0,04s | update p50 0,0000ms p99 0,0000ms
+[13:02:08] DataVo (LSM Relaxed): UPDATE alloc 10,68 MB total = 559,7 B/op | UPDATE cpu 2,05 us/op | insert alloc 8,71 MB
+[13:02:08] SQLite (WAL,normal): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[13:02:08] SQLite (WAL,normal): inserted 5 000/20 000, elapsed 0,0s
+[13:02:08] SQLite (WAL,normal): inserted 10 000/20 000, elapsed 0,0s
+[13:02:08] SQLite (WAL,normal): inserted 15 000/20 000, elapsed 0,0s
+[13:02:08] SQLite (WAL,normal): inserted 20 000/20 000, elapsed 0,0s
+[13:02:08] SQLite (WAL,normal): insert phase complete in 0,03s; starting 20 000 point updates...
+[13:02:08] SQLite (WAL,normal): 5 000/20 000 updates, elapsed 0,1s
+[13:02:09] SQLite (WAL,normal): 10 000/20 000 updates, elapsed 0,1s
+[13:02:09] SQLite (WAL,normal): 15 000/20 000 updates, elapsed 0,1s
+[13:02:09] SQLite (WAL,normal): 20 000/20 000 updates, elapsed 0,2s
+[13:02:09] SQLite (WAL,normal): insert 0,03s | update 0,14s | update p50 0,0061ms p99 0,0145ms
+[13:02:09] SQLite (WAL,normal): UPDATE alloc 10,68 MB total = 560,2 B/op | UPDATE cpu 7,16 us/op | insert alloc 12,52 MB
+[13:02:09] SQLite (WAL,full): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[13:02:09] SQLite (WAL,full): inserted 5 000/20 000, elapsed 0,0s
+[13:02:09] SQLite (WAL,full): inserted 10 000/20 000, elapsed 0,0s
+[13:02:09] SQLite (WAL,full): inserted 15 000/20 000, elapsed 0,0s
+[13:02:09] SQLite (WAL,full): inserted 20 000/20 000, elapsed 0,0s
+[13:02:09] SQLite (WAL,full): insert phase complete in 0,03s; starting 20 000 point updates...
+[13:02:30] SQLite (WAL,full): 5 000/20 000 updates, elapsed 21,2s
+[13:02:51] SQLite (WAL,full): 10 000/20 000 updates, elapsed 42,3s
+[13:03:12] SQLite (WAL,full): 15 000/20 000 updates, elapsed 63,3s
+[13:03:33] SQLite (WAL,full): 20 000/20 000 updates, elapsed 84,1s
+[13:03:33] SQLite (WAL,full): insert 0,03s | update 84,10s | update p50 4,0254ms p99 7,2177ms
+[13:03:33] SQLite (WAL,full): UPDATE alloc 9,77 MB total = 512,4 B/op | UPDATE cpu 4 204,87 us/op | insert alloc 12,52 MB
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) | 135.797 | 0.000000 | 0.000084 | 23.913 |
+| DataVo (LSM Relaxed) | 70.079 | 0.000041 | 0.000042 | 19.384 |
+| SQLite (WAL,normal) | 177.087 | 0.006084 | 0.014459 | 23.202 |
+| SQLite (WAL,full) | 84130.804 | 4.025375 | 7.217666 | 22.291 |
+
+========================================
+Deep Document
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario deep-document --format markdown --progress-every 1000
+========================================
+[13:03:33] DataVo: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[13:03:33] DataVo: saved 1 000/5 000, elapsed 0,0s
+[13:03:33] DataVo: saved 2 000/5 000, elapsed 0,0s
+[13:03:33] DataVo: saved 3 000/5 000, elapsed 0,0s
+[13:03:33] DataVo: saved 4 000/5 000, elapsed 0,0s
+[13:03:33] DataVo: saved 5 000/5 000, elapsed 0,0s
+[13:03:33] DataVo: save phase complete in 0,0s; starting 5 000 loads...
+[13:03:33] DataVo: 1 000/5 000 loads, elapsed 0,0s
+[13:03:33] DataVo: 2 000/5 000 loads, elapsed 0,1s
+[13:03:33] DataVo: 3 000/5 000 loads, elapsed 0,1s
+[13:03:33] DataVo: 4 000/5 000 loads, elapsed 0,1s
+[13:03:33] DataVo: 5 000/5 000 loads, elapsed 0,1s
+[13:03:33] LiteDB: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[13:03:33] LiteDB: saved 1 000/5 000, elapsed 0,0s
+[13:03:33] LiteDB: saved 2 000/5 000, elapsed 0,1s
+[13:03:33] LiteDB: saved 3 000/5 000, elapsed 0,1s
+[13:03:33] LiteDB: saved 4 000/5 000, elapsed 0,1s
+[13:03:33] LiteDB: saved 5 000/5 000, elapsed 0,2s
+[13:03:33] LiteDB: save phase complete in 0,2s; starting 5 000 loads...
+[13:03:33] LiteDB: 1 000/5 000 loads, elapsed 0,2s
+[13:03:33] LiteDB: 2 000/5 000 loads, elapsed 0,3s
+[13:03:33] LiteDB: 3 000/5 000 loads, elapsed 0,3s
+[13:03:33] LiteDB: 4 000/5 000 loads, elapsed 0,4s
+[13:03:33] LiteDB: 5 000/5 000 loads, elapsed 0,5s
+[13:03:33] SQLite: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[13:03:34] SQLite: saved 1 000/5 000, elapsed 0,0s
+[13:03:34] SQLite: saved 2 000/5 000, elapsed 0,0s
+[13:03:34] SQLite: saved 3 000/5 000, elapsed 0,1s
+[13:03:34] SQLite: saved 4 000/5 000, elapsed 0,1s
+[13:03:34] SQLite: saved 5 000/5 000, elapsed 0,1s
+[13:03:34] SQLite: save phase complete in 0,1s; starting 5 000 loads...
+[13:03:34] SQLite: 1 000/5 000 loads, elapsed 0,1s
+[13:03:34] SQLite: 2 000/5 000 loads, elapsed 0,1s
+[13:03:34] SQLite: 3 000/5 000 loads, elapsed 0,1s
+[13:03:34] SQLite: 4 000/5 000 loads, elapsed 0,1s
+[13:03:34] SQLite: 5 000/5 000 loads, elapsed 0,1s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 66.393 | 0.004208 | 0.009042 | 23.057 |
+| LiteDB | 465.208 | 0.047833 | 0.261792 | 333.083 |
+| SQLite | 145.755 | 0.007125 | 0.014750 | 46.050 |
+
+========================================
+Concurrent Ops
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario concurrent-ops --format markdown
+========================================
+[13:03:34] DataVo: concurrent ops — preloading 100 000 records, then 8 readers + 2 writers for 5s...
+[13:03:39] DataVo: 6 235 551 reads + 326 775 writes, 1 312 015 OPS
+[13:03:39] SQLite: concurrent ops — preloading 100 000 records, then 8 readers + 2 writers for 5s...
+[13:03:44] SQLite: 1 658 768 reads + 2 writes, 323 104 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo | 5001.716 | 1312014.916 | 0.066541 | 0.146542 | 3659.898 |
+| SQLite | 5133.860 | 323103.889 | 0.136166 | 5132.611500 | 917.405 |
+
+========================================
+Vector Search
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario vector-search --format markdown --progress-every 1000
+========================================
+[13:03:45] DataVo: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[03/07/26 13:03:45:223] New database VectorBenchmark successfully created!
+[03/07/26 13:03:45:228] New table Vectors successfully created!
+[03/07/26 13:03:45:231] New index file vidx successfully created!
+[13:03:49] DataVo: inserted 1 000/10 000, elapsed 3,8s
+[13:03:54] DataVo: inserted 2 000/10 000, elapsed 9,7s
+[13:04:01] DataVo: inserted 3 000/10 000, elapsed 16,1s
+[13:04:08] DataVo: inserted 4 000/10 000, elapsed 23,3s
+[13:04:16] DataVo: inserted 5 000/10 000, elapsed 31,0s
+[13:04:24] DataVo: inserted 6 000/10 000, elapsed 39,4s
+[13:04:33] DataVo: inserted 7 000/10 000, elapsed 48,2s
+[13:04:42] DataVo: inserted 8 000/10 000, elapsed 57,6s
+[13:04:52] DataVo: inserted 9 000/10 000, elapsed 67,3s
+[13:05:02] DataVo: inserted 10 000/10 000, elapsed 77,2s
+[13:05:02] DataVo: insert phase complete in 77,2s; starting 100 top-10 queries...
+[13:05:02] DataVo: 10/100 queries, elapsed 77,3s
+[13:05:02] DataVo: 20/100 queries, elapsed 77,3s
+[13:05:02] DataVo: 30/100 queries, elapsed 77,3s
+[13:05:02] DataVo: 40/100 queries, elapsed 77,3s
+[13:05:02] DataVo: 50/100 queries, elapsed 77,3s
+[13:05:02] DataVo: 60/100 queries, elapsed 77,4s
+[13:05:02] DataVo: 70/100 queries, elapsed 77,4s
+[13:05:02] DataVo: 80/100 queries, elapsed 77,4s
+[13:05:02] DataVo: 90/100 queries, elapsed 77,4s
+[13:05:02] DataVo: 100/100 queries, elapsed 77,5s
+[13:05:02] DataVo-Flat: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[03/07/26 13:05:02:861] New database VectorBenchmark successfully created!
+[03/07/26 13:05:02:861] New table Vectors successfully created!
+[03/07/26 13:05:02:862] New index file vidx successfully created!
+[13:05:02] DataVo-Flat: inserted 1 000/10 000, elapsed 0,0s
+[13:05:02] DataVo-Flat: inserted 2 000/10 000, elapsed 0,0s
+[13:05:02] DataVo-Flat: inserted 3 000/10 000, elapsed 0,0s
+[13:05:02] DataVo-Flat: inserted 4 000/10 000, elapsed 0,0s
+[13:05:02] DataVo-Flat: inserted 5 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: inserted 6 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: inserted 7 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: inserted 8 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: inserted 9 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: inserted 10 000/10 000, elapsed 0,1s
+[13:05:02] DataVo-Flat: insert phase complete in 0,1s; starting 100 top-10 queries...
+[13:05:03] DataVo-Flat: 10/100 queries, elapsed 0,2s
+[13:05:03] DataVo-Flat: 20/100 queries, elapsed 0,3s
+[13:05:03] DataVo-Flat: 30/100 queries, elapsed 0,3s
+[13:05:03] DataVo-Flat: 40/100 queries, elapsed 0,3s
+[13:05:03] DataVo-Flat: 50/100 queries, elapsed 0,3s
+[13:05:03] DataVo-Flat: 60/100 queries, elapsed 0,4s
+[13:05:03] DataVo-Flat: 70/100 queries, elapsed 0,4s
+[13:05:03] DataVo-Flat: 80/100 queries, elapsed 0,4s
+[13:05:03] DataVo-Flat: 90/100 queries, elapsed 0,4s
+[13:05:03] DataVo-Flat: 100/100 queries, elapsed 0,5s
+[13:05:03] LiteDB: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[13:05:03] LiteDB: inserted 1 000/10 000, elapsed 0,5s
+[13:05:04] LiteDB: inserted 2 000/10 000, elapsed 0,6s
+[13:05:04] LiteDB: inserted 3 000/10 000, elapsed 0,7s
+[13:05:04] LiteDB: inserted 4 000/10 000, elapsed 0,8s
+[13:05:04] LiteDB: inserted 5 000/10 000, elapsed 0,9s
+[13:05:04] LiteDB: inserted 6 000/10 000, elapsed 1,0s
+[13:05:04] LiteDB: inserted 7 000/10 000, elapsed 1,1s
+[13:05:04] LiteDB: inserted 8 000/10 000, elapsed 1,2s
+[13:05:04] LiteDB: inserted 9 000/10 000, elapsed 1,3s
+[13:05:04] LiteDB: inserted 10 000/10 000, elapsed 1,4s
+[13:05:05] LiteDB: insert phase complete in 1,6s; starting 100 top-10 queries...
+[13:05:14] LiteDB: 10/100 queries, elapsed 11,0s
+[13:05:23] LiteDB: 20/100 queries, elapsed 20,2s
+[13:05:32] LiteDB: 30/100 queries, elapsed 29,4s
+[13:05:42] LiteDB: 40/100 queries, elapsed 38,6s
+[13:05:51] LiteDB: 50/100 queries, elapsed 48,0s
+[13:06:00] LiteDB: 60/100 queries, elapsed 57,1s
+[13:06:10] LiteDB: 70/100 queries, elapsed 66,5s
+[13:06:19] LiteDB: 80/100 queries, elapsed 75,7s
+[13:06:28] LiteDB: 90/100 queries, elapsed 84,8s
+[13:06:37] LiteDB: 100/100 queries, elapsed 94,1s
+[13:06:37] SQLite: vector search — inserting 10 000 x 1536-dim vectors then 100 top-10 queries...
+[13:06:37] SQLite: inserted 1 000/10 000, elapsed 0,0s
+[13:06:37] SQLite: inserted 2 000/10 000, elapsed 0,0s
+[13:06:37] SQLite: inserted 3 000/10 000, elapsed 0,1s
+[13:06:37] SQLite: inserted 4 000/10 000, elapsed 0,1s
+[13:06:37] SQLite: inserted 5 000/10 000, elapsed 0,1s
+[13:06:37] SQLite: inserted 6 000/10 000, elapsed 0,1s
+[13:06:37] SQLite: inserted 7 000/10 000, elapsed 0,2s
+[13:06:37] SQLite: inserted 8 000/10 000, elapsed 0,2s
+[13:06:37] SQLite: inserted 9 000/10 000, elapsed 0,2s
+[13:06:38] SQLite: inserted 10 000/10 000, elapsed 0,2s
+[13:06:38] SQLite: insert phase complete in 0,2s; starting 100 top-10 queries...
+[13:06:38] SQLite: 10/100 queries, elapsed 0,3s
+[13:06:38] SQLite: 20/100 queries, elapsed 0,3s
+[13:06:38] SQLite: 30/100 queries, elapsed 0,3s
+[13:06:38] SQLite: 40/100 queries, elapsed 0,3s
+[13:06:38] SQLite: 50/100 queries, elapsed 0,4s
+[13:06:38] SQLite: 60/100 queries, elapsed 0,4s
+[13:06:38] SQLite: 70/100 queries, elapsed 0,4s
+[13:06:38] SQLite: 80/100 queries, elapsed 0,4s
+[13:06:38] SQLite: 90/100 queries, elapsed 0,5s
+[13:06:38] SQLite: 100/100 queries, elapsed 0,5s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo | 77452.245 | 2.215125 | 2.879625 | 157.251 |
+| DataVo-Flat | 458.794 | 2.164041 | 11.497666 | 10.332 |
+| LiteDB | 94122.907 | 918.513875 | 967.655417 | 208915.174 |
+| SQLite | 479.096 | 2.439584 | 2.911708 | 63.378 |
+
+========================================
+Thread Scaling
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario thread-scaling --format markdown --progress-every 10000
+========================================
+[13:06:38] DataVo (LSM Production): thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[13:07:19] DataVo (LSM Production): 1 threads completed 110 000 ops in 41 271,6ms (2 665 OPS)
+[13:08:01] DataVo (LSM Production): 2 threads completed 110 000 ops in 41 413,7ms (2 656 OPS)
+[13:08:42] DataVo (LSM Production): 4 threads completed 110 000 ops in 41 447,9ms (2 654 OPS)
+[13:09:24] DataVo (LSM Production): 8 threads completed 110 000 ops in 41 627,2ms (2 643 OPS)
+[13:10:06] DataVo (LSM Production): 16 threads completed 110 000 ops in 41 810,3ms (2 631 OPS)
+[13:10:47] DataVo (LSM Production): 32 threads completed 110 000 ops in 41 654,3ms (2 641 OPS)
+[13:10:47] DataVo (LSM Relaxed): thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[13:10:48] DataVo (LSM Relaxed): 1 threads completed 110 000 ops in 85,8ms (1 281 445 OPS)
+[13:10:48] DataVo (LSM Relaxed): 2 threads completed 110 000 ops in 78,1ms (1 408 723 OPS)
+[13:10:48] DataVo (LSM Relaxed): 4 threads completed 110 000 ops in 91,1ms (1 207 899 OPS)
+[13:10:48] DataVo (LSM Relaxed): 8 threads completed 110 000 ops in 90,3ms (1 218 619 OPS)
+[13:10:48] DataVo (LSM Relaxed): 16 threads completed 110 000 ops in 94,4ms (1 165 511 OPS)
+[13:10:48] DataVo (LSM Relaxed): 32 threads completed 110 000 ops in 92,9ms (1 184 015 OPS)
+[13:10:48] SQLite (WAL,normal): thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[13:10:49] SQLite (WAL,normal): 1 threads completed 110 000 ops in 363,8ms (302 336 OPS)
+[13:10:49] SQLite (WAL,normal): 2 threads completed 110 000 ops in 219,1ms (502 078 OPS)
+[13:10:49] SQLite (WAL,normal): 4 threads completed 110 000 ops in 202,9ms (542 010 OPS)
+[13:10:49] SQLite (WAL,normal): 8 threads completed 110 000 ops in 193,0ms (570 074 OPS)
+[13:10:49] SQLite (WAL,normal): 16 threads completed 110 000 ops in 198,5ms (554 116 OPS)
+[13:10:50] SQLite (WAL,normal): 32 threads completed 110 000 ops in 188,2ms (584 478 OPS)
+[13:10:50] LiteDB: thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[13:10:52] LiteDB: 1 threads completed 110 000 ops in 2 205,5ms (49 875 OPS)
+[13:10:54] LiteDB: 2 threads completed 110 000 ops in 1 724,3ms (63 793 OPS)
+[13:10:56] LiteDB: 4 threads completed 110 000 ops in 1 715,9ms (64 106 OPS)
+[13:10:58] LiteDB: 8 threads completed 110 000 ops in 1 725,6ms (63 744 OPS)
+[13:10:59] LiteDB: 16 threads completed 110 000 ops in 1 788,7ms (61 497 OPS)
+[13:11:01] LiteDB: 32 threads completed 110 000 ops in 1 778,3ms (61 856 OPS)
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) (1 threads) | 41271.577 | 2665.273 | n/a | n/a | 22.960 |
+| DataVo (LSM Production) (2 threads) | 41413.696 | 2656.126 | n/a | n/a | 21.563 |
+| DataVo (LSM Production) (4 threads) | 41447.945 | 2653.931 | n/a | n/a | 21.558 |
+| DataVo (LSM Production) (8 threads) | 41627.173 | 2642.505 | n/a | n/a | 20.596 |
+| DataVo (LSM Production) (16 threads) | 41810.284 | 2630.932 | n/a | n/a | 21.651 |
+| DataVo (LSM Production) (32 threads) | 41654.303 | 2640.784 | n/a | n/a | 21.663 |
+| DataVo (LSM Relaxed) (1 threads) | 85.841 | 1281444.911 | n/a | n/a | 22.859 |
+| DataVo (LSM Relaxed) (2 threads) | 78.085 | 1408723.069 | n/a | n/a | 20.451 |
+| DataVo (LSM Relaxed) (4 threads) | 91.067 | 1207899.222 | n/a | n/a | 20.453 |
+| DataVo (LSM Relaxed) (8 threads) | 90.266 | 1218619.172 | n/a | n/a | 20.456 |
+| DataVo (LSM Relaxed) (16 threads) | 94.379 | 1165511.045 | n/a | n/a | 20.462 |
+| DataVo (LSM Relaxed) (32 threads) | 92.904 | 1184015.362 | n/a | n/a | 21.472 |
+| SQLite (WAL,normal) (1 threads) | 363.834 | 302335.764 | n/a | n/a | 64.470 |
+| SQLite (WAL,normal) (2 threads) | 219.089 | 502077.918 | n/a | n/a | 62.036 |
+| SQLite (WAL,normal) (4 threads) | 202.948 | 542010.227 | n/a | n/a | 62.042 |
+| SQLite (WAL,normal) (8 threads) | 192.958 | 570073.721 | n/a | n/a | 62.053 |
+| SQLite (WAL,normal) (16 threads) | 198.514 | 554116.253 | n/a | n/a | 62.074 |
+| SQLite (WAL,normal) (32 threads) | 188.202 | 584478.380 | n/a | n/a | 62.092 |
+| LiteDB (1 threads) | 2205.496 | 49875.398 | n/a | n/a | 4403.421 |
+| LiteDB (2 threads) | 1724.327 | 63793.019 | n/a | n/a | 4351.927 |
+| LiteDB (4 threads) | 1715.899 | 64106.345 | n/a | n/a | 4351.808 |
+| LiteDB (8 threads) | 1725.639 | 63744.499 | n/a | n/a | 4352.544 |
+| LiteDB (16 threads) | 1788.709 | 61496.857 | n/a | n/a | 4352.145 |
+| LiteDB (32 threads) | 1778.336 | 61855.560 | n/a | n/a | 4352.812 |
+
+========================================
+YCSB Mixed
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario ycsb-mixed --format markdown --progress-every 10000
+========================================
+[13:11:01] DataVo (LSM Production): YCSB mixed — preloading 100 000, then 80 000 reads + 20 000 updates across 12 threads...
+[13:12:24] DataVo (LSM Production): YCSB completed in 83 010,7ms (1 205 OPS), read p99 0,0139ms write p99 268,0694ms
+[13:12:25] DataVo (LSM Relaxed): YCSB mixed — preloading 100 000, then 80 000 reads + 20 000 updates across 12 threads...
+[13:12:25] DataVo (LSM Relaxed): YCSB completed in 217,1ms (460 514 OPS), read p99 0,0012ms write p99 0,6276ms
+[13:12:25] SQLite (WAL,normal): YCSB mixed — preloading 100 000, then 80 000 reads + 20 000 updates across 12 threads...
+[13:12:25] SQLite (WAL,normal): YCSB completed in 420,1ms (238 019 OPS), read p99 0,0106ms write p99 3,4108ms
+[13:12:25] LiteDB: YCSB mixed — preloading 100 000, then 80 000 reads + 20 000 updates across 12 threads...
+[13:12:29] LiteDB: YCSB completed in 2 823,9ms (35 412 OPS), read p99 2,5941ms write p99 2,6528ms
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) | 83010.682 | 1204.664 | 0.013875 | 268.069416 | 29.633 |
+| DataVo (LSM Relaxed) | 217.149 | 460514.348 | 0.001166 | 0.627625 | 29.438 |
+| SQLite (WAL,normal) | 420.135 | 238018.789 | 0.010625 | 3.410792 | 57.266 |
+| LiteDB | 2823.886 | 35412.194 | 2.594083 | 2.652792 | 4312.916 |
+
+========================================
+Space and Recovery
+Command: ./demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host --scenario space-and-recovery --format markdown --progress-every 100000
+========================================
+[13:12:29] DataVo (LSM Production): space/recovery — inserting 1 000 000 records, measuring footprint and cold-open RTO...
+[13:12:30] DataVo (LSM Production): insert 1 062,9ms | size 50,68 MB | recovery 0,6ms
+[13:12:30] DataVo (LSM Relaxed): space/recovery — inserting 1 000 000 records, measuring footprint and cold-open RTO...
+[13:12:31] DataVo (LSM Relaxed): insert 578,4ms | size 50,68 MB | recovery 0,5ms
+[13:12:31] SQLite (WAL,normal): space/recovery — inserting 1 000 000 records, measuring footprint and cold-open RTO...
+[13:12:31] SQLite (WAL,normal): insert 774,2ms | size 58,40 MB | recovery 0,4ms
+[13:12:31] LiteDB: space/recovery — inserting 1 000 000 records, measuring footprint and cold-open RTO...
+[13:12:34] LiteDB: insert 3 000,8ms | size 154,46 MB | recovery 0,6ms
+| Engine Name | Insert Execution Time (ms) | Disk Size (MB) | Recovery Time (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) | 1062.925 | 50.678 | 0.637 | 324.976 |
+| DataVo (LSM Relaxed) | 578.351 | 50.678 | 0.541 | 275.553 |
+| SQLite (WAL,normal) | 774.227 | 58.405 | 0.396 | 633.194 |
+| LiteDB | 3000.785 | 154.461 | 0.639 | 15158.863 |
+
+== Completed ==
+Failures: 0
+Date: 2026-07-03T11:12:34Z

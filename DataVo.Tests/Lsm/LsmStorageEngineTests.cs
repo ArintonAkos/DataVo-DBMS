@@ -228,17 +228,18 @@ public sealed class LsmStorageEngineTests
     }
 
     [Fact]
-    public void HasAnyRows_FlushesBufferedMutationsLikeScanProbes()
+    public void HasAnyRows_AnswersFromBufferedMutationsWithoutFlushing()
     {
-        // Read probes historically flushed the active MemTable before answering (via ReadAllRows);
-        // bulk-ingest disk layout depends on that cadence, so the cheap probe must keep it.
+        // Flushes are size-triggered by LsmTable, not probe-triggered: the emptiness probe answers
+        // from the authoritative latest-row map and must not force tiny SSTables during ingest.
+        // Durability of the buffered mutation comes from the WAL (see HasAnyRows_PersistsAcrossReopen).
         using var fixture = new LsmStorageEngineFixture();
         fixture.Engine.InsertRow("db", "users", Val("alice"));
 
         Assert.True(fixture.Engine.HasAnyRows("db", "users"));
 
         string tableDirectory = Path.Combine(fixture.RootDirectory, "db", "users");
-        Assert.NotEmpty(Directory.GetFiles(tableDirectory, "*.sst"));
+        Assert.Empty(Directory.GetFiles(tableDirectory, "*.sst"));
     }
 
     [Fact]
@@ -401,15 +402,7 @@ public sealed class LsmStorageEngineTests
             .GetType()
             .GetProperty("Table", BindingFlags.Instance | BindingFlags.Public)!
             .GetValue(tableState)!;
-        object walWriter = table
-            .GetType()
-            .GetField("_walWriter", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(table)!;
-
-        return (int)walWriter
-            .GetType()
-            .GetProperty("DurableFlushCount", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(walWriter)!;
+        return ((LsmTable)table).WalDurableFlushCount;
     }
 
     private static object GetSingleTableState(LsmStorageEngine engine)

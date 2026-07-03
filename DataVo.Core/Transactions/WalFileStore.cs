@@ -134,6 +134,41 @@ internal sealed class WalFileStore
     }
 
     /// <summary>
+    /// Forces buffered frames to disk WITHOUT holding the store lock across the device flush, so
+    /// concurrent appends proceed while the fsync is in flight. This is what makes WAL group commit
+    /// group: the leader's fsync no longer blocks follower appends, so the next batch accumulates
+    /// during the current flush. Correctness is unaffected because the caller captures its durable
+    /// watermark BEFORE invoking this — frames appended during the fsync are simply not yet claimed
+    /// durable. The handle lease is acquired under the lock (so it matches the current file across
+    /// delete/recreate cycles); a file deleted mid-flush by a completed generation flush is benign,
+    /// because that generation's data is already durable in its SSTable.
+    /// </summary>
+    internal void FlushToDiskConcurrent()
+    {
+        FileHandlePool.FileHandleLease lease;
+        lock (GetLock())
+        {
+            EnsureDirectoryExists();
+            lease = BinaryFrameHandlePool.Acquire(FilePath);
+        }
+
+        using (lease)
+        {
+            try
+            {
+                RandomAccess.FlushToDisk(lease.Handle);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The segment was deleted after its SSTable became durable; nothing left to flush.
+                return;
+            }
+
+            Interlocked.Increment(ref _durableFlushCount);
+        }
+    }
+
+    /// <summary>
     /// Appends committed binary WAL frames as one contiguous durable write.
     /// </summary>
     /// <param name="frames">The committed binary frames to persist in LSN order.</param>

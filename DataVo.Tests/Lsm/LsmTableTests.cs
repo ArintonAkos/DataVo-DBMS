@@ -377,7 +377,7 @@ public sealed class LsmTableTests
         table.Put(Key(1), seqno: 3, Val("one-new-active"));
 
         Assert.Equal(originalBytes, File.ReadAllBytes(result.FilePath));
-        SsTableReader reader = SsTableReader.Load(result.Bytes);
+        SsTableReader reader = SsTableReader.Load(originalBytes);
         Assert.True(reader.TryGet(Key(1), snapshotSeqno: 3, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Equal(Val("one"), value);

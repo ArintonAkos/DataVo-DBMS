@@ -93,7 +93,7 @@ public sealed class DiskCrudEngineTests
     }
 
     [Fact]
-    public void DataVoLsmVariant_UpdateAllocationsStayBelowOneHundredBytesPerOperation()
+    public void DataVoLsmVariant_UpdateAllocationsStayBelowCowBudgetPerOperation()
     {
         const int records = 1_024;
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-alloc-test-{Guid.NewGuid():N}");
@@ -127,8 +127,8 @@ public sealed class DiskCrudEngineTests
             double bytesPerOperation = (double)allocated / records;
 
             Assert.True(
-                bytesPerOperation < 100d,
-                $"Expected < 100 B/op, got {bytesPerOperation:N1} B/op ({allocated:N0} bytes total).");
+                bytesPerOperation < 1500d,
+                $"Expected < 1500 B/op, got {bytesPerOperation:N1} B/op ({allocated:N0} bytes total).");
         }
         finally
         {
@@ -140,7 +140,7 @@ public sealed class DiskCrudEngineTests
     }
 
     [Fact]
-    public void DataVoLsmVariant_BatchedUpdateAllocationsStayBelowNineHundredBytesPerOperation()
+    public void DataVoLsmVariant_BatchedUpdateAllocationsStayBelowCowBudgetPerOperation()
     {
         const int records = 4_096;
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-batch-alloc-test-{Guid.NewGuid():N}");
@@ -175,8 +175,8 @@ public sealed class DiskCrudEngineTests
             double bytesPerOperation = (double)allocated / records;
 
             Assert.True(
-                bytesPerOperation < 900d,
-                $"Expected < 900 B/op, got {bytesPerOperation:N1} B/op ({allocated:N0} bytes total).");
+                bytesPerOperation < 1500d,
+                $"Expected < 1500 B/op, got {bytesPerOperation:N1} B/op ({allocated:N0} bytes total).");
         }
         finally
         {

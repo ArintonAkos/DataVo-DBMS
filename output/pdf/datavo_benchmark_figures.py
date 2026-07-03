@@ -84,22 +84,6 @@ DISK_CRUD = pd.DataFrame(
     ]
 )
 
-VECTOR_SEARCH = pd.DataFrame(
-    [
-        {"engine": "DataVo", "time_ms": 164366.979, "p50_ms": 3.855125, "p99_ms": 4.374166, "gc_mb": 159.833, "color": COLORS["datavo"]},
-        {"engine": "DataVo-Flat", "time_ms": 389.815, "p50_ms": 2.575250, "p99_ms": 2.917208, "gc_mb": 12.931, "color": COLORS["datavo_lsm"]},
-        {"engine": "LiteDB", "time_ms": 95686.349, "p50_ms": 940.821958, "p99_ms": 1004.167208, "gc_mb": 208914.953, "color": COLORS["litedb"]},
-        {"engine": "SQLite (sqlite-vec)", "time_ms": 514.173, "p50_ms": 2.491375, "p99_ms": 5.367500, "gc_mb": 63.308, "color": COLORS["sqlite"]},
-    ]
-)
-
-CONCURRENT_OPS = pd.DataFrame(
-    [
-        {"engine": "DataVo", "time_ms": 5000.661, "ops": 1786977.904, "read_p99_ms": 0.081166, "write_p99_ms": 0.478750, "gc_mb": 6760.186, "color": COLORS["datavo"]},
-        {"engine": "SQLite", "time_ms": 5135.673, "ops": 364277.845, "read_p99_ms": 0.115125, "write_p99_ms": 5134.706084, "gc_mb": 1030.731, "color": COLORS["sqlite"]},
-    ]
-)
-
 THREAD_SCALING = pd.DataFrame(
     [
         {"threads": 1, "engine": "DataVo (LSM Relaxed)", "ops": 723307.329, "color": COLORS["datavo_lsm_relaxed"]},
@@ -205,15 +189,12 @@ def disk_row(engine: str, time_ms: float, p50_ms: float, p99_ms: float, gc_mb: f
 
 
 def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
-    benchmark_path = REPO_ROOT / "benchmark_results.txt"
-    whitepaper_path = REPO_ROOT / "whitepaper_metrics.txt"
+    fixed_rerun_path = REPO_ROOT / "output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt"
     fullfsync_path = REPO_ROOT / "tmp/sqlite-fullfsync-disk-crud-wal.log"
-    fresh_lsm_relaxed_path = REPO_ROOT / "artifacts/profiling/lsm-vs-sqlite/datavo-lsm-relaxed-50k.log"
-    fresh_sqlite_normal_path = REPO_ROOT / "artifacts/profiling/lsm-vs-sqlite/sqlite-wal-normal-50k.log"
 
     disk_table = find_table(
-        benchmark_path,
-        ("SQLite (WAL,normal)", "SQLite (WAL,full)"),
+        fixed_rerun_path,
+        ("DataVo (LSM Production)", "DataVo (LSM Relaxed)", "SQLite (WAL,normal)", "SQLite (WAL,full)"),
         ("Total Execution Time (ms)", "P50 Latency (ms)", "P99 Latency (ms)", "Total GC Allocated (MB)"),
     )
     fullfsync_table = find_table(
@@ -221,30 +202,21 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
         ("SQLite (WAL,full)",),
         ("Total Execution Time (ms)", "P50 Latency (ms)", "P99 Latency (ms)", "Total GC Allocated (MB)"),
     )
-    fresh_lsm_relaxed_table = find_table(
-        fresh_lsm_relaxed_path,
-        ("DataVo (LSM Relaxed)",),
-        ("Total Execution Time (ms)", "P50 Latency (ms)", "P99 Latency (ms)", "Total GC Allocated (MB)"),
-    )
-    fresh_sqlite_normal_table = find_table(
-        fresh_sqlite_normal_path,
-        ("SQLite (WAL,normal)",),
-        ("Total Execution Time (ms)", "P50 Latency (ms)", "P99 Latency (ms)", "Total GC Allocated (MB)"),
-    )
 
-    sqlite_normal = row_for(fresh_sqlite_normal_table, "SQLite (WAL,normal)")
+    datavo_lsm_production = row_for(disk_table, "DataVo (LSM Production)")
+    datavo_lsm_relaxed = row_for(disk_table, "DataVo (LSM Relaxed)")
+    sqlite_normal = row_for(disk_table, "SQLite (WAL,normal)")
     sqlite_full = row_for(disk_table, "SQLite (WAL,full)")
     sqlite_fullfsync = row_for(fullfsync_table, "SQLite (WAL,full)")
-    datavo_lsm_relaxed = row_for(fresh_lsm_relaxed_table, "DataVo (LSM Relaxed)")
     disk_crud = [
         disk_row(
             "DataVo (LSM Production)",
-            205309.000,
-            0.000000,
-            0.000000,
-            0.000,
+            parse_number(datavo_lsm_production["Total Execution Time (ms)"]),
+            parse_number(datavo_lsm_production["P50 Latency (ms)"]),
+            parse_number(datavo_lsm_production["P99 Latency (ms)"]),
+            parse_number(datavo_lsm_production["Total GC Allocated (MB)"]),
             "datavo_lsm_production",
-            "supplemental: Plan 6 unbatched DataVo LSM Production validation run",
+            str(fixed_rerun_path.relative_to(REPO_ROOT)),
         ),
         disk_row(
             "SQLite (WAL,full+fullfsync)",
@@ -262,7 +234,7 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
             parse_number(sqlite_full["P99 Latency (ms)"]),
             parse_number(sqlite_full["Total GC Allocated (MB)"]),
             "sqlite_full",
-            str(benchmark_path.relative_to(REPO_ROOT)),
+            str(fixed_rerun_path.relative_to(REPO_ROOT)),
         ),
         disk_row(
             "DataVo (LSM Relaxed)",
@@ -271,7 +243,7 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
             parse_number(datavo_lsm_relaxed["P99 Latency (ms)"]),
             parse_number(datavo_lsm_relaxed["Total GC Allocated (MB)"]),
             "datavo_lsm_relaxed",
-            str(fresh_lsm_relaxed_path.relative_to(REPO_ROOT)),
+            str(fixed_rerun_path.relative_to(REPO_ROOT)),
         ),
         disk_row(
             "SQLite (WAL,normal)",
@@ -280,12 +252,12 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
             parse_number(sqlite_normal["P99 Latency (ms)"]),
             parse_number(sqlite_normal["Total GC Allocated (MB)"]),
             "sqlite",
-            str(fresh_sqlite_normal_path.relative_to(REPO_ROOT)),
+            str(fixed_rerun_path.relative_to(REPO_ROOT)),
         ),
     ]
 
     thread_table = find_table(
-        whitepaper_path,
+        fixed_rerun_path,
         ("DataVo (LSM Relaxed) (1 threads)", "SQLite (WAL,normal) (32 threads)"),
         ("OPS", "Total GC Allocated (MB)"),
     )
@@ -295,48 +267,58 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
         if match is None:
             continue
         engine, threads = match.group(1), int(match.group(2))
-        if engine not in {"DataVo (LSM Relaxed)", "SQLite (WAL,normal)"}:
+        if engine not in {"DataVo (LSM Relaxed)", "DataVo (LSM Production)", "SQLite (WAL,normal)"}:
             continue
+        color_key = (
+            "datavo_lsm_production" if engine == "DataVo (LSM Production)"
+            else "datavo_lsm_relaxed" if engine.startswith("DataVo")
+            else "sqlite"
+        )
         thread_scaling.append(
             {
                 "threads": threads,
                 "engine": engine,
                 "ops": parse_number(row["OPS"]),
-                "color_key": "datavo_lsm_relaxed" if engine.startswith("DataVo") else "sqlite",
-                "source": str(whitepaper_path.relative_to(REPO_ROOT)),
+                "color_key": color_key,
+                "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
             }
         )
     thread_scaling.sort(key=lambda row: (0 if row["engine"].startswith("DataVo") else 1, row["threads"]))
 
+    ycsb_table = find_table(
+        fixed_rerun_path,
+        ("DataVo (LSM Relaxed)", "SQLite (WAL,normal)", "LiteDB"),
+        ("OPS", "Read P99 Latency (ms)", "Write P99 Latency (ms)"),
+    )
     ycsb_write_tail = [
         {
             "engine": "DataVo (LSM Relaxed)",
-            "ops": 352000.000,
-            "read_p99_ms": 0.009200,
-            "write_p99_ms": 1.140000,
+            "ops": parse_number(row_for(ycsb_table, "DataVo (LSM Relaxed)")["OPS"]),
+            "read_p99_ms": parse_number(row_for(ycsb_table, "DataVo (LSM Relaxed)")["Read P99 Latency (ms)"]),
+            "write_p99_ms": parse_number(row_for(ycsb_table, "DataVo (LSM Relaxed)")["Write P99 Latency (ms)"]),
             "color_key": "datavo_lsm_relaxed",
-            "source": "verified Table 9 metrics",
+            "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
         },
         {
             "engine": "SQLite (WAL,normal)",
-            "ops": 251107.005,
-            "read_p99_ms": 0.010000,
-            "write_p99_ms": 3.403125,
+            "ops": parse_number(row_for(ycsb_table, "SQLite (WAL,normal)")["OPS"]),
+            "read_p99_ms": parse_number(row_for(ycsb_table, "SQLite (WAL,normal)")["Read P99 Latency (ms)"]),
+            "write_p99_ms": parse_number(row_for(ycsb_table, "SQLite (WAL,normal)")["Write P99 Latency (ms)"]),
             "color_key": "sqlite",
-            "source": "verified Table 9 metrics",
+            "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
         },
         {
             "engine": "LiteDB",
-            "ops": 38719.294,
-            "read_p99_ms": 2.619792,
-            "write_p99_ms": 2.912250,
+            "ops": parse_number(row_for(ycsb_table, "LiteDB")["OPS"]),
+            "read_p99_ms": parse_number(row_for(ycsb_table, "LiteDB")["Read P99 Latency (ms)"]),
+            "write_p99_ms": parse_number(row_for(ycsb_table, "LiteDB")["Write P99 Latency (ms)"]),
             "color_key": "litedb",
-            "source": "verified Table 9 metrics",
+            "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
         },
     ]
 
     space_table = find_table(
-        whitepaper_path,
+        fixed_rerun_path,
         ("DataVo (LSM Relaxed)", "SQLite (WAL,normal)", "LiteDB"),
         ("Disk Size (MB)", "Recovery Time (ms)"),
     )
@@ -349,9 +331,6 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
         row = row_for(space_table, engine)
         recovery_ms = parse_number(row.get("Recovery Time (ms)", "nan"))
         gc_mb = parse_number(row.get("Total GC Allocated (MB)", row.get("GC MB", "nan")))
-        if engine == "DataVo (LSM Relaxed)":
-            recovery_ms = 0.606
-            gc_mb = 204.000
         space_amplification.append(
             {
                 "engine": engine,
@@ -359,12 +338,60 @@ def build_calculated_metrics() -> dict[str, list[dict[str, object]]]:
                 "recovery_ms": recovery_ms,
                 "gc_mb": gc_mb,
                 "color_key": color_key,
-                "source": str(whitepaper_path.relative_to(REPO_ROOT)),
+                "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
+            }
+        )
+
+    concurrent_table = find_table(
+        fixed_rerun_path,
+        ("DataVo", "SQLite"),
+        ("OPS", "Read P99 Latency (ms)", "Write P99 Latency (ms)"),
+    )
+    concurrent_ops = []
+    for engine, color_key in (("DataVo", "datavo"), ("SQLite", "sqlite")):
+        row = row_for(concurrent_table, engine)
+        concurrent_ops.append(
+            {
+                "engine": engine,
+                "time_ms": parse_number(row["Total Execution Time (ms)"]),
+                "ops": parse_number(row["OPS"]),
+                "read_p99_ms": parse_number(row["Read P99 Latency (ms)"]),
+                "write_p99_ms": parse_number(row["Write P99 Latency (ms)"]),
+                "gc_mb": parse_number(row["Total GC Allocated (MB)"]),
+                "color_key": color_key,
+                "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
+            }
+        )
+
+    vector_table = find_table(
+        fixed_rerun_path,
+        ("DataVo", "DataVo-Flat", "LiteDB", "SQLite"),
+        ("Total Execution Time (ms)", "P50 Latency (ms)", "P99 Latency (ms)", "Total GC Allocated (MB)"),
+    )
+    vector_search = []
+    for engine, display, color_key in (
+        ("DataVo", "DataVo", "datavo"),
+        ("DataVo-Flat", "DataVo-Flat", "datavo_lsm"),
+        ("LiteDB", "LiteDB", "litedb"),
+        ("SQLite", "SQLite (sqlite-vec)", "sqlite"),
+    ):
+        row = row_for(vector_table, engine)
+        vector_search.append(
+            {
+                "engine": display,
+                "time_ms": parse_number(row["Total Execution Time (ms)"]),
+                "p50_ms": parse_number(row["P50 Latency (ms)"]),
+                "p99_ms": parse_number(row["P99 Latency (ms)"]),
+                "gc_mb": parse_number(row["Total GC Allocated (MB)"]),
+                "color_key": color_key,
+                "source": str(fixed_rerun_path.relative_to(REPO_ROOT)),
             }
         )
 
     return {
         "DISK_CRUD": disk_crud,
+        "VECTOR_SEARCH": vector_search,
+        "CONCURRENT_OPS": concurrent_ops,
         "THREAD_SCALING": thread_scaling,
         "YCSB_WRITE_TAIL": ycsb_write_tail,
         "SPACE_AMPLIFICATION": space_amplification,
@@ -398,42 +425,42 @@ def write_calculated_metrics(metrics: dict[str, list[dict[str, object]]]) -> Non
         {
             "metric": "sqlite_fullfsync_vs_datavo_lsm_production_time_ratio",
             "value": disk["SQLite (WAL,full+fullfsync)"]["time_ms"] / disk["DataVo (LSM Production)"]["time_ms"],
-            "calculation": "209282.571 / 205309.000",
+            "calculation": f'{disk["SQLite (WAL,full+fullfsync)"]["time_ms"]:.3f} / {disk["DataVo (LSM Production)"]["time_ms"]:.3f}',
         },
         {
             "metric": "sqlite_normal_vs_datavo_lsm_relaxed_disk_crud_time_ratio",
             "value": disk["SQLite (WAL,normal)"]["time_ms"] / disk["DataVo (LSM Relaxed)"]["time_ms"],
-            "calculation": "367.254 / 243.615",
+            "calculation": f'{disk["SQLite (WAL,normal)"]["time_ms"]:.3f} / {disk["DataVo (LSM Relaxed)"]["time_ms"]:.3f}',
         },
         {
             "metric": "datavo_lsm_relaxed_vs_sqlite_normal_thread1_ops_ratio",
             "value": thread[("DataVo (LSM Relaxed)", 1)]["ops"] / thread[("SQLite (WAL,normal)", 1)]["ops"],
-            "calculation": "723307.329 / 347639.653",
+            "calculation": f'{thread[("DataVo (LSM Relaxed)", 1)]["ops"]:.3f} / {thread[("SQLite (WAL,normal)", 1)]["ops"]:.3f}',
         },
         {
             "metric": "sqlite_normal_vs_datavo_lsm_relaxed_ycsb_write_p99_ratio",
             "value": ycsb["SQLite (WAL,normal)"]["write_p99_ms"] / ycsb["DataVo (LSM Relaxed)"]["write_p99_ms"],
-            "calculation": "3.403125 / 1.140000",
+            "calculation": f'{ycsb["SQLite (WAL,normal)"]["write_p99_ms"]:.6f} / {ycsb["DataVo (LSM Relaxed)"]["write_p99_ms"]:.6f}',
         },
         {
             "metric": "sqlite_normal_vs_datavo_lsm_relaxed_ycsb_read_p99_ratio",
             "value": ycsb["SQLite (WAL,normal)"]["read_p99_ms"] / ycsb["DataVo (LSM Relaxed)"]["read_p99_ms"],
-            "calculation": "0.010000 / 0.009200",
+            "calculation": f'{ycsb["SQLite (WAL,normal)"]["read_p99_ms"]:.6f} / {ycsb["DataVo (LSM Relaxed)"]["read_p99_ms"]:.6f}',
         },
         {
             "metric": "datavo_lsm_relaxed_ingest_gc_mb",
             "value": space["DataVo (LSM Relaxed)"]["gc_mb"],
-            "calculation": "verified Table 10 GC MB = 204.000",
+            "calculation": f'verified fixed rerun GC MB = {space["DataVo (LSM Relaxed)"]["gc_mb"]:.3f}',
         },
         {
             "metric": "sqlite_space_over_datavo_space_percent",
             "value": ((space["SQLite (WAL,normal)"]["disk_mb"] - space["DataVo (LSM Relaxed)"]["disk_mb"]) / space["SQLite (WAL,normal)"]["disk_mb"]) * 100,
-            "calculation": "(58.405 - 50.700) / 58.405 * 100",
+            "calculation": f'({space["SQLite (WAL,normal)"]["disk_mb"]:.3f} - {space["DataVo (LSM Relaxed)"]["disk_mb"]:.3f}) / {space["SQLite (WAL,normal)"]["disk_mb"]:.3f} * 100',
         },
         {
             "metric": "litedb_space_vs_datavo_space_ratio",
             "value": space["LiteDB"]["disk_mb"] / space["DataVo (LSM Relaxed)"]["disk_mb"],
-            "calculation": "154.461 / 50.700",
+            "calculation": f'{space["LiteDB"]["disk_mb"]:.3f} / {space["DataVo (LSM Relaxed)"]["disk_mb"]:.3f}',
         },
     ]
     lines.append("## DERIVED_CALCULATIONS")
@@ -473,6 +500,8 @@ _calculated_metrics = build_calculated_metrics()
 write_calculated_metrics(_calculated_metrics)
 _calculated_frames = load_calculated_metrics(CALCULATIONS_PATH)
 DISK_CRUD = _calculated_frames["DISK_CRUD"]
+VECTOR_SEARCH = _calculated_frames["VECTOR_SEARCH"]
+CONCURRENT_OPS = _calculated_frames["CONCURRENT_OPS"]
 THREAD_SCALING = _calculated_frames["THREAD_SCALING"]
 YCSB_WRITE_TAIL = _calculated_frames["YCSB_WRITE_TAIL"]
 SPACE_AMPLIFICATION = _calculated_frames["SPACE_AMPLIFICATION"]
@@ -587,10 +616,11 @@ def figure_3_concurrent_ops() -> None:
     clean_axes(ax)
     for bar, value in zip(bars, data["ops"]):
         ax.text(bar.get_x() + bar.get_width() / 2, value * 1.025, f"{value:,.3f} OPS", ha="center", va="bottom", fontsize=9, fontweight="bold")
+    write_p99 = {row["engine"]: row["write_p99_ms"] for _, row in data.iterrows()}
     ax.text(
         0.02,
         0.96,
-        "Write P99: DataVo 0.478750 ms; SQLite 5,134.706084 ms",
+        f"Write P99: DataVo {write_p99['DataVo']:.6f} ms; SQLite {write_p99['SQLite']:,.6f} ms",
         transform=ax.transAxes,
         va="top",
         ha="left",
@@ -604,10 +634,19 @@ def figure_3_concurrent_ops() -> None:
 
 
 def figure_4_thread_scaling_curve() -> None:
-    fig, ax = plt.subplots(figsize=(8.4, 5.2))
-    for engine, group in THREAD_SCALING.groupby("engine", sort=False):
+    relaxed_vs_sqlite = THREAD_SCALING[THREAD_SCALING["engine"] != "DataVo (LSM Production)"]
+    production = THREAD_SCALING[THREAD_SCALING["engine"] == "DataVo (LSM Production)"]
+
+    fig, (ax, ax_prod) = plt.subplots(
+        1, 2, figsize=(12.6, 5.2), gridspec_kw={"width_ratios": [1.55, 1.0]}
+    )
+
+    y_min = max(0, relaxed_vs_sqlite["ops"].min() * 0.84)
+    y_max = relaxed_vs_sqlite["ops"].max() * 1.12
+    label_gap = (y_max - y_min) * 0.025
+    for engine, group in relaxed_vs_sqlite.groupby("engine", sort=False):
         color = group["color"].iloc[0]
-        label_offset = 14_000 if engine.startswith("DataVo") else -18_000
+        label_offset = label_gap if engine.startswith("DataVo") else -label_gap
         label_va = "bottom" if label_offset > 0 else "top"
         ax.plot(
             group["threads"],
@@ -634,14 +673,49 @@ def figure_4_thread_scaling_curve() -> None:
     ax.set_xscale("log", base=2)
     ax.set_xticks([1, 2, 4, 8, 16, 32])
     ax.get_xaxis().set_major_formatter(mpl.ticker.ScalarFormatter())
-    ax.set_ylim(300_000, 760_000)
+    ax.set_ylim(y_min, y_max)
     ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda value, _: f"{value / 1000:.0f}K"))
     ax.set_xlabel("Worker threads")
     ax.set_ylabel("Operations per second")
-    ax.set_title("Thread Scaling OPS: DataVo LSM Relaxed vs SQLite WAL Normal")
+    ax.set_title("Relaxed Durability: DataVo LSM vs SQLite WAL Normal")
     ax.grid(True, axis="both", which="major")
     clean_axes(ax)
     ax.legend(loc="lower right")
+
+    prod_color = production["color"].iloc[0]
+    ax_prod.plot(
+        production["threads"],
+        production["ops"],
+        marker="s",
+        linewidth=2.5,
+        markersize=6,
+        color=prod_color,
+        label="DataVo (LSM Production)",
+    )
+    for _, row in production.iterrows():
+        ax_prod.text(
+            row["threads"],
+            row["ops"] * 1.045,
+            f"{row['ops'] / 1000:,.1f}K",
+            ha="center",
+            va="bottom",
+            fontsize=7.4,
+            color=prod_color,
+            fontweight="bold" if row["threads"] in (1, 32) else "normal",
+        )
+
+    ax_prod.set_xscale("log", base=2)
+    ax_prod.set_xticks([1, 2, 4, 8, 16, 32])
+    ax_prod.get_xaxis().set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax_prod.set_ylim(0, production["ops"].max() * 1.28)
+    ax_prod.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda value, _: f"{value / 1000:.0f}K"))
+    ax_prod.set_xlabel("Worker threads")
+    ax_prod.set_ylabel("Operations per second")
+    ax_prod.set_title("Strict Durability: WAL Group Commit Scaling")
+    ax_prod.grid(True, axis="both", which="major")
+    clean_axes(ax_prod)
+    ax_prod.legend(loc="lower right")
+
     fig.tight_layout()
     save_all(fig, "figure_4_thread_scaling_ops")
     plt.close(fig)

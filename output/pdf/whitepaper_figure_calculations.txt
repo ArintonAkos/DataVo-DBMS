@@ -4,46 +4,64 @@
 
 ## DISK_CRUD
 engine,time_ms,p50_ms,p99_ms,gc_mb,color_key,source
-DataVo (LSM Production),205309.0,0.0,0.0,0.0,datavo_lsm_production,supplemental: Plan 6 unbatched DataVo LSM Production validation run
+DataVo (LSM Production),501.87,4.2e-05,0.000125,23.074,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
 "SQLite (WAL,full+fullfsync)",209282.571,4.028958,6.85575,55.71,sqlite_fullfsync,tmp/sqlite-fullfsync-disk-crud-wal.log
-"SQLite (WAL,full)",4250.816,0.026208,0.057167,53.427,sqlite_full,benchmark_results.txt
-DataVo (LSM Relaxed),243.615,0.0,4.2e-05,64.416,datavo_lsm_relaxed,artifacts/profiling/lsm-vs-sqlite/datavo-lsm-relaxed-50k.log
-"SQLite (WAL,normal)",367.254,0.005291,0.008708,57.139,sqlite,artifacts/profiling/lsm-vs-sqlite/sqlite-wal-normal-50k.log
+"SQLite (WAL,full)",84638.11,4.019917,7.9455,21.371,sqlite_full,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+DataVo (LSM Relaxed),247.08,8.3e-05,0.000208,17.782,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+"SQLite (WAL,normal)",842.914,0.028625,0.127875,23.19,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+
+## VECTOR_SEARCH
+engine,time_ms,p50_ms,p99_ms,gc_mb,color_key,source
+DataVo,160508.529,2.337125,3.0155,157.246,datavo,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+DataVo-Flat,580.608,2.124417,10.488584,10.331,datavo_lsm,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+LiteDB,95716.48,881.466417,2989.564083,208915.002,litedb,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+SQLite (sqlite-vec),463.904,2.386333,3.106291,63.427,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+
+## CONCURRENT_OPS
+engine,time_ms,ops,read_p99_ms,write_p99_ms,gc_mb,color_key,source
+DataVo,5084.77,511827.704,0.038875,4.466542,626.927,datavo,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+SQLite,5312.498,191068.481,0.32175,5306.753,566.248,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
 
 ## THREAD_SCALING
 threads,engine,ops,color_key,source
-1,DataVo (LSM Relaxed),723307.329,datavo_lsm_relaxed,whitepaper_metrics.txt
-2,DataVo (LSM Relaxed),727112.642,datavo_lsm_relaxed,whitepaper_metrics.txt
-4,DataVo (LSM Relaxed),645039.471,datavo_lsm_relaxed,whitepaper_metrics.txt
-8,DataVo (LSM Relaxed),608467.657,datavo_lsm_relaxed,whitepaper_metrics.txt
-16,DataVo (LSM Relaxed),616969.926,datavo_lsm_relaxed,whitepaper_metrics.txt
-32,DataVo (LSM Relaxed),604661.39,datavo_lsm_relaxed,whitepaper_metrics.txt
-1,"SQLite (WAL,normal)",347639.653,sqlite,whitepaper_metrics.txt
-2,"SQLite (WAL,normal)",505938.569,sqlite,whitepaper_metrics.txt
-4,"SQLite (WAL,normal)",534829.56,sqlite,whitepaper_metrics.txt
-8,"SQLite (WAL,normal)",578359.572,sqlite,whitepaper_metrics.txt
-16,"SQLite (WAL,normal)",599309.378,sqlite,whitepaper_metrics.txt
-32,"SQLite (WAL,normal)",597648.416,sqlite,whitepaper_metrics.txt
+1,DataVo (LSM Production),2478.648,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+1,DataVo (LSM Relaxed),1215413.207,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+2,DataVo (LSM Production),2962.324,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+2,DataVo (LSM Relaxed),1192483.021,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+4,DataVo (LSM Production),4788.347,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+4,DataVo (LSM Relaxed),1044648.267,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+8,DataVo (LSM Production),7274.764,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+8,DataVo (LSM Relaxed),1025016.936,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+16,DataVo (LSM Production),7480.346,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+16,DataVo (LSM Relaxed),1041723.883,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+32,DataVo (LSM Production),9110.373,datavo_lsm_production,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+32,DataVo (LSM Relaxed),1022364.692,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+1,"SQLite (WAL,normal)",318474.934,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+2,"SQLite (WAL,normal)",515803.275,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+4,"SQLite (WAL,normal)",541284.774,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+8,"SQLite (WAL,normal)",586604.721,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+16,"SQLite (WAL,normal)",582041.07,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+32,"SQLite (WAL,normal)",514214.285,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
 
 ## YCSB_WRITE_TAIL
 engine,ops,read_p99_ms,write_p99_ms,color_key,source
-DataVo (LSM Relaxed),352000.0,0.0092,1.14,datavo_lsm_relaxed,verified Table 9 metrics
-"SQLite (WAL,normal)",251107.005,0.01,3.403125,sqlite,verified Table 9 metrics
-LiteDB,38719.294,2.619792,2.91225,litedb,verified Table 9 metrics
+DataVo (LSM Relaxed),626690.498,0.000917,1.333833,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+"SQLite (WAL,normal)",233778.627,0.0105,3.408333,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+LiteDB,35866.077,3.27425,3.785125,litedb,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
 
 ## SPACE_AMPLIFICATION
 engine,disk_mb,recovery_ms,gc_mb,color_key,source
-DataVo (LSM Relaxed),50.7,0.606,204.0,datavo_lsm_relaxed,whitepaper_metrics.txt
-"SQLite (WAL,normal)",58.405,0.414,634.17,sqlite,whitepaper_metrics.txt
-LiteDB,154.461,0.61,15159.987,litedb,whitepaper_metrics.txt
+DataVo (LSM Relaxed),66.443,0.5,206.688,datavo_lsm_relaxed,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+"SQLite (WAL,normal)",58.405,0.386,631.917,sqlite,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
+LiteDB,154.461,0.674,15158.872,litedb,output/pdf/whitepaper_benchmark_rerun_2026-07-03-v2.txt
 
 ## DERIVED_CALCULATIONS
 metric,value,calculation
-sqlite_fullfsync_vs_datavo_lsm_production_time_ratio,1.0193541004047557,209282.571 / 205309.000
-sqlite_normal_vs_datavo_lsm_relaxed_disk_crud_time_ratio,1.5075180099747554,367.254 / 243.615
-datavo_lsm_relaxed_vs_sqlite_normal_thread1_ops_ratio,2.0806237802797485,723307.329 / 347639.653
-sqlite_normal_vs_datavo_lsm_relaxed_ycsb_write_p99_ratio,2.985197368421053,3.403125 / 1.140000
-sqlite_normal_vs_datavo_lsm_relaxed_ycsb_read_p99_ratio,1.0869565217391304,0.010000 / 0.009200
-datavo_lsm_relaxed_ingest_gc_mb,204.0,verified Table 10 GC MB = 204.000
-sqlite_space_over_datavo_space_percent,13.18694769849076,(58.405 - 50.700) / 58.405 * 100
-litedb_space_vs_datavo_space_ratio,3.045267489711934,154.461 / 50.700
+sqlite_fullfsync_vs_datavo_lsm_production_time_ratio,417.0055412756291,209282.571 / 501.870
+sqlite_normal_vs_datavo_lsm_relaxed_disk_crud_time_ratio,3.4115023474178403,842.914 / 247.080
+datavo_lsm_relaxed_vs_sqlite_normal_thread1_ops_ratio,3.8163543728059928,1215413.207 / 318474.934
+sqlite_normal_vs_datavo_lsm_relaxed_ycsb_write_p99_ratio,2.5552921542651887,3.408333 / 1.333833
+sqlite_normal_vs_datavo_lsm_relaxed_ycsb_read_p99_ratio,11.450381679389315,0.010500 / 0.000917
+datavo_lsm_relaxed_ingest_gc_mb,206.688,verified fixed rerun GC MB = 206.688
+sqlite_space_over_datavo_space_percent,-13.762520332163335,(58.405 - 66.443) / 58.405 * 100
+litedb_space_vs_datavo_space_ratio,2.3247144168685945,154.461 / 66.443

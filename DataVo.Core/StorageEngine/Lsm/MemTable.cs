@@ -111,6 +111,18 @@ public sealed class MemTable : IDisposable
         _frozen = true;
     }
 
+    /// <summary>
+    /// Pins the backing arena so spans returned by <see cref="TryGet"/> and the enumerator stay valid
+    /// even if the MemTable is disposed concurrently (its slabs are then returned to the pool only
+    /// after the last lease is released). Concurrent readers of a frozen generation — including the
+    /// background flush — must hold a lease for the duration of their read.
+    /// </summary>
+    public ArenaLease AcquireReadLease()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _arena.AcquireLease();
+    }
+
     /// <summary>Inserts a tombstone for <paramref name="userKey"/> at <paramref name="seqno"/>.</summary>
     public void Delete(ReadOnlySpan<byte> userKey, ulong seqno)
     {
