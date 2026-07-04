@@ -1,0 +1,186 @@
+{
+  "name": "DataVo Documentation",
+  "generatedAt": "2026-07-04T19:20:41.540Z",
+  "pages": [
+    {
+      "title": "What Is DataVo?",
+      "route": "/manual/preface/what-is-datavo",
+      "source": "manual/preface/what-is-datavo.md",
+      "aiPath": "/ai/pages/manual/preface/what-is-datavo.md"
+    },
+    {
+      "title": "v0.1 Alpha Scope",
+      "route": "/manual/preface/alpha-scope",
+      "source": "manual/preface/alpha-scope.md",
+      "aiPath": "/ai/pages/manual/preface/alpha-scope.md"
+    },
+    {
+      "title": "Roadmap",
+      "route": "/manual/preface/roadmap",
+      "source": "manual/preface/roadmap.md",
+      "aiPath": "/ai/pages/manual/preface/roadmap.md"
+    },
+    {
+      "title": "Quickstart",
+      "route": "/manual/tutorial/quickstart",
+      "source": "manual/tutorial/quickstart.md",
+      "aiPath": "/ai/pages/manual/tutorial/quickstart.md"
+    },
+    {
+      "title": "Using DataVoContext",
+      "route": "/manual/tutorial/datavo-context",
+      "source": "manual/tutorial/datavo-context.md",
+      "aiPath": "/ai/pages/manual/tutorial/datavo-context.md"
+    },
+    {
+      "title": "Entity Framework Example",
+      "route": "/manual/tutorial/entity-framework-example",
+      "source": "manual/tutorial/entity-framework-example.md",
+      "aiPath": "/ai/pages/manual/tutorial/entity-framework-example.md"
+    },
+    {
+      "title": "Vector Search Example",
+      "route": "/manual/tutorial/vector-search-example",
+      "source": "manual/tutorial/vector-search-example.md",
+      "aiPath": "/ai/pages/manual/tutorial/vector-search-example.md"
+    },
+    {
+      "title": "Supported SQL",
+      "route": "/manual/sql-language/supported-sql",
+      "source": "manual/sql-language/supported-sql.md",
+      "aiPath": "/ai/pages/manual/sql-language/supported-sql.md"
+    },
+    {
+      "title": "CREATE TABLE",
+      "route": "/manual/sql-language/create-table",
+      "source": "manual/sql-language/create-table.md",
+      "aiPath": "/ai/pages/manual/sql-language/create-table.md"
+    },
+    {
+      "title": "Data Manipulation",
+      "route": "/manual/sql-language/data-manipulation",
+      "source": "manual/sql-language/data-manipulation.md",
+      "aiPath": "/ai/pages/manual/sql-language/data-manipulation.md"
+    },
+    {
+      "title": "Queries",
+      "route": "/manual/sql-language/queries",
+      "source": "manual/sql-language/queries.md",
+      "aiPath": "/ai/pages/manual/sql-language/queries.md"
+    },
+    {
+      "title": "Vector Search and Indexes",
+      "route": "/manual/sql-language/vector-search-syntax",
+      "source": "manual/sql-language/vector-search-syntax.md",
+      "aiPath": "/ai/pages/manual/sql-language/vector-search-syntax.md"
+    },
+    {
+      "title": "SQL Compatibility Matrix",
+      "route": "/manual/sql-language/sql-compatibility",
+      "source": "manual/sql-language/sql-compatibility.md",
+      "aiPath": "/ai/pages/manual/sql-language/sql-compatibility.md"
+    },
+    {
+      "title": "Storage Modes",
+      "route": "/manual/storage-engine/storage-modes",
+      "source": "manual/storage-engine/storage-modes.md",
+      "aiPath": "/ai/pages/manual/storage-engine/storage-modes.md"
+    },
+    {
+      "title": "LSM Mode",
+      "route": "/manual/storage-engine/lsm-mode",
+      "source": "manual/storage-engine/lsm-mode.md",
+      "aiPath": "/ai/pages/manual/storage-engine/lsm-mode.md"
+    },
+    {
+      "title": "WAL And Durability",
+      "route": "/manual/storage-engine/wal-and-durability",
+      "source": "manual/storage-engine/wal-and-durability.md",
+      "aiPath": "/ai/pages/manual/storage-engine/wal-and-durability.md"
+    },
+    {
+      "title": "Transactions and MVCC",
+      "route": "/manual/storage-engine/transactions-acid-mvcc",
+      "source": "manual/storage-engine/transactions-acid-mvcc.md",
+      "aiPath": "/ai/pages/manual/storage-engine/transactions-acid-mvcc.md"
+    },
+    {
+      "title": "Query Planner And Fast Paths",
+      "route": "/manual/storage-engine/query-planner-fast-paths",
+      "source": "manual/storage-engine/query-planner-fast-paths.md",
+      "aiPath": "/ai/pages/manual/storage-engine/query-planner-fast-paths.md"
+    },
+    {
+      "title": "Connecting to DataVo",
+      "route": "/manual/client-interfaces/datavo-context-api",
+      "source": "manual/client-interfaces/datavo-context-api.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/datavo-context-api.md"
+    },
+    {
+      "title": "Entity Framework Support",
+      "route": "/manual/client-interfaces/entity-framework",
+      "source": "manual/client-interfaces/entity-framework.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/entity-framework.md"
+    },
+    {
+      "title": "Roslyn Source Generators",
+      "route": "/manual/client-interfaces/source-generators",
+      "source": "manual/client-interfaces/source-generators.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/source-generators.md"
+    },
+    {
+      "title": "Native AOT",
+      "route": "/manual/client-interfaces/native-aot",
+      "source": "manual/client-interfaces/native-aot.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/native-aot.md"
+    },
+    {
+      "title": "Configuration Reference",
+      "route": "/manual/reference/configuration",
+      "source": "manual/reference/configuration.md",
+      "aiPath": "/ai/pages/manual/reference/configuration.md"
+    },
+    {
+      "title": "Limits",
+      "route": "/manual/reference/limits",
+      "source": "manual/reference/limits.md",
+      "aiPath": "/ai/pages/manual/reference/limits.md"
+    },
+    {
+      "title": "Unsupported Features",
+      "route": "/manual/reference/unsupported-features",
+      "source": "manual/reference/unsupported-features.md",
+      "aiPath": "/ai/pages/manual/reference/unsupported-features.md"
+    },
+    {
+      "title": "Error Handling",
+      "route": "/manual/reference/error-handling",
+      "source": "manual/reference/error-handling.md",
+      "aiPath": "/ai/pages/manual/reference/error-handling.md"
+    },
+    {
+      "title": "AI Access And MCP",
+      "route": "/manual/reference/ai-access",
+      "source": "manual/reference/ai-access.md",
+      "aiPath": "/ai/pages/manual/reference/ai-access.md"
+    },
+    {
+      "title": "Benchmark Results",
+      "route": "/manual/performance/benchmarks",
+      "source": "manual/performance/benchmarks.md",
+      "aiPath": "/ai/pages/manual/performance/benchmarks.md"
+    },
+    {
+      "title": "Benchmark Methodology",
+      "route": "/manual/performance/methodology",
+      "source": "manual/performance/methodology.md",
+      "aiPath": "/ai/pages/manual/performance/methodology.md"
+    },
+    {
+      "title": "Reproducing Benchmarks",
+      "route": "/manual/performance/reproducing-benchmarks",
+      "source": "manual/performance/reproducing-benchmarks.md",
+      "aiPath": "/ai/pages/manual/performance/reproducing-benchmarks.md"
+    }
+  ]
+}

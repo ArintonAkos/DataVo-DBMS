@@ -6,10 +6,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <NoWarn>$(NoWarn);RS1036;RS2008</NoWarn>
+    <NoWarn>$(NoWarn);RS1036;RS2008;NU5128</NoWarn>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>Arinton Akos</Authors>
+    <Company>DataVo</Company>
     <PackageId>DataVo.Generators</PackageId>
     <Title>DataVo Generators</Title>
     <Description>Source generators for DataVo compiled queries.</Description>
+    <PackageTags>database;sql;dbms;dotnet;csharp;source-generator;embedded</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArintonAkos/DataVo-DBMS.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\artifacts\packages</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

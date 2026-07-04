@@ -2,86 +2,46 @@
 layout: home
 
 hero:
-  name: "DataVo DBMS"
-  text: "Production Documentation"
-  tagline: "Embed, operate, and extend a C# SQL engine with local packaging, auth/session SQL, and browser WASM playground support"
+  name: "DataVo"
+  text: "A C#-native embedded database engine"
+  tagline: "v0.1 Alpha documentation for allocation-aware SQL, LSM storage, vector search, and local-first .NET workloads."
   actions:
     - theme: brand
-      text: Get Started
-      link: /features/getting-started
+      text: Get started
+      link: /manual/tutorial/quickstart
     - theme: alt
-      text: Explore Features
-      link: /features/
+      text: Read benchmarks
+      link: /manual/performance/benchmarks
     - theme: alt
-      text: Core Modules
-      link: /DataVo.Core/
-    - theme: alt
-      text: Packaging Guide
-      link: /features/setup-and-packaging
+      text: SQL reference
+      link: /manual/sql-language/supported-sql
 
 features:
-  - title: Querying Guide
-    details: Learn the supported SELECT surface with examples for joins, grouping, predicates, ordering, set operations, and subqueries.
-    link: /features/select-and-querying
-  - title: Security and Authentication
-    details: Use user/role DDL, grant and revoke permissions, and session login/logout commands with practical SQL examples.
-    link: /features/security-and-authentication
-  - title: Data Changes
-    details: Understand INSERT, UPDATE, DELETE, and VACUUM with before-and-after table examples.
-    link: /features/data-modification
-  - title: Schema Evolution
-    details: Review CREATE TABLE, CREATE INDEX, and guarded ALTER TABLE support for adding, dropping, and modifying columns.
-    link: /features/schema-and-ddl
-  - title: Packaging and Embedding
-    details: Start with local packages today, adopt NuGet publication flows when available, and structure customer delivery paths.
-    link: /features/setup-and-packaging
-  - title: WebAssembly and npm
-    details: Integrate browser runtime workflows now and prepare for public npm package distribution.
-    link: /features/wasm-and-npm
-  - title: Game Development (Unity and Godot)
-    details: Embed DataVo for local gameplay data, profiles, and deterministic tool pipelines.
-    link: /features/unity-and-godot
-  - title: Entity Framework Integration
-    details: Follow the EF adoption path and understand current capability boundaries and rollout posture.
-    link: /features/entity-framework
-  - title: Runtime Architecture
-    details: Move from feature docs into parser, runtime, storage, and indexing internals when contributing to the engine.
-    link: /DataVo.Core/
-  - title: Roadmap
-    details: Track planned ADO.NET, Entity Framework, vector, WebAssembly, and future NuGet distribution work.
-    link: /features/roadmap-and-integrations
+  - title: Native AOT compatible core
+    details: DataVo.Core and DataVo.Data enable trim/AOT analyzers and treat IL2026/IL3050-family diagnostics as errors, keeping the engine aligned with Native AOT constraints.
+    link: /manual/client-interfaces/native-aot
+  - title: Zero-allocation hot paths
+    details: Typed rows, arena-backed LSM MemTables, compiled access paths, and binary WAL frames avoid dictionary materialization on selected internal write and read paths.
+    link: /manual/storage-engine/query-planner-fast-paths
+  - title: Roslyn compiled queries
+    details: The DataVo.Generators package emits compiled query plans, typed row mappers, and optional schema-manifest index hints for supported SELECT, INSERT, and UPDATE shapes.
+    link: /manual/client-interfaces/source-generators
+  - title: Vector search
+    details: Store VECTOR(n) columns, build HNSW or FLAT vector indexes, and rank by cosine (<=>) or L2 (<->) distance directly in DataVo SQL.
+    link: /manual/sql-language/vector-search-syntax
 ---
 
-<SqlEditor />
+DataVo v0.1 Alpha is an attempt to build an embedded database engine from inside the .NET runtime instead of behind a native provider boundary. It is written in C#, runs in-process, and is designed around `Span<T>`, source-generated serialization, Native AOT constraints, typed row paths, SIMD kernels, and GC-aware execution. In the checked-in benchmark artifacts, DataVo reaches roughly 1.2M+ ops/sec in relaxed LSM thread-scaling workloads, with near-zero or sharply reduced allocation on the hottest internal paths.
 
-## Choose a documentation path
+This is not a full RDBMS and it is not a mature SQLite replacement. The interesting part of DataVo is narrower: C#-native embedded storage for local-first apps, game tooling, simulations, browser/WASM workflows, reactive query maintenance, and vector search experiments. The current engine supports SQL-style DDL/DML/querying, disk and in-memory modes, WAL/MVCC work, vector columns/indexing, reactive subscriptions, an ADO.NET-facing package, and early EF integration, but the public packaging and production-hardening story is still alpha.
 
-- **Feature Documentation**: use this when you want to know what SQL works, what the engine returns, and how behavior looks from the outside.
-- **DataVo.Core Modules**: use this when you want to understand implementation details, extension points, or subsystem responsibilities.
-- **Architecture**: use this when you want design-level context, storage/indexing rationale, and internal structure notes.
+DataVo is being opened alongside the whitepaper because the design tradeoffs are worth discussing in public: how much can a database gain by knowing it lives inside .NET, avoiding avoidable GC pressure, and binding hot paths earlier than a generic provider can? The project is best suited today for early users who like embedded systems, storage engines, .NET performance work, and honest alpha software.
 
-## Current documentation focus
+## What to read first
 
-This documentation tracks implemented behavior first, then roadmap areas.
-
-- local packaging and embedding workflows
-- NuGet and npm publication-ready adoption guidance
-- SQL surface area by feature
-- auth/session SQL operations and grant inspection
-- browser WASM runtime and parity test workflows
-- Unity and Godot integration patterns
-- Entity Framework integration path
-- architecture references for contributors
-
-## Start here
-
-If you are new to the project, the best sequence is:
-
-1. [Getting Started](./features/getting-started.md)
-2. [Setup and Packaging](./features/setup-and-packaging.md)
-3. [WebAssembly and npm](./features/wasm-and-npm.md)
-4. [Unity and Godot](./features/unity-and-godot.md)
-5. [Entity Framework Integration](./features/entity-framework.md)
-6. [SELECT and Query Features](./features/select-and-querying.md)
-7. [Security and Authentication](./features/security-and-authentication.md)
-8. [Roadmap and Integrations](./features/roadmap-and-integrations.md)
+- [Quickstart](./manual/tutorial/quickstart.md): create a database, table, row, and query from C#.
+- [v0.1 Alpha Scope](./manual/preface/alpha-scope.md): understand what is launch-ready and what is still planned.
+- [SQL Compatibility Matrix](./manual/sql-language/sql-compatibility.md): see the public SQL support boundary.
+- [MVCC, Transactions, And ACID](./manual/storage-engine/transactions-acid-mvcc.md): review the exact isolation and durability setting.
+- [Entity Framework Support](./manual/client-interfaces/entity-framework.md): see supported EF workflows and unsupported provider features.
+- [Benchmark Results](./manual/performance/benchmarks.md): review selected whitepaper results and the workload caveats.

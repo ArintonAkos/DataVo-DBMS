@@ -129,7 +129,7 @@ internal sealed class LsmFileRegistry
     private LsmTableFileMetadata[] GetAllLiveFiles()
     {
         var files = new List<LsmTableFileMetadata>();
-        for (int level = 0; level <= 7; level++)
+        for (int level = 0; level <= LsmTable.DefaultMaxCompactionLevel; level++)
         {
             files.AddRange(_manifest.GetLiveFiles(level));
         }

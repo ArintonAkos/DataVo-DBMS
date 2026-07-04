@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Threading;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
@@ -14,7 +15,9 @@ namespace DataVo.Core.StorageEngine.Lsm;
 public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, IDisposable
 {
     private const int UserKeySize = sizeof(long);
-    private const int MaxLevelToScan = 7;
+    private const int MaxLevelToScan = LsmTable.DefaultMaxCompactionLevel;
+    private static readonly byte[] NextRowIdMetadataKey =
+        [0x5F, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x76, 0x6F, 0x5F, 0x6E, 0x65, 0x78, 0x74, 0x5F, 0x72, 0x6F, 0x77, 0x5F, 0x69, 0x64];
 
     private readonly string _storageDirectory;
     private readonly LsmWalDurabilityMode _walDurabilityMode;
@@ -51,6 +54,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             Span<byte> userKey = stackalloc byte[UserKeySize];
             EncodeRowId(rowId, userKey);
             ticket = state.Table.PutDeferDurability(userKey, seqno, rowBytes);
+            ticket = state.Table.PutDeferDurability(
+                NextRowIdMetadataKey,
+                state.NextSeqno++,
+                EncodeNextRowIdMetadata(state.NextRowId));
             state.LatestRows.Set(rowId, rowBytes);
             insertedRowId = rowId;
         }
@@ -91,6 +98,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
                 ReadOnlySpan<LsmBatchRowPutEntry> entries = batch.AsSpan(0, count);
                 ticket = state.Table.PutRowIdBatch(entries);
+                ticket = state.Table.PutDeferDurability(
+                    NextRowIdMetadataKey,
+                    state.NextSeqno++,
+                    EncodeNextRowIdMetadata(state.NextRowId));
                 foreach (LsmBatchRowPutEntry entry in entries)
                 {
                     state.LatestRows.Set(entry.RowId, entry.Value);
@@ -138,6 +149,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             LatestRowLookup.Live => rowBytes.ToArray(),
             LatestRowLookup.Tombstone => throw new RowDeletedException(rowId, tableName),
+            _ when rowId > 0 && rowId < state.ReadNextRowId() => throw new RowDeletedException(rowId, tableName),
             _ => throw new RowNotFoundException(rowId, tableName),
         };
     }
@@ -339,11 +351,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             state.Table.FlushActiveMemTable();
-            lock (state.Table.MaintenanceGate)
-            {
-                var compactor = new LsmCompactor(state.TableDirectory, state.Manifest, state.FileRegistry);
-                compactor.CompactLevel(sourceLevel: 0, targetLevel: 1);
-            }
+            state.Table.CompactAllLevelsForMaintenance();
 
             return CollectLiveRowsSorted(state);
         }
@@ -404,7 +412,15 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         var state = new TableState(tableDirectory, manifest, table, registry);
 
         state.Table.FlushActiveMemTable();
-        foreach ((long rowId, LatestRowVersion version) in RebuildLatestRowsFromSstables(state))
+        Dictionary<long, LatestRowVersion> latestRows = RebuildLatestRowsFromSstables(
+            state,
+            out long persistedNextRowId);
+        if (persistedNextRowId > state.NextRowId)
+        {
+            state.NextRowId = persistedNextRowId;
+        }
+
+        foreach ((long rowId, LatestRowVersion version) in latestRows)
         {
             if (rowId >= state.NextRowId)
             {
@@ -445,13 +461,29 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         return rows;
     }
 
-    private static Dictionary<long, LatestRowVersion> RebuildLatestRowsFromSstables(TableState state)
+    private static Dictionary<long, LatestRowVersion> RebuildLatestRowsFromSstables(
+        TableState state,
+        out long persistedNextRowId)
     {
         var latest = new Dictionary<long, LatestRowVersion>();
+        persistedNextRowId = 1;
+        ulong persistedNextRowIdSeqno = 0;
         foreach (SstableEntry entry in ReadAllSstableEntries(state))
         {
-            long rowId = DecodeRowId(InternalKey.UserKey(entry.InternalKey));
             ulong seqno = InternalKey.Sequence(entry.InternalKey);
+            ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
+            if (IsNextRowIdMetadataKey(userKey))
+            {
+                if (seqno >= persistedNextRowIdSeqno)
+                {
+                    persistedNextRowId = DecodeNextRowIdMetadata(entry.Value);
+                    persistedNextRowIdSeqno = seqno;
+                }
+
+                continue;
+            }
+
+            long rowId = DecodeRowId(userKey);
             if (latest.TryGetValue(rowId, out LatestRowVersion existing) && existing.Sequence >= seqno)
             {
                 continue;
@@ -594,8 +626,36 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         return unchecked((long)(flipped ^ (ulong)long.MinValue));
     }
 
+    private static bool IsNextRowIdMetadataKey(ReadOnlySpan<byte> userKey) =>
+        userKey.SequenceEqual(NextRowIdMetadataKey);
+
+    private static byte[] EncodeNextRowIdMetadata(long nextRowId)
+    {
+        var value = new byte[sizeof(long)];
+        BinaryPrimitives.WriteInt64LittleEndian(value, nextRowId);
+        return value;
+    }
+
+    private static long DecodeNextRowIdMetadata(ReadOnlySpan<byte> value)
+    {
+        if (value.Length != sizeof(long))
+        {
+            throw new InvalidDataException("LSM next-row-id metadata value is malformed.");
+        }
+
+        long nextRowId = BinaryPrimitives.ReadInt64LittleEndian(value);
+        if (nextRowId < 1)
+        {
+            throw new InvalidDataException("LSM next-row-id metadata value must be positive.");
+        }
+
+        return nextRowId;
+    }
+
     private sealed class TableState : IDisposable
     {
+        private long _nextRowId = 1;
+
         public TableState(string tableDirectory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry)
         {
             TableDirectory = tableDirectory;
@@ -621,7 +681,13 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         /// </summary>
         public LsmLatestRowStore LatestRows { get; } = new();
 
-        public long NextRowId { get; set; } = 1;
+        public long NextRowId
+        {
+            get => Volatile.Read(ref _nextRowId);
+            set => Volatile.Write(ref _nextRowId, value);
+        }
+
+        public long ReadNextRowId() => Volatile.Read(ref _nextRowId);
 
         public ulong NextSeqno { get; set; } = 1;
 

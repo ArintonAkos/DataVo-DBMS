@@ -33,6 +33,8 @@ internal readonly record struct LsmBatchRowPutEntry(long RowId, ulong Seqno, byt
 /// </summary>
 public sealed class LsmTable : IDisposable
 {
+    internal const int DefaultMaxCompactionLevel = 7;
+
     /// <summary>
     /// Active MemTable size that triggers rotation into the background flush pipeline. Size-triggered
     /// (RocksDB-style) so the flush count is proportional to data volume, not to probe frequency.
@@ -45,6 +47,12 @@ public sealed class LsmTable : IDisposable
 
     /// <summary>Level-0 live-file count that triggers a background merge into Level 1.</summary>
     internal int Level0CompactionThreshold { get; set; } = 4;
+
+    /// <summary>Live-file count that triggers background compaction for non-zero levels.</summary>
+    internal int LevelCompactionThreshold { get; set; } = 4;
+
+    /// <summary>Highest persisted LSM level. Compaction into this level can drop tombstones.</summary>
+    internal int MaxCompactionLevel { get; set; } = DefaultMaxCompactionLevel;
 
     /// <summary>File registry used by background compaction; compaction is disabled while null.</summary>
     internal LsmFileRegistry? CompactionRegistry { get; set; }
@@ -353,13 +361,13 @@ public sealed class LsmTable : IDisposable
                 return;
             }
 
+            MaybeCompactLevels();
+
             lock (_gate)
             {
                 _workerBusy = false;
                 Monitor.PulseAll(_gate);
             }
-
-            MaybeCompactLevel0();
         }
     }
 
@@ -433,7 +441,21 @@ public sealed class LsmTable : IDisposable
         }
     }
 
-    private void MaybeCompactLevel0()
+    internal void CompactAllLevelsForMaintenance()
+    {
+        LsmFileRegistry? registry = CompactionRegistry;
+        if (registry is null)
+        {
+            return;
+        }
+
+        lock (_ioGate)
+        {
+            CompactAllLevels(registry);
+        }
+    }
+
+    private void MaybeCompactLevels()
     {
         LsmFileRegistry? registry = CompactionRegistry;
         if (registry is null)
@@ -445,11 +467,7 @@ public sealed class LsmTable : IDisposable
         {
             lock (_ioGate)
             {
-                if (_manifest.GetLiveFiles(0).Count >= Level0CompactionThreshold)
-                {
-                    var compactor = new LsmCompactor(_tableDirectory, _manifest, registry);
-                    compactor.CompactLevel(sourceLevel: 0, targetLevel: 1);
-                }
+                CompactEligibleLevels(registry);
             }
         }
         catch (Exception ex)
@@ -471,11 +489,98 @@ public sealed class LsmTable : IDisposable
             }
 
             _flushWorker = _flushWorker.ContinueWith(
-                _ => MaybeCompactLevel0(),
+                _ => RunScheduledCompactionCheck(),
                 CancellationToken.None,
                 TaskContinuationOptions.None,
                 TaskScheduler.Default);
         }
+    }
+
+    private void RunScheduledCompactionCheck()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _backgroundError is not null)
+            {
+                return;
+            }
+
+            _workerBusy = true;
+        }
+
+        try
+        {
+            MaybeCompactLevels();
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _workerBusy = false;
+                Monitor.PulseAll(_gate);
+            }
+        }
+    }
+
+    private void CompactEligibleLevels(LsmFileRegistry registry)
+    {
+        int maxLevel = ValidatedMaxCompactionLevel();
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry);
+
+        bool madeProgress;
+        do
+        {
+            madeProgress = false;
+            for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
+            {
+                int threshold = sourceLevel == 0 ? Level0CompactionThreshold : LevelCompactionThreshold;
+                if (threshold <= 0)
+                {
+                    throw new InvalidOperationException("LSM compaction thresholds must be positive.");
+                }
+
+                if (_manifest.GetLiveFiles(sourceLevel).Count < threshold)
+                {
+                    continue;
+                }
+
+                int targetLevel = sourceLevel + 1;
+                compactor.CompactLevel(
+                    sourceLevel,
+                    targetLevel,
+                    dropTombstonesAtBottomLevel: targetLevel == maxLevel);
+                madeProgress = true;
+            }
+        }
+        while (madeProgress);
+    }
+
+    private void CompactAllLevels(LsmFileRegistry registry)
+    {
+        int maxLevel = ValidatedMaxCompactionLevel();
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry);
+
+        for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
+        {
+            while (_manifest.GetLiveFiles(sourceLevel).Count > 0)
+            {
+                int targetLevel = sourceLevel + 1;
+                compactor.CompactLevel(
+                    sourceLevel,
+                    targetLevel,
+                    dropTombstonesAtBottomLevel: targetLevel == maxLevel);
+            }
+        }
+    }
+
+    private int ValidatedMaxCompactionLevel()
+    {
+        if (MaxCompactionLevel < 1)
+        {
+            throw new InvalidOperationException("LSM max compaction level must be at least 1.");
+        }
+
+        return MaxCompactionLevel;
     }
 
     private void WaitForFlushPipelineNoLock()

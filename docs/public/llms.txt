@@ -1,0 +1,40 @@
+# DataVo Documentation
+
+DataVo is a C#-native embedded database engine. This file exposes only the curated public v0.1 Alpha manual.
+
+## Manual Pages
+- [What Is DataVo?](/ai/pages/manual/preface/what-is-datavo.md)
+- [v0.1 Alpha Scope](/ai/pages/manual/preface/alpha-scope.md)
+- [Roadmap](/ai/pages/manual/preface/roadmap.md)
+- [Quickstart](/ai/pages/manual/tutorial/quickstart.md)
+- [Using DataVoContext](/ai/pages/manual/tutorial/datavo-context.md)
+- [Entity Framework Example](/ai/pages/manual/tutorial/entity-framework-example.md)
+- [Vector Search Example](/ai/pages/manual/tutorial/vector-search-example.md)
+- [Supported SQL](/ai/pages/manual/sql-language/supported-sql.md)
+- [CREATE TABLE](/ai/pages/manual/sql-language/create-table.md)
+- [Data Manipulation](/ai/pages/manual/sql-language/data-manipulation.md)
+- [Queries](/ai/pages/manual/sql-language/queries.md)
+- [Vector Search and Indexes](/ai/pages/manual/sql-language/vector-search-syntax.md)
+- [SQL Compatibility Matrix](/ai/pages/manual/sql-language/sql-compatibility.md)
+- [Storage Modes](/ai/pages/manual/storage-engine/storage-modes.md)
+- [LSM Mode](/ai/pages/manual/storage-engine/lsm-mode.md)
+- [WAL And Durability](/ai/pages/manual/storage-engine/wal-and-durability.md)
+- [Transactions and MVCC](/ai/pages/manual/storage-engine/transactions-acid-mvcc.md)
+- [Query Planner And Fast Paths](/ai/pages/manual/storage-engine/query-planner-fast-paths.md)
+- [Connecting to DataVo](/ai/pages/manual/client-interfaces/datavo-context-api.md)
+- [Entity Framework Support](/ai/pages/manual/client-interfaces/entity-framework.md)
+- [Roslyn Source Generators](/ai/pages/manual/client-interfaces/source-generators.md)
+- [Native AOT](/ai/pages/manual/client-interfaces/native-aot.md)
+- [Configuration Reference](/ai/pages/manual/reference/configuration.md)
+- [Limits](/ai/pages/manual/reference/limits.md)
+- [Unsupported Features](/ai/pages/manual/reference/unsupported-features.md)
+- [Error Handling](/ai/pages/manual/reference/error-handling.md)
+- [AI Access And MCP](/ai/pages/manual/reference/ai-access.md)
+- [Benchmark Results](/ai/pages/manual/performance/benchmarks.md)
+- [Benchmark Methodology](/ai/pages/manual/performance/methodology.md)
+- [Reproducing Benchmarks](/ai/pages/manual/performance/reproducing-benchmarks.md)
+
+## Full Index
+- [AI docs index](/ai/index.json)
+- [Full Markdown export](/llms-full.txt)
+- [MCP discovery config](/mcp/datavo-docs.json)

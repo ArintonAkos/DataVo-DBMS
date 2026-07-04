@@ -1,0 +1,18 @@
+{
+  "name": "datavo-docs",
+  "description": "Local MCP server configuration for the curated DataVo v0.1 Alpha manual.",
+  "docsBaseUrl": "/",
+  "aiIndex": "/ai/index.json",
+  "llms": "/llms.txt",
+  "llmsFull": "/llms-full.txt",
+  "publicScope": "Curated manual pages only. Internal architecture, audit, generated API, and source folders are excluded.",
+  "mcpServers": {
+    "datavo-docs": {
+      "command": "node",
+      "args": [
+        "./mcp/datavo-docs-server.cjs"
+      ],
+      "cwd": "./docs"
+    }
+  }
+}

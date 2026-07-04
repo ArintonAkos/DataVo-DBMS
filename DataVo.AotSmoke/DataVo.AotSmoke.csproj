@@ -10,6 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
+    <IsPackable>false</IsPackable>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Surface cross-assembly trim/AOT issues during ordinary build of this app too. -->
     <IsAotCompatible>true</IsAotCompatible>

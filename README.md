@@ -21,6 +21,29 @@ Use DataVo when you want:
 - Browser and WebAssembly support for interactive and local-first applications
 - Integration direction for ADO.NET and Entity Framework workflows
 
+## Benchmarks
+
+The current benchmark suite was rerun on July 3, 2026 with `.NET 10.0.103` on macOS arm64 / Apple Silicon. Treat these as local benchmark results, not universal database rankings: storage mode, durability setting, hardware, filesystem behavior, native extensions, and workload shape all matter.
+
+The most important distinction is durability. `DataVo LSM Production` uses strict WAL fsync before acknowledging writes. `DataVo LSM Relaxed` is an OS-buffered throughput ceiling for caches, rebuildable data, and research workloads; it does not have the same power-loss contract as strict mode.
+
+Highlights from the checked-in benchmark docs:
+
+- `1,215,413 ops/s` at one thread for DataVo LSM Relaxed in the thread-scaling workload, with roughly a 1M ops/s plateau through 32 threads.
+- `626,690 ops/s` on the YCSB mixed workload, with `1.333833 ms` write P99 latency in relaxed LSM mode.
+- `501.870 ms` total time for strict-fsync DataVo LSM Production in the disk CRUD WAL workload, versus `842.914 ms` for SQLite WAL normal in the same run.
+- `10.331 MB` allocated by the DataVo-Flat vector path for 10,000 vectors x 1536 dimensions and 100 top-10 queries; DataVo HNSW allocated `157.246 MB`, SQLite/sqlite-vec allocated `63.427 MB`, and LiteDB allocated `208,915.002 MB`.
+
+![Thread scaling throughput](docs/public/benchmarks/thread-scaling-throughput.png)
+
+![YCSB write P99 latency](docs/public/benchmarks/ycsb-write-p99.png)
+
+![Vector search allocation](docs/public/benchmarks/vector-search-allocation.png)
+
+![Disk CRUD WAL total time](docs/public/benchmarks/disk-crud-wal-time.png)
+
+More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
+
 ## Install with NuGet
 
 ### Public feed (planned)
@@ -31,6 +54,38 @@ When published, installation will follow the standard NuGet flow:
 dotnet add package DataVo.Core
 dotnet add package DataVo.Data
 dotnet add package DataVo.EntityFrameworkCore
+# Optional, for source-generated compiled queries:
+dotnet add package DataVo.Generators
+```
+
+### Publishing packages
+
+The repository is already pack-ready for the preview packages. Build and pack from the repository root:
+
+```bash
+dotnet restore DataVo.sln
+dotnet pack DataVo.Core/DataVo.Core.csproj -c Release --no-restore
+dotnet pack DataVo.Data/DataVo.Data.csproj -c Release --no-restore
+dotnet pack DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj -c Release --no-restore
+dotnet pack DataVo.Generators/DataVo.Generators.csproj -c Release --no-restore
+```
+
+Publish with a NuGet API key configured in the environment:
+
+```bash
+dotnet nuget push "artifacts/packages/*.nupkg" \
+  --api-key "$NUGET_API_KEY" \
+  --source https://api.nuget.org/v3/index.json \
+  --skip-duplicate
+```
+
+Push symbol packages separately only if symbol publishing is part of the release process:
+
+```bash
+dotnet nuget push "artifacts/packages/*.snupkg" \
+  --api-key "$NUGET_API_KEY" \
+  --source https://api.nuget.org/v3/index.json \
+  --skip-duplicate
 ```
 
 ## Vector search example

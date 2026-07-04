@@ -200,6 +200,65 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
     }
 
     [Fact]
+    public void BackgroundCompaction_CascadesBeyondLevelOneAndDropsBottomLevelTombstones()
+    {
+        string dir = Path.Combine(_root, "leveled-compaction");
+        Directory.CreateDirectory(dir);
+        var manifest = new LsmManifest(Path.Combine(dir, "MANIFEST"));
+        using var table = new LsmTable(dir, manifest)
+        {
+            CompactionRegistry = new LsmFileRegistry(dir, manifest),
+            Level0CompactionThreshold = 2,
+            LevelCompactionThreshold = 2,
+            MaxCompactionLevel = 2,
+        };
+
+        Span<byte> key = stackalloc byte[sizeof(long)];
+
+        InternalKey.EncodeInt64UserKey(key, 1);
+        table.Put(key, seqno: 1, Value(1));
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        InternalKey.EncodeInt64UserKey(key, 1);
+        table.Delete(key, seqno: 2);
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        Assert.True(
+            WaitUntil(() => manifest.GetLiveFiles(0).Count == 0 && manifest.GetLiveFiles(1).Count == 1),
+            $"expected first L0 compaction (L0={manifest.GetLiveFiles(0).Count}, L1={manifest.GetLiveFiles(1).Count})");
+
+        InternalKey.EncodeInt64UserKey(key, 2);
+        table.Put(key, seqno: 3, Value(2));
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        InternalKey.EncodeInt64UserKey(key, 3);
+        table.Put(key, seqno: 4, Value(3));
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        Assert.True(
+            WaitUntil(() => manifest.GetLiveFiles(1).Count == 0 && manifest.GetLiveFiles(2).Count == 1),
+            $"expected cascading L1 compaction (L1={manifest.GetLiveFiles(1).Count}, L2={manifest.GetLiveFiles(2).Count})");
+
+        LsmTableFileMetadata bottomFile = Assert.Single(manifest.GetLiveFiles(2));
+        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(Path.Combine(dir, bottomFile.FileName)));
+
+        InternalKey.EncodeInt64UserKey(key, 1);
+        Assert.False(reader.TryGet(key, snapshotSeqno: 2, out byte[] deletedValue, out bool isTombstone));
+        Assert.False(isTombstone);
+        Assert.Empty(deletedValue);
+
+        InternalKey.EncodeInt64UserKey(key, 2);
+        Assert.True(reader.TryGet(key, snapshotSeqno: 3, out byte[] rowTwo, out isTombstone));
+        Assert.False(isTombstone);
+        Assert.Equal(Value(2), rowTwo);
+
+        InternalKey.EncodeInt64UserKey(key, 3);
+        Assert.True(reader.TryGet(key, snapshotSeqno: 4, out byte[] rowThree, out isTombstone));
+        Assert.False(isTombstone);
+        Assert.Equal(Value(3), rowThree);
+    }
+
+    [Fact]
     public void Reopen_ReplaysRotatedWalSegmentsInOrder()
     {
         string dir = Path.Combine(_root, "segments");
