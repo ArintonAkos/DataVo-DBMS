@@ -52,18 +52,25 @@ function connect() {
 }
 
 function renderQueries(queries) {
-  queryList.innerHTML = "";
+  queryList.replaceChildren();
   for (const query of queries) {
     const card = document.createElement("div");
     card.className = "query-card";
-    card.innerHTML = `
-      <h3>${query.label}</h3>
-      <code>${query.sql}</code>
-      <button type="button">Subscribe</button>
-    `;
-    card.querySelector("button").addEventListener("click", () => {
+
+    const title = document.createElement("h3");
+    title.textContent = query.label;
+
+    const code = document.createElement("code");
+    code.textContent = query.sql;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Subscribe";
+    button.addEventListener("click", () => {
       send({ type: "subscribe", id: query.id, sql: query.sql });
     });
+
+    card.append(title, code, button);
     queryList.appendChild(card);
   }
 }
@@ -80,10 +87,14 @@ function renderMetrics(metrics) {
 function appendEvent(label, payload) {
   const node = document.createElement("div");
   node.className = "event";
-  node.innerHTML = `
-    <strong>${label}</strong>
-    <pre>${JSON.stringify(payload, null, 2)}</pre>
-  `;
+
+  const strong = document.createElement("strong");
+  strong.textContent = label;
+
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(payload, null, 2);
+
+  node.append(strong, pre);
   events.prepend(node);
   while (events.children.length > 80) {
     events.lastElementChild.remove();
