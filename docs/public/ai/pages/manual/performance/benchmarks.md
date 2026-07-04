@@ -419,6 +419,13 @@ These measurements were produced by the GitHub Actions Linux benchmark workflow 
 
 This is appended as a separate sqlite-vec-enabled Linux snapshot. SQLite vector search now reports measured results instead of `n/a`.
 
+### Linux rerun headline charts
+
+The charts below summarize the sqlite-vec-enabled Linux rerun: vector total time, vector query P99, and thread-scaling throughput. The raw tables that follow retain the exact values.
+
+
+
+
 ### Linux rerun simple exposure
 
 | Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |

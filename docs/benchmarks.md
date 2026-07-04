@@ -712,6 +712,110 @@ These measurements were produced by the GitHub Actions Linux benchmark workflow 
 
 This is appended as a separate sqlite-vec-enabled Linux snapshot. SQLite vector search now reports measured results instead of `n/a`.
 
+### Linux rerun headline charts
+
+The charts below summarize the sqlite-vec-enabled Linux rerun: vector total time, vector query P99, and thread-scaling throughput. The raw tables that follow retain the exact values.
+
+<BenchmarkChart
+  title="Linux vector search total time"
+  subtitle="10,000 x 1536-dim vectors, then 100 top-10 queries."
+  kind="bar"
+  scale="log"
+  unit="ms"
+  x-axis-label="Workload metric"
+  y-axis-label="Total time (milliseconds, log scale)"
+  :value-digits="3"
+  :x-labels="['Total time']"
+  :series="[
+    {
+      name: 'DataVo',
+      values: [79536.809],
+      details: ['P99 query latency 2.557093 ms']
+    },
+    {
+      name: 'DataVo-Flat',
+      values: [602.778],
+      details: ['P99 query latency 10.595424 ms']
+    },
+    {
+      name: 'LiteDB',
+      values: [164640.254],
+      details: ['P99 query latency 1663.416067 ms']
+    },
+    {
+      name: 'SQLite/sqlite-vec',
+      values: [2186.128],
+      details: ['P99 query latency 19.589254 ms']
+    }
+  ]"
+  note="Linux CI now loads sqlite-vec; SQLite total time includes native vec0 insert/build and query work."
+/>
+
+<BenchmarkChart
+  title="Linux vector search query P99"
+  subtitle="Query-phase P99 latency for 100 top-10 searches."
+  kind="bar"
+  scale="log"
+  unit="ms"
+  x-axis-label="Workload metric"
+  y-axis-label="Query P99 latency (milliseconds, log scale)"
+  :value-digits="6"
+  :x-labels="['P99']"
+  :series="[
+    {
+      name: 'DataVo',
+      values: [2.557093],
+      details: ['79,536.809 ms total']
+    },
+    {
+      name: 'DataVo-Flat',
+      values: [10.595424],
+      details: ['602.778 ms total']
+    },
+    {
+      name: 'LiteDB',
+      values: [1663.416067],
+      details: ['164,640.254 ms total']
+    },
+    {
+      name: 'SQLite/sqlite-vec',
+      values: [19.589254],
+      details: ['2,186.128 ms total']
+    }
+  ]"
+  note="DataVo HNSW has the lowest query P99 in this run; DataVo-Flat has the lowest total time."
+/>
+
+<BenchmarkChart
+  title="Linux thread scaling throughput"
+  subtitle="Preload 100,000 records, then run 100,000 reads and 10,000 updates."
+  kind="line"
+  scale="linear"
+  unit="ops/s"
+  x-axis-label="Thread count"
+  y-axis-label="Throughput (operations per second)"
+  :value-digits="0"
+  :x-labels="['1', '2', '4', '8', '16', '32']"
+  :series="[
+    {
+      name: 'DataVo LSM Relaxed',
+      values: [669441.400, 692373.008, 557513.046, 554449.457, 553293.479, 551425.988],
+      details: ['164.316 ms total', '158.874 ms total', '197.305 ms total', '198.395 ms total', '198.810 ms total', '199.483 ms total']
+    },
+    {
+      name: 'SQLite WAL normal',
+      values: [125139.630, 188187.215, 206687.661, 242693.117, 252509.775, 243662.720],
+      details: ['879.018 ms total', '584.524 ms total', '532.204 ms total', '453.247 ms total', '435.627 ms total', '451.444 ms total']
+    },
+    {
+      name: 'LiteDB',
+      values: [24505.799, 24510.724, 22167.619, 21192.578, 22149.964, 22280.677],
+      details: ['4,488.734 ms total', '4,487.832 ms total', '4,962.193 ms total', '5,190.497 ms total', '4,966.148 ms total', '4,937.013 ms total']
+    }
+  ]"
+  note="This is the Linux CI rerun, not the macOS arm64 headline chart above."
+/>
+
 ### Linux rerun simple exposure
 
 | Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |

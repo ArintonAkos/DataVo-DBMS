@@ -36,6 +36,14 @@ Highlights from the checked-in benchmark docs:
 - `501.870 ms` total time for strict-fsync DataVo LSM Production in the disk CRUD WAL workload, versus `842.914 ms` for SQLite WAL normal in the same run.
 - `10.331 MB` allocated by the DataVo-Flat vector path for 10,000 vectors x 1536 dimensions and 100 top-10 queries; DataVo HNSW allocated `157.246 MB`, SQLite/sqlite-vec allocated `63.427 MB`, and LiteDB allocated `208,915.002 MB`.
 
+Linux CI sqlite-vec rerun highlights:
+
+- SQLite/sqlite-vec now runs in CI with `SQLITE_VEC_PATH` set to the pinned Linux x86_64 `vec0.so` extension.
+- On the Linux vector workload, DataVo HNSW reported `2.557093 ms` query P99, DataVo-Flat reported `602.778 ms` total time, and SQLite/sqlite-vec reported `2,186.128 ms` total time with `19.589254 ms` query P99.
+- On Linux thread scaling, DataVo LSM Relaxed reported `692,373 ops/s` at two threads and stayed above `551,000 ops/s` through 32 threads.
+
+macOS arm64 headline plots:
+
 ![Thread scaling throughput](docs/public/benchmarks/thread-scaling-throughput.png)
 
 ![YCSB write P99 latency](docs/public/benchmarks/ycsb-write-p99.png)
@@ -43,6 +51,14 @@ Highlights from the checked-in benchmark docs:
 ![Vector search allocation](docs/public/benchmarks/vector-search-allocation.png)
 
 ![Disk CRUD WAL total time](docs/public/benchmarks/disk-crud-wal-time.png)
+
+Linux CI sqlite-vec rerun plots:
+
+![Linux vector search total time](docs/public/benchmarks/linux-vector-search-time.svg)
+
+![Linux vector search query P99](docs/public/benchmarks/linux-vector-search-p99.svg)
+
+![Linux thread scaling throughput](docs/public/benchmarks/linux-thread-scaling-throughput.svg)
 
 More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
 
