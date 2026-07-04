@@ -728,6 +728,116 @@ This is appended as a separate Linux snapshot. It does not replace the July 3, 2
 | SQLite (WAL,normal) | 1,794.018 | 58.405 | 0.685 | 629.097 |
 | LiteDB | 7,416.158 | 154.461 | 1.425 | 15,158.757 |
 
+## Linux CI Snapshot - July 4, 2026 sqlite-vec rerun
+
+These measurements were produced by the GitHub Actions Linux benchmark workflow on July 4, 2026 at `2026-07-04T20:13:44Z`, after the workflow began downloading the pinned `sqlite-vec` loadable extension. Environment: Ubuntu 24.04 hosted runner on Azure, Linux kernel `6.17.0-1018-azure`, x64, .NET SDK `10.0.301`, .NET host `10.0.9`, `sqlite-vec` `0.1.9` from `sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz` with SHA256 `b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7`.
+
+This is appended as a separate sqlite-vec-enabled Linux snapshot. SQLite vector search now reports measured results instead of `n/a`.
+
+### Linux rerun simple exposure
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 1,241.747 | 0.016241 | 0.110366 | 355.567 |
+| DuckDB | 170,289.722 | 3.362646 | 4.548743 | 208.302 |
+| SQLite | 1,430.825 | 0.022482 | 0.062748 | 199.715 |
+
+### Linux rerun complex VIP
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 471.420 | 0.007934 | 0.021069 | 97.473 |
+| DuckDB | 110,489.423 | 2.190414 | 2.623444 | 131.237 |
+| SQLite | 233,819.490 | 4.589164 | 8.130840 | 115.601 |
+
+### Linux rerun flat CRUD
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | Insert GC (MB) | Lookup GC (MB) | Total GC (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| DataVo | 148.330 | 0.001252 | 0.002034 | 19.396 | 2.290 | 21.686 |
+| LiteDB | 2,815.603 | 0.022832 | 0.103844 | 635.945 | 1,833.159 | 2,469.104 |
+| SQLite | 341.896 | 0.003206 | 0.004849 | 31.285 | 30.824 | 62.109 |
+
+### Linux rerun disk CRUD WAL
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 480.493 | 0.000090 | 0.000111 | 49.339 |
+| DataVo (LSM Relaxed) | 213.726 | 0.000090 | 0.000120 | 36.613 |
+| SQLite (WAL,normal) | 1,136.952 | 0.013726 | 0.029305 | 57.003 |
+| SQLite (WAL,full) | 9,058.913 | 0.119884 | 0.590714 | 53.414 |
+
+### Linux rerun deep document
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 155.220 | 0.010309 | 0.022883 | 23.061 |
+| LiteDB | 1,410.523 | 0.185899 | 0.284583 | 332.249 |
+| SQLite | 366.910 | 0.020088 | 0.032731 | 46.048 |
+
+### Linux rerun concurrent ops
+
+| Engine | Total time (ms) | Ops/s | Read P99 (ms) | Write P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DataVo | 9,009.968 | 2,765,510.729 | 0.005290 | 0.000000 | 1,906.625 |
+| SQLite | 5,107.601 | 212,973.762 | 0.172972 | 5,104.352643 | 606.056 |
+
+### Linux rerun vector search
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 79,536.809 | 2.316313 | 2.557093 | 157.246 |
+| DataVo-Flat | 602.778 | 2.881425 | 10.595424 | 10.327 |
+| LiteDB | 164,640.254 | 1,614.703016 | 1,663.416067 | 208,915.221 |
+| SQLite | 2,186.128 | 18.414207 | 19.589254 | 63.279 |
+
+### Linux rerun thread scaling
+
+| Engine | Threads | Total time (ms) | Ops/s | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 1 | 4,018.153 | 27,375.762 | 23.509 |
+| DataVo (LSM Production) | 2 | 3,196.829 | 34,409.095 | 21.619 |
+| DataVo (LSM Production) | 4 | 1,793.892 | 61,319.188 | 20.033 |
+| DataVo (LSM Production) | 8 | 1,575.778 | 69,806.783 | 18.875 |
+| DataVo (LSM Production) | 16 | 1,675.560 | 65,649.697 | 19.914 |
+| DataVo (LSM Production) | 32 | 1,563.815 | 70,340.792 | 19.863 |
+| DataVo (LSM Relaxed) | 1 | 164.316 | 669,441.400 | 20.064 |
+| DataVo (LSM Relaxed) | 2 | 158.874 | 692,373.008 | 17.704 |
+| DataVo (LSM Relaxed) | 4 | 197.305 | 557,513.046 | 17.704 |
+| DataVo (LSM Relaxed) | 8 | 198.395 | 554,449.457 | 17.705 |
+| DataVo (LSM Relaxed) | 16 | 198.810 | 553,293.479 | 17.705 |
+| DataVo (LSM Relaxed) | 32 | 199.483 | 551,425.988 | 17.706 |
+| SQLite (WAL,normal) | 1 | 879.018 | 125,139.630 | 62.036 |
+| SQLite (WAL,normal) | 2 | 584.524 | 188,187.215 | 62.036 |
+| SQLite (WAL,normal) | 4 | 532.204 | 206,687.661 | 62.041 |
+| SQLite (WAL,normal) | 8 | 453.247 | 242,693.117 | 62.056 |
+| SQLite (WAL,normal) | 16 | 435.627 | 252,509.775 | 62.045 |
+| SQLite (WAL,normal) | 32 | 451.444 | 243,662.720 | 62.041 |
+| LiteDB | 1 | 4,488.734 | 24,505.799 | 4,367.394 |
+| LiteDB | 2 | 4,487.832 | 24,510.724 | 4,350.557 |
+| LiteDB | 4 | 4,962.193 | 22,167.619 | 4,350.839 |
+| LiteDB | 8 | 5,190.497 | 21,192.578 | 4,350.763 |
+| LiteDB | 16 | 4,966.148 | 22,149.964 | 4,350.672 |
+| LiteDB | 32 | 4,937.013 | 22,280.677 | 4,350.705 |
+
+### Linux rerun YCSB mixed
+
+| Engine | Total time (ms) | Ops/s | Read P99 (ms) | Write P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 3,773.362 | 26,501.563 | 0.010309 | 2.506526 | 26.132 |
+| DataVo (LSM Relaxed) | 370.689 | 269,767.991 | 0.002445 | 0.384078 | 21.123 |
+| SQLite (WAL,normal) | 1,331.577 | 75,098.930 | 0.045144 | 3.219948 | 55.506 |
+| LiteDB | 6,546.631 | 15,275.033 | 0.131846 | 0.245650 | 4,276.233 |
+
+### Linux rerun space and recovery
+
+| Engine | Insert time (ms) | Disk size (MB) | Recovery time (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 1,597.586 | 66.444 | 0.929 | 286.401 |
+| DataVo (LSM Relaxed) | 1,036.807 | 66.444 | 0.802 | 205.669 |
+| SQLite (WAL,normal) | 1,779.351 | 58.405 | 0.633 | 629.039 |
+| LiteDB | 6,891.179 | 154.461 | 1.342 | 15,158.796 |
+
 ## Responsible Interpretation
 
 DataVo's strongest current evidence is workload-specific: allocation-controlled typed rows, source-generated access paths, LSM write paths, and vector allocation behavior. The relaxed LSM results should not be presented as equivalent to strict fsync durability. SQLite and DuckDB remain mature engines with broad SQL support, sophisticated optimizers, and production hardening far beyond a v0.1 alpha embedded engine.
