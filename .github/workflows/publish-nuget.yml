@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # OIDC token for NuGet Trusted Publishing
 
 jobs:
   publish:
@@ -37,12 +38,20 @@ jobs:
             dotnet pack DataVo.sln -c Release -o artifacts/packages
           fi
 
+      # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
+      # (~1h) nuget.org API key. Requested right before the push so it can't
+      # expire. Needs a matching Trusted Publishing policy on nuget.org.
+      - name: NuGet login (Trusted Publishing)
+        if: github.ref_type == 'tag'
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: arintonakos
+
       - name: Push to NuGet
         if: github.ref_type == 'tag'
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: >-
           dotnet nuget push "artifacts/packages/*.nupkg"
-          --api-key "$NUGET_API_KEY"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
