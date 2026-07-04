@@ -164,7 +164,7 @@ function normalizePathForReport(filePath) {
 
 function parseClassRanges(content) {
   const classes = [];
-  const classRegex = /((?:\s*\[[^\]]+\]\s*)*)\s*(?:public|internal|protected|private)?\s*(?:abstract\s+)?(?:partial\s+)?class\s+([A-Za-z0-9_]+)[^{]*\{/g;
+  const classRegex = /((?:\[[^\]]+\]\s*)*)(?:public|internal|protected|private)?\s*(?:abstract\s+)?(?:partial\s+)?class\s+([A-Za-z0-9_]+)[^{]*\{/g;
   let match;
 
   while ((match = classRegex.exec(content)) !== null) {
@@ -205,7 +205,7 @@ function isTestAttributes(attrs) {
 function parseAllMethods(content) {
   const classRanges = parseClassRanges(content);
   const methods = [];
-  const methodRegex = /((?:\s*\[[^\]]+\]\s*)*)\s*(?:public|internal|protected|private)\s+(?:static\s+)?(?:async\s+)?(?:System\.Threading\.Tasks\.)?(?:Task|void)\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{/g;
+  const methodRegex = /((?:\[[^\]]+\]\s*)*)(?:public|internal|protected|private)\s+(?:static\s+)?(?:async\s+)?(?:System\.Threading\.Tasks\.)?(?:Task|void)\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{/g;
   let methodMatch;
 
   while ((methodMatch = methodRegex.exec(content)) !== null) {

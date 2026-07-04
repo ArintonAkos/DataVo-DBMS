@@ -16,6 +16,9 @@ on:
       - "demos/Research.Benchmark/**"
       - ".github/workflows/linux-benchmark.yml"
 
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     name: Research benchmark matrix on Ubuntu
