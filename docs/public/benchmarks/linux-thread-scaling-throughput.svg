@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520" role="img" aria-label="Linux thread scaling throughput">
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <text x="112" y="32" font-size="25" font-weight="800" fill="#0f172a">Linux thread scaling throughput</text>
+      <text x="112" y="55" font-size="15" fill="#64748b">110,000 mixed read/update operations, 1 to 32 threads.</text>
+      
+      <line x1="112" y1="430" x2="872" y2="430" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="435" text-anchor="end" font-size="13" fill="#64748b">0.00</text>
+      <line x1="112" y1="360.4" x2="872" y2="360.4" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="365.4" text-anchor="end" font-size="13" fill="#64748b">150k</text>
+      <line x1="112" y1="290.79999999999995" x2="872" y2="290.79999999999995" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="295.79999999999995" text-anchor="end" font-size="13" fill="#64748b">300k</text>
+      <line x1="112" y1="221.20000000000002" x2="872" y2="221.20000000000002" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="226.20000000000002" text-anchor="end" font-size="13" fill="#64748b">450k</text>
+      <line x1="112" y1="151.59999999999997" x2="872" y2="151.59999999999997" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="156.59999999999997" text-anchor="end" font-size="13" fill="#64748b">600k</text>
+      <line x1="112" y1="82" x2="872" y2="82" stroke="#d8dee9" stroke-width="1"/>
+      <text x="98" y="87" text-anchor="end" font-size="13" fill="#64748b">750k</text>
+      <line x1="112" y1="430" x2="872" y2="430" stroke="#334155" stroke-width="1.2"/>
+      <line x1="112" y1="82" x2="112" y2="430" stroke="#334155" stroke-width="1.2"/>
+      <text x="28" y="64" font-size="14" font-weight="700" fill="#334155">ops/s</text>
+      <text x="492" y="462" text-anchor="middle" font-size="14" font-weight="700" fill="#334155">Thread count</text>
+      
+    <text x="112" y="464" text-anchor="middle" font-size="14" fill="#0f172a">1</text>
+  
+    <text x="264" y="464" text-anchor="middle" font-size="14" fill="#0f172a">2</text>
+  
+    <text x="416" y="464" text-anchor="middle" font-size="14" fill="#0f172a">4</text>
+  
+    <text x="568" y="464" text-anchor="middle" font-size="14" fill="#0f172a">8</text>
+  
+    <text x="720" y="464" text-anchor="middle" font-size="14" fill="#0f172a">16</text>
+  
+    <text x="872" y="464" text-anchor="middle" font-size="14" fill="#0f172a">32</text>
+  
+      
+      <polyline points="112,119.37919040000003 264,108.73892428799996 416,171.31394665599998 568,172.73545195199995 720,173.271825744 872,174.138341568" fill="none" stroke="#0891b2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <circle cx="112" cy="119.37919040000003" r="5" fill="#0891b2"/>
+    
+      <circle cx="264" cy="108.73892428799996" r="5" fill="#0891b2"/>
+    
+      <circle cx="416" cy="171.31394665599998" r="5" fill="#0891b2"/>
+    
+      <circle cx="568" cy="172.73545195199995" r="5" fill="#0891b2"/>
+    
+      <circle cx="720" cy="173.271825744" r="5" fill="#0891b2"/>
+    
+      <circle cx="872" cy="174.138341568" r="5" fill="#0891b2"/>
+    
+      <polyline points="112,371.93521168 264,342.68113224 416,334.096925296 568,317.390393712 720,312.8354644 872,316.94049792" fill="none" stroke="#d97706" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <circle cx="112" cy="371.93521168" r="5" fill="#d97706"/>
+    
+      <circle cx="264" cy="342.68113224" r="5" fill="#d97706"/>
+    
+      <circle cx="416" cy="334.096925296" r="5" fill="#d97706"/>
+    
+      <circle cx="568" cy="317.390393712" r="5" fill="#d97706"/>
+    
+      <circle cx="720" cy="312.8354644" r="5" fill="#d97706"/>
+    
+      <circle cx="872" cy="316.94049792" r="5" fill="#d97706"/>
+    
+      <polyline points="112,418.62930926399997 264,418.627024064 416,419.714224784 568,420.166643808 720,419.722416704 872,419.661765872" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <circle cx="112" cy="418.62930926399997" r="5" fill="#7c3aed"/>
+    
+      <circle cx="264" cy="418.627024064" r="5" fill="#7c3aed"/>
+    
+      <circle cx="416" cy="419.714224784" r="5" fill="#7c3aed"/>
+    
+      <circle cx="568" cy="420.166643808" r="5" fill="#7c3aed"/>
+    
+      <circle cx="720" cy="419.722416704" r="5" fill="#7c3aed"/>
+    
+      <circle cx="872" cy="419.661765872" r="5" fill="#7c3aed"/>
+    
+      
+      <rect x="112" y="476" width="14" height="14" rx="2" fill="#0891b2"/>
+      <text x="134" y="488" font-size="14" fill="#0f172a">DataVo LSM Relaxed</text>
+      <rect x="324" y="476" width="14" height="14" rx="2" fill="#d97706"/>
+      <text x="346" y="488" font-size="14" fill="#0f172a">SQLite WAL normal</text>
+      <rect x="536" y="476" width="14" height="14" rx="2" fill="#7c3aed"/>
+      <text x="558" y="488" font-size="14" fill="#0f172a">LiteDB</text>
+    </svg>
