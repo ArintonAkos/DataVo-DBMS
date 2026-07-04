@@ -25,6 +25,8 @@ Use DataVo when you want:
 
 The current benchmark suite was rerun on July 3, 2026 with `.NET 10.0.103` on macOS arm64 / Apple Silicon. Treat these as local benchmark results, not universal database rankings: storage mode, durability setting, hardware, filesystem behavior, native extensions, and workload shape all matter.
 
+An additional GitHub Actions Linux snapshot from July 4, 2026 is appended in the detailed benchmark docs; it is kept separate from the macOS headline measurements.
+
 The most important distinction is durability. `DataVo LSM Production` uses strict WAL fsync before acknowledging writes. `DataVo LSM Relaxed` is an OS-buffered throughput ceiling for caches, rebuildable data, and research workloads; it does not have the same power-loss contract as strict mode.
 
 Highlights from the checked-in benchmark docs:

@@ -34,6 +34,31 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Install sqlite-vec loadable extension
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SQLITE_VEC_VERSION="0.1.9"
+          SQLITE_VEC_ARCHIVE="sqlite-vec-${SQLITE_VEC_VERSION}-loadable-linux-x86_64.tar.gz"
+          SQLITE_VEC_URL="https://github.com/asg017/sqlite-vec/releases/download/v${SQLITE_VEC_VERSION}/${SQLITE_VEC_ARCHIVE}"
+          SQLITE_VEC_SHA256="b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7"
+          SQLITE_VEC_DIR="${RUNNER_TEMP}/sqlite-vec"
+
+          mkdir -p "$SQLITE_VEC_DIR"
+          curl -sSfL "$SQLITE_VEC_URL" -o "${SQLITE_VEC_DIR}/${SQLITE_VEC_ARCHIVE}"
+          echo "${SQLITE_VEC_SHA256}  ${SQLITE_VEC_DIR}/${SQLITE_VEC_ARCHIVE}" | sha256sum -c -
+          echo "${SQLITE_VEC_SHA256}  ${SQLITE_VEC_ARCHIVE}" > "${SQLITE_VEC_DIR}/checksums.txt"
+          tar -xzf "${SQLITE_VEC_DIR}/${SQLITE_VEC_ARCHIVE}" -C "$SQLITE_VEC_DIR"
+          test -f "${SQLITE_VEC_DIR}/vec0.so"
+
+          echo "SQLITE_VEC_PATH=${SQLITE_VEC_DIR}/vec0.so" >> "$GITHUB_ENV"
+          {
+            echo "SQLITE_VEC_VERSION=${SQLITE_VEC_VERSION}"
+            echo "SQLITE_VEC_ARCHIVE=${SQLITE_VEC_ARCHIVE}"
+            echo "SQLITE_VEC_SHA256=${SQLITE_VEC_SHA256}"
+          } >> "$GITHUB_ENV"
+
       - name: Restore benchmark host
         run: dotnet restore demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj
 
@@ -66,6 +91,8 @@ jobs:
             echo "DataVo Linux benchmark matrix"
             echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo "Kernel: $(uname -a)"
+            echo "sqlite-vec: ${SQLITE_VEC_VERSION} (${SQLITE_VEC_ARCHIVE}, sha256:${SQLITE_VEC_SHA256})"
+            echo "SQLITE_VEC_PATH: ${SQLITE_VEC_PATH}"
             dotnet --info
           } | tee -a "$LOG_FILE"
 
@@ -93,4 +120,14 @@ jobs:
         with:
           name: linux-benchmark-log
           path: artifacts/linux-benchmark.log
+          if-no-files-found: error
+
+      - name: Upload sqlite-vec extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-vec-linux-x86_64
+          path: |
+            ${{ runner.temp }}/sqlite-vec/vec0.so
+            ${{ runner.temp }}/sqlite-vec/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz
+            ${{ runner.temp }}/sqlite-vec/checksums.txt
           if-no-files-found: error
