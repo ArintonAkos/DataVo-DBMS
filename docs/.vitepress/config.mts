@@ -3,265 +3,120 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 
 export default withMermaid(
   defineConfig({
-    title: "DataVo DBMS",
-    description: "A Custom C# Database Management System",
+    title: "DataVo",
+    description:
+      "C#-native embedded database documentation for DataVo v0.1 Alpha.",
+    cleanUrls: true,
+    srcExclude: [
+      "superpowers/**",
+      "public/**",
+      "DataVo.Core/**",
+      "architecture/**",
+      "audit/**",
+      "features/**",
+      "Parser.cs.tmp",
+      "ai-mcp.md",
+      "benchmarks.md",
+      "configuration.md",
+      "fast-paths.md",
+      "quickstart.md",
+      "source-generators.md",
+      "sql-reference.md",
+    ],
     head: [
       ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ],
     themeConfig: {
+      logo: "/favicon.svg",
+      siteTitle: "DataVo",
       nav: [
         { text: "Home", link: "/" },
-        { text: "Features", link: "/features/" },
-        { text: "Core Modules", link: "/DataVo.Core/" },
+        { text: "Manual", link: "/manual/preface/what-is-datavo" },
+        { text: "Quickstart", link: "/manual/tutorial/quickstart" },
+        { text: "SQL", link: "/manual/sql-language/supported-sql" },
+        { text: "Benchmarks", link: "/manual/performance/benchmarks" },
+        { text: "AI Access", link: "/manual/reference/ai-access" },
       ],
       sidebar: [
         {
-          text: "Feature Documentation",
+          text: "Preface",
+          collapsed: false,
           items: [
-            { text: "Overview", link: "/features/" },
-            { text: "Getting Started", link: "/features/getting-started" },
-            {
-              text: "Setup and Packaging",
-              link: "/features/setup-and-packaging",
-            },
-            {
-              text: "WebAssembly and npm",
-              link: "/features/wasm-and-npm",
-            },
-            {
-              text: "Unity and Godot",
-              link: "/features/unity-and-godot",
-            },
-            {
-              text: "Entity Framework",
-              link: "/features/entity-framework",
-            },
-            {
-              text: "SELECT and Querying",
-              link: "/features/select-and-querying",
-            },
-            {
-              text: "Security and Authentication",
-              link: "/features/security-and-authentication",
-            },
-            { text: "Data Modification", link: "/features/data-modification" },
-            { text: "Schema and DDL", link: "/features/schema-and-ddl" },
-            { text: "Transactions", link: "/features/transactions" },
-            {
-              text: "Roadmap and Integrations",
-              link: "/features/roadmap-and-integrations",
-            },
+            { text: "What Is DataVo?", link: "/manual/preface/what-is-datavo" },
+            { text: "v0.1 Alpha Scope", link: "/manual/preface/alpha-scope" },
+            { text: "Roadmap", link: "/manual/preface/roadmap" },
           ],
         },
         {
-          text: "Architecture",
+          text: "Tutorial",
+          collapsed: true,
           items: [
-            {
-              text: "DataVo.Core Modules",
-              link: "/DataVo.Core/",
-              collapsed: false,
-              items: [
-                {
-                  text: "BTree",
-                  collapsed: true,
-                  items: [
-                    { text: "Overview", link: "/DataVo.Core/BTree/" },
-                    {
-                      text: "IndexManager",
-                      link: "/DataVo.Core/BTree/IndexManager",
-                    },
-                    { text: "BPlus", link: "/DataVo.Core/BTree/BPlus/" },
-                    { text: "Binary", link: "/DataVo.Core/BTree/Binary/" },
-                    { text: "Core", link: "/DataVo.Core/BTree/Core/" },
-                  ],
-                },
-                { text: "Cache", link: "/DataVo.Core/Cache/" },
-                { text: "Constants", link: "/DataVo.Core/Constants/" },
-                {
-                  text: "Contracts",
-                  collapsed: true,
-                  items: [
-                    { text: "Overview", link: "/DataVo.Core/Contracts/" },
-                    {
-                      text: "Results",
-                      link: "/DataVo.Core/Contracts/Results/",
-                    },
-                  ],
-                },
-                { text: "Enums", link: "/DataVo.Core/Enums/" },
-                { text: "Exceptions", link: "/DataVo.Core/Exceptions/" },
-                { text: "Logger", link: "/DataVo.Core/Logger/" },
-                { text: "Runtime", link: "/DataVo.Core/Runtime/" },
-                {
-                  text: "Models",
-                  collapsed: true,
-                  items: [
-                    { text: "Overview", link: "/DataVo.Core/Models/" },
-                    { text: "Catalog", link: "/DataVo.Core/Models/Catalog/" },
-                    { text: "DDL", link: "/DataVo.Core/Models/DDL/" },
-                    { text: "DML", link: "/DataVo.Core/Models/DML/" },
-                    { text: "DQL", link: "/DataVo.Core/Models/DQL/" },
-                    {
-                      text: "Statement",
-                      link: "/DataVo.Core/Models/Statement/",
-                    },
-                    {
-                      text: "Statement Utils",
-                      link: "/DataVo.Core/Models/Statement/Utils/",
-                    },
-                  ],
-                },
-                {
-                  text: "Parser",
-                  collapsed: true,
-                  items: [
-                    { text: "Overview", link: "/DataVo.Core/Parser/" },
-                    {
-                      text: "Parser Orchestrator",
-                      link: "/DataVo.Core/Parser/Parser",
-                    },
-                    { text: "AST", link: "/DataVo.Core/Parser/AST/" },
-                    { text: "Actions", link: "/DataVo.Core/Parser/Actions/" },
-                    {
-                      text: "Aggregations",
-                      link: "/DataVo.Core/Parser/Aggregations/",
-                    },
-                    { text: "Binding", link: "/DataVo.Core/Parser/Binding/" },
-                    { text: "Commands", link: "/DataVo.Core/Parser/Commands/" },
-                    {
-                      text: "DDL",
-                      collapsed: true,
-                      items: [
-                        { text: "Overview", link: "/DataVo.Core/Parser/DDL/" },
-                        {
-                          text: "CreateTable",
-                          link: "/DataVo.Core/Parser/DDL/CreateTable",
-                        },
-                        {
-                          text: "DropTable",
-                          link: "/DataVo.Core/Parser/DDL/DropTable",
-                        },
-                        {
-                          text: "CreateIndex",
-                          link: "/DataVo.Core/Parser/DDL/CreateIndex",
-                        },
-                      ],
-                    },
-                    {
-                      text: "DML",
-                      collapsed: true,
-                      items: [
-                        { text: "Overview", link: "/DataVo.Core/Parser/DML/" },
-                        {
-                          text: "InsertInto",
-                          link: "/DataVo.Core/Parser/DML/InsertInto",
-                        },
-                        {
-                          text: "Update",
-                          link: "/DataVo.Core/Parser/DML/Update",
-                        },
-                        {
-                          text: "DeleteFrom",
-                          link: "/DataVo.Core/Parser/DML/DeleteFrom",
-                        },
-                        {
-                          text: "Vacuum",
-                          link: "/DataVo.Core/Parser/DML/Vacuum",
-                        },
-                      ],
-                    },
-                    {
-                      text: "DQL",
-                      collapsed: true,
-                      items: [
-                        { text: "Overview", link: "/DataVo.Core/Parser/DQL/" },
-                        {
-                          text: "Select",
-                          link: "/DataVo.Core/Parser/DQL/Select",
-                        },
-                      ],
-                    },
-                    {
-                      text: "Transactions",
-                      link: "/DataVo.Core/Parser/Transactions/",
-                    },
-                    {
-                      text: "Statements",
-                      link: "/DataVo.Core/Parser/Statements/",
-                    },
-                    {
-                      text: "JoinStrategies",
-                      link: "/DataVo.Core/Parser/Statements/JoinStrategies/",
-                    },
-                    {
-                      text: "Mechanism",
-                      collapsed: true,
-                      items: [
-                        {
-                          text: "Overview",
-                          link: "/DataVo.Core/Parser/Statements/Mechanism/",
-                        },
-                        {
-                          text: "StatementEvaluator",
-                          link: "/DataVo.Core/Parser/Statements/Mechanism/StatementEvaluator",
-                        },
-                      ],
-                    },
-                    { text: "Types", link: "/DataVo.Core/Parser/Types/" },
-                    { text: "Utils", link: "/DataVo.Core/Parser/Utils/" },
-                  ],
-                },
-                { text: "Transactions", link: "/DataVo.Core/Transactions/" },
-                { text: "Services", link: "/DataVo.Core/Services/" },
-                {
-                  text: "StorageEngine",
-                  collapsed: true,
-                  items: [
-                    { text: "Overview", link: "/DataVo.Core/StorageEngine/" },
-                    {
-                      text: "Config",
-                      link: "/DataVo.Core/StorageEngine/Config/",
-                    },
-                    {
-                      text: "Disk",
-                      collapsed: true,
-                      items: [
-                        {
-                          text: "Overview",
-                          link: "/DataVo.Core/StorageEngine/Disk/",
-                        },
-                        {
-                          text: "DiskStorageEngine",
-                          link: "/DataVo.Core/StorageEngine/Disk/DiskStorageEngine",
-                        },
-                      ],
-                    },
-                    {
-                      text: "Memory",
-                      collapsed: true,
-                      items: [
-                        {
-                          text: "Overview",
-                          link: "/DataVo.Core/StorageEngine/Memory/",
-                        },
-                        {
-                          text: "InMemoryStorageEngine",
-                          link: "/DataVo.Core/StorageEngine/Memory/InMemoryStorageEngine",
-                        },
-                      ],
-                    },
-                    {
-                      text: "Serialization",
-                      link: "/DataVo.Core/StorageEngine/Serialization/",
-                    },
-                  ],
-                },
-                { text: "Utils", link: "/DataVo.Core/Utils/" },
-              ],
-            },
+            { text: "Quickstart", link: "/manual/tutorial/quickstart" },
+            { text: "Using DataVoContext", link: "/manual/tutorial/datavo-context" },
+            { text: "Entity Framework Example", link: "/manual/tutorial/entity-framework-example" },
+            { text: "Vector Search Example", link: "/manual/tutorial/vector-search-example" },
+          ],
+        },
+        {
+          text: "SQL Language",
+          collapsed: true,
+          items: [
+            { text: "Supported SQL", link: "/manual/sql-language/supported-sql" },
+            { text: "CREATE TABLE", link: "/manual/sql-language/create-table" },
+            { text: "Data Manipulation", link: "/manual/sql-language/data-manipulation" },
+            { text: "Queries", link: "/manual/sql-language/queries" },
+            { text: "Vector Search and Indexes", link: "/manual/sql-language/vector-search-syntax" },
+            { text: "SQL Compatibility Matrix", link: "/manual/sql-language/sql-compatibility" },
+          ],
+        },
+        {
+          text: "Storage Engine",
+          collapsed: true,
+          items: [
+            { text: "Storage Modes", link: "/manual/storage-engine/storage-modes" },
+            { text: "LSM Mode", link: "/manual/storage-engine/lsm-mode" },
+            { text: "WAL And Durability", link: "/manual/storage-engine/wal-and-durability" },
+            { text: "Transactions and MVCC", link: "/manual/storage-engine/transactions-acid-mvcc" },
+            { text: "Query Planner And Fast Paths", link: "/manual/storage-engine/query-planner-fast-paths" },
+          ],
+        },
+        {
+          text: "Client Interfaces",
+          collapsed: true,
+          items: [
+            { text: "Connecting to DataVo", link: "/manual/client-interfaces/datavo-context-api" },
+            { text: "Entity Framework Support", link: "/manual/client-interfaces/entity-framework" },
+            { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
+            { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },
+          ],
+        },
+        {
+          text: "Reference",
+          collapsed: true,
+          items: [
+            { text: "Configuration Reference", link: "/manual/reference/configuration" },
+            { text: "Limits", link: "/manual/reference/limits" },
+            { text: "Unsupported Features", link: "/manual/reference/unsupported-features" },
+            { text: "Error Handling", link: "/manual/reference/error-handling" },
+            { text: "AI Access And MCP", link: "/manual/reference/ai-access" },
+          ],
+        },
+        {
+          text: "Performance",
+          collapsed: true,
+          items: [
+            { text: "Benchmark Results", link: "/manual/performance/benchmarks" },
+            { text: "Benchmark Methodology", link: "/manual/performance/methodology" },
+            { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
           ],
         },
       ],
+      socialLinks: [
+        { icon: "github", link: "https://github.com/ArintonAkos/DataVo-DBMS" },
+      ],
+      search: {
+        provider: "local",
+      },
     },
   }),
 );

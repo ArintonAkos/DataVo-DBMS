@@ -1,0 +1,93 @@
+name: Linux Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "DataVo.Core/**"
+      - "demos/Research.Benchmark/**"
+      - ".github/workflows/linux-benchmark.yml"
+  pull_request:
+    paths:
+      - "DataVo.Core/**"
+      - "demos/Research.Benchmark/**"
+      - ".github/workflows/linux-benchmark.yml"
+
+jobs:
+  benchmark:
+    name: Research benchmark matrix on Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore DataVo.sln
+
+      - name: Build benchmark host
+        run: dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj -c Release --no-restore
+
+      - name: Run full benchmark scenario matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+          LOG_FILE="artifacts/linux-benchmark.log"
+          : > "$LOG_FILE"
+
+          scenarios=(
+            "simple-exposure"
+            "complex-vip"
+            "flat-crud"
+            "disk-crud-wal"
+            "deep-document"
+            "concurrent-ops"
+            "vector-search"
+            "thread-scaling"
+            "ycsb-mixed"
+            "space-and-recovery"
+          )
+
+          {
+            echo "DataVo Linux benchmark matrix"
+            echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Kernel: $(uname -a)"
+            dotnet --info
+          } | tee -a "$LOG_FILE"
+
+          for scenario in "${scenarios[@]}"; do
+            {
+              echo
+              echo "========================================"
+              echo "SCENARIO: ${scenario}"
+              echo "========================================"
+            } | tee -a "$LOG_FILE"
+
+            dotnet run \
+              --project demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj \
+              -c Release \
+              --no-build \
+              -- \
+              --scenario "$scenario" \
+              --format markdown \
+              --progress-every 10000 \
+              2>&1 | tee -a "$LOG_FILE"
+          done
+
+      - name: Upload benchmark log
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-benchmark-log
+          path: artifacts/linux-benchmark.log
+          if-no-files-found: error

@@ -32,7 +32,11 @@
 /output/pdf/*.aux
 /output/pdf/*.out
 /output/pdf/*.pdf
+/output/pdf/datavo_managed_database_benchmark_whitepaper.*
+/output/pdf/datavo_pgfplots_snippet.tex
+/output/pdf/whitepaper_*.txt
 /output/pdf/datavo_executable_artifacts.md
+/output/pdf/test.txt
 /output/pdf/figures/
 /output/pdf/references/
 
