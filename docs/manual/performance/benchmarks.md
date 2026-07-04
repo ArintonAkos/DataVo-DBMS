@@ -618,6 +618,116 @@ SQLite is smaller than DataVo in this run by 13.76 percent. LiteDB uses 2.32x th
 | SQLite space over DataVo space | `(58.405 - 66.443) / 58.405 * 100` | -13.76% |
 | LiteDB space vs DataVo space | `154.461 / 66.443` | 2.32x |
 
+## Linux CI Snapshot - July 4, 2026
+
+These measurements were produced by the GitHub Actions Linux benchmark workflow on July 4, 2026 at `2026-07-04T19:39:29Z`. Environment: Ubuntu 24.04 hosted runner on Azure, Linux kernel `6.17.0-1018-azure`, x64, .NET SDK `10.0.301`, .NET host `10.0.9`.
+
+This is appended as a separate Linux snapshot. It does not replace the July 3, 2026 macOS arm64 measurements above. SQLite vector search reported `n/a` in this run because `SQLITE_VEC_PATH` was not set on the runner; the workflow now downloads and exports the pinned `sqlite-vec` Linux x86_64 loadable extension so this scenario should be rerun.
+
+### Linux simple exposure
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 1,225.539 | 0.016190 | 0.110096 | 355.567 |
+| DuckDB | 174,377.097 | 3.428554 | 4.678679 | 208.302 |
+| SQLite | 1,402.745 | 0.022312 | 0.061395 | 199.203 |
+
+### Linux complex VIP
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 467.431 | 0.007534 | 0.022161 | 97.468 |
+| DuckDB | 113,237.819 | 2.236863 | 2.901818 | 131.237 |
+| SQLite | 231,680.353 | 4.580272 | 8.061315 | 115.604 |
+
+### Linux flat CRUD
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | Insert GC (MB) | Lookup GC (MB) | Total GC (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| DataVo | 146.317 | 0.001263 | 0.002044 | 19.390 | 2.290 | 21.680 |
+| LiteDB | 2,856.804 | 0.022432 | 0.110727 | 635.949 | 1,832.855 | 2,468.804 |
+| SQLite | 340.635 | 0.003286 | 0.004408 | 31.285 | 30.824 | 62.109 |
+
+### Linux disk CRUD WAL
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 473.281 | 0.000090 | 0.000120 | 44.468 |
+| DataVo (LSM Relaxed) | 212.502 | 0.000091 | 0.000121 | 31.751 |
+| SQLite (WAL,normal) | 1,057.520 | 0.013816 | 0.029355 | 57.196 |
+| SQLite (WAL,full) | 7,792.303 | 0.108022 | 0.489026 | 53.414 |
+
+### Linux deep document
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 156.755 | 0.009928 | 0.022952 | 23.056 |
+| LiteDB | 1,458.141 | 0.187492 | 0.260218 | 332.249 |
+| SQLite | 373.122 | 0.020168 | 0.033212 | 46.048 |
+
+### Linux concurrent ops
+
+| Engine | Total time (ms) | Ops/s | Read P99 (ms) | Write P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DataVo | 9,020.001 | 2,368,026.931 | 0.005630 | 0.000000 | 1,716.644 |
+| SQLite | 5,107.857 | 199,916.321 | 0.185317 | 3,303.239339 | 570.333 |
+
+### Linux vector search
+
+| Engine | Total time (ms) | P50 (ms) | P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo | 84,798.703 | 2.602106 | 3.020380 | 157.245 |
+| DataVo-Flat | 616.448 | 3.012895 | 10.734534 | 10.327 |
+| LiteDB | 168,891.495 | 1,657.344904 | 1,700.552233 | 208,915.187 |
+| SQLite | n/a | n/a | n/a | n/a |
+
+### Linux thread scaling
+
+| Engine | Threads | Total time (ms) | Ops/s | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 1 | 3,478.492 | 31,622.901 | 23.676 |
+| DataVo (LSM Production) | 2 | 2,818.404 | 39,029.178 | 21.620 |
+| DataVo (LSM Production) | 4 | 1,629.282 | 67,514.394 | 20.040 |
+| DataVo (LSM Production) | 8 | 1,404.683 | 78,309.461 | 18.860 |
+| DataVo (LSM Production) | 16 | 1,406.291 | 78,219.964 | 19.889 |
+| DataVo (LSM Production) | 32 | 1,358.683 | 80,960.778 | 19.873 |
+| DataVo (LSM Relaxed) | 1 | 190.012 | 578,911.110 | 20.154 |
+| DataVo (LSM Relaxed) | 2 | 189.798 | 579,564.757 | 17.704 |
+| DataVo (LSM Relaxed) | 4 | 211.100 | 521,080.797 | 17.704 |
+| DataVo (LSM Relaxed) | 8 | 211.885 | 519,149.784 | 17.705 |
+| DataVo (LSM Relaxed) | 16 | 211.247 | 520,718.193 | 17.705 |
+| DataVo (LSM Relaxed) | 32 | 215.962 | 509,349.810 | 17.706 |
+| SQLite (WAL,normal) | 1 | 895.974 | 122,771.379 | 62.036 |
+| SQLite (WAL,normal) | 2 | 589.814 | 186,499.346 | 62.036 |
+| SQLite (WAL,normal) | 4 | 531.915 | 206,800.075 | 62.041 |
+| SQLite (WAL,normal) | 8 | 500.144 | 219,936.790 | 62.037 |
+| SQLite (WAL,normal) | 16 | 499.692 | 220,135.471 | 62.033 |
+| SQLite (WAL,normal) | 32 | 440.481 | 249,726.720 | 62.070 |
+| LiteDB | 1 | 4,561.652 | 24,114.071 | 4,365.008 |
+| LiteDB | 2 | 4,940.175 | 22,266.418 | 4,350.736 |
+| LiteDB | 4 | 5,168.339 | 21,283.434 | 4,350.736 |
+| LiteDB | 8 | 5,184.349 | 21,217.708 | 4,350.608 |
+| LiteDB | 16 | 5,198.950 | 21,158.117 | 4,350.882 |
+| LiteDB | 32 | 5,289.057 | 20,797.658 | 4,350.565 |
+
+### Linux YCSB mixed
+
+| Engine | Total time (ms) | Ops/s | Read P99 (ms) | Write P99 (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 3,366.275 | 29,706.430 | 0.010640 | 2.293357 | 26.502 |
+| DataVo (LSM Relaxed) | 397.577 | 251,523.667 | 0.002796 | 0.418472 | 21.002 |
+| SQLite (WAL,normal) | 1,284.695 | 77,839.469 | 0.043291 | 3.223290 | 55.510 |
+| LiteDB | 6,660.995 | 15,012.772 | 0.134983 | 0.276738 | 4,276.401 |
+
+### Linux space and recovery
+
+| Engine | Insert time (ms) | Disk size (MB) | Recovery time (ms) | GC allocated (MB) |
+| --- | ---: | ---: | ---: | ---: |
+| DataVo (LSM Production) | 1,608.832 | 66.444 | 0.967 | 286.389 |
+| DataVo (LSM Relaxed) | 1,054.688 | 66.444 | 0.819 | 205.669 |
+| SQLite (WAL,normal) | 1,794.018 | 58.405 | 0.685 | 629.097 |
+| LiteDB | 7,416.158 | 154.461 | 1.425 | 15,158.757 |
+
 ## Responsible Interpretation
 
 DataVo's strongest current evidence is workload-specific: allocation-controlled typed rows, source-generated access paths, LSM write paths, and vector allocation behavior. The relaxed LSM results should not be presented as equivalent to strict fsync durability. SQLite and DuckDB remain mature engines with broad SQL support, sophisticated optimizers, and production hardening far beyond a v0.1 alpha embedded engine.

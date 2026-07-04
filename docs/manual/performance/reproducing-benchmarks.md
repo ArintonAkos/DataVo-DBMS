@@ -20,6 +20,8 @@ The vector workload inserts 10,000 vectors, uses 1536 dimensions, and runs 100 t
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario vector-search --vectors 10000 --dimensions 1536 --queries 100 --topk 10 --format markdown
 ```
 
+SQLite vector search requires the `sqlite-vec` loadable `vec0` extension. The Linux GitHub Actions benchmark workflow downloads the pinned `v0.1.9` Linux x86_64 loadable release, verifies SHA256, exports `SQLITE_VEC_PATH`, and uploads the extension artifact with the run. For local runs, set `SQLITE_VEC_PATH` yourself before launching the vector scenario.
+
 The thread-scaling workload is the one to run when you want to inspect the 1.2M ops/s LSM Relaxed result.
 
 ```bash
