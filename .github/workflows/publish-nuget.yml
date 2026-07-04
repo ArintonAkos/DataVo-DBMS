@@ -30,13 +30,23 @@ jobs:
             echo "value=" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pack only the four publishable projects explicitly. Packing the whole
+      # solution would try to build DataVo.Browser, which needs the wasm-tools
+      # workload (NETSDK1147) that isn't on the runner.
       - name: Pack
         run: |
-          if [ -n "${{ steps.version.outputs.value }}" ]; then
-            dotnet pack DataVo.sln -c Release -p:Version=${{ steps.version.outputs.value }} -o artifacts/packages
-          else
-            dotnet pack DataVo.sln -c Release -o artifacts/packages
-          fi
+          VERSION="${{ steps.version.outputs.value }}"
+          PROJECTS="DataVo.Core/DataVo.Core.csproj \
+                    DataVo.Data/DataVo.Data.csproj \
+                    DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj \
+                    DataVo.Generators/DataVo.Generators.csproj"
+          for proj in $PROJECTS; do
+            if [ -n "$VERSION" ]; then
+              dotnet pack "$proj" -c Release -p:Version="$VERSION" -o artifacts/packages
+            else
+              dotnet pack "$proj" -c Release -o artifacts/packages
+            fi
+          done
 
       # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
       # (~1h) nuget.org API key. Requested right before the push so it can't
