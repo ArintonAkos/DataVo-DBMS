@@ -1,4 +1,11 @@
 <Project>
+  <!-- Packaging is strictly opt-in: a project must explicitly set IsPackable=true
+       (see the conditional groups below and DataVo.Generators.csproj) to be published.
+       This default keeps any future project out of the public NuGet feed by accident. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
     <Version>0.1.0-preview.1</Version>
