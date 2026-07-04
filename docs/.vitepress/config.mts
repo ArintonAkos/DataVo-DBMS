@@ -4,11 +4,14 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 export default withMermaid(
   defineConfig({
     title: "DataVo",
+    base: "/DataVo-DBMS/",
     description:
       "C#-native embedded database documentation for DataVo v0.1 Alpha.",
     cleanUrls: true,
     srcExclude: [
       "superpowers/**",
+      "specs/**",
+      "plans/**",
       "public/**",
       "DataVo.Core/**",
       "architecture/**",
@@ -23,11 +26,7 @@ export default withMermaid(
       "source-generators.md",
       "sql-reference.md",
     ],
-    head: [
-      ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
-    ],
     themeConfig: {
-      logo: "/favicon.svg",
       siteTitle: "DataVo",
       nav: [
         { text: "Home", link: "/" },
