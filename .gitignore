@@ -406,3 +406,6 @@ local-docs/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 docs/superpowers/
+
+# matplotlib cache from benchmark plot generator
+docs/scripts/.matplotlib-cache/

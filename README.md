@@ -54,11 +54,11 @@ Interactive versions of every chart live on the [benchmarks page](https://arinto
 
 Linux CI sqlite-vec rerun plots:
 
-![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.svg)
+![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.png)
 
-![Linux vector search query P99](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-p99.svg)
+![Linux vector search query P99](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-p99.png)
 
-![Linux thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-thread-scaling-throughput.svg)
+![Linux thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-thread-scaling-throughput.png)
 
 More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
 

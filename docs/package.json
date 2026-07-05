@@ -7,7 +7,7 @@
     "docs:ai": "node scripts/generate-ai-docs.cjs",
     "docs:dev": "npm run docs:ai && vitepress dev",
     "docs:build": "npm run docs:ai && node scripts/clean-docs-dist.cjs && vitepress build",
-    "benchmarks:linux-plots": "node scripts/generate-linux-benchmark-plots.cjs",
+    "benchmarks:linux-plots": "python3 scripts/generate-linux-benchmark-plots.py",
     "mcp": "node mcp/datavo-docs-server.cjs",
     "test:browser:generate": "bash ../scripts/generate-wasm-browser-scenarios.sh",
     "test:browser:install": "playwright install chromium",
