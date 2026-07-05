@@ -58,14 +58,4 @@ https://<docs-host>/mcp/remote-docs.json
 
 ## AI Access Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `/llms.txt` | Supported | Short AI entrypoint with links to curated manual pages. |
-| `/llms-full.txt` | Supported | Concatenated Markdown export of the curated manual only. |
-| `/ai/index.json` | Supported | Structured index of public manual pages. |
-| `/ai/pages/<route>.md` | Supported | Canonical Markdown for one public manual page. |
-| `Copy page for AI` | Supported | Copies canonical Markdown for the current page. |
-| Local stdio MCP server | Supported | `npm run mcp` serves the curated manual to MCP clients. |
-| Hosted MCP discovery JSON | Supported | Static config files are generated under `/mcp/`. |
-| Internal docs export | Not Supported | Raw architecture, audit, generated API, and source folders are intentionally excluded. |
-| Running MCP directly on GitHub Pages | Not Supported | Static hosts cannot run a stdio MCP process. |
+Supported endpoints and actions: `/llms.txt`, `/llms-full.txt`, `/ai/index.json`, `/ai/pages/<route>.md`, the `Copy page for AI` action, a local stdio MCP server (`npm run mcp`), and generated hosted-MCP discovery JSON under `/mcp/`. Raw internal docs (architecture, audit, generated API, and source folders) are intentionally **not** exported, and a stdio MCP process **cannot** run directly on static GitHub Pages hosting.

@@ -63,15 +63,7 @@ The project is early. DataVo v0.1 Alpha is useful for experiments, local-first a
 
 ## v0.1 Positioning
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Embedded C# storage engine | Supported | Applications instantiate `DataVoContext` directly inside the host process. |
-| In-memory, disk, and LSM storage | Supported | `InMemory`, `Disk`, and `Lsm` are the public launch modes. |
-| SQL-style DDL, DML, and queries | Supported | DataVo has its own compact SQL dialect. |
-| Vector columns and indexes | Supported | `VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, and `<->` are documented public features. |
-| Source-generated AOT-sensitive paths | Supported | Source-generated and typed paths avoid reflection-heavy execution where possible. |
-| Full RDBMS compatibility | Not Supported | DataVo v0.1 is not PostgreSQL, SQLite, or SQL Server compatible. |
-| Client/server protocol | Planned | PostgreSQL-wire compatibility would require a future `DataVo.Server`. |
+In v0.1, DataVo supports an embedded C# storage engine (`DataVoContext` runs in-process), `InMemory`, `Disk`, and `Lsm` storage, its own compact SQL dialect for DDL/DML/queries, and vector columns and indexes (`VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, `<->`). Source-generated, AOT-sensitive paths avoid reflection-heavy execution where possible. DataVo is deliberately **not** a full RDBMS — it is not PostgreSQL, SQLite, or SQL Server compatible — and it has no client/server protocol yet (PostgreSQL-wire compatibility would require a future `DataVo.Server`). See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -141,7 +133,7 @@ What makes this an alpha is the boundary around the edges. Package polish, stora
 | SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
 | Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
 | Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Planned | Package metadata and public publishing remain launch work. |
+| NuGet launch packaging | Supported | Package metadata is complete and preview packages publish to nuget.org via CI Trusted Publishing. |
 | Stable storage format | Planned | Alpha storage files may change before a stable release. |
 | Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
 | Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |
@@ -212,7 +204,7 @@ Future tooling process
 | Curated public documentation | Supported | The v0.1 manual and AI export expose only public launch docs. |
 | Core embedded API | Supported | `DataVoContext` remains the primary interface. |
 | Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
-| NuGet packages | Planned | Public package publishing, version policy, and README polish remain launch tasks. |
+| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags. |
 | SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
 | Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
 | PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |
@@ -362,14 +354,7 @@ Expected output:
 
 ## Quickstart Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `DataVoContext` construction | Supported | Pass `DataVoConfig` to select storage mode and durability settings. |
-| `CREATE DATABASE` and `USE` | Supported | The examples use an explicit logical database. |
-| `CREATE TABLE` | Supported | Primary keys and scalar columns are supported in the documented subset. |
-| Column-targeted `INSERT` | Supported | Value count must match the supplied column list. |
-| `SELECT ... WHERE ... ORDER BY ... LIMIT` | Supported | This is part of the public query subset. |
-| Strongly typed general query API | Planned | The general API returns `QueryResult`; source generators provide typed calls for narrow shapes. |
+Everything in this quickstart is part of the public subset: constructing `DataVoContext` with a `DataVoConfig` (which selects storage mode and durability), `CREATE DATABASE` and `USE`, `CREATE TABLE` with primary keys and scalar columns, column-targeted `INSERT` (the value count must match the column list), and `SELECT ... WHERE ... ORDER BY ... LIMIT`. The general query API returns `QueryResult`; a strongly typed general API is planned, and source generators already provide typed calls for narrow shapes.
 
 ---
 
@@ -466,15 +451,7 @@ using var lsmDb = new DataVoContext(new DataVoConfig
 
 ## DataVoContext API Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `Execute(string query)` | Supported | Executes SQL using the context default session. |
-| `Execute(string query, Guid sessionId)` | Supported | Executes SQL against an explicit logical session. |
-| Session-bound transactions | Supported | `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` belong to the session that executes them. |
-| Dictionary row results | Supported | `QueryResult.Data` contains dictionaries keyed by column name. |
-| Persistent disk mode | Supported | Use `StorageMode.Disk`, `DiskStoragePath`, and WAL settings. |
-| Persistent LSM mode | Supported | Use `StorageMode.Lsm` and choose strict or relaxed WAL durability. |
-| Async general SQL API | Planned | The primary public examples use synchronous `Execute`. |
+`DataVoContext` supports `Execute(string query)` against the default session and `Execute(string query, Guid sessionId)` against an explicit session, session-bound transactions (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`), dictionary row results in `QueryResult.Data`, and persistent `Disk` and `Lsm` storage (with WAL and durability settings). The public examples use synchronous `Execute`; an async general SQL API is planned.
 
 ---
 
@@ -595,16 +572,7 @@ List<ItemEmbedding> nearest = ctx.QueryFromDataVo<ItemEmbedding>(query => query
 
 ## EF Core Example Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic mapped `DbSet` querying | Supported | Works for simple bounded entity shapes. |
-| Basic inserts with `SaveChanges` | Supported | Supported for simple mapped entities in the bridge workflow. |
-| `LoadFromDataVo` | Supported | Refreshes EF state from DataVo before LINQ queries. |
-| `QueryFromDataVo` | Supported | Executes supported LINQ query patterns. |
-| Vector function shims | Supported | `CosineDistance` and `L2Distance` are available for preview translation. |
-| Migrations | Not Supported | No EF migrations pipeline in v0.1. |
-| Shadow properties | Not Supported | The bridge expects explicit CLR properties. |
-| Complex LINQ joins | Not Supported | Broad provider-style join translation is outside the v0.1 support claim. |
+The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.1.
 
 ---
 
@@ -837,21 +805,7 @@ VACUUM Users;
 
 ## SQL Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `CREATE DATABASE` / `USE` | Supported | Selects the active database for the session. |
-| `CREATE TABLE` / `DROP TABLE` | Supported | Includes primary keys, defaults, scalar columns, and vector columns. |
-| `ALTER TABLE ADD/DROP/MODIFY COLUMN` | Supported | Limited implementation; key/indexed columns have restrictions. |
-| Scalar indexes | Supported | Single-column and composite scalar indexes are documented. |
-| Vector indexes | Supported | `USING HNSW` and `USING FLAT`. |
-| `INSERT`, `UPDATE`, `DELETE`, `VACUUM` | Supported | Core DML is available in the public subset. |
-| `SELECT`, `WHERE`, `ORDER BY`, `LIMIT`, `OFFSET` | Supported | Includes common predicate and ordering shapes. |
-| Aggregates, `GROUP BY`, `HAVING` | Supported | Used by runtime query paths. |
-| Joins | Supported | `INNER`, `LEFT`, `RIGHT`, `FULL`, and `CROSS`. |
-| `UNION` / `UNION ALL` | Supported | Branches must project compatible columns. |
-| Window functions | Not Supported | Not part of the v0.1 public claim. |
-| Stored procedures and triggers | Not Supported | No procedural SQL layer in v0.1. |
-| PostgreSQL dialect compatibility | Not Supported | DataVo SQL is its own dialect. |
+Supported: `CREATE DATABASE`/`USE`, `CREATE TABLE`/`DROP TABLE` (primary keys, defaults, scalar and vector columns), limited `ALTER TABLE ADD/DROP/MODIFY COLUMN`, scalar and vector indexes (`USING HNSW`, `USING FLAT`), core DML (`INSERT`, `UPDATE`, `DELETE`, `VACUUM`), `SELECT`/`WHERE`/`ORDER BY`/`LIMIT`/`OFFSET`, aggregates with `GROUP BY`/`HAVING`, all major joins (`INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`), and `UNION`/`UNION ALL`. Window functions, stored procedures, triggers, and PostgreSQL-dialect compatibility are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -956,18 +910,7 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `CREATE TABLE` | Supported | Registers catalog metadata and prepares table storage. |
-| Integer primary keys | Supported | Common fast path for point lookups. |
-| `VARCHAR(n)` | Supported | Recommended spelling for text columns. |
-| `INT`, `FLOAT`, `BIT`, `DATE`, `GUID` | Supported | Public scalar type set used in examples and typed readers. |
-| `VECTOR(n)` | Supported | Fixed-dimension vector column. |
-| Scalar `CREATE INDEX` | Supported | Single-column and composite scalar indexes. |
-| Vector `CREATE INDEX` | Supported | `USING HNSW` and `USING FLAT`. |
-| `ALTER TABLE ADD COLUMN` | Supported | Rewrites rows and backfills null/default values. |
-| `ALTER TABLE DROP/MODIFY COLUMN` | Supported | Limited; rejects key, foreign-key, referenced, indexed, or incompatible changes. |
-| PostgreSQL domains/collations | Not Supported | No domain or collation system in v0.1. |
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `FLOAT`, `BIT`, `DATE`, `GUID`), `VECTOR(n)`, scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1060,18 +1003,7 @@ ROLLBACK;
 
 ## DML Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Column-targeted `INSERT` | Supported | Recommended form for application code. |
-| Full-row `INSERT` | Supported | Value count must match table column count. |
-| Vector literal inserts | Supported | Use bracketed numeric values such as `'[1,0,0]'`. |
-| `UPDATE ... SET ... WHERE ...` | Supported | General path supports predicate-based updates. |
-| Fixed-width compiled update fast path | Supported | Applies only to narrow source-generated single-row update shapes. |
-| `DELETE ... WHERE ...` | Supported | Deletes matching rows and updates indexes. |
-| `VACUUM table` | Supported | Compacts storage and rebuilds indexes after deletes. |
-| Transactional DML | Supported | `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` are session-bound. |
-| `MERGE` | Not Supported | Not part of v0.1. |
-| PostgreSQL `COPY` protocol | Not Supported | No bulk copy protocol in v0.1. |
+Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.1. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1217,19 +1149,7 @@ LIMIT 5;
 
 ## Query Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Projection and aliases | Supported | Select named columns and computed aliases. |
-| `WHERE` predicates | Supported | Includes equality, comparisons, `IN`, `BETWEEN`, `LIKE`, and vector distance predicates. |
-| `ORDER BY` | Supported | Supports ascending/descending ordering and vector ranking. |
-| `LIMIT` / `OFFSET` | Supported | Use for top-K and paging shapes. |
-| Aggregates | Supported | Includes `COUNT`, `SUM`, `MIN`, and `MAX` in documented paths. |
-| `GROUP BY` / `HAVING` | Supported | Runtime query path supports grouped aggregates. |
-| Joins | Supported | `INNER`, `LEFT`, `RIGHT`, `FULL`, and `CROSS`. |
-| Subqueries | Supported | Includes `IN` and `EXISTS` style shapes in tested paths. |
-| `UNION` / `UNION ALL` | Supported | Branch projections must be compatible. |
-| Vector distance ranking | Supported | Use `<=>` for cosine and `<->` for L2. |
-| Cost-based optimizer parity with mature RDBMSs | Not Supported | Planner work is early and controlled by configuration. |
+Supported query features: projection and aliases; `WHERE` predicates including equality, comparisons, `IN`, `BETWEEN`, `LIKE`, and vector-distance predicates; `ORDER BY` (including vector ranking); `LIMIT`/`OFFSET`; aggregates (`COUNT`, `SUM`, `MIN`, `MAX`); `GROUP BY`/`HAVING`; all major joins; subqueries (`IN` and `EXISTS` shapes); `UNION`/`UNION ALL`; and vector distance ranking (`<=>` for cosine, `<->` for L2). The planner is early and configuration-controlled — it is not at cost-based-optimizer parity with mature RDBMSs. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1506,13 +1426,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `StorageMode.InMemory` | Supported | Ephemeral storage for tests, demos, and isolated engine benchmarks. |
-| `StorageMode.Disk` | Supported | File-backed local tables with WAL options. |
-| `StorageMode.Lsm` | Supported | WAL-covered MemTables, SSTables, manifests, and compaction. |
-| `StorageMode.Wasm` | Planned | Browser/WASM integration exists but is not the primary v0.1 launch path. |
-| `StorageMode.Custom` | Planned | Advanced custom storage injection, not the default public workflow. |
+`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
 
 ---
 
@@ -1572,14 +1486,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## LSM Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Arena-backed MemTable | Supported | Designed to keep steady-state managed allocation low. |
-| WAL segment per generation | Supported | WAL segments are retained until SSTable and manifest edits are durable. |
-| 32 MB MemTable flush threshold | Supported | Internal threshold in v0.1, not a public tuning setting. |
-| Background flush pipeline | Supported | Frozen generations flush outside the foreground write path. |
-| Compaction | Supported | Present as part of the LSM engine; tuning remains alpha. |
-| Stable on-disk format guarantee | Not Supported | v0.1 storage files may change before a stable release. |
+The LSM engine provides an arena-backed MemTable, a WAL segment per generation (retained until SSTable and manifest edits are durable), a 32 MB MemTable flush threshold (an internal v0.1 value, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and compaction (present, with tuning still in alpha). The on-disk format is **not** guaranteed stable — v0.1 storage files may change before a stable release.
 
 ---
 
@@ -1648,14 +1555,7 @@ Misleading:
 
 ## Durability Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Disk WAL | Supported | `WalEnabled` defaults to enabled for disk mode unless explicitly overridden. |
-| Disk sync writes | Supported | `SyncDiskWrites = true` enables fsync-like behavior. |
-| LSM strict fsync | Supported | `LsmStrictFsync = true` waits for WAL durability before acknowledging writes. |
-| LSM relaxed OS-buffered mode | Supported | Faster, but can lose recent writes on power or kernel failure. |
-| WAL checkpoint settings | Supported | Disk mode has checkpoint threshold and interval settings. |
-| Relaxed throughput as strict durability | Not Supported | Relaxed benchmark wins must not be presented as strict durability. |
+Supported: disk WAL (`WalEnabled`, on by default for disk mode), disk sync writes (`SyncDiskWrites = true`), LSM strict fsync (`LsmStrictFsync = true`, which waits for WAL durability before acknowledging writes), LSM relaxed OS-buffered mode (faster, but can lose recent writes on power or kernel failure), and WAL checkpoint settings. Relaxed throughput must **not** be presented as strict durability.
 
 ---
 
@@ -1780,18 +1680,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## ACID & Isolation Contract
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` | Supported | Transactions are session-bound and buffer DML until commit or rollback. |
-| Single-Row Lock-Free Reads | Supported | Point-read hot paths are designed to avoid serializing readers through a global write lock. |
-| Per-Table Write Locks | Supported | Inserts and commit paths acquire table-scoped write boundaries where the engine needs table-level mutation coordination. |
-| Row-level write coordination | Supported | Updates and deletes coordinate around selected row IDs and revalidate rows before mutation. |
-| MVCC snapshot visibility | Supported | Row-version metadata and transaction snapshots are used for visibility decisions in supported paths. |
-| Strict LSM commit durability | Supported | `LsmStrictFsync = true` waits for WAL durability before acknowledging writes. |
-| Disk sync writes | Supported | `SyncDiskWrites = true` opts into fsync-like disk behavior for disk mode. |
-| Multi-Row Serializability | Not Supported | v0.1 does not claim serializable isolation for arbitrary multi-row predicates or complex transaction schedules. |
-| Phantom-Read Prevention | Not Supported | Predicate-range locking and complete phantom prevention are not public v0.1 guarantees. |
-| Full ACID equivalence to PostgreSQL/SQLite | Not Supported | DataVo has useful transaction primitives, but v0.1 still has explicit isolation and storage-format maturity limits. |
+Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). v0.1 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.
 
 ---
 
@@ -1857,18 +1746,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Planner And Fast Path Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| General parser/executor | Supported | Default path for SQL execution through `DataVoContext.Execute`. |
-| Source-generated SELECT plan | Supported | `[DataVoQuery]` emits static plans for narrow equality SELECT shapes. |
-| Typed row reader | Supported | Eligible projections avoid dictionary materialization. |
-| Single-column manifest index hint | Supported | Schema manifests can pre-resolve index hints. |
-| Fixed-width compiled update | Supported | Narrow disk/LSM single-row update shapes only. |
-| LSM MemTable write path | Supported | Arena-backed write path avoids much allocation in steady state. |
-| Vector predicate fast path | Supported | ANN prefiltering is controlled by vector planner knobs. |
-| Volcano execution | Planned | Present but disabled by default. |
-| Arbitrary SQL fast path | Not Supported | Complex queries use the general runtime path. |
-| Cost-based optimizer parity with PostgreSQL | Not Supported | Planner work is early and targeted. |
+Supported paths include the general parser/executor (the default for `DataVoContext.Execute`), source-generated `SELECT` plans for narrow equality shapes (`[DataVoQuery]`), typed row readers, single-column manifest index hints, fixed-width compiled updates for narrow single-row shapes, the arena-backed LSM MemTable write path, and the vector-predicate ANN prefilter fast path. Volcano execution is present but disabled by default (planned); there is no arbitrary-SQL fast path, and the planner is not a cost-based optimizer at PostgreSQL parity.
 
 ---
 
@@ -2039,17 +1917,7 @@ List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
 
 ## Entity Framework Core Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic `DbSet` querying | Supported | Simple LINQ over mapped entities works after data is written in the current context or loaded with `LoadFromDataVo`. |
-| Basic inserts | Supported | `Add` plus `SaveChanges` is supported for simple mapped entities in the bridge workflow. |
-| `QueryFromDataVo` queries | Supported | Useful for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties. |
-| Vector LINQ shims | Supported | `DataVoVectorDbFunctions.CosineDistance` and `L2Distance` are available for DataVo-native translation preview. |
-| Native provider identity | Planned | Preview flags exist, but DataVo is not yet a mature standalone EF provider. |
-| Migrations | Not Supported | v0.1 does not include EF migration scaffolding, diffing, or apply support. |
-| Shadow Properties | Not Supported | The current bridge expects explicit mapped CLR properties. |
-| Complex Joins | Not Supported | Arbitrary LINQ `Join`, `GroupJoin`, and complex relationship shaping are outside the v0.1 support claim. |
-| Broad `GroupBy` translation | Not Supported | Unsupported grouped operators report unsupported-pattern errors. |
+The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.1 — unsupported grouped operators report unsupported-pattern errors.
 
 ---
 
@@ -2140,19 +2008,7 @@ Use query capability checks before running a LINQ query that may be outside the 
 
 ## Entity Framework Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic `DbSet` querying | Supported | Works for mapped entities with explicit scalar CLR properties. |
-| Basic inserts | Supported | `Add` plus `SaveChanges` works for basic bridge workflows. |
-| `LoadFromDataVo` | Supported | Refreshes EF state from DataVo tables. |
-| `QueryFromDataVo` / `QueryFromDataVoAsync` | Supported | Executes supported `Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties. |
-| `ExplainQueryFromDataVo` / capability checks | Supported | Useful for preflight diagnostics. |
-| Vector function shims | Supported | `CosineDistance` and `L2Distance` are available for preview translation. |
-| Native provider identity | Planned | Preview flags exist, but this is not a full standalone provider. |
-| Migrations | Not Supported | No migration scaffolding or apply pipeline in v0.1. |
-| Shadow Properties | Not Supported | The bridge expects explicit mapped CLR properties. |
-| Complex LINQ Joins | Not Supported | Broad provider-style join translation is outside the v0.1 support claim. |
-| Broad `GroupBy` translation | Not Supported | Unsupported grouped operators report unsupported-pattern errors. |
+Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.1: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.
 
 ---
 
@@ -2223,19 +2079,7 @@ Use generated queries for stable point reads, inserts, and narrow fixed-shape up
 
 ## Source Generator Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Static partial method generation | Supported | Containing type and method must be `static partial`. |
-| `DataVoContext` first parameter | Supported | Generated methods execute against an existing context. |
-| SQL parameter validation | Supported | SQL parameters must match C# parameters. |
-| Equality `SELECT` | Supported | `SELECT ... FROM table WHERE column = @param`. |
-| `INSERT INTO ... VALUES (...)` | Supported | Emits compiled insert path. |
-| `UPDATE ... SET ... WHERE ...` | Supported | Emits compiled update path for supported shapes. |
-| Typed projection mapper | Supported | Eligible projections use typed row readers. |
-| Schema manifest index hints | Supported | Single-column indexes can be pre-resolved as hints. |
-| Joins, aggregates, and vector search | Not Supported | Use runtime SQL for complex query shapes. |
-| `DELETE` generation | Not Supported | Not emitted in v0.1. |
-| Full LINQ provider generation | Not Supported | The generator covers a limited set of SQL patterns. |
+The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It does **not** generate `DELETE`, joins, aggregates, or vector search, and it is not a full LINQ provider — use runtime SQL for those shapes.
 
 ---
 
@@ -2289,15 +2133,7 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
 
 ## Native AOT Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| C#-native embedded core | Supported | Runs in-process without a native provider boundary. |
-| Source-generated query paths | Supported | `[DataVoQuery]` emits static code for supported shapes. |
-| Typed row readers | Supported | Avoid dictionary and boxing overhead on eligible projections. |
-| Source-generated AOT-sensitive paths | Supported | Generated queries and typed readers are the supported AOT-oriented paths in v0.1. |
-| Reflection-free catalog/runtime everywhere | Planned | Some runtime areas still need additional trimming hardening. |
-| Full EF Core AOT claim | Not Supported | EF integration has separate provider and reflection considerations. |
-| Full dynamic SQL AOT guarantee | Not Supported | Runtime SQL parsing and dynamic result shapes remain more dynamic than generated calls. |
+The AOT-oriented supported paths in v0.1 are the C#-native embedded core (no native provider boundary), source-generated query paths (`[DataVoQuery]`), and typed row readers. A fully reflection-free catalog and runtime everywhere is planned — some runtime areas still need trimming hardening. A full EF Core AOT claim and a full dynamic-SQL AOT guarantee are **not** supported, because EF integration and runtime SQL parsing remain more dynamic than generated calls.
 
 ---
 
@@ -2401,18 +2237,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Configuration Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `StorageMode.InMemory` | Supported | Best for tests, examples, and ephemeral workloads. |
-| `StorageMode.Disk` | Supported | File-backed storage with WAL options. |
-| `StorageMode.Lsm` | Supported | WAL-covered LSM storage with strict or relaxed durability. |
-| `DiskStoragePath` | Supported | Required for predictable persisted file placement. |
-| `WalEnabled` | Supported | Defaults to enabled for disk mode unless explicitly set. |
-| `SyncDiskWrites` | Supported | Enables fsync-like behavior for disk writes. |
-| `LsmStrictFsync` | Supported | Strict mode waits for WAL durability before acknowledging writes. |
-| `LockAcquireTimeoutMs` | Supported | Defaults to 30000 ms; `-1` waits indefinitely. |
-| Vector predicate fast-path knobs | Supported | Advanced controls for vector predicate routing. |
-| Volcano planner knobs | Planned | Present for limited planner experiments; not the default public execution path. |
+Supported settings: `StorageMode.InMemory`, `StorageMode.Disk`, and `StorageMode.Lsm`; `DiskStoragePath`; `WalEnabled` (on by default for disk mode); `SyncDiskWrites`; `LsmStrictFsync`; `LockAcquireTimeoutMs` (default 30000 ms, with `-1` waiting indefinitely); and vector predicate fast-path knobs. Volcano planner knobs exist for limited planner experiments but are planned, not the default public execution path.
 
 ---
 
@@ -2688,14 +2513,7 @@ catch (Exception ex)
 
 ## Error Handling Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `QueryResult.IsError` | Supported | Primary signal for general SQL execution failure. |
-| `QueryResult.Messages` | Supported | Contains row counts, validation notes, and error messages. |
-| `QueryResult.Fields` and `Data` | Supported | Used for successful tabular results. |
-| Parser/lexer/binding diagnostics | Supported | May surface through result messages or exceptions depending on call path. |
-| EF query validation exceptions | Supported | Unsupported EF bridge query patterns can be reported through typed integration errors. |
-| Stable public error code catalog | Planned | v0.1 does not yet document stable numeric error codes. |
+Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.1.
 
 ---
 
@@ -2759,17 +2577,7 @@ https://<docs-host>/mcp/remote-docs.json
 
 ## AI Access Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `/llms.txt` | Supported | Short AI entrypoint with links to curated manual pages. |
-| `/llms-full.txt` | Supported | Concatenated Markdown export of the curated manual only. |
-| `/ai/index.json` | Supported | Structured index of public manual pages. |
-| `/ai/pages/<route>.md` | Supported | Canonical Markdown for one public manual page. |
-| `Copy page for AI` | Supported | Copies canonical Markdown for the current page. |
-| Local stdio MCP server | Supported | `npm run mcp` serves the curated manual to MCP clients. |
-| Hosted MCP discovery JSON | Supported | Static config files are generated under `/mcp/`. |
-| Internal docs export | Not Supported | Raw architecture, audit, generated API, and source folders are intentionally excluded. |
-| Running MCP directly on GitHub Pages | Not Supported | Static hosts cannot run a stdio MCP process. |
+Supported endpoints and actions: `/llms.txt`, `/llms-full.txt`, `/ai/index.json`, `/ai/pages/<route>.md`, the `Copy page for AI` action, a local stdio MCP server (`npm run mcp`), and generated hosted-MCP discovery JSON under `/mcp/`. Raw internal docs (architecture, audit, generated API, and source folders) are intentionally **not** exported, and a stdio MCP process **cannot** run directly on static GitHub Pages hosting.
 
 ---
 
@@ -3378,14 +3186,7 @@ The charts are interactive so exact values are available on hover. Log scale is 
 
 ## Methodology Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Apple Silicon macOS baseline | Supported | Published results were collected in macOS arm64 / Apple Silicon context. |
-| Benchmark host commands | Supported | Scenarios run through `demos/Research.Benchmark/src/Research.Benchmark.Host`. |
-| Durability labels | Supported | Results distinguish strict LSM, relaxed LSM, SQLite WAL normal, and SQLite WAL full. |
-| Interactive exact-value charts | Supported | Hover reveals exact numbers; log scale is used when needed for readability. |
-| Workload SQL disclosure | Supported | Benchmark pages include representative schemas and query shapes. |
-| Cross-machine universal ranking | Not Supported | Results depend on hardware, OS, storage mode, durability, indexes, and native extensions. |
+The published results were collected on an Apple Silicon macOS arm64 baseline; scenarios run through `demos/Research.Benchmark/src/Research.Benchmark.Host`; results distinguish durability labels (strict LSM, relaxed LSM, SQLite WAL normal, SQLite WAL full); the interactive charts reveal exact values on hover and use a log scale where needed; and the benchmark pages disclose representative schemas and query shapes. These are local measurements, **not** a cross-machine universal ranking — results depend on hardware, OS, storage mode, durability, indexes, and native extensions.
 
 ---
 
@@ -3460,16 +3261,12 @@ var relaxed = new DataVoConfig
 };
 ```
 
+## Reproducing the Linux CI snapshot
+
+The Linux measurements in the benchmark results come from the GitHub Actions workflow `.github/workflows/linux-benchmark.yml`, which runs on an Ubuntu hosted runner. It downloads the pinned `sqlite-vec v0.1.9` Linux x86_64 loadable extension, verifies its SHA256, exports `SQLITE_VEC_PATH`, runs the same scenario commands shown above, and uploads the results as workflow artifacts. To reproduce it, trigger that workflow from the repository's Actions tab (it supports manual `workflow_dispatch`), or run the same `dotnet run` commands on a Linux host with `SQLITE_VEC_PATH` pointing at the extension.
+
 ## Reproduction Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Flat CRUD scenario | Supported | Compares in-process insert and point lookup paths. |
-| Disk CRUD WAL scenario | Supported | Includes strict/relaxed durability comparisons. |
-| Vector search scenario | Supported | Uses 10,000 vectors, 1536 dimensions, 100 queries, and top-10 results in the documented command. |
-| Thread scaling scenario | Supported | Includes 1, 2, 4, 8, 16, and 32 thread runs. |
-| YCSB mixed scenario | Supported | Preloads 100,000 records and mixes reads with updates. |
-| Space and recovery scenario | Supported | Measures disk footprint and recovery behavior. |
-| Stable public CI benchmark gate | Planned | Commands are documented; a long-term CI performance gate is future work. |
+All six scenarios above are reproducible from the documented commands: flat CRUD (in-process insert and point lookup), disk CRUD WAL (with strict/relaxed durability comparisons), vector search (10,000 vectors, 1536 dimensions, 100 queries, top-10), thread scaling (1, 2, 4, 8, 16, and 32 threads), YCSB mixed (100,000 records mixing reads and updates), and space-and-recovery (disk footprint and recovery). A long-term public CI performance gate is planned but not yet in place.
 
 ---

@@ -119,15 +119,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## ACID & Isolation Contract
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` | Supported | Transactions are session-bound and buffer DML until commit or rollback. |
-| Single-Row Lock-Free Reads | Supported | Point-read hot paths are designed to avoid serializing readers through a global write lock. |
-| Per-Table Write Locks | Supported | Inserts and commit paths acquire table-scoped write boundaries where the engine needs table-level mutation coordination. |
-| Row-level write coordination | Supported | Updates and deletes coordinate around selected row IDs and revalidate rows before mutation. |
-| MVCC snapshot visibility | Supported | Row-version metadata and transaction snapshots are used for visibility decisions in supported paths. |
-| Strict LSM commit durability | Supported | `LsmStrictFsync = true` waits for WAL durability before acknowledging writes. |
-| Disk sync writes | Supported | `SyncDiskWrites = true` opts into fsync-like disk behavior for disk mode. |
-| Multi-Row Serializability | Not Supported | v0.1 does not claim serializable isolation for arbitrary multi-row predicates or complex transaction schedules. |
-| Phantom-Read Prevention | Not Supported | Predicate-range locking and complete phantom prevention are not public v0.1 guarantees. |
-| Full ACID equivalence to PostgreSQL/SQLite | Not Supported | DataVo has useful transaction primitives, but v0.1 still has explicit isolation and storage-format maturity limits. |
+Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). v0.1 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.

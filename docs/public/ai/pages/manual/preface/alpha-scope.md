@@ -64,7 +64,7 @@ What makes this an alpha is the boundary around the edges. Package polish, stora
 | SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
 | Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
 | Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Planned | Package metadata and public publishing remain launch work. |
+| NuGet launch packaging | Supported | Package metadata is complete and preview packages publish to nuget.org via CI Trusted Publishing. |
 | Stable storage format | Planned | Alpha storage files may change before a stable release. |
 | Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
 | Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |

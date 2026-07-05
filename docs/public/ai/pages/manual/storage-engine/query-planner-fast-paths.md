@@ -60,15 +60,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Planner And Fast Path Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| General parser/executor | Supported | Default path for SQL execution through `DataVoContext.Execute`. |
-| Source-generated SELECT plan | Supported | `[DataVoQuery]` emits static plans for narrow equality SELECT shapes. |
-| Typed row reader | Supported | Eligible projections avoid dictionary materialization. |
-| Single-column manifest index hint | Supported | Schema manifests can pre-resolve index hints. |
-| Fixed-width compiled update | Supported | Narrow disk/LSM single-row update shapes only. |
-| LSM MemTable write path | Supported | Arena-backed write path avoids much allocation in steady state. |
-| Vector predicate fast path | Supported | ANN prefiltering is controlled by vector planner knobs. |
-| Volcano execution | Planned | Present but disabled by default. |
-| Arbitrary SQL fast path | Not Supported | Complex queries use the general runtime path. |
-| Cost-based optimizer parity with PostgreSQL | Not Supported | Planner work is early and targeted. |
+Supported paths include the general parser/executor (the default for `DataVoContext.Execute`), source-generated `SELECT` plans for narrow equality shapes (`[DataVoQuery]`), typed row readers, single-column manifest index hints, fixed-width compiled updates for narrow single-row shapes, the arena-backed LSM MemTable write path, and the vector-predicate ANN prefilter fast path. Volcano execution is present but disabled by default (planned); there is no arbitrary-SQL fast path, and the planner is not a cost-based optimizer at PostgreSQL parity.

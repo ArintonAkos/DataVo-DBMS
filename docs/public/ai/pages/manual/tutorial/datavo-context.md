@@ -91,12 +91,4 @@ using var lsmDb = new DataVoContext(new DataVoConfig
 
 ## DataVoContext API Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `Execute(string query)` | Supported | Executes SQL using the context default session. |
-| `Execute(string query, Guid sessionId)` | Supported | Executes SQL against an explicit logical session. |
-| Session-bound transactions | Supported | `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` belong to the session that executes them. |
-| Dictionary row results | Supported | `QueryResult.Data` contains dictionaries keyed by column name. |
-| Persistent disk mode | Supported | Use `StorageMode.Disk`, `DiskStoragePath`, and WAL settings. |
-| Persistent LSM mode | Supported | Use `StorageMode.Lsm` and choose strict or relaxed WAL durability. |
-| Async general SQL API | Planned | The primary public examples use synchronous `Execute`. |
+`DataVoContext` supports `Execute(string query)` against the default session and `Execute(string query, Guid sessionId)` against an explicit session, session-bound transactions (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`), dictionary row results in `QueryResult.Data`, and persistent `Disk` and `Lsm` storage (with WAL and durability settings). The public examples use synchronous `Execute`; an async general SQL API is planned.

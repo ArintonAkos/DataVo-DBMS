@@ -49,10 +49,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `StorageMode.InMemory` | Supported | Ephemeral storage for tests, demos, and isolated engine benchmarks. |
-| `StorageMode.Disk` | Supported | File-backed local tables with WAL options. |
-| `StorageMode.Lsm` | Supported | WAL-covered MemTables, SSTables, manifests, and compaction. |
-| `StorageMode.Wasm` | Planned | Browser/WASM integration exists but is not the primary v0.1 launch path. |
-| `StorageMode.Custom` | Planned | Advanced custom storage injection, not the default public workflow. |
+`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.

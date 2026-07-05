@@ -85,16 +85,4 @@ Use query capability checks before running a LINQ query that may be outside the 
 
 ## Entity Framework Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic `DbSet` querying | Supported | Works for mapped entities with explicit scalar CLR properties. |
-| Basic inserts | Supported | `Add` plus `SaveChanges` works for basic bridge workflows. |
-| `LoadFromDataVo` | Supported | Refreshes EF state from DataVo tables. |
-| `QueryFromDataVo` / `QueryFromDataVoAsync` | Supported | Executes supported `Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties. |
-| `ExplainQueryFromDataVo` / capability checks | Supported | Useful for preflight diagnostics. |
-| Vector function shims | Supported | `CosineDistance` and `L2Distance` are available for preview translation. |
-| Native provider identity | Planned | Preview flags exist, but this is not a full standalone provider. |
-| Migrations | Not Supported | No migration scaffolding or apply pipeline in v0.1. |
-| Shadow Properties | Not Supported | The bridge expects explicit mapped CLR properties. |
-| Complex LINQ Joins | Not Supported | Broad provider-style join translation is outside the v0.1 support claim. |
-| Broad `GroupBy` translation | Not Supported | Unsupported grouped operators report unsupported-pattern errors. |
+Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.1: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.

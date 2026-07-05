@@ -99,15 +99,4 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `CREATE TABLE` | Supported | Registers catalog metadata and prepares table storage. |
-| Integer primary keys | Supported | Common fast path for point lookups. |
-| `VARCHAR(n)` | Supported | Recommended spelling for text columns. |
-| `INT`, `FLOAT`, `BIT`, `DATE`, `GUID` | Supported | Public scalar type set used in examples and typed readers. |
-| `VECTOR(n)` | Supported | Fixed-dimension vector column. |
-| Scalar `CREATE INDEX` | Supported | Single-column and composite scalar indexes. |
-| Vector `CREATE INDEX` | Supported | `USING HNSW` and `USING FLAT`. |
-| `ALTER TABLE ADD COLUMN` | Supported | Rewrites rows and backfills null/default values. |
-| `ALTER TABLE DROP/MODIFY COLUMN` | Supported | Limited; rejects key, foreign-key, referenced, indexed, or incompatible changes. |
-| PostgreSQL domains/collations | Not Supported | No domain or collation system in v0.1. |
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `FLOAT`, `BIT`, `DATE`, `GUID`), `VECTOR(n)`, scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

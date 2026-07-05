@@ -115,13 +115,4 @@ List<ItemEmbedding> nearest = ctx.QueryFromDataVo<ItemEmbedding>(query => query
 
 ## EF Core Example Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic mapped `DbSet` querying | Supported | Works for simple bounded entity shapes. |
-| Basic inserts with `SaveChanges` | Supported | Supported for simple mapped entities in the bridge workflow. |
-| `LoadFromDataVo` | Supported | Refreshes EF state from DataVo before LINQ queries. |
-| `QueryFromDataVo` | Supported | Executes supported LINQ query patterns. |
-| Vector function shims | Supported | `CosineDistance` and `L2Distance` are available for preview translation. |
-| Migrations | Not Supported | No EF migrations pipeline in v0.1. |
-| Shadow properties | Not Supported | The bridge expects explicit CLR properties. |
-| Complex LINQ joins | Not Supported | Broad provider-style join translation is outside the v0.1 support claim. |
+The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.1.

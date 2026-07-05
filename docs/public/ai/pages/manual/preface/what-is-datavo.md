@@ -63,12 +63,4 @@ The project is early. DataVo v0.1 Alpha is useful for experiments, local-first a
 
 ## v0.1 Positioning
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Embedded C# storage engine | Supported | Applications instantiate `DataVoContext` directly inside the host process. |
-| In-memory, disk, and LSM storage | Supported | `InMemory`, `Disk`, and `Lsm` are the public launch modes. |
-| SQL-style DDL, DML, and queries | Supported | DataVo has its own compact SQL dialect. |
-| Vector columns and indexes | Supported | `VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, and `<->` are documented public features. |
-| Source-generated AOT-sensitive paths | Supported | Source-generated and typed paths avoid reflection-heavy execution where possible. |
-| Full RDBMS compatibility | Not Supported | DataVo v0.1 is not PostgreSQL, SQLite, or SQL Server compatible. |
-| Client/server protocol | Planned | PostgreSQL-wire compatibility would require a future `DataVo.Server`. |
+In v0.1, DataVo supports an embedded C# storage engine (`DataVoContext` runs in-process), `InMemory`, `Disk`, and `Lsm` storage, its own compact SQL dialect for DDL/DML/queries, and vector columns and indexes (`VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, `<->`). Source-generated, AOT-sensitive paths avoid reflection-heavy execution where possible. DataVo is deliberately **not** a full RDBMS — it is not PostgreSQL, SQLite, or SQL Server compatible — and it has no client/server protocol yet (PostgreSQL-wire compatibility would require a future `DataVo.Server`). See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

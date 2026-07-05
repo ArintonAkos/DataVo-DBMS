@@ -123,18 +123,4 @@ VACUUM Users;
 
 ## SQL Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `CREATE DATABASE` / `USE` | Supported | Selects the active database for the session. |
-| `CREATE TABLE` / `DROP TABLE` | Supported | Includes primary keys, defaults, scalar columns, and vector columns. |
-| `ALTER TABLE ADD/DROP/MODIFY COLUMN` | Supported | Limited implementation; key/indexed columns have restrictions. |
-| Scalar indexes | Supported | Single-column and composite scalar indexes are documented. |
-| Vector indexes | Supported | `USING HNSW` and `USING FLAT`. |
-| `INSERT`, `UPDATE`, `DELETE`, `VACUUM` | Supported | Core DML is available in the public subset. |
-| `SELECT`, `WHERE`, `ORDER BY`, `LIMIT`, `OFFSET` | Supported | Includes common predicate and ordering shapes. |
-| Aggregates, `GROUP BY`, `HAVING` | Supported | Used by runtime query paths. |
-| Joins | Supported | `INNER`, `LEFT`, `RIGHT`, `FULL`, and `CROSS`. |
-| `UNION` / `UNION ALL` | Supported | Branches must project compatible columns. |
-| Window functions | Not Supported | Not part of the v0.1 public claim. |
-| Stored procedures and triggers | Not Supported | No procedural SQL layer in v0.1. |
-| PostgreSQL dialect compatibility | Not Supported | DataVo SQL is its own dialect. |
+Supported: `CREATE DATABASE`/`USE`, `CREATE TABLE`/`DROP TABLE` (primary keys, defaults, scalar and vector columns), limited `ALTER TABLE ADD/DROP/MODIFY COLUMN`, scalar and vector indexes (`USING HNSW`, `USING FLAT`), core DML (`INSERT`, `UPDATE`, `DELETE`, `VACUUM`), `SELECT`/`WHERE`/`ORDER BY`/`LIMIT`/`OFFSET`, aggregates with `GROUP BY`/`HAVING`, all major joins (`INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`), and `UNION`/`UNION ALL`. Window functions, stored procedures, triggers, and PostgreSQL-dialect compatibility are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

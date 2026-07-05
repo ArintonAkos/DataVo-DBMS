@@ -69,14 +69,10 @@ var relaxed = new DataVoConfig
 };
 ```
 
+## Reproducing the Linux CI snapshot
+
+The Linux measurements in the benchmark results come from the GitHub Actions workflow `.github/workflows/linux-benchmark.yml`, which runs on an Ubuntu hosted runner. It downloads the pinned `sqlite-vec v0.1.9` Linux x86_64 loadable extension, verifies its SHA256, exports `SQLITE_VEC_PATH`, runs the same scenario commands shown above, and uploads the results as workflow artifacts. To reproduce it, trigger that workflow from the repository's Actions tab (it supports manual `workflow_dispatch`), or run the same `dotnet run` commands on a Linux host with `SQLITE_VEC_PATH` pointing at the extension.
+
 ## Reproduction Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Flat CRUD scenario | Supported | Compares in-process insert and point lookup paths. |
-| Disk CRUD WAL scenario | Supported | Includes strict/relaxed durability comparisons. |
-| Vector search scenario | Supported | Uses 10,000 vectors, 1536 dimensions, 100 queries, and top-10 results in the documented command. |
-| Thread scaling scenario | Supported | Includes 1, 2, 4, 8, 16, and 32 thread runs. |
-| YCSB mixed scenario | Supported | Preloads 100,000 records and mixes reads with updates. |
-| Space and recovery scenario | Supported | Measures disk footprint and recovery behavior. |
-| Stable public CI benchmark gate | Planned | Commands are documented; a long-term CI performance gate is future work. |
+All six scenarios above are reproducible from the documented commands: flat CRUD (in-process insert and point lookup), disk CRUD WAL (with strict/relaxed durability comparisons), vector search (10,000 vectors, 1536 dimensions, 100 queries, top-10), thread scaling (1, 2, 4, 8, 16, and 32 threads), YCSB mixed (100,000 records mixing reads and updates), and space-and-recovery (disk footprint and recovery). A long-term public CI performance gate is planned but not yet in place.
