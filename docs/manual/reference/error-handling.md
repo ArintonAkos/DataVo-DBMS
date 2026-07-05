@@ -88,11 +88,4 @@ catch (Exception ex)
 
 ## Error Handling Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `QueryResult.IsError` | Supported | Primary signal for general SQL execution failure. |
-| `QueryResult.Messages` | Supported | Contains row counts, validation notes, and error messages. |
-| `QueryResult.Fields` and `Data` | Supported | Used for successful tabular results. |
-| Parser/lexer/binding diagnostics | Supported | May surface through result messages or exceptions depending on call path. |
-| EF query validation exceptions | Supported | Unsupported EF bridge query patterns can be reported through typed integration errors. |
-| Stable public error code catalog | Planned | v0.1 does not yet document stable numeric error codes. |
+Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.1.

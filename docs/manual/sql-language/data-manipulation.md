@@ -84,15 +84,4 @@ ROLLBACK;
 
 ## DML Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Column-targeted `INSERT` | Supported | Recommended form for application code. |
-| Full-row `INSERT` | Supported | Value count must match table column count. |
-| Vector literal inserts | Supported | Use bracketed numeric values such as `'[1,0,0]'`. |
-| `UPDATE ... SET ... WHERE ...` | Supported | General path supports predicate-based updates. |
-| Fixed-width compiled update fast path | Supported | Applies only to narrow source-generated single-row update shapes. |
-| `DELETE ... WHERE ...` | Supported | Deletes matching rows and updates indexes. |
-| `VACUUM table` | Supported | Compacts storage and rebuilds indexes after deletes. |
-| Transactional DML | Supported | `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` are session-bound. |
-| `MERGE` | Not Supported | Not part of v0.1. |
-| PostgreSQL `COPY` protocol | Not Supported | No bulk copy protocol in v0.1. |
+Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.1. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

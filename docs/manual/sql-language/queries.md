@@ -137,16 +137,4 @@ LIMIT 5;
 
 ## Query Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Projection and aliases | Supported | Select named columns and computed aliases. |
-| `WHERE` predicates | Supported | Includes equality, comparisons, `IN`, `BETWEEN`, `LIKE`, and vector distance predicates. |
-| `ORDER BY` | Supported | Supports ascending/descending ordering and vector ranking. |
-| `LIMIT` / `OFFSET` | Supported | Use for top-K and paging shapes. |
-| Aggregates | Supported | Includes `COUNT`, `SUM`, `MIN`, and `MAX` in documented paths. |
-| `GROUP BY` / `HAVING` | Supported | Runtime query path supports grouped aggregates. |
-| Joins | Supported | `INNER`, `LEFT`, `RIGHT`, `FULL`, and `CROSS`. |
-| Subqueries | Supported | Includes `IN` and `EXISTS` style shapes in tested paths. |
-| `UNION` / `UNION ALL` | Supported | Branch projections must be compatible. |
-| Vector distance ranking | Supported | Use `<=>` for cosine and `<->` for L2. |
-| Cost-based optimizer parity with mature RDBMSs | Not Supported | Planner work is early and controlled by configuration. |
+Supported query features: projection and aliases; `WHERE` predicates including equality, comparisons, `IN`, `BETWEEN`, `LIKE`, and vector-distance predicates; `ORDER BY` (including vector ranking); `LIMIT`/`OFFSET`; aggregates (`COUNT`, `SUM`, `MIN`, `MAX`); `GROUP BY`/`HAVING`; all major joins; subqueries (`IN` and `EXISTS` shapes); `UNION`/`UNION ALL`; and vector distance ranking (`<=>` for cosine, `<->` for L2). The planner is early and configuration-controlled — it is not at cost-based-optimizer parity with mature RDBMSs. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

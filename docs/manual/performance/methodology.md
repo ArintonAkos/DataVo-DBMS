@@ -62,11 +62,4 @@ The charts are interactive so exact values are available on hover. Log scale is 
 
 ## Methodology Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Apple Silicon macOS baseline | Supported | Published results were collected in macOS arm64 / Apple Silicon context. |
-| Benchmark host commands | Supported | Scenarios run through `demos/Research.Benchmark/src/Research.Benchmark.Host`. |
-| Durability labels | Supported | Results distinguish strict LSM, relaxed LSM, SQLite WAL normal, and SQLite WAL full. |
-| Interactive exact-value charts | Supported | Hover reveals exact numbers; log scale is used when needed for readability. |
-| Workload SQL disclosure | Supported | Benchmark pages include representative schemas and query shapes. |
-| Cross-machine universal ranking | Not Supported | Results depend on hardware, OS, storage mode, durability, indexes, and native extensions. |
+The published results were collected on an Apple Silicon macOS arm64 baseline; scenarios run through `demos/Research.Benchmark/src/Research.Benchmark.Host`; results distinguish durability labels (strict LSM, relaxed LSM, SQLite WAL normal, SQLite WAL full); the interactive charts reveal exact values on hover and use a log scale where needed; and the benchmark pages disclose representative schemas and query shapes. These are local measurements, **not** a cross-machine universal ranking — results depend on hardware, OS, storage mode, durability, indexes, and native extensions.

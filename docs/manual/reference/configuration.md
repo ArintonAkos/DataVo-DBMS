@@ -95,15 +95,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Configuration Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `StorageMode.InMemory` | Supported | Best for tests, examples, and ephemeral workloads. |
-| `StorageMode.Disk` | Supported | File-backed storage with WAL options. |
-| `StorageMode.Lsm` | Supported | WAL-covered LSM storage with strict or relaxed durability. |
-| `DiskStoragePath` | Supported | Required for predictable persisted file placement. |
-| `WalEnabled` | Supported | Defaults to enabled for disk mode unless explicitly set. |
-| `SyncDiskWrites` | Supported | Enables fsync-like behavior for disk writes. |
-| `LsmStrictFsync` | Supported | Strict mode waits for WAL durability before acknowledging writes. |
-| `LockAcquireTimeoutMs` | Supported | Defaults to 30000 ms; `-1` waits indefinitely. |
-| Vector predicate fast-path knobs | Supported | Advanced controls for vector predicate routing. |
-| Volcano planner knobs | Planned | Present for limited planner experiments; not the default public execution path. |
+Supported settings: `StorageMode.InMemory`, `StorageMode.Disk`, and `StorageMode.Lsm`; `DiskStoragePath`; `WalEnabled` (on by default for disk mode); `SyncDiskWrites`; `LsmStrictFsync`; `LockAcquireTimeoutMs` (default 30000 ms, with `-1` waiting indefinitely); and vector predicate fast-path knobs. Volcano planner knobs exist for limited planner experiments but are planned, not the default public execution path.

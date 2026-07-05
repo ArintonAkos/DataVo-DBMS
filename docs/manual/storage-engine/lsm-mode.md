@@ -51,11 +51,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## LSM Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Arena-backed MemTable | Supported | Designed to keep steady-state managed allocation low. |
-| WAL segment per generation | Supported | WAL segments are retained until SSTable and manifest edits are durable. |
-| 32 MB MemTable flush threshold | Supported | Internal threshold in v0.1, not a public tuning setting. |
-| Background flush pipeline | Supported | Frozen generations flush outside the foreground write path. |
-| Compaction | Supported | Present as part of the LSM engine; tuning remains alpha. |
-| Stable on-disk format guarantee | Not Supported | v0.1 storage files may change before a stable release. |
+The LSM engine provides an arena-backed MemTable, a WAL segment per generation (retained until SSTable and manifest edits are durable), a 32 MB MemTable flush threshold (an internal v0.1 value, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and compaction (present, with tuning still in alpha). The on-disk format is **not** guaranteed stable — v0.1 storage files may change before a stable release.

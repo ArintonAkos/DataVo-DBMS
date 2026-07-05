@@ -162,14 +162,4 @@ List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
 
 ## Entity Framework Core Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Basic `DbSet` querying | Supported | Simple LINQ over mapped entities works after data is written in the current context or loaded with `LoadFromDataVo`. |
-| Basic inserts | Supported | `Add` plus `SaveChanges` is supported for simple mapped entities in the bridge workflow. |
-| `QueryFromDataVo` queries | Supported | Useful for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties. |
-| Vector LINQ shims | Supported | `DataVoVectorDbFunctions.CosineDistance` and `L2Distance` are available for DataVo-native translation preview. |
-| Native provider identity | Planned | Preview flags exist, but DataVo is not yet a mature standalone EF provider. |
-| Migrations | Not Supported | v0.1 does not include EF migration scaffolding, diffing, or apply support. |
-| Shadow Properties | Not Supported | The current bridge expects explicit mapped CLR properties. |
-| Complex Joins | Not Supported | Arbitrary LINQ `Join`, `GroupJoin`, and complex relationship shaping are outside the v0.1 support claim. |
-| Broad `GroupBy` translation | Not Supported | Unsupported grouped operators report unsupported-pattern errors. |
+The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.1 — unsupported grouped operators report unsupported-pattern errors.
