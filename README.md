@@ -1,8 +1,8 @@
 ﻿# DataVo
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-vitepress-3eaf7c)](docs/index.md)
-[![NuGet](https://img.shields.io/badge/NuGet-coming_soon-004880)](#install-with-nuget)
+[![Docs](https://img.shields.io/badge/docs-live-3eaf7c)](https://arintonakos.github.io/DataVo-DBMS/)
+[![NuGet](https://img.shields.io/nuget/vpre/DataVo.Core.svg?label=DataVo.Core)](https://www.nuget.org/packages/DataVo.Core/)
 [![npm](https://img.shields.io/badge/npm-coming_soon-CB3837)](#install-with-npm)
 
 DataVo is an embeddable SQL engine for .NET, designed for local-first applications, game tooling, and browser-native workflows.
@@ -42,69 +42,39 @@ Linux CI sqlite-vec rerun highlights:
 - On the Linux vector workload, DataVo HNSW reported `2.557093 ms` query P99, DataVo-Flat reported `602.778 ms` total time, and SQLite/sqlite-vec reported `2,186.128 ms` total time with `19.589254 ms` query P99.
 - On Linux thread scaling, DataVo LSM Relaxed reported `692,373 ops/s` at two threads and stayed above `551,000 ops/s` through 32 threads.
 
-macOS arm64 headline plots:
+Interactive versions of every chart live on the [benchmarks page](https://arintonakos.github.io/DataVo-DBMS/manual/performance/benchmarks). macOS arm64 headline plots:
 
-![Thread scaling throughput](docs/public/benchmarks/thread-scaling-throughput.png)
+![Thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/thread-scaling-throughput.png)
 
-![YCSB write P99 latency](docs/public/benchmarks/ycsb-write-p99.png)
+![YCSB write P99 latency](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ycsb-write-p99.png)
 
-![Vector search allocation](docs/public/benchmarks/vector-search-allocation.png)
+![Vector search allocation](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/vector-search-allocation.png)
 
-![Disk CRUD WAL total time](docs/public/benchmarks/disk-crud-wal-time.png)
+![Disk CRUD WAL total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/disk-crud-wal-time.png)
 
 Linux CI sqlite-vec rerun plots:
 
-![Linux vector search total time](docs/public/benchmarks/linux-vector-search-time.svg)
+![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.svg)
 
-![Linux vector search query P99](docs/public/benchmarks/linux-vector-search-p99.svg)
+![Linux vector search query P99](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-p99.svg)
 
-![Linux thread scaling throughput](docs/public/benchmarks/linux-thread-scaling-throughput.svg)
+![Linux thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-thread-scaling-throughput.svg)
 
 More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
 
 ## Install with NuGet
 
-### Public feed (planned)
-
-When published, installation will follow the standard NuGet flow:
+DataVo preview packages are published on [nuget.org](https://www.nuget.org/packages/DataVo.Core/). Because `0.1.0-preview.1` is a prerelease, include `--prerelease`:
 
 ```bash
-dotnet add package DataVo.Core
-dotnet add package DataVo.Data
-dotnet add package DataVo.EntityFrameworkCore
+dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Data --prerelease
+dotnet add package DataVo.EntityFrameworkCore --prerelease
 # Optional, for source-generated compiled queries:
-dotnet add package DataVo.Generators
+dotnet add package DataVo.Generators --prerelease
 ```
 
-### Publishing packages
-
-The repository is already pack-ready for the preview packages. Build and pack from the repository root:
-
-```bash
-dotnet restore DataVo.sln
-dotnet pack DataVo.Core/DataVo.Core.csproj -c Release --no-restore
-dotnet pack DataVo.Data/DataVo.Data.csproj -c Release --no-restore
-dotnet pack DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj -c Release --no-restore
-dotnet pack DataVo.Generators/DataVo.Generators.csproj -c Release --no-restore
-```
-
-Publish with a NuGet API key configured in the environment:
-
-```bash
-dotnet nuget push "artifacts/packages/*.nupkg" \
-  --api-key "$NUGET_API_KEY" \
-  --source https://api.nuget.org/v3/index.json \
-  --skip-duplicate
-```
-
-Push symbol packages separately only if symbol publishing is part of the release process:
-
-```bash
-dotnet nuget push "artifacts/packages/*.snupkg" \
-  --api-key "$NUGET_API_KEY" \
-  --source https://api.nuget.org/v3/index.json \
-  --skip-duplicate
-```
+Releases publish automatically from CI via [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC — no stored API keys) whenever a `v*.*.*` tag is pushed.
 
 ## Vector search example
 
@@ -307,9 +277,9 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 
 DataVo is preview software aimed at local-first and embeddable database scenarios.
 
-- Local package distribution is available now.
+- Preview packages are published on nuget.org (prerelease); local package distribution is also available.
 - Browser/WebAssembly runtime support is available now.
-- Public NuGet and npm publication are in deployment preparation.
+- Public npm publication is still in preparation.
 - Production-hardening work is active; validate representative workloads before production adoption.
 
 ## License
