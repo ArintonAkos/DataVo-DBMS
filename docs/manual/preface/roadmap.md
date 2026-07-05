@@ -59,7 +59,7 @@ Future tooling process
 | Curated public documentation | Supported | The v0.1 manual and AI export expose only public launch docs. |
 | Core embedded API | Supported | `DataVoContext` remains the primary interface. |
 | Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
-| NuGet packages | Planned | Public package publishing, version policy, and README polish remain launch tasks. |
+| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags. |
 | SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
 | Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
 | PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |

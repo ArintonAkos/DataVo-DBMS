@@ -64,7 +64,7 @@ More detail, including scenario commands and caveats: [docs/manual/performance/b
 
 ## Install with NuGet
 
-DataVo preview packages are published on [nuget.org](https://www.nuget.org/packages/DataVo.Core/). Because `0.1.0-preview.1` is a prerelease, include `--prerelease`:
+DataVo preview packages are published on [nuget.org](https://www.nuget.org/packages/DataVo.Core/). Because these are prerelease versions, include `--prerelease`:
 
 ```bash
 dotnet add package DataVo.Core --prerelease
