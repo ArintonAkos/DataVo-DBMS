@@ -62,16 +62,4 @@ Use generated queries for stable point reads, inserts, and narrow fixed-shape up
 
 ## Source Generator Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Static partial method generation | Supported | Containing type and method must be `static partial`. |
-| `DataVoContext` first parameter | Supported | Generated methods execute against an existing context. |
-| SQL parameter validation | Supported | SQL parameters must match C# parameters. |
-| Equality `SELECT` | Supported | `SELECT ... FROM table WHERE column = @param`. |
-| `INSERT INTO ... VALUES (...)` | Supported | Emits compiled insert path. |
-| `UPDATE ... SET ... WHERE ...` | Supported | Emits compiled update path for supported shapes. |
-| Typed projection mapper | Supported | Eligible projections use typed row readers. |
-| Schema manifest index hints | Supported | Single-column indexes can be pre-resolved as hints. |
-| Joins, aggregates, and vector search | Not Supported | Use runtime SQL for complex query shapes. |
-| `DELETE` generation | Not Supported | Not emitted in v0.1. |
-| Full LINQ provider generation | Not Supported | The generator covers a limited set of SQL patterns. |
+The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It does **not** generate `DELETE`, joins, aggregates, or vector search, and it is not a full LINQ provider — use runtime SQL for those shapes.

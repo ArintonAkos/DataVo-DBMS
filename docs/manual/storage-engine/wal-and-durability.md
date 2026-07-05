@@ -60,11 +60,4 @@ Misleading:
 
 ## Durability Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Disk WAL | Supported | `WalEnabled` defaults to enabled for disk mode unless explicitly overridden. |
-| Disk sync writes | Supported | `SyncDiskWrites = true` enables fsync-like behavior. |
-| LSM strict fsync | Supported | `LsmStrictFsync = true` waits for WAL durability before acknowledging writes. |
-| LSM relaxed OS-buffered mode | Supported | Faster, but can lose recent writes on power or kernel failure. |
-| WAL checkpoint settings | Supported | Disk mode has checkpoint threshold and interval settings. |
-| Relaxed throughput as strict durability | Not Supported | Relaxed benchmark wins must not be presented as strict durability. |
+Supported: disk WAL (`WalEnabled`, on by default for disk mode), disk sync writes (`SyncDiskWrites = true`), LSM strict fsync (`LsmStrictFsync = true`, which waits for WAL durability before acknowledging writes), LSM relaxed OS-buffered mode (faster, but can lose recent writes on power or kernel failure), and WAL checkpoint settings. Relaxed throughput must **not** be presented as strict durability.

@@ -136,11 +136,4 @@ Expected output:
 
 ## Quickstart Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| `DataVoContext` construction | Supported | Pass `DataVoConfig` to select storage mode and durability settings. |
-| `CREATE DATABASE` and `USE` | Supported | The examples use an explicit logical database. |
-| `CREATE TABLE` | Supported | Primary keys and scalar columns are supported in the documented subset. |
-| Column-targeted `INSERT` | Supported | Value count must match the supplied column list. |
-| `SELECT ... WHERE ... ORDER BY ... LIMIT` | Supported | This is part of the public query subset. |
-| Strongly typed general query API | Planned | The general API returns `QueryResult`; source generators provide typed calls for narrow shapes. |
+Everything in this quickstart is part of the public subset: constructing `DataVoContext` with a `DataVoConfig` (which selects storage mode and durability), `CREATE DATABASE` and `USE`, `CREATE TABLE` with primary keys and scalar columns, column-targeted `INSERT` (the value count must match the column list), and `SELECT ... WHERE ... ORDER BY ... LIMIT`. The general query API returns `QueryResult`; a strongly typed general API is planned, and source generators already provide typed calls for narrow shapes.

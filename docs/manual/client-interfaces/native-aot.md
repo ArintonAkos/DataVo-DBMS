@@ -45,12 +45,4 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
 
 ## Native AOT Support Summary
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| C#-native embedded core | Supported | Runs in-process without a native provider boundary. |
-| Source-generated query paths | Supported | `[DataVoQuery]` emits static code for supported shapes. |
-| Typed row readers | Supported | Avoid dictionary and boxing overhead on eligible projections. |
-| Source-generated AOT-sensitive paths | Supported | Generated queries and typed readers are the supported AOT-oriented paths in v0.1. |
-| Reflection-free catalog/runtime everywhere | Planned | Some runtime areas still need additional trimming hardening. |
-| Full EF Core AOT claim | Not Supported | EF integration has separate provider and reflection considerations. |
-| Full dynamic SQL AOT guarantee | Not Supported | Runtime SQL parsing and dynamic result shapes remain more dynamic than generated calls. |
+The AOT-oriented supported paths in v0.1 are the C#-native embedded core (no native provider boundary), source-generated query paths (`[DataVoQuery]`), and typed row readers. A fully reflection-free catalog and runtime everywhere is planned — some runtime areas still need trimming hardening. A full EF Core AOT claim and a full dynamic-SQL AOT guarantee are **not** supported, because EF integration and runtime SQL parsing remain more dynamic than generated calls.
