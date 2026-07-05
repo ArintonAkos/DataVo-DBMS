@@ -4,6 +4,7 @@
 [![Docs](https://img.shields.io/badge/docs-live-3eaf7c)](https://arintonakos.github.io/DataVo-DBMS/)
 [![NuGet](https://img.shields.io/nuget/vpre/DataVo.Core.svg?label=DataVo.Core)](https://www.nuget.org/packages/DataVo.Core/)
 [![npm](https://img.shields.io/badge/npm-coming_soon-CB3837)](#install-with-npm)
+![Views](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2FArintonAkos%2FDataVo-DBMS&label=Views&icon=github&color=%230d6efd&style=flat&tz=UTC)
 
 DataVo is an embeddable SQL engine for .NET, designed for local-first applications, game tooling, and browser-native workflows.
 
