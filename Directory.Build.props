@@ -8,7 +8,7 @@
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.1.0-preview.2</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and disk-backed storage, and embeddable .NET workflows.</Description>
@@ -29,19 +29,19 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>Initial local pack-ready setup with SQL engine, storage, indexing, and ALTER TABLE support.</PackageReleaseNotes>
+    <PackageReleaseNotes>SQL engine, storage, indexing, and ALTER TABLE support. preview.2 refreshes the package README and packaging; published via CI Trusted Publishing.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
     <PackageId>DataVo.Data</PackageId>
     <Title>DataVo Data</Title>
     <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
-    <PackageReleaseNotes>Initial local pack-ready setup for the DataVo data-access package.</PackageReleaseNotes>
+    <PackageReleaseNotes>DataVo data-access package. preview.2 refreshes the package README and packaging.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
     <IsPackable>true</IsPackable>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.1.0-preview.2</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageId>DataVo.EntityFrameworkCore</PackageId>
@@ -59,7 +59,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageReleaseNotes>Initial EF Core schema bridge for generating DataVo DDL from EF models.</PackageReleaseNotes>
+    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. preview.2 refreshes the package README and packaging.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">

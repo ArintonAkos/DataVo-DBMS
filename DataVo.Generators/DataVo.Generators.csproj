@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoWarn>$(NoWarn);RS1036;RS2008;NU5128</NoWarn>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.1.0-preview.2</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageId>DataVo.Generators</PackageId>
