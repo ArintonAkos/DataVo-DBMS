@@ -13,7 +13,7 @@
 - **Nothing has been pushed to nuget.org yet.** README badges say "NuGet coming soon."
 - **Docs:** VitePress site under `docs/`, builds via `npm run docs:build` (`docs:ai` generator → `clean-docs-dist.cjs` → `vitepress build`) into `docs/.vitepress/dist`. Static assets in `docs/public/`.
 - **No `base`** is set in `docs/.vitepress/config.mts`.
-- Only one workflow exists: `.github/workflows/linux-benchmark.yml`. No NuGet or Pages workflow.
+- Only one workflow exists: `.github/workflows/benchmark.yml`. No NuGet or Pages workflow.
 - Repo remote: `https://github.com/ArintonAkos/DataVo-DBMS`. Project-pages URL will be `https://arintonakos.github.io/DataVo-DBMS/` (github.io lowercases the owner).
 - Local SDK: .NET `10.0.103`. No `global.json` pinning.
 

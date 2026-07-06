@@ -19,7 +19,7 @@ DLL=demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Res
 
 dotnet "$DLL" --scenario flat-crud      --format csv          # Scenario A (default 50,000 records)
 dotnet "$DLL" --scenario deep-document  --format csv --orders 2000   # Scenario B
-SQLITE_VEC_PATH=/path/to/vec0.dylib \
+SQLITE_VEC_PATH=/path/to/vec0 \
 dotnet "$DLL" --scenario vector-search  --format csv          # Scenario C (10,000 x 1536-dim, 100 queries)
 ```
 
@@ -30,16 +30,35 @@ Engine filter: `--engine all|datavo|litedb|sqlite`. Other knobs: `--records`, `-
 
 `sqlite-vec` is a **native loadable extension**, not a NuGet package. The benchmark loads it from the path
 in the `SQLITE_VEC_PATH` environment variable; if it is unset or the library can't load, the SQLite row is
-reported `n/a`. To obtain it (example, macOS arm64):
+reported `n/a`. Use the `v0.1.9` loadable asset that matches the host OS/CPU.
 
 ```bash
 curl -sL -o /tmp/svec.tgz \
-  https://github.com/asg017/sqlite-vec/releases/download/v0.1.6/sqlite-vec-0.1.6-loadable-macos-aarch64.tar.gz
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-macos-aarch64.tar.gz
 tar xzf /tmp/svec.tgz -C /tmp                      # -> /tmp/vec0.dylib
 export SQLITE_VEC_PATH=/tmp/vec0.dylib
 ```
 
-(Use the matching `loadable-linux-x86_64` asset on Linux CI.)
+Linux x64:
+
+```bash
+curl -sL -o /tmp/svec.tgz \
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz
+tar xzf /tmp/svec.tgz -C /tmp                      # -> /tmp/vec0.so
+export SQLITE_VEC_PATH=/tmp/vec0.so
+```
+
+Windows x64, PowerShell:
+
+```powershell
+curl.exe -L -o $env:TEMP\svec.tgz `
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz
+tar -xzf $env:TEMP\svec.tgz -C $env:TEMP           # -> %TEMP%\vec0.dll
+$env:SQLITE_VEC_PATH = "$env:TEMP\vec0.dll"
+```
+
+The GitHub Actions benchmark workflow downloads the pinned Linux and Windows x64 loadable assets and sets
+`SQLITE_VEC_PATH` automatically for both runners.
 
 ## Notes on the DataVo results
 
