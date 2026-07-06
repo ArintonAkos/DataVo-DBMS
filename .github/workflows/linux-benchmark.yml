@@ -1,29 +1,24 @@
-name: Linux Benchmark
+name: Benchmark
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-    paths:
-      - "DataVo.Core/**"
-      - "demos/Research.Benchmark/**"
-      - ".github/workflows/linux-benchmark.yml"
-  pull_request:
-    paths:
-      - "DataVo.Core/**"
-      - "demos/Research.Benchmark/**"
-      - ".github/workflows/linux-benchmark.yml"
 
 permissions:
   contents: read
 
 jobs:
   benchmark:
-    name: Research benchmark matrix on Ubuntu
-    runs-on: ubuntu-latest
+    name: Research benchmark matrix on ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64
+            runner: ubuntu-latest
+          - label: windows-x64
+            runner: windows-latest
 
     steps:
       - name: Checkout
@@ -35,6 +30,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Install sqlite-vec loadable extension
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +67,7 @@ jobs:
           set -euo pipefail
 
           mkdir -p artifacts
-          LOG_FILE="artifacts/linux-benchmark.log"
+          LOG_FILE="artifacts/${{ matrix.label }}-benchmark.log"
           : > "$LOG_FILE"
 
           scenarios=(
@@ -88,11 +84,11 @@ jobs:
           )
 
           {
-            echo "DataVo Linux benchmark matrix"
+            echo "DataVo benchmark matrix (${{ matrix.label }})"
             echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "Kernel: $(uname -a)"
-            echo "sqlite-vec: ${SQLITE_VEC_VERSION} (${SQLITE_VEC_ARCHIVE}, sha256:${SQLITE_VEC_SHA256})"
-            echo "SQLITE_VEC_PATH: ${SQLITE_VEC_PATH}"
+            echo "System: $(uname -a)"
+            echo "sqlite-vec: ${SQLITE_VEC_VERSION:-not installed for this runner} ${SQLITE_VEC_ARCHIVE:+(${SQLITE_VEC_ARCHIVE}, sha256:${SQLITE_VEC_SHA256})}"
+            echo "SQLITE_VEC_PATH: ${SQLITE_VEC_PATH:-not set}"
             dotnet --info
           } | tee -a "$LOG_FILE"
 
@@ -118,11 +114,12 @@ jobs:
       - name: Upload benchmark log
         uses: actions/upload-artifact@v4
         with:
-          name: linux-benchmark-log
-          path: artifacts/linux-benchmark.log
+          name: benchmark-log-${{ matrix.label }}
+          path: artifacts/${{ matrix.label }}-benchmark.log
           if-no-files-found: error
 
       - name: Upload sqlite-vec extension
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: sqlite-vec-linux-x86_64
