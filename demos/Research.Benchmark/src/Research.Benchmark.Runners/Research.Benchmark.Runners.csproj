@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
     <DataVoCoreTargetFramework Condition="'$(DataVoCoreTargetFramework)' == ''">net10.0</DataVoCoreTargetFramework>
     <OutputPath Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">bin/$(Configuration)/$(TargetFramework)-datavo-netstandard2.1/</OutputPath>
+    <IntermediateOutputPath Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">obj/$(Configuration)/$(TargetFramework)-datavo-netstandard2.1/</IntermediateOutputPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">

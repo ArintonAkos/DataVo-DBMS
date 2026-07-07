@@ -20,13 +20,8 @@ internal sealed class PriorityQueue<TElement, TPriority>
 
     public void Enqueue(TElement element, TPriority priority)
     {
-        int index = _items.BinarySearch((element, priority), EntryComparer.Instance(_comparer));
-        if (index < 0)
-        {
-            index = ~index;
-        }
-
-        _items.Insert(index, (element, priority));
+        _items.Add((element, priority));
+        SiftUp(_items.Count - 1);
     }
 
     public TElement Dequeue()
@@ -37,7 +32,7 @@ internal sealed class PriorityQueue<TElement, TPriority>
         }
 
         TElement element = _items[0].Element;
-        _items.RemoveAt(0);
+        RemoveRoot();
         return element;
     }
 
@@ -51,7 +46,7 @@ internal sealed class PriorityQueue<TElement, TPriority>
         }
 
         (element, priority) = _items[0];
-        _items.RemoveAt(0);
+        RemoveRoot();
         return true;
     }
 
@@ -80,19 +75,63 @@ internal sealed class PriorityQueue<TElement, TPriority>
 
     public void Clear() => _items.Clear();
 
-    private sealed class EntryComparer : IComparer<(TElement Element, TPriority Priority)>
+    private void RemoveRoot()
     {
-        private readonly IComparer<TPriority> _priorityComparer;
-
-        private EntryComparer(IComparer<TPriority> priorityComparer)
+        int last = _items.Count - 1;
+        if (last == 0)
         {
-            _priorityComparer = priorityComparer;
+            _items.RemoveAt(0);
+            return;
         }
 
-        public static EntryComparer Instance(IComparer<TPriority> priorityComparer) => new(priorityComparer);
+        _items[0] = _items[last];
+        _items.RemoveAt(last);
+        SiftDown(0);
+    }
 
-        public int Compare((TElement Element, TPriority Priority) x, (TElement Element, TPriority Priority) y) =>
-            _priorityComparer.Compare(x.Priority, y.Priority);
+    private void SiftUp(int index)
+    {
+        (TElement Element, TPriority Priority) item = _items[index];
+        while (index > 0)
+        {
+            int parent = (index - 1) >> 1;
+            if (_comparer.Compare(item.Priority, _items[parent].Priority) >= 0)
+            {
+                break;
+            }
+
+            _items[index] = _items[parent];
+            index = parent;
+        }
+
+        _items[index] = item;
+    }
+
+    private void SiftDown(int index)
+    {
+        (TElement Element, TPriority Priority) item = _items[index];
+        int half = _items.Count >> 1;
+
+        while (index < half)
+        {
+            int child = (index << 1) + 1;
+            int right = child + 1;
+
+            if (right < _items.Count && _comparer.Compare(_items[right].Priority, _items[child].Priority) < 0)
+            {
+                child = right;
+            }
+
+            if (_comparer.Compare(_items[child].Priority, item.Priority) >= 0)
+            {
+                break;
+            }
+
+            _items[index] = _items[child];
+            index = child;
+        }
+
+        _items[index] = item;
     }
 }
 #endif

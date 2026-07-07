@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 using DataVo.Core.Indexing.HNSW;
 using System.Diagnostics;
 using System.Globalization;
@@ -12,6 +13,15 @@ public class HNSWIndexTests : IDisposable
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"datavo_hnsw_tests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
+    }
+
+    [Fact]
+    public void Hnsw_AdvertisesSpanInsertAndReservationCapabilities()
+    {
+        var index = new HNSWIndex();
+
+        Assert.IsAssignableFrom<ISpanVectorIndex>(index);
+        Assert.IsAssignableFrom<IReservableVectorIndex>(index);
     }
 
     [Fact]

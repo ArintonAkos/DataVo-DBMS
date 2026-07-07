@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 using DataVo.Core.Utils;
 using System.Runtime.CompilerServices;
 #if NET10_0_OR_GREATER
@@ -9,7 +10,7 @@ namespace DataVo.Core.Indexing.HNSW;
 /// <summary>
 /// Implements an in-memory HNSW (Hierarchical Navigable Small World) vector index.
 /// </summary>
-public class HNSWIndex : IVectorIndex
+public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
 {
     private const int DefaultM = 16;
     private const int DefaultEfConstruction = 64;
@@ -45,6 +46,7 @@ public class HNSWIndex : IVectorIndex
     private long[] _rowIdByOrdinal = [];
     private bool[] _isActive = [];
     private int[] _nodeLevels = [];
+    private float[] _inverseNormByOrdinal = [];
 
     private int[] _levelStrides = [];
     private int[] _levelOffsets = [];
@@ -372,6 +374,21 @@ public class HNSWIndex : IVectorIndex
             throw new ArgumentException("Vector cannot be null or empty", nameof(vector));
         }
 
+        Insert(rowId, vector.AsSpan());
+    }
+
+    /// <summary>
+    /// Inserts or replaces a single vector for a row id without requiring the caller to allocate a copied array.
+    /// </summary>
+    /// <param name="rowId">Row id to associate with the vector.</param>
+    /// <param name="vector">Vector payload to index.</param>
+    public void Insert(long rowId, ReadOnlySpan<float> vector)
+    {
+        if (vector.Length == 0)
+        {
+            throw new ArgumentException("Vector cannot be empty", nameof(vector));
+        }
+
         ValidateFiniteVector(vector, nameof(vector));
         InsertCore(rowId, vector);
     }
@@ -385,6 +402,7 @@ public class HNSWIndex : IVectorIndex
 
         int ordinal;
         int sampledLevel;
+        float vectorInvNorm;
 
         lock (_stateGate)
         {
@@ -399,7 +417,7 @@ public class HNSWIndex : IVectorIndex
 
             sampledLevel = SampleLevel();
             _nodeLevels[ordinal] = sampledLevel;
-            WriteVector(ordinal, vector);
+            vectorInvNorm = WriteVector(ordinal, vector);
             ClearNodeLinks(ordinal);
 
             if (!EntryPointId.HasValue)
@@ -425,7 +443,7 @@ public class HNSWIndex : IVectorIndex
 
         for (int level = topLevel; level > targetLevel; level--)
         {
-            entryOrdinal = SearchGreedy(vector, entryOrdinal, level);
+            entryOrdinal = SearchGreedy(vector, vectorInvNorm, entryOrdinal, level);
         }
 
         var selectWorkspace = GetSelectionWorkspace();
@@ -437,7 +455,7 @@ public class HNSWIndex : IVectorIndex
         {
             int ef = ResolveEffectiveEfConstruction(level);
             var searchWorkspace = GetSearchWorkspace();
-            int candidateCount = SearchLayer(vector, entryOrdinal, ef, level, searchWorkspace);
+            int candidateCount = SearchLayer(vector, vectorInvNorm, entryOrdinal, ef, level, searchWorkspace);
 
             int neighborLimit = ResolveNeighborLimit(level);
             if (neighborLimit > destinationBuffer.Length)
@@ -507,6 +525,7 @@ public class HNSWIndex : IVectorIndex
 
             _isActive[ordinal] = false;
             _nodeLevels[ordinal] = 0;
+            _inverseNormByOrdinal[ordinal] = 0f;
             _rowIdByOrdinal[ordinal] = 0;
             _rowIdToOrdinal.Remove(rowId);
             _freeOrdinals.Push(ordinal);
@@ -554,23 +573,24 @@ public class HNSWIndex : IVectorIndex
 
         if (topK >= _count)
         {
-            return ExactSearch(queryVector, topK);
+            return ExactSearch(queryVector, topK, ComputeInverseNorm(queryVector));
         }
 
         if (!EntryPointId.HasValue || !_rowIdToOrdinal.TryGetValue(EntryPointId.Value, out int entryOrdinal))
         {
-            return ExactSearch(queryVector, topK);
+            return ExactSearch(queryVector, topK, ComputeInverseNorm(queryVector));
         }
 
+        float queryInvNorm = ComputeInverseNorm(queryVector);
         int current = entryOrdinal;
         for (int level = MaxLevel; level > 0; level--)
         {
-            current = SearchGreedy(queryVector, current, level);
+            current = SearchGreedy(queryVector, queryInvNorm, current, level);
         }
 
         int ef = ResolveEffectiveEfSearch(topK);
         var workspace = GetSearchWorkspace();
-        int resultCount = SearchLayer(queryVector, current, ef, 0, workspace);
+        int resultCount = SearchLayer(queryVector, queryInvNorm, current, ef, 0, workspace);
 
         int take = Math.Min(topK, resultCount);
         var result = new List<long>(take);
@@ -603,6 +623,7 @@ public class HNSWIndex : IVectorIndex
         _rowIdByOrdinal = [];
         _isActive = [];
         _nodeLevels = [];
+        _inverseNormByOrdinal = [];
 
         _vectorDimension = -1;
         _ordinalCapacity = 0;
@@ -698,6 +719,7 @@ public class HNSWIndex : IVectorIndex
         _rowIdByOrdinal = state.RowIdByOrdinal ?? [];
         _isActive = state.IsActive ?? [];
         _nodeLevels = state.NodeLevels ?? [];
+        _inverseNormByOrdinal = new float[Math.Max(_ordinalCapacity, _nextOrdinal)];
         _levelStrides = state.LevelStrides ?? [];
         _levelOffsets = state.LevelOffsets ?? [];
         _nodeGraphStride = _levelStrides.Sum();
@@ -706,6 +728,7 @@ public class HNSWIndex : IVectorIndex
         ComputePageGeometry();
         RebuildVectorPagesFromFlat(state.VectorData ?? []);
         RebuildGraphPagesFromFlat(state.GraphLinks ?? []);
+        RebuildInverseNorms();
 
         _rowIdToOrdinal.Clear();
         if (state.RowIds != null && state.Ordinals != null)
@@ -932,6 +955,7 @@ public class HNSWIndex : IVectorIndex
         Array.Resize(ref _rowIdByOrdinal, newCapacity);
         Array.Resize(ref _isActive, newCapacity);
         Array.Resize(ref _nodeLevels, newCapacity);
+        Array.Resize(ref _inverseNormByOrdinal, newCapacity);
         Array.Resize(ref _nodeLocks, newCapacity);
 
         for (int i = previousCapacity; i < newCapacity; i++)
@@ -940,10 +964,13 @@ public class HNSWIndex : IVectorIndex
         }
     }
 
-    private void WriteVector(int ordinal, ReadOnlySpan<float> vector)
+    private float WriteVector(int ordinal, ReadOnlySpan<float> vector)
     {
         int slot = (ordinal & _vectorPageMask) * _vectorDimension;
         vector.CopyTo(_vectorPages[ordinal >> _vectorPageShift].AsSpan(slot, _vectorDimension));
+        float inverseNorm = ComputeInverseNorm(vector);
+        _inverseNormByOrdinal[ordinal] = inverseNorm;
+        return inverseNorm;
     }
 
     private ReadOnlySpan<float> GetVector(int ordinal)
@@ -1032,10 +1059,10 @@ public class HNSWIndex : IVectorIndex
         return _threadSelectionWorkspace;
     }
 
-    private int SearchGreedy(ReadOnlySpan<float> query, int entryOrdinal, int level)
+    private int SearchGreedy(ReadOnlySpan<float> query, float queryInvNorm, int entryOrdinal, int level)
     {
         int current = entryOrdinal;
-        float currentDistance = Distance(query, GetVector(current));
+        float currentDistance = DistanceToOrdinal(query, queryInvNorm, current);
 
         bool moved;
         do
@@ -1060,7 +1087,7 @@ public class HNSWIndex : IVectorIndex
                     continue;
                 }
 
-                float distance = Distance(query, GetVector(neighbor));
+                float distance = DistanceToOrdinal(query, queryInvNorm, neighbor);
                 if (distance < currentDistance)
                 {
                     current = neighbor;
@@ -1073,7 +1100,7 @@ public class HNSWIndex : IVectorIndex
         return current;
     }
 
-    private int SearchLayer(ReadOnlySpan<float> query, int entryOrdinal, int ef, int level, SearchWorkspace workspace)
+    private int SearchLayer(ReadOnlySpan<float> query, float queryInvNorm, int entryOrdinal, int ef, int level, SearchWorkspace workspace)
     {
         workspace.Begin();
         workspace.EnsureVisitedCapacity(_nextOrdinal + 1);
@@ -1084,7 +1111,7 @@ public class HNSWIndex : IVectorIndex
             return 0;
         }
 
-        float startDistance = Distance(query, GetVector(entryOrdinal));
+        float startDistance = DistanceToOrdinal(query, queryInvNorm, entryOrdinal);
         workspace.CandidateQueue.Enqueue((entryOrdinal, startDistance), startDistance);
         workspace.ResultQueue.Enqueue((entryOrdinal, startDistance), -startDistance);
         workspace.VisitedEpochByOrdinal[entryOrdinal] = workspace.Epoch;
@@ -1130,7 +1157,7 @@ public class HNSWIndex : IVectorIndex
                 }
 
                 workspace.VisitedEpochByOrdinal[neighbor] = workspace.Epoch;
-                float distance = Distance(query, GetVector(neighbor));
+                float distance = DistanceToOrdinal(query, queryInvNorm, neighbor);
 
                 if (workspace.ResultQueue.Count >= ef && workspace.ResultQueue.TryPeek(out _, out float worst))
                 {
@@ -1315,7 +1342,7 @@ public class HNSWIndex : IVectorIndex
 
             workspace.SeenEpochByOrdinal[candidate] = workspace.SeenEpoch;
             workspace.CandidateOrdinals[uniqueCount] = candidate;
-            workspace.CandidateDistances[uniqueCount] = Distance(GetVector(targetOrdinal), GetVector(candidate));
+            workspace.CandidateDistances[uniqueCount] = DistanceBetweenOrdinals(targetOrdinal, candidate);
             uniqueCount++;
         }
 
@@ -1368,7 +1395,7 @@ public class HNSWIndex : IVectorIndex
                     continue;
                 }
 
-                float candidateToExisting = Distance(GetVector(candidate), GetVector(existing));
+                float candidateToExisting = DistanceBetweenOrdinals(candidate, existing);
                 if (candidateToExisting < candidateToTarget)
                 {
                     occluded = true;
@@ -1427,7 +1454,7 @@ public class HNSWIndex : IVectorIndex
         return count;
     }
 
-    private List<long> ExactSearch(ReadOnlySpan<float> query, int topK)
+    private List<long> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
     {
         int take = Math.Min(topK, _count);
         var maxHeap = new PriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
@@ -1441,7 +1468,7 @@ public class HNSWIndex : IVectorIndex
                 continue;
             }
 
-            float distance = Distance(query, GetVector(ordinal));
+            float distance = DistanceToOrdinal(query, queryInvNorm, ordinal);
             if (maxHeap.Count < take)
             {
                 maxHeap.Enqueue((ordinal, distance), (-distance, -ordinal));
@@ -1530,11 +1557,62 @@ public class HNSWIndex : IVectorIndex
         MaxLevel = bestLevel;
     }
 
-    private float Distance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    private float DistanceToOrdinal(ReadOnlySpan<float> query, float queryInvNorm, int ordinal)
     {
         return Metric == "cosine"
-            ? SimdDistanceKernels.CosineDistance(a, b)
-            : SimdDistanceKernels.EuclideanDistance(a, b);
+            ? CosineDistanceFromCachedNorms(query, GetVector(ordinal), queryInvNorm, _inverseNormByOrdinal[ordinal])
+            : SimdDistanceKernels.EuclideanDistance(query, GetVector(ordinal));
+    }
+
+    private float DistanceBetweenOrdinals(int leftOrdinal, int rightOrdinal)
+    {
+        return Metric == "cosine"
+            ? CosineDistanceFromCachedNorms(
+                GetVector(leftOrdinal),
+                GetVector(rightOrdinal),
+                _inverseNormByOrdinal[leftOrdinal],
+                _inverseNormByOrdinal[rightOrdinal])
+            : SimdDistanceKernels.EuclideanDistance(GetVector(leftOrdinal), GetVector(rightOrdinal));
+    }
+
+    private static float CosineDistanceFromCachedNorms(
+        ReadOnlySpan<float> left,
+        ReadOnlySpan<float> right,
+        float leftInvNorm,
+        float rightInvNorm)
+    {
+        if (leftInvNorm <= 0f || rightInvNorm <= 0f)
+        {
+            return 1f;
+        }
+
+        return 1f - SimdDistanceKernels.Dot(left, right) * leftInvNorm * rightInvNorm;
+    }
+
+    private static float ComputeInverseNorm(ReadOnlySpan<float> vector)
+    {
+        float sumSquares = SimdDistanceKernels.Dot(vector, vector);
+        return sumSquares <= 0f ? 0f : 1f / MathF.Sqrt(sumSquares);
+    }
+
+    private void RebuildInverseNorms()
+    {
+        if (_nextOrdinal <= 0)
+        {
+            return;
+        }
+
+        if (_inverseNormByOrdinal.Length < _nextOrdinal)
+        {
+            Array.Resize(ref _inverseNormByOrdinal, _nextOrdinal);
+        }
+
+        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
+        {
+            _inverseNormByOrdinal[ordinal] = (uint)ordinal < (uint)_isActive.Length && _isActive[ordinal]
+                ? ComputeInverseNorm(GetVector(ordinal))
+                : 0f;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
