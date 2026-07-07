@@ -48,6 +48,77 @@ public class IndexManagerTests : IDisposable
         public bool TryDeleteDirectory(string directoryPath) => false;
     }
 
+    private sealed class BatchRecordingVectorIndex : IVectorIndex, IBatchVectorIndex
+    {
+        public static BatchRecordingVectorIndex? LastCreated { get; private set; }
+
+        public BatchRecordingVectorIndex()
+        {
+            LastCreated = this;
+        }
+
+        public string IndexType => "BATCHREC";
+
+        public int SingleInsertCalls { get; private set; }
+
+        public int BatchInsertCalls { get; private set; }
+
+        public int BatchVectorDimension { get; private set; }
+
+        public long[] BatchRowIds { get; private set; } = [];
+
+        public float[] BatchVectors { get; private set; } = [];
+
+        public void Insert(long rowId, float[] vector)
+        {
+            SingleInsertCalls++;
+        }
+
+        public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+        {
+            BatchInsertCalls++;
+            BatchVectorDimension = vectorDimension;
+            BatchRowIds = [.. rowIds];
+            BatchVectors = [.. vectors];
+        }
+
+        public void Delete(List<long> rowIds) { }
+
+        public List<long> SearchTopK(float[] queryVector, int topK) => [];
+
+        public void Clear() { }
+    }
+
+    private sealed class BatchRecordingVectorFactory : IVectorIndexFactory
+    {
+        public string IndexType => "BATCHREC";
+
+        public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
+            => new BatchRecordingVectorIndex();
+
+        public object LoadIndex(string filePath, IIndexPersistence persistence)
+            => new BatchRecordingVectorIndex();
+    }
+
+    private sealed class BatchRecordingVectorPersistence : IIndexPersistence
+    {
+        public string FileExtension => ".batchrec";
+
+        public void SaveIndex(object index, string filePath) { }
+
+        public object LoadIndex(string filePath) => new BatchRecordingVectorIndex();
+
+        public void Flush(object index) { }
+
+        public bool FileExists(string filePath) => File.Exists(filePath);
+
+        public void EnsureDirectory(string directoryPath) => Directory.CreateDirectory(directoryPath);
+
+        public bool TryDeleteFile(string filePath) => true;
+
+        public bool TryDeleteDirectory(string directoryPath) => true;
+    }
+
     private readonly string _testDir;
     private readonly IndexManager _manager;
 
@@ -171,6 +242,29 @@ public class IndexManagerTests : IDisposable
 
         Assert.Single(rowIds);
         Assert.Equal(20L, rowIds[0]);
+    }
+
+    [Fact]
+    public void VectorIndex_InsertMany_UsesBatchCapabilityWhenAvailable()
+    {
+        _manager.RegisterIndexType("BATCHREC", new BatchRecordingVectorFactory(), new BatchRecordingVectorPersistence());
+        _manager.CreateVectorIndex([], "idx_batch", "Embeddings", "DbBatch", indexType: "BATCHREC");
+
+        _manager.InsertManyIntoVectorIndex(
+            [101L, 202L],
+            [1f, 0f, 0f, 1f],
+            vectorDimension: 2,
+            indexName: "idx_batch",
+            tableName: "Embeddings",
+            databaseName: "DbBatch",
+            indexType: "BATCHREC");
+
+        BatchRecordingVectorIndex index = Assert.IsType<BatchRecordingVectorIndex>(BatchRecordingVectorIndex.LastCreated);
+        Assert.Equal(0, index.SingleInsertCalls);
+        Assert.Equal(1, index.BatchInsertCalls);
+        Assert.Equal(2, index.BatchVectorDimension);
+        Assert.Equal([101L, 202L], index.BatchRowIds);
+        Assert.Equal([1f, 0f, 0f, 1f], index.BatchVectors);
     }
 
     [Fact]

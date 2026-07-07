@@ -1458,6 +1458,8 @@ internal sealed class InsertRowService(
         }
 
         string vectorColumn = index.AttributeNames[0];
+        int vectorDimension = -1;
+        int vectorCount = 0;
         for (int i = 0; i < rows.Count; i++)
         {
             CellValue vectorCell = GetTypedCell(rows[i], schema, vectorColumn);
@@ -1471,8 +1473,46 @@ internal sealed class InsertRowService(
                 throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
             }
 
-            indexes.InsertIntoVectorIndex(vectorCell.AsVectorReadOnlySpan(), rowIds[i], indexName, tableName, databaseName, indexKind);
+            int currentDimension = vectorCell.VectorLength;
+            if (vectorDimension < 0)
+            {
+                vectorDimension = currentDimension;
+            }
+            else if (currentDimension != vectorDimension)
+            {
+                throw new EvaluationException($"Vector dimension mismatch for index '{indexName}'. Expected {vectorDimension}, got {currentDimension}.");
+            }
+
+            vectorCount++;
         }
+
+        if (vectorCount == 0)
+        {
+            return;
+        }
+
+        var vectorRowIds = new long[vectorCount];
+        var vectorBuffer = new float[checked(vectorCount * vectorDimension)];
+        int writeIndex = 0;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            CellValue vectorCell = GetTypedCell(rows[i], schema, vectorColumn);
+            if (vectorCell.IsNull)
+            {
+                continue;
+            }
+
+            if (vectorCell.Type != CellType.Vector)
+            {
+                throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+            }
+
+            vectorRowIds[writeIndex] = rowIds[i];
+            vectorCell.AsVectorReadOnlySpan().CopyTo(vectorBuffer.AsSpan(writeIndex * vectorDimension, vectorDimension));
+            writeIndex++;
+        }
+
+        indexes.InsertManyIntoVectorIndex(vectorRowIds, vectorBuffer, vectorDimension, indexName, tableName, databaseName, indexKind);
     }
 
     private static bool HasNullKeyPart(

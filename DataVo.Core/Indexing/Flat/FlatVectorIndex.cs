@@ -5,7 +5,7 @@ namespace DataVo.Core.Indexing.Flat;
 /// <summary>
 /// Exact brute-force vector index optimized for fast inserts and SIMD-accelerated scans.
 /// </summary>
-public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
+public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
 {
     private readonly Dictionary<long, int> _rowIdToOrdinal = [];
     private readonly object _stateGate = new();
@@ -105,6 +105,56 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             int ordinal = AcquireOrdinal(rowId);
             vector.CopyTo(GetVectorSpan(ordinal));
             _inverseNormByOrdinal[ordinal] = ComputeInverseNorm(vector);
+        }
+    }
+
+    /// <summary>
+    /// Inserts a batch of vectors under a single index lock.
+    /// </summary>
+    /// <param name="rowIds">Row ids mapped one-to-one to vectors.</param>
+    /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
+    /// <param name="vectorDimension">Dimension of each vector.</param>
+    public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+    {
+        if (rowIds == null)
+        {
+            throw new ArgumentNullException(nameof(rowIds));
+        }
+
+        if (vectors == null)
+        {
+            throw new ArgumentNullException(nameof(vectors));
+        }
+
+        if (vectorDimension <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vectorDimension));
+        }
+
+        if ((long)rowIds.Length * vectorDimension != vectors.Length)
+        {
+            throw new ArgumentException("Vector buffer length does not match rowId count * vectorDimension.", nameof(vectors));
+        }
+
+        lock (_stateGate)
+        {
+            EnsureVectorDimension(vectorDimension);
+            EnsureCapacity(_count + rowIds.Length);
+            for (int i = 0; i < rowIds.Length; i++)
+            {
+                ReadOnlySpan<float> vector = vectors.AsSpan(i * vectorDimension, vectorDimension);
+                ValidateFiniteVector(vector, nameof(vectors));
+                if (_rowIdToOrdinal.TryGetValue(rowIds[i], out int existingOrdinal))
+                {
+                    vector.CopyTo(GetVectorSpan(existingOrdinal));
+                    _inverseNormByOrdinal[existingOrdinal] = ComputeInverseNorm(vector);
+                    continue;
+                }
+
+                int ordinal = AcquireOrdinal(rowIds[i]);
+                vector.CopyTo(GetVectorSpan(ordinal));
+                _inverseNormByOrdinal[ordinal] = ComputeInverseNorm(vector);
+            }
         }
     }
 

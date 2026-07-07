@@ -27,7 +27,7 @@ internal readonly record struct HNSWBuildDiagnosticsSnapshot(
 /// <summary>
 /// Implements an in-memory HNSW (Hierarchical Navigable Small World) vector index.
 /// </summary>
-public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
+public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
 {
     private const int DefaultM = 16;
     private const int DefaultEfConstruction = 64;
@@ -425,7 +425,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             throw new ArgumentOutOfRangeException(nameof(vectorDimension));
         }
 
-        if (rowIds.Length * vectorDimension != vectors.Length)
+        if ((long)rowIds.Length * vectorDimension != vectors.Length)
         {
             throw new ArgumentException("Vector buffer length does not match rowId count * vectorDimension.", nameof(vectors));
         }
@@ -444,6 +444,17 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             int offset = i * vectorDimension;
             InsertCore(rowIds[i], vectors.AsSpan(offset, vectorDimension));
         });
+    }
+
+    /// <summary>
+    /// Inserts a batch of vectors using the default parallel HNSW construction path.
+    /// </summary>
+    /// <param name="rowIds">Row ids mapped one-to-one to vectors.</param>
+    /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
+    /// <param name="vectorDimension">Dimension of each vector.</param>
+    public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+    {
+        InsertBatchParallel(rowIds, vectors, vectorDimension);
     }
 
     /// <summary>

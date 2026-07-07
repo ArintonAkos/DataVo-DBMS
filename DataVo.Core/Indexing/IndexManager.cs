@@ -825,6 +825,50 @@ public class IndexManager : IDisposable
         FlushIfImmediate(cacheKey);
     }
 
+    internal void InsertManyIntoVectorIndex(
+        long[] rowIds,
+        float[] vectors,
+        int vectorDimension,
+        string indexName,
+        string tableName,
+        string databaseName,
+        string indexType = "HNSW")
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowIds);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(vectors);
+        if (vectorDimension <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vectorDimension));
+        }
+
+        if ((long)rowIds.Length * vectorDimension != vectors.Length)
+        {
+            throw new ArgumentException("Vector buffer length does not match rowId count * vectorDimension.", nameof(vectors));
+        }
+
+        if (rowIds.Length == 0)
+        {
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
+        if (vectorIndex is IBatchVectorIndex batchVectorIndex)
+        {
+            batchVectorIndex.InsertBatch(rowIds, vectors, vectorDimension);
+        }
+        else
+        {
+            for (int i = 0; i < rowIds.Length; i++)
+            {
+                vectorIndex.Insert(rowIds[i], vectors.AsSpan(i * vectorDimension, vectorDimension).ToArray());
+            }
+        }
+
+        MarkDirty(cacheKey);
+        FlushIfImmediate(cacheKey);
+    }
+
     /// <summary>
     /// Deletes vectors by row IDs.
     /// </summary>
