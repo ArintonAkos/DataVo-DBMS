@@ -54,7 +54,11 @@ jobs:
             SQLITE_VEC_LIBRARY="vec0.so"
           fi
           SQLITE_VEC_URL="https://github.com/asg017/sqlite-vec/releases/download/v${SQLITE_VEC_VERSION}/${SQLITE_VEC_ARCHIVE}"
-          SQLITE_VEC_DIR="${RUNNER_TEMP}/sqlite-vec"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            SQLITE_VEC_DIR="$(cygpath -u "$RUNNER_TEMP")/sqlite-vec"
+          else
+            SQLITE_VEC_DIR="${RUNNER_TEMP}/sqlite-vec"
+          fi
 
           mkdir -p "$SQLITE_VEC_DIR"
           curl -sSfL "$SQLITE_VEC_URL" -o "${SQLITE_VEC_DIR}/${SQLITE_VEC_ARCHIVE}"
