@@ -38,6 +38,56 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
+    public void Factory_KeepsBuildThroughputDefaultButAllowsDiversityOverride()
+    {
+        var factory = new HNSWIndexFactory();
+
+        var defaultIndex = Assert.IsType<HNSWIndex>(factory.CreateIndex(
+            "idx",
+            "emb",
+            []));
+        var diversityIndex = Assert.IsType<HNSWIndex>(factory.CreateIndex(
+            "idx",
+            "emb",
+            new Dictionary<string, object> { ["enableDiversityHeuristic"] = true }));
+
+        Assert.False(defaultIndex.EnableDiversityHeuristic);
+        Assert.True(diversityIndex.EnableDiversityHeuristic);
+    }
+
+    [Fact]
+    public void BuildDiagnostics_WhenEnabled_RecordsDiversityConstructionWork()
+    {
+        var index = new HNSWIndex
+        {
+            Metric = "cosine",
+            M = 4,
+            EfConstruction = 16,
+            EfSearch = 16,
+            EnableAdaptiveEfConstruction = false,
+            EnableDiversityHeuristic = true,
+            EnableBuildDiagnostics = true
+        };
+
+        index.Reserve(80, 8);
+        for (int rowId = 1; rowId <= 80; rowId++)
+        {
+            index.Insert(rowId, BuildUnitVector(rowId, dimensions: 8));
+        }
+
+        HNSWBuildDiagnosticsSnapshot diagnostics = index.GetBuildDiagnosticsSnapshot();
+
+        Assert.True(diagnostics.SearchLayerCalls > 0);
+        Assert.True(diagnostics.SearchLayerNeighborVisits > 0);
+        Assert.True(diagnostics.EdgeAddCalls > 0);
+        Assert.True(diagnostics.FullNeighborPrunes > 0);
+        Assert.True(diagnostics.SelectNeighborsCalls > 0);
+        Assert.True(diagnostics.DiversityComparisons > 0);
+        Assert.True(diagnostics.IncrementalDiversityPrunes > 0);
+        Assert.True(diagnostics.DistanceBetweenOrdinalCalls > 0);
+    }
+
+    [Fact]
     public void Insert_BuildsLayeredGraphState()
     {
         var index = new HNSWIndex
@@ -903,6 +953,27 @@ public class HNSWIndexTests : IDisposable
         }
 
         return dataset;
+    }
+
+    private static float[] BuildUnitVector(int seed, int dimensions)
+    {
+        var random = new Random(seed);
+        var vector = new float[dimensions];
+        double sumSquares = 0d;
+        for (int i = 0; i < vector.Length; i++)
+        {
+            float value = (float)(random.NextDouble() * 2d - 1d);
+            vector[i] = value;
+            sumSquares += value * value;
+        }
+
+        float scale = sumSquares <= 0d ? 1f : (float)(1d / Math.Sqrt(sumSquares));
+        for (int i = 0; i < vector.Length; i++)
+        {
+            vector[i] *= scale;
+        }
+
+        return vector;
     }
 
     private static List<float[]> BuildQueries(int seed, int queries, int dimension)

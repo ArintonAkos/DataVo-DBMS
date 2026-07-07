@@ -854,6 +854,11 @@ public class IndexManager : IDisposable
         }
     }
 
+    internal HNSWIndex? TryGetHnswVectorIndex(string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    {
+        return GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType) as HNSWIndex;
+    }
+
     /// <summary>
     /// Performs nearest-neighbor vector search.
     /// </summary>

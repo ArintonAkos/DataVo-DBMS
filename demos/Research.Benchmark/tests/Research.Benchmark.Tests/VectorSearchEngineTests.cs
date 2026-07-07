@@ -28,6 +28,28 @@ public sealed class VectorSearchEngineTests
         Assert.Equal("DataVo-Flat [DataVo.Core net10.0]", engine.Name);
     }
 
+    [Fact]
+    public void DataVoVectorSearchEngine_DiversityProfileVariant_HasDistinctBenchmarkNameAndDiagnostics()
+    {
+        using var engine = new DataVoVectorSearchEngine(
+            "HNSW",
+            "DataVo-HNSW-Diversity",
+            expectedVectors: Count,
+            enableDiversityHeuristic: true,
+            enableBuildDiagnostics: true);
+
+        Assert.Equal("DataVo-HNSW-Diversity [DataVo.Core net10.0]", engine.Name);
+
+        engine.Initialize(Dimensions);
+        float[][] vectors = SeedVectors(engine);
+
+        IReadOnlyList<long> top = engine.Search(vectors[41], k: 5);
+
+        Assert.Contains(42L, top);
+        Assert.True(engine.TryFormatBuildDiagnostics(out string diagnostics));
+        Assert.Contains("diversityComparisons=", diagnostics);
+    }
+
     [Theory]
     [MemberData(nameof(AlwaysAvailableEngines))]
     public void ExactMatchQueryReturnsPlantedVector(IVectorSearchEngine engine)

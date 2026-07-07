@@ -133,7 +133,14 @@ else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnor
     int topK = ReadIntArg(args, "--topk", 10);
 
     if (ShouldRun(engineFilter, "datavo"))
-        results.Add(RunVectorSearch(new DataVoVectorSearchEngine(), vectors, dimensions, queries, topK, progressEvery));
+        results.Add(RunVectorSearch(new DataVoVectorSearchEngine("HNSW", "DataVo", vectors), vectors, dimensions, queries, topK, progressEvery));
+    if (ShouldRun(engineFilter, "datavo-hnsw-diversity"))
+        results.Add(RunVectorSearch(new DataVoVectorSearchEngine(
+            "HNSW",
+            "DataVo-HNSW-Diversity",
+            vectors,
+            enableDiversityHeuristic: true,
+            enableBuildDiagnostics: true), vectors, dimensions, queries, topK, progressEvery));
     if (ShouldRun(engineFilter, "datavo-flat"))
         results.Add(RunVectorSearch(new DataVoVectorSearchEngine("FLAT", "DataVo-Flat", vectors), vectors, dimensions, queries, topK, progressEvery));
     if (ShouldRun(engineFilter, "litedb"))
@@ -1120,6 +1127,12 @@ static BenchmarkMetrics RunVectorSearch(IVectorSearchEngine engine, int vectors,
             if (sink == long.MinValue)
             {
                 Console.Error.WriteLine(sink);
+            }
+
+            if (engine is DataVoVectorSearchEngine dataVoEngine
+                && dataVoEngine.TryFormatBuildDiagnostics(out string diagnostics))
+            {
+                Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: HNSW build diagnostics — {diagnostics}");
             }
 
             return new BenchmarkMetrics(

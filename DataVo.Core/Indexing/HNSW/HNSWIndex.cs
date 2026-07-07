@@ -7,6 +7,23 @@ using System.Runtime.Intrinsics.X86;
 
 namespace DataVo.Core.Indexing.HNSW;
 
+internal readonly record struct HNSWBuildDiagnosticsSnapshot(
+    long SearchLayerCalls,
+    long SearchLayerNeighborVisits,
+    long EdgeAddCalls,
+    long EdgeDuplicateSkips,
+    long EdgeAppends,
+    long FullNeighborPrunes,
+    long SelectNeighborsCalls,
+    long SelectNeighborCandidates,
+    long DiversityComparisons,
+    long DiversityOcclusions,
+    long IncrementalDiversityPrunes,
+    long NonDiverseReplacementScans,
+    long NonDiverseReplacements,
+    long DistanceToOrdinalCalls,
+    long DistanceBetweenOrdinalCalls);
+
 /// <summary>
 /// Implements an in-memory HNSW (Hierarchical Navigable Small World) vector index.
 /// </summary>
@@ -16,6 +33,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     private const int DefaultEfConstruction = 64;
     private const int DefaultEfSearch = 64;
     private const int DefaultMaxAdaptiveEfConstruction = 64;
+    private const bool DefaultEnableDiversityHeuristic = false;
     private const int MaxSupportedLevels = 33;
 
 #if NET6_0_OR_GREATER
@@ -48,6 +66,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     private bool[] _isActive = [];
     private int[] _nodeLevels = [];
     private float[] _inverseNormByOrdinal = [];
+    private ulong[] _diversityPrunedLevelMaskByOrdinal = [];
 
     private int[] _levelStrides = [];
     private int[] _levelOffsets = [];
@@ -58,6 +77,22 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     private int _ordinalCapacity;
     private int _nextOrdinal;
     private int _count;
+
+    private long _diagSearchLayerCalls;
+    private long _diagSearchLayerNeighborVisits;
+    private long _diagEdgeAddCalls;
+    private long _diagEdgeDuplicateSkips;
+    private long _diagEdgeAppends;
+    private long _diagFullNeighborPrunes;
+    private long _diagSelectNeighborsCalls;
+    private long _diagSelectNeighborCandidates;
+    private long _diagDiversityComparisons;
+    private long _diagDiversityOcclusions;
+    private long _diagIncrementalDiversityPrunes;
+    private long _diagNonDiverseReplacementScans;
+    private long _diagNonDiverseReplacements;
+    private long _diagDistanceToOrdinalCalls;
+    private long _diagDistanceBetweenOrdinalCalls;
 
     private sealed class SearchWorkspace
     {
@@ -275,7 +310,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     /// <summary>
     /// Gets or sets a value indicating whether diversity-aware neighbor selection is enabled.
     /// </summary>
-    public bool EnableDiversityHeuristic { get; set; } = true;
+    public bool EnableDiversityHeuristic { get; set; } = DefaultEnableDiversityHeuristic;
 
     /// <summary>
     /// Gets or sets a value indicating whether graph repair heuristics run after deletions.
@@ -296,6 +331,47 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     /// Gets the number of active vectors currently indexed.
     /// </summary>
     public int Count => _count;
+
+    /// <summary>
+    /// Enables opt-in construction counters for profiling HNSW build behavior. Disabled by default.
+    /// </summary>
+    internal bool EnableBuildDiagnostics { get; set; }
+
+    internal void ResetBuildDiagnostics()
+    {
+        _diagSearchLayerCalls = 0;
+        _diagSearchLayerNeighborVisits = 0;
+        _diagEdgeAddCalls = 0;
+        _diagEdgeDuplicateSkips = 0;
+        _diagEdgeAppends = 0;
+        _diagFullNeighborPrunes = 0;
+        _diagSelectNeighborsCalls = 0;
+        _diagSelectNeighborCandidates = 0;
+        _diagDiversityComparisons = 0;
+        _diagDiversityOcclusions = 0;
+        _diagIncrementalDiversityPrunes = 0;
+        _diagNonDiverseReplacementScans = 0;
+        _diagNonDiverseReplacements = 0;
+        _diagDistanceToOrdinalCalls = 0;
+        _diagDistanceBetweenOrdinalCalls = 0;
+    }
+
+    internal HNSWBuildDiagnosticsSnapshot GetBuildDiagnosticsSnapshot() => new(
+        _diagSearchLayerCalls,
+        _diagSearchLayerNeighborVisits,
+        _diagEdgeAddCalls,
+        _diagEdgeDuplicateSkips,
+        _diagEdgeAppends,
+        _diagFullNeighborPrunes,
+        _diagSelectNeighborsCalls,
+        _diagSelectNeighborCandidates,
+        _diagDiversityComparisons,
+        _diagDiversityOcclusions,
+        _diagIncrementalDiversityPrunes,
+        _diagNonDiverseReplacementScans,
+        _diagNonDiverseReplacements,
+        _diagDistanceToOrdinalCalls,
+        _diagDistanceBetweenOrdinalCalls);
 
     /// <summary>
     /// Pre-allocates storage and thread-local scratch buffers for an expected index size.
@@ -632,6 +708,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         _isActive = [];
         _nodeLevels = [];
         _inverseNormByOrdinal = [];
+        _diversityPrunedLevelMaskByOrdinal = [];
 
         _vectorDimension = -1;
         _ordinalCapacity = 0;
@@ -730,6 +807,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         _isActive = state.IsActive ?? [];
         _nodeLevels = state.NodeLevels ?? [];
         _inverseNormByOrdinal = new float[Math.Max(_ordinalCapacity, _nextOrdinal)];
+        _diversityPrunedLevelMaskByOrdinal = new ulong[Math.Max(_ordinalCapacity, _nextOrdinal)];
         _levelStrides = state.LevelStrides ?? [];
         _levelOffsets = state.LevelOffsets ?? [];
         _nodeGraphStride = _levelStrides.Sum();
@@ -966,6 +1044,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         Array.Resize(ref _isActive, newCapacity);
         Array.Resize(ref _nodeLevels, newCapacity);
         Array.Resize(ref _inverseNormByOrdinal, newCapacity);
+        Array.Resize(ref _diversityPrunedLevelMaskByOrdinal, newCapacity);
         Array.Resize(ref _nodeLocks, newCapacity);
 
         for (int i = previousCapacity; i < newCapacity; i++)
@@ -1010,6 +1089,10 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     {
         int baseSlot = (ordinal & _graphPageMask) * _nodeGraphStride;
         _graphPages[ordinal >> _graphPageShift].AsSpan(baseSlot, _nodeGraphStride).Fill(-1);
+        if ((uint)ordinal < (uint)_diversityPrunedLevelMaskByOrdinal.Length)
+        {
+            _diversityPrunedLevelMaskByOrdinal[ordinal] = 0UL;
+        }
     }
 
     private int ResolveNeighborLimit(int level)
@@ -1118,6 +1201,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
 
     private int SearchLayer(ReadOnlySpan<float> query, float queryInvNorm, int entryOrdinal, int ef, int level, SearchWorkspace workspace)
     {
+        DiagIncrement(ref _diagSearchLayerCalls);
         workspace.Begin();
         workspace.EnsureVisitedCapacity(_nextOrdinal + 1);
         workspace.EnsureResultCapacity(Math.Max(ef, 16));
@@ -1152,6 +1236,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
                     break;
                 }
 
+                DiagIncrement(ref _diagSearchLayerNeighborVisits);
                 if (i + 1 < neighbors.Length)
                 {
                     PrefetchOrdinalVector(neighbors[i + 1]);
@@ -1228,6 +1313,8 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             return;
         }
 
+        DiagIncrement(ref _diagEdgeAddCalls);
+
         // Direct per-node lock (no captured lambda): the edge-connection path runs once per
         // directed edge (~M x bidirectional x N), so a closure+delegate here allocated heavily
         // during build. The body is inlined under the lock to keep it allocation-free.
@@ -1244,16 +1331,30 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             {
                 if (neighbors[i] == target)
                 {
+                    DiagIncrement(ref _diagEdgeDuplicateSkips);
                     return;
                 }
 
                 if (neighbors[i] < 0)
                 {
                     neighbors[i] = target;
+                    DiagIncrement(ref _diagEdgeAppends);
                     return;
                 }
             }
 
+            if (!EnableDiversityHeuristic)
+            {
+                ReplaceWorstNeighborIfCloser(source, target, neighbors);
+                return;
+            }
+
+            if (IsDiversityPruned(source, level) && TryPruneDiversityIncremental(source, target, level, neighbors))
+            {
+                return;
+            }
+
+            DiagIncrement(ref _diagFullNeighborPrunes);
             var workspace = GetSelectionWorkspace();
             workspace.EnsureCandidateCapacity(neighbors.Length + 1);
 
@@ -1272,6 +1373,142 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             workspace.ExistingNeighbors[candidateCount++] = target;
 
             SelectNeighbors(level, source, workspace.ExistingNeighbors.AsSpan(0, candidateCount), neighbors);
+            MarkDiversityPruned(source, level);
+        }
+    }
+
+    private bool TryPruneDiversityIncremental(int source, int target, int level, Span<int> neighbors)
+    {
+        int count = CountSelected(neighbors);
+        if (count != neighbors.Length)
+        {
+            ClearDiversityPruned(source, level);
+            return false;
+        }
+
+        Span<int> sortedNeighbors = count <= 128 ? stackalloc int[count] : new int[count];
+        Span<float> sourceDistances = count <= 128 ? stackalloc float[count] : new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            sortedNeighbors[i] = neighbors[i];
+            sourceDistances[i] = DistanceBetweenOrdinals(source, neighbors[i]);
+        }
+
+        for (int i = 1; i < count; i++)
+        {
+            int ordinal = sortedNeighbors[i];
+            float distance = sourceDistances[i];
+            int j = i - 1;
+            while (j >= 0 && sourceDistances[j] > distance)
+            {
+                sortedNeighbors[j + 1] = sortedNeighbors[j];
+                sourceDistances[j + 1] = sourceDistances[j];
+                j--;
+            }
+
+            sortedNeighbors[j + 1] = ordinal;
+            sourceDistances[j + 1] = distance;
+        }
+
+        float targetDistance = DistanceBetweenOrdinals(source, target);
+        int insertAt = 0;
+        while (insertAt < count && sourceDistances[insertAt] <= targetDistance)
+        {
+            insertAt++;
+        }
+
+        if (insertAt >= neighbors.Length)
+        {
+            sortedNeighbors.CopyTo(neighbors);
+            DiagIncrement(ref _diagIncrementalDiversityPrunes);
+            return true;
+        }
+
+        for (int i = 0; i < insertAt; i++)
+        {
+            DiagIncrement(ref _diagDiversityComparisons);
+            float targetToExisting = DistanceBetweenOrdinals(target, sortedNeighbors[i]);
+            if (targetToExisting < targetDistance)
+            {
+                DiagIncrement(ref _diagDiversityOcclusions);
+                sortedNeighbors.CopyTo(neighbors);
+                DiagIncrement(ref _diagIncrementalDiversityPrunes);
+                return true;
+            }
+        }
+
+        Span<int> selected = count <= 128 ? stackalloc int[count] : new int[count];
+        Span<int> omitted = count <= 127 ? stackalloc int[count + 1] : new int[count + 1];
+        int selectedCount = 0;
+        int omittedCount = 0;
+
+        for (int i = 0; i < insertAt; i++)
+        {
+            selected[selectedCount++] = sortedNeighbors[i];
+        }
+
+        selected[selectedCount++] = target;
+
+        for (int i = insertAt; i < count && selectedCount < neighbors.Length; i++)
+        {
+            int existing = sortedNeighbors[i];
+            DiagIncrement(ref _diagDiversityComparisons);
+            float existingToTarget = DistanceBetweenOrdinals(existing, target);
+            if (existingToTarget < sourceDistances[i])
+            {
+                omitted[omittedCount++] = existing;
+                DiagIncrement(ref _diagDiversityOcclusions);
+                continue;
+            }
+
+            selected[selectedCount++] = existing;
+        }
+
+        for (int i = 0; i < omittedCount && selectedCount < neighbors.Length; i++)
+        {
+            selected[selectedCount++] = omitted[i];
+        }
+
+        for (int i = 0; i < selectedCount; i++)
+        {
+            neighbors[i] = selected[i];
+        }
+
+        for (int i = selectedCount; i < neighbors.Length; i++)
+        {
+            neighbors[i] = -1;
+        }
+
+        DiagIncrement(ref _diagIncrementalDiversityPrunes);
+        return true;
+    }
+
+    private void ReplaceWorstNeighborIfCloser(int source, int target, Span<int> neighbors)
+    {
+        DiagIncrement(ref _diagNonDiverseReplacementScans);
+        float targetDistance = DistanceBetweenOrdinals(source, target);
+        int worstIndex = -1;
+        float worstDistance = float.NegativeInfinity;
+        for (int i = 0; i < neighbors.Length; i++)
+        {
+            int neighbor = neighbors[i];
+            if (neighbor < 0)
+            {
+                break;
+            }
+
+            float distance = DistanceBetweenOrdinals(source, neighbor);
+            if (distance > worstDistance)
+            {
+                worstDistance = distance;
+                worstIndex = i;
+            }
+        }
+
+        if (worstIndex >= 0 && targetDistance < worstDistance)
+        {
+            neighbors[worstIndex] = target;
+            DiagIncrement(ref _diagNonDiverseReplacements);
         }
     }
 
@@ -1321,6 +1558,8 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     // Zero-allocation selection path over spans. It writes the selected ordinals directly to destination.
     private void SelectNeighbors(int level, int targetOrdinal, ReadOnlySpan<int> candidates, Span<int> destination)
     {
+        DiagIncrement(ref _diagSelectNeighborsCalls);
+        DiagAdd(ref _diagSelectNeighborCandidates, candidates.Length);
         destination.Fill(-1);
         if (destination.Length == 0)
         {
@@ -1411,10 +1650,12 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
                     continue;
                 }
 
+                DiagIncrement(ref _diagDiversityComparisons);
                 float candidateToExisting = DistanceBetweenOrdinals(candidate, existing);
                 if (candidateToExisting < candidateToTarget)
                 {
                     occluded = true;
+                    DiagIncrement(ref _diagDiversityOcclusions);
                     break;
                 }
             }
@@ -1468,6 +1709,29 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         }
 
         return count;
+    }
+
+    private bool IsDiversityPruned(int ordinal, int level)
+    {
+        return (uint)ordinal < (uint)_diversityPrunedLevelMaskByOrdinal.Length
+            && level is >= 0 and < 64
+            && (_diversityPrunedLevelMaskByOrdinal[ordinal] & (1UL << level)) != 0UL;
+    }
+
+    private void MarkDiversityPruned(int ordinal, int level)
+    {
+        if ((uint)ordinal < (uint)_diversityPrunedLevelMaskByOrdinal.Length && level is >= 0 and < 64)
+        {
+            _diversityPrunedLevelMaskByOrdinal[ordinal] |= 1UL << level;
+        }
+    }
+
+    private void ClearDiversityPruned(int ordinal, int level)
+    {
+        if ((uint)ordinal < (uint)_diversityPrunedLevelMaskByOrdinal.Length && level is >= 0 and < 64)
+        {
+            _diversityPrunedLevelMaskByOrdinal[ordinal] &= ~(1UL << level);
+        }
     }
 
     private List<long> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
@@ -1575,6 +1839,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
 
     private float DistanceToOrdinal(ReadOnlySpan<float> query, float queryInvNorm, int ordinal)
     {
+        DiagIncrement(ref _diagDistanceToOrdinalCalls);
         return Metric == "cosine"
             ? CosineDistanceFromCachedNorms(query, GetVector(ordinal), queryInvNorm, _inverseNormByOrdinal[ordinal])
             : SimdDistanceKernels.EuclideanDistance(query, GetVector(ordinal));
@@ -1582,6 +1847,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
 
     private float DistanceBetweenOrdinals(int leftOrdinal, int rightOrdinal)
     {
+        DiagIncrement(ref _diagDistanceBetweenOrdinalCalls);
         return Metric == "cosine"
             ? CosineDistanceFromCachedNorms(
                 GetVector(leftOrdinal),
@@ -1589,6 +1855,24 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
                 _inverseNormByOrdinal[leftOrdinal],
                 _inverseNormByOrdinal[rightOrdinal])
             : SimdDistanceKernels.EuclideanDistance(GetVector(leftOrdinal), GetVector(rightOrdinal));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void DiagIncrement(ref long counter)
+    {
+        if (EnableBuildDiagnostics)
+        {
+            System.Threading.Interlocked.Increment(ref counter);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void DiagAdd(ref long counter, long value)
+    {
+        if (EnableBuildDiagnostics)
+        {
+            System.Threading.Interlocked.Add(ref counter, value);
+        }
     }
 
     private static float CosineDistanceFromCachedNorms(
