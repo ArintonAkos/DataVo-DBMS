@@ -15,6 +15,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     private const int DefaultM = 16;
     private const int DefaultEfConstruction = 64;
     private const int DefaultEfSearch = 64;
+    private const int DefaultMaxAdaptiveEfConstruction = 64;
     private const int MaxSupportedLevels = 33;
 
 #if NET6_0_OR_GREATER
@@ -145,6 +146,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         public required int EfConstruction { get; init; }
         public required bool EnableAdaptiveEfConstruction { get; init; }
         public required double AdaptiveEfConstructionMultiplier { get; init; }
+        public int MaxAdaptiveEfConstruction { get; init; }
         public required bool EnableInsertionCandidateExpansion { get; init; }
         public required double InsertionCandidateExpansionFactor { get; init; }
         public required bool EnableAdaptiveInsertionCandidateExpansion { get; init; }
@@ -208,6 +210,12 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
     /// Gets or sets the multiplier used when adaptive construction search width is enabled.
     /// </summary>
     public double AdaptiveEfConstructionMultiplier { get; set; } = 1.25d;
+
+    /// <summary>
+    /// Gets or sets the upper bound for adaptive construction search width.
+    /// A value less than or equal to zero disables the cap.
+    /// </summary>
+    public int MaxAdaptiveEfConstruction { get; set; } = DefaultMaxAdaptiveEfConstruction;
 
     /// <summary>
     /// Gets or sets a value indicating whether insertion candidate sets are expanded before neighbor selection.
@@ -659,6 +667,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
             EfConstruction = EfConstruction,
             EnableAdaptiveEfConstruction = EnableAdaptiveEfConstruction,
             AdaptiveEfConstructionMultiplier = AdaptiveEfConstructionMultiplier,
+            MaxAdaptiveEfConstruction = MaxAdaptiveEfConstruction,
             EnableInsertionCandidateExpansion = EnableInsertionCandidateExpansion,
             InsertionCandidateExpansionFactor = InsertionCandidateExpansionFactor,
             EnableAdaptiveInsertionCandidateExpansion = EnableAdaptiveInsertionCandidateExpansion,
@@ -697,6 +706,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         EfConstruction = Math.Max(1, state.EfConstruction);
         EnableAdaptiveEfConstruction = state.EnableAdaptiveEfConstruction;
         AdaptiveEfConstructionMultiplier = state.AdaptiveEfConstructionMultiplier > 0d ? state.AdaptiveEfConstructionMultiplier : 1.25d;
+        MaxAdaptiveEfConstruction = state.MaxAdaptiveEfConstruction > 0 ? state.MaxAdaptiveEfConstruction : DefaultMaxAdaptiveEfConstruction;
         EnableInsertionCandidateExpansion = state.EnableInsertionCandidateExpansion;
         InsertionCandidateExpansionFactor = state.InsertionCandidateExpansionFactor > 0d ? state.InsertionCandidateExpansionFactor : 1.5d;
         EnableAdaptiveInsertionCandidateExpansion = state.EnableAdaptiveInsertionCandidateExpansion;
@@ -1028,7 +1038,13 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex
         }
 
         int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Log2(_count + 1) * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier));
-        return Math.Clamp(adaptive, baseEf, Math.Max(baseEf, _count));
+        int upperBound = Math.Max(baseEf, _count);
+        if (MaxAdaptiveEfConstruction > 0)
+        {
+            upperBound = Math.Min(upperBound, Math.Max(baseEf, MaxAdaptiveEfConstruction));
+        }
+
+        return Math.Clamp(adaptive, baseEf, upperBound);
     }
 
     private static void ValidateFiniteVector(ReadOnlySpan<float> vector, string parameter)

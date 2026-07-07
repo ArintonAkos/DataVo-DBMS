@@ -25,6 +25,19 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
+    public void Factory_AppliesMaxAdaptiveEfConstruction()
+    {
+        var factory = new HNSWIndexFactory();
+
+        var index = Assert.IsType<HNSWIndex>(factory.CreateIndex(
+            "idx",
+            "emb",
+            new Dictionary<string, object> { ["maxAdaptiveEfConstruction"] = 128 }));
+
+        Assert.Equal(128, index.MaxAdaptiveEfConstruction);
+    }
+
+    [Fact]
     public void Insert_BuildsLayeredGraphState()
     {
         var index = new HNSWIndex

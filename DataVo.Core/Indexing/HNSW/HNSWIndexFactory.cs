@@ -50,6 +50,9 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (index is HNSWIndex hnswAdaptiveMultiplier && TryReadDouble(@params, "adaptiveEfConstructionMultiplier", out double adaptiveEfConstructionMultiplier) && adaptiveEfConstructionMultiplier > 0d)
             hnswAdaptiveMultiplier.AdaptiveEfConstructionMultiplier = adaptiveEfConstructionMultiplier;
 
+        if (index is HNSWIndex hnswMaxAdaptiveConstruction && TryReadInt(@params, "maxAdaptiveEfConstruction", out int maxAdaptiveEfConstruction))
+            hnswMaxAdaptiveConstruction.MaxAdaptiveEfConstruction = maxAdaptiveEfConstruction;
+
         if (index is HNSWIndex hnswInsertionExpansion && TryReadBool(@params, "enableInsertionCandidateExpansion", out bool enableInsertionCandidateExpansion))
             hnswInsertionExpansion.EnableInsertionCandidateExpansion = enableInsertionCandidateExpansion;
 
