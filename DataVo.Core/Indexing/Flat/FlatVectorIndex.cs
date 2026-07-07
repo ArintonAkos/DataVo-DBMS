@@ -259,7 +259,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
     internal void ImportFlatState(FlatVectorState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(state);
 
         lock (_stateGate)
         {
@@ -418,7 +418,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
     internal void ImportEntries(IEnumerable<(long RowId, float[] Vector)> entries)
     {
-        ArgumentNullException.ThrowIfNull(entries);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entries);
 
         lock (_stateGate)
         {
@@ -486,7 +486,17 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
     private static float ComputeInverseNorm(ReadOnlySpan<float> vector)
     {
+#if NET10_0_OR_GREATER
         float norm = System.Numerics.Tensors.TensorPrimitives.Norm(vector);
+#else
+        float sumSquares = 0f;
+        for (int i = 0; i < vector.Length; i++)
+        {
+            sumSquares += vector[i] * vector[i];
+        }
+
+        float norm = MathF.Sqrt(sumSquares);
+#endif
         return norm > 0f ? 1f / norm : 0f;
     }
 

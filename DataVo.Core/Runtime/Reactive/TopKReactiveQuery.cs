@@ -351,8 +351,8 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 return 0;
             }
 
-            ArgumentNullException.ThrowIfNull(x);
-            ArgumentNullException.ThrowIfNull(y);
+            DataVo.Core.Compat.ThrowHelper.ThrowIfNull(x);
+            DataVo.Core.Compat.ThrowHelper.ThrowIfNull(y);
 
             foreach (SortKey sortKey in sortKeys)
             {

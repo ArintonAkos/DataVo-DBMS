@@ -121,7 +121,7 @@ public sealed class SsTableWriter
 
     private static byte[] WriteCore(MemTable memTable, Func<int, byte[]> allocate, out int length)
     {
-        ArgumentNullException.ThrowIfNull(memTable);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(memTable);
         if (memTable.Count == 0)
         {
             throw new InvalidOperationException("Cannot finish an empty SSTable.");

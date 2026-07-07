@@ -33,10 +33,10 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         Func<Dictionary<string, object?>, TResult> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -56,10 +56,10 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         Func<Dictionary<string, object?>, TResult> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -79,10 +79,10 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         CompiledRowMapper<T> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -102,10 +102,10 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         CompiledRowMapper<T> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -126,9 +126,9 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         CompiledRowMapper<T> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -149,9 +149,9 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         CompiledRowMapper<T> mapper)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(mapper);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
 
         if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
         {
@@ -329,9 +329,9 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         IReadOnlyList<DataVoCompiledQueryParameter> parameters)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
 
         if (plan.Kind != DataVoCompiledQueryKind.Insert)
         {
@@ -357,9 +357,9 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         IReadOnlyList<DataVoCompiledQueryParameter> parameters)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(parameters);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
 
         if (plan.Kind != DataVoCompiledQueryKind.Update)
         {
@@ -444,8 +444,8 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
 
         if (plan.Kind != DataVoCompiledQueryKind.Update)
         {
@@ -481,8 +481,8 @@ public static class DataVoCompiledQuery
         DataVoFixedWidthValue primaryKeyValue,
         ReadOnlySpan<DataVoFixedWidthValue> assignmentValues)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
 
         if (plan.Kind != DataVoCompiledQueryKind.Update)
         {
@@ -525,9 +525,9 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         IReadOnlyList<DataVoFixedWidthUpdateBatchEntry> updates)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(updates);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(updates);
 
         if (plan.Kind != DataVoCompiledQueryKind.Update)
         {
@@ -2152,13 +2152,13 @@ public static class DataVoCompiledQuery
     }
 
     internal static string BuildScalarComparisonKey(int value) =>
-        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
 
     internal static string BuildScalarComparisonKey(long value) =>
-        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
 
     internal static string BuildScalarComparisonKey(double value) =>
-        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
 
     internal static string BuildScalarComparisonKey(Guid value) =>
         value.ToString("D");
@@ -2183,8 +2183,8 @@ public static class DataVoCompiledQuery
             int intValue => BuildScalarComparisonKey(intValue),
             long longValue => BuildScalarComparisonKey(longValue),
             double doubleValue => BuildScalarComparisonKey(doubleValue),
-            float floatValue => string.Create(CultureInfo.InvariantCulture, $"[{floatValue}]"),
-            decimal decimalValue => string.Create(CultureInfo.InvariantCulture, $"[{decimalValue}]"),
+            float floatValue => string.Format(CultureInfo.InvariantCulture, "[{0}]", floatValue),
+            decimal decimalValue => string.Format(CultureInfo.InvariantCulture, "[{0}]", decimalValue),
             Guid guidValue => BuildScalarComparisonKey(guidValue),
             string stringValue => BuildScalarComparisonKey(stringValue),
             _ => VectorParser.TryCoerceToVector(value, out float[] vector)

@@ -40,7 +40,14 @@ internal sealed class GroupCommitter : IAsyncDisposable
 
     public ValueTask CommitAsync(WalFrame frame, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+#if NET6_0_OR_GREATER
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+#else
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(GroupCommitter));
+        }
+#endif
         if (Volatile.Read(ref _writerException) is Exception writerException)
         {
             frame.Dispose();
@@ -175,7 +182,7 @@ internal sealed class GroupCommitter : IAsyncDisposable
 
     private sealed class PendingCommit
     {
-        private readonly TaskCompletionSource _completion =
+        private readonly TaskCompletionSource<object?> _completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _completed;
 
@@ -197,7 +204,7 @@ internal sealed class GroupCommitter : IAsyncDisposable
 
             try
             {
-                _completion.SetResult();
+                _completion.SetResult(null);
             }
             finally
             {

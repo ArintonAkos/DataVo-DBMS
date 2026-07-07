@@ -1,22 +1,29 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net10.0;netstandard2.1</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
     <!-- AOT durable fence (Phase 1) — COMPLETE & LOCKED. The trim/AOT analyzers are on and the IL
          trim/AOT diagnostics are errors, so DataVo.Core stays Native-AOT clean: any regression fails the
          build. The baseline was ratcheted 184 -> 0 across the Native AOT cleanup (catalog XmlSerializer,
          Newtonsoft/STJ-reflection -> STJ source-gen, dynamic/DLR removal, Activator factory). -->
-    <IsAotCompatible>true</IsAotCompatible>
-    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2067;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
+    <IsAotCompatible Condition="'$(TargetFramework)' == 'net10.0'">true</IsAotCompatible>
+    <WarningsAsErrors Condition="'$(TargetFramework)' == 'net10.0'">$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <!-- Hardware-accelerated, cross-platform vector math (ARM NEON / x86 AVX) used by the HNSW distance
          kernels. AOT-safe: TensorPrimitives is intrinsics-based with no reflection. -->
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+    <PackageReference Include="System.Text.Json" Version="10.0.0" />
+    <PackageReference Include="System.Threading.Channels" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

@@ -301,7 +301,7 @@ public sealed class DataVoEngine : IDisposable
     /// <param name="snapshot">The snapshot to restore.</param>
     public void RestoreSnapshot(Guid session, DataVoSnapshot snapshot)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(snapshot);
         using SnapshotLockScope _ = EnterRuntimeWriteScope();
 
         EnsureInMemorySnapshotsSupported();

@@ -165,7 +165,7 @@ public sealed class DataVoContext : IDisposable
         string tableName,
         IEnumerable<IReadOnlyDictionary<string, object?>> rows)
     {
-        ArgumentNullException.ThrowIfNull(rows);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rows);
 
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         List<IReadOnlyDictionary<string, object?>> materializedRows = rows
@@ -246,7 +246,7 @@ public sealed class DataVoContext : IDisposable
     /// </summary>
     public long InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
     {
-        ArgumentNullException.ThrowIfNull(columns);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
         if (columns.ColumnCount != row.Length)
         {
             throw new ArgumentException(
@@ -334,8 +334,8 @@ public sealed class DataVoContext : IDisposable
         IReadOnlyList<CellValue[]> rows,
         bool callerOwnsRowBuffers = false)
     {
-        ArgumentNullException.ThrowIfNull(columns);
-        ArgumentNullException.ThrowIfNull(rows);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rows);
         if (rows.Count == 0)
         {
             return [];

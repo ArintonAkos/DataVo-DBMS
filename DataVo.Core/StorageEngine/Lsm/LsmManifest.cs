@@ -94,7 +94,7 @@ public sealed class LsmManifest
     /// <summary>Loads an existing manifest from <paramref name="manifestPath"/> or starts an empty version.</summary>
     public LsmManifest(string manifestPath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(manifestPath);
         _manifestPath = manifestPath;
         Load();
     }
@@ -114,7 +114,7 @@ public sealed class LsmManifest
     /// <summary>Validates and atomically applies a version edit to the live manifest state.</summary>
     public void ApplyEdit(LsmVersionEdit edit)
     {
-        ArgumentNullException.ThrowIfNull(edit);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(edit);
 
         Dictionary<int, List<LsmTableFileMetadata>> candidate = CopyLevels(_filesByLevel);
         ApplyDeletes(candidate, edit.DeletedFiles);
@@ -253,7 +253,7 @@ public sealed class LsmManifest
             throw new ArgumentException("File size must be non-negative.", nameof(file));
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(file.FileName);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(file.FileName);
     }
 
     private static void Normalize(Dictionary<int, List<LsmTableFileMetadata>> levels)

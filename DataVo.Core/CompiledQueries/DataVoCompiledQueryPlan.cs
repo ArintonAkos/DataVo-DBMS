@@ -138,8 +138,8 @@ public sealed class DataVoCompiledQueryPlan
         IReadOnlyList<string> columns,
         IReadOnlyList<string> parameterNames)
     {
-        ArgumentNullException.ThrowIfNull(columns);
-        ArgumentNullException.ThrowIfNull(parameterNames);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameterNames);
 
         if (columns.Count != parameterNames.Count)
         {
@@ -166,7 +166,7 @@ public sealed class DataVoCompiledQueryPlan
         string whereColumn,
         string whereParameterName)
     {
-        ArgumentNullException.ThrowIfNull(assignments);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(assignments);
         if (assignments.Count == 0)
         {
             throw new ArgumentException("Compiled update plans require at least one assignment.", nameof(assignments));

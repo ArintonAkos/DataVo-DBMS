@@ -38,7 +38,7 @@ public sealed class DataVoWhitepaperBenchmarkEngine : IWhitepaperBenchmarkEngine
         _durable = durable;
     }
 
-    public string Name => _durable ? "DataVo (LSM Production)" : "DataVo (LSM Relaxed)";
+    public string Name => DataVoBenchmarkName.Format(_durable ? "DataVo (LSM Production)" : "DataVo (LSM Relaxed)");
 
     public string WorkingDirectory => _workingDirectory
         ?? throw new InvalidOperationException("DataVo whitepaper engine has not been initialized.");

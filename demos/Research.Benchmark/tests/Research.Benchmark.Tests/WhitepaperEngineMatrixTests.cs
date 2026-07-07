@@ -13,8 +13,8 @@ public sealed class WhitepaperEngineMatrixTests
 
         Assert.Equal(
         [
-            "DataVo (LSM Production)",
-            "DataVo (LSM Relaxed)",
+            "DataVo (LSM Production) [DataVo.Core net10.0]",
+            "DataVo (LSM Relaxed) [DataVo.Core net10.0]",
             "SQLite (WAL,normal)",
             "LiteDB",
         ], names);

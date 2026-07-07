@@ -6,11 +6,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DataVoCoreTargetFramework Condition="'$(DataVoCoreTargetFramework)' == ''">net10.0</DataVoCoreTargetFramework>
+    <OutputPath Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">bin/$(Configuration)/$(TargetFramework)-datavo-netstandard2.1/</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../../../DataVo.Core/DataVo.Core.csproj" SetTargetFramework="TargetFramework=$(DataVoCoreTargetFramework)" />
     <ProjectReference Include="../Research.Benchmark.Abstractions/Research.Benchmark.Abstractions.csproj" />
     <ProjectReference Include="../Research.Benchmark.Runners/Research.Benchmark.Runners.csproj" />
   </ItemGroup>
+
+  <Target Name="ForceNetStandardDataVoCoreOutput" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">
+    <ItemGroup>
+      <_ForcedDataVoCoreAsset Include="$(MSBuildProjectDirectory)/../../../../DataVo.Core/bin/$(Configuration)/netstandard2.1/DataVo.Core.dll" />
+      <_ForcedDataVoCoreAsset Include="$(MSBuildProjectDirectory)/../../../../DataVo.Core/bin/$(Configuration)/netstandard2.1/DataVo.Core.pdb" Condition="Exists('$(MSBuildProjectDirectory)/../../../../DataVo.Core/bin/$(Configuration)/netstandard2.1/DataVo.Core.pdb')" />
+      <_ForcedDataVoCoreAsset Include="$(MSBuildProjectDirectory)/../../../../DataVo.Core/bin/$(Configuration)/netstandard2.1/DataVo.Core.xml" Condition="Exists('$(MSBuildProjectDirectory)/../../../../DataVo.Core/bin/$(Configuration)/netstandard2.1/DataVo.Core.xml')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ForcedDataVoCoreAsset)" DestinationFolder="$(OutDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
+  </Target>
 
 </Project>

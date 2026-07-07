@@ -16,7 +16,7 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
     private static readonly ReactiveRowSchema OrdersSchema = new("Id", "AccountId", "MarketId", "Stake");
     private readonly CellValue[] _orderCells = new CellValue[4];
 
-    public string Name => "DataVo";
+    public string Name => DataVoBenchmarkName.Format("DataVo");
 
     public EngineArchitecture Architecture => EngineArchitecture.EmbeddedReactiveIvm;
 

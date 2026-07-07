@@ -1653,7 +1653,7 @@ public class Parser(List<Token> tokens)
                 object numValue = token.Value;
                 if (int.TryParse(token.Value, out int i)) numValue = i;
                 else if (long.TryParse(token.Value, out long l)) numValue = l;
-                else if (double.TryParse(token.Value, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
+                else if (double.TryParse(token.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
 
                 values.Push(new LiteralNode { Value = numValue });
             }
@@ -2198,7 +2198,7 @@ public class Parser(List<Token> tokens)
         object numValue = value;
         if (int.TryParse(value, out int i)) numValue = i;
         else if (long.TryParse(value, out long l)) numValue = l;
-        else if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
+        else if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double d)) numValue = d;
 
         return new LiteralNode { Value = numValue };
     }

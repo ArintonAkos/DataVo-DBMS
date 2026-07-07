@@ -147,16 +147,16 @@ public static class IndexKeyEncoder
     }
 
     private static string FormatSingleElementVector(int value) =>
-        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
 
     private static string FormatSingleElementVector(long value) =>
-        string.Create(CultureInfo.InvariantCulture, $"[{value}]");
+        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
 
     private static string FormatSingleElementVector(double value) =>
-        string.Create(CultureInfo.CurrentCulture, $"[{value}]");
+        string.Format(CultureInfo.CurrentCulture, "[{0}]", value);
 
     private static string FormatSingleElementVector(decimal value) =>
-        string.Create(CultureInfo.CurrentCulture, $"[{value}]");
+        string.Format(CultureInfo.CurrentCulture, "[{0}]", value);
 
     private static string SerializeVector(ReadOnlySpan<float> vector)
     {

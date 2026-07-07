@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using DataVo.Core.StorageEngine.Config;
 using Research.Benchmark.Abstractions;
 using Research.Benchmark.Host;
 using Research.Benchmark.Runners;
@@ -1203,7 +1202,8 @@ static string ReadStringArg(string[] args, string name, string defaultValue)
 static bool HasFlag(string[] args, string name) =>
     Array.IndexOf(args, name) >= 0;
 
-static bool ShouldRun(string filter, string engine) => filter is "all" || filter == engine;
+static bool ShouldRun(string filter, string engine) =>
+    filter is "all" || filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(engine);
 
 readonly record struct WhitepaperOperation(
     bool IsUpdate,

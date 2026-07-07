@@ -20,8 +20,8 @@ internal sealed class StoredRowDictionaryView : IReadOnlyDictionary<string, obje
 
     public StoredRowDictionaryView(ReactiveRowSchema schema, CellValue[] cells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(cells);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(cells);
         _schema = schema;
         _cells = cells;
     }

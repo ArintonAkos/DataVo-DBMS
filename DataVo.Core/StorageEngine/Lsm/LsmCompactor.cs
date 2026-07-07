@@ -32,8 +32,8 @@ public sealed class LsmCompactor
         LsmFileRegistry? fileRegistry,
         Action<LsmVersionEdit>? applyEdit)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableDirectory);
-        ArgumentNullException.ThrowIfNull(manifest);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(tableDirectory);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(manifest);
 
         _tableDirectory = tableDirectory;
         _manifest = manifest;

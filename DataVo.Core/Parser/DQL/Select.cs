@@ -123,7 +123,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     /// </exception>
     public override void PerformAction(Guid session)
     {
-        long queryStartTick = Environment.TickCount64;
+        long queryStartTick = DataVo.Core.Compat.EnvironmentCompat.TickCount64;
         ResetQueryHybridTelemetry();
 
         try
@@ -183,7 +183,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 Logger.Info($"Rows selected: {Data.Count}");
                 Messages.Add($"Rows selected: {Data.Count}");
 
-                long queryElapsedMs = Math.Max(0, Environment.TickCount64 - queryStartTick);
+                long queryElapsedMs = Math.Max(0, DataVo.Core.Compat.EnvironmentCompat.TickCount64 - queryStartTick);
                 ReportHybridRoutingTelemetry(queryElapsedMs, Data.Count);
             }
             finally

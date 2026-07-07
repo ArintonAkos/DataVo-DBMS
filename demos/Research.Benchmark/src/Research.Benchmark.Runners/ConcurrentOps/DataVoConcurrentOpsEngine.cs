@@ -33,7 +33,7 @@ public sealed class DataVoConcurrentOpsEngine : IConcurrentOpsEngine
     private int _initialRecords;
     private long _nextInsertId;
 
-    public string Name => "DataVo";
+    public string Name => DataVoBenchmarkName.Format("DataVo");
 
     public async Task InitializeAsync(ConcurrentOpsOptions options, CancellationToken cancellationToken = default)
     {

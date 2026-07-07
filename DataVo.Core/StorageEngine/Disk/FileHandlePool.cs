@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.StorageEngine.Disk;
 
@@ -21,7 +22,7 @@ internal sealed class FileHandlePool : IDisposable
 
     public FileHandleLease Acquire(string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(path);
 
         string normalizedPath = NormalizePath(path);
 
@@ -32,13 +33,14 @@ internal sealed class FileHandlePool : IDisposable
             if (_entries.TryGetValue(normalizedPath, out Entry? existing))
             {
                 existing.RefCount++;
-                existing.LastUsedTicks = Environment.TickCount64;
+                existing.LastUsedTicks = EnvironmentCompat.TickCount64;
                 return new FileHandleLease(this, normalizedPath, existing.Handle);
             }
 
             EvictIdleEntriesIfNeeded();
 
             Directory.CreateDirectory(Path.GetDirectoryName(normalizedPath) ?? ".");
+#if NET6_0_OR_GREATER
             SafeFileHandle handle = File.OpenHandle(
                 normalizedPath,
                 FileMode.OpenOrCreate,
@@ -47,13 +49,24 @@ internal sealed class FileHandlePool : IDisposable
                 FileOptions.RandomAccess);
 
             var entry = new Entry(handle)
+#else
+            var stream = new FileStream(
+                normalizedPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.ReadWrite | FileShare.Delete,
+                4096,
+                FileOptions.RandomAccess);
+
+            var entry = new Entry(stream)
+#endif
             {
                 RefCount = 1,
-                LastUsedTicks = Environment.TickCount64
+                LastUsedTicks = EnvironmentCompat.TickCount64
             };
             _entries.Add(normalizedPath, entry);
 
-            return new FileHandleLease(this, normalizedPath, handle);
+            return new FileHandleLease(this, normalizedPath, entry.Handle);
         }
     }
 
@@ -80,7 +93,7 @@ internal sealed class FileHandlePool : IDisposable
 
                 try
                 {
-                    RandomAccess.FlushToDisk(entry.Handle);
+                    RandomAccessCompat.FlushToDisk(entry.Handle);
                 }
                 catch (IOException)
                 {
@@ -97,7 +110,7 @@ internal sealed class FileHandlePool : IDisposable
 
     public void Remove(string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(path);
 
         string normalizedPath = NormalizePath(path);
 
@@ -146,7 +159,7 @@ internal sealed class FileHandlePool : IDisposable
             }
 
             entry.RefCount--;
-            entry.LastUsedTicks = Environment.TickCount64;
+            entry.LastUsedTicks = EnvironmentCompat.TickCount64;
 
             if (entry.RefCount == 0 && entry.RemoveWhenIdle)
             {
@@ -206,7 +219,7 @@ internal sealed class FileHandlePool : IDisposable
 
         try
         {
-            RandomAccess.FlushToDisk(entry.Handle);
+            RandomAccessCompat.FlushToDisk(entry.Handle);
         }
         catch (IOException)
         {
@@ -218,12 +231,32 @@ internal sealed class FileHandlePool : IDisposable
         {
         }
 
+#if NET6_0_OR_GREATER
         entry.Handle.Dispose();
+#else
+        RandomAccessCompat.Unregister(entry.Handle);
+        entry.Stream?.Dispose();
+#endif
     }
 
-    private sealed class Entry(SafeFileHandle handle)
+    private sealed class Entry
     {
-        public SafeFileHandle Handle { get; } = handle;
+#if NET6_0_OR_GREATER
+        public Entry(SafeFileHandle handle)
+        {
+            Handle = handle;
+        }
+#else
+        public Entry(FileStream stream)
+        {
+            Stream = stream;
+            Handle = stream.SafeFileHandle;
+            RandomAccessCompat.Register(Handle, stream);
+        }
+
+        public FileStream? Stream { get; }
+#endif
+        public SafeFileHandle Handle { get; }
         public int RefCount { get; set; }
         public long LastUsedTicks { get; set; }
         public bool RemoveWhenIdle { get; set; }

@@ -23,13 +23,17 @@ internal static class PasswordHasher
     /// <returns>A tuple containing the derived hash and salt as base64 strings.</returns>
     public static (string Hash, string Salt) HashPassword(string password)
     {
+#if NET6_0_OR_GREATER
         byte[] salt = RandomNumberGenerator.GetBytes(SaltSizeBytes);
-        byte[] hash = Rfc2898DeriveBytes.Pbkdf2(
-            password ?? string.Empty,
-            salt,
-            IterationCount,
-            KdfAlgorithm,
-            HashSizeBytes);
+#else
+        byte[] salt = new byte[SaltSizeBytes];
+        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(salt);
+        }
+#endif
+
+        byte[] hash = DeriveHash(password, salt, HashSizeBytes);
 
         return (Convert.ToBase64String(hash), Convert.ToBase64String(salt));
     }
@@ -65,14 +69,28 @@ internal static class PasswordHasher
             return false;
         }
 
-        byte[] computedHash = Rfc2898DeriveBytes.Pbkdf2(
+        byte[] computedHash = DeriveHash(password, salt, expectedHash.Length);
+
+        // Constant-time comparison to avoid leaking match progress via timing.
+        return CryptographicOperations.FixedTimeEquals(computedHash, expectedHash);
+    }
+
+    private static byte[] DeriveHash(string? password, byte[] salt, int hashSizeBytes)
+    {
+#if NET6_0_OR_GREATER
+        return Rfc2898DeriveBytes.Pbkdf2(
             password ?? string.Empty,
             salt,
             IterationCount,
             KdfAlgorithm,
-            expectedHash.Length);
-
-        // Constant-time comparison to avoid leaking match progress via timing.
-        return CryptographicOperations.FixedTimeEquals(computedHash, expectedHash);
+            hashSizeBytes);
+#else
+        using var pbkdf2 = new Rfc2898DeriveBytes(
+            password ?? string.Empty,
+            salt,
+            IterationCount,
+            KdfAlgorithm);
+        return pbkdf2.GetBytes(hashSizeBytes);
+#endif
     }
 }

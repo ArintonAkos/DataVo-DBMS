@@ -58,7 +58,7 @@ public readonly ref struct QueryChangeRef
         ReadOnlySpan<CellValue> updated,
         ReadOnlySpan<CellValue> updatedBefore)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         _schema = schema;
         _added = added;
         _removed = removed;

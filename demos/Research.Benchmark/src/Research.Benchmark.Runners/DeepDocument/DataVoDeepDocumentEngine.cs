@@ -39,7 +39,7 @@ public sealed class DataVoDeepDocumentEngine : IDeepDocumentEngine
     private int _nextItemId = 1;
     private int _nextAddressId = 1;
 
-    public string Name => "DataVo";
+    public string Name => DataVoBenchmarkName.Format("DataVo");
 
     public void Initialize()
     {

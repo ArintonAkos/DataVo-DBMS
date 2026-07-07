@@ -1,7 +1,11 @@
+#if NET10_0_OR_GREATER
 using System.Numerics.Tensors;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+#else
+using System.Numerics;
+#endif
 
 namespace DataVo.Core.Utils;
 
@@ -24,6 +28,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
+#if NET10_0_OR_GREATER
         if (TryDotAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -35,6 +40,9 @@ internal static class SimdDistanceKernels
         }
 
         return TensorPrimitives.Dot(a, b);
+#else
+        return PortableDot(a, b);
+#endif
     }
 
     public static float CosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
@@ -44,6 +52,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
+#if NET10_0_OR_GREATER
         if (TryCosineDistanceAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -55,6 +64,9 @@ internal static class SimdDistanceKernels
         }
 
         return TensorCosineDistance(a, b);
+#else
+        return PortableCosineDistance(a, b);
+#endif
     }
 
     public static float EuclideanDistance(float[] a, float[] b)
@@ -69,6 +81,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
+#if NET10_0_OR_GREATER
         if (TryEuclideanDistanceAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -81,8 +94,12 @@ internal static class SimdDistanceKernels
 
         // Cross-platform hardware acceleration: the runtime lowers this to ARM NEON or x86 AVX.
         return TensorPrimitives.Distance(a, b);
+#else
+        return PortableEuclideanDistance(a, b);
+#endif
     }
 
+#if NET10_0_OR_GREATER
     private static unsafe bool TryDotAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
     {
         result = 0f;
@@ -604,4 +621,161 @@ internal static class SimdDistanceKernels
 
         return sum;
     }
+#else
+    private static float PortableDot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)
+        {
+            int i = 0;
+            Vector<float> sum = Vector<float>.Zero;
+            int width = Vector<float>.Count;
+            Span<float> left = stackalloc float[width];
+            Span<float> right = stackalloc float[width];
+
+            for (; i <= a.Length - width; i += width)
+            {
+                a.Slice(i, width).CopyTo(left);
+                b.Slice(i, width).CopyTo(right);
+                sum += new Vector<float>(left) * new Vector<float>(right);
+            }
+
+            float total = 0f;
+            for (int lane = 0; lane < Vector<float>.Count; lane++)
+            {
+                total += sum[lane];
+            }
+
+            for (; i < a.Length; i++)
+            {
+                total += a[i] * b[i];
+            }
+
+            return total;
+        }
+
+        float scalar = 0f;
+        for (int i = 0; i < a.Length; i++)
+        {
+            scalar += a[i] * b[i];
+        }
+
+        return scalar;
+    }
+
+    private static float PortableCosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)
+        {
+            int i = 0;
+            int width = Vector<float>.Count;
+            Vector<float> dotVector = Vector<float>.Zero;
+            Vector<float> magnitudeAVector = Vector<float>.Zero;
+            Vector<float> magnitudeBVector = Vector<float>.Zero;
+            Span<float> left = stackalloc float[width];
+            Span<float> right = stackalloc float[width];
+
+            for (; i <= a.Length - width; i += width)
+            {
+                a.Slice(i, width).CopyTo(left);
+                b.Slice(i, width).CopyTo(right);
+                Vector<float> va = new(left);
+                Vector<float> vb = new(right);
+                dotVector += va * vb;
+                magnitudeAVector += va * va;
+                magnitudeBVector += vb * vb;
+            }
+
+            float dotSum = 0f;
+            float simdMagnitudeA = 0f;
+            float simdMagnitudeB = 0f;
+            for (int lane = 0; lane < Vector<float>.Count; lane++)
+            {
+                dotSum += dotVector[lane];
+                simdMagnitudeA += magnitudeAVector[lane];
+                simdMagnitudeB += magnitudeBVector[lane];
+            }
+
+            for (; i < a.Length; i++)
+            {
+                float av = a[i];
+                float bv = b[i];
+                dotSum += av * bv;
+                simdMagnitudeA += av * av;
+                simdMagnitudeB += bv * bv;
+            }
+
+            if (simdMagnitudeA <= 0f || simdMagnitudeB <= 0f)
+            {
+                return 1f;
+            }
+
+            float simdSimilarity = dotSum / (MathF.Sqrt(simdMagnitudeA) * MathF.Sqrt(simdMagnitudeB));
+            return 1f - simdSimilarity;
+        }
+
+        float dot = 0f;
+        float magnitudeA = 0f;
+        float magnitudeB = 0f;
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            float av = a[i];
+            float bv = b[i];
+            dot += av * bv;
+            magnitudeA += av * av;
+            magnitudeB += bv * bv;
+        }
+
+        if (magnitudeA <= 0f || magnitudeB <= 0f)
+        {
+            return 1f;
+        }
+
+        float similarity = dot / (MathF.Sqrt(magnitudeA) * MathF.Sqrt(magnitudeB));
+        return 1f - similarity;
+    }
+
+    private static float PortableEuclideanDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)
+        {
+            int i = 0;
+            int width = Vector<float>.Count;
+            Vector<float> sum = Vector<float>.Zero;
+            Span<float> left = stackalloc float[width];
+            Span<float> right = stackalloc float[width];
+
+            for (; i <= a.Length - width; i += width)
+            {
+                a.Slice(i, width).CopyTo(left);
+                b.Slice(i, width).CopyTo(right);
+                Vector<float> diff = new Vector<float>(left) - new Vector<float>(right);
+                sum += diff * diff;
+            }
+
+            float total = 0f;
+            for (int lane = 0; lane < Vector<float>.Count; lane++)
+            {
+                total += sum[lane];
+            }
+
+            for (; i < a.Length; i++)
+            {
+                float diff = a[i] - b[i];
+                total += diff * diff;
+            }
+
+            return MathF.Sqrt(total);
+        }
+
+        float sumSquares = 0f;
+        for (int i = 0; i < a.Length; i++)
+        {
+            float diff = a[i] - b[i];
+            sumSquares += diff * diff;
+        }
+
+        return MathF.Sqrt(sumSquares);
+    }
+#endif
 }

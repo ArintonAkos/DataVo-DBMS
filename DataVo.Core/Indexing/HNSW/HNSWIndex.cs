@@ -1,6 +1,8 @@
 using DataVo.Core.Utils;
 using System.Runtime.CompilerServices;
+#if NET10_0_OR_GREATER
 using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace DataVo.Core.Indexing.HNSW;
 
@@ -14,7 +16,11 @@ public class HNSWIndex : IVectorIndex
     private const int DefaultEfSearch = 64;
     private const int MaxSupportedLevels = 33;
 
+#if NET6_0_OR_GREATER
     private readonly Random _random = Random.Shared;
+#else
+    private readonly Random _random = new();
+#endif
     private readonly Dictionary<long, int> _rowIdToOrdinal = [];
     private readonly Stack<int> _freeOrdinals = [];
     private readonly object _stateGate = new();
@@ -82,7 +88,7 @@ public class HNSWIndex : IVectorIndex
             Epoch++;
             if (Epoch == int.MaxValue)
             {
-                Array.Clear(VisitedEpochByOrdinal);
+                Array.Clear(VisitedEpochByOrdinal, 0, VisitedEpochByOrdinal.Length);
                 Epoch = 1;
             }
 
@@ -124,7 +130,7 @@ public class HNSWIndex : IVectorIndex
             SeenEpoch++;
             if (SeenEpoch == int.MaxValue)
             {
-                Array.Clear(SeenEpochByOrdinal);
+                Array.Clear(SeenEpochByOrdinal, 0, SeenEpochByOrdinal.Length);
                 SeenEpoch = 1;
             }
         }
@@ -982,7 +988,7 @@ public class HNSWIndex : IVectorIndex
             return Math.Max(1, baseEf);
         }
 
-        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Math.Log2(_count + 1) * topK * AdaptiveEfSearchMultiplier));
+        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Log2(_count + 1) * topK * AdaptiveEfSearchMultiplier));
         return Math.Clamp(adaptive, baseEf, Math.Max(baseEf, _count));
     }
 
@@ -994,7 +1000,7 @@ public class HNSWIndex : IVectorIndex
             return baseEf;
         }
 
-        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Math.Log2(_count + 1) * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier));
+        int adaptive = (int)Math.Ceiling(Math.Max(baseEf, Log2(_count + 1) * ResolveNeighborLimit(level) * AdaptiveEfConstructionMultiplier));
         return Math.Clamp(adaptive, baseEf, Math.Max(baseEf, _count));
     }
 
@@ -1008,6 +1014,8 @@ public class HNSWIndex : IVectorIndex
             }
         }
     }
+
+    private static double Log2(double value) => Math.Log(value, 2d);
 
     private SearchWorkspace GetSearchWorkspace()
     {
@@ -1546,6 +1554,7 @@ public class HNSWIndex : IVectorIndex
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void PrefetchOrdinalVector(int ordinal)
     {
+#if NET10_0_OR_GREATER
         if (!Sse.IsSupported || _vectorDimension <= 0 || ordinal < 0 || ordinal >= _nextOrdinal)
         {
             return;
@@ -1568,6 +1577,7 @@ public class HNSWIndex : IVectorIndex
         {
             Sse.Prefetch0(ptr);
         }
+#endif
     }
 
     private object? TryGetNodeLock(int ordinal)

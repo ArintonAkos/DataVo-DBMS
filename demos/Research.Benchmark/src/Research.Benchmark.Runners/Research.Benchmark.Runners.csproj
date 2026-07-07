@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DataVoCoreTargetFramework Condition="'$(DataVoCoreTargetFramework)' == ''">net10.0</DataVoCoreTargetFramework>
+    <OutputPath Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">bin/$(Configuration)/$(TargetFramework)-datavo-netstandard2.1/</OutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(DataVoCoreTargetFramework)' == 'netstandard2.1'">
+    <DefineConstants>$(DefineConstants);DATAVO_CORE_NETSTANDARD21</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,7 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Research.Benchmark.Abstractions/Research.Benchmark.Abstractions.csproj" />
-    <ProjectReference Include="../../../../DataVo.Core/DataVo.Core.csproj" />
+    <ProjectReference Include="../../../../DataVo.Core/DataVo.Core.csproj" SetTargetFramework="TargetFramework=$(DataVoCoreTargetFramework)" />
   </ItemGroup>
 
 </Project>

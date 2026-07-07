@@ -371,7 +371,7 @@ internal sealed partial class JoinReactiveQuery
     private static (string LeftPk, string RightPk) SplitIdentity(string identity)
     {
         int colon = identity.IndexOf(':');
-        int leftLength = int.Parse(identity.AsSpan(0, colon), CultureInfo.InvariantCulture);
+        int leftLength = int.Parse(identity.Substring(0, colon), CultureInfo.InvariantCulture);
         int start = colon + 1;
         return (identity.Substring(start, leftLength), identity[(start + leftLength)..]);
     }

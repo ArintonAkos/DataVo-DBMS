@@ -42,8 +42,8 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
     /// </exception>
     public JoinReactiveQuery(JoinShape shape, DataVoEngine engine, string databaseName)
     {
-        ArgumentNullException.ThrowIfNull(shape);
-        ArgumentNullException.ThrowIfNull(engine);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(shape);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(engine);
 
         _shape = shape;
         _where = ReactivePredicate.Compile(shape.Where);

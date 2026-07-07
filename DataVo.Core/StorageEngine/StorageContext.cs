@@ -262,7 +262,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
         List<byte[]> serializedRows = _typedInsertSerializeScratch ??= [];
         try
         {
-            serializedRows.EnsureCapacity(rows.Count);
+            if (serializedRows.Capacity < rows.Count)
+            {
+                serializedRows.Capacity = rows.Count;
+            }
             for (int i = 0; i < rows.Count; i++)
             {
                 serializedRows.Add(RowSerializer.SerializeCells(columns, rows[i]));

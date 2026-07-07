@@ -19,7 +19,7 @@ public sealed class ReactiveRowSchema
     /// <summary>Creates a schema from the given column names, in projection order.</summary>
     public ReactiveRowSchema(IReadOnlyList<string> columns)
     {
-        ArgumentNullException.ThrowIfNull(columns);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
         _columns = columns.ToArray();
         _ordinals = new Dictionary<string, int>(_columns.Length, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < _columns.Length; i++)

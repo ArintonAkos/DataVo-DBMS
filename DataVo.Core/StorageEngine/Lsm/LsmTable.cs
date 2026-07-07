@@ -104,8 +104,8 @@ public sealed class LsmTable : IDisposable
         Action<LsmVersionEdit>? applyEdit,
         Action<LsmCrashPoint>? crashHook = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableDirectory);
-        ArgumentNullException.ThrowIfNull(manifest);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(tableDirectory);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(manifest);
 
         _tableDirectory = tableDirectory;
         _manifest = manifest;
@@ -138,7 +138,7 @@ public sealed class LsmTable : IDisposable
         {
             lock (_gate)
             {
-                ObjectDisposedException.ThrowIf(_disposed, this);
+                DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
                 return _active.Count;
             }
         }
@@ -229,7 +229,7 @@ public sealed class LsmTable : IDisposable
         LsmFlushResult? result;
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
             WaitForFlushPipelineNoLock();
             ThrowIfUnusableNoLock();
 
@@ -593,7 +593,7 @@ public sealed class LsmTable : IDisposable
 
     private void ThrowIfUnusableNoLock()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         if (_backgroundError is not null)
         {
             throw new InvalidOperationException(

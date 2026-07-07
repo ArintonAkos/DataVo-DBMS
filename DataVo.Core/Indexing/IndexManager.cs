@@ -127,7 +127,7 @@ public class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<long>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
 
-    private readonly Lock _lock = new();
+    private readonly object _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
 
@@ -804,7 +804,7 @@ public class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
-        ArgumentNullException.ThrowIfNull(vector);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(vector);
         InsertIntoVectorIndex(vector.AsSpan(), rowId, indexName, tableName, databaseName, indexType);
     }
 

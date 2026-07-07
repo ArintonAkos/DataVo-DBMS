@@ -12,8 +12,8 @@ internal sealed class LsmFileRegistry
 
     public LsmFileRegistry(string tableDirectory, LsmManifest manifest)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableDirectory);
-        ArgumentNullException.ThrowIfNull(manifest);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(tableDirectory);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(manifest);
         _tableDirectory = tableDirectory;
         _manifest = manifest;
         RefreshFromManifest();
@@ -108,7 +108,7 @@ internal sealed class LsmFileRegistry
 
     public T ExecuteVersionEdit<T>(Func<T> action)
     {
-        ArgumentNullException.ThrowIfNull(action);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(action);
         lock (_versionGate)
         {
             return action();

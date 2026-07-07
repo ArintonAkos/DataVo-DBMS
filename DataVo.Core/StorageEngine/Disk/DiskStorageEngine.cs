@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Compat;
 using DataVo.Core.StorageEngine.Config;
 using Microsoft.Win32.SafeHandles;
 
@@ -74,7 +75,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
     {
         if (_syncWrites)
         {
-            RandomAccess.FlushToDisk(handle);
+            RandomAccessCompat.FlushToDisk(handle);
         }
     }
 
@@ -106,7 +107,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
 
     private void EnsureFileHeader(SafeFileHandle handle)
     {
-        if (RandomAccess.GetLength(handle) >= FileHeaderSize)
+        if (RandomAccessCompat.GetLength(handle) >= FileHeaderSize)
         {
             return;
         }
@@ -114,7 +115,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
         Span<byte> header = stackalloc byte[FileHeaderSize];
         FileHeaderMagic.CopyTo(header);
         BinaryPrimitives.WriteInt32LittleEndian(header[4..], FileHeaderVersion);
-        RandomAccess.Write(handle, header, fileOffset: 0);
+        RandomAccessCompat.Write(handle, header, fileOffset: 0);
     }
 
     /// <summary>
@@ -157,7 +158,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
                 using var lease = Acquire(filePath);
                 EnsureFileHeader(lease.Handle);
 
-                long rowId = RandomAccess.GetLength(lease.Handle);
+                long rowId = RandomAccessCompat.GetLength(lease.Handle);
                 WriteRowRecord(lease.Handle, rowId, rowBytes);
                 FlushIfDurable(lease.Handle);
 
@@ -202,7 +203,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
                 using var lease = Acquire(filePath);
                 EnsureFileHeader(lease.Handle);
 
-                long offset = RandomAccess.GetLength(lease.Handle);
+                long offset = RandomAccessCompat.GetLength(lease.Handle);
                 foreach (var bytes in rowsBytes)
                 {
                     rowIds.Add(offset);
@@ -295,10 +296,10 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
             if (UsesHandlePooling)
             {
                 using var lease = Acquire(filePath);
-                long offset = RandomAccess.GetLength(lease.Handle) >= FileHeaderSize
+                long offset = RandomAccessCompat.GetLength(lease.Handle) >= FileHeaderSize
                     ? FileHeaderSize
                     : 0;
-                long fileLength = RandomAccess.GetLength(lease.Handle);
+                long fileLength = RandomAccessCompat.GetLength(lease.Handle);
 
                 while (offset < fileLength)
                 {
@@ -367,7 +368,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
 
                 Span<byte> tombstone = stackalloc byte[sizeof(int)];
                 BinaryPrimitives.WriteInt32LittleEndian(tombstone, -pooledOriginalLength);
-                RandomAccess.Write(lease.Handle, tombstone, rowId);
+                RandomAccessCompat.Write(lease.Handle, tombstone, rowId);
                 FlushIfDurable(lease.Handle);
                 return;
             }
@@ -460,10 +461,10 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
             {
                 using var lease = Acquire(filePath);
                 var pooledSurvivors = new List<byte[]>();
-                long offset = RandomAccess.GetLength(lease.Handle) >= FileHeaderSize
+                long offset = RandomAccessCompat.GetLength(lease.Handle) >= FileHeaderSize
                     ? FileHeaderSize
                     : 0;
-                long fileLength = RandomAccess.GetLength(lease.Handle);
+                long fileLength = RandomAccessCompat.GetLength(lease.Handle);
 
                 while (offset < fileLength)
                 {
@@ -481,7 +482,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
                     pooledSurvivors.Add(data);
                 }
 
-                RandomAccess.SetLength(lease.Handle, 0);
+                RandomAccessCompat.SetLength(lease.Handle, 0);
                 WriteHeader(lease.Handle);
 
                 long writeOffset = FileHeaderSize;
@@ -574,15 +575,15 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
         Span<byte> header = stackalloc byte[FileHeaderSize];
         FileHeaderMagic.CopyTo(header);
         BinaryPrimitives.WriteInt32LittleEndian(header[4..], FileHeaderVersion);
-        RandomAccess.Write(handle, header, 0);
+        RandomAccessCompat.Write(handle, header, 0);
     }
 
     private static long WriteRowRecord(SafeFileHandle handle, long offset, byte[] rowBytes)
     {
         Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
         BinaryPrimitives.WriteInt32LittleEndian(lengthPrefix, rowBytes.Length);
-        RandomAccess.Write(handle, lengthPrefix, offset);
-        RandomAccess.Write(handle, rowBytes, offset + sizeof(int));
+        RandomAccessCompat.Write(handle, lengthPrefix, offset);
+        RandomAccessCompat.Write(handle, rowBytes, offset + sizeof(int));
         return offset + sizeof(int) + rowBytes.Length;
     }
 
@@ -597,7 +598,7 @@ public class DiskStorageEngine : IStorageEngine, IDisposable
     {
         while (!buffer.IsEmpty)
         {
-            int bytesRead = RandomAccess.Read(handle, buffer, offset);
+            int bytesRead = RandomAccessCompat.Read(handle, buffer, offset);
             if (bytesRead == 0)
             {
                 throw new EndOfStreamException("Unexpected end of disk table file.");

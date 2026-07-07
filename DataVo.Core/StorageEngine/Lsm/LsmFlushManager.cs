@@ -10,7 +10,7 @@ public sealed class LsmFlushManager
     /// </summary>
     public byte[] FreezeAndFlush(MemTable memTable)
     {
-        ArgumentNullException.ThrowIfNull(memTable);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(memTable);
         if (memTable.Count == 0)
         {
             throw new InvalidOperationException("Cannot flush an empty MemTable.");

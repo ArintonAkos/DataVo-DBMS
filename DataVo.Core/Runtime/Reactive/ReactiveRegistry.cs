@@ -44,8 +44,8 @@ public sealed class ReactiveRegistry
     /// <exception cref="InvalidOperationException">Thrown when the subscription cap is exceeded.</exception>
     public IDisposable Add(DataVoContext ctx, string sql, Action<QueryChange> onChanged)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(onChanged);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ctx);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
         IReactiveQuery subscription = CreateQuery(sql, databaseName);
@@ -64,9 +64,9 @@ public sealed class ReactiveRegistry
     /// </summary>
     internal IDisposable AddCompiledForTest(DataVoContext ctx, IReactiveQuery query, Action<QueryChange> onChanged)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(query);
-        ArgumentNullException.ThrowIfNull(onChanged);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ctx);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(query);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
 
@@ -84,8 +84,8 @@ public sealed class ReactiveRegistry
     /// </summary>
     public IDisposable SubscribeZeroAlloc(DataVoContext ctx, string sql, QueryDeltaHandler onChanged)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(onChanged);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ctx);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
         IReactiveQuery subscription = CreateQuery(sql, databaseName);

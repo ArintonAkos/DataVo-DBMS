@@ -24,7 +24,7 @@ public sealed class DataVoFlatCrudEngine : IFlatCrudEngine
     private DataVoPreparedSelectSingle<FlatRecord>? _lookup;
     private List<CellValue[]>? _batchRows;
 
-    public string Name => "DataVo";
+    public string Name => DataVoBenchmarkName.Format("DataVo");
 
     public void Initialize()
     {

@@ -1360,7 +1360,9 @@ internal sealed class InsertRowService(
 
     private static ReadOnlySpan<long> AsRowIdSpan(IReadOnlyList<long> rowIds) => rowIds switch
     {
+#if NET6_0_OR_GREATER
         List<long> list => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list),
+#endif
         long[] array => array,
         _ => rowIds.ToArray(),
     };

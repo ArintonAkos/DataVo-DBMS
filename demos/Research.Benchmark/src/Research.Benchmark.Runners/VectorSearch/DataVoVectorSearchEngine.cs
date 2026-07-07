@@ -41,7 +41,7 @@ public sealed class DataVoVectorSearchEngine : IVectorSearchEngine
         _expectedVectors = Math.Max(0, expectedVectors);
     }
 
-    public string Name => _name;
+    public string Name => DataVoBenchmarkName.Format(_name);
 
     public void Initialize(int dimensions)
     {

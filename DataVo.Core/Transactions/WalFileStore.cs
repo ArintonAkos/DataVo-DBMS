@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using DataVo.Core.Compat;
 using DataVo.Core.Serialization;
 using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.Utils;
@@ -89,7 +90,7 @@ internal sealed class WalFileStore
             using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
             stream.Seek(0, SeekOrigin.End);
 
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
             {
                 writer.WriteLine(SerializeWalEntry(entry));
                 writer.Flush();
@@ -128,7 +129,7 @@ internal sealed class WalFileStore
         {
             EnsureDirectoryExists();
             using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
-            RandomAccess.FlushToDisk(lease.Handle);
+            RandomAccessCompat.FlushToDisk(lease.Handle);
             Interlocked.Increment(ref _durableFlushCount);
         });
     }
@@ -156,7 +157,7 @@ internal sealed class WalFileStore
         {
             try
             {
-                RandomAccess.FlushToDisk(lease.Handle);
+                RandomAccessCompat.FlushToDisk(lease.Handle);
             }
             catch (ObjectDisposedException)
             {
@@ -225,11 +226,11 @@ internal sealed class WalFileStore
     private void AppendFrameBytesCore(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
         using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
-        long offset = RandomAccess.GetLength(lease.Handle);
-        RandomAccess.Write(lease.Handle, bytes, offset);
+        long offset = RandomAccessCompat.GetLength(lease.Handle);
+        RandomAccessCompat.Write(lease.Handle, bytes, offset);
         if (flushToDisk)
         {
-            RandomAccess.FlushToDisk(lease.Handle);
+            RandomAccessCompat.FlushToDisk(lease.Handle);
             Interlocked.Increment(ref _durableFlushCount);
         }
     }
@@ -424,7 +425,7 @@ internal sealed class WalFileStore
 
         string tmpPath = FilePath + ".tmp";
         using var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
+        using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
         {
             foreach (var entry in entries)
             {

@@ -76,7 +76,7 @@ internal sealed class LsmLatestRowStore
     /// <summary>Publishes <paramref name="rowBytes"/> as the latest live version of <paramref name="rowId"/>. Writer-locked by the caller.</summary>
     public void Set(long rowId, byte[] rowBytes)
     {
-        ArgumentNullException.ThrowIfNull(rowBytes);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
         byte[]?[] page = EnsurePage(rowId);
         Volatile.Write(ref page[rowId & PageMask], rowBytes);
     }
@@ -140,7 +140,10 @@ internal sealed class LsmLatestRowStore
 
     private byte[]?[] EnsurePage(long rowId)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(rowId);
+        if (rowId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rowId), rowId, "Value cannot be negative.");
+        }
         long pageIndex = rowId >> PageShift;
         if (pageIndex > int.MaxValue)
         {

@@ -30,7 +30,7 @@ internal static class VectorParser
             return false;
         }
 
-        string[] parts = candidate.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        string[] parts = candidate.Split([','], StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0)
         {
             return false;
@@ -39,7 +39,7 @@ internal static class VectorParser
         vector = new float[parts.Length];
         for (int i = 0; i < parts.Length; i++)
         {
-            if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
+            if (!float.TryParse(parts[i].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
             {
                 vector = [];
                 return false;

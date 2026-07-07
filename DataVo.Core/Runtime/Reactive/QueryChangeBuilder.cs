@@ -26,7 +26,7 @@ internal sealed class QueryChangeBuilder
     /// <summary>Creates an arena for the given schema.</summary>
     public QueryChangeBuilder(ReactiveRowSchema schema, int initialRowCapacity = 4)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         _schema = schema;
         int width = Math.Max(1, schema.ColumnCount);
         int capacity = Math.Max(1, initialRowCapacity) * width;

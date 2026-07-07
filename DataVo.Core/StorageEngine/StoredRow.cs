@@ -14,7 +14,7 @@ internal sealed class StoredRow
 
     public StoredRow(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         if (cells.Length != schema.ColumnCount)
         {
             throw new ArgumentException(
@@ -28,8 +28,8 @@ internal sealed class StoredRow
 
     private StoredRow(ReactiveRowSchema schema, CellValue[] ownedCells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(ownedCells);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ownedCells);
         if (ownedCells.Length != schema.ColumnCount)
         {
             throw new ArgumentException(
@@ -94,7 +94,7 @@ internal readonly ref struct StoredRowView
 
     public StoredRowView(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         _schema = schema;
         _cells = cells;
     }

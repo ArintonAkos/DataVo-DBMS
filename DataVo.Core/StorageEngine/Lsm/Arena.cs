@@ -54,7 +54,7 @@ public sealed class Arena : IDisposable
     /// </summary>
     public Span<byte> Allocate(int size, out long handle)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
 
         if (size < 0)
         {
@@ -86,7 +86,7 @@ public sealed class Arena : IDisposable
     /// </summary>
     public Span<byte> Resolve(long handle, int length)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
 
         int slabIndex = (int)(handle >> 32);
         int offset = (int)(handle & 0xFFFFFFFF);
@@ -95,7 +95,7 @@ public sealed class Arena : IDisposable
 
     internal ref long ResolveInt64Reference(long handle, int offsetInAllocation)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
 
         int slabIndex = (int)(handle >> 32);
         int offset = (int)(handle & 0xFFFFFFFF) + offsetInAllocation;
@@ -108,7 +108,7 @@ public sealed class Arena : IDisposable
     /// </summary>
     public void Reset()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         lock (_leaseSync)
         {
             if (_activeLeases > 0)
@@ -140,7 +140,7 @@ public sealed class Arena : IDisposable
     {
         lock (_leaseSync)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
             _activeLeases++;
             return new ArenaLease(this);
         }

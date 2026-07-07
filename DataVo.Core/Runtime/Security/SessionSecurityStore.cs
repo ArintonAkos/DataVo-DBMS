@@ -419,7 +419,12 @@ internal sealed class SessionSecurityStore
                 DatabasePermission.WriteData,
                 DatabasePermission.ManageTransactions
             ]);
-            SeedBuiltInRole(DatabaseRole.Admin.ToString(), Enum.GetValues<DatabasePermission>());
+            SeedBuiltInRole(DatabaseRole.Admin.ToString(),
+#if NET6_0_OR_GREATER
+                Enum.GetValues<DatabasePermission>());
+#else
+                Enum.GetValues(typeof(DatabasePermission)).Cast<DatabasePermission>());
+#endif
 
             foreach (DataVoAuthUser configUser in config.AuthorizationUsers)
             {

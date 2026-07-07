@@ -13,7 +13,7 @@ public readonly struct TypedRow
     /// <summary>Creates an owned typed row image by copying <paramref name="cells"/>.</summary>
     public TypedRow(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         if (cells.Length != schema.ColumnCount)
         {
             throw new ArgumentException(
@@ -37,8 +37,8 @@ public readonly struct TypedRow
     /// </summary>
     public static TypedRow FromOwnedCells(ReactiveRowSchema schema, CellValue[] ownedCells)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(ownedCells);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ownedCells);
         if (ownedCells.Length != schema.ColumnCount)
         {
             throw new ArgumentException(

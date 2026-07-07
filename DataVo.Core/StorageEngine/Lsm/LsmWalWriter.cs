@@ -21,7 +21,7 @@ internal sealed class LsmWalWriter
 
     public LsmWalWriter(string walPath, LsmWalDurabilityMode durabilityMode, int capacityBytes = 1 << 20)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(walPath);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(walPath);
         _store = new WalFileStore(walPath);
         _durabilityMode = durabilityMode;
         _frameBuffer = new byte[Math.Max(capacityBytes, WalAppender.FrameHeaderSize)];
@@ -147,7 +147,7 @@ internal sealed class LsmWalWriter
 
     public void ReplayInto(MemTable memTable)
     {
-        ArgumentNullException.ThrowIfNull(memTable);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(memTable);
 
         foreach (WalFrameRecord frame in _store.ReadBinaryFrames())
         {

@@ -29,7 +29,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         string storageDirectory,
         LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(storageDirectory);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;
         Directory.CreateDirectory(_storageDirectory);
@@ -42,7 +42,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// </summary>
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
-        ArgumentNullException.ThrowIfNull(rowBytes);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
 
         long insertedRowId;
@@ -75,7 +75,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// </summary>
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
-        ArgumentNullException.ThrowIfNull(rowsBytes);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowsBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
 
         List<long> insertedRowIds;
@@ -89,7 +89,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 int count = 0;
                 foreach (byte[] rowBytes in rowsBytes)
                 {
-                    ArgumentNullException.ThrowIfNull(rowBytes);
+                    DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
                     long rowId = state.NextRowId++;
                     ulong seqno = state.NextSeqno++;
                     batch[count++] = new LsmBatchRowPutEntry(rowId, seqno, rowBytes);
@@ -303,7 +303,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// <inheritdoc />
     public void DropTable(string databaseName, string tableName)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         (string DatabaseName, string TableName) key = (databaseName, tableName);
         if (_tables.TryRemove(key, out TableState? state))
         {
@@ -323,7 +323,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// <inheritdoc />
     public void DropDatabase(string databaseName)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         foreach ((string DatabaseName, string TableName) key in _tables.Keys)
         {
             if (string.Equals(key.DatabaseName, databaseName, StringComparison.Ordinal)
@@ -379,9 +379,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
     private TableState GetOrCreateTable(string databaseName, string tableName)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(databaseName);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(tableName);
 
         return _tables.GetOrAdd(
             (databaseName, tableName),

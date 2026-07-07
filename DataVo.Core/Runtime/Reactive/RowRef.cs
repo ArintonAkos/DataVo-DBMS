@@ -14,7 +14,7 @@ public readonly ref struct RowRef
     /// <summary>Creates a borrowed row view. The cell count must equal the schema's column count.</summary>
     public RowRef(ReactiveRowSchema schema, ReadOnlySpan<CellValue> values)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(schema);
         if (values.Length != schema.ColumnCount)
         {
             throw new ArgumentException(

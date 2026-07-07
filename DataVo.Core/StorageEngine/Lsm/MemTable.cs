@@ -60,7 +60,7 @@ public sealed class MemTable : IDisposable
     /// </summary>
     public void Put(ReadOnlySpan<byte> userKey, ulong seqno, LsmValueType valueType, ReadOnlySpan<byte> value)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         if (_frozen)
         {
             throw new InvalidOperationException("Cannot Put into a frozen MemTable.");
@@ -107,7 +107,7 @@ public sealed class MemTable : IDisposable
     /// <summary>Marks the MemTable immutable. Subsequent writes throw; reads and iteration remain valid.</summary>
     public void Freeze()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         _frozen = true;
     }
 
@@ -119,7 +119,7 @@ public sealed class MemTable : IDisposable
     /// </summary>
     public ArenaLease AcquireReadLease()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         return _arena.AcquireLease();
     }
 
@@ -136,7 +136,7 @@ public sealed class MemTable : IDisposable
     /// </summary>
     public bool TryGet(ReadOnlySpan<byte> userKey, ulong snapshotSeqno, out ReadOnlySpan<byte> value, out bool isTombstone)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         value = default;
         isTombstone = false;
 
@@ -285,7 +285,7 @@ public sealed class MemTable : IDisposable
     /// </summary>
     public bool TryGetInternalKeyBounds(out byte[] smallestInternalKey, out byte[] largestInternalKey)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         long first = GetForward(_head, 0);
         if (first == Null)
         {

@@ -1,4 +1,6 @@
+#if NET10_0_OR_GREATER
 using System.Runtime.Intrinsics;
+#endif
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 
@@ -79,6 +81,7 @@ internal static class CompiledIntegerScan
         Func<StoredRow, TState, bool> onMatch,
         TState state)
     {
+#if NET10_0_OR_GREATER
         if (Vector256.IsHardwareAccelerated && rows.Count >= Vector256<int>.Count)
         {
             ScanRowsVector256(rows, whereColumn, expected, onMatch, state);
@@ -90,6 +93,7 @@ internal static class CompiledIntegerScan
             ScanRowsVector128(rows, whereColumn, expected, onMatch, state);
             return;
         }
+#endif
 
         foreach ((_, StoredRow row) in rows)
         {
@@ -102,6 +106,7 @@ internal static class CompiledIntegerScan
         }
     }
 
+#if NET10_0_OR_GREATER
     private static void ScanRowsVector256<TState>(
         Dictionary<long, StoredRow> rows,
         string whereColumn,
@@ -253,6 +258,7 @@ internal static class CompiledIntegerScan
 
         return true;
     }
+#endif
 
     private static bool TryReadInt32(StoredRow row, string column, out int value)
     {

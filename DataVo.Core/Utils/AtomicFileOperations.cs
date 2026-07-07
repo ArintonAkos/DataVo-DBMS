@@ -1,4 +1,5 @@
 using System.Reflection;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.Utils;
 
@@ -32,11 +33,11 @@ internal static class AtomicFileOperations
 
         if (!File.Exists(destinationPath))
         {
-            File.Move(tempPath, destinationPath, overwrite: true);
+            FileCompat.Move(tempPath, destinationPath, overwrite: true);
             return;
         }
 
-        if (OperatingSystem.IsBrowser())
+        if (FileCompat.IsBrowser())
         {
             ReplaceViaDeleteAndMove(tempPath, destinationPath);
             return;
@@ -82,11 +83,11 @@ internal static class AtomicFileOperations
 
             if (File.Exists(destinationPath))
             {
-                File.Move(destinationPath, backupPath, overwrite: true);
+                FileCompat.Move(destinationPath, backupPath, overwrite: true);
                 movedDestinationToBackup = true;
             }
 
-            File.Move(tempPath, destinationPath, overwrite: true);
+            FileCompat.Move(tempPath, destinationPath, overwrite: true);
 
             if (movedDestinationToBackup && File.Exists(backupPath))
             {
@@ -104,7 +105,7 @@ internal static class AtomicFileOperations
         {
             if (movedDestinationToBackup && !File.Exists(destinationPath) && File.Exists(backupPath))
             {
-                File.Move(backupPath, destinationPath, overwrite: true);
+                FileCompat.Move(backupPath, destinationPath, overwrite: true);
             }
 
             throw;

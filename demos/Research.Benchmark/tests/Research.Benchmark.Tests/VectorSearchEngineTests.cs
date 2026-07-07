@@ -25,7 +25,7 @@ public sealed class VectorSearchEngineTests
     {
         using var engine = new DataVoVectorSearchEngine("FLAT", "DataVo-Flat");
 
-        Assert.Equal("DataVo-Flat", engine.Name);
+        Assert.Equal("DataVo-Flat [DataVo.Core net10.0]", engine.Name);
     }
 
     [Theory]

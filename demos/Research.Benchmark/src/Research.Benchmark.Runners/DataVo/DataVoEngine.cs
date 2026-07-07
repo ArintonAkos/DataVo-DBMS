@@ -49,7 +49,7 @@ public sealed class DataVoEngine : IBettingRiskEngine
         _defaultReadModel = new RiskReadModel(_runnerExposureView, _accountExposureView, _defaultMarketRisk, DateTimeOffset.MinValue);
     }
 
-    public string Name => "DataVo";
+    public string Name => DataVoBenchmarkName.Format("DataVo");
 
     public EngineArchitecture Architecture => EngineArchitecture.EmbeddedReactiveIvm;
 

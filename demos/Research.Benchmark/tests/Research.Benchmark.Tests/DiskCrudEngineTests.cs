@@ -15,8 +15,8 @@ public sealed class DiskCrudEngineTests
             durable: false,
             storageMode: DataVoDiskCrudStorageMode.Lsm);
 
-        Assert.Equal("DataVo (LSM Production)", production.Name);
-        Assert.Equal("DataVo (LSM Relaxed)", relaxed.Name);
+        Assert.Equal("DataVo (LSM Production) [DataVo.Core net10.0]", production.Name);
+        Assert.Equal("DataVo (LSM Relaxed) [DataVo.Core net10.0]", relaxed.Name);
     }
 
     [Fact]
@@ -29,8 +29,8 @@ public sealed class DiskCrudEngineTests
 
         Assert.Equal(
         [
-            "DataVo (LSM Production)",
-            "DataVo (LSM Relaxed)",
+            "DataVo (LSM Production) [DataVo.Core net10.0]",
+            "DataVo (LSM Relaxed) [DataVo.Core net10.0]",
             "SQLite (WAL,normal)",
             "SQLite (WAL,full)",
         ], names);

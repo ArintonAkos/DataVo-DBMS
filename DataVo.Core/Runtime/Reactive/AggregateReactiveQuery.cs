@@ -298,7 +298,7 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         ReadOnlySpan<char> keySpan = BuildGroupKey(row);
         string key;
         GroupState state;
-        if (_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existing, out GroupState? existingState))
+        if (TryGetGroup(keySpan, out string? existing, out GroupState? existingState))
         {
             key = existing!;
             state = existingState!;
@@ -358,7 +358,7 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         ReadOnlySpan<char> keySpan = BuildGroupKey(row);
         string key;
         GroupState state;
-        if (_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existing, out GroupState? existingState))
+        if (TryGetGroup(keySpan, out string? existing, out GroupState? existingState))
         {
             key = existing!;
             state = existingState!;
@@ -417,7 +417,7 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     private string RemoveRow(IReadOnlyDictionary<string, object?> row)
     {
         ReadOnlySpan<char> keySpan = BuildGroupKey(row);
-        if (!_groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out string? existingKey, out GroupState? existingState))
+        if (!TryGetGroup(keySpan, out string? existingKey, out GroupState? existingState))
         {
             // No such group (e.g. deleting a row whose group is already gone): materialize the key so
             // the caller can classify it. Off the steady-state path.
@@ -599,6 +599,7 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
                 AppendChars(ref pos, b ? "True" : "False");
                 return;
 
+#if NET6_0_OR_GREATER
             case ISpanFormattable formattable:
             {
                 int written;
@@ -610,12 +611,34 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
                 pos += written;
                 return;
             }
+#else
+            case IFormattable formattable:
+                AppendChars(ref pos, formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty);
+                return;
+#endif
 
             // Exotic types (rare): fall back to the legacy rendering. Allocates, but off the common path.
             default:
                 AppendChars(ref pos, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
                 return;
         }
+    }
+
+    private bool TryGetGroup(ReadOnlySpan<char> keySpan, out string? key, out GroupState? state)
+    {
+#if NET9_0_OR_GREATER
+        return _groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out key, out state);
+#else
+        key = new string(keySpan);
+        if (_groups.TryGetValue(key, out GroupState? found))
+        {
+            state = found;
+            return true;
+        }
+
+        state = null;
+        return false;
+#endif
     }
 
     private void AppendValue(ref int pos, CellValue value)
@@ -657,8 +680,13 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
     }
 
     private void AppendFormattable<T>(ref int pos, T value)
+#if NET6_0_OR_GREATER
         where T : ISpanFormattable
+#else
+        where T : IFormattable
+#endif
     {
+#if NET6_0_OR_GREATER
         int written;
         while (!value.TryFormat(_keyBuffer.AsSpan(pos), out written, default, CultureInfo.InvariantCulture))
         {
@@ -666,6 +694,9 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         }
 
         pos += written;
+#else
+        AppendChars(ref pos, value.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty);
+#endif
     }
 
     private void EnsureKeyCapacity(int min)

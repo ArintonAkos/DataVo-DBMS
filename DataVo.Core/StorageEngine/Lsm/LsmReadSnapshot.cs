@@ -15,7 +15,7 @@ internal sealed class LsmReadSnapshot : IDisposable
 
     public byte[] ReadAllBytes(long fileNumber)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
 
         foreach (LsmSstableHandle handle in _handles)
         {

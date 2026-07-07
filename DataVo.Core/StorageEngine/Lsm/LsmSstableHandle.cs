@@ -10,7 +10,7 @@ internal sealed class LsmSstableHandle
 
     public LsmSstableHandle(string tableDirectory, LsmTableFileMetadata metadata)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableDirectory);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(tableDirectory);
         TableDirectory = tableDirectory;
         Metadata = metadata.Copy();
         FilePath = Path.Combine(tableDirectory, Metadata.FileName);

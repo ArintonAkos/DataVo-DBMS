@@ -103,7 +103,7 @@ public static class LsmWalRecordCodec
     /// <summary>Applies an already-decoded mutation to <paramref name="memTable"/>.</summary>
     public static bool Apply(LsmWalRecord record, MemTable memTable)
     {
-        ArgumentNullException.ThrowIfNull(memTable);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(memTable);
 
         if (record.UserKey is null || record.Value is null)
         {
@@ -138,7 +138,7 @@ public static class LsmWalRecordCodec
     /// <summary>Decodes and applies one mutation payload to <paramref name="memTable"/>.</summary>
     public static bool Replay(ReadOnlySpan<byte> source, MemTable memTable)
     {
-        ArgumentNullException.ThrowIfNull(memTable);
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(memTable);
         return TryRead(source, out LsmWalRecord record) && Apply(record, memTable);
     }
 
