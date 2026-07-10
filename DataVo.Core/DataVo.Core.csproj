@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;netstandard2.1</TargetFrameworks>
+    <DataVoEnablePortableTarget Condition="'$(DataVoEnablePortableTarget)' == ''">false</DataVoEnablePortableTarget>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(DataVoEnablePortableTarget)' == 'true'">net10.0;netstandard2.1</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>

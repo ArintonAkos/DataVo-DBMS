@@ -4,6 +4,7 @@
        This default keeps any future project out of the public NuGet feed by accident. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
@@ -29,7 +30,7 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>SQL engine, storage, indexing, and ALTER TABLE support. preview.2 refreshes the package README and packaging; published via CI Trusted Publishing.</PackageReleaseNotes>
+    <PackageReleaseNotes>SQL engine, storage, indexing, and ALTER TABLE support. The public Core package currently ships net10.0 only; the experimental netstandard2.1 target is not published while Unity compatibility is being validated.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">

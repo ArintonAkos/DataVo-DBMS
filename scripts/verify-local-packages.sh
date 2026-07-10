@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PACKAGES_DIR="$ROOT_DIR/artifacts/packages"
 TEMP_DIR="$(mktemp -d)"
+PACKAGES_DIR="$TEMP_DIR/packages"
 APP_DIR="$TEMP_DIR/DataVo.PackageSmoke"
 
 cleanup() {
@@ -11,15 +11,42 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/5] Packing DataVo.Core and DataVo.Data..."
-dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" -c Release >/dev/null
-dotnet pack "$ROOT_DIR/DataVo.Data/DataVo.Data.csproj" -c Release >/dev/null
+mkdir -p "$PACKAGES_DIR"
 
-echo "[2/5] Verifying package artifacts exist..."
-ls "$PACKAGES_DIR"/DataVo.Core.*.nupkg >/dev/null
-ls "$PACKAGES_DIR"/DataVo.Data.*.nupkg >/dev/null
+echo "[1/6] Packing DataVo.Core and DataVo.Data..."
+dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
+  -c Release \
+  -o "$PACKAGES_DIR" >/dev/null
+dotnet pack "$ROOT_DIR/DataVo.Data/DataVo.Data.csproj" \
+  -c Release \
+  -o "$PACKAGES_DIR" >/dev/null
 
-echo "[3/5] Creating temporary consumer app..."
+echo "[2/6] Verifying package artifacts exist..."
+CORE_PACKAGE="$(
+  find "$PACKAGES_DIR" -maxdepth 1 -type f \
+    -name 'DataVo.Core.*.nupkg' -print
+)"
+DATA_PACKAGE="$(
+  find "$PACKAGES_DIR" -maxdepth 1 -type f \
+    -name 'DataVo.Data.*.nupkg' -print
+)"
+
+if [[ -z "$CORE_PACKAGE" || "$CORE_PACKAGE" == *$'\n'* ]]; then
+  echo "Expected exactly one DataVo.Core nupkg, found:" >&2
+  printf '%s\n' "${CORE_PACKAGE:-<none>}" >&2
+  exit 1
+fi
+
+if [[ -z "$DATA_PACKAGE" || "$DATA_PACKAGE" == *$'\n'* ]]; then
+  echo "Expected exactly one DataVo.Data nupkg, found:" >&2
+  printf '%s\n' "${DATA_PACKAGE:-<none>}" >&2
+  exit 1
+fi
+
+echo "[3/6] Verifying the public Core target boundary..."
+bash "$ROOT_DIR/scripts/assert-core-package-targets.sh" "$CORE_PACKAGE"
+
+echo "[4/6] Creating temporary consumer app..."
 dotnet new console -n DataVo.PackageSmoke -o "$APP_DIR" --force >/dev/null
 
 cat > "$APP_DIR/Program.cs" <<'CS'
@@ -65,11 +92,11 @@ using (var connection = new DataVoConnection("StorageMode=InMemory;DataSource=De
 Console.WriteLine("External consumer package validation passed.");
 CS
 
-echo "[4/5] Installing local packages from artifacts..."
+echo "[5/6] Installing local packages from artifacts..."
 dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Core --source "$PACKAGES_DIR" --prerelease >/dev/null
 dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Data --source "$PACKAGES_DIR" --prerelease >/dev/null
 
-echo "[5/5] Running consumer app with local packages..."
+echo "[6/6] Running consumer app with local packages..."
 dotnet run --project "$APP_DIR/DataVo.PackageSmoke.csproj" -c Release >/dev/null
 
 echo "SUCCESS: local DataVo package smoke test passed."
