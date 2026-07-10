@@ -17,16 +17,8 @@ jobs:
         include:
           - label: linux-x64-net10
             runner: ubuntu-latest
-            datavo_core: net10.0
-          - label: linux-x64-netstandard2.1
-            runner: ubuntu-latest
-            datavo_core: netstandard2.1
           - label: windows-x64-net10
             runner: windows-latest
-            datavo_core: net10.0
-          - label: windows-x64-netstandard2.1
-            runner: windows-latest
-            datavo_core: netstandard2.1
 
     steps:
       - name: Checkout
@@ -85,7 +77,7 @@ jobs:
         run: dotnet restore demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj
 
       - name: Build benchmark host
-        run: dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj -c Release --no-restore -p:DataVoCoreTargetFramework=${{ matrix.datavo_core }}
+        run: dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host/Research.Benchmark.Host.csproj -c Release --no-restore
 
       - name: Run full benchmark scenario matrix
         shell: bash
@@ -96,11 +88,7 @@ jobs:
           LOG_FILE="artifacts/${{ matrix.label }}-benchmark.log"
           : > "$LOG_FILE"
 
-          if [[ "${{ matrix.datavo_core }}" == "netstandard2.1" ]]; then
-            HOST_DLL="demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0-datavo-netstandard2.1/net10.0/Research.Benchmark.Host.dll"
-          else
-            HOST_DLL="demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll"
-          fi
+          HOST_DLL="demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll"
 
           scenarios=(
             "simple-exposure"
@@ -117,7 +105,7 @@ jobs:
 
           {
             echo "DataVo benchmark matrix (${{ matrix.label }})"
-            echo "DataVo.Core target: ${{ matrix.datavo_core }}"
+            echo "DataVo.Core target: net10.0"
             echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo "System: $(uname -a)"
             echo "Host DLL: ${HOST_DLL}"
