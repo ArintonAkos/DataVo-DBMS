@@ -124,6 +124,19 @@ LIMIT 10;
 
 What makes this an alpha is the boundary around the edges. Package polish, storage-format stability, EF provider completeness, migrations, server tooling, and PostgreSQL compatibility are not finished. The documentation calls those limits out directly so early users can make a practical decision.
 
+## Unity Evaluation Status
+
+Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. An experimental portable target remains internal until the same final artifact passes a tracked Unity Editor and player proof.
+
+| Environment or boundary | Status | Meaning |
+| --- | --- | --- |
+| Unity Editor | Unverified until Stage 3 | No tracked Unity project has imported and executed the candidate package yet. |
+| Windows x64 IL2CPP | Unverified until Stage 3 | A built and executed IL2CPP player is required; compilation alone is insufficient. |
+| Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
+| Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
+| In-memory mode | Candidate scope | This is the only storage mode included in the first Unity proof. |
+| Disk/LSM persistence | Unsupported until separately validated | Do not use DataVo for Unity save data until durability is tested on each advertised platform. |
+
 ## v0.1 Scope Summary
 
 | Feature | Status | Notes |
@@ -133,7 +146,7 @@ What makes this an alpha is the boundary around the edges. Package polish, stora
 | SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
 | Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
 | Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Supported | Package metadata is complete and preview packages publish to nuget.org via CI Trusted Publishing. |
+| NuGet launch packaging | Supported | The public Core package currently contains only `net10.0`; portable/Unity packaging is not supported. |
 | Stable storage format | Planned | Alpha storage files may change before a stable release. |
 | Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
 | Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |
@@ -184,6 +197,8 @@ ORDER BY Id ASC
 LIMIT 50;
 ```
 
+Unity integration follows a separate proof-first path. The first candidate is managed, in-memory use under a pinned Unity Editor and an executed Windows x64 IL2CPP player. Direct Burst calls and unverified game-save persistence are outside that scope.
+
 The tooling roadmap is separate. Developers will eventually want to inspect DataVo databases through DBeaver, DataGrip, or pgAdmin. That requires a `DataVo.Server` process and enough PostgreSQL-wire compatibility to connect, list tables, and run simple queries. That work is valuable, but it should not distract from stabilizing the embedded engine.
 
 ```text
@@ -204,7 +219,8 @@ Future tooling process
 | Curated public documentation | Supported | The v0.1 manual and AI export expose only public launch docs. |
 | Core embedded API | Supported | `DataVoContext` remains the primary interface. |
 | Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
-| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags. |
+| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags; the current public Core package is `net10.0` only. |
+| Unity managed integration proof | Planned | Editor and Windows x64 IL2CPP execution must pass before a portable Core asset is published. |
 | SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
 | Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
 | PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |
@@ -3217,10 +3233,30 @@ dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.
 
 SQLite vector search requires the `sqlite-vec` loadable `vec0` extension. The GitHub Actions benchmark workflow downloads the pinned `v0.1.9` loadable release for Linux x64 and Windows x64, verifies SHA256, exports `SQLITE_VEC_PATH`, and uploads the extension artifact with the run. For local runs, set `SQLITE_VEC_PATH` yourself before launching the vector scenario.
 
-The thread-scaling workload is the one to run when you want to inspect the 1.2M ops/s LSM Relaxed result.
+Linux x64:
 
 ```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario thread-scaling --format markdown
+curl -sL -o /tmp/svec.tgz \
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz
+tar xzf /tmp/svec.tgz -C /tmp
+export SQLITE_VEC_PATH=/tmp/vec0.so
+```
+
+Windows x64, PowerShell:
+
+```powershell
+curl.exe -L -o $env:TEMP\svec.tgz `
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz
+tar -xzf $env:TEMP\svec.tgz -C $env:TEMP
+$env:SQLITE_VEC_PATH = "$env:TEMP\vec0.dll"
+```
+
+The thread-scaling workload is the one to run when you want to inspect the LSM Relaxed result. Use the
+relaxed engine filter for that number; the default `all` matrix also runs strict production durability, which
+can be much slower on Windows because it includes fsync-heavy update work.
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario thread-scaling --engine datavo-lsm-relaxed --format markdown
 ```
 
 The YCSB-style mixed workload preloads records and mixes reads with updates so write-tail latency can be compared.
@@ -3261,7 +3297,7 @@ var relaxed = new DataVoConfig
 };
 ```
 
-## Reproducing the Linux CI snapshot
+## Reproducing the CI Snapshot
 
 The Linux and Windows measurements in the benchmark results come from the GitHub Actions workflow `.github/workflows/benchmark.yml`. It runs on Ubuntu and Windows hosted runners, downloads the pinned `sqlite-vec v0.1.9` loadable extension for each OS, verifies its SHA256, exports `SQLITE_VEC_PATH`, runs the same scenario commands shown above, and uploads the results as workflow artifacts. To reproduce it, trigger that workflow from the repository's Actions tab (it supports manual `workflow_dispatch`), or run the same `dotnet run` commands on a local host with `SQLITE_VEC_PATH` pointing at the extension.
 

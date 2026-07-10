@@ -52,6 +52,19 @@ LIMIT 10;
 
 What makes this an alpha is the boundary around the edges. Package polish, storage-format stability, EF provider completeness, migrations, server tooling, and PostgreSQL compatibility are not finished. The documentation calls those limits out directly so early users can make a practical decision.
 
+## Unity Evaluation Status
+
+Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. An experimental portable target remains internal until the same final artifact passes a tracked Unity Editor and player proof.
+
+| Environment or boundary | Status | Meaning |
+| --- | --- | --- |
+| Unity Editor | Unverified until Stage 3 | No tracked Unity project has imported and executed the candidate package yet. |
+| Windows x64 IL2CPP | Unverified until Stage 3 | A built and executed IL2CPP player is required; compilation alone is insufficient. |
+| Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
+| Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
+| In-memory mode | Candidate scope | This is the only storage mode included in the first Unity proof. |
+| Disk/LSM persistence | Unsupported until separately validated | Do not use DataVo for Unity save data until durability is tested on each advertised platform. |
+
 ## v0.1 Scope Summary
 
 | Feature | Status | Notes |
@@ -61,7 +74,7 @@ What makes this an alpha is the boundary around the edges. Package polish, stora
 | SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
 | Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
 | Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Supported | Package metadata is complete and preview packages publish to nuget.org via CI Trusted Publishing. |
+| NuGet launch packaging | Supported | The public Core package currently contains only `net10.0`; portable/Unity packaging is not supported. |
 | Stable storage format | Planned | Alpha storage files may change before a stable release. |
 | Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
 | Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |

@@ -1,90 +1,45 @@
-# Unity and Godot Integration
+# Unity and Godot Evaluation Status
 
-This page provides practical guidance for teams using DataVo in game and simulation workflows.
+DataVo is not currently a supported Unity or Godot runtime integration. This page records the proposed use cases, the managed integration boundary, and the proof required before support is claimed.
 
-## Why game teams use DataVo
+## Support matrix
 
-- Local in-process SQL for profiles, inventory, progression, and save-state metadata.
-- Deterministic behavior during development and automated testing.
-- No mandatory external DB service for local gameplay tooling scenarios.
+| Environment or boundary | Status | Meaning |
+| --- | --- | --- |
+| Unity Editor | Unverified until Stage 3 | The final candidate package has not been imported and executed in a tracked Unity project. |
+| Windows x64 IL2CPP | Unverified until Stage 3 | The player must build, launch, run the smoke suite, and exit successfully. |
+| Direct Burst calls | Unsupported by design | DataVo contains managed classes, strings, collections, locks, exceptions, and storage services. |
+| Job-to-managed batch bridge | Planned proof | Jobs produce fixed-layout POD commands; managed code drains them after `JobHandle` completion. |
+| In-memory mode | Candidate scope | The first proof covers in-memory SQL, snapshots, reactive queries, and vector search. |
+| Disk/LSM persistence | Unsupported until separately validated | Do not use these modes for shipped game saves until durability is proven per platform. |
+| Godot C# | Unverified | Godot is not part of the first Unity proof and requires its own final-artifact validation. |
 
-## Typical use cases
+## Candidate use cases
 
-- Player progression and unlock tracking
-- Offline progression caches
-- Local analytics snapshots during playtests
-- Authoring tools and editors backed by SQL
+- deterministic gameplay and simulation test state
+- inventory, scoreboard, or economy views maintained after writes
+- editor-side semantic asset lookup
+- local NPC-memory and vector-search prototypes
+- debugging and playtest tooling
 
-## Deterministic in-memory workflows
+These are evaluation targets, not current support claims.
 
-For gameplay tests, runtime simulations, and local playtest tooling, use `StorageMode.InMemory` with snapshots:
+## Planned managed boundary
 
-```csharp
-using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+DataVo runs in managed code outside Burst jobs. A Burst-compatible job may write blittable commands or numeric rows into a Unity native container. After the job completes, managed integration code drains the batch, maps it to schema columns, and calls DataVo. No DataVo type belongs in the job struct, and no DataVo method is called by Burst-compiled code.
 
-db.Execute("CREATE DATABASE GameTests");
-db.Execute("USE GameTests");
-db.Execute("CREATE TABLE PlayerState (Id INT PRIMARY KEY, Level INT)");
-db.Execute("INSERT INTO PlayerState VALUES (1, 5)");
+## Candidate in-memory scenario
 
-DataVoSnapshot baseline = db.CreateSnapshot();
+The first proof will exercise `StorageMode.InMemory`, snapshots, reactive subscriptions, Flat vector search, and HNSW recall through the final packaged artifact. Similar APIs already run under modern .NET, but that does not establish Unity compatibility.
 
-db.Execute("UPDATE PlayerState SET Level = 10 WHERE Id = 1");
-db.RestoreSnapshot(baseline);
-```
+## Proof gate
 
-This lets game teams seed one database, run a scenario, restore instantly, and reuse the same database surface in runtime code and automated tests.
-
-## Unity integration approach
-
-1. Add DataVo packages to your .NET project references.
-2. Initialize DataVo context in your data service layer.
-3. Keep SQL scripts versioned with your game data model.
-
-Minimal pattern:
-
-```csharp
-using DataVo.Core;
-using DataVo.Core.StorageEngine.Config;
-
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Disk
-});
-
-db.Execute("CREATE DATABASE GameData");
-db.Execute("USE GameData");
-```
-
-## Godot integration approach
-
-Use the same .NET embedding pattern in your Godot C# project.
-
-Recommended structure:
-
-- place DataVo initialization in a dedicated data subsystem
-- expose async-safe commands via your game service layer
-- keep schema migrations and startup SQL deterministic
-
-## Storage mode guidance
-
-- InMemory: tests, prototyping, temporary state
-- Disk: persistent save and profile data
-
-## Security and auth notes
-
-For multi-profile or tool-user workflows, DataVo includes principal and grant commands:
-
-- CREATE USER, CREATE ROLE
-- GRANT, REVOKE
-- LOGIN, LOGOUT
-
-See [Security and Authentication](./security-and-authentication.md).
+Support remains unverified until a pinned Unity 6.5 project imports the exact candidate package, passes Editor execution, and builds and executes a Windows x64 IL2CPP player with Medium managed stripping. Disk and LSM modes require a later durability proof.
 
 ## Related pages
 
-- [Getting Started](./getting-started.md)
+- [v0.1 Alpha Scope](../manual/preface/alpha-scope.md)
 - [Setup and Packaging](./setup-and-packaging.md)
 - [Runtime Observability](./runtime-observability.md)
-- [Source-Generated Compiled Queries](./compiled-queries.md)
-- [Security and Authentication](./security-and-authentication.md)
+- [Reactive Queries](./reactive-queries.md)
+- [Vector Queries Guide](./vector-queries-guide.md)

@@ -230,11 +230,13 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 - Similarity matching without external vector databases
 - Hybrid neural-lexical search combining text and vector similarity
 
-### Unity and Godot developers
+### Unity and Godot evaluation
 
-- Use DataVo as a local gameplay/profile/state database.
-- Keep persistence and query behavior deterministic across development environments.
-- Reuse the same SQL surface in tools and runtime workflows.
+- Unity is an evaluation target, not a supported runtime.
+- The current public runtime packages are .NET 10 assets; no verified Unity or Godot runtime artifact is distributed.
+- The planned first Unity proof covers in-memory execution in the Editor and a Windows x64 IL2CPP player.
+- Direct Burst calls are unsupported by design. The planned boundary is a blittable job batch drained by managed code after the job completes.
+- Disk and LSM persistence are unsupported for Unity save data until separately validated.
 
 ### Browser and WebAssembly products
 
@@ -268,7 +270,7 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 - Product docs: [docs/index.md](docs/index.md)
 - Setup and packaging: [docs/features/setup-and-packaging.md](docs/features/setup-and-packaging.md)
 - WebAssembly and npm integration: [docs/features/wasm-and-npm.md](docs/features/wasm-and-npm.md)
-- Unity and Godot integration: [docs/features/unity-and-godot.md](docs/features/unity-and-godot.md)
+- Unity and Godot evaluation status: [docs/features/unity-and-godot.md](docs/features/unity-and-godot.md)
 - Entity Framework integration: [docs/features/entity-framework.md](docs/features/entity-framework.md)
 - Vector search guide: [docs/features/vector-queries-guide.md](docs/features/vector-queries-guide.md) — Complete guide to vector columns, distance metrics, exact vs. ANN search
 - Query features: [docs/features/select-and-querying.md](docs/features/select-and-querying.md)
@@ -281,6 +283,7 @@ DataVo is preview software aimed at local-first and embeddable database scenario
 - Preview packages are published on nuget.org (prerelease); local package distribution is also available.
 - Browser/WebAssembly runtime support is available now.
 - Public npm publication is still in preparation.
+- Unity and Godot runtime compatibility remains unverified; do not treat the current packages as game-runtime support.
 - Production-hardening work is active; validate representative workloads before production adoption.
 
 ## License

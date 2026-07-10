@@ -29,8 +29,8 @@ features:
   - title: WebAssembly and npm
     details: Learn browser runtime support today and customer-ready npm package integration planning.
     link: /features/wasm-and-npm
-  - title: Unity and Godot
-    details: Apply DataVo in game development workflows for local persistence and deterministic SQL behavior.
+  - title: Unity and Godot evaluation
+    details: Review the support matrix, managed boundary, and proof plan for future Unity and Godot integration.
     link: /features/unity-and-godot
   - title: Runtime Observability
     details: Enable bounded query diagnostics for elapsed time, row activity, index use, vector paths, and runtime errors.
@@ -77,7 +77,7 @@ It is separate from the DataVo.Core module reference on purpose:
 3. [Runtime Observability](./runtime-observability.md)
 4. [Source-Generated Compiled Queries](./compiled-queries.md)
 5. [WebAssembly and npm](./wasm-and-npm.md)
-6. [Unity and Godot](./unity-and-godot.md)
+6. [Unity and Godot evaluation](./unity-and-godot.md)
 7. [Entity Framework Integration](./entity-framework.md)
 8. [SELECT and Query Features](./select-and-querying.md)
 9. [Vector Queries Guide](./vector-queries-guide.md)
@@ -94,7 +94,7 @@ This section is written for:
 
 - developers embedding `DataVo` in applications
 - product teams planning NuGet and npm rollout
-- Unity and Godot developers building local-first game data flows
+- teams evaluating future Unity or Godot integrations
 - teams evaluating Entity Framework integration paths
 - contributors extending SQL support
 - maintainers reviewing feature behavior and current limitations
@@ -130,11 +130,11 @@ Read:
 4. [Source-Generated Compiled Queries](./compiled-queries.md)
 5. [Transactions](./transactions.md)
 
-### I want to ship to Unity or Godot
+### I want to evaluate future Unity or Godot support
 
 Read:
 
-1. [Unity and Godot](./unity-and-godot.md)
+1. [Unity and Godot evaluation](./unity-and-godot.md)
 2. [Setup and Packaging](./setup-and-packaging.md)
 3. [Runtime Observability](./runtime-observability.md)
 4. [Source-Generated Compiled Queries](./compiled-queries.md)

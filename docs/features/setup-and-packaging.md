@@ -32,6 +32,10 @@ dotnet add package DataVo.EntityFrameworkCore --source ./artifacts/packages
 dotnet add package DataVo.Generators --source ./artifacts/packages # optional: source-generated compiled queries
 ```
 
+### Current target-framework boundary
+
+The public DataVo.Core package currently contains only a net10.0 asset. The experimental `netstandard2.1` target is quarantined and is not a supported or distributed Unity artifact.
+
 ## npm
 
 ### Planned public install flow
@@ -82,7 +86,8 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 ## End-user guidance by stack
 
 - .NET app teams: start with DataVo.Core and DataVo.Data
-- Unity and Godot teams: use disk mode for persistent save/profile data
+- Unity and Godot teams: evaluation only; do not use the current packages as a shipped runtime or save-data dependency.
+- The planned first Unity proof is limited to `StorageMode.InMemory`; Disk and LSM require separate platform durability validation.
 - For deterministic tests and simulations, prefer `StorageMode.InMemory` plus `CreateSnapshot()` / `RestoreSnapshot(...)`.
 - Browser teams: deploy WASM runtime assets and follow npm rollout updates
 - EF teams: adopt DataVo.EntityFrameworkCore in bounded integration slices

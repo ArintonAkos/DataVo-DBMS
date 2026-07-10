@@ -30,6 +30,9 @@ jobs:
             echo "value=" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify runtime support claims
+        run: bash scripts/check-unity-support-status.sh
+
       # Pack only the four publishable projects explicitly. Packing the whole
       # solution would try to build DataVo.Browser, which needs the wasm-tools
       # workload (NETSDK1147) that isn't on the runner.

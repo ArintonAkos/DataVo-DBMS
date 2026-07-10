@@ -39,6 +39,8 @@ ORDER BY Id ASC
 LIMIT 50;
 ```
 
+Unity integration follows a separate proof-first path. The first candidate is managed, in-memory use under a pinned Unity Editor and an executed Windows x64 IL2CPP player. Direct Burst calls and unverified game-save persistence are outside that scope.
+
 The tooling roadmap is separate. Developers will eventually want to inspect DataVo databases through DBeaver, DataGrip, or pgAdmin. That requires a `DataVo.Server` process and enough PostgreSQL-wire compatibility to connect, list tables, and run simple queries. That work is valuable, but it should not distract from stabilizing the embedded engine.
 
 ```text
@@ -59,7 +61,8 @@ Future tooling process
 | Curated public documentation | Supported | The v0.1 manual and AI export expose only public launch docs. |
 | Core embedded API | Supported | `DataVoContext` remains the primary interface. |
 | Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
-| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags. |
+| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags; the current public Core package is `net10.0` only. |
+| Unity managed integration proof | Planned | Editor and Windows x64 IL2CPP execution must pass before a portable Core asset is published. |
 | SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
 | Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
 | PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |

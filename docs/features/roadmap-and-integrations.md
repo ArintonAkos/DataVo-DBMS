@@ -52,11 +52,11 @@ Principal, grant, and session auth SQL command families are implemented.
 
 See [Security and Authentication](./security-and-authentication.md) for command examples and inspection flows.
 
-### Unity and Godot scenarios
+## Unity and Godot evaluation
 
-DataVo is suitable for game-development local data workflows where deterministic behavior and embedded runtime control matter.
+Unity is an evaluation target, not an available runtime integration. The first planned proof uses an in-memory managed boundary in a pinned Unity Editor and an executed Windows x64 IL2CPP player. Godot requires a separate validation pass.
 
-See [Unity and Godot](./unity-and-godot.md) for adoption guidance.
+See [Unity and Godot](./unity-and-godot.md) for the current support matrix and proof boundary.
 
 ## ADO.NET direction
 
