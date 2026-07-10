@@ -48,6 +48,12 @@ jobs:
             fi
           done
 
+      - name: Verify release package contents
+        shell: bash
+        run: >-
+          bash scripts/assert-core-package-targets.sh
+          artifacts/packages/DataVo.Core.*.nupkg
+
       # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
       # (~1h) nuget.org API key. Requested right before the push so it can't
       # expire. Needs a matching Trusted Publishing policy on nuget.org.
