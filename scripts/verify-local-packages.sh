@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEMP_DIR="$(mktemp -d)"
+RUN_ID="$(printf '%s' "${TEMP_DIR##*.}" | tr '[:upper:]' '[:lower:]')"
+PACKAGE_VERSION="0.0.0-local.run$RUN_ID"
+NUGET_PACKAGES="$TEMP_DIR/nuget-packages"
+NUGET_FALLBACK_PACKAGES="${NUGET_FALLBACK_PACKAGES-$HOME/.nuget/packages}"
+export NUGET_PACKAGES NUGET_FALLBACK_PACKAGES
 PACKAGES_DIR="$TEMP_DIR/packages"
 APP_DIR="$TEMP_DIR/DataVo.PackageSmoke"
 
@@ -11,14 +16,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$PACKAGES_DIR"
+mkdir -p "$PACKAGES_DIR" "$NUGET_PACKAGES"
 
 echo "[1/6] Packing DataVo.Core and DataVo.Data..."
 dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
   -c Release \
+  -p:PackageVersion="$PACKAGE_VERSION" \
   -o "$PACKAGES_DIR" >/dev/null
 dotnet pack "$ROOT_DIR/DataVo.Data/DataVo.Data.csproj" \
   -c Release \
+  -p:PackageVersion="$PACKAGE_VERSION" \
   -o "$PACKAGES_DIR" >/dev/null
 
 echo "[2/6] Verifying package artifacts exist..."
@@ -93,8 +100,19 @@ Console.WriteLine("External consumer package validation passed.");
 CS
 
 echo "[5/6] Installing local packages from artifacts..."
-dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Core --source "$PACKAGES_DIR" --prerelease >/dev/null
-dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Data --source "$PACKAGES_DIR" --prerelease >/dev/null
+dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Core --source "$PACKAGES_DIR" --version "$PACKAGE_VERSION" >/dev/null
+dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Data --source "$PACKAGES_DIR" --version "$PACKAGE_VERSION" >/dev/null
+
+ASSETS_FILE="$APP_DIR/obj/project.assets.json"
+if ! grep -Fq "\"DataVo.Core/$PACKAGE_VERSION\":" "$ASSETS_FILE"; then
+  echo "Expected consumer assets to resolve DataVo.Core/$PACKAGE_VERSION." >&2
+  exit 1
+fi
+
+if ! grep -Fq "\"DataVo.Data/$PACKAGE_VERSION\":" "$ASSETS_FILE"; then
+  echo "Expected consumer assets to resolve DataVo.Data/$PACKAGE_VERSION." >&2
+  exit 1
+fi
 
 echo "[6/6] Running consumer app with local packages..."
 dotnet run --project "$APP_DIR/DataVo.PackageSmoke.csproj" -c Release >/dev/null
