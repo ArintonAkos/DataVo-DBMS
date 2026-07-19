@@ -31,8 +31,10 @@ The indexed hit path can avoid:
 | SQL re-parsing | The generator emits a static plan. |
 | Rebuilding projection metadata | Prepared select handles cache projection state per context. |
 | Dictionary materialization | Typed mappers read through `CompiledRowReader`. |
-| Boxing primitive cells | Reader methods return typed values such as `int`, `long`, `DateOnly`, and `Guid`. |
+| Boxing primitive cells | Reader methods return typed values such as `int`, `long`, `DataVoDate`, and `Guid`. |
 | Decoding unprojected columns | The storage path can decode only projected cells from row bytes. |
+
+Compiled `GetDate`/`GetDateOrNull` readers return the cross-target `DataVoDate` value. Modern .NET projections that explicitly use `System.DateOnly` are adapters and use `GetDateOnly`/`GetDateOnlyOrNull` instead.
 
 ## Compiled Access Paths
 

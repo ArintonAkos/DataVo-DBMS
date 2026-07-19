@@ -177,6 +177,10 @@ dotnet add package DataVo.Core --source ./artifacts/packages
 dotnet add package DataVo.Data --source ./artifacts/packages
 ```
 
+### SQL DATE preview migration
+
+SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `CellValue.AsDate()` and compiled `GetDate`/`GetDateOrNull` return `DataVoDate`. On modern .NET, use the explicit `DataVoDate.FromDateOnly(...)`, `dataVoDate.ToDateOnly()`, `CellValue.AsDateOnly()`, and compiled `GetDateOnly`/`GetDateOnlyOrNull` adapters when a `System.DateOnly` is required. Existing persisted `DATE` bytes are unchanged; this API migration does not require a storage rewrite.
+
 ## Install with npm
 
 ### Public package (planned)
@@ -233,10 +237,12 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 ### Unity and Godot evaluation
 
 - Unity is an evaluation target, not a supported runtime.
-- The current public runtime packages are .NET 10 assets; no verified Unity or Godot runtime artifact is distributed.
+- The public `DataVo.Core` package still contains only a `net10.0` asset.
+- `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only; it does not publish or support a Unity package.
+- On the portable candidate, Disk and LSM are rejected; `StorageMode.InMemory` is the only Stage 3 candidate mode.
+- Passing the portable-asset .NET-host verifier is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
 - The planned first Unity proof covers in-memory execution in the Editor and a Windows x64 IL2CPP player.
 - Direct Burst calls are unsupported by design. The planned boundary is a blittable job batch drained by managed code after the job completes.
-- Disk and LSM persistence are unsupported for Unity save data until separately validated.
 
 ### Browser and WebAssembly products
 

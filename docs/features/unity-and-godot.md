@@ -2,6 +2,8 @@
 
 DataVo is not currently a supported Unity or Godot runtime integration. This page records the proposed use cases, the managed integration boundary, and the proof required before support is claimed.
 
+The public `DataVo.Core` package remains `net10.0`-only. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate; it is not a distributed or supported Unity package. Passing its .NET-host verifier does not prove Unity Editor, Mono, IL2CPP, Jobs, or Burst compatibility.
+
 ## Support matrix
 
 | Environment or boundary | Status | Meaning |
@@ -10,8 +12,8 @@ DataVo is not currently a supported Unity or Godot runtime integration. This pag
 | Windows x64 IL2CPP | Unverified until Stage 3 | The player must build, launch, run the smoke suite, and exit successfully. |
 | Direct Burst calls | Unsupported by design | DataVo contains managed classes, strings, collections, locks, exceptions, and storage services. |
 | Job-to-managed batch bridge | Planned proof | Jobs produce fixed-layout POD commands; managed code drains them after `JobHandle` completion. |
-| In-memory mode | Candidate scope | The first proof covers in-memory SQL, snapshots, reactive queries, and vector search. |
-| Disk/LSM persistence | Unsupported until separately validated | Do not use these modes for shipped game saves until durability is proven per platform. |
+| In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
+| Disk/LSM persistence | Unsupported until separately validated | The experimental portable target rejects both modes; do not use DataVo for shipped game saves. |
 | Godot C# | Unverified | Godot is not part of the first Unity proof and requires its own final-artifact validation. |
 
 ## Candidate use cases
@@ -30,7 +32,7 @@ DataVo runs in managed code outside Burst jobs. A Burst-compatible job may write
 
 ## Candidate in-memory scenario
 
-The first proof will exercise `StorageMode.InMemory`, snapshots, reactive subscriptions, Flat vector search, and HNSW recall through the final packaged artifact. Similar APIs already run under modern .NET, but that does not establish Unity compatibility.
+The first Unity proof will exercise `StorageMode.InMemory`, snapshots, reactive subscriptions, Flat vector search, and HNSW recall through the final packaged artifact. Similar APIs and the portable-asset verifier may pass under a .NET host, but that does not establish Unity compatibility.
 
 ## Proof gate
 

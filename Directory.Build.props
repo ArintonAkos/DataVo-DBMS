@@ -30,7 +30,7 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>SQL engine, storage, indexing, and ALTER TABLE support. The public Core package currently ships net10.0 only; the experimental netstandard2.1 target is not published while Unity compatibility is being validated.</PackageReleaseNotes>
+    <PackageReleaseNotes>preview.2 makes DataVo.Core.DataVoDate the SQL DATE value returned by preview row APIs and preserves existing persisted DATE bytes. Modern .NET DateOnly APIs remain explicit adapters. The public Core package still ships net10.0 only; DataVoEnablePortableTarget=true creates an experimental local netstandard2.1 candidate, not verified Unity support.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">

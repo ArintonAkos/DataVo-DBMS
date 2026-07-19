@@ -34,7 +34,11 @@ dotnet add package DataVo.Generators --source ./artifacts/packages # optional: s
 
 ### Current target-framework boundary
 
-The public DataVo.Core package currently contains only a net10.0 asset. The experimental `netstandard2.1` target is quarantined and is not a supported or distributed Unity artifact.
+The public DataVo.Core package currently contains only a net10.0 asset. `DataVoEnablePortableTarget=true` opts a local build or pack into an experimental `netstandard2.1` candidate; it does not change the normal package or tag-publish path. On that candidate, Disk and LSM are rejected and `StorageMode.InMemory` is the only Stage 3 candidate mode. Passing the portable-asset .NET-host verifier proves neither Unity Editor nor Mono, IL2CPP, Jobs, or Burst compatibility.
+
+### SQL DATE preview migration
+
+SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `CellValue.AsDate()` and compiled `GetDate` return `DataVoDate`. Modern .NET callers retain explicit `FromDateOnly`, `ToDateOnly`, `AsDateOnly`, and `GetDateOnly` adapters. Existing persisted `DATE` bytes are unchanged, so this API change does not require rewriting stored rows.
 
 ## npm
 

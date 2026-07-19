@@ -24,6 +24,10 @@ public static partial class PlayerQueries
 }
 ```
 
+## SQL DATE Row Contract
+
+SQL `DATE` columns now materialize as `DataVo.Core.DataVoDate` in preview row APIs. `CellValue.AsDate()` and compiled `GetDate`/`GetDateOrNull` return that common type. Modern .NET callers can explicitly adapt with `DataVoDate.FromDateOnly(...)`, `dataVoDate.ToDateOnly()`, `CellValue.AsDateOnly()`, and compiled `GetDateOnly`/`GetDateOnlyOrNull`. Existing persisted `DATE` bytes are unchanged.
+
 The fixed-width update fast path is intentionally narrow. It is for compiled single-row updates that can be found through an integer primary-key lane and patched safely.
 
 ```csharp

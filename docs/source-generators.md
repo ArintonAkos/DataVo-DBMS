@@ -72,10 +72,13 @@ Supported typed getters include:
 | `double`, `double?` | `GetDouble`, `GetDoubleOrNull` |
 | `decimal`, `decimal?` | `GetDecimal`, `GetDecimalOrNull` |
 | `bool`, `bool?` | `GetBoolean`, `GetBooleanOrNull` |
-| `DateOnly`, `DateOnly?` | `GetDate`, `GetDateOrNull` |
+| `DataVo.Core.DataVoDate`, `DataVo.Core.DataVoDate?` | `GetDate`, `GetDateOrNull` |
+| `System.DateOnly`, `System.DateOnly?` (modern .NET adapter) | `GetDateOnly`, `GetDateOnlyOrNull` |
 | `Guid`, `Guid?` | `GetGuid`, `GetGuidOrNull` |
 | `string`, `string?` | `GetString` |
 | `float[]` | `GetVector` |
+
+`DataVoDate` is the cross-target SQL `DATE` projection type. `DateOnly` projections are explicit modern-only conveniences, not the portable row contract.
 
 If the constructor does not cleanly match the projection, or the parameter type is unsupported, generated code falls back to a dictionary-based mapper. That fallback is correct but gives up the zero-boxing typed reader advantage.
 
