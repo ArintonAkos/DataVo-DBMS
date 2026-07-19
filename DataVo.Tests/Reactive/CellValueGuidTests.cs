@@ -29,7 +29,7 @@ public sealed class CellValueGuidTests
     }
 
     [Fact]
-    public void GuidCorpus_RoundTripsEveryBitPattern()
+    public void GuidCorpus_RoundTripsDeterministicAndSeededValues()
     {
         var random = new Random(0x71C3);
         var bytes = new byte[16];

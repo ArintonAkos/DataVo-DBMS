@@ -1,4 +1,5 @@
 using System.Globalization;
+using DataVo.Core.Compat;
 using DataVo.Core.CompiledQueries;
 
 namespace DataVo.Tests.Performance;
@@ -18,13 +19,11 @@ public sealed class ScalarKeyFormattingAllocationTests
             static () => DataVoCompiledQuery.BuildScalarComparisonKey(12.5d),
             static () => string.Create(CultureInfo.InvariantCulture, $"[{12.5d}]"));
 
-        object floatValue = 12.5f;
-        object decimalValue = 12.5m;
         AssertOutputOnlyAllocation(
-            () => DataVoCompiledQuery.BuildScalarComparisonKey(floatValue),
+            static () => ScalarKeyFormatter.FormatBracketed(12.5f, CultureInfo.InvariantCulture),
             static () => string.Create(CultureInfo.InvariantCulture, $"[{12.5f}]"));
         AssertOutputOnlyAllocation(
-            () => DataVoCompiledQuery.BuildScalarComparisonKey(decimalValue),
+            static () => ScalarKeyFormatter.FormatBracketed(12.5m, CultureInfo.InvariantCulture),
             static () => string.Create(CultureInfo.InvariantCulture, $"[{12.5m}]"));
     }
 

@@ -9,10 +9,13 @@ PACKAGE_VERSION="0.0.0-stage2a.$RUN_ID"
 PACKAGES_DIR="$TEMP_ROOT/packages"
 EXTRACT_DIR="$TEMP_ROOT/extracted"
 PACK_CACHE="$TEMP_ROOT/pack-packages"
+CORE_EXTENSIONS="$TEMP_ROOT/core-extensions/"
 CONSUMER_CACHE="$TEMP_ROOT/consumer-packages"
 CONSUMER_HTTP_CACHE="$TEMP_ROOT/consumer-http-cache"
+CONSUMER_EXTENSIONS="$TEMP_ROOT/consumer-extensions/"
 SMOKE_CACHE="$TEMP_ROOT/smoke-packages"
 SMOKE_HTTP_CACHE="$TEMP_ROOT/smoke-http-cache"
+SMOKE_EXTENSIONS="$TEMP_ROOT/smoke-extensions/"
 TEST_ROOT="$TEMP_ROOT/test-storage"
 NUGET_SCRATCH="$TEMP_ROOT/nuget-scratch"
 DOTNET_CLI_HOME="$TEMP_ROOT/dotnet-home"
@@ -22,14 +25,17 @@ unset NUGET_FALLBACK_PACKAGES || true
 cleanup() { rm -rf "$TEMP_ROOT"; }
 trap cleanup EXIT HUP INT TERM
 mkdir -p "$PACKAGES_DIR" "$EXTRACT_DIR" "$PACK_CACHE" \
-  "$CONSUMER_CACHE" "$CONSUMER_HTTP_CACHE" \
-  "$SMOKE_CACHE" "$SMOKE_HTTP_CACHE" "$TEST_ROOT" "$DOTNET_CLI_HOME"
+  "$CORE_EXTENSIONS" "$CONSUMER_CACHE" "$CONSUMER_HTTP_CACHE" "$CONSUMER_EXTENSIONS" \
+  "$SMOKE_CACHE" "$SMOKE_HTTP_CACHE" "$SMOKE_EXTENSIONS" "$TEST_ROOT" "$DOTNET_CLI_HOME"
 
 NUGET_PACKAGES="$PACK_CACHE" dotnet restore "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
-  -p:DataVoEnablePortableTarget=true --force --no-cache
+  -p:DataVoEnablePortableTarget=true \
+  -p:MSBuildProjectExtensionsPath="$CORE_EXTENSIONS" \
+  --force --no-cache
 NUGET_PACKAGES="$PACK_CACHE" dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
   -c Release --no-restore \
   -p:DataVoEnablePortableTarget=true \
+  -p:MSBuildProjectExtensionsPath="$CORE_EXTENSIONS" \
   -p:EnablePackageValidation=true \
   -p:PackageVersion="$PACKAGE_VERSION" \
   -o "$PACKAGES_DIR"
@@ -57,14 +63,16 @@ dotnet restore "$ROOT_DIR/tools/DataVo.PortableConsumer/DataVo.PortableConsumer.
   --source "$PACKAGES_DIR" \
   --source "https://api.nuget.org/v3/index.json" \
   --force --no-cache \
+  -p:MSBuildProjectExtensionsPath="$CONSUMER_EXTENSIONS" \
   -p:DataVoCandidateVersion="$PACKAGE_VERSION"
 
 NUGET_PACKAGES="$CONSUMER_CACHE" NUGET_HTTP_CACHE_PATH="$CONSUMER_HTTP_CACHE" \
 dotnet build "$ROOT_DIR/tools/DataVo.PortableConsumer/DataVo.PortableConsumer.csproj" \
   -c Release --no-restore \
+  -p:MSBuildProjectExtensionsPath="$CONSUMER_EXTENSIONS" \
   -p:DataVoCandidateVersion="$PACKAGE_VERSION"
 
-ASSETS="$ROOT_DIR/tools/DataVo.PortableConsumer/obj/project.assets.json"
+ASSETS="${CONSUMER_EXTENSIONS}project.assets.json"
 grep -Fq 'lib/netstandard2.1/DataVo.Core.dll' "$ASSETS" || {
   echo "Portable consumer did not select the netstandard2.1 candidate asset." >&2
   exit 1
@@ -80,11 +88,13 @@ NUGET_PACKAGES="$SMOKE_CACHE" NUGET_HTTP_CACHE_PATH="$SMOKE_HTTP_CACHE" \
 dotnet restore "$ROOT_DIR/tools/DataVo.PortablePackageSmoke/DataVo.PortablePackageSmoke.csproj" \
   --source "https://api.nuget.org/v3/index.json" \
   --force --no-cache \
+  -p:MSBuildProjectExtensionsPath="$SMOKE_EXTENSIONS" \
   -p:DataVoPortableAssembly="$PORTABLE_DLL"
 
 NUGET_PACKAGES="$SMOKE_CACHE" NUGET_HTTP_CACHE_PATH="$SMOKE_HTTP_CACHE" \
 dotnet build "$ROOT_DIR/tools/DataVo.PortablePackageSmoke/DataVo.PortablePackageSmoke.csproj" \
   -c Release --no-restore \
+  -p:MSBuildProjectExtensionsPath="$SMOKE_EXTENSIONS" \
   -p:DataVoPortableAssembly="$PORTABLE_DLL"
 
 DATAVO_PORTABLE_ASSEMBLY="$PORTABLE_DLL" \
