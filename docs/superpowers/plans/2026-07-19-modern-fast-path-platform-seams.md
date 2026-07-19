@@ -124,6 +124,7 @@ git commit -m "perf: restore modern scalar and WAL hot paths"
 - Create: `DataVo.Core/Compat/DataVoPriorityQueue.Portable.cs`
 - Modify: `DataVo.Core/Transactions/GroupCommitter.cs`
 - Modify: `DataVo.Core/Parser/DQL/Select.cs`
+- Modify: `DataVo.Core/StorageEngine/Disk/FileHandlePool.cs` (clock type-name substitution only; whole-file split remains Task 4)
 - Modify: `DataVo.Core/Indexing/HNSW/HNSWIndex.cs` (type-name substitution only)
 - Modify: `DataVo.Core/Execution/Volcano/SortOperator.cs`
 - Modify: `DataVo.Core/StorageEngine/Lsm/LsmCompactor.cs`
@@ -152,6 +153,7 @@ git commit -m "perf: restore modern scalar and WAL hot paths"
 ```bash
 git add DataVo.Core/Compat DataVo.Core/Transactions/GroupCommitter.cs \
   DataVo.Core/Parser/DQL/Select.cs \
+  DataVo.Core/StorageEngine/Disk/FileHandlePool.cs \
   DataVo.Core/Indexing/HNSW/HNSWIndex.cs \
   DataVo.Core/Execution/Volcano/SortOperator.cs \
   DataVo.Core/StorageEngine/Lsm/LsmCompactor.cs \
@@ -162,7 +164,8 @@ git add DataVo.Core/Compat DataVo.Core/Transactions/GroupCommitter.cs \
   DataVo.Tests/Compat/ThrowHelperTests.cs \
   DataVo.Tests/Compat/TaskCancellationWaiterTests.cs \
   DataVo.Tests/Compat/DataVoPriorityQueueTests.cs \
-  DataVo.Tests/Lsm/ArenaTests.cs
+  DataVo.Tests/Lsm/ArenaTests.cs \
+  tools/DataVo.PortablePackageSmoke/Program.cs
 git commit -m "refactor: isolate core runtime compatibility seams"
 ```
 
