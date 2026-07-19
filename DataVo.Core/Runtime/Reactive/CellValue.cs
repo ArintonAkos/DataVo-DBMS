@@ -209,10 +209,4 @@ public readonly partial struct CellValue
             0);
     }
 
-    private static long Int64BitsFromDecimal(decimal value)
-    {
-        int[] bits = decimal.GetBits(value);
-        ulong raw = (uint)bits[0] | ((ulong)(uint)bits[1] << 32);
-        return unchecked((long)raw);
-    }
 }

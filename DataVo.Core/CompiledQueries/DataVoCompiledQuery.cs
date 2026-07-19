@@ -2158,13 +2158,13 @@ public static class DataVoCompiledQuery
     }
 
     internal static string BuildScalarComparisonKey(int value) =>
-        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     internal static string BuildScalarComparisonKey(long value) =>
-        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     internal static string BuildScalarComparisonKey(double value) =>
-        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     internal static string BuildScalarComparisonKey(Guid value) =>
         value.ToString("D");
@@ -2189,8 +2189,8 @@ public static class DataVoCompiledQuery
             int intValue => BuildScalarComparisonKey(intValue),
             long longValue => BuildScalarComparisonKey(longValue),
             double doubleValue => BuildScalarComparisonKey(doubleValue),
-            float floatValue => string.Format(CultureInfo.InvariantCulture, "[{0}]", floatValue),
-            decimal decimalValue => string.Format(CultureInfo.InvariantCulture, "[{0}]", decimalValue),
+            float floatValue => ScalarKeyFormatter.FormatBracketed(floatValue, CultureInfo.InvariantCulture),
+            decimal decimalValue => ScalarKeyFormatter.FormatBracketed(decimalValue, CultureInfo.InvariantCulture),
             Guid guidValue => BuildScalarComparisonKey(guidValue),
             string stringValue => BuildScalarComparisonKey(stringValue),
             _ => VectorParser.TryCoerceToVector(value, out float[] vector)

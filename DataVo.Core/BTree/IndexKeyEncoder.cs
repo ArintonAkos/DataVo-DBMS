@@ -1,5 +1,6 @@
 using System.Text;
 using System.Globalization;
+using DataVo.Core.Compat;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Utils;
@@ -147,16 +148,16 @@ public static class IndexKeyEncoder
     }
 
     private static string FormatSingleElementVector(int value) =>
-        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     private static string FormatSingleElementVector(long value) =>
-        string.Format(CultureInfo.InvariantCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     private static string FormatSingleElementVector(double value) =>
-        string.Format(CultureInfo.CurrentCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.CurrentCulture);
 
     private static string FormatSingleElementVector(decimal value) =>
-        string.Format(CultureInfo.CurrentCulture, "[{0}]", value);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.CurrentCulture);
 
     private static string SerializeVector(ReadOnlySpan<float> vector)
     {

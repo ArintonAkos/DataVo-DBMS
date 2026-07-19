@@ -2,11 +2,13 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using DataVo.Core;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Indexing.Flat;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.Transactions;
 
 internal static class Program
 {
@@ -48,6 +50,8 @@ internal static class PortableSmoke
         Require(dateCell.ToObject() is DataVoDate boxed && boxed == expectedDate,
             "CellValue.ToObject did not materialize DataVoDate.");
 
+        VerifyPortableHotPathFallbacks();
+
         using (var storage = new StorageContext(new DataVoConfig { StorageMode = StorageMode.InMemory }))
         {
             Require(storage.Config.StorageMode == StorageMode.InMemory,
@@ -88,6 +92,48 @@ internal static class PortableSmoke
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");
         return 0;
+    }
+
+    private static void VerifyPortableHotPathFallbacks()
+    {
+        int[] lengths = [0, 1, 2, 3, 4, 7, 8, 9, 31, 32, 33, 4096];
+        foreach (int length in lengths)
+        {
+            var payload = new byte[length];
+            new Random(0x5A17).NextBytes(payload);
+            Require(WalCrc32C.HashToUInt32(payload) == ReferenceCrc32C(payload),
+                $"Portable CRC32C mismatch at length {length}.");
+        }
+
+        Require(DataVoCompiledQuery.BuildScalarComparisonKey(42) == "[42]",
+            "Portable INT scalar-key formatting changed.");
+        Require(DataVoCompiledQuery.BuildScalarComparisonKey(4_294_967_296L) == "[4294967296]",
+            "Portable BIGINT scalar-key formatting changed.");
+        Require(DataVoCompiledQuery.BuildScalarComparisonKey(12.5d) == "[12.5]",
+            "Portable FLOAT scalar-key formatting changed.");
+        Require(DataVoCompiledQuery.BuildScalarComparisonKey((object)12.5m) == "[12.5]",
+            "Portable DECIMAL scalar-key formatting changed.");
+
+        Guid expected = new("00112233-4455-6677-8899-aabbccddeeff");
+        Require(CellValue.From(expected).AsGuid() == expected,
+            "Portable GUID cell extraction changed.");
+    }
+
+    private static uint ReferenceCrc32C(ReadOnlySpan<byte> data)
+    {
+        uint crc = 0xFFFFFFFFu;
+        for (int i = 0; i < data.Length; i++)
+        {
+            crc ^= data[i];
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 1u) != 0
+                    ? (crc >> 1) ^ 0x82F63B78u
+                    : crc >> 1;
+            }
+        }
+
+        return ~crc;
     }
 
     private static List<QueryResult> ExecuteOk(DataVoContext db, string sql)

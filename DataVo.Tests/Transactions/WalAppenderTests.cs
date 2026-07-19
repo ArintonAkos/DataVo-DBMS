@@ -11,6 +11,27 @@ public sealed class WalAppenderTests
         Assert.Equal(0xE3069283u, WalCrc32C.HashToUInt32("123456789"u8));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(31)]
+    [InlineData(32)]
+    [InlineData(33)]
+    [InlineData(4096)]
+    public void Crc32C_MatchesReferenceAcrossWordBoundaries(int length)
+    {
+        var payload = new byte[length];
+        new Random(0x5A17).NextBytes(payload);
+
+        Assert.Equal(ReferenceCrc32C(payload), WalCrc32C.HashToUInt32(payload));
+    }
+
     [Fact]
     public void Commit_WritesBinaryHeaderPayloadAndCrc32C()
     {
@@ -96,5 +117,22 @@ public sealed class WalAppenderTests
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    private static uint ReferenceCrc32C(ReadOnlySpan<byte> data)
+    {
+        uint crc = 0xFFFFFFFFu;
+        for (int i = 0; i < data.Length; i++)
+        {
+            crc ^= data[i];
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 1u) != 0
+                    ? (crc >> 1) ^ 0x82F63B78u
+                    : crc >> 1;
+            }
+        }
+
+        return ~crc;
     }
 }

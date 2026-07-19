@@ -1,6 +1,7 @@
 using DataVo.Core;
 using DataVo.Core.BTree;
 using DataVo.Core.Runtime.Reactive;
+using System.Globalization;
 
 namespace DataVo.Tests.Storage;
 
@@ -34,21 +35,43 @@ public class IndexKeyEncoderTypedTests
         var schema = new ReactiveRowSchema("Id");
         CellValue[] cells = [CellValue.From(42)];
         string[] attributes = ["Id"];
+        long actual = MeasureAllocation(() => IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
+        long outputOnly = MeasureAllocation(static () =>
+            string.Create(CultureInfo.InvariantCulture, $"[{42}]"));
 
-        for (int i = 0; i < 1_000; i++)
+        Assert.True(actual <= outputOnly,
+            $"typed INT key allocated {actual} B/call; output-only formatting allocated {outputOnly} B/call");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FloatingKey_UsesCurrentCultureWithoutNumericBoxing(bool useDecimal)
+    {
+        CultureInfo original = CultureInfo.CurrentCulture;
+        try
         {
-            _ = IndexKeyEncoder.BuildKeyString(schema, cells, attributes);
-        }
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            var schema = new ReactiveRowSchema("Value");
+            CellValue[] cells = useDecimal
+                ? [CellValue.From(12.5m)]
+                : [CellValue.From(12.5d)];
+            string[] attributes = ["Value"];
 
-        const int measured = 10_000;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < measured; i++)
+            Assert.Equal("[12,5]", IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
+
+            long actual = MeasureAllocation(() => IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
+            long outputOnly = useDecimal
+                ? MeasureAllocation(static () => string.Create(CultureInfo.GetCultureInfo("fr-FR"), $"[{12.5m}]"))
+                : MeasureAllocation(static () => string.Create(CultureInfo.GetCultureInfo("fr-FR"), $"[{12.5d}]"));
+
+            Assert.True(actual <= outputOnly,
+                $"typed floating key allocated {actual} B/call; output-only formatting allocated {outputOnly} B/call");
+        }
+        finally
         {
-            _ = IndexKeyEncoder.BuildKeyString(schema, cells, attributes);
+            CultureInfo.CurrentCulture = original;
         }
-
-        long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / measured;
-        Assert.True(perCall <= 96, $"typed INT key allocated {perCall} B per call");
     }
 
     [Fact]
@@ -144,5 +167,29 @@ public class IndexKeyEncoderTypedTests
         byte[] typedEncoded = IndexKeyEncoder.Encode(TypedKey(schema, cells, "Id", "Name"));
 
         Assert.Equal(dictEncoded, typedEncoded);
+    }
+
+    private static long MeasureAllocation(Func<string> action)
+    {
+        string? sink = null;
+        for (int i = 0; i < 2_000; i++)
+        {
+            sink = action();
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        const int measured = 10_000;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < measured; i++)
+        {
+            sink = action();
+        }
+
+        long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / measured;
+        GC.KeepAlive(sink);
+        return perCall;
     }
 }
