@@ -237,9 +237,14 @@ internal static class PortableSmoke
 
     private static void VerifyPortableFileHandlePoolFence(Assembly core, string testRoot)
     {
-        string directory = Path.Combine(testRoot, "file-handle-second-fence");
-        string path = Path.Combine(directory, "table.dat");
-        Require(!Directory.Exists(directory), $"Portable handle-pool probe path already exists: {directory}");
+        string acquireDirectory = Path.Combine(testRoot, "file-handle-acquire-second-fence");
+        string acquirePath = Path.Combine(acquireDirectory, "table.dat");
+        string removeDirectory = Path.Combine(testRoot, "file-handle-remove-second-fence");
+        string removePath = Path.Combine(removeDirectory, "table.dat");
+        Require(!Directory.Exists(acquireDirectory),
+            $"Portable handle-pool acquire probe path already exists: {acquireDirectory}");
+        Require(!Directory.Exists(removeDirectory),
+            $"Portable handle-pool remove probe path already exists: {removeDirectory}");
 
         Type poolType = RequireInternalType(core, "DataVo.Core.StorageEngine.Disk.FileHandlePool");
         object pool = Activator.CreateInstance(
@@ -253,20 +258,62 @@ internal static class PortableSmoke
         try
         {
             MethodInfo acquire = RequireMethod(poolType, "Acquire", BindingFlags.Public | BindingFlags.Instance);
-            PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
-                () => acquire.Invoke(pool, [path]),
+            PlatformNotSupportedException acquireError = ExpectReflectionPlatformNotSupported(
+                () => acquire.Invoke(pool, [acquirePath]),
                 "Portable file-handle acquisition unexpectedly succeeded.");
-            RequirePortableFenceMessage(error, "file-handle acquisition");
+            RequirePortableFenceMessage(acquireError, "file-handle acquisition");
+            Require(!Directory.Exists(acquireDirectory),
+                $"Portable file-handle acquisition rejection created directory '{acquireDirectory}'.");
+            Require(!File.Exists(acquirePath),
+                $"Portable file-handle acquisition rejection created file '{acquirePath}'.");
+
+            MethodInfo flushToDisk = RequireMethod(
+                poolType,
+                "FlushToDisk",
+                BindingFlags.Public | BindingFlags.Instance);
+            PlatformNotSupportedException flushError = ExpectReflectionPlatformNotSupported(
+                () => flushToDisk.Invoke(pool, null),
+                "Portable file-handle pool flush unexpectedly succeeded.");
+            RequirePortableFenceMessage(flushError, "file-handle pool flush");
+
+            MethodInfo remove = RequireMethod(poolType, "Remove", BindingFlags.Public | BindingFlags.Instance);
+            PlatformNotSupportedException removeError = ExpectReflectionPlatformNotSupported(
+                () => remove.Invoke(pool, [removePath]),
+                "Portable file-handle removal unexpectedly succeeded.");
+            RequirePortableFenceMessage(removeError, "file-handle removal");
+            Require(!Directory.Exists(removeDirectory),
+                $"Portable file-handle removal rejection created directory '{removeDirectory}'.");
+            Require(!File.Exists(removePath),
+                $"Portable file-handle removal rejection created file '{removePath}'.");
+
+            Type leaseType = poolType.GetNestedType(
+                "FileHandleLease",
+                BindingFlags.Public | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException(
+                    $"Portable type '{poolType.FullName}' is missing nested type 'FileHandleLease'.");
+            object lease = Activator.CreateInstance(leaseType, nonPublic: true)
+                ?? throw new InvalidOperationException("Could not construct the portable file-handle lease probe.");
+            try
+            {
+                PropertyInfo handle = leaseType.GetProperty(
+                    "Handle",
+                    BindingFlags.Public | BindingFlags.Instance)
+                    ?? throw new InvalidOperationException(
+                        $"Portable type '{leaseType.FullName}' is missing property 'Handle'.");
+                PlatformNotSupportedException handleError = ExpectReflectionPlatformNotSupported(
+                    () => handle.GetValue(lease),
+                    "Portable file-handle lease exposed a handle.");
+                RequirePortableFenceMessage(handleError, "file-handle lease access");
+            }
+            finally
+            {
+                ((IDisposable)lease).Dispose();
+            }
         }
         finally
         {
             ((IDisposable)pool).Dispose();
         }
-
-        Require(!Directory.Exists(directory),
-            $"Portable file-handle rejection created directory '{directory}'.");
-        Require(!File.Exists(path),
-            $"Portable file-handle rejection created file '{path}'.");
     }
 
     private static void VerifyPortableLsmPublicationFence(Assembly core, string testRoot)

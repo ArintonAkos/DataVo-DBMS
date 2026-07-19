@@ -119,7 +119,7 @@ public sealed class FileHandlePoolTests
     }
 
     [Fact]
-    public void FlushToDisk_PersistsRandomAccessWrite()
+    public void FlushToDisk_AfterRandomAccessWrite_LeavesWrittenBytesReadable()
     {
         string root = CreateTempDirectory();
         string path = Path.Combine(root, "table.dat");
