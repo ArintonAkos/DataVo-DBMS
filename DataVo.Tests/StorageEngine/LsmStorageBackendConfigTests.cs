@@ -6,6 +6,18 @@ namespace DataVo.Tests.StorageEngine;
 public sealed class LsmStorageBackendConfigTests
 {
     [Fact]
+    public void StorageContext_InMemoryMode_StillResolvesInMemoryBackend()
+    {
+        using var context = new StorageContext(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory
+        });
+
+        Assert.NotNull(context.Backend);
+        Assert.Equal("InMemory", context.Backend!.BackendKind);
+    }
+
+    [Fact]
     public void StorageContext_LsmMode_ResolvesLsmBackend()
     {
         string root = Path.Combine(Path.GetTempPath(), $"datavo_lsm_backend_config_{Guid.NewGuid():N}");

@@ -1,4 +1,5 @@
 using DataVo.Core.Exceptions;
+using DataVo.Core.Compat;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
@@ -78,6 +79,8 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
     private static IStorageEngine ResolveStorageEngine(DataVoConfig config)
     {
+        PortableStoragePolicy.ThrowIfUnsupported(config.StorageMode);
+
         return config.StorageMode switch
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
