@@ -48,7 +48,7 @@ public class RowSerializerAllTypesRoundTripTests
             context,
             DataVoCompiledQueryPlan.SelectSingle("All_", ["Id", "F", "B", "D", "S"], "Id", "id"),
             [new DataVoCompiledQueryParameter("id", 7)],
-            static r => (r.GetInt32("Id"), r.GetDouble("F"), r.GetBoolean("B"), r.GetDate("D"), r.GetString("S")));
+            static r => (r.GetInt32("Id"), r.GetDouble("F"), r.GetBoolean("B"), r.GetDateOnly("D"), r.GetString("S")));
 
         Assert.Equal((7, 2.5, true, date, "héllo"), hit);
     }

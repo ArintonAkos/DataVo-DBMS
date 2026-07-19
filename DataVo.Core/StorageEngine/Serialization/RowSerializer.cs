@@ -693,7 +693,7 @@ public static class RowSerializer
                 writer.Write(cell.AsBoolean());
                 return;
             case StorageColumnType.Date:
-                writer.Write(cell.AsDate().ToDateTime(TimeOnly.MinValue).ToBinary());
+                writer.Write(cell.AsDate().ToDateTime().ToBinary());
                 return;
             case StorageColumnType.Guid:
             {

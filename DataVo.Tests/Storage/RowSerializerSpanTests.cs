@@ -37,7 +37,7 @@ public class RowSerializerSpanTests
         Assert.Equal("héllo wörld", decoded[1].AsString());
         Assert.Equal(1.5, decoded[2].AsDouble(), 3);
         Assert.True(decoded[3].AsBoolean());
-        Assert.Equal(new DateOnly(2026, 6, 24), decoded[4].AsDate());
+        Assert.Equal(new DateOnly(2026, 6, 24), decoded[4].AsDateOnly());
         Assert.True(decoded[5].IsNull);
     }
 
@@ -64,7 +64,7 @@ public class RowSerializerSpanTests
 
         Assert.Equal(7, dest[0].AsInt32());                       // Id
         Assert.Equal(2.5, dest[1].AsDouble(), 3);                 // Score
-        Assert.Equal(new DateOnly(2026, 1, 2), dest[2].AsDate()); // Day
+        Assert.Equal(new DateOnly(2026, 1, 2), dest[2].AsDateOnly()); // Day
         Assert.Equal("note!", dest[3].AsString());                // Note
     }
 

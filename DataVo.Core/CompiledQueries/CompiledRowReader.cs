@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 
@@ -10,7 +11,7 @@ namespace DataVo.Core.CompiledQueries;
 /// unknown column throws <see cref="KeyNotFoundException"/>; a type mismatch or NULL into a non-nullable getter
 /// throws (mirroring the dictionary path's casts).
 /// </summary>
-public readonly ref struct CompiledRowReader
+public readonly ref partial struct CompiledRowReader
 {
     private readonly StoredRowView _view;
 
@@ -52,11 +53,11 @@ public readonly ref struct CompiledRowReader
     /// <summary>Reads a <see cref="bool"/> column by ordinal; throws if the cell is not Boolean or is NULL.</summary>
     public bool GetBoolean(int ordinal) => _view[ordinal].AsBoolean();
 
-    /// <summary>Reads a <see cref="DateOnly"/> column; throws if the cell is not Date or is NULL.</summary>
-    public DateOnly GetDate(string column) => _view[column].AsDate();
+    /// <summary>Reads a <see cref="DataVoDate"/> column; throws if the cell is not Date or is NULL.</summary>
+    public DataVoDate GetDate(string column) => _view[column].AsDate();
 
-    /// <summary>Reads a <see cref="DateOnly"/> column by ordinal; throws if the cell is not Date or is NULL.</summary>
-    public DateOnly GetDate(int ordinal) => _view[ordinal].AsDate();
+    /// <summary>Reads a <see cref="DataVoDate"/> column by ordinal; throws if the cell is not Date or is NULL.</summary>
+    public DataVoDate GetDate(int ordinal) => _view[ordinal].AsDate();
 
     /// <summary>Reads a <see cref="Guid"/> column; throws if the cell is not Guid or is NULL.</summary>
     public Guid GetGuid(string column) => _view[column].AsGuid();
@@ -106,11 +107,11 @@ public readonly ref struct CompiledRowReader
     /// <summary>Reads a nullable <see cref="bool"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
     public bool? GetBooleanOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsBoolean(); }
 
-    /// <summary>Reads a nullable <see cref="DateOnly"/> column; SQL NULL returns <c>null</c>.</summary>
-    public DateOnly? GetDateOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDate(); }
+    /// <summary>Reads a nullable <see cref="DataVoDate"/> column; SQL NULL returns <c>null</c>.</summary>
+    public DataVoDate? GetDateOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDate(); }
 
-    /// <summary>Reads a nullable <see cref="DateOnly"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
-    public DateOnly? GetDateOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDate(); }
+    /// <summary>Reads a nullable <see cref="DataVoDate"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public DataVoDate? GetDateOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDate(); }
 
     /// <summary>Reads a nullable <see cref="Guid"/> column; SQL NULL returns <c>null</c>.</summary>
     public Guid? GetGuidOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsGuid(); }

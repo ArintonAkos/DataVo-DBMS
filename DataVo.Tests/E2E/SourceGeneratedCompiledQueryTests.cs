@@ -6,7 +6,15 @@ namespace DataVo.Tests.E2E;
 
 public sealed record GeneratedPlayer(int Id, string Name, int Level);
 
-public sealed record MixedRow(int Id, double Score, bool Active, DateOnly Day, string? Note);
+public sealed record MixedRow(
+    int Id,
+    double Score,
+    bool Active,
+    DataVoDate Day,
+    DataVoDate? OptionalDay,
+    DateOnly ModernDay,
+    DateOnly? OptionalModernDay,
+    string? Note);
 
 public static partial class GeneratedGameQueries
 {
@@ -22,7 +30,7 @@ public static partial class GeneratedGameQueries
     [DataVoQuery("UPDATE Players SET Level = @level WHERE Id = @id")]
     public static partial int SetPlayerLevel(DataVoContext db, int id, int level);
 
-    [DataVoQuery("SELECT Id, Score, Active, Day, Note FROM Mixed WHERE Id = @id")]
+    [DataVoQuery("SELECT Id, Score, Active, Day, OptionalDay, ModernDay, OptionalModernDay, Note FROM Mixed WHERE Id = @id")]
     public static partial MixedRow? GetMixed(DataVoContext db, int id);
 }
 
@@ -85,7 +93,11 @@ public class SourceGeneratedCompiledQueryTests
     public void GeneratedTypedSelect_ReadsAllStorableTypesIncludingNull()
     {
         using var context = CreateContext();
-        context.Execute("CREATE TABLE Mixed (Id INT PRIMARY KEY, Score FLOAT, Active BIT, Day DATE, Note VARCHAR(50))");
+        context.Execute(
+            "CREATE TABLE Mixed (Id INT PRIMARY KEY, Score FLOAT, Active BIT, Day DATE, " +
+            "OptionalDay DATE, ModernDay DATE, OptionalModernDay DATE, Note VARCHAR(50))");
+        var canonicalDay = new DateOnly(2026, 6, 24);
+        var modernDay = new DateOnly(2027, 7, 25);
         context.BulkInsert(
             "Mixed",
             [
@@ -94,14 +106,27 @@ public class SourceGeneratedCompiledQueryTests
                     ["Id"] = 7,
                     ["Score"] = 4.25,
                     ["Active"] = true,
-                    ["Day"] = new DateOnly(2026, 6, 24),
+                    ["Day"] = canonicalDay,
+                    ["OptionalDay"] = null,
+                    ["ModernDay"] = modernDay,
+                    ["OptionalModernDay"] = null,
                     ["Note"] = null
                 }
             ]);
 
         MixedRow? row = GeneratedGameQueries.GetMixed(context, 7);
 
-        Assert.Equal(new MixedRow(7, 4.25, true, new DateOnly(2026, 6, 24), null), row);
+        Assert.Equal(
+            new MixedRow(
+                7,
+                4.25,
+                true,
+                DataVoDate.FromDateOnly(canonicalDay),
+                null,
+                modernDay,
+                null,
+                null),
+            row);
     }
 
     private static DataVoContext CreateContext()

@@ -60,7 +60,7 @@ public class RowSerializerTypedParityTests
         Assert.Equal(42, round[0].AsInt32());
         Assert.Equal(3.5, round[1].AsDouble());
         Assert.True(round[2].AsBoolean());
-        Assert.Equal(new DateOnly(2026, 6, 22), round[3].AsDate());
+        Assert.Equal(new DateOnly(2026, 6, 22), round[3].AsDateOnly());
         Assert.Equal("hello", round[4].AsString());
         Assert.Equal(new float[] { 1f, 2f, 3f }, round[5].AsVector());
     }

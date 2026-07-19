@@ -367,6 +367,37 @@ public class DataVoQueryGeneratorTests
         Assert.Contains("reader.GetDecimal(\"Amount\")", generated);
     }
 
+    [Fact]
+    public void Generator_DateParams_EmitCanonicalAndExplicitModernGetters()
+    {
+        string source = """
+            using System;
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Dates(
+                DataVoDate Day,
+                DataVoDate? OptionalDay,
+                DateOnly ModernDay,
+                DateOnly? OptionalModernDay);
+
+            public static partial class DateQueries
+            {
+                [DataVoQuery("SELECT Day, OptionalDay, ModernDay, OptionalModernDay FROM Events WHERE Day = @day")]
+                public static partial IReadOnlyList<Dates> Get(DataVoContext db, DataVoDate day);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("reader.GetDate(\"Day\")", generated);
+        Assert.Contains("reader.GetDateOrNull(\"OptionalDay\")", generated);
+        Assert.Contains("reader.GetDateOnly(\"ModernDay\")", generated);
+        Assert.Contains("reader.GetDateOnlyOrNull(\"OptionalModernDay\")", generated);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
     {
         CSharpCompilation compilation = CSharpCompilation.Create(

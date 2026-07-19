@@ -670,13 +670,29 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
                 return;
 
             case CellType.Date:
-                AppendFormattable(ref pos, value.AsDate());
+                AppendDate(ref pos, value.AsDate());
                 return;
 
             default:
                 AppendChars(ref pos, Convert.ToString(value.ToObject(), CultureInfo.InvariantCulture) ?? string.Empty);
                 return;
         }
+    }
+
+    private void AppendDate(ref int pos, DataVoDate value)
+    {
+        DateTime dateTime = value.ToDateTime();
+        int written;
+        while (!dateTime.TryFormat(
+                   _keyBuffer.AsSpan(pos),
+                   out written,
+                   "yyyy-MM-dd",
+                   CultureInfo.InvariantCulture))
+        {
+            EnsureKeyCapacity(Math.Max(_keyBuffer.Length * 2, pos + 64));
+        }
+
+        pos += written;
     }
 
     private void AppendFormattable<T>(ref int pos, T value)

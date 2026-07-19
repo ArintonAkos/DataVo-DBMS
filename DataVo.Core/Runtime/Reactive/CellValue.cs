@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.Runtime.Reactive;
 
@@ -19,7 +20,7 @@ public enum CellType : byte
     Decimal = 5,
     /// <summary>A <see cref="string"/>.</summary>
     String = 6,
-    /// <summary>A <see cref="DateOnly"/> (the SQL DATE type), stored inline as its day number.</summary>
+    /// <summary>A <see cref="DataVoDate"/> (the SQL DATE type), stored inline as its day number.</summary>
     Date = 7,
     /// <summary>A dense <see cref="float"/>[] (the SQL VECTOR type); the cell owns a clone of the array.</summary>
     Vector = 8,
@@ -30,10 +31,11 @@ public enum CellType : byte
 /// <summary>
 /// A compact, typed cell value that avoids boxing for the common DataVo scalar types
 /// (<c>null</c>, <see cref="bool"/>, <see cref="int"/>, <see cref="long"/>, <see cref="double"/>,
-/// <see cref="decimal"/>, <see cref="string"/>). Decimal is stored inline so financial workloads
-/// stay allocation-free. Replaces <c>object?</c> as the reactive engine's cell currency.
+/// <see cref="decimal"/>, <see cref="string"/>, <see cref="DataVoDate"/>). Decimal and DATE values are
+/// stored inline so financial workloads stay allocation-free. Replaces <c>object?</c> as the reactive
+/// engine's cell currency.
 /// </summary>
-public readonly struct CellValue
+public readonly partial struct CellValue
 {
     private readonly CellType _type;
     private readonly long _numeric;     // bool/int/long/double bits (reinterpreted)
@@ -71,8 +73,8 @@ public readonly struct CellValue
     public static CellValue From(string? value) =>
         value is null ? Null : new(CellType.String, 0L, 0m, value);
 
-    /// <summary>Creates a <see cref="DateOnly"/> cell (stored inline as its day number; no boxing).</summary>
-    public static CellValue From(DateOnly value) => new(CellType.Date, value.DayNumber, 0m, null);
+    /// <summary>Creates a <see cref="DataVoDate"/> cell (stored inline as its day number; no boxing).</summary>
+    public static CellValue From(DataVoDate value) => new(CellType.Date, value.DayNumber, 0m, null);
 
     /// <summary>Creates a <see cref="Guid"/> cell (stored inline as two 64-bit halves; no boxing).</summary>
     public static CellValue From(Guid value)
@@ -105,9 +107,10 @@ public readonly struct CellValue
         double d => From(d),
         decimal m => From(m),
         string s => From(s),
-        DateOnly d => From(d),
+        DataVoDate d => From(d),
         Guid g => From(g),
         float[] v => From(v),
+        _ when DateObjectAdapter.TryConvert(value, out DataVoDate d) => From(d),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
     };
 
@@ -145,9 +148,9 @@ public readonly struct CellValue
         _ => throw Mismatch(CellType.String),
     };
 
-    /// <summary>Reads the cell as a <see cref="DateOnly"/>.</summary>
-    public DateOnly AsDate() =>
-        _type == CellType.Date ? DateOnly.FromDayNumber((int)_numeric) : throw Mismatch(CellType.Date);
+    /// <summary>Reads the cell as a <see cref="DataVoDate"/>.</summary>
+    public DataVoDate AsDate() =>
+        _type == CellType.Date ? DataVoDate.FromDayNumber((int)_numeric) : throw Mismatch(CellType.Date);
 
     /// <summary>Reads the cell as a <see cref="Guid"/>.</summary>
     public Guid AsGuid()
@@ -186,7 +189,7 @@ public readonly struct CellValue
         CellType.Double => BitConverter.Int64BitsToDouble(_numeric),
         CellType.Decimal => _decimal,
         CellType.String => _reference,
-        CellType.Date => DateOnly.FromDayNumber((int)_numeric),
+        CellType.Date => AsDate(),
         CellType.Vector => ((float[])_reference!).Clone(),
         CellType.Guid => AsGuid(),
         _ => null,

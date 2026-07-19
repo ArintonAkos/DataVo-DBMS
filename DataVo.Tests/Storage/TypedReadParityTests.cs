@@ -35,7 +35,7 @@ public class TypedReadParityTests
         Assert.Equal(42, row["I"].AsInt32());
         Assert.Equal(3.5d, row["F"].AsDouble());
         Assert.True(row["B"].AsBoolean());
-        Assert.Equal(new DateOnly(2026, 6, 22), row["D"].AsDate());
+        Assert.Equal(new DateOnly(2026, 6, 22), row["D"].AsDateOnly());
         Assert.Equal("hello", row["S"].AsString());
         Assert.Equal(new float[] { 1f, 2f, 3f }, row["V"].AsVector());
         AssertDictionaryEquivalent(legacy.Values.Single(), row.AsDictionary());
