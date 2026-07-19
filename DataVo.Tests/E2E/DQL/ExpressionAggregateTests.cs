@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.E2E.DQL;
@@ -80,8 +81,8 @@ public abstract class ExpressionAggregateTestsBase(DataVoConfig config, string t
         Assert.Equal(30L, Convert.ToInt64(result.Data[0]["MaxScore"]));
         Assert.Equal("alpha", result.Data[0]["MinLabel"]);
         Assert.Equal("gamma", result.Data[0]["MaxLabel"]);
-        Assert.Equal(DateOnly.Parse("2026-01-05"), result.Data[0]["FirstDate"]);
-        Assert.Equal(DateOnly.Parse("2026-03-15"), result.Data[0]["LastDate"]);
+        Assert.Equal(DataVoDate.Parse("2026-01-05"), result.Data[0]["FirstDate"]);
+        Assert.Equal(DataVoDate.Parse("2026-03-15"), result.Data[0]["LastDate"]);
     }
 
     [Fact]

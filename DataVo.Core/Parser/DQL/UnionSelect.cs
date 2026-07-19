@@ -123,7 +123,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
             return ColumnKinds.Boolean;
         }
 
-        if (type == typeof(DateOnly) || type == typeof(DateTime))
+        if (type == typeof(DataVoDate) || type == typeof(DateTime))
         {
             return ColumnKinds.Date;
         }

@@ -136,7 +136,7 @@ internal partial class Select
             string s => $"System.String:{s}",
             char c => $"System.Char:{c}",
             bool b => $"System.Boolean:{b}",
-            DateOnly d => $"System.DateOnly:{d:O}",
+            DataVoDate d => $"DataVo.Core.DataVoDate:{d:O}",
             DateTime dt => $"System.DateTime:{dt:O}",
             IFormattable formattable => $"{value.GetType().FullName}:{formattable.ToString(null, CultureInfo.InvariantCulture)}",
             _ => $"{value.GetType().FullName}:{value}"

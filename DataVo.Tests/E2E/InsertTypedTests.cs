@@ -129,7 +129,9 @@ public class InsertTypedTests
         Dictionary<string, object?> typedRow = Select(typed, "SELECT Id, ObservedOn FROM Metrics").Single();
         Dictionary<string, object?> dictRow = Select(dict, "SELECT Id, ObservedOn FROM Metrics").Single();
         Assert.Equal(dictRow["Id"], typedRow["Id"]);
-        Assert.Equal(dictRow["ObservedOn"], typedRow["ObservedOn"]);
+        DataVoDate expected = DataVoDate.FromDateOnly(observedOn);
+        Assert.Equal(expected, Assert.IsType<DataVoDate>(typedRow["ObservedOn"]));
+        Assert.Equal(expected, Assert.IsType<DataVoDate>(dictRow["ObservedOn"]));
     }
 
     [Fact]
@@ -237,7 +239,7 @@ public class InsertTypedTests
         Assert.NotNull(change.After);
         Assert.Equal(1, change.After!["Id"]);
         Assert.Equal(12.5d, change.After["Reading"]);
-        Assert.Equal(observedOn, change.After["ObservedOn"]);
+        Assert.Equal(DataVoDate.FromDateOnly(observedOn), Assert.IsType<DataVoDate>(change.After["ObservedOn"]));
         AssertVectorsEqual([1f, 0f, 0f], (float[])change.After["Emb"]!);
         Assert.NotNull(change.TypedAfter);
     }

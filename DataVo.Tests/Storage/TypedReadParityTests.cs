@@ -21,7 +21,7 @@ public class TypedReadParityTests
                 ["I"] = 42,
                 ["F"] = 3.5d,
                 ["B"] = true,
-                ["D"] = new DateOnly(2026, 6, 22),
+                ["D"] = DataVoDate.FromDateTime(new DateTime(2026, 6, 22)),
                 ["S"] = "hello",
                 ["V"] = new float[] { 1f, 2f, 3f },
             },
@@ -35,7 +35,7 @@ public class TypedReadParityTests
         Assert.Equal(42, row["I"].AsInt32());
         Assert.Equal(3.5d, row["F"].AsDouble());
         Assert.True(row["B"].AsBoolean());
-        Assert.Equal(new DateOnly(2026, 6, 22), row["D"].AsDateOnly());
+        Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 6, 22)), row["D"].AsDate());
         Assert.Equal("hello", row["S"].AsString());
         Assert.Equal(new float[] { 1f, 2f, 3f }, row["V"].AsVector());
         AssertDictionaryEquivalent(legacy.Values.Single(), row.AsDictionary());
@@ -75,7 +75,7 @@ public class TypedReadParityTests
         ["I"] = id,
         ["F"] = id + 0.5d,
         ["B"] = id % 2 == 0,
-        ["D"] = new DateOnly(2026, 6, 20 + id),
+        ["D"] = DataVoDate.FromDateTime(new DateTime(2026, 6, 20 + id)),
         ["S"] = text,
         ["V"] = new float[] { id, id + 1, id + 2 },
     };

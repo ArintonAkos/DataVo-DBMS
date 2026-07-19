@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using System.Collections.Concurrent;
 using System.Globalization;
+using DataVo.Core.Compat;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
@@ -465,7 +466,7 @@ public static class RowSerializer
             case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
-                return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+                return CellValue.From(DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
             case StorageColumnType.Guid:
                 return CellValue.From(reader.ReadGuid());
             case StorageColumnType.Vector:
@@ -650,7 +651,7 @@ public static class RowSerializer
 
         if (type == StorageColumnType.Date)
         {
-            return DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
+            return DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64()));
         }
 
         if (type == StorageColumnType.DateTime)
@@ -731,7 +732,7 @@ public static class RowSerializer
             case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
-                return CellValue.From(DateOnly.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+                return CellValue.From(DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
             case StorageColumnType.Guid:
                 return CellValue.From(new Guid(reader.ReadBytes(16)));
             case StorageColumnType.Vector:
@@ -755,9 +756,14 @@ public static class RowSerializer
     /// </summary>
     private static long ToBinaryDateValue(object value)
     {
-        if (value is DateOnly dateOnly)
+        if (value is DataVoDate dataVoDate)
         {
-            return dateOnly.ToDateTime(TimeOnly.MinValue).ToBinary();
+            return dataVoDate.ToDateTime().ToBinary();
+        }
+
+        if (DateObjectAdapter.TryConvert(value, out DataVoDate adaptedDate))
+        {
+            return adaptedDate.ToDateTime().ToBinary();
         }
 
         if (value is DateTime dateTime)

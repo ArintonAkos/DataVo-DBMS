@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Serialization;
@@ -26,7 +27,7 @@ public class RowSerializerSpanTests
             CellValue.From("héllo wörld"),     // multi-byte UTF8
             CellValue.From((double)1.5f),       // FLOAT stored as single-bits
             CellValue.From(true),
-            CellValue.From(new DateOnly(2026, 6, 24)),
+            CellValue.From(DataVoDate.FromDateTime(new DateTime(2026, 6, 24))),
             CellValue.Null,                     // NULL string
         ];
 
@@ -37,7 +38,7 @@ public class RowSerializerSpanTests
         Assert.Equal("héllo wörld", decoded[1].AsString());
         Assert.Equal(1.5, decoded[2].AsDouble(), 3);
         Assert.True(decoded[3].AsBoolean());
-        Assert.Equal(new DateOnly(2026, 6, 24), decoded[4].AsDateOnly());
+        Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 6, 24)), decoded[4].AsDate());
         Assert.True(decoded[5].IsNull);
     }
 
@@ -51,7 +52,7 @@ public class RowSerializerSpanTests
             CellValue.From("skip-me"),         // not projected (a string before a projected column)
             CellValue.From((double)2.5f),
             CellValue.From(false),             // not projected
-            CellValue.From(new DateOnly(2026, 1, 2)),
+            CellValue.From(DataVoDate.FromDateTime(new DateTime(2026, 1, 2))),
             CellValue.From("note!"),
         ];
         byte[] bytes = RowSerializer.SerializeCells(columns, full);
@@ -64,7 +65,7 @@ public class RowSerializerSpanTests
 
         Assert.Equal(7, dest[0].AsInt32());                       // Id
         Assert.Equal(2.5, dest[1].AsDouble(), 3);                 // Score
-        Assert.Equal(new DateOnly(2026, 1, 2), dest[2].AsDateOnly()); // Day
+        Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 1, 2)), dest[2].AsDate()); // Day
         Assert.Equal("note!", dest[3].AsString());                // Note
     }
 

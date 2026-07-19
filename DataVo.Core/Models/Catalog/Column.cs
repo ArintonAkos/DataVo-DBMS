@@ -32,7 +32,7 @@ public class Column : IColumn
 
     /// <summary>
     /// Gets the strongly-typed value parsed from <see cref="Value"/> based on the column's <see cref="Type"/>.
-    /// Parses to <see cref="int"/>, <see cref="double"/>, <see cref="bool"/>, or <see cref="DateOnly"/> where applicable.
+    /// Parses to <see cref="int"/>, <see cref="double"/>, <see cref="bool"/>, or <see cref="DataVoDate"/> where applicable.
     /// </summary>
     public object? ParsedValue
     {
@@ -66,7 +66,7 @@ public class Column : IColumn
         return Type.ToUpperInvariant() switch
         {
             "VARCHAR" => (Length > 0 && Length < rawValue.Length) ? rawValue[..Length] : rawValue,
-            "DATE" => TryParseDate(rawValue, out DateOnly parsedDate) ? parsedDate : rawValue,
+            "DATE" => TryParseDate(rawValue, out DataVoDate parsedDate) ? parsedDate : rawValue,
             "GUID" => Guid.TryParse(rawValue, out Guid parsedGuid) ? parsedGuid : rawValue,
             "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,
             "INT" => int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) ? parsedInt : rawValue,
@@ -76,10 +76,10 @@ public class Column : IColumn
         };
     }
 
-    private static bool TryParseDate(string input, out DateOnly parsedDate)
+    private static bool TryParseDate(string input, out DataVoDate parsedDate)
     {
-        return DateOnly.TryParse(input, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate)
-            || DateOnly.TryParse(input, CultureInfo.CurrentCulture, DateTimeStyles.None, out parsedDate);
+        return DataVoDate.TryParse(input, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate)
+            || DataVoDate.TryParse(input, CultureInfo.CurrentCulture, DateTimeStyles.None, out parsedDate);
     }
 
     private static bool TryParseFloatingPoint(string input, out double parsedFloat)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using DataVo.Core.BTree;
+using DataVo.Core.Compat;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
@@ -869,14 +870,19 @@ internal sealed class InsertRowService(
             return VectorParser.SerializeVector(vector);
         }
 
-        if (rawValue is DateOnly dateOnly)
+        if (rawValue is DataVoDate dataVoDate)
         {
-            return dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return dataVoDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+
+        if (DateObjectAdapter.TryConvert(rawValue, out DataVoDate adaptedDate))
+        {
+            return adaptedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
         if (rawValue is DateTime dateTime && columnType.Equals("DATE", StringComparison.OrdinalIgnoreCase))
         {
-            return DateOnly.FromDateTime(dateTime).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return DataVoDate.FromDateTime(dateTime).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
         if (rawValue is IFormattable formattable)
@@ -899,7 +905,7 @@ internal sealed class InsertRowService(
             "INT" => parsedValue is int,
             "FLOAT" => parsedValue is double,
             "BIT" => parsedValue is bool,
-            "DATE" => parsedValue is DateOnly,
+            "DATE" => parsedValue is DataVoDate,
             "GUID" => parsedValue is Guid,
             "VECTOR" => parsedValue is float[] vector && (column.Length <= 0 || vector.Length == column.Length),
             _ => true
@@ -915,7 +921,7 @@ internal sealed class InsertRowService(
 
         if (column.Type.Equals("DATE", StringComparison.OrdinalIgnoreCase) && parsedValue is DateTime dateTime)
         {
-            return DateOnly.FromDateTime(dateTime);
+            return DataVoDate.FromDateTime(dateTime);
         }
 
         if (column.Type.Equals("GUID", StringComparison.OrdinalIgnoreCase)

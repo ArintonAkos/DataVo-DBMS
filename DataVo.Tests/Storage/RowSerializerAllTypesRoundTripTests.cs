@@ -15,7 +15,7 @@ public class RowSerializerAllTypesRoundTripTests
         using var context = CreateContext();
         context.Execute("CREATE TABLE All_ (Id INT PRIMARY KEY, F FLOAT, B BIT, D DATE, S VARCHAR(50), V VECTOR(3))");
 
-        var date = new DateOnly(2026, 6, 24);
+        DataVoDate date = DataVoDate.FromDateTime(new DateTime(2026, 6, 24));
         float[] vector = [1.5f, -2.0f, 3.25f];
         context.BulkInsert(
             "All_",
@@ -44,11 +44,11 @@ public class RowSerializerAllTypesRoundTripTests
         Assert.Null(row8["S"]);
 
         // Typed/compiled path: DecodeTypedCell via the streaming projected read.
-        var hit = DataVoCompiledQuery.SelectSingleTyped<(int Id, double F, bool B, DateOnly D, string? S)>(
+        var hit = DataVoCompiledQuery.SelectSingleTyped<(int Id, double F, bool B, DataVoDate D, string? S)>(
             context,
             DataVoCompiledQueryPlan.SelectSingle("All_", ["Id", "F", "B", "D", "S"], "Id", "id"),
             [new DataVoCompiledQueryParameter("id", 7)],
-            static r => (r.GetInt32("Id"), r.GetDouble("F"), r.GetBoolean("B"), r.GetDateOnly("D"), r.GetString("S")));
+            static r => (r.GetInt32("Id"), r.GetDouble("F"), r.GetBoolean("B"), r.GetDate("D"), r.GetString("S")));
 
         Assert.Equal((7, 2.5, true, date, "héllo"), hit);
     }

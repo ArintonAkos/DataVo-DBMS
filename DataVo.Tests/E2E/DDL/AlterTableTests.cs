@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.E2E.DDL;
@@ -161,7 +162,7 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
         Assert.Equal(3, result.Data.Count);
         Assert.Null(result.Data[0]["Born"]);
         Assert.Null(result.Data[1]["Born"]);
-        Assert.Equal(new DateOnly(2026, 6, 22), result.Data[2]["Born"]);
+        Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 6, 22)), result.Data[2]["Born"]);
     }
 
     [Fact]
@@ -195,7 +196,8 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
 
         var result = ExecuteAndReturn("SELECT Born FROM Users ORDER BY Id");
         Assert.False(result.IsError);
-        Assert.All(result.Data, row => Assert.Equal(new DateOnly(2026, 6, 22), row["Born"]));
+        Assert.All(result.Data, row =>
+            Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 6, 22)), row["Born"]));
     }
 
     [Fact]

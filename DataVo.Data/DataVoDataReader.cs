@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
+using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 
 namespace DataVo.Data;
@@ -127,7 +128,11 @@ public class DataVoDataReader : DbDataReader
         throw new NotSupportedException();
 
     /// <inheritdoc />
-    public override DateTime GetDateTime(int ordinal) => Convert.ToDateTime(GetValue(ordinal));
+    public override DateTime GetDateTime(int ordinal)
+    {
+        object value = GetValue(ordinal);
+        return value is DataVoDate date ? date.ToDateTime() : Convert.ToDateTime(value);
+    }
 
     /// <inheritdoc />
     public override decimal GetDecimal(int ordinal) => Convert.ToDecimal(GetValue(ordinal));

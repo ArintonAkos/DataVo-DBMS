@@ -51,8 +51,8 @@ internal static class PolymorphicJsonWriter
             case decimal m:
                 writer.WriteNumberValue(m);
                 break;
-            case DateOnly dateOnly:
-                writer.WriteStringValue(dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            case DataVoDate date:
+                writer.WriteStringValue(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 break;
             case DateTime dateTime:
                 writer.WriteStringValue(dateTime.ToString("o", CultureInfo.InvariantCulture));

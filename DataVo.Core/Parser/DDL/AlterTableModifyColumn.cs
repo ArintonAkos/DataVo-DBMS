@@ -204,7 +204,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
     {
         return value switch
         {
-            DateOnly dateOnly => dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DataVoDate date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? "NULL"

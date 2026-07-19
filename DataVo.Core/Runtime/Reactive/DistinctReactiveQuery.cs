@@ -222,7 +222,7 @@ internal sealed class DistinctReactiveQuery : IReactiveQuery
             float v => "float:" + v.ToString(CultureInfo.InvariantCulture),
             double v => "double:" + v.ToString(CultureInfo.InvariantCulture),
             decimal v => "decimal:" + v.ToString(CultureInfo.InvariantCulture),
-            DateOnly v => "dateonly:" + v.ToString("O", CultureInfo.InvariantCulture),
+            DataVoDate v => "date:" + v.ToString("O", CultureInfo.InvariantCulture),
             DateTime v => "datetime:" + v.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
             DateTimeOffset v => "datetimeoffset:" + v.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
             Guid v => "guid:" + v.ToString(),

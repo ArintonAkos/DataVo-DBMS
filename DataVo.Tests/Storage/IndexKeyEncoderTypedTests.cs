@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.BTree;
 using DataVo.Core.Runtime.Reactive;
 
@@ -74,7 +75,7 @@ public class IndexKeyEncoderTypedTests
     public void DateKey_MatchesDictionary()
     {
         var schema = new ReactiveRowSchema("Born");
-        var date = new DateOnly(2026, 6, 22);
+        DataVoDate date = DataVoDate.FromDateTime(new DateTime(2026, 6, 22));
         CellValue[] cells = [CellValue.From(date)];
         var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Born"] = date };
 

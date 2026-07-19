@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Data;
 using DataVo.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore;
@@ -231,7 +232,7 @@ internal static class DataVoEntityMaterializer
     /// <summary>
     /// Converts a DataVo <c>dynamic</c> value to the CLR property type expected by EF.
     /// DataVo returns: <c>int</c> for INT, <c>string</c> for VARCHAR, <c>bool</c>/<c>int</c>
-    /// for BIT, <c>DateTime</c>/<c>string</c> for DATE, <c>double</c> for FLOAT.
+    /// for BIT, <see cref="DataVoDate"/> for DATE, <c>double</c> for FLOAT.
     /// </summary>
     internal static object ConvertToClrType(object value, Type targetType)
     {
@@ -262,6 +263,7 @@ internal static class DataVoEntityMaterializer
             return value switch
             {
                 DateTime dt => dt,
+                DataVoDate d => d.ToDateTime(),
                 DateOnly d => d.ToDateTime(TimeOnly.MinValue),
                 string s => DateTime.Parse(s, CultureInfo.InvariantCulture),
                 _ => Convert.ToDateTime(value, CultureInfo.InvariantCulture)
@@ -274,6 +276,7 @@ internal static class DataVoEntityMaterializer
             return value switch
             {
                 DateOnly d => d,
+                DataVoDate d => d.ToDateOnly(),
                 DateTime dt => DateOnly.FromDateTime(dt),
                 string s => DateOnly.Parse(s, CultureInfo.InvariantCulture),
                 _ => DateOnly.FromDateTime(Convert.ToDateTime(value, CultureInfo.InvariantCulture))
@@ -287,6 +290,7 @@ internal static class DataVoEntityMaterializer
             {
                 DateTimeOffset dto => dto,
                 DateTime dt => new DateTimeOffset(dt),
+                DataVoDate d => new DateTimeOffset(d.ToDateTime()),
                 DateOnly d => new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue)),
                 string s => DateTimeOffset.Parse(s, CultureInfo.InvariantCulture),
                 _ => new DateTimeOffset(Convert.ToDateTime(value, CultureInfo.InvariantCulture))
