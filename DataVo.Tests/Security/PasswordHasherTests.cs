@@ -8,12 +8,20 @@ public sealed class PasswordHasherTests
     private const string PersistedPassword = "DataVo-stage2b!";
     private const string PersistedHash = "rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=";
     private const string PersistedSalt = "AAECAwQFBgcICQoLDA0ODw==";
+    private const string MinimumLegacySaltHash = "+p95m+Nw04sUo7SfCTGGVw9SMOFDGE7cFyFRQsXf3k8=";
+    private const string MinimumLegacySalt = "AAECAwQFBgc=";
 
     [Fact]
     public void Verify_AcceptsPersistedPbkdf2Sha256Vector()
     {
         Assert.True(PasswordHasher.Verify(PersistedPassword, PersistedHash, PersistedSalt));
         Assert.False(PasswordHasher.Verify("wrong-password", PersistedHash, PersistedSalt));
+    }
+
+    [Fact]
+    public void Verify_AcceptsPersistedVectorAtEightByteCompatibilityBoundary()
+    {
+        Assert.True(PasswordHasher.Verify(PersistedPassword, MinimumLegacySaltHash, MinimumLegacySalt));
     }
 
     [Fact]
@@ -59,6 +67,7 @@ public sealed class PasswordHasherTests
     [InlineData("rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=", "")]
     [InlineData("rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=", "   ")]
     [InlineData("rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=", "not-base64")]
+    [InlineData("rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=", "AA==")]
     public void Verify_ReturnsFalseForMalformedPersistedValues(string hash, string salt)
     {
         Assert.False(PasswordHasher.Verify(PersistedPassword, hash, salt));

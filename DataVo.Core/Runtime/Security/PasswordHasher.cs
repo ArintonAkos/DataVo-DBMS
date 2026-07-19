@@ -9,6 +9,7 @@ namespace DataVo.Core.Runtime.Security;
 internal static class PasswordHasher
 {
     private const int SaltSizeBytes = 16;
+    private const int MinimumPersistedSaltSizeBytes = 8;
     private const int HashSizeBytes = 32;
 
     // PBKDF2-HMAC-SHA256 work factor. Aligned with the OWASP Password Storage
@@ -56,7 +57,10 @@ internal static class PasswordHasher
             return false;
         }
 
-        if (expectedHash.Length == 0)
+        // The portable instance-based PBKDF2 API rejects salts below eight bytes on
+        // legacy runtimes. Treat that cross-runtime incompatibility as malformed input
+        // before platform dispatch, while retaining persisted salts of eight bytes or more.
+        if (expectedHash.Length == 0 || salt.Length < MinimumPersistedSaltSizeBytes)
         {
             return false;
         }

@@ -463,11 +463,17 @@ internal static class PortableSmoke
         const string password = "DataVo-stage2b!";
         const string persistedHash = "rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=";
         const string persistedSalt = "AAECAwQFBgcICQoLDA0ODw==";
+        const string minimumLegacySaltHash = "+p95m+Nw04sUo7SfCTGGVw9SMOFDGE7cFyFRQsXf3k8=";
+        const string minimumLegacySalt = "AAECAwQFBgc=";
 
         Require(PasswordHasher.Verify(password, persistedHash, persistedSalt),
             "Portable PBKDF2 fallback rejected the fixed modern password vector.");
         Require(!PasswordHasher.Verify("wrong-password", persistedHash, persistedSalt),
             "Portable PBKDF2 fallback accepted the wrong password.");
+        Require(!PasswordHasher.Verify(password, persistedHash, "AA=="),
+            "Portable password verification accepted a decoded salt shorter than eight bytes.");
+        Require(PasswordHasher.Verify(password, minimumLegacySaltHash, minimumLegacySalt),
+            "Portable password verification rejected the eight-byte compatibility boundary.");
 
         (string generatedHash, string generatedSalt) = PasswordHasher.HashPassword("portable-generated-password");
         Require(Convert.FromBase64String(generatedHash).Length == 32,
