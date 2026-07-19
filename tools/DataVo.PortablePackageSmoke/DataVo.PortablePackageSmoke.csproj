@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="DataVo.Core" Condition="'$(DataVoPortableAssembly)' != ''">
+      <HintPath>$(DataVoPortableAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+    <PackageReference Include="System.Text.Json" Version="10.0.0" />
+    <PackageReference Include="System.Threading.Channels" Version="10.0.0" />
+  </ItemGroup>
+
+  <Target Name="RequireDataVoPortableAssembly" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(DataVoPortableAssembly)' == ''"
+           Text="DataVoPortableAssembly must name the extracted portable DataVo.Core.dll." />
+    <Error Condition="'$(DataVoPortableAssembly)' != '' and !Exists('$(DataVoPortableAssembly)')"
+           Text="DataVoPortableAssembly does not exist: $(DataVoPortableAssembly)" />
+  </Target>
+</Project>

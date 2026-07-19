@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(DataVoCandidateVersion)' != ''">
+    <PackageReference Include="DataVo.Core" Version="$(DataVoCandidateVersion)" />
+  </ItemGroup>
+
+  <Target Name="RequireDataVoCandidateVersion"
+          BeforeTargets="CollectPackageReferences;PrepareForBuild">
+    <Error Condition="'$(DataVoCandidateVersion)' == ''"
+           Text="DataVoCandidateVersion must identify the exact locally packed candidate." />
+  </Target>
+</Project>
