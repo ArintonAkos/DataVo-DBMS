@@ -1,4 +1,5 @@
 using DataVo.Core.Indexing;
+using DataVo.Core.Compat;
 using DataVo.Core.Utils;
 using System.Runtime.CompilerServices;
 #if NET10_0_OR_GREATER
@@ -96,8 +97,8 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
 
     private sealed class SearchWorkspace
     {
-        public PriorityQueue<(int Ordinal, float Distance), float> CandidateQueue { get; } = new();
-        public PriorityQueue<(int Ordinal, float Distance), float> ResultQueue { get; } = new();
+        public DataVoPriorityQueue<(int Ordinal, float Distance), float> CandidateQueue { get; } = new();
+        public DataVoPriorityQueue<(int Ordinal, float Distance), float> ResultQueue { get; } = new();
         public int[] VisitedEpochByOrdinal = [];
         public int Epoch { get; set; } = 1;
 
@@ -1748,7 +1749,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
     private List<long> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
     {
         int take = Math.Min(topK, _count);
-        var maxHeap = new PriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
+        var maxHeap = new DataVoPriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
 
         for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
         {

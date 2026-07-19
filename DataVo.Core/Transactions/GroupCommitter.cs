@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.Transactions;
 
@@ -40,14 +41,7 @@ internal sealed class GroupCommitter : IAsyncDisposable
 
     public ValueTask CommitAsync(WalFrame frame, CancellationToken cancellationToken = default)
     {
-#if NET6_0_OR_GREATER
-        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
-#else
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(GroupCommitter));
-        }
-#endif
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         if (Volatile.Read(ref _writerException) is Exception writerException)
         {
             frame.Dispose();
@@ -61,12 +55,7 @@ internal sealed class GroupCommitter : IAsyncDisposable
             throw new InvalidOperationException("The WAL group committer is closed.");
         }
 
-        if (!cancellationToken.CanBeCanceled)
-        {
-            return new ValueTask(pending.Task);
-        }
-
-        return new ValueTask(pending.Task.WaitAsync(cancellationToken));
+        return new ValueTask(TaskCancellationWaiter.WaitAsync(pending.Task, cancellationToken));
     }
 
     public async ValueTask DisposeAsync()

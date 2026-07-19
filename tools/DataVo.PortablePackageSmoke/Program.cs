@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using DataVo.Core;
 using DataVo.Core.CompiledQueries;
+using DataVo.Core.Compat;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Indexing.Flat;
 using DataVo.Core.Runtime.Reactive;
@@ -43,6 +44,8 @@ internal static class PortableSmoke
         Require(forbidden.Length == 0,
             "Portable asset exports forbidden System types: "
             + string.Join(", ", forbidden.Select(t => t.FullName)));
+
+        VerifyPortableCompatibilitySeams();
 
         DataVoDate expectedDate = DataVoDate.FromDateTime(new DateTime(2026, 7, 19));
         CellValue dateCell = CellValue.From(expectedDate);
@@ -92,6 +95,102 @@ internal static class PortableSmoke
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");
         return 0;
+    }
+
+    private static void VerifyPortableCompatibilitySeams()
+    {
+        VerifyPortableGuards();
+        VerifyPortableCancellationWaiter();
+        VerifyPortableMonotonicClock();
+        VerifyPortablePriorityQueue();
+    }
+
+    private static void VerifyPortableGuards()
+    {
+        object? value = null;
+        ArgumentNullException nullError = Expect<ArgumentNullException>(
+            () => ThrowHelper.ThrowIfNull(value),
+            "Portable ThrowIfNull accepted null.");
+        Require(nullError.ParamName == nameof(value),
+            $"Portable ThrowIfNull caller name was '{nullError.ParamName}'.");
+
+        string? path = null;
+        ArgumentNullException nullWhitespaceError = Expect<ArgumentNullException>(
+            () => ThrowHelper.ThrowIfNullOrWhiteSpace(path),
+            "Portable ThrowIfNullOrWhiteSpace accepted null.");
+        Require(nullWhitespaceError.ParamName == nameof(path),
+            $"Portable null/whitespace guard caller name was '{nullWhitespaceError.ParamName}'.");
+
+        string whitespace = " \t";
+        ArgumentException whitespaceError = Expect<ArgumentException>(
+            () => ThrowHelper.ThrowIfNullOrWhiteSpace(whitespace),
+            "Portable ThrowIfNullOrWhiteSpace accepted whitespace.");
+        Require(whitespaceError.GetType() == typeof(ArgumentException),
+            $"Portable whitespace guard threw '{whitespaceError.GetType().FullName}'.");
+        Require(whitespaceError.ParamName == nameof(whitespace),
+            $"Portable whitespace guard caller name was '{whitespaceError.ParamName}'.");
+
+        long rowId = -4_294_967_296L;
+        ArgumentOutOfRangeException negativeError = Expect<ArgumentOutOfRangeException>(
+            () => ThrowHelper.ThrowIfNegative(rowId),
+            "Portable ThrowIfNegative accepted a negative value.");
+        Require(negativeError.ParamName == nameof(rowId),
+            $"Portable negative guard caller name was '{negativeError.ParamName}'.");
+        Require(negativeError.ActualValue is long actual && actual == rowId,
+            $"Portable negative guard actual value was '{negativeError.ActualValue}'.");
+
+        var marker = new PortableDisposedMarker();
+        ObjectDisposedException disposedError = Expect<ObjectDisposedException>(
+            () => ThrowHelper.ThrowIfDisposed(true, marker),
+            "Portable disposed guard accepted a disposed instance.");
+        Require(disposedError.ObjectName == typeof(PortableDisposedMarker).FullName,
+            $"Portable disposed guard object name was '{disposedError.ObjectName}'.");
+    }
+
+    private static void VerifyPortableCancellationWaiter()
+    {
+        TaskCancellationWaiter.WaitAsync(Task.CompletedTask, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
+        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        Task wait = TaskCancellationWaiter.WaitAsync(completion.Task, cancellation.Token);
+        cancellation.Cancel();
+
+        OperationCanceledException cancellationError = Expect<OperationCanceledException>(
+            () => wait.GetAwaiter().GetResult(),
+            "Portable cancellation waiter ignored cancellation.");
+        Require(cancellationError.CancellationToken == cancellation.Token,
+            "Portable cancellation waiter did not preserve the cancellation token.");
+        Require(!completion.Task.IsCompleted,
+            "Portable cancellation waiter completed the underlying task.");
+
+        completion.SetResult(null);
+        completion.Task.GetAwaiter().GetResult();
+    }
+
+    private static void VerifyPortableMonotonicClock()
+    {
+        long before = MonotonicClock.GetMilliseconds();
+        Thread.Sleep(2);
+        long after = MonotonicClock.GetMilliseconds();
+        Require(after >= before,
+            $"Portable monotonic clock moved backward ({before} -> {after}).");
+    }
+
+    private static void VerifyPortablePriorityQueue()
+    {
+        var queue = new DataVoPriorityQueue<string, int>();
+        queue.Enqueue("later", 20);
+        queue.Enqueue("first", 10);
+
+        Require(queue.TryPeek(out string? peeked, out int priority)
+                && peeked == "first"
+                && priority == 10,
+            "Portable priority queue returned the wrong minimum.");
+        Require(queue.Dequeue() == "first" && queue.Dequeue() == "later" && queue.Count == 0,
+            "Portable priority queue dequeued elements out of order.");
     }
 
     private static void VerifyPortableHotPathFallbacks()
@@ -175,8 +274,27 @@ internal static class PortableSmoke
         Environment.GetEnvironmentVariable(name)
         ?? throw new InvalidOperationException($"Required environment variable {name} is not set.");
 
+    private static TException Expect<TException>(Action action, string noExceptionMessage)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException error)
+        {
+            return error;
+        }
+
+        throw new InvalidOperationException(noExceptionMessage);
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private sealed class PortableDisposedMarker
+    {
     }
 }

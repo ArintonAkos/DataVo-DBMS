@@ -57,7 +57,7 @@ public enum IndexPersistenceMode
 /// IndexManager itself, following the Open/Closed principle.
 /// </para>
 /// </remarks>
-public class IndexManager : IDisposable
+public partial class IndexManager : IDisposable
 {
     private static readonly HashSet<string> KnownVectorTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -127,7 +127,6 @@ public class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<long>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
 
-    private readonly object _lock = new();
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
 

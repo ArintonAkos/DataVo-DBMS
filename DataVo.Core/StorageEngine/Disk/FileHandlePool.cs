@@ -33,7 +33,7 @@ internal sealed class FileHandlePool : IDisposable
             if (_entries.TryGetValue(normalizedPath, out Entry? existing))
             {
                 existing.RefCount++;
-                existing.LastUsedTicks = EnvironmentCompat.TickCount64;
+                existing.LastUsedTicks = MonotonicClock.GetMilliseconds();
                 return new FileHandleLease(this, normalizedPath, existing.Handle);
             }
 
@@ -62,7 +62,7 @@ internal sealed class FileHandlePool : IDisposable
 #endif
             {
                 RefCount = 1,
-                LastUsedTicks = EnvironmentCompat.TickCount64
+                LastUsedTicks = MonotonicClock.GetMilliseconds()
             };
             _entries.Add(normalizedPath, entry);
 
@@ -159,7 +159,7 @@ internal sealed class FileHandlePool : IDisposable
             }
 
             entry.RefCount--;
-            entry.LastUsedTicks = EnvironmentCompat.TickCount64;
+            entry.LastUsedTicks = MonotonicClock.GetMilliseconds();
 
             if (entry.RefCount == 0 && entry.RemoveWhenIdle)
             {

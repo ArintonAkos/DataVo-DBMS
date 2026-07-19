@@ -140,10 +140,8 @@ internal sealed class LsmLatestRowStore
 
     private byte[]?[] EnsurePage(long rowId)
     {
-        if (rowId < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(rowId), rowId, "Value cannot be negative.");
-        }
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNegative(rowId);
+
         long pageIndex = rowId >> PageShift;
         if (pageIndex > int.MaxValue)
         {

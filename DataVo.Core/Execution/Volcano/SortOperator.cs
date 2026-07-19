@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DataVo.Core.Compat;
 using DataVo.Core.Serialization;
 using DataVo.Core.Utils;
 
@@ -82,7 +83,7 @@ public sealed class SortOperator : IQueryOperator
     private List<ExecutionRow> _sortedRows = [];
     private List<string> _spillRunFiles = [];
     private bool _usingExternalSpill;
-    private PriorityQueue<RunCursor, SortPriority>? _mergeQueue;
+    private DataVoPriorityQueue<RunCursor, SortPriority>? _mergeQueue;
     private int _index;
 
     /// <summary>
@@ -307,7 +308,7 @@ public sealed class SortOperator : IQueryOperator
 
     private void OpenSpillMergeQueue()
     {
-        _mergeQueue = new PriorityQueue<RunCursor, SortPriority>(new SortPriorityComparer(_sortKeys));
+        _mergeQueue = new DataVoPriorityQueue<RunCursor, SortPriority>(new SortPriorityComparer(_sortKeys));
 
         foreach (string runFile in _spillRunFiles)
         {

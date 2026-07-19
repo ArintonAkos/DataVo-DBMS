@@ -11,6 +11,14 @@ namespace System.Runtime.CompilerServices
     [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false, Inherited = false)]
     internal sealed class SetsRequiredMembersAttribute : Attribute;
 
+    [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+    internal sealed class CallerArgumentExpressionAttribute : Attribute
+    {
+        public CallerArgumentExpressionAttribute(string parameterName) => ParameterName = parameterName;
+
+        public string ParameterName { get; }
+    }
+
     [AttributeUsage(AttributeTargets.All, AllowMultiple = true, Inherited = false)]
     internal sealed class CompilerFeatureRequiredAttribute : Attribute
     {

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.StorageEngine.Lsm;
 
@@ -171,7 +172,7 @@ public sealed class LsmCompactor
         IReadOnlyList<LsmSstableHandle> handles,
         bool dropTombstonesAtBottomLevel)
     {
-        var queue = new PriorityQueue<SstableCursor, SstableCursorPriority>(SstableCursorPriorityComparer.Instance);
+        var queue = new DataVoPriorityQueue<SstableCursor, SstableCursorPriority>(SstableCursorPriorityComparer.Instance);
         for (int i = 0; i < files.Count; i++)
         {
             LsmTableFileMetadata file = files[i];

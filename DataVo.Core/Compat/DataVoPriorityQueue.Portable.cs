@@ -1,17 +1,17 @@
 #if NETSTANDARD2_1
-namespace System.Collections.Generic;
+namespace DataVo.Core.Compat;
 
-internal sealed class PriorityQueue<TElement, TPriority>
+internal sealed class DataVoPriorityQueue<TElement, TPriority>
 {
     private readonly List<(TElement Element, TPriority Priority)> _items = [];
     private readonly IComparer<TPriority> _comparer;
 
-    public PriorityQueue()
+    public DataVoPriorityQueue()
         : this(null)
     {
     }
 
-    public PriorityQueue(IComparer<TPriority>? comparer)
+    public DataVoPriorityQueue(IComparer<TPriority>? comparer)
     {
         _comparer = comparer ?? Comparer<TPriority>.Default;
     }

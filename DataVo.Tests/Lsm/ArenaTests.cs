@@ -114,7 +114,8 @@ public class ArenaTests
     {
         var arena = new Arena(slabSize: 64);
         arena.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => arena.Allocate(8));
+        ObjectDisposedException error = Assert.Throws<ObjectDisposedException>(() => arena.Allocate(8));
+        Assert.Equal(typeof(Arena).FullName, error.ObjectName);
     }
 
     [Fact]
