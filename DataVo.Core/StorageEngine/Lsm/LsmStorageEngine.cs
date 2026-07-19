@@ -3,8 +3,10 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Threading;
 using DataVo.Core.CompiledQueries;
+using DataVo.Core.Compat;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Core.StorageEngine.Lsm;
@@ -29,7 +31,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         string storageDirectory,
         LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync)
     {
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
+        PortableStoragePolicy.ThrowIfUnsupported(StorageMode.Lsm);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;
         Directory.CreateDirectory(_storageDirectory);

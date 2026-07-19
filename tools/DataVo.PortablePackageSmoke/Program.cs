@@ -12,6 +12,8 @@ using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.StorageEngine.Disk;
+using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.Transactions;
 
 internal static class Program
@@ -51,6 +53,7 @@ internal static class PortableSmoke
         string testRoot = RequiredEnvironment("DATAVO_PORTABLE_TEST_ROOT");
         VerifyPortableCompatibilitySeams();
         VerifyPortableDurableSecondFences(core, testRoot);
+        VerifyPublicDurableEngineFences(testRoot);
 
         DataVoDate expectedDate = DataVoDate.FromDateTime(new DateTime(2026, 7, 19));
         CellValue dateCell = CellValue.From(expectedDate);
@@ -100,6 +103,41 @@ internal static class PortableSmoke
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");
         return 0;
+    }
+
+    private static void VerifyPublicDurableEngineFences(string testRoot)
+    {
+        ExpectPublicEngineRejection(
+            Path.Combine(testRoot, "direct-disk"),
+            path => new DiskStorageEngine(path),
+            nameof(DiskStorageEngine));
+        ExpectPublicEngineRejection(
+            Path.Combine(testRoot, "direct-lsm"),
+            path => new LsmStorageEngine(path),
+            nameof(LsmStorageEngine));
+    }
+
+    private static void ExpectPublicEngineRejection(
+        string path,
+        Func<string, IDisposable> create,
+        string engineName)
+    {
+        Require(!Directory.Exists(path), $"{engineName} test directory already exists.");
+
+        try
+        {
+            using IDisposable engine = create(path);
+            throw new InvalidOperationException($"{engineName} unexpectedly constructed on the portable target.");
+        }
+        catch (PlatformNotSupportedException error)
+        {
+            Require(error.Message.Contains("netstandard2.1", StringComparison.Ordinal),
+                $"{engineName} rejection did not identify the portable target.");
+            Require(error.Message.Contains(nameof(StorageMode.InMemory), StringComparison.Ordinal),
+                $"{engineName} rejection did not identify the supported storage mode.");
+        }
+
+        Require(!Directory.Exists(path), $"{engineName} created its storage directory before rejecting the portable target.");
     }
 
     private static void VerifyPortableCompatibilitySeams()
