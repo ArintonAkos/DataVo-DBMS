@@ -118,6 +118,30 @@ public sealed class FileHandlePoolTests
         }
     }
 
+    [Fact]
+    public void FlushToDisk_PersistsRandomAccessWrite()
+    {
+        string root = CreateTempDirectory();
+        string path = Path.Combine(root, "table.dat");
+        byte[] payload = [0x10, 0x20, 0x30, 0x40];
+
+        try
+        {
+            using var pool = new FileHandlePool(capacity: 8);
+            using (FileHandlePool.FileHandleLease lease = pool.Acquire(path))
+            {
+                RandomAccess.Write(lease.Handle, payload, fileOffset: 0);
+                pool.FlushToDisk();
+            }
+
+            Assert.Equal(payload, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         string root = Path.Combine(Path.GetTempPath(), $"datavo_file_handle_pool_{Guid.NewGuid():N}");

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
+using Microsoft.Win32.SafeHandles;
 using DataVo.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Compat;
@@ -45,7 +46,9 @@ internal static class PortableSmoke
             "Portable asset exports forbidden System types: "
             + string.Join(", ", forbidden.Select(t => t.FullName)));
 
+        string testRoot = RequiredEnvironment("DATAVO_PORTABLE_TEST_ROOT");
         VerifyPortableCompatibilitySeams();
+        VerifyPortableDurableSecondFences(core, testRoot);
 
         DataVoDate expectedDate = DataVoDate.FromDateTime(new DateTime(2026, 7, 19));
         CellValue dateCell = CellValue.From(expectedDate);
@@ -89,7 +92,6 @@ internal static class PortableSmoke
         Require(flat.SearchTopK([0.9f, 0.1f], 1).SequenceEqual([101L]),
             "Flat vector lookup returned the wrong nearest row.");
 
-        string testRoot = RequiredEnvironment("DATAVO_PORTABLE_TEST_ROOT");
         ExpectDurableRejection(StorageMode.Disk, Path.Combine(testRoot, "disk"));
         ExpectDurableRejection(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
 
@@ -191,6 +193,186 @@ internal static class PortableSmoke
             "Portable priority queue returned the wrong minimum.");
         Require(queue.Dequeue() == "first" && queue.Dequeue() == "later" && queue.Count == 0,
             "Portable priority queue dequeued elements out of order.");
+    }
+
+    private static void VerifyPortableDurableSecondFences(Assembly core, string testRoot)
+    {
+        var failures = new List<string>();
+        RunFenceProbe("random access", () => VerifyPortableRandomAccessFence(core), failures);
+        RunFenceProbe("file-handle acquisition", () => VerifyPortableFileHandlePoolFence(core, testRoot), failures);
+        RunFenceProbe("LSM publication", () => VerifyPortableLsmPublicationFence(core, testRoot), failures);
+
+        Require(
+            failures.Count == 0,
+            "Portable durable second-fence failures:\n- " + string.Join("\n- ", failures));
+    }
+
+    private static void VerifyPortableRandomAccessFence(Assembly core)
+    {
+        Type facade = RequireInternalType(core, "DataVo.Core.Compat.RandomAccessCompat");
+        PortableGetLength getLength = RequireDelegate<PortableGetLength>(facade, "GetLength");
+        PortableWrite write = RequireDelegate<PortableWrite>(facade, "Write");
+        PortableRead read = RequireDelegate<PortableRead>(facade, "Read");
+        PortableSetLength setLength = RequireDelegate<PortableSetLength>(facade, "SetLength");
+        PortableFlushToDisk flushToDisk = RequireDelegate<PortableFlushToDisk>(facade, "FlushToDisk");
+        byte[] empty = [];
+
+        var probes = new (string Name, Action Invoke)[]
+        {
+            ("GetLength", () => getLength(null!)),
+            ("Write", () => write(null!, empty, 0)),
+            ("Read", () => read(null!, empty, 0)),
+            ("SetLength", () => setLength(null!, 0)),
+            ("FlushToDisk", () => flushToDisk(null!))
+        };
+
+        foreach ((string name, Action invoke) in probes)
+        {
+            PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
+                invoke,
+                $"Portable random-access {name} accepted a null handle instead of rejecting durable I/O.");
+            RequirePortableFenceMessage(error, $"random-access {name}");
+        }
+    }
+
+    private static void VerifyPortableFileHandlePoolFence(Assembly core, string testRoot)
+    {
+        string directory = Path.Combine(testRoot, "file-handle-second-fence");
+        string path = Path.Combine(directory, "table.dat");
+        Require(!Directory.Exists(directory), $"Portable handle-pool probe path already exists: {directory}");
+
+        Type poolType = RequireInternalType(core, "DataVo.Core.StorageEngine.Disk.FileHandlePool");
+        object pool = Activator.CreateInstance(
+            poolType,
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null,
+            args: [8],
+            culture: null)
+            ?? throw new InvalidOperationException("Could not construct the portable file-handle pool probe.");
+
+        try
+        {
+            MethodInfo acquire = RequireMethod(poolType, "Acquire", BindingFlags.Public | BindingFlags.Instance);
+            PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
+                () => acquire.Invoke(pool, [path]),
+                "Portable file-handle acquisition unexpectedly succeeded.");
+            RequirePortableFenceMessage(error, "file-handle acquisition");
+        }
+        finally
+        {
+            ((IDisposable)pool).Dispose();
+        }
+
+        Require(!Directory.Exists(directory),
+            $"Portable file-handle rejection created directory '{directory}'.");
+        Require(!File.Exists(path),
+            $"Portable file-handle rejection created file '{path}'.");
+    }
+
+    private static void VerifyPortableLsmPublicationFence(Assembly core, string testRoot)
+    {
+        string directory = Path.Combine(testRoot, "lsm-publication-second-fence");
+        string path = Path.Combine(directory, "table.sst");
+        Require(!Directory.Exists(directory), $"Portable LSM probe path already exists: {directory}");
+
+        Type operations = RequireInternalType(core, "DataVo.Core.StorageEngine.Lsm.LsmDurableFileOperations");
+        Type crashPointType = RequireInternalType(core, "DataVo.Core.StorageEngine.Lsm.LsmCrashPoint");
+        MethodInfo publish = RequireMethod(operations, "WriteFileAtomically", BindingFlags.Public | BindingFlags.Static);
+        object crashPoint = Enum.ToObject(crashPointType, 0);
+        bool writeInvoked = false;
+        bool crashHookInvoked = false;
+        Action<Stream> write = _ => writeInvoked = true;
+        Delegate crashHook = CreateFlaggingAction(crashPointType, () => crashHookInvoked = true);
+
+        PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
+            () => publish.Invoke(null, [path, true, write, crashHook, crashPoint, crashPoint, crashPoint]),
+            "Portable LSM publication unexpectedly succeeded.");
+        RequirePortableFenceMessage(error, "LSM publication");
+
+        Require(!writeInvoked, "Portable LSM rejection invoked the write callback.");
+        Require(!crashHookInvoked, "Portable LSM rejection invoked the crash callback.");
+        Require(!Directory.Exists(directory),
+            $"Portable LSM rejection created directory '{directory}'.");
+        Require(!File.Exists(path),
+            $"Portable LSM rejection created destination file '{path}'.");
+        Require(
+            !Directory.Exists(directory)
+            || !Directory.EnumerateFiles(directory, Path.GetFileName(path) + ".tmp-*").Any(),
+            "Portable LSM rejection created a temporary publication file.");
+    }
+
+    private static Delegate CreateFlaggingAction(Type argumentType, Action callback)
+    {
+        MethodInfo factory = typeof(PortableSmoke)
+            .GetMethod(nameof(CreateFlaggingActionCore), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(argumentType);
+        return (Delegate)factory.Invoke(null, [callback])!;
+    }
+
+    private static Delegate CreateFlaggingActionCore<T>(Action callback) =>
+        (Action<T>)(_ => callback());
+
+    private static Type RequireInternalType(Assembly assembly, string fullName) =>
+        assembly.GetType(fullName, throwOnError: false)
+        ?? throw new InvalidOperationException($"Portable assembly is missing internal type '{fullName}'.");
+
+    private static MethodInfo RequireMethod(Type type, string name, BindingFlags flags) =>
+        type.GetMethod(name, flags)
+        ?? throw new InvalidOperationException($"Portable type '{type.FullName}' is missing method '{name}'.");
+
+    private static TDelegate RequireDelegate<TDelegate>(Type type, string name)
+        where TDelegate : Delegate =>
+        (TDelegate)RequireMethod(type, name, BindingFlags.Public | BindingFlags.Static)
+            .CreateDelegate(typeof(TDelegate));
+
+    private static PlatformNotSupportedException ExpectReflectionPlatformNotSupported(
+        Action action,
+        string noExceptionMessage)
+    {
+        try
+        {
+            action();
+        }
+        catch (TargetInvocationException error) when (error.InnerException is PlatformNotSupportedException unsupported)
+        {
+            return unsupported;
+        }
+        catch (PlatformNotSupportedException unsupported)
+        {
+            return unsupported;
+        }
+        catch (Exception error)
+        {
+            Exception actual = error is TargetInvocationException invocation
+                && invocation.InnerException is Exception inner
+                ? inner
+                : error;
+            throw new InvalidOperationException(
+                $"{noExceptionMessage} It threw {actual.GetType().FullName} instead.",
+                actual);
+        }
+
+        throw new InvalidOperationException(noExceptionMessage);
+    }
+
+    private static void RequirePortableFenceMessage(PlatformNotSupportedException error, string operation)
+    {
+        Require(error.Message.Contains("netstandard2.1", StringComparison.Ordinal),
+            $"Portable {operation} rejection did not name the experimental target.");
+        Require(error.Message.Contains(nameof(StorageMode.InMemory), StringComparison.Ordinal),
+            $"Portable {operation} rejection did not name the supported storage mode.");
+    }
+
+    private static void RunFenceProbe(string name, Action probe, ICollection<string> failures)
+    {
+        try
+        {
+            probe();
+        }
+        catch (Exception error)
+        {
+            failures.Add($"{name}: {error.Message}");
+        }
     }
 
     private static void VerifyPortableHotPathFallbacks()
@@ -297,4 +479,10 @@ internal static class PortableSmoke
     private sealed class PortableDisposedMarker
     {
     }
+
+    private delegate long PortableGetLength(SafeFileHandle handle);
+    private delegate void PortableWrite(SafeFileHandle handle, ReadOnlySpan<byte> bytes, long fileOffset);
+    private delegate int PortableRead(SafeFileHandle handle, Span<byte> buffer, long fileOffset);
+    private delegate void PortableSetLength(SafeFileHandle handle, long length);
+    private delegate void PortableFlushToDisk(SafeFileHandle handle);
 }
