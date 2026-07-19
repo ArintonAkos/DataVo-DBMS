@@ -8,6 +8,40 @@ namespace DataVo.Tests.E2E;
 public class AuthorizationTests
 {
     [Fact]
+    public void Authorization_PersistedPasswordVectorAuthenticatesAdminWithAllPermissions()
+    {
+        var config = new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory,
+            EnableAuthorization = true,
+            AllowAnonymousSession = false,
+            AuthorizationUsers =
+            [
+                new DataVoAuthUser
+                {
+                    Username = "admin",
+                    PasswordHash = "rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=",
+                    PasswordSalt = "AAECAwQFBgcICQoLDA0ODw==",
+                    Role = DatabaseRole.Admin
+                }
+            ]
+        };
+
+        using var context = new DataVoContext(config);
+
+        Assert.False(context.Login("admin", "wrong-password"));
+        Assert.True(context.Login("admin", "DataVo-stage2b!"));
+        SessionPrincipal principal = context.Engine.SessionSecurity.Get(context.SessionId)
+            ?? throw new InvalidOperationException("Expected an authenticated session principal.");
+        Assert.Equal(
+            Enum.GetValues<DatabasePermission>().Order(),
+            principal.EffectivePermissions.Order());
+
+        QueryResult createDatabase = context.Execute($"CREATE DATABASE AuthVector_{Guid.NewGuid():N}").Single();
+        Assert.False(createDatabase.IsError, string.Join(" | ", createDatabase.Messages));
+    }
+
+    [Fact]
     public void Authorization_ReadOnlyAnonymous_CanSelectButCannotInsert()
     {
         var config = new DataVoConfig

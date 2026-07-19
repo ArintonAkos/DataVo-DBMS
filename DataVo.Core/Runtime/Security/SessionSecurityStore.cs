@@ -7,7 +7,7 @@ namespace DataVo.Core.Runtime.Security;
 /// <summary>
 /// Stores and validates session principals for authentication/authorization.
 /// </summary>
-internal sealed class SessionSecurityStore
+internal sealed partial class SessionSecurityStore
 {
     private sealed class AuthUser
     {
@@ -419,12 +419,7 @@ internal sealed class SessionSecurityStore
                 DatabasePermission.WriteData,
                 DatabasePermission.ManageTransactions
             ]);
-            SeedBuiltInRole(DatabaseRole.Admin.ToString(),
-#if NET6_0_OR_GREATER
-                Enum.GetValues<DatabasePermission>());
-#else
-                Enum.GetValues(typeof(DatabasePermission)).Cast<DatabasePermission>());
-#endif
+            SeedBuiltInRole(DatabaseRole.Admin.ToString(), GetDatabasePermissions());
 
             foreach (DataVoAuthUser configUser in config.AuthorizationUsers)
             {

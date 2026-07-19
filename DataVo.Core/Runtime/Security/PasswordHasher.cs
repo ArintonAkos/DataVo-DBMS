@@ -23,15 +23,7 @@ internal static class PasswordHasher
     /// <returns>A tuple containing the derived hash and salt as base64 strings.</returns>
     public static (string Hash, string Salt) HashPassword(string password)
     {
-#if NET6_0_OR_GREATER
-        byte[] salt = RandomNumberGenerator.GetBytes(SaltSizeBytes);
-#else
-        byte[] salt = new byte[SaltSizeBytes];
-        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
-        {
-            rng.GetBytes(salt);
-        }
-#endif
+        byte[] salt = PasswordHashPlatform.GetRandomBytes(SaltSizeBytes);
 
         byte[] hash = DeriveHash(password, salt, HashSizeBytes);
 
@@ -77,20 +69,11 @@ internal static class PasswordHasher
 
     private static byte[] DeriveHash(string? password, byte[] salt, int hashSizeBytes)
     {
-#if NET6_0_OR_GREATER
-        return Rfc2898DeriveBytes.Pbkdf2(
+        return PasswordHashPlatform.DeriveHash(
             password ?? string.Empty,
             salt,
             IterationCount,
             KdfAlgorithm,
             hashSizeBytes);
-#else
-        using var pbkdf2 = new Rfc2898DeriveBytes(
-            password ?? string.Empty,
-            salt,
-            IterationCount,
-            KdfAlgorithm);
-        return pbkdf2.GetBytes(hashSizeBytes);
-#endif
     }
 }

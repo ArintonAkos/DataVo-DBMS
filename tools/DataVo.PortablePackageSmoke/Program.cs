@@ -6,8 +6,10 @@ using DataVo.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Compat;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Indexing;
 using DataVo.Core.Indexing.Flat;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Transactions;
@@ -57,6 +59,7 @@ internal static class PortableSmoke
             "CellValue.ToObject did not materialize DataVoDate.");
 
         VerifyPortableHotPathFallbacks();
+        VerifyPortableLibraryFallbacks();
 
         using (var storage = new StorageContext(new DataVoConfig { StorageMode = StorageMode.InMemory }))
         {
@@ -445,6 +448,137 @@ internal static class PortableSmoke
         Guid expected = new("00112233-4455-6677-8899-aabbccddeeff");
         Require(CellValue.From(expected).AsGuid() == expected,
             "Portable GUID cell extraction changed.");
+    }
+
+    private static void VerifyPortableLibraryFallbacks()
+    {
+        VerifyPortablePasswordAndPermissions();
+        VerifyPortableAggregateMaintenance();
+        VerifyPortableIntegerScanAndTypedBatch();
+        VerifyPortableGuidEquality();
+    }
+
+    private static void VerifyPortablePasswordAndPermissions()
+    {
+        const string password = "DataVo-stage2b!";
+        const string persistedHash = "rb/gy2xJgDHSNv4ThGEcdnh+Dlu8dEVmWN+qVF3It4w=";
+        const string persistedSalt = "AAECAwQFBgcICQoLDA0ODw==";
+
+        Require(PasswordHasher.Verify(password, persistedHash, persistedSalt),
+            "Portable PBKDF2 fallback rejected the fixed modern password vector.");
+        Require(!PasswordHasher.Verify("wrong-password", persistedHash, persistedSalt),
+            "Portable PBKDF2 fallback accepted the wrong password.");
+
+        (string generatedHash, string generatedSalt) = PasswordHasher.HashPassword("portable-generated-password");
+        Require(Convert.FromBase64String(generatedHash).Length == 32,
+            "Portable password hashing changed the derived-key size.");
+        Require(Convert.FromBase64String(generatedSalt).Length == 16,
+            "Portable password hashing changed the salt size.");
+        Require(PasswordHasher.Verify("portable-generated-password", generatedHash, generatedSalt),
+            "Portable password hashing could not verify its generated hash.");
+
+        using var secured = new DataVoContext(new DataVoConfig
+        {
+            StorageMode = StorageMode.InMemory,
+            EnableAuthorization = true,
+            AllowAnonymousSession = false,
+            AuthorizationUsers =
+            [
+                new DataVoAuthUser
+                {
+                    Username = "admin",
+                    PasswordHash = persistedHash,
+                    PasswordSalt = persistedSalt,
+                    Role = DatabaseRole.Admin
+                }
+            ]
+        });
+        Require(secured.Login("admin", password),
+            "Portable session initialization rejected persisted credentials.");
+        SessionPrincipal principal = secured.Engine.SessionSecurity.Get(secured.SessionId)
+            ?? throw new InvalidOperationException("Portable login did not create a session principal.");
+        Require(Enum.GetValues<DatabasePermission>()
+                .All(permission => principal.EffectivePermissions.Contains(permission)),
+            "Portable session initialization omitted an admin permission.");
+        ExecuteOk(secured, "CREATE DATABASE PortableSecurity");
+    }
+
+    private static void VerifyPortableAggregateMaintenance()
+    {
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        ExecuteOk(db, "CREATE DATABASE PortableAggregate");
+        ExecuteOk(db, "USE PortableAggregate");
+        ExecuteOk(db, "CREATE TABLE Sales (Id INT PRIMARY KEY, GroupId INT, Amount INT)");
+
+        QueryChange? change = null;
+        using IDisposable subscription = db.Subscribe(
+            "SELECT GroupId, SUM(Amount) AS Total, COUNT(*) AS Cnt FROM Sales GROUP BY GroupId",
+            value => change = value);
+
+        ExecuteOk(db, "INSERT INTO Sales VALUES (1, 7, 10)");
+        db.DispatchPendingNotifications();
+        change = null;
+
+        db.InsertTyped(
+            "Sales",
+            new ReactiveRowSchema("Id", "GroupId", "Amount"),
+            [CellValue.From(2), CellValue.From(7), CellValue.From(20)]);
+        db.DispatchPendingNotifications();
+
+        Require(change is not null && change.Updated.Count == 1,
+            "Portable aggregate maintenance did not update the existing numeric group.");
+        Require(Convert.ToInt64(change!.Updated[0]["GroupId"]) == 7L
+                && Convert.ToInt64(change.Updated[0]["Total"]) == 30L
+                && Convert.ToInt64(change.Updated[0]["Cnt"]) == 2L,
+            "Portable aggregate maintenance returned the wrong derived row.");
+    }
+
+    private static void VerifyPortableIntegerScanAndTypedBatch()
+    {
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        ExecuteOk(db, "CREATE DATABASE PortableCompiled");
+        ExecuteOk(db, "USE PortableCompiled");
+        ExecuteOk(db, "CREATE TABLE Levels (Id INT PRIMARY KEY, Level INT, Name VARCHAR(20))");
+
+        var schema = new ReactiveRowSchema("Id", "Level", "Name");
+        IReadOnlyList<long> rowIds = db.InsertTypedBatch(
+            "Levels",
+            schema,
+            [
+                [CellValue.From(1), CellValue.From(1), CellValue.From("one")],
+                [CellValue.From(2), CellValue.From(2), CellValue.From("two")],
+                [CellValue.From(3), CellValue.From(1), CellValue.From("three")],
+                [CellValue.From(4), CellValue.From(2), CellValue.From("four")],
+                [CellValue.From(5), CellValue.From(1), CellValue.From("five")]
+            ]);
+        Require(rowIds.SequenceEqual([1L, 2L, 3L, 4L, 5L]),
+            "Portable typed batch insert returned the wrong row ids.");
+
+        var plan = DataVoCompiledQueryPlan.SelectMany(
+            "Levels",
+            ["Id", "Level", "Name"],
+            "Level",
+            "level");
+        DataVoPreparedSelectMany<int> prepared = DataVoCompiledQuery.PrepareSelectManyTyped(
+            db,
+            plan,
+            static row => row.GetInt32("Id"));
+        IReadOnlyList<int> matches = prepared.Execute(1);
+
+        Require(matches.Order().SequenceEqual([1, 3, 5]),
+            "Portable scalar integer scan returned the wrong rows.");
+    }
+
+    private static void VerifyPortableGuidEquality()
+    {
+        Guid value = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
+        Guid different = Guid.Parse("00112233-4455-6677-8899-aabbccddeefe");
+        Require(GuidSimdEqualityComparer.Instance.Equals(value, value),
+            "Portable GUID comparer rejected equal values.");
+        Require(!GuidSimdEqualityComparer.Instance.Equals(value, different),
+            "Portable GUID comparer accepted different values.");
+        Require(GuidSimdEqualityComparer.Instance.GetHashCode(value) == value.GetHashCode(),
+            "Portable GUID comparer changed hash-code behavior.");
     }
 
     private static uint ReferenceCrc32C(ReadOnlySpan<byte> data)

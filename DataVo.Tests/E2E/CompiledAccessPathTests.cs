@@ -321,6 +321,28 @@ public class CompiledAccessPathTests
         Assert.Equal([2, 6, 10, 14, 18, 22], rows.Select(static row => row.Id).Order());
     }
 
+    [Theory]
+    [InlineData(3)]
+    [InlineData(33)]
+    public void PreparedSelectManyTyped_IntegerScanMatchesScalarResultsBelowAndAboveSimdWidth(int rowCount)
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Levels (Id INT PRIMARY KEY, Level INT, Name VARCHAR(50))");
+        for (int i = 1; i <= rowCount; i++)
+        {
+            context.Execute($"INSERT INTO Levels VALUES ({i}, {i % 3}, 'P{i}')");
+        }
+
+        var plan = DataVoCompiledQueryPlan.SelectMany("Levels", ["Id", "Level", "Name"], "Level", "level");
+        DataVoPreparedSelectMany<LevelProjection> prepared =
+            DataVoCompiledQuery.PrepareSelectManyTyped(context, plan, MapLevel);
+
+        IReadOnlyList<LevelProjection> rows = prepared.Execute(1);
+        int[] expected = Enumerable.Range(1, rowCount).Where(static id => id % 3 == 1).ToArray();
+
+        Assert.Equal(expected, rows.Select(static row => row.Id).Order());
+    }
+
     [Fact]
     public void PreparedSelectSingleTyped_UnindexedIntPredicate_ReturnsFirstIntegerScanMatch()
     {

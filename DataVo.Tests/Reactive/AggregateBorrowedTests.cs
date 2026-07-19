@@ -1,3 +1,4 @@
+using System.Globalization;
 using DataVo.Core;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime;
@@ -287,5 +288,45 @@ public class AggregateBorrowedTests
         Assert.Equal("music", d.Category);
         Assert.Equal(30, d.Total);
         Assert.Equal(1, d.Cnt);
+    }
+
+    [Fact]
+    public void AggregateGroupKey_DictionaryAndTypedDecimalRowsMatchUnderNonInvariantCulture()
+    {
+        CultureInfo originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+
+            var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(
+                "SELECT Price, COUNT(*) AS Cnt FROM Orders GROUP BY Price");
+            using DataVoEngine engine = DataVoEngine.Initialize(
+                new DataVoConfig { StorageMode = StorageMode.InMemory });
+            var aggregate = new AggregateReactiveQuery(select, engine, "AggDb");
+            aggregate.Seed("Orders", [(1L, Row(("Price", 12.5m)))]);
+
+            var builder = new QueryChangeBuilder(aggregate.OutputSchema);
+            var schema = new ReactiveRowSchema("Price");
+            var change = new RowChange(
+                "Orders",
+                2,
+                TypedRow.FromOwnedCells(schema, [CellValue.From(12.5m)]));
+
+            aggregate.ApplyInto([change], builder);
+            QueryChangeRef delta = builder.Build();
+
+            Assert.Equal(1, delta.Added.Count);
+            RowRef added = delta.Added[0];
+            Assert.Equal(12.5m, added["Price"].AsDecimal());
+            Assert.Equal(2L, added["Cnt"].AsInt64());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 }

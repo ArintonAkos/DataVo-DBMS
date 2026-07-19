@@ -325,6 +325,37 @@ public class InsertTypedTests
     }
 
     [Fact]
+    public void InsertTypedBatch_IntegerPrimaryKeyResultsMatchDictionaryBulkInsert()
+    {
+        using DataVoContext typed = CreateContext();
+        typed.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        IReadOnlyList<long> typedRowIds = typed.InsertTypedBatch("Players", PlayerSchema,
+        [
+            [CellValue.From(10), CellValue.From("Ada"), CellValue.From(7)],
+            [CellValue.From(20), CellValue.From("Bob"), CellValue.From(3)],
+            [CellValue.From(30), CellValue.From("Cara"), CellValue.From(7)]
+        ]);
+
+        using DataVoContext dictionary = CreateContext();
+        dictionary.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
+        IReadOnlyList<long> dictionaryRowIds = dictionary.BulkInsert("Players",
+        [
+            new Dictionary<string, object?> { ["Id"] = 10, ["Name"] = "Ada", ["Level"] = 7 },
+            new Dictionary<string, object?> { ["Id"] = 20, ["Name"] = "Bob", ["Level"] = 3 },
+            new Dictionary<string, object?> { ["Id"] = 30, ["Name"] = "Cara", ["Level"] = 7 }
+        ]);
+
+        Assert.Equal(dictionaryRowIds, typedRowIds);
+        var dictionaryRows = Select(dictionary, "SELECT Id, Name, Level FROM Players")
+            .Select(static row => (Id: Convert.ToInt32(row["Id"]), Name: row["Name"]?.ToString(), Level: Convert.ToInt32(row["Level"])))
+            .OrderBy(static row => row.Id);
+        var typedRows = Select(typed, "SELECT Id, Name, Level FROM Players")
+            .Select(static row => (Id: Convert.ToInt32(row["Id"]), Name: row["Name"]?.ToString(), Level: Convert.ToInt32(row["Level"])))
+            .OrderBy(static row => row.Id);
+        Assert.Equal(dictionaryRows, typedRows);
+    }
+
+    [Fact]
     public void InsertTypedBatch_RejectsDuplicatePrimaryKeyFromEarlierBatch()
     {
         using DataVoContext ctx = CreateContext();

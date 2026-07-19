@@ -14,7 +14,7 @@ using PolyIndexManager = DataVo.Core.Indexing.IndexManager;
 
 namespace DataVo.Core.Parser.DML;
 
-internal sealed class InsertRowService(
+internal sealed partial class InsertRowService(
     DataVoEngine engine,
     StorageContext context,
     EngineCatalog catalog,
@@ -1363,15 +1363,6 @@ internal sealed class InsertRowService(
             indexes.InsertManyIntoIndex(entries, indexName, tableName, databaseName);
         }
     }
-
-    private static ReadOnlySpan<long> AsRowIdSpan(IReadOnlyList<long> rowIds) => rowIds switch
-    {
-#if NET6_0_OR_GREATER
-        List<long> list => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list),
-#endif
-        long[] array => array,
-        _ => rowIds.ToArray(),
-    };
 
     private static bool TryBuildIntegerIndexEntries(
         ReactiveRowSchema schema,

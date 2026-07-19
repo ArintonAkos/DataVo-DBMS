@@ -17,7 +17,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// next extreme surfaces after the current one is deleted. An optional pre-aggregation <c>WHERE</c>
 /// is applied first: a row only contributes to its group while it matches.
 /// </remarks>
-internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
+internal sealed partial class AggregateReactiveQuery : IBorrowedReactiveQuery
 {
     private enum AggregateFunction
     {
@@ -586,61 +586,6 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         pos += text.Length;
     }
 
-    private void AppendValue(ref int pos, object value)
-    {
-        switch (value)
-        {
-            case string s:
-                AppendChars(ref pos, s);
-                return;
-
-            // bool is not ISpanFormattable; render exactly as the legacy Convert.ToString did.
-            case bool b:
-                AppendChars(ref pos, b ? "True" : "False");
-                return;
-
-#if NET6_0_OR_GREATER
-            case ISpanFormattable formattable:
-            {
-                int written;
-                while (!formattable.TryFormat(_keyBuffer.AsSpan(pos), out written, default, CultureInfo.InvariantCulture))
-                {
-                    EnsureKeyCapacity(Math.Max(_keyBuffer.Length * 2, pos + 64));
-                }
-
-                pos += written;
-                return;
-            }
-#else
-            case IFormattable formattable:
-                AppendChars(ref pos, formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty);
-                return;
-#endif
-
-            // Exotic types (rare): fall back to the legacy rendering. Allocates, but off the common path.
-            default:
-                AppendChars(ref pos, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
-                return;
-        }
-    }
-
-    private bool TryGetGroup(ReadOnlySpan<char> keySpan, out string? key, out GroupState? state)
-    {
-#if NET9_0_OR_GREATER
-        return _groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out key, out state);
-#else
-        key = new string(keySpan);
-        if (_groups.TryGetValue(key, out GroupState? found))
-        {
-            state = found;
-            return true;
-        }
-
-        state = null;
-        return false;
-#endif
-    }
-
     private void AppendValue(ref int pos, CellValue value)
     {
         switch (value.Type)
@@ -693,26 +638,6 @@ internal sealed class AggregateReactiveQuery : IBorrowedReactiveQuery
         }
 
         pos += written;
-    }
-
-    private void AppendFormattable<T>(ref int pos, T value)
-#if NET6_0_OR_GREATER
-        where T : ISpanFormattable
-#else
-        where T : IFormattable
-#endif
-    {
-#if NET6_0_OR_GREATER
-        int written;
-        while (!value.TryFormat(_keyBuffer.AsSpan(pos), out written, default, CultureInfo.InvariantCulture))
-        {
-            EnsureKeyCapacity(Math.Max(_keyBuffer.Length * 2, pos + 64));
-        }
-
-        pos += written;
-#else
-        AppendChars(ref pos, value.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty);
-#endif
     }
 
     private void EnsureKeyCapacity(int min)

@@ -1,7 +1,6 @@
-using System.Runtime.InteropServices;
 #if NET10_0_OR_GREATER
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-#endif
 
 namespace DataVo.Core.Indexing;
 
@@ -15,7 +14,6 @@ internal sealed class GuidSimdEqualityComparer : IEqualityComparer<Guid>
 
     public bool Equals(Guid x, Guid y)
     {
-#if NET10_0_OR_GREATER
         if (!Vector128.IsHardwareAccelerated)
         {
             return x.Equals(y);
@@ -31,10 +29,8 @@ internal sealed class GuidSimdEqualityComparer : IEqualityComparer<Guid>
         Vector128<byte> equalBytes = Vector128.Equals(left, right);
 
         return Vector128.EqualsAll(equalBytes, Vector128<byte>.AllBitsSet);
-#else
-        return x.Equals(y);
-#endif
     }
 
     public int GetHashCode(Guid obj) => obj.GetHashCode();
 }
+#endif
