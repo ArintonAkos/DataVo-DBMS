@@ -32,35 +32,19 @@
 - Modify: `DataVo.Tests/Storage/IndexKeyEncoderTypedTests.cs`
 - Create: `DataVo.Tests/Performance/ScalarKeyFormattingAllocationTests.cs`
 - Modify: `DataVo.Tests/Reactive/CellValueGuidTests.cs`
-- Create: `DataVo.Tests/Compat/ThrowHelperTests.cs`
-- Modify: `DataVo.Tests/Lsm/ArenaTests.cs`
 
 - [ ] Add CRC32C parity cases for lengths `0, 1, 2, 3, 4, 7, 8, 9, 31, 32, 33`, plus a seeded large payload. Compute expected values with a test-local Castagnoli reference loop so the production implementation is not its own oracle.
 - [ ] Add scalar-key culture/parity tests for `int`, `long`, `double`, `float`, and `decimal`. Pin the intentional providers: index-key floating values use current culture; compiled comparison keys are invariant. Restore the culture in `finally`.
 - [ ] Add warmed allocation tests that keep outputs live and distinguish the output string allocation from numeric boxing. Cover direct typed overloads; do not use the object overload to judge unavoidable caller boxing.
 - [ ] Add deterministic and seeded GUID round trips, then measure 10,000 warmed `CellValue.AsGuid()` calls and require exactly zero bytes allocated.
-- [ ] Assert guard caller names, null-versus-empty/whitespace exception types, negative actual values, and disposed `ObjectName == typeof(Arena).FullName`.
 - [ ] Run:
 
 ```bash
 dotnet test DataVo.Tests/DataVo.Tests.csproj -c Release \
-  --filter "FullyQualifiedName~WalAppenderTests|FullyQualifiedName~IndexKeyEncoderTypedTests|FullyQualifiedName~ScalarKeyFormattingAllocationTests|FullyQualifiedName~CellValueGuidTests|FullyQualifiedName~ThrowHelperTests|FullyQualifiedName~ArenaTests"
+  --filter "FullyQualifiedName~WalAppenderTests|FullyQualifiedName~IndexKeyEncoderTypedTests|FullyQualifiedName~ScalarKeyFormattingAllocationTests|FullyQualifiedName~CellValueGuidTests"
 ```
 
-Expected RED at `f43632c`: scalar boxing/allocation, GUID allocation, missing guard caller names, incorrect null/whitespace distinction, and short disposed object names. CRC correctness remains green and characterizes the implementation before its performance restoration.
-
-- [ ] Commit only the regression tests:
-
-```bash
-git add \
-  DataVo.Tests/Transactions/WalAppenderTests.cs \
-  DataVo.Tests/Storage/IndexKeyEncoderTypedTests.cs \
-  DataVo.Tests/Performance/ScalarKeyFormattingAllocationTests.cs \
-  DataVo.Tests/Reactive/CellValueGuidTests.cs \
-  DataVo.Tests/Compat/ThrowHelperTests.cs \
-  DataVo.Tests/Lsm/ArenaTests.cs
-git commit -m "test: lock modern compatibility regressions"
-```
+Expected RED at `f43632c`: scalar boxing/allocation and GUID allocation. CRC correctness remains green and characterizes the implementation before its performance restoration. Record the exact failures in the task report, but do not commit a deliberately red tree; Task 2 commits these tests with their production fixes.
 
 ---
 
@@ -78,10 +62,13 @@ git commit -m "test: lock modern compatibility regressions"
 - Modify: `DataVo.Core/Runtime/Reactive/CellValue.cs`
 - Create: `DataVo.Core/Runtime/Reactive/CellValue.DecimalBits.Modern.cs`
 - Create: `DataVo.Core/Runtime/Reactive/CellValue.DecimalBits.Portable.cs`
+- Modify: `DataVo.Core/Properties/AssemblyInfo.cs`
+- Modify: `tools/DataVo.PortablePackageSmoke/Program.cs`
 
 - [ ] Move `WalCrc32C` out of `WalAppender.cs`. The modern file restores the baseline 8/4/2/1-byte `BitOperations.Crc32C` implementation; the portable file owns the current polynomial loop. Keep checksum output byte-identical.
 - [ ] Add typed `ScalarKeyFormatter.FormatBracketed` overloads. Modern implementations use `string.Create(provider, $"[{value}]")`; portable implementations use `string.Format`. Route both key builders through the seam without changing their culture rules.
 - [ ] Move `Int64BitsFromDecimal` to complete `CellValue` partial files. Modern uses `stackalloc int[4]` and `decimal.GetBits(value, span)`; portable retains the array overload.
+- [ ] Grant only the tracked exact-package smoke assembly internal visibility. In that smoke, execute portable CRC boundary cases, scalar formatting parity, and GUID round trips against the exact extracted `netstandard2.1` assembly.
 - [ ] Run the Task 1 tests and both target builds:
 
 ```bash
@@ -90,6 +77,7 @@ dotnet test DataVo.Tests/DataVo.Tests.csproj -c Release \
 dotnet build DataVo.Core/DataVo.Core.csproj -c Release -f net10.0
 dotnet build DataVo.Core/DataVo.Core.csproj -c Release -f netstandard2.1 \
   -p:DataVoEnablePortableTarget=true
+bash scripts/verify-portable-candidate.sh
 ```
 
 - [ ] Commit:
@@ -105,7 +93,13 @@ git add \
   DataVo.Core/CompiledQueries/DataVoCompiledQuery.cs \
   DataVo.Core/Runtime/Reactive/CellValue.cs \
   DataVo.Core/Runtime/Reactive/CellValue.DecimalBits.Modern.cs \
-  DataVo.Core/Runtime/Reactive/CellValue.DecimalBits.Portable.cs
+  DataVo.Core/Runtime/Reactive/CellValue.DecimalBits.Portable.cs \
+  DataVo.Core/Properties/AssemblyInfo.cs \
+  tools/DataVo.PortablePackageSmoke/Program.cs \
+  DataVo.Tests/Transactions/WalAppenderTests.cs \
+  DataVo.Tests/Storage/IndexKeyEncoderTypedTests.cs \
+  DataVo.Tests/Performance/ScalarKeyFormattingAllocationTests.cs \
+  DataVo.Tests/Reactive/CellValueGuidTests.cs
 git commit -m "perf: restore modern scalar and WAL hot paths"
 ```
 
@@ -139,14 +133,20 @@ git commit -m "perf: restore modern scalar and WAL hot paths"
 - Modify: `DataVo.Core/StorageEngine/Lsm/LsmLatestRowStore.cs`
 - Create: `DataVo.Tests/Compat/TaskCancellationWaiterTests.cs`
 - Create: `DataVo.Tests/Compat/DataVoPriorityQueueTests.cs`
+- Create: `DataVo.Tests/Compat/ThrowHelperTests.cs`
+- Modify: `DataVo.Tests/Lsm/ArenaTests.cs`
+- Modify: `tools/DataVo.PortablePackageSmoke/Program.cs`
 
+- [ ] Before production edits, add and run guard tests that assert caller names, null-versus-empty/whitespace exception types, negative actual values, and `ObjectDisposedException.ObjectName == typeof(Arena).FullName`. Confirm the expected failures at `f43632c`.
 - [ ] Modern guard wrappers forward to BCL guards and use `[CallerArgumentExpression]`; portable wrappers reproduce the same exception types, parameter names, actual values, and full disposed type name. Add only an internal `CallerArgumentExpressionAttribute` compiler shim for `netstandard2.1`.
 - [ ] Replace the `System.Threading.Tasks` extension shim with a DataVo-owned waiter. Modern calls `Task.WaitAsync`; portable uses `Task.WhenAny` and cancellation registration. Route `GroupCommitter` through it and remove the method-level target branch.
 - [ ] Replace `EnvironmentCompat` with a monotonic-millisecond seam. Modern uses `Environment.TickCount64`; portable uses `Stopwatch.GetTimestamp()` conversion. Update query telemetry and file-handle LRU callers.
 - [ ] Replace the BCL-namespace priority queue with `DataVoPriorityQueue<TElement, TPriority>` in `DataVo.Core.Compat`. Modern delegates to the BCL queue; portable owns the heap. Change only queue type names in HNSW, sort, and LSM code.
 - [ ] Make `IndexManager` partial and put its `_lock` field in target files: `System.Threading.Lock` on modern .NET and `object` on portable.
 - [ ] Route the existing negative row-id validation through the caller-preserving guard.
+- [ ] Exercise the portable guard, cancellation waiter, monotonic clock, and priority queue directly in the exact-package smoke. Assert caller names and cancellation semantics, not portable allocation parity.
 - [ ] Run guard/queue/cancellation tests, `GroupCommitterTests`, sort/LSM tests, and both builds.
+- [ ] Run `bash scripts/verify-portable-candidate.sh` so the portable implementations execute, not merely compile.
 - [ ] Commit:
 
 ```bash
@@ -234,12 +234,23 @@ bash scripts/verify-portable-candidate.sh
 - Modify: `DataVo.Tests/E2E/CompiledAccessPathTests.cs`
 - Modify: `DataVo.Tests/BTree/IndexManagerGuidFastLaneTests.cs`
 - Modify: `DataVo.Tests/E2E/InsertTypedTests.cs`
+- Modify: `tools/DataVo.PortablePackageSmoke/Program.cs`
 
 - [ ] Put random-byte generation and PBKDF2 derivation behind complete modern/portable files. Modern restores one-shot `RandomNumberGenerator.GetBytes` and `Rfc2898DeriveBytes.Pbkdf2`; portable uses instance APIs. Preserve iteration count, SHA-256, salt/hash sizes, Base64 representation, and fixed-time comparison.
 - [ ] Move generic `Enum.GetValues<T>`, alternate dictionary lookup/span formatting, compiled integer intrinsics, GUID intrinsics, and `CollectionsMarshal.AsSpan` to target partial files. Portable implementations retain the scalar/allocation-tolerant fallback.
 - [ ] Keep the common query, reactive, security, and insert algorithms free of target directives.
 - [ ] Do not move or edit HNSW algorithms, `SimdDistanceKernels`, or vector norm routing in this task.
-- [ ] Run focused suites and both target builds.
+- [ ] Add a fixed persisted PBKDF2 vector test plus random-salt, correct-password, wrong-password, malformed-input, and salt-uniqueness cases. Extend existing tests for aggregate culture/parity, compiled integer scans below/above SIMD width, GUID comparer parity, and typed batch insert parity.
+- [ ] In the exact-package smoke, verify the fixed modern password vector, aggregate maintenance, scalar integer scan behavior, GUID equality, and typed batch insert using the portable assembly.
+- [ ] Run:
+
+```bash
+dotnet test DataVo.Tests/DataVo.Tests.csproj -c Release \
+  --filter "FullyQualifiedName~PasswordHasherTests|FullyQualifiedName~AuthorizationTests|FullyQualifiedName~AggregateBorrowedTests|FullyQualifiedName~CompiledAccessPathTests|FullyQualifiedName~IndexManagerGuidFastLaneTests|FullyQualifiedName~InsertTypedTests"
+dotnet build DataVo.Core/DataVo.Core.csproj -c Release -f netstandard2.1 \
+  -p:DataVoEnablePortableTarget=true
+bash scripts/verify-portable-candidate.sh
+```
 - [ ] Commit: `refactor: isolate modern library fast paths`.
 
 ---
