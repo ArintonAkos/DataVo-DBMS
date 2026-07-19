@@ -10,7 +10,7 @@ fail() {
   exit 1
 }
 
-DIRECTIVE_PATTERN='^[[:space:]]*#(if|elif|else|endif)\b'
+DIRECTIVE_PATTERN='^[[:space:]]*#[[:space:]]*(if|elif|else|endif)\b'
 
 # These orchestration/algorithm files were changed by Stage 2B and must remain target-neutral.
 # HNSW is intentionally absent: its existing branches are explicitly deferred to Stage 2C.
@@ -55,7 +55,7 @@ validate_complete_target_file() {
     fail "$file does not end with its target guard"
   [[ "$directive_count" == '2' ]] ||
     fail "$file contains nested or interleaved target directives"
-  if rg -n '^[[:space:]]*#(elif|else)\b' "$file" >/dev/null; then
+  if rg -n '^[[:space:]]*#[[:space:]]*(elif|else)\b' "$file" >/dev/null; then
     fail "$file contains an interleaved target branch"
   fi
 }
@@ -133,7 +133,28 @@ dotnet pack "$SOURCE_ROOT/DataVo.Core/DataVo.Core.csproj" \
 CORE_PACKAGE="$PACKAGE_DIR/DataVo.Core.$PACKAGE_VERSION.nupkg"
 [[ -f "$CORE_PACKAGE" ]] || fail "normal Core package was not created: $CORE_PACKAGE"
 
-core_dlls="$(unzip -Z1 "$CORE_PACKAGE" \
+package_entries="$(unzip -Z1 "$CORE_PACKAGE")"
+
+portable_entries="$(printf '%s\n' "$package_entries" \
+  | awk '$0 ~ /(^|\/)netstandard2\.1(\/|$)/ { print }' \
+  | LC_ALL=C sort)"
+[[ -z "$portable_entries" ]] || {
+  printf 'Normal Core package portable assets:\n%s\n' "$portable_entries" >&2
+  fail 'normal Core package contains a quarantined netstandard2.1 asset'
+}
+
+non_net10_framework_entries="$(printf '%s\n' "$package_entries" \
+  | awk -F/ '
+      ($1 == "lib" || $1 == "ref") && $2 != "net10.0" { print; next }
+      $1 == "runtimes" && ($3 == "lib" || $3 == "ref") && $4 != "net10.0" { print }
+    ' \
+  | LC_ALL=C sort)"
+[[ -z "$non_net10_framework_entries" ]] || {
+  printf 'Normal Core package non-net10 framework assets:\n%s\n' "$non_net10_framework_entries" >&2
+  fail 'normal Core package contains an asset for a framework other than net10.0'
+}
+
+core_dlls="$(printf '%s\n' "$package_entries" \
   | awk '$0 ~ /(^|\/)DataVo\.Core\.dll$/ { print }' \
   | LC_ALL=C sort)"
 [[ "$core_dlls" == 'lib/net10.0/DataVo.Core.dll' ]] || {
