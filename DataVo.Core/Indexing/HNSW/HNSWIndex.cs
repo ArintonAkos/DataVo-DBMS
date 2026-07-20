@@ -650,7 +650,23 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
     /// <returns>A list of row ids ordered from nearest to farthest.</returns>
     public List<long> SearchTopK(float[] queryVector, int topK)
     {
-        if (queryVector == null || queryVector.Length == 0)
+        if (queryVector == null)
+        {
+            throw new ArgumentException("Query vector cannot be null or empty", nameof(queryVector));
+        }
+
+        return SearchTopK(queryVector.AsSpan(), topK);
+    }
+
+    /// <summary>
+    /// Returns the nearest row ids for the supplied query vector.
+    /// </summary>
+    /// <param name="queryVector">Query vector.</param>
+    /// <param name="topK">Maximum number of matches to return.</param>
+    /// <returns>A list of row ids ordered from nearest to farthest.</returns>
+    public List<long> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
+    {
+        if (queryVector.Length == 0)
         {
             throw new ArgumentException("Query vector cannot be null or empty", nameof(queryVector));
         }

@@ -191,7 +191,20 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// </summary>
     public List<long> SearchTopK(float[] queryVector, int topK)
     {
-        if (queryVector == null || queryVector.Length == 0)
+        if (queryVector == null)
+        {
+            throw new ArgumentException("Query vector cannot be null or empty", nameof(queryVector));
+        }
+
+        return SearchTopK(queryVector.AsSpan(), topK);
+    }
+
+    /// <summary>
+    /// Returns the exact nearest row ids for the supplied query vector.
+    /// </summary>
+    public List<long> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
+    {
+        if (queryVector.Length == 0)
         {
             throw new ArgumentException("Query vector cannot be null or empty", nameof(queryVector));
         }

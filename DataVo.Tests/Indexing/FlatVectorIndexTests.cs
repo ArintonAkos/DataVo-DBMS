@@ -19,6 +19,18 @@ public class FlatVectorIndexTests
     }
 
     [Fact]
+    public void SearchTopK_ReadOnlySpan_ReturnsExactNearestRow()
+    {
+        var index = new FlatVectorIndex { Metric = "euclidean" };
+        index.Insert(10L, [1f, 0f, 0f]);
+        index.Insert(20L, [0f, 1f, 0f]);
+
+        ReadOnlySpan<float> query = stackalloc float[] { 0.9f, 0.1f, 0f };
+
+        Assert.Equal([10L], index.SearchTopK(query, topK: 1));
+    }
+
+    [Fact]
     public void InsertUpdateDeleteAndClear_UpdateSearchableRows()
     {
         var index = new FlatVectorIndex { Metric = "cosine" };

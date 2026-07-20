@@ -25,6 +25,18 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
+    public void SearchTopK_ReadOnlySpan_ReturnsNearestRow()
+    {
+        var index = new HNSWIndex { Metric = "euclidean", M = 8, EfSearch = 32 };
+        index.Insert(10L, [1f, 0f, 0f]);
+        index.Insert(20L, [0f, 1f, 0f]);
+
+        ReadOnlySpan<float> query = stackalloc float[] { 0.9f, 0.1f, 0f };
+
+        Assert.Equal([10L], index.SearchTopK(query, topK: 2).Take(1));
+    }
+
+    [Fact]
     public void Factory_AppliesMaxAdaptiveEfConstruction()
     {
         var factory = new HNSWIndexFactory();
