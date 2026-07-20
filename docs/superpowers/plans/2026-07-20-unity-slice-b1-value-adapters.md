@@ -44,6 +44,7 @@ The package intentionally has no `.meta` assets yet because it has not been open
 ## Task 1: Define and test the UPM package contract
 
 **Files:**
+- Modify: `.gitignore`
 - Create: `scripts/test-unity-mathematics-package.sh`
 - Create: `integrations/unity/com.datavo.unity.mathematics/package.json`
 - Create: `integrations/unity/com.datavo.unity.mathematics/Runtime/Mathematics/DataVo.Unity.Mathematics.asmdef`
@@ -51,7 +52,7 @@ The package intentionally has no `.meta` assets yet because it has not been open
 - Create: `integrations/unity/com.datavo.unity.mathematics/README.md`
 - Create: `integrations/unity/com.datavo.unity.mathematics/Documentation~/README.md`
 
-- [ ] **Step 1: Write a failing static contract check**
+- [x] **Step 1: Write a failing static contract check**
 
 Write `scripts/test-unity-mathematics-package.sh` before the package files. It must fail when the package is absent, then validate with `rg` and JSON parsing that:
 
@@ -69,7 +70,7 @@ bash scripts/test-unity-mathematics-package.sh
 
 Expected: failure because the package tree does not exist.
 
-- [ ] **Step 2: Add the minimal UPM metadata and documentation**
+- [x] **Step 2: Add the minimal UPM metadata and documentation**
 
 Use a source-package manifest with `unity: "6000.0"`, the single exact Mathematics dependency, and a description declaring the package experimental and dependent on a prepared portable DataVo.Core candidate. Documentation must state:
 
@@ -81,19 +82,19 @@ Use a source-package manifest with `unity: "6000.0"`, the single exact Mathemati
 
 Do not add a `DataVo.Core` DLL placeholder or asmdef; candidate preparation owns that generated fixture later.
 
-- [ ] **Step 3: Make the package layout test green**
+- [x] **Step 3: Make the package layout test green**
 
 Run:
 
 ```bash
-bash scripts/test-unity-mathematics-package.sh
+bash scripts/test-unity-mathematics-package.sh --metadata
 ```
 
 Expected: static layout contract passes once source-API checks are added by Tasks 2 and 3.
 
-- [ ] **Step 4: Commit the UPM skeleton**
+- [x] **Step 4: Commit the UPM skeleton**
 
-Run `git add` with exactly the six Task 1 files, then commit:
+Run `git add` with exactly the seven Task 1 files, then commit:
 
 ```bash
 git commit -m "feat: scaffold Unity Mathematics package"
@@ -126,34 +127,34 @@ public static class UnityMathematicsCellExtensions
 }
 ```
 
-- [ ] **Step 1: Extend the static test with failing Mathematics API assertions**
+- [x] **Step 1: Extend the static test with failing Mathematics API assertions**
 
 Require all eight conversion signatures, three ordinary-vector search signatures, stack allocation use, `CellValue.FromVector`, `CellValue.CopyVectorTo`, and `VectorLength` exact-dimension validation. Require explicit `x,y,z,w` mapping. Require that `quaternion` does not occur in a `SearchNearest` declaration.
 
 Run:
 
 ```bash
-bash scripts/test-unity-mathematics-package.sh
+bash scripts/test-unity-mathematics-package.sh --mathematics
 ```
 
 Expected: failure because Mathematics source does not exist.
 
-- [ ] **Step 2: Implement direct Mathematics conversions and search**
+- [x] **Step 2: Implement direct Mathematics conversions and search**
 
 Use `stackalloc float[2]`, `[3]`, or `[4]` fixed-size buffers for input, fill explicit component order, then call `CellValue.FromVector`. For output, call a private exact-length helper that reads `value.VectorLength`, throws `ArgumentException($"Expected VECTOR({expected}) but received VECTOR({actual}).", nameof(value))` for a dimension mismatch, copies into stack storage with `CopyVectorTo`, and constructs the requested type.
 
 Each `SearchNearest` overload checks `context` for null, stack-copies its vector, and calls `DataVoContext.SearchNearest(tableName, indexName, ReadOnlySpan<float>, topK)`. Quaternion is conversion-only.
 
-- [ ] **Step 3: Run the static contract and Core regression tests**
+- [x] **Step 3: Run the static contract and Core regression tests**
 
 ```bash
-bash scripts/test-unity-mathematics-package.sh
+bash scripts/test-unity-mathematics-package.sh --mathematics
 dotnet test DataVo.Tests/DataVo.Tests.csproj --no-build --no-restore --filter "FullyQualifiedName~CellValueVectorTests|FullyQualifiedName~VectorContextTests"
 ```
 
 Expected: static check and existing Core vector regressions pass. The Core run proves imported API behavior, not Unity compilation.
 
-- [ ] **Step 4: Commit the Mathematics adapters**
+- [x] **Step 4: Commit the Mathematics adapters**
 
 Stage exactly the script and Mathematics extension source, then:
 
@@ -169,23 +170,23 @@ git commit -m "feat: add Unity Mathematics vector adapters"
 
 **Public surface:** the same conversion API for `UnityEngine.Vector2`, `Vector3`, `Vector4`, and `Quaternion`, plus `SearchNearest` extensions for `Vector2`, `Vector3`, and `Vector4` only.
 
-- [ ] **Step 1: Extend the static test with failing EngineTypes API assertions**
+- [x] **Step 1: Extend the static test with failing EngineTypes API assertions**
 
 Require `using UnityEngine;`, all eight conversion signatures, the three ordinary-vector search signatures, direct `CellValue.FromVector` and `CopyVectorTo` use, exact dimension validation, explicit x/y/z/w mapping, and no `SearchNearest(... Quaternion ...)`.
 
 Run:
 
 ```bash
-bash scripts/test-unity-mathematics-package.sh
+bash scripts/test-unity-mathematics-package.sh --engine-types
 ```
 
 Expected: failure because EngineTypes source does not exist.
 
-- [ ] **Step 2: Implement direct EngineTypes conversions and search**
+- [x] **Step 2: Implement direct EngineTypes conversions and search**
 
 Mirror the Mathematics implementation in the EngineTypes namespace. Keep the helper assembly-local and do not reference the Mathematics assembly: the two adapters must remain independently importable.
 
-- [ ] **Step 3: Run static, portable, and support-status verification**
+- [x] **Step 3: Run static, portable, and support-status verification**
 
 ```bash
 bash scripts/test-unity-mathematics-package.sh
@@ -197,7 +198,7 @@ bash scripts/check-unity-support-status.sh
 
 Expected: static package and portable-Core checks pass. Existing Core nullable warnings may be recorded, but no new warnings are accepted. Support status must remain unverified pending Editor and player execution.
 
-- [ ] **Step 4: Commit the EngineTypes adapters**
+- [x] **Step 4: Commit the EngineTypes adapters**
 
 Stage exactly the script and EngineTypes extension source, then:
 
@@ -210,7 +211,7 @@ git commit -m "feat: add UnityEngine vector adapters"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-20-unity-slice-b1-value-adapters.md`
 
-- [ ] **Step 1: Inspect the working tree and static test**
+- [x] **Step 1: Inspect the working tree and static test**
 
 ```bash
 git diff --check HEAD
@@ -220,16 +221,50 @@ bash scripts/test-unity-mathematics-package.sh
 
 Expected: no whitespace errors; only intended tracked work and pre-existing user-owned untracked files are present.
 
-- [ ] **Step 2: Record completion boundaries**
+- [x] **Step 2: Record completion boundaries**
 
 Update this plan to mark implemented steps complete and record commands/results. Explicitly record that Unity Editor 6000.5.3f1, Mono, Windows x64 IL2CPP, Burst, and package import execution remain external gates.
 
-- [ ] **Step 3: Commit the verified plan**
+- [x] **Step 3: Commit the verified plan**
 
 ```bash
 git add -f docs/superpowers/plans/2026-07-20-unity-slice-b1-value-adapters.md
 git commit -m "docs: record Unity value adapter verification"
 ```
+
+## Implementation Record (2026-07-20)
+
+- The contract check was first red for the missing package, then independently
+  red for each missing adapter source file. It supports metadata-only,
+  Mathematics-only, EngineTypes-only, and full-package checks so the two
+  assemblies can be verified independently.
+- The source package, precise asmdefs, experimental documentation, and a narrow
+  `.gitignore` exception for UPM's `Documentation~` directory landed in
+  commit `f16eec2`.
+- Mathematics conversion/search adapters landed in `cb2f0d1`; the subsequent
+  compiler-harness failure identified the actual `CellValue` namespace and was
+  corrected in `b967a0a`. UnityEngine adapters landed in `a6363ae`.
+- The full static package contract passed. A disposable netstandard2.1 compiler
+  harness using Unity-shaped value-type stubs compiled both adapter sources
+  against the portable Core target with no adapter diagnostics. It repeats the
+  existing four `TopKReactiveQuery` nullable warnings from Core and has no
+  errors. This is a C# surface check, not an Editor import.
+- The focused Core vector regression set passed 17/17. Portable Core restore and
+  build passed on net10.0 and netstandard2.1; the existing four
+  `TopKReactiveQuery` nullable warnings occur on each target, with no new Core
+  warnings introduced by this slice.
+- `scripts/verify-portable-candidate.sh` passed using a clean restored package,
+  local portable consumer, and exact extracted-DLL smoke. The support-status
+  documentation check also passed and continues to report Unity as unverified.
+- A normal parallel full-suite run exposed two unrelated resource-sensitive
+  failures: the LSM 1K update wall-clock assertion and the reactive
+  allocation-free assertion. Each passed in isolation. A fresh serial xUnit run
+  completed with 1,417 passed, 0 failed, and 1 intentional Stage2B probe skip
+  (TRX: `/private/tmp/datavo-unity-b1-tests/unity-slice-b1-serial.trx`).
+- No Unity Editor is installed in this environment. Unity 6000.5.3f1 Editor
+  import/Mono tests, Burst validation, Windows x64 IL2CPP execution, candidate
+  fixture preparation, package metadata generation, and performance measurements
+  remain external Slice B2 gates.
 
 ## Deferred Follow-up: Slice B2
 
