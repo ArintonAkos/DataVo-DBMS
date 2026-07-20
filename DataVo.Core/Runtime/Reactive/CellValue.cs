@@ -91,6 +91,20 @@ public readonly partial struct CellValue
     public static CellValue From(float[]? value) =>
         value is null ? Null : new(CellType.Vector, 0L, 0m, (float[])value.Clone());
 
+    /// <summary>Creates a VECTOR cell by taking one owned copy of <paramref name="values"/>.</summary>
+    public static CellValue FromVector(ReadOnlySpan<float> values) =>
+        new(CellType.Vector, 0L, 0m, values.ToArray());
+
+    /// <summary>
+    /// Creates a VECTOR cell that owns <paramref name="values"/> without cloning it.
+    /// The caller must not mutate the array after this call.
+    /// </summary>
+    public static CellValue TakeVectorOwnership(float[] values)
+    {
+        ThrowHelper.ThrowIfNull(values);
+        return new CellValue(CellType.Vector, 0L, 0m, values);
+    }
+
     internal static CellValue FromVectorOwned(float[]? value) =>
         value is null ? Null : new(CellType.Vector, 0L, 0m, value);
 
@@ -171,8 +185,23 @@ public readonly partial struct CellValue
     public float[] AsVector() =>
         _type == CellType.Vector ? (float[])((float[])_reference!).Clone() : throw Mismatch(CellType.Vector);
 
-    internal int VectorLength =>
+    /// <summary>Gets the number of components in this VECTOR cell.</summary>
+    public int VectorLength =>
         _type == CellType.Vector ? ((float[])_reference!).Length : throw Mismatch(CellType.Vector);
+
+    /// <summary>
+    /// Copies vector components into <paramref name="destination"/> without exposing stored state.
+    /// </summary>
+    public void CopyVectorTo(Span<float> destination)
+    {
+        ReadOnlySpan<float> source = AsVectorReadOnlySpan();
+        if (destination.Length < source.Length)
+        {
+            throw new ArgumentException("Destination is shorter than the vector length.", nameof(destination));
+        }
+
+        source.CopyTo(destination);
+    }
 
     internal ReadOnlySpan<float> AsVectorReadOnlySpan() =>
         _type == CellType.Vector ? ((float[])_reference!).AsSpan() : throw Mismatch(CellType.Vector);

@@ -96,4 +96,46 @@ public class CellValueVectorTests
         CellValue notVector = CellValue.From(42);
         Assert.Throws<InvalidOperationException>(() => notVector.AsVector()); // another cell read as vector
     }
+
+    [Fact]
+    public void FromVector_CopiesSpan_AndCopyVectorToPreservesDestinationTail()
+    {
+        float[] source = [1f, 2f, 3f];
+        CellValue cell = CellValue.FromVector(source.AsSpan());
+        source[0] = 99f;
+
+        float[] destination = [-1f, -1f, -1f, -1f];
+        cell.CopyVectorTo(destination);
+
+        Assert.Equal(CellType.Vector, cell.Type);
+        Assert.Equal(3, cell.VectorLength);
+        Assert.Equal(new[] { 1f, 2f, 3f, -1f }, destination);
+    }
+
+    [Fact]
+    public void TakeVectorOwnership_StoresTransferredBuffer_AndAsVectorRemainsDefensive()
+    {
+        float[] transferred = [4f, 5f, 6f];
+        CellValue cell = CellValue.TakeVectorOwnership(transferred);
+
+        float[] defensiveRead = cell.AsVector();
+        defensiveRead[1] = 99f;
+
+        float[] destination = new float[cell.VectorLength];
+        cell.CopyVectorTo(destination);
+        Assert.Equal(new[] { 4f, 5f, 6f }, destination);
+    }
+
+    [Fact]
+    public void VectorInterop_RejectsNullOwnership_NonVectorLength_AndUndersizedDestination()
+    {
+        Assert.Throws<ArgumentNullException>(() => CellValue.TakeVectorOwnership(null!));
+
+        CellValue scalar = CellValue.From(42);
+        Assert.Throws<InvalidOperationException>(() => _ = scalar.VectorLength);
+        Assert.Throws<InvalidOperationException>(() => scalar.CopyVectorTo(new float[1]));
+
+        CellValue vector = CellValue.FromVector([1f, 2f, 3f]);
+        Assert.Throws<ArgumentException>(() => vector.CopyVectorTo(new float[2]));
+    }
 }
