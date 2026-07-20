@@ -452,7 +452,7 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
-    /// Executes a nearest-neighbor vector search using an HNSW index in the current session database.
+    /// Executes a nearest-neighbor vector search in the current session database.
     /// </summary>
     /// <param name="tableName">The table containing the indexed vector column.</param>
     /// <param name="indexName">The vector index name.</param>
@@ -460,6 +460,23 @@ public sealed class DataVoContext : IDisposable
     /// <param name="topK">The number of nearest rows to return.</param>
     /// <returns>The matching table rows in ranked order.</returns>
     public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, float[] queryVector, int topK = 10)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(queryVector);
+        return SearchNearestCore(tableName, indexName, queryVector.AsSpan(), topK);
+    }
+
+    /// <summary>
+    /// Executes a nearest-neighbor vector search in the current session database.
+    /// </summary>
+    /// <param name="tableName">The table containing the indexed vector column.</param>
+    /// <param name="indexName">The vector index name.</param>
+    /// <param name="queryVector">The query vector.</param>
+    /// <param name="topK">The number of nearest rows to return.</param>
+    /// <returns>The matching table rows in ranked order.</returns>
+    public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK = 10) =>
+        SearchNearestCore(tableName, indexName, queryVector, topK);
+
+    private List<Dictionary<string, object?>> SearchNearestCore(string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK)
     {
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
@@ -535,7 +552,7 @@ public sealed class DataVoContext : IDisposable
     {
         if (VectorParser.TryParseVector(queryVector, out float[] parsedVector))
         {
-            return SearchNearest(tableName, indexName, parsedVector, topK);
+            return SearchNearestCore(tableName, indexName, parsedVector, topK);
         }
 
         const string parseError = "Query vector must be in format [x,y,z].";

@@ -45,6 +45,28 @@ public class VectorContextTests
         Assert.Equal("A", results[0]["Label"]);
     }
 
+    [Theory]
+    [InlineData("HNSW", "idx_span_hnsw")]
+    [InlineData("FLAT", "idx_span_flat")]
+    public void DataVoContext_SearchNearest_ReadOnlySpan_ReturnsRankedRows(string indexKind, string indexName)
+    {
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        string dbName = $"VecCtxSpan_{Guid.NewGuid():N}";
+
+        context.Execute($"CREATE DATABASE {dbName}");
+        context.Execute($"USE {dbName}");
+        context.Execute("CREATE TABLE Embeddings (Id INT PRIMARY KEY, Emb VECTOR(3), Label VARCHAR)");
+        context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
+        context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
+        context.Execute($"CREATE INDEX {indexName} ON Embeddings (Emb) USING {indexKind}");
+
+        ReadOnlySpan<float> query = stackalloc float[] { 0.9f, 0.1f, 0f };
+        List<Dictionary<string, object?>> results = context.SearchNearest("Embeddings", indexName, query, topK: 1);
+
+        Assert.Single(results);
+        Assert.Equal("A", results[0]["Label"]);
+    }
+
     [Fact]
     public void DataVoContext_SearchNearest_UsesPrimaryIndexManager_WhenPolymorphicIndexExists()
     {

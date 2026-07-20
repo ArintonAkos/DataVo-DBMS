@@ -907,13 +907,21 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(queryVector);
+        return SearchVector(queryVector.AsSpan(), topK, indexName, tableName, databaseName, indexType);
+    }
+
+    internal List<long> SearchVector(ReadOnlySpan<float> queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    {
         if (topK <= 0)
         {
             return [];
         }
 
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        List<long> results = vectorIndex.SearchTopK(queryVector, topK);
+        List<long> results = vectorIndex is ISpanVectorIndex spanVectorIndex
+            ? spanVectorIndex.SearchTopK(queryVector, topK)
+            : vectorIndex.SearchTopK(queryVector.ToArray(), topK);
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, expansionPasses: 0);
         return results;
     }
