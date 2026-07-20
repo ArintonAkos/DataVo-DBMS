@@ -104,18 +104,22 @@ assert_source_contract() {
   local vector3_name="$4"
   local vector4_name="$5"
   local quaternion_name="$6"
+  local as_vector2_name="$7"
+  local as_vector3_name="$8"
+  local as_vector4_name="$9"
+  local as_quaternion_name="${10}"
 
   require_file "$source_path"
 
-  rg -Fq "namespace $namespace_name;" "$source_path"
+  rg -Fq "namespace $namespace_name" "$source_path"
   rg -Fq "ToDataVoCell(this $vector2_name value)" "$source_path"
   rg -Fq "ToDataVoCell(this $vector3_name value)" "$source_path"
   rg -Fq "ToDataVoCell(this $vector4_name value)" "$source_path"
   rg -Fq "ToDataVoCell(this $quaternion_name value)" "$source_path"
-  rg -Fq "As"$vector2_name"(this CellValue value)" "$source_path"
-  rg -Fq "As"$vector3_name"(this CellValue value)" "$source_path"
-  rg -Fq "As"$vector4_name"(this CellValue value)" "$source_path"
-  rg -Fq "As"$quaternion_name"(this CellValue value)" "$source_path"
+  rg -Fq "As$as_vector2_name(this CellValue value)" "$source_path"
+  rg -Fq "As$as_vector3_name(this CellValue value)" "$source_path"
+  rg -Fq "As$as_vector4_name(this CellValue value)" "$source_path"
+  rg -Fq "As$as_quaternion_name(this CellValue value)" "$source_path"
   rg -Fq "SearchNearest(this DataVoContext context" "$source_path"
   rg -Fq "CellValue.FromVector" "$source_path"
   rg -Fq "value.CopyVectorTo" "$source_path"
@@ -126,14 +130,14 @@ assert_source_contract() {
   rg -Fq "value.z" "$source_path"
   rg -Fq "value.w" "$source_path"
 
-  if rg -n -U "SearchNearest\\([\\s\\S]*$quaternion_name" "$source_path" >/dev/null; then
+  if rg -n -P "SearchNearest\\([^)]*\\b$quaternion_name\\b" "$source_path" >/dev/null; then
     echo "Quaternion nearest-neighbor overloads are intentionally unsupported: $source_path" >&2
     exit 1
   fi
 }
 
 if [[ "$mode" == "--mathematics" || "$mode" == "--all" ]]; then
-  assert_source_contract "$mathematics_source" "DataVo.Unity.Mathematics" "float2" "float3" "float4" "quaternion"
+  assert_source_contract "$mathematics_source" "DataVo.Unity.Mathematics" "float2" "float3" "float4" "quaternion" "Float2" "Float3" "Float4" "Quaternion"
 
   if rg -Fq "UnityEngine" "$mathematics_source"; then
     echo "Mathematics adapter must not reference UnityEngine." >&2
@@ -142,7 +146,7 @@ if [[ "$mode" == "--mathematics" || "$mode" == "--all" ]]; then
 fi
 
 if [[ "$mode" == "--engine-types" || "$mode" == "--all" ]]; then
-  assert_source_contract "$engine_types_source" "DataVo.Unity.EngineTypes" "Vector2" "Vector3" "Vector4" "Quaternion"
+  assert_source_contract "$engine_types_source" "DataVo.Unity.EngineTypes" "Vector2" "Vector3" "Vector4" "Quaternion" "Vector2" "Vector3" "Vector4" "Quaternion"
   rg -Fq "using UnityEngine;" "$engine_types_source"
 fi
 
