@@ -264,6 +264,10 @@ _pkginfo.txt
 ClientBin/
 ~$*
 *~
+
+# Track UPM package documentation; Unity reserves the Documentation~ directory name.
+!integrations/unity/com.datavo.unity.mathematics/Documentation~/
+!integrations/unity/com.datavo.unity.mathematics/Documentation~/**
 *.dbmdl
 *.dbproj.schemaview
 *.jfm

@@ -1,0 +1,17 @@
+{
+  "name": "DataVo.Unity.Mathematics",
+  "rootNamespace": "DataVo.Unity.Mathematics",
+  "references": [
+    "DataVo.Core",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}
