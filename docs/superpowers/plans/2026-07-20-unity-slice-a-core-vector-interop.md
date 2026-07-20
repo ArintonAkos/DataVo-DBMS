@@ -354,9 +354,12 @@ Run:
 - Verifies Tasks 1-3 compile under net10.0 and opt-in netstandard2.1.
 - Verifies normal DataVo.Core packaging remains net10.0-only.
 
-- [ ] **Step 1: Build both Core targets**
+- [ ] **Step 1: Restore and build both Core targets**
 
-Run: dotnet build DataVo.Core/DataVo.Core.csproj --no-restore -p:DataVoEnablePortableTarget=true
+Run:
+
+    dotnet restore DataVo.Core/DataVo.Core.csproj -p:DataVoEnablePortableTarget=true
+    dotnet build DataVo.Core/DataVo.Core.csproj --no-restore -p:DataVoEnablePortableTarget=true
 
 Expected: successful net10.0 and netstandard2.1 builds, with no warning introduced by this slice.
 
