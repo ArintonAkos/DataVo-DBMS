@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DataVo.Core;
+using DataVo.Core.Runtime.Reactive;
 using Unity.Mathematics;
 
 namespace DataVo.Unity.Mathematics
