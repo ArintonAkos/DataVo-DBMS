@@ -28,7 +28,9 @@ semantics, or creating avoidable temporary vector arrays.
   ```
 
   It registers both UnityEngine and Unity Mathematics types. The developer does
-  not choose one family globally; one project may use both.
+  not choose one family globally; one project may use both. The extension returns
+  `void`: it configures the existing context and deliberately does not introduce
+  a fluent/builder API.
 - The first supported types are `Vector2`, `Vector3`, `Vector4`, `Quaternion`,
   `float2`, `float3`, `float4`, and `quaternion`.
 - `VECTOR(2)`, `VECTOR(3)`, and `VECTOR(4)` have no semantic type tag in SQL.
@@ -98,7 +100,7 @@ registered.
 `UseUnityTypes()` lives in `com.datavo.unity.mathematics`, registers all eight
 converters as one group, and is idempotent for that package's own registrations.
 It throws on a genuine user-supplied conflict instead of silently replacing a
-converter.
+converter. Its signature is `void UseUnityTypes(this DataVoContext context)`.
 
 ### Read APIs
 
