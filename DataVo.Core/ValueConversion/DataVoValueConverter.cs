@@ -51,4 +51,6 @@ public sealed class DataVoValueConverter<T> : IDataVoValueConverter
 
     /// <inheritdoc />
     public object FromMaterialized(object? value) => _fromMaterialized(value)!;
+
+    internal T FromMaterializedTyped(object? value) => _fromMaterialized(value);
 }

@@ -3,7 +3,8 @@
   "rootNamespace": "DataVo.UnitySmoke.EditorTests",
   "references": [
     "DataVo.Unity.Mathematics",
-    "DataVo.Unity.EngineTypes"
+    "DataVo.Unity.EngineTypes",
+    "DataVo.Unity.TypeBinding"
   ],
   "includePlatforms": [
     "Editor"

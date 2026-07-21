@@ -51,8 +51,39 @@ internal sealed class DataVoValueConverterRegistry
 
     public T ConvertMaterialized<T>(object? value)
     {
-        object? converted = ConvertMaterialized(value, typeof(T));
-        return converted is null ? default! : (T)converted;
+        if (value is null)
+        {
+            if (!typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) is not null)
+            {
+                return default!;
+            }
+
+            throw new InvalidOperationException($"Cannot read SQL NULL as non-nullable '{typeof(T).FullName}'.");
+        }
+
+        if (value is T direct)
+        {
+            return direct;
+        }
+
+        if (!_converters.TryGetValue(typeof(T), out IDataVoValueConverter? converter))
+        {
+            throw new NotSupportedException($"No DataVo value converter is registered for '{typeof(T).FullName}'.");
+        }
+
+        if (converter is DataVoValueConverter<T> typedConverter)
+        {
+            return typedConverter.FromMaterializedTyped(value);
+        }
+
+        object converted = converter.FromMaterialized(value);
+        if (converted is not T result)
+        {
+            throw new InvalidOperationException(
+                $"Converter '{converter.RegistrationKey}' returned '{converted?.GetType().FullName ?? "null"}' for '{typeof(T).FullName}'.");
+        }
+
+        return result;
     }
 
     internal object? ConvertMaterialized(object? value, Type targetType)
