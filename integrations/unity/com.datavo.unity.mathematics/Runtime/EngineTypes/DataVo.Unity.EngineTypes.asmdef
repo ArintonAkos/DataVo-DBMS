@@ -1,14 +1,14 @@
 {
   "name": "DataVo.Unity.EngineTypes",
   "rootNamespace": "DataVo.Unity.EngineTypes",
-  "references": [
-    "DataVo.Core"
-  ],
+  "references": [],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "DataVo.Core.dll"
+  ],
   "autoReferenced": true,
   "defineConstraints": [],
   "versionDefines": [],

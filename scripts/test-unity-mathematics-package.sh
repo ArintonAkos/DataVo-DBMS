@@ -77,8 +77,14 @@ const mathematicsAsmdef = readJson(mathematicsAsmdefPath);
 assert(mathematicsAsmdef.name === "DataVo.Unity.Mathematics", "Mathematics asmdef name is incorrect.");
 equalArrays(
   mathematicsAsmdef.references,
-  ["DataVo.Core", "Unity.Mathematics"],
-  "Mathematics asmdef must reference only DataVo.Core and Unity.Mathematics.",
+  ["Unity.Mathematics"],
+  "Mathematics asmdef must reference only Unity.Mathematics as an asmdef.",
+);
+assert(mathematicsAsmdef.overrideReferences === true, "Mathematics asmdef must override automatic plugin references.");
+equalArrays(
+  mathematicsAsmdef.precompiledReferences,
+  ["DataVo.Core.dll"],
+  "Mathematics asmdef must explicitly reference the DataVo.Core plugin.",
 );
 assert(mathematicsAsmdef.noEngineReferences === true, "Mathematics asmdef must disable UnityEngine references.");
 
@@ -86,8 +92,14 @@ const engineTypesAsmdef = readJson(engineTypesAsmdefPath);
 assert(engineTypesAsmdef.name === "DataVo.Unity.EngineTypes", "EngineTypes asmdef name is incorrect.");
 equalArrays(
   engineTypesAsmdef.references,
-  ["DataVo.Core"],
-  "EngineTypes asmdef must reference only DataVo.Core.",
+  [],
+  "EngineTypes asmdef must not reference source asmdefs.",
+);
+assert(engineTypesAsmdef.overrideReferences === true, "EngineTypes asmdef must override automatic plugin references.");
+equalArrays(
+  engineTypesAsmdef.precompiledReferences,
+  ["DataVo.Core.dll"],
+  "EngineTypes asmdef must explicitly reference the DataVo.Core plugin.",
 );
 assert(engineTypesAsmdef.noEngineReferences === false, "EngineTypes asmdef must retain UnityEngine references.");
 NODE

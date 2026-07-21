@@ -2,14 +2,15 @@
   "name": "DataVo.Unity.Mathematics",
   "rootNamespace": "DataVo.Unity.Mathematics",
   "references": [
-    "DataVo.Core",
     "Unity.Mathematics"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "DataVo.Core.dll"
+  ],
   "autoReferenced": true,
   "defineConstraints": [],
   "versionDefines": [],
