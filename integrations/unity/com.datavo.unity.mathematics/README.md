@@ -22,7 +22,7 @@ claim that an arbitrary DataVo package is Unity-compatible.
 ## Status
 
 This package is unverified until it has been imported and tested by the pinned
-Unity 6000.5.3f1 Editor and an executed Windows x64 IL2CPP player. Static source
+Unity 6000.5.4f1 Editor and an executed Windows x64 IL2CPP player. Static source
 checks do not establish Unity, Burst, Mono, or IL2CPP support.
 
 Do not call DataVo from Burst-compiled code. Native containers and the

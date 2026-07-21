@@ -23,7 +23,7 @@ bridge are planned for com.datavo.unity.jobs.
 
 ## Verification status
 
-Pinned Unity 6000.5.3f1 Editor/Mono, Burst, package import, and executed Windows
+Pinned Unity 6000.5.4f1 Editor/Mono, Burst, package import, and executed Windows
 x64 IL2CPP verification have not run yet. The repository's static package
 contract checks validate source layout and intended APIs only; they are not a
 Unity support claim.

@@ -2,7 +2,8 @@
 
 ## Status
 
-Approved in conversation on 2026-07-19.
+Approved in conversation on 2026-07-19. The Unity baseline was amended in
+conversation on 2026-07-21 to use the locally installed `6000.5.4f1` Editor.
 
 This design refines Stage 3 of
 `docs/superpowers/specs/2026-07-10-unity-compatibility-reset-design.md`.
@@ -77,12 +78,12 @@ tested by Unity; it is not compiled against or dependent on the unofficial
 
 ## Pinned Environment
 
-- Unity Editor: `6000.5.3f1`.
+- Unity Editor: `6000.5.4f1`.
 - Unity Mathematics: `com.unity.mathematics` `1.3.3`.
 - Burst: released `com.unity.burst` `1.8.26`.
-- Test Framework: the core version fixed by Unity `6000.5.3f1`.
+- Test Framework: the core version fixed by Unity `6000.5.4f1`.
 - Collections and other transitive Unity packages: resolve once from a clean
-  `6000.5.3f1` project, commit the resulting `Packages/packages-lock.json`, and
+  `6000.5.4f1` project, commit the resulting `Packages/packages-lock.json`, and
   reject lock drift in verification.
 - Editor proof: batch-mode Editor execution using Mono on macOS ARM64.
 - Player proof: Windows x64 IL2CPP, Medium managed stripping, executed on Windows.
@@ -383,12 +384,11 @@ lock hash, scripting backend, managed stripping level, Burst enabled state, OS,
 CPU, architecture, process bitness, configuration, scenario parameters, and UTC
 timestamp.
 
-This workstation currently has no Unity Editor installed. Host preparation and
-portable-host baselines may run here, but Editor scripts fail with a clear missing
-Editor diagnostic until exact Unity `6000.5.3f1` is installed. Windows IL2CPP
-execution requires a Windows runner with the pinned Editor/module and an activated
-Unity license. Missing environment or licensing is reported as blocked evidence,
-not converted into a support claim.
+This workstation has Unity `6000.5.4f1` on macOS ARM64. Host preparation,
+portable-host baselines, and Editor/Mono evidence use that exact version. Windows
+IL2CPP execution still requires a Windows runner with the pinned Editor/module and
+an activated Unity license. Missing environment or licensing is reported as blocked
+evidence, not converted into a support claim.
 
 ## Verification Gates
 
@@ -500,7 +500,7 @@ explicit Stage 4 decision.
   https://docs.unity3d.com/Packages/com.unity.mathematics@1.3/manual/index.html
 - Unity Burst compilation boundary:
   https://docs.unity3d.com/Manual/script-compilation-burst.html
-- Unity `6000.5.3f1` release:
-  https://unity.com/releases/editor/whats-new/6000.5.3f1
+- Unity `6000.5.4f1` release:
+  https://unity.com/releases/editor/whats-new/6000.5.4f1
 - Sentis/Inference tensor behavior deferred from this design:
   https://docs.unity3d.com/Packages/com.unity.ai.inference@2.4/manual/tensor-fundamentals.html
