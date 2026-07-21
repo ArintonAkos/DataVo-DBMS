@@ -277,6 +277,12 @@ ClientBin/
 /tests/unity/.generated
 /tests/unity/DataVo.UnitySmoke/.generated
 /tests/unity/DataVo.UnitySmoke/Assets/DataVoSmoke/.generated/
+/demos/unity/DataVo.UnityArenaDemo/Library/
+/demos/unity/DataVo.UnityArenaDemo/Temp/
+/demos/unity/DataVo.UnityArenaDemo/Logs/
+/demos/unity/DataVo.UnityArenaDemo/UserSettings/
+/demos/unity/DataVo.UnityArenaDemo/.generated
+/demos/unity/DataVo.UnityArenaDemo/Assets/DataVoArena/.generated/
 !tests/unity/DataVo.UnitySmoke/Packages/
 !tests/unity/DataVo.UnitySmoke/Packages/**
 !tests/unity/DataVo.UnitySmoke/**/*.meta

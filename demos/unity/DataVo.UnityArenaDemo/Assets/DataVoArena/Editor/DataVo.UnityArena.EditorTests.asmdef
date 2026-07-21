@@ -1,0 +1,23 @@
+{
+  "name": "DataVo.UnityArena.EditorTests",
+  "rootNamespace": "DataVo.UnityArena.EditorTests",
+  "references": [
+    "DataVo.UnityArena.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "DataVo.Core.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "DataVo.UnityArena.Runtime",
+  "rootNamespace": "DataVo.UnityArena",
+  "references": [
+    "DataVo.Unity.TypeBinding",
+    "DataVo.Unity.EngineTypes",
+    "DataVo.Unity.Mathematics",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "DataVo.Core.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
