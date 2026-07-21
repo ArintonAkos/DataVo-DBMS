@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "unity": {
+    "editorVersion": "6000.5.4f1",
+    "revision": "d550df8bd089"
+  },
+  "assemblies": [
+    {
+      "fileName": "Microsoft.Bcl.AsyncInterfaces.dll",
+      "runtimePath": "Resources/Scripting/BCLExtensions/runtime/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll",
+      "identity": "Microsoft.Bcl.AsyncInterfaces, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "sha256": "136d5965cf4768e8420b547a8bddea882921f426c371833d558a858a2f0c235a"
+    },
+    {
+      "fileName": "System.Runtime.CompilerServices.Unsafe.dll",
+      "runtimePath": "Resources/Scripting/BCLExtensions/runtime/netstandard2.1/System.Runtime.CompilerServices.Unsafe.dll",
+      "identity": "System.Runtime.CompilerServices.Unsafe, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "sha256": "fd67abc4c4af10affbcd42fd68a2a7bc361b26714afe6965d4d0d139459d8297"
+    },
+    {
+      "fileName": "System.Text.Encodings.Web.dll",
+      "runtimePath": "Resources/Scripting/BCLExtensions/runtime/netstandard2.1/System.Text.Encodings.Web.dll",
+      "identity": "System.Text.Encodings.Web, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "sha256": "5ad1f348223f281c34b9b857445a1c3412a430026ef049aeac641c53a92408be"
+    },
+    {
+      "fileName": "System.Text.Json.dll",
+      "runtimePath": "Resources/Scripting/BCLExtensions/runtime/netstandard2.1/System.Text.Json.dll",
+      "identity": "System.Text.Json, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "sha256": "f80c939be592939ca3bbbc9ddf61bb137ce201ec38d70005915cb70acf2d4cc3"
+    }
+  ]
+}

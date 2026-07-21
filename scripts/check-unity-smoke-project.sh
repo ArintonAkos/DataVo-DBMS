@@ -3,6 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$root/tests/unity/DataVo.UnitySmoke"
+runtime_bcl_manifest="$project/UnityRuntimeBclManifest.json"
+runtime_bcl_checker="$root/scripts/check-unity-runtime-bcl.sh"
 require_candidate=false
 
 if [[ $# -gt 1 ]]; then
@@ -23,7 +25,9 @@ for file in \
   "$project/ProjectSettings/ProjectVersion.txt" \
   "$project/ProjectSettings/ProjectSettings.asset" \
   "$project/Packages/manifest.json" \
-  "$project/Packages/packages-lock.json"; do
+  "$project/Packages/packages-lock.json" \
+  "$runtime_bcl_manifest" \
+  "$runtime_bcl_checker"; do
   if [[ ! -f "$file" ]]; then
     echo "Unity smoke project file is missing: $file" >&2
     exit 1
