@@ -87,6 +87,25 @@ public sealed class AutomaticModelBindingTests
         Assert.Empty(Select(context, "SELECT Id FROM Transforms"));
     }
 
+    [Fact]
+    public void BulkInsert_ConvertsRegisteredVectorWithoutMakingCallersUseCells()
+    {
+        using var context = CreateContext();
+        context.RegisterValueConverters(CreateTestVectorConverter());
+        context.Execute("CREATE TABLE Samples (Id INT PRIMARY KEY, Position VECTOR(2))");
+        context.Execute("CREATE INDEX idx_samples_position ON Samples (Position) USING HNSW");
+
+        IReadOnlyList<long> rowIds = context.BulkInsert("Samples",
+        [
+            new Dictionary<string, object?> { ["Id"] = 1, ["Position"] = new TestVector(6f, -3f) }
+        ]);
+
+        Assert.Equal([1L], rowIds);
+        Dictionary<string, object?> row = Select(context, "SELECT Position FROM Samples").Single();
+        Assert.Equal(new TestVector(6f, -3f), context.Get<TestVector>(row, "Position"));
+        Assert.Equal(1, context.SearchNearest("Samples", "idx_samples_position", [6f, -3f], topK: 1).Single()["Id"]);
+    }
+
     private static DataVoValueConverter<TestVector> CreateTestVectorConverter() => new(
         "DataVo.Tests.AutomaticModelBinding.TestVector.v1",
         value => CellValue.FromVector([value.X, value.Y]),

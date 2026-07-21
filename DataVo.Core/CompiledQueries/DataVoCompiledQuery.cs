@@ -7,6 +7,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
+using DataVo.Core.Parser.DML;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
@@ -14,6 +15,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.CompiledQueries;
 
@@ -344,7 +346,8 @@ public static class DataVoCompiledQuery
 
         for (int i = 0; i < plan.InsertColumns.Count; i++)
         {
-            row[plan.InsertColumns[i]] = RequiredParameter(parameterDictionary, plan.InsertParameterNames[i]);
+            row[plan.InsertColumns[i]] = context.BindValueForWrite(
+                RequiredParameter(parameterDictionary, plan.InsertParameterNames[i]));
         }
 
         return context.BulkInsert(plan.TableName, [row]);
@@ -418,7 +421,7 @@ public static class DataVoCompiledQuery
 
             Dictionary<string, Column> columnsByName = GetTableColumnsByName(context, plan.TableName, databaseName);
             List<Dictionary<string, object?>> newRows = orderedRowIds
-                .Select(rowId => ApplyAssignments(existingRows[rowId], plan, parameterDictionary, columnsByName))
+                .Select(rowId => ApplyAssignments(context, existingRows[rowId], plan, parameterDictionary, columnsByName))
                 .ToList();
 
             ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows);
@@ -1533,6 +1536,7 @@ public static class DataVoCompiledQuery
     }
 
     private static Dictionary<string, object?> ApplyAssignments(
+        DataVoContext context,
         IReadOnlyDictionary<string, object?> oldRow,
         DataVoCompiledQueryPlan plan,
         IReadOnlyDictionary<string, object?> parameters,
@@ -1547,7 +1551,7 @@ public static class DataVoCompiledQuery
                 throw new BindingException($"Column {columnName} doesn't exist in table {plan.TableName}!");
             }
 
-            object? rawValue = RequiredParameter(parameters, parameterName);
+            object? rawValue = context.BindValueForWrite(RequiredParameter(parameters, parameterName));
             newRow[columnName] = NormalizeAssignedValue(column, rawValue);
         }
 
@@ -1559,6 +1563,12 @@ public static class DataVoCompiledQuery
         if (rawValue == null || rawValue is DBNull)
         {
             return null;
+        }
+
+        if (rawValue is DataVoBoundValue boundValue)
+        {
+            InsertRowService.ValidateTypedCell(columnMetadata, boundValue.Cell);
+            return boundValue.Cell.IsNull ? null : boundValue;
         }
 
         var column = new Column
@@ -1993,6 +2003,17 @@ public static class DataVoCompiledQuery
                 string vectorColumn = index.AttributeNames[0];
                 if (!newRow.TryGetValue(vectorColumn, out object? vectorValue) || vectorValue is null)
                 {
+                    continue;
+                }
+
+                if (vectorValue is DataVoBoundValue boundValue)
+                {
+                    if (boundValue.Cell.Type != CellType.Vector)
+                    {
+                        throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                    }
+
+                    indexes.InsertIntoVectorIndex(boundValue.Cell.AsVectorReadOnlySpan(), newRowIds[i], indexName, tableName, databaseName, indexKind);
                     continue;
                 }
 

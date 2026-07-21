@@ -1,4 +1,5 @@
 using DataVo.Core.Runtime;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.Runtime.Changes;
 
@@ -85,7 +86,9 @@ internal sealed class ChangeRecorder
         var clone = new Dictionary<string, object?>(row.Count, StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, object?> pair in row)
         {
-            clone[pair.Key] = pair.Value;
+            clone[pair.Key] = pair.Value is DataVoBoundValue boundValue
+                ? boundValue.ToMaterializedValue()
+                : pair.Value;
         }
 
         return clone;

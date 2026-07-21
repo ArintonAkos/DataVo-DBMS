@@ -4,7 +4,9 @@ using DataVo.Core.BTree.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Indexing;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Tests.E2E;
 
@@ -267,6 +269,29 @@ public class CompiledQueryRuntimeTests
     }
 
     [Fact]
+    public void CompiledInsert_ConvertsRegisteredVectorParameters()
+    {
+        using var context = CreateContext();
+        context.RegisterValueConverters(CreateTestVectorConverter());
+        context.Execute("CREATE TABLE Samples (Id INT PRIMARY KEY, Position VECTOR(2))");
+
+        IReadOnlyList<long> ids = DataVoCompiledQuery.Insert(
+            context,
+            DataVoCompiledQueryPlan.Insert(
+                tableName: "Samples",
+                columns: ["Id", "Position"],
+                parameterNames: ["id", "position"]),
+            [
+                new DataVoCompiledQueryParameter("id", 1),
+                new DataVoCompiledQueryParameter("position", new TestVector(1.5f, -4f))
+            ]);
+
+        Assert.Equal([1L], ids);
+        Dictionary<string, object?> row = context.Execute("SELECT Position FROM Samples").Single().Data.Single();
+        Assert.Equal(new TestVector(1.5f, -4f), context.Get<TestVector>(row, "Position"));
+    }
+
+    [Fact]
     public void CompiledUpdate_UpdatesRowsAndReturnsAffectedCount()
     {
         using var context = CreateContext();
@@ -292,6 +317,41 @@ public class CompiledQueryRuntimeTests
 
         Assert.Equal(1, affected);
         Assert.Equal(7, (int)context.Execute("SELECT Level FROM Players WHERE Id = 1").Single().Data.Single()["Level"]!);
+    }
+
+    [Fact]
+    public void CompiledUpdate_ConvertsRegisteredVectorAssignments()
+    {
+        using var context = CreateContext();
+        context.RegisterValueConverters(CreateTestVectorConverter());
+        context.Execute("CREATE TABLE Samples (Id INT PRIMARY KEY, Position VECTOR(2))");
+        context.Execute("CREATE INDEX idx_samples_position ON Samples (Position) USING HNSW");
+        context.BulkInsert("Samples",
+        [
+            new Dictionary<string, object?> { ["Id"] = 1, ["Position"] = new[] { 0f, 0f } }
+        ]);
+
+        var plan = DataVoCompiledQueryPlan.Update(
+            tableName: "Samples",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Position"] = "position"
+            },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        int affected = DataVoCompiledQuery.Update(
+            context,
+            plan,
+            [
+                new DataVoCompiledQueryParameter("id", 1),
+                new DataVoCompiledQueryParameter("position", new TestVector(-2f, 9f))
+            ]);
+
+        Assert.Equal(1, affected);
+        Dictionary<string, object?> row = context.Execute("SELECT Position FROM Samples").Single().Data.Single();
+        Assert.Equal(new TestVector(-2f, 9f), context.Get<TestVector>(row, "Position"));
+        Assert.Equal(1, context.SearchNearest("Samples", "idx_samples_position", [-2f, 9f], topK: 1).Single()["Id"]);
     }
 
     [Fact]
@@ -362,6 +422,13 @@ public class CompiledQueryRuntimeTests
         return context;
     }
 
+    private static DataVoValueConverter<TestVector> CreateTestVectorConverter() => new(
+        "DataVo.Tests.CompiledQueryRuntime.TestVector.v1",
+        value => CellValue.FromVector([value.X, value.Y]),
+        value => value is float[] vector && vector.Length == 2
+            ? new TestVector(vector[0], vector[1])
+            : throw new ArgumentException("Expected VECTOR(2).", nameof(value)));
+
     private static string CurrentDatabase(DataVoContext context)
     {
         return context.Engine.Sessions.Get(context.SessionId)
@@ -381,4 +448,6 @@ public class CompiledQueryRuntimeTests
         var cacheKey = (databaseName, tableName, indexName);
         cache[cacheKey] = new ThrowingIndex();
     }
+
+    private readonly record struct TestVector(float X, float Y);
 }

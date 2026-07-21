@@ -8,6 +8,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Utils;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.StorageEngine.Serialization;
 
@@ -568,6 +569,12 @@ public static class RowSerializer
     /// </summary>
     private static void WriteNonNullValue(BinaryWriter writer, Column column, object value)
     {
+        if (value is DataVoBoundValue boundValue)
+        {
+            WriteTypedCell(writer, column, boundValue.Cell);
+            return;
+        }
+
         object boxed = value;
         StorageColumnType type = ClassifyColumnType(column.Type);
         if (type == StorageColumnType.Int)

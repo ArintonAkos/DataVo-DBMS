@@ -10,6 +10,7 @@ using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Transactions;
 using DataVo.Core.Utils;
+using DataVo.Core.ValueConversion;
 using PolyIndexManager = DataVo.Core.Indexing.IndexManager;
 
 namespace DataVo.Core.Parser.DML;
@@ -501,7 +502,7 @@ internal sealed partial class InsertRowService(
         return primaryKeys.Count == 1 && schema.TryGetOrdinal(primaryKeys[0], out ordinal);
     }
 
-    private static void ValidateTypedCell(Column column, CellValue cell)
+    internal static void ValidateTypedCell(Column column, CellValue cell)
     {
         CellType expected = ExpectedCellType(column);
 
@@ -844,6 +845,13 @@ internal sealed partial class InsertRowService(
             return true;
         }
 
+        if (rawValue is DataVoBoundValue boundValue)
+        {
+            ValidateTypedCell(column, boundValue.Cell);
+            normalizedValue = boundValue.Cell.IsNull ? null : boundValue;
+            return true;
+        }
+
         string formattedValue = FormatColumnValue(rawValue, column.Type);
         column.Value = formattedValue;
 
@@ -1183,6 +1191,17 @@ internal sealed partial class InsertRowService(
                 }
 
                 string vectorColumn = index.AttributeNames[0];
+                if (row[vectorColumn] is DataVoBoundValue boundValue)
+                {
+                    if (boundValue.Cell.Type != CellType.Vector)
+                    {
+                        throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");
+                    }
+
+                    indexes.InsertIntoVectorIndex(boundValue.Cell.AsVectorReadOnlySpan(), rowId, indexName, tableName, databaseName, indexKind);
+                    continue;
+                }
+
                 if (!VectorParser.TryCoerceToVector(row[vectorColumn], out float[] vector))
                 {
                     throw new EvaluationException($"Cannot coerce value of '{vectorColumn}' into VECTOR for index '{indexName}'.");

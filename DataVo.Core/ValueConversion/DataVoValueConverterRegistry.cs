@@ -101,4 +101,16 @@ internal sealed class DataVoValueConverterRegistry
             ? converter.ToCellValue(value)
             : CellValue.From(value);
     }
+
+    internal object? BindForLegacyWrite(object? value)
+    {
+        if (value is null || value is DataVoBoundValue)
+        {
+            return value;
+        }
+
+        return _converters.TryGetValue(value.GetType(), out IDataVoValueConverter? converter)
+            ? new DataVoBoundValue(converter.ToCellValue(value))
+            : value;
+    }
 }

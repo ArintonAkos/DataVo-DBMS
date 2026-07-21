@@ -7,6 +7,7 @@ using DataVo.Core.Compat;
 using DataVo.Core.Serialization;
 using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.Utils;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.Transactions;
 
@@ -533,6 +534,11 @@ internal sealed class WalFileStore
 
     private static object? PrepareValueForWalSerialization(object? value)
     {
+        if (value is DataVoBoundValue boundValue)
+        {
+            value = boundValue.ToMaterializedValue();
+        }
+
         if (TryCoerceRuntimeVector(value, out float[] vector))
         {
             return CreateVectorEnvelope(vector);

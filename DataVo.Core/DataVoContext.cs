@@ -242,7 +242,7 @@ public sealed class DataVoContext : IDisposable
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         List<IReadOnlyDictionary<string, object?>> materializedRows = rows
             .Select(row => row ?? throw new ArgumentNullException(nameof(rows), "Rows cannot contain null entries."))
-            .Select(row => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase))
+            .Select(MaterializeBoundWriteRow)
             .ToList();
 
         if (materializedRows.Count == 0)
@@ -650,6 +650,19 @@ public sealed class DataVoContext : IDisposable
     private string? TryGetCurrentDatabaseName()
     {
         return Engine.Sessions.Get(SessionId);
+    }
+
+    internal object? BindValueForWrite(object? value) => _valueConverters.BindForLegacyWrite(value);
+
+    private IReadOnlyDictionary<string, object?> MaterializeBoundWriteRow(IReadOnlyDictionary<string, object?> row)
+    {
+        var materialized = new Dictionary<string, object?>(row.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string columnName, object? value) in row)
+        {
+            materialized[columnName] = BindValueForWrite(value);
+        }
+
+        return materialized;
     }
 
     private string ResolveCurrentDatabase()
