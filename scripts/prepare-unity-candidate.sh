@@ -143,12 +143,6 @@ cmp -s "$core_package" "$cached_package" || {
   exit 1
 }
 
-node "$root/scripts/resolve-unity-candidate-assets.mjs" \
-  --assets "$consumer_assets" \
-  --packages-root "$consumer_cache" \
-  --runtime-directory "$stage/Runtime/Dependencies" \
-  --output "$stage/dependency-assets.json"
-
 NUGET_PACKAGES="$tool_cache" dotnet restore "$root/tools/DataVo.UnityCandidateInspector/DataVo.UnityCandidateInspector.csproj" \
   -p:MSBuildProjectExtensionsPath="$tool_extensions" \
   --force --no-cache
@@ -164,6 +158,19 @@ inspector="$root/tools/DataVo.UnityCandidateInspector/bin/Debug/net10.0/DataVo.U
   exit 1
 }
 
+unity_runtime_inventory="$root/tests/unity/DataVo.UnitySmoke/UnityRuntimeBclManifest.json"
+unity_runtime_inventory_reference="tests/unity/DataVo.UnitySmoke/UnityRuntimeBclManifest.json"
+bash "$root/scripts/check-unity-runtime-bcl.sh" --manifest "$unity_runtime_inventory"
+
+node "$root/scripts/resolve-unity-candidate-assets.mjs" \
+  --assets "$consumer_assets" \
+  --packages-root "$consumer_cache" \
+  --runtime-directory "$stage/Runtime/Dependencies" \
+  --output "$stage/dependency-assets.json" \
+  --inspector "$inspector" \
+  --unity-runtime-inventory "$unity_runtime_inventory" \
+  --unity-runtime-inventory-reference "$unity_runtime_inventory_reference"
+
 assemblies=("$core_dll")
 while IFS= read -r dependency; do
   assemblies+=("$dependency")
@@ -175,15 +182,25 @@ dotnet "$inspector" \
   "${assemblies[@]}"
 
 package_sha256="$(shasum -a 256 "$core_package" | awk '{ print $1 }')"
-node - "$stage" "$source_commit" "$package_version" "$package_sha256" <<'NODE'
+node - "$stage" "$source_commit" "$package_version" "$package_sha256" "$unity_runtime_inventory" "$unity_runtime_inventory_reference" <<'NODE'
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const [stage, sourceCommit, packageVersion, packageSha256] = process.argv.slice(2);
+const [stage, sourceCommit, packageVersion, packageSha256, unityRuntimeInventoryPath, unityRuntimeInventoryReference] = process.argv.slice(2);
 const dependencies = JSON.parse(fs.readFileSync(path.join(stage, "dependency-assets.json"), "utf8"));
 const inventory = JSON.parse(fs.readFileSync(path.join(stage, "assembly-inventory.json"), "utf8"));
+const unityRuntimeInventory = JSON.parse(fs.readFileSync(unityRuntimeInventoryPath, "utf8"));
+if (dependencies.schemaVersion !== 2 || !Array.isArray(dependencies.dependencies)) {
+  throw new Error("Dependency assets manifest must use schemaVersion 2.");
+}
+if (unityRuntimeInventory.schemaVersion !== 1 || typeof unityRuntimeInventory.unity?.editorVersion !== "string" || typeof unityRuntimeInventory.unity?.revision !== "string") {
+  throw new Error("Unity runtime inventory is malformed.");
+}
 const dependencyByFixturePath = new Map(
-  dependencies.dependencies.map((dependency) => [dependency.fixturePath, dependency]),
+  dependencies.dependencies
+    .filter((dependency) => dependency.resolution === "copied")
+    .map((dependency) => [dependency.fixturePath, dependency]),
 );
 
 const assemblies = inventory.assemblies.map((assembly) => {
@@ -199,7 +216,7 @@ const assemblies = inventory.assemblies.map((assembly) => {
   }
 
   const dependency = dependencyByFixturePath.get(assembly.file);
-  if (!dependency) {
+  if (!dependency || dependency.resolution !== "copied") {
     throw new Error("No dependency provenance for " + assembly.file);
   }
 
@@ -222,7 +239,7 @@ const packageJson = {
 };
 
 const candidateManifest = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   sourceCommit,
   fixturePackage: {
     name: packageJson.name,
@@ -233,6 +250,13 @@ const candidateManifest = {
     version: packageVersion,
     sha256: packageSha256,
     assetPath: "lib/netstandard2.1/DataVo.Core.dll",
+  },
+  unityRuntimeInventory: {
+    path: unityRuntimeInventoryReference,
+    schemaVersion: unityRuntimeInventory.schemaVersion,
+    editorVersion: unityRuntimeInventory.unity.editorVersion,
+    revision: unityRuntimeInventory.unity.revision,
+    sha256: crypto.createHash("sha256").update(fs.readFileSync(unityRuntimeInventoryPath)).digest("hex"),
   },
   dependencyAssets: "dependency-assets.json",
   assemblyInventory: "assembly-inventory.json",
