@@ -29,5 +29,24 @@ namespace System.Runtime.CompilerServices
         public bool IsOptional { get; init; }
     }
 }
+
+namespace System.Diagnostics.CodeAnalysis
+{
+    [Flags]
+    internal enum DynamicallyAccessedMemberTypes
+    {
+        None = 0,
+        PublicParameterlessConstructor = 0x0001,
+        PublicProperties = 0x0200,
+    }
+
+    [AttributeUsage(AttributeTargets.GenericParameter | AttributeTargets.Field | AttributeTargets.ReturnValue | AttributeTargets.Parameter, Inherited = false)]
+    internal sealed class DynamicallyAccessedMembersAttribute : Attribute
+    {
+        public DynamicallyAccessedMembersAttribute(DynamicallyAccessedMemberTypes memberTypes) => MemberTypes = memberTypes;
+
+        public DynamicallyAccessedMemberTypes MemberTypes { get; }
+    }
+}
 #pragma warning restore CS1591
 #endif

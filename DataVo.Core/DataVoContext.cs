@@ -1,4 +1,6 @@
-﻿using DataVo.Core.Contracts.Results;
+﻿using System.Diagnostics.CodeAnalysis;
+using DataVo.Core.Contracts.Results;
+using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Parser.DML;
 using DataVo.Core.Parser;
@@ -41,6 +43,7 @@ public sealed class DataVoContext : IDisposable
 {
     private InsertRowService? _typedInsertService;
     private readonly DataVoValueConverterRegistry _valueConverters = new();
+    private readonly DataVoModelBinding _modelBindings = new();
     private readonly Dictionary<(string DatabaseName, string TableName), string> _retainedWriteLockKeys = [];
 
     /// <summary>
@@ -100,6 +103,44 @@ public sealed class DataVoContext : IDisposable
         }
 
         return _valueConverters.ConvertMaterialized<T>(value);
+    }
+
+    /// <summary>
+    /// Materializes a public parameterless model from a result row. Result fields without a matching public
+    /// writable property are ignored; registered converters are selected from each property type.
+    /// </summary>
+    public T Map<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+        IReadOnlyDictionary<string, object?> row)
+    {
+        return _modelBindings.Map<T>(row, _valueConverters);
+    }
+
+    /// <summary>
+    /// Inserts a public parameterless model by matching its public readable properties to the selected
+    /// table's catalog columns. The binding is cached for the current catalog schema version.
+    /// </summary>
+    public long Insert<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+        string tableName,
+        T entity)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name is required.", nameof(tableName));
+        }
+
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entity);
+        string databaseName = ResolveCurrentDatabase();
+        int schemaVersion = Engine.Catalog.GetTableSchemaVersion(tableName, databaseName);
+        IReadOnlyList<Column> columns = Engine.Catalog.GetTableColumns(tableName, databaseName);
+        DataVoModelBinding.WriteBinding binding = _modelBindings.GetWriteBinding(
+            typeof(T), databaseName, tableName, schemaVersion, columns);
+        CellValue[] cells = binding.CreateCells(entity!, _valueConverters);
+
+        return InsertTyped(tableName, binding.Schema, cells);
     }
 
     /// <summary>
