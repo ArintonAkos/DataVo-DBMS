@@ -276,6 +276,7 @@ ClientBin/
 /tests/unity/DataVo.UnitySmoke/UserSettings/
 /tests/unity/.generated
 /tests/unity/DataVo.UnitySmoke/.generated
+/tests/unity/DataVo.UnitySmoke/Assets/DataVoSmoke/.generated/
 !tests/unity/DataVo.UnitySmoke/Packages/
 !tests/unity/DataVo.UnitySmoke/Packages/**
 !tests/unity/DataVo.UnitySmoke/**/*.meta
