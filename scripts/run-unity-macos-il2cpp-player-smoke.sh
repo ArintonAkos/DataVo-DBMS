@@ -4,6 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 editor="/Applications/Unity/Hub/Editor/6000.5.4f1/Unity.app/Contents/MacOS/Unity"
 project="$root/tests/unity/DataVo.UnitySmoke"
+settings_file="$project/ProjectSettings/ProjectSettings.asset"
 output_root="$(mktemp -d /private/tmp/datavo-unity-il2cpp.XXXXXX)"
 app="$output_root/DataVoUnitySmoke.app"
 editor_log="$output_root/editor.log"
@@ -27,6 +28,38 @@ if [[ ! -x "$editor" ]]; then
   fail "Pinned Unity Editor is missing or not executable: $editor"
 fi
 
+if [[ ! -f "$settings_file" ]]; then
+  fail "Unity Player settings file is missing: $settings_file"
+fi
+
+settings_before="$(shasum -a 256 "$settings_file" | awk '{print $1}')"
+verify_settings_unchanged() {
+  if [[ ! -f "$settings_file" ]]; then
+    echo "Unity Player settings file disappeared: $settings_file" >&2
+    return 1
+  fi
+
+  settings_after="$(shasum -a 256 "$settings_file" | awk '{print $1}')"
+  if [[ "$settings_before" != "$settings_after" ]]; then
+    echo "Unity macOS IL2CPP Player smoke changed tracked ProjectSettings.asset: $settings_file" >&2
+    echo "ProjectSettings SHA-256 before: $settings_before" >&2
+    echo "ProjectSettings SHA-256 after:  $settings_after" >&2
+    return 1
+  fi
+}
+
+on_exit() {
+  local exit_code=$?
+  trap - EXIT
+  if ! verify_settings_unchanged; then
+    exit 1
+  fi
+
+  exit "$exit_code"
+}
+trap on_exit EXIT
+
+bash "$root/scripts/check-unity-runtime-bcl.sh"
 bash "$root/scripts/prepare-unity-smoke-candidate.sh"
 bash "$root/scripts/check-unity-smoke-project.sh" --require-candidate
 
@@ -45,11 +78,21 @@ if [[ $editor_exit -ne 0 ]]; then
   fail "Unity macOS IL2CPP Player build failed with exit code $editor_exit."
 fi
 
-player="$app/Contents/MacOS/DataVoUnitySmoke"
-
-if [[ ! -x "$player" ]]; then
-  fail "Unity macOS Player executable is missing or not executable: $player"
+player_directory="$app/Contents/MacOS"
+if [[ ! -d "$player_directory" ]]; then
+  fail "Unity macOS Player executable directory is missing: $player_directory"
 fi
+
+player_candidates=()
+while IFS= read -r candidate; do
+  player_candidates+=("$candidate")
+done < <(find "$player_directory" -maxdepth 1 -type f -perm -111 -print | LC_ALL=C sort)
+
+if [[ ${#player_candidates[@]} -ne 1 ]]; then
+  fail "Unity macOS Player must contain exactly one executable in $player_directory; found ${#player_candidates[@]}."
+fi
+
+player="${player_candidates[0]}"
 
 set +e
 "$player" \

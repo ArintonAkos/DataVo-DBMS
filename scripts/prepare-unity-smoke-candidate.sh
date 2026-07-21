@@ -12,6 +12,7 @@ fi
 candidate_root="$(mktemp -d /private/tmp/datavo-unity-smoke-candidate.XXXXXX)"
 candidate_output="$candidate_root/com.datavo.core.candidate"
 
+bash "$root/scripts/check-unity-runtime-bcl.sh"
 bash "$root/scripts/prepare-unity-candidate.sh" --output "$candidate_output"
 ln -sfn "$candidate_output" "$candidate_link"
 

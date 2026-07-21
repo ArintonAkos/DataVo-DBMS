@@ -21,6 +21,7 @@ output_root="$(mktemp -d /private/tmp/datavo-unity-b2b.XXXXXX)"
 results="$output_root/editmode-results.xml"
 log="$output_root/editor.log"
 
+bash "$root/scripts/check-unity-runtime-bcl.sh"
 bash "$root/scripts/prepare-unity-smoke-candidate.sh"
 
 set +e

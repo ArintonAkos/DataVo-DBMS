@@ -66,8 +66,8 @@ namespace DataVo.UnitySmoke.Editor
 
         private static string GetEditorRoot()
         {
-            var executable = new FileInfo(EditorApplication.applicationPath);
-            DirectoryInfo? root = executable.Directory?.Parent?.Parent?.Parent;
+            var contents = new DirectoryInfo(EditorApplication.applicationContentsPath);
+            DirectoryInfo? root = contents.Parent?.Parent;
 
             if (root is null)
                 throw new InvalidOperationException("Could not locate the pinned Unity Editor root.");
