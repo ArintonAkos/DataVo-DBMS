@@ -69,8 +69,8 @@ assert(manifest.unity === "6000.0", "UPM package must declare Unity 6000.0.");
 assert(
   manifest.dependencies &&
     Object.keys(manifest.dependencies).length === 1 &&
-    manifest.dependencies["com.unity.mathematics"] === "1.3.3",
-  "UPM package must declare only com.unity.mathematics 1.3.3.",
+    manifest.dependencies["com.unity.mathematics"] === "1.4.0",
+  "UPM package must declare only com.unity.mathematics 1.4.0.",
 );
 
 const mathematicsAsmdef = readJson(mathematicsAsmdefPath);
@@ -86,7 +86,7 @@ equalArrays(
   ["DataVo.Core.dll"],
   "Mathematics asmdef must explicitly reference the DataVo.Core plugin.",
 );
-assert(mathematicsAsmdef.noEngineReferences === true, "Mathematics asmdef must disable UnityEngine references.");
+assert(mathematicsAsmdef.noEngineReferences === false, "Mathematics asmdef must retain UnityEngine module references required by Unity Mathematics 1.4.0.");
 
 const engineTypesAsmdef = readJson(engineTypesAsmdefPath);
 assert(engineTypesAsmdef.name === "DataVo.Unity.EngineTypes", "EngineTypes asmdef name is incorrect.");
@@ -123,6 +123,7 @@ assert_source_contract() {
 
   require_file "$source_path"
 
+  rg -Fq "#nullable enable" "$source_path"
   rg -Fq "namespace $namespace_name" "$source_path"
   rg -Fq "ToDataVoCell(this $vector2_name value)" "$source_path"
   rg -Fq "ToDataVoCell(this $vector3_name value)" "$source_path"

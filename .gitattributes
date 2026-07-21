@@ -3,6 +3,9 @@
 ###############################################################################
 * text=auto
 
+# Unity serializes blank ProjectSettings scalar values with trailing spaces.
+tests/unity/DataVo.UnitySmoke/ProjectSettings/*.asset whitespace=-trailing-space
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

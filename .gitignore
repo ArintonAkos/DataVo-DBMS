@@ -268,6 +268,17 @@ ClientBin/
 # Track UPM package documentation; Unity reserves the Documentation~ directory name.
 !integrations/unity/com.datavo.unity.mathematics/Documentation~/
 !integrations/unity/com.datavo.unity.mathematics/Documentation~/**
+
+# Unity smoke-project source and generated candidate boundary.
+/tests/unity/DataVo.UnitySmoke/Library/
+/tests/unity/DataVo.UnitySmoke/Temp/
+/tests/unity/DataVo.UnitySmoke/Logs/
+/tests/unity/DataVo.UnitySmoke/UserSettings/
+/tests/unity/.generated
+/tests/unity/DataVo.UnitySmoke/.generated
+!tests/unity/DataVo.UnitySmoke/Packages/
+!tests/unity/DataVo.UnitySmoke/Packages/**
+!tests/unity/DataVo.UnitySmoke/**/*.meta
 *.dbmdl
 *.dbproj.schemaview
 *.jfm

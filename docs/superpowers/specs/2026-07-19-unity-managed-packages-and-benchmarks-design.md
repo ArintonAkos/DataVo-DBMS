@@ -79,7 +79,8 @@ tested by Unity; it is not compiled against or dependent on the unofficial
 ## Pinned Environment
 
 - Unity Editor: `6000.5.4f1`.
-- Unity Mathematics: `com.unity.mathematics` `1.3.3`.
+- Unity Mathematics: `com.unity.mathematics` `1.4.0`, resolved by the installed
+  `6000.5.4f1` Editor as a built-in package.
 - Burst: released `com.unity.burst` `1.8.26`.
 - Test Framework: the core version fixed by Unity `6000.5.4f1`.
 - Collections and other transitive Unity packages: resolve once from a clean
@@ -496,8 +497,8 @@ explicit Stage 4 decision.
   https://docs.unity3d.com/6000.0/Documentation/Manual/dotnet-profile-support.html
 - Unity custom package guidance:
   https://docs.unity3d.com/Manual/CustomPackages.html
-- Unity Mathematics `1.3.3`:
-  https://docs.unity3d.com/Packages/com.unity.mathematics@1.3/manual/index.html
+- Unity Mathematics `1.4.0`:
+  https://docs.unity3d.com/Packages/com.unity.mathematics@1.4/manual/index.html
 - Unity Burst compilation boundary:
   https://docs.unity3d.com/Manual/script-compilation-burst.html
 - Unity `6000.5.4f1` release:

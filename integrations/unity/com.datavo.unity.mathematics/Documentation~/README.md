@@ -21,6 +21,10 @@ does not use unofficial Unity NuGet mirrors, and does not make DataVo callable
 from Burst. Native container adapters and the explicit Burst-to-managed drain
 bridge are planned for com.datavo.unity.jobs.
 
+On Unity `6000.5.4f1`, Unity Mathematics `1.4.0` forwards its value types through
+`UnityEngine.MathematicsModule`. The Mathematics assembly therefore retains Unity
+engine-module references while still exposing only Unity Mathematics adapters.
+
 ## Verification status
 
 Pinned Unity 6000.5.4f1 Editor/Mono, Burst, package import, and executed Windows

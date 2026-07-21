@@ -20,7 +20,7 @@
 - The fixture generator must stage beside the requested output and publish only by a final rename. A pre-existing output path is an error; the generator must not delete or overwrite it.
 - Reject duplicate assembly identities and duplicate public top-level System.* types across distinct copied DLLs before publishing the fixture.
 - Adapter asmdefs reference the candidate as a Unity precompiled plugin. They must use overrideReferences:true and precompiledReferences:["DataVo.Core.dll"]; DataVo.Core must not appear in their asmdef references arrays.
-- DataVo.Unity.Mathematics retains Unity.Mathematics as its only asmdef reference and keeps noEngineReferences:true. DataVo.Unity.EngineTypes has no asmdef references and keeps noEngineReferences:false.
+- DataVo.Unity.Mathematics retains Unity.Mathematics as its only asmdef reference and keeps noEngineReferences:false, because Unity `6000.5.4f1` Mathematics `1.4.0` forwards its value types through `UnityEngine.MathematicsModule`. DataVo.Unity.EngineTypes has no asmdef references and keeps noEngineReferences:false.
 - Static or .NET-host checks are not Unity import, Burst, Mono, IL2CPP, AOT, player, or performance evidence.
 - Preserve unrelated user-owned untracked files. Use apply_patch for edits and stage exact paths only.
 
