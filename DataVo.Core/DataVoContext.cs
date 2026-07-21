@@ -8,6 +8,7 @@ using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
+using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core;
 
@@ -39,6 +40,7 @@ namespace DataVo.Core;
 public sealed class DataVoContext : IDisposable
 {
     private InsertRowService? _typedInsertService;
+    private readonly DataVoValueConverterRegistry _valueConverters = new();
     private readonly Dictionary<(string DatabaseName, string TableName), string> _retainedWriteLockKeys = [];
 
     /// <summary>
@@ -70,6 +72,35 @@ public sealed class DataVoContext : IDisposable
     /// Gets the diagnostics facade for runtime query instrumentation.
     /// </summary>
     public DataVoDiagnostics Diagnostics => Engine.Diagnostics;
+
+    /// <summary>
+    /// Registers external CLR value converters for this context. Registration is atomic: a conflicting
+    /// converter leaves the existing set unchanged.
+    /// </summary>
+    public void RegisterValueConverters(params IDataVoValueConverter[] converters)
+    {
+        _valueConverters.RegisterRange(converters);
+    }
+
+    /// <summary>
+    /// Reads one named materialized result value as <typeparamref name="T"/> using the converter registered
+    /// for that target type when the value is not already compatible.
+    /// </summary>
+    public T Get<T>(IReadOnlyDictionary<string, object?> row, string columnName)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(row);
+        if (string.IsNullOrWhiteSpace(columnName))
+        {
+            throw new ArgumentException("Result column name is required.", nameof(columnName));
+        }
+
+        if (!row.TryGetValue(columnName, out object? value))
+        {
+            throw new KeyNotFoundException($"Result row does not contain column '{columnName}'.");
+        }
+
+        return _valueConverters.ConvertMaterialized<T>(value);
+    }
 
     /// <summary>
     /// Registers a standing reactive query that reports exactly what changed in its result set, and
