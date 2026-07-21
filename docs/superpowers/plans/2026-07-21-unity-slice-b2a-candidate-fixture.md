@@ -49,7 +49,7 @@
 
 **Produces:** Adapter assemblies that use Unity precompiled-plugin references rather than an asmdef reference for a generated DataVo.Core.dll.
 
-- [ ] **Step 1: Change the existing metadata contract to the intended plugin shape**
+- [x] **Step 1: Change the existing metadata contract to the intended plugin shape**
 
 In the Node assertion block, require exactly:
 
@@ -64,7 +64,7 @@ EngineTypes precompiledReferences: ["DataVo.Core.dll"]
 
 Keep the existing names, root namespaces, autoReferenced values, and noEngineReferences assertions.
 
-- [ ] **Step 2: Run the targeted metadata contract and observe red**
+- [x] **Step 2: Run the targeted metadata contract and observe red**
 
 Run:
 
@@ -74,7 +74,7 @@ bash scripts/test-unity-mathematics-package.sh --metadata
 
 Expected: failure because the current asmdefs still name DataVo.Core in references and have empty precompiledReferences arrays.
 
-- [ ] **Step 3: Change only the two asmdefs to the plugin model**
+- [x] **Step 3: Change only the two asmdefs to the plugin model**
 
 Set the Mathematics asmdef fields to:
 
@@ -94,7 +94,7 @@ Set the EngineTypes asmdef fields to:
 
 Do not add a DataVo.Core.asmdef beside the generated DLL. A source asmdef with that identity would collide with the precompiled DataVo.Core plugin.
 
-- [ ] **Step 4: Verify the corrected adapter contract and portable C# surface**
+- [x] **Step 4: Verify the corrected adapter contract and portable C# surface**
 
 Run:
 
@@ -105,7 +105,7 @@ dotnet build /private/tmp/datavo-unity-adapter-contract/DataVo.Unity.AdapterCont
 
 Expected: the static package contract passes. The disposable adapter C# harness has no adapter diagnostics; it may repeat the known portable Core nullable warnings.
 
-- [ ] **Step 5: Commit the corrected plugin boundary**
+- [x] **Step 5: Commit the corrected plugin boundary**
 
 ~~~bash
 git add scripts/test-unity-mathematics-package.sh integrations/unity/com.datavo.unity.mathematics/Runtime/Mathematics/DataVo.Unity.Mathematics.asmdef integrations/unity/com.datavo.unity.mathematics/Runtime/EngineTypes/DataVo.Unity.EngineTypes.asmdef
@@ -136,11 +136,11 @@ The JSON output contains a schemaVersion and one ordered record per input DLL:
 }
 ~~~
 
-- [ ] **Step 1: Write the failing inspector integration contract**
+- [x] **Step 1: Write the failing inspector integration contract**
 
 Create scripts/test-unity-candidate-inspector.sh. It must:
 
-1. build the portable Core target into a temporary workspace;
+1. require the already-built Debug netstandard2.1 Core artifact;
 2. invoke the inspector once for that DLL and require one inventory record with a SHA-256 and DataVo.Core identity;
 3. invoke the inspector with the same DLL twice and require a non-zero exit plus the exact phrase Duplicate assembly identity.
 
@@ -152,7 +152,7 @@ bash scripts/test-unity-candidate-inspector.sh
 
 Expected: failure because the inspector project does not exist.
 
-- [ ] **Step 2: Implement the minimal inspector**
+- [x] **Step 2: Implement the minimal inspector**
 
 Target net10.0 with no PackageReference. Parse --root, --output, then one or more assembly paths; reject unknown options, missing root/output/input, a root that does not contain an input, and duplicate input path arguments with an argument error.
 
@@ -167,7 +167,7 @@ MetadataReader metadata = peReader.GetMetadataReader();
 
 Compute lowercase SHA-256 from file bytes. Enumerate public top-level types whose namespace begins with System. Use TypeAttributes.Public only, not nested types. Before writing JSON, reject a repeated name.FullName across different files and reject any repeated public System type across different files. Write sorted JSON with paths relative to the fixture root supplied by --root.
 
-- [ ] **Step 3: Run the inspector contract and verify green**
+- [x] **Step 3: Run the inspector contract and verify green**
 
 Run:
 
@@ -178,7 +178,7 @@ bash scripts/test-unity-candidate-inspector.sh
 
 Expected: normal inventory succeeds and the duplicated DataVo.Core input fails with Duplicate assembly identity.
 
-- [ ] **Step 4: Commit the inventory boundary**
+- [x] **Step 4: Commit the inventory boundary**
 
 ~~~bash
 git add tools/DataVo.UnityCandidateInspector/DataVo.UnityCandidateInspector.csproj tools/DataVo.UnityCandidateInspector/Program.cs scripts/test-unity-candidate-inspector.sh
@@ -204,7 +204,7 @@ git commit -m "feat: inspect Unity candidate assemblies"
 }
 ~~~
 
-- [ ] **Step 1: Write the failing fixture-shape portion of the preparation test**
+- [x] **Step 1: Write the failing fixture-shape portion of the preparation test**
 
 Create scripts/test-prepare-unity-candidate.sh before the resolver/generator. It must create a unique temporary output, call scripts/prepare-unity-candidate.sh --output with that path, and require:
 
@@ -222,13 +222,13 @@ bash scripts/test-prepare-unity-candidate.sh
 
 Expected: failure because the preparation command and resolver do not exist.
 
-- [ ] **Step 2: Implement deterministic assets resolution**
+- [x] **Step 2: Implement deterministic assets resolution**
 
 The Node command accepts exactly --assets, --packages-root, --runtime-directory, and --output. It selects the target whose name begins .NETStandard,Version=v2.1, unions compile and runtime DLL assets, excludes DataVo.Core, and resolves each asset through libraries[libraryKey].path beneath the supplied package root.
 
 Copy each selected DLL into Runtime/Dependencies using its basename. Reject an absent source DLL or a basename collision before copying. Emit stable, package-ID/version/path-sorted dependency-assets.json using only forward-slash fixture paths.
 
-- [ ] **Step 3: Verify the resolver through the preparation contract**
+- [x] **Step 3: Verify the resolver through the preparation contract**
 
 Run:
 
@@ -265,7 +265,7 @@ scripts/prepare-unity-candidate.sh --output /absolute/or/relative/new-directory
       <resolved managed DLLs>
 ~~~
 
-- [ ] **Step 1: Implement isolated pack and consumer restore**
+- [x] **Step 1: Implement isolated pack and consumer restore**
 
 Require one --output value and reject any existing output. Create an adjacent staging directory and isolated pack, restore, HTTP, MSBuild-extension, and DOTNET_CLI_HOME paths under mktemp. Pack DataVo.Core Release with:
 
@@ -279,7 +279,7 @@ Require exactly lib/net10.0/DataVo.Core.dll and lib/netstandard2.1/DataVo.Core.d
 
 Restore tools/DataVo.PortableConsumer targeting the generated package with only the isolated local source plus NuGet.org. Require its assets file to select lib/netstandard2.1/DataVo.Core.dll and confirm the consumer cache nupkg byte-matches the just-packed candidate.
 
-- [ ] **Step 2: Resolve, inspect, and write provenance files**
+- [x] **Step 2: Resolve, inspect, and write provenance files**
 
 Call resolve-unity-candidate-assets.mjs with the consumer assets file and isolated cache. Run DataVo.UnityCandidateInspector with --root set to the staging directory and --output assembly-inventory.json over DataVo.Core.dll plus every copied dependency DLL.
 
@@ -299,11 +299,11 @@ Write README.md that names this output generated/test-only, instructs callers no
 
 Write candidate-manifest.json with schemaVersion 1, sourceCommit, candidate package ID/version/SHA-256, netstandard asset path, relative fixture assembly paths, dependency-assets filename, and assembly-inventory filename. Use Node JSON serialization with sorted keys/records so repeated runs from the same commit have deterministic content apart from the candidate package version only.
 
-- [ ] **Step 3: Publish only after all validation succeeds**
+- [x] **Step 3: Publish only after all validation succeeds**
 
 After all required files exist and the inspector succeeds, rename the complete staging directory to --output. On a failure, leave the requested path absent and clean only owned temporary/staging paths.
 
-- [ ] **Step 4: Run the end-to-end candidate preparation contract**
+- [x] **Step 4: Run the end-to-end candidate preparation contract**
 
 Run:
 
@@ -315,7 +315,7 @@ bash scripts/check-unity-support-status.sh
 
 Expected: fixture shape, hashes, dependency closure, duplicate protections, existing portable smoke, and support disclaimers all pass. Network access may be required solely for the explicitly isolated fresh NuGet restores.
 
-- [ ] **Step 5: Commit the generated-fixture preparation tooling**
+- [x] **Step 5: Commit the generated-fixture preparation tooling**
 
 ~~~bash
 git add scripts/resolve-unity-candidate-assets.mjs scripts/prepare-unity-candidate.sh scripts/test-prepare-unity-candidate.sh
@@ -328,7 +328,7 @@ git commit -m "feat: prepare Unity portable candidate fixture"
 - Create: scripts/xunit-serial.runsettings
 - Modify: docs/superpowers/plans/2026-07-21-unity-slice-b2a-candidate-fixture.md
 
-- [ ] **Step 1: Run source and portable verification**
+- [x] **Step 1: Run source and portable verification**
 
 Run:
 
@@ -344,7 +344,7 @@ git diff --check HEAD
 
 Expected: all commands exit zero. Existing TopKReactiveQuery nullable warnings may appear in portable Core builds but no errors/new warnings are accepted.
 
-- [ ] **Step 2: Add a portable serial test configuration and run the full test suite**
+- [x] **Step 2: Add a portable serial test configuration and run the full test suite**
 
 Create scripts/xunit-serial.runsettings:
 
@@ -368,14 +368,38 @@ dotnet test DataVo.Tests/DataVo.Tests.csproj --no-build --no-restore --settings 
 
 Expected TRX counters: 1,418 total, 1,417 executed/passed, 0 failed, 1 intentional Stage2B skip.
 
-- [ ] **Step 3: Record what remains blocked**
+- [x] **Step 3: Record what remains blocked**
 
 Mark this plan complete only for deterministic candidate preparation. Record that pinned Unity Editor import, derived packages-lock.json, Jobs/Collections, Burst, the smoke project, Windows x64 IL2CPP execution, and NuGet derivation from Unity-compiled adapter DLLs remain unexecuted Slice B2b/B2c work.
 
-- [ ] **Step 4: Commit the verified plan**
+- [x] **Step 4: Commit the verified plan**
 
 ~~~bash
 git add scripts/xunit-serial.runsettings
 git add -f docs/superpowers/plans/2026-07-21-unity-slice-b2a-candidate-fixture.md
 git commit -m "docs: record Unity candidate fixture verification"
 ~~~
+
+## Implementation Record
+
+Completed 2026-07-21.
+
+- Corrected the UPM adapter assembly definitions so `DataVo.Core.dll` is consumed as a precompiled Unity plugin. `DataVo.Core` is no longer an asmdef reference, avoiding a source-assembly identity collision with the generated candidate DLL.
+- Added a framework-only managed-assembly inspector. It records identities, SHA-256 hashes, and public top-level `System.*` types, rejecting duplicate identities and duplicate framework types before fixture publication.
+- Added an atomic candidate generator. It packs the opt-in portable package in isolated NuGet caches, restores a clean netstandard2.1 consumer, extracts the exact Core asset plus its resolved managed dependency closure, inventories it, and writes provenance manifests before the final rename.
+- The resolver verification is exercised through the successful end-to-end preparation contract after the generator exists; it copies only the assets selected by the fresh consumer restore.
+- Added the checked-in serial xUnit configuration. The full run produced 1,418 total tests: 1,417 passed, 0 failed, and 1 intentional Stage2B performance-probe skip.
+
+Verification completed successfully:
+
+~~~bash
+bash scripts/test-unity-mathematics-package.sh --all
+bash scripts/test-unity-candidate-inspector.sh
+bash scripts/test-prepare-unity-candidate.sh
+dotnet build DataVo.Core/DataVo.Core.csproj --no-restore --disable-build-servers -p:DataVoEnablePortableTarget=true
+bash scripts/verify-portable-candidate.sh
+bash scripts/check-unity-support-status.sh
+dotnet test DataVo.Tests/DataVo.Tests.csproj --no-build --no-restore --settings scripts/xunit-serial.runsettings --logger "trx;LogFileName=unity-slice-b2a-serial.trx" --results-directory /private/tmp/datavo-unity-b2a-tests
+~~~
+
+The portable Core build still reports the pre-existing four `TopKReactiveQuery` nullable warnings (`CS8602`), with no errors. No Unity Editor is installed locally, and no Unity import, package lock derivation, Jobs/Collections implementation, Burst, Mono, IL2CPP, player build, Windows x64 test, or NuGet package derived from Unity-compiled adapter DLLs has been performed. Those remain explicit Slice B2b/B2c work, gated on a clean project using the pinned Unity 6000.5.3f1 Editor.
