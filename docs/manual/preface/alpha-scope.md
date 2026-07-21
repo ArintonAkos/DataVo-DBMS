@@ -58,12 +58,13 @@ SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `Ce
 
 ## Unity Evaluation Status
 
-Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
 
 | Environment or boundary | Status | Meaning |
 | --- | --- | --- |
-| Unity Editor | Unverified until Stage 3 | No tracked Unity project has imported and executed the candidate package yet. |
-| Windows x64 IL2CPP | Unverified until Stage 3 | A built and executed IL2CPP player is required; compilation alone is insufficient. |
+| Unity 6000.5.4f1 Editor | Verified (narrow smoke) | The tracked project imports the generated candidate and its EditMode smoke suite passes. |
+| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) | A Medium-stripping Player builds, launches, performs the Unity type-binding scenario, writes a passing report, and exits zero. |
+| Windows x64 IL2CPP | Unverified | Windows requires its own built-and-executed Player proof. |
 | Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
 | Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |

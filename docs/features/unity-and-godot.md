@@ -2,14 +2,15 @@
 
 DataVo is not currently a supported Unity or Godot runtime integration. This page records the proposed use cases, the managed integration boundary, and the proof required before support is claimed.
 
-The public `DataVo.Core` package remains `net10.0`-only. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate; it is not a distributed or supported Unity package. Passing its .NET-host verifier does not prove Unity Editor, Mono, IL2CPP, Jobs, or Burst compatibility.
+The public `DataVo.Core` package remains `net10.0`-only. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate; it is not a distributed or supported Unity package. Passing its .NET-host verifier alone does not prove Unity Editor, Mono, IL2CPP, Jobs, or Burst compatibility.
 
 ## Support matrix
 
 | Environment or boundary | Status | Meaning |
 | --- | --- | --- |
-| Unity Editor | Unverified until Stage 3 | The final candidate package has not been imported and executed in a tracked Unity project. |
-| Windows x64 IL2CPP | Unverified until Stage 3 | The player must build, launch, run the smoke suite, and exit successfully. |
+| Unity 6000.5.4f1 Editor | Verified (narrow smoke) | The generated candidate imports into the tracked project and its EditMode smoke suite passes. |
+| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) | A Medium-stripping Player builds, launches, executes automatic Unity value binding, writes a passing JSON report, and exits zero. |
+| Windows x64 IL2CPP | Unverified | Windows must build, launch, run the smoke suite, and exit successfully on its own target. |
 | Direct Burst calls | Unsupported by design | DataVo contains managed classes, strings, collections, locks, exceptions, and storage services. |
 | Job-to-managed batch bridge | Planned proof | Jobs produce fixed-layout POD commands; managed code drains them after `JobHandle` completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
@@ -30,13 +31,13 @@ These are evaluation targets, not current support claims.
 
 DataVo runs in managed code outside Burst jobs. A Burst-compatible job may write blittable commands or numeric rows into a Unity native container. After the job completes, managed integration code drains the batch, maps it to schema columns, and calls DataVo. No DataVo type belongs in the job struct, and no DataVo method is called by Burst-compiled code.
 
-## Candidate in-memory scenario
+## Verified narrow in-memory scenario
 
-The first Unity proof will exercise `StorageMode.InMemory`, snapshots, reactive subscriptions, Flat vector search, and HNSW recall through the final packaged artifact. Similar APIs and the portable-asset verifier may pass under a .NET host, but that does not establish Unity compatibility.
+The verified candidate uses `StorageMode.InMemory` only. It registers both UnityEngine and Unity.Mathematics types through `UseUnityTypes()`, performs typed model insert/map/read for all initial supported types, rejects an exact vector-length mismatch, and emits a Player JSON result. Similar APIs and the portable-asset verifier may pass under a .NET host, but that does not establish wider Unity compatibility.
 
 ## Proof gate
 
-Support remains unverified until a pinned Unity 6.5 project imports the exact candidate package, passes Editor execution, and builds and executes a Windows x64 IL2CPP player with Medium managed stripping. Disk and LSM modes require a later durability proof.
+The exact Unity 6000.5.4f1 macOS Editor and macOS IL2CPP Medium-stripping gate have passed this narrow scenario. Support remains unverified for Windows, other Unity versions and targets, Mono, Burst, Jobs, vector-search execution, reactive-query execution, and persistent storage. Disk and LSM modes require a separate durability proof.
 
 ## Related pages
 

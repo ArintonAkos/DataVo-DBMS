@@ -26,8 +26,9 @@ reject_text() {
 }
 
 readonly support_rows=(
-  "| Unity Editor | Unverified until Stage 3 |"
-  "| Windows x64 IL2CPP | Unverified until Stage 3 |"
+  "| Unity 6000.5.4f1 Editor | Verified (narrow smoke) |"
+  "| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) |"
+  "| Windows x64 IL2CPP | Unverified |"
   "| Direct Burst calls | Unsupported by design |"
   "| Job-to-managed batch bridge | Planned proof |"
   "| In-memory mode | Candidate scope |"
@@ -45,6 +46,9 @@ done
 require_text \
   "$ROOT/README.md" \
   "Unity is an evaluation target, not a supported runtime."
+require_text \
+  "$ROOT/README.md" \
+  "A narrow macOS IL2CPP smoke proof is recorded for Unity 6000.5.4f1 only."
 require_text \
   "$ROOT/docs/features/setup-and-packaging.md" \
   "The public DataVo.Core package currently contains only a net10.0 asset."
@@ -76,5 +80,8 @@ reject_text \
 reject_text \
   "$ROOT/docs/features/unity-and-godot.md" \
   "StorageMode = StorageMode.Disk"
+reject_text \
+  "$ROOT/README.md" \
+  "The planned first Unity proof covers in-memory execution in the Editor and a Windows x64 IL2CPP player."
 
 echo "Unity support-status documentation check passed."

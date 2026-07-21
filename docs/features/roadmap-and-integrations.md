@@ -54,7 +54,7 @@ See [Security and Authentication](./security-and-authentication.md) for command 
 
 ## Unity and Godot evaluation
 
-Unity is an evaluation target, not an available runtime integration. The first planned proof uses an in-memory managed boundary in a pinned Unity Editor and an executed Windows x64 IL2CPP player. Godot requires a separate validation pass.
+Unity is an evaluation target, not an available runtime integration. A narrow in-memory managed boundary has passed in Unity 6000.5.4f1 Editor and macOS IL2CPP; Windows x64, Burst, Jobs, vector/reactive workloads, and persistence require separate validation. Godot requires a separate validation pass.
 
 See [Unity and Godot](./unity-and-godot.md) for the current support matrix and proof boundary.
 

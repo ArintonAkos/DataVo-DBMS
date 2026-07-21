@@ -240,8 +240,8 @@ var result = db.Execute("SELECT * FROM Users ORDER BY Id");
 - The public `DataVo.Core` package still contains only a `net10.0` asset.
 - `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only; it does not publish or support a Unity package.
 - On the portable candidate, Disk and LSM are rejected; `StorageMode.InMemory` is the only Stage 3 candidate mode.
-- Passing the portable-asset .NET-host verifier is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
-- The planned first Unity proof covers in-memory execution in the Editor and a Windows x64 IL2CPP player.
+- Passing the portable-asset .NET-host verifier alone is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+- A narrow macOS IL2CPP smoke proof is recorded for Unity 6000.5.4f1 only. It covers the tracked candidate, `StorageMode.InMemory`, automatic Unity value binding, Medium stripping, Player launch, and a successful result report; it is not Windows, Burst, Jobs, or save-data support.
 - Direct Burst calls are unsupported by design. The planned boundary is a blittable job batch drained by managed code after the job completes.
 
 ### Browser and WebAssembly products

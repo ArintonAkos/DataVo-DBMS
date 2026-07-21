@@ -34,7 +34,7 @@ dotnet add package DataVo.Generators --source ./artifacts/packages # optional: s
 
 ### Current target-framework boundary
 
-The public DataVo.Core package currently contains only a net10.0 asset. `DataVoEnablePortableTarget=true` opts a local build or pack into an experimental `netstandard2.1` candidate; it does not change the normal package or tag-publish path. On that candidate, Disk and LSM are rejected and `StorageMode.InMemory` is the only Stage 3 candidate mode. Passing the portable-asset .NET-host verifier proves neither Unity Editor nor Mono, IL2CPP, Jobs, or Burst compatibility.
+The public DataVo.Core package currently contains only a net10.0 asset. `DataVoEnablePortableTarget=true` opts a local build or pack into an experimental `netstandard2.1` candidate; it does not change the normal package or tag-publish path. On that candidate, Disk and LSM are rejected and `StorageMode.InMemory` is the only Stage 3 candidate mode. Passing the portable-asset .NET-host verifier alone proves neither Unity Editor nor Mono, IL2CPP, Jobs, or Burst compatibility. A separate narrow Unity 6000.5.4f1 macOS Editor/IL2CPP smoke gate is recorded; it is not general Unity runtime support.
 
 ### SQL DATE preview migration
 
