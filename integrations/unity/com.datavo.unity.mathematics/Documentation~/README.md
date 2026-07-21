@@ -15,6 +15,29 @@ SearchNearest extensions are available only for ordinary 2-, 3-, and 4-component
 vectors. A quaternion is not an ordinary rotation-distance query: its antipode
 encodes the same rotation, while cosine/L2 treat it as different.
 
+## Automatic type binding
+
+For normal game and tooling code, add `using DataVo.Unity;` and configure the
+context once:
+
+```csharp
+context.UseUnityTypes();
+
+PlayerState player = context.Map<PlayerState>(row);
+Vector3 position = context.Get<Vector3>(row, "Position");
+context.Insert("Players", player);
+```
+
+`UseUnityTypes()` returns `void`: it is a per-context setup action, not a
+builder. It registers UnityEngine.Vector2/3/4 and Quaternion together with
+Unity.Mathematics.float2/3/4 and quaternion. Property types drive `Map<T>`;
+the explicit `T` drives `Get<T>`. This matters because a SQL `VECTOR(4)` cannot
+be safely guessed as either `Vector4` or `Quaternion` from its dimension.
+
+The existing `ToDataVoCell()` and `As*()` methods are still available for
+low-level code. Application models and normal DataVo writes do not need to
+mention them.
+
 The package must be paired with an exact portable DataVo.Core candidate produced by
 the repository's later Unity preparation flow. It does not include a Core binary,
 does not use unofficial Unity NuGet mirrors, and does not make DataVo callable

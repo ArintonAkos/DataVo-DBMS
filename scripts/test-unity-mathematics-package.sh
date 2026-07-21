@@ -3,10 +3,10 @@ set -euo pipefail
 
 mode="${1:-all}"
 case "$mode" in
-  --metadata|--mathematics|--engine-types|--all)
+  --metadata|--mathematics|--engine-types|--type-binding|--all)
     ;;
   *)
-    echo "Usage: $0 [--metadata|--mathematics|--engine-types|--all]" >&2
+    echo "Usage: $0 [--metadata|--mathematics|--engine-types|--type-binding|--all]" >&2
     exit 64
     ;;
 esac
@@ -18,6 +18,8 @@ mathematics_asmdef="$package_root/Runtime/Mathematics/DataVo.Unity.Mathematics.a
 engine_types_asmdef="$package_root/Runtime/EngineTypes/DataVo.Unity.EngineTypes.asmdef"
 mathematics_source="$package_root/Runtime/Mathematics/UnityMathematicsCellExtensions.cs"
 engine_types_source="$package_root/Runtime/EngineTypes/UnityEngineCellExtensions.cs"
+type_binding_asmdef="$package_root/Runtime/TypeBinding/DataVo.Unity.TypeBinding.asmdef"
+type_binding_source="$package_root/Runtime/TypeBinding/UnityTypeBindingExtensions.cs"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -161,6 +163,52 @@ fi
 if [[ "$mode" == "--engine-types" || "$mode" == "--all" ]]; then
   assert_source_contract "$engine_types_source" "DataVo.Unity.EngineTypes" "Vector2" "Vector3" "Vector4" "Quaternion" "Vector2" "Vector3" "Vector4" "Quaternion"
   rg -Fq "using UnityEngine;" "$engine_types_source"
+fi
+
+if [[ "$mode" == "--type-binding" || "$mode" == "--all" ]]; then
+  require_file "$type_binding_asmdef"
+  require_file "$type_binding_source"
+
+  node - "$type_binding_asmdef" <<'NODE'
+const fs = require("node:fs");
+const asmdefPath = process.argv[2];
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+
+const asmdef = JSON.parse(fs.readFileSync(asmdefPath, "utf8"));
+assert(asmdef.name === "DataVo.Unity.TypeBinding", "TypeBinding asmdef name is incorrect.");
+assert(
+  Array.isArray(asmdef.references) && asmdef.references.length === 1 && asmdef.references[0] === "Unity.Mathematics",
+  "TypeBinding asmdef must reference Unity.Mathematics only.",
+);
+assert(asmdef.overrideReferences === true, "TypeBinding asmdef must override automatic plugin references.");
+assert(
+  Array.isArray(asmdef.precompiledReferences) &&
+    asmdef.precompiledReferences.length === 1 &&
+    asmdef.precompiledReferences[0] === "DataVo.Core.dll",
+  "TypeBinding asmdef must explicitly reference the DataVo.Core plugin.",
+);
+assert(asmdef.noEngineReferences === false, "TypeBinding asmdef must retain UnityEngine references.");
+NODE
+
+  rg -Fq "#nullable enable" "$type_binding_source"
+  rg -Fq "namespace DataVo.Unity" "$type_binding_source"
+  rg -Fq "using DataVo.Core.ValueConversion;" "$type_binding_source"
+  rg -Fq "public static void UseUnityTypes(this DataVoContext context)" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<Vector2>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<Vector3>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<Vector4>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<Quaternion>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<float2>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<float3>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<float4>" "$type_binding_source"
+  rg -Fq "new DataVoValueConverter<quaternion>" "$type_binding_source"
+  rg -Fq "context.RegisterValueConverters(" "$type_binding_source"
 fi
 
 echo "Unity Mathematics package $mode contract passed."
