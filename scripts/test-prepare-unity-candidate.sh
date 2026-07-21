@@ -50,6 +50,9 @@ assert(candidate.corePackage.assetPath === "lib/netstandard2.1/DataVo.Core.dll",
 assert(/^[0-9a-f]{64}$/.test(candidate.corePackage.sha256), "Candidate manifest must include the package SHA-256.");
 assert(dependencies.schemaVersion === 1 && Array.isArray(dependencies.dependencies), "Dependency assets inventory is malformed.");
 assert(dependencies.dependencies.length > 0, "Candidate fixture must include the resolved managed dependency closure.");
+const jsonDependency = dependencies.dependencies.find((dependency) => dependency.packageId === "System.Text.Json");
+assert(jsonDependency, "Candidate fixture must record the System.Text.Json dependency.");
+assert(jsonDependency.packageVersion === "8.0.0", "Portable candidate must resolve System.Text.Json 8.0.0 for Unity compatibility.");
 assert(inventory.schemaVersion === 1 && Array.isArray(inventory.assemblies), "Assembly inventory is malformed.");
 assert(Array.isArray(candidate.assemblies) && candidate.assemblies.length === inventory.assemblies.length, "Candidate manifest must preserve every assembly record.");
 
