@@ -66,5 +66,6 @@ rg -Fq "Assembly identity mismatch" "$temp_root/identity.stderr"
 
 rg -Fq "UnityRuntimeBclManifest.json" "$smoke_project_check"
 rg -Fq "check-unity-runtime-bcl.sh" "$smoke_project_check"
+rg -Fq -- "--identity-output" "$checker"
 
 echo "Unity runtime BCL checker contract passed."

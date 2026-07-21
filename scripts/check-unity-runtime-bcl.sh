@@ -125,10 +125,9 @@ NODE
   fi
 done
 
-inventory="$temp_root/assembly-inventory.json"
+inventory="$temp_root/assembly-identities.json"
 dotnet run --project "$inspector_project" -- \
-  --root "$unity_root" \
-  --output "$inventory" \
+  --identity-output "$inventory" \
   "${assembly_paths[@]}" \
   >/dev/null
 
@@ -140,21 +139,20 @@ const [recordsPath, inventoryPath, unityRoot] = process.argv.slice(2);
 const records = JSON.parse(fs.readFileSync(recordsPath, "utf8"));
 const inventory = JSON.parse(fs.readFileSync(inventoryPath, "utf8"));
 if (inventory.schemaVersion !== 1 || !Array.isArray(inventory.assemblies)) {
-  throw new Error("Unity candidate inspector produced an invalid assembly inventory.");
+  throw new Error("Unity candidate inspector produced an invalid assembly identity inventory.");
 }
 
-const byRuntimePath = new Map(records.map((record) => [record.runtimePath, record]));
-if (inventory.assemblies.length !== byRuntimePath.size) {
+const bySourcePath = new Map(records.map((record) => [path.resolve(unityRoot, record.runtimePath), record]));
+if (inventory.assemblies.length !== bySourcePath.size) {
   throw new Error("Unity candidate inspector returned the wrong number of runtime assemblies.");
 }
 
 for (const assembly of inventory.assemblies) {
-  const runtimePath = assembly.file.replaceAll(path.sep, "/");
-  const record = byRuntimePath.get(runtimePath);
-  if (!record) throw new Error("Unity candidate inspector returned an undeclared assembly: " + runtimePath);
+  const sourcePath = path.resolve(assembly.sourcePath);
+  const record = bySourcePath.get(sourcePath);
+  if (!record) throw new Error("Unity candidate inspector returned an undeclared assembly: " + sourcePath);
   if (assembly.identity !== record.identity) {
-    const absolutePath = path.join(unityRoot, runtimePath);
-    throw new Error(`Assembly identity mismatch for ${record.fileName}: expected ${record.identity}, observed ${assembly.identity}, runtime path: ${absolutePath}`);
+    throw new Error(`Assembly identity mismatch for ${record.fileName}: expected ${record.identity}, observed ${assembly.identity}, runtime path: ${sourcePath}`);
   }
 }
 NODE

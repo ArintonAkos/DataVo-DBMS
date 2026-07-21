@@ -13,26 +13,26 @@ internal static class CandidateInspector
         try
         {
             Options options = Options.Parse(args);
-            List<AssemblyRecord> records = options.AssemblyPaths
-                .Select(path => Inspect(path, options.RootDirectory))
-                .OrderBy(record => record.File, StringComparer.Ordinal)
-                .ToList();
-
-            ValidateNoDuplicateIdentities(records);
-            ValidateNoDuplicatePublicSystemTypes(records);
-
-            string? outputDirectory = Path.GetDirectoryName(options.OutputPath);
-            if (!string.IsNullOrEmpty(outputDirectory))
+            if (options.Mode == InspectionMode.CandidateInventory)
             {
-                Directory.CreateDirectory(outputDirectory);
-            }
+                List<AssemblyRecord> records = options.AssemblyPaths
+                    .Select(path => InspectCandidate(path, options.RootDirectory!))
+                    .OrderBy(record => record.File, StringComparer.Ordinal)
+                    .ToList();
 
-            var inventory = new AssemblyInventory(1, records);
-            File.WriteAllText(
-                options.OutputPath,
-                JsonSerializer.Serialize(
-                    inventory,
-                    new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                ValidateNoDuplicateIdentities(records);
+                ValidateNoDuplicatePublicSystemTypes(records);
+                WriteInventory(options.OutputPath, new AssemblyInventory(1, records));
+            }
+            else
+            {
+                List<IdentityAssemblyRecord> records = options.AssemblyPaths
+                    .Select(InspectIdentity)
+                    .OrderBy(record => record.SourcePath, StringComparer.Ordinal)
+                    .ToList();
+
+                WriteInventory(options.OutputPath, new IdentityAssemblyInventory(1, records));
+            }
 
             return 0;
         }
@@ -53,7 +53,22 @@ internal static class CandidateInspector
         }
     }
 
-    private static AssemblyRecord Inspect(string assemblyPath, string rootDirectory)
+    private static void WriteInventory<TInventory>(string outputPath, TInventory inventory)
+    {
+        string? outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+
+        File.WriteAllText(
+            outputPath,
+            JsonSerializer.Serialize(
+                inventory,
+                new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    }
+
+    private static AssemblyRecord InspectCandidate(string assemblyPath, string rootDirectory)
     {
         string fullPath = Path.GetFullPath(assemblyPath);
         if (!File.Exists(fullPath))
@@ -69,14 +84,9 @@ internal static class CandidateInspector
             throw new ArgumentException($"Assembly must be inside --root: {fullPath}", nameof(assemblyPath));
         }
 
-        AssemblyName assemblyName = AssemblyName.GetAssemblyName(fullPath);
+        AssemblyIdentity identity = ReadIdentity(fullPath);
         using FileStream stream = File.OpenRead(fullPath);
         using var peReader = new PEReader(stream);
-        if (!peReader.HasMetadata)
-        {
-            throw new InvalidOperationException($"Assembly has no managed metadata: {fullPath}");
-        }
-
         MetadataReader metadata = peReader.GetMetadataReader();
         string[] publicSystemTypes = metadata.TypeDefinitions
             .Select(handle => metadata.GetTypeDefinition(handle))
@@ -89,9 +99,41 @@ internal static class CandidateInspector
 
         return new AssemblyRecord(
             relativePath.Replace(Path.DirectorySeparatorChar, '/'),
-            ComputeSha256(fullPath),
-            assemblyName.FullName ?? assemblyName.Name ?? "<unnamed>",
+            identity.Sha256,
+            identity.FullName,
             publicSystemTypes);
+    }
+
+    private static IdentityAssemblyRecord InspectIdentity(string assemblyPath)
+    {
+        if (!Path.IsPathFullyQualified(assemblyPath))
+        {
+            throw new ArgumentException($"Identity-mode assembly path must be absolute: {assemblyPath}", nameof(assemblyPath));
+        }
+
+        string fullPath = Path.GetFullPath(assemblyPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new ArgumentException($"Assembly does not exist: {fullPath}", nameof(assemblyPath));
+        }
+
+        AssemblyIdentity identity = ReadIdentity(fullPath);
+        return new IdentityAssemblyRecord(fullPath, Path.GetFileName(fullPath), identity.Sha256, identity.FullName);
+    }
+
+    private static AssemblyIdentity ReadIdentity(string fullPath)
+    {
+        AssemblyName assemblyName = AssemblyName.GetAssemblyName(fullPath);
+        using FileStream stream = File.OpenRead(fullPath);
+        using var peReader = new PEReader(stream);
+        if (!peReader.HasMetadata)
+        {
+            throw new InvalidOperationException($"Assembly has no managed metadata: {fullPath}");
+        }
+
+        return new AssemblyIdentity(
+            ComputeSha256(fullPath),
+            assemblyName.FullName ?? assemblyName.Name ?? "<unnamed>");
     }
 
     private static void ValidateNoDuplicateIdentities(IEnumerable<AssemblyRecord> records)
@@ -134,12 +176,23 @@ internal static class CandidateInspector
         return Convert.ToHexString(hash.ComputeHash(stream)).ToLowerInvariant();
     }
 
-    private sealed record Options(string RootDirectory, string OutputPath, IReadOnlyList<string> AssemblyPaths)
+    private enum InspectionMode
+    {
+        CandidateInventory,
+        IdentityInventory
+    }
+
+    private sealed record Options(
+        InspectionMode Mode,
+        string? RootDirectory,
+        string OutputPath,
+        IReadOnlyList<string> AssemblyPaths)
     {
         public static Options Parse(string[] args)
         {
             string? rootDirectory = null;
             string? outputPath = null;
+            string? identityOutputPath = null;
             var assemblyPaths = new List<string>();
 
             for (int index = 0; index < args.Length; index++)
@@ -152,6 +205,9 @@ internal static class CandidateInspector
                     case "--output":
                         outputPath = ReadValue(args, ref index, "--output");
                         break;
+                    case "--identity-output":
+                        identityOutputPath = ReadValue(args, ref index, "--identity-output");
+                        break;
                     default:
                         if (args[index].StartsWith("-", StringComparison.Ordinal))
                         {
@@ -161,6 +217,25 @@ internal static class CandidateInspector
                         assemblyPaths.Add(args[index]);
                         break;
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(identityOutputPath))
+            {
+                if (!string.IsNullOrWhiteSpace(rootDirectory) || !string.IsNullOrWhiteSpace(outputPath))
+                {
+                    throw new ArgumentException("--identity-output cannot be combined with --root or --output.");
+                }
+
+                if (assemblyPaths.Count == 0)
+                {
+                    throw new ArgumentException("Provide at least one assembly path.");
+                }
+
+                return new Options(
+                    InspectionMode.IdentityInventory,
+                    null,
+                    Path.GetFullPath(identityOutputPath),
+                    assemblyPaths);
             }
 
             if (string.IsNullOrWhiteSpace(rootDirectory))
@@ -184,6 +259,7 @@ internal static class CandidateInspector
             }
 
             return new Options(
+                InspectionMode.CandidateInventory,
                 Path.GetFullPath(rootDirectory),
                 Path.GetFullPath(outputPath),
                 assemblyPaths);
@@ -208,4 +284,14 @@ internal static class CandidateInspector
         string Sha256,
         string Identity,
         IReadOnlyList<string> PublicSystemTypes);
+
+    private sealed record IdentityAssemblyInventory(int SchemaVersion, IReadOnlyList<IdentityAssemblyRecord> Assemblies);
+
+    private sealed record IdentityAssemblyRecord(
+        string SourcePath,
+        string FileName,
+        string Sha256,
+        string Identity);
+
+    private sealed record AssemblyIdentity(string Sha256, string FullName);
 }

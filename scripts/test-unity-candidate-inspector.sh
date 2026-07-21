@@ -71,4 +71,48 @@ fi
 
 rg -Fq "Duplicate assembly identity" "$temp_root/duplicate.stderr"
 
+identity_inventory="$temp_root/dependency-identities.json"
+dotnet "$tool_dll" \
+  --identity-output "$identity_inventory" \
+  "$portable_dll" \
+  "$copied_dll"
+
+node - "$identity_inventory" "$portable_dll" "$copied_dll" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [inventoryPath, ...sourcePaths] = process.argv.slice(2);
+const inventory = JSON.parse(fs.readFileSync(inventoryPath, "utf8"));
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+
+assert(inventory.schemaVersion === 1, "Identity inventory schemaVersion must be 1.");
+assert(Array.isArray(inventory.assemblies) && inventory.assemblies.length === sourcePaths.length, "Identity inventory must contain every requested assembly.");
+
+const expectedPaths = sourcePaths.map((sourcePath) => path.resolve(sourcePath)).sort((left, right) => left.localeCompare(right));
+assert(JSON.stringify(inventory.assemblies.map((assembly) => assembly.sourcePath)) === JSON.stringify(expectedPaths), "Identity inventory assemblies must be sorted by absolute source path.");
+
+for (const assembly of inventory.assemblies) {
+  assert(path.isAbsolute(assembly.sourcePath), "Identity inventory sourcePath must be absolute.");
+  assert(assembly.fileName === path.basename(assembly.sourcePath), "Identity inventory fileName must match sourcePath.");
+  assert(/^[0-9a-f]{64}$/.test(assembly.sha256), "Identity inventory SHA-256 must be lowercase hex.");
+  assert(typeof assembly.identity === "string" && assembly.identity.startsWith("DataVo.Core,"), "Identity inventory must contain the full assembly identity.");
+  assert(!Object.hasOwn(assembly, "publicSystemTypes"), "Identity-only inventory must not contain publicSystemTypes.");
+}
+NODE
+
+missing_dll="$temp_root/missing.dll"
+if dotnet "$tool_dll" --identity-output "$temp_root/missing.json" "$missing_dll" >"$temp_root/missing.stdout" 2>"$temp_root/missing.stderr"; then
+  echo "Candidate inspector accepted a missing identity-mode assembly." >&2
+  exit 1
+fi
+
+rg -Fq "Assembly does not exist" "$temp_root/missing.stderr"
+rg -Fq "$missing_dll" "$temp_root/missing.stderr"
+
 echo "Unity candidate inspector contract passed."
