@@ -85,13 +85,13 @@ try {
   const jsonSource = createDependency("System.Text.Json.dll", "provided-by-unity");
   const unityProvided = resolveScenario(
     "unity-provided",
-    [dependency("System.Text.Json", "8.0.0", "lib/netstandard2.0/System.Text.Json.dll", jsonSource)],
+    [dependency("System.Text.Json", "8.0.6", "lib/netstandard2.0/System.Text.Json.dll", jsonSource)],
     { schemaVersion: 1, assemblies: [identityRecord(jsonSource, unityInventory.assemblies[0].identity)] }
   );
 
   assert.deepEqual(unityProvided.output.dependencies[0], {
     packageId: "System.Text.Json",
-    packageVersion: "8.0.0",
+    packageVersion: "8.0.6",
     assetPath: "lib/netstandard2.0/System.Text.Json.dll",
     identity: unityInventory.assemblies[0].identity,
     resolution: "unity-provided",

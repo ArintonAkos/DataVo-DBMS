@@ -52,7 +52,7 @@ assert(dependencies.schemaVersion === 2 && Array.isArray(dependencies.dependenci
 assert(dependencies.dependencies.length > 0, "Candidate fixture must include the resolved managed dependency closure.");
 const jsonDependency = dependencies.dependencies.find((dependency) => dependency.packageId === "System.Text.Json");
 assert(jsonDependency, "Candidate fixture must record the System.Text.Json dependency.");
-assert(jsonDependency.packageVersion === "8.0.0", "Portable candidate must resolve System.Text.Json 8.0.0 for Unity compatibility.");
+assert(jsonDependency.packageVersion === "8.0.6", "Portable candidate must resolve the patched System.Text.Json 8.0.6 package for Unity compatibility.");
 assert(jsonDependency.resolution === "unity-provided", "System.Text.Json must be provided by the pinned Unity runtime.");
 assert(inventory.schemaVersion === 1 && Array.isArray(inventory.assemblies), "Assembly inventory is malformed.");
 assert(Array.isArray(candidate.assemblies) && candidate.assemblies.length === inventory.assemblies.length, "Candidate manifest must preserve every assembly record.");
