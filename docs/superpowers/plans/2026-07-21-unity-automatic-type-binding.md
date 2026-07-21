@@ -65,7 +65,7 @@
     public void RegisterValueConverters(params IDataVoValueConverter[] converters);
     public T Get<T>(IReadOnlyDictionary<string, object?> row, string columnName);
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create a local TestVector(float X, float Y) and this converter:
 
@@ -78,7 +78,7 @@ Create a local TestVector(float X, float Y) and this converter:
 
 Test Get<TestVector>() from a materialized float array, direct built-in reads, missing-column KeyNotFoundException, unregistered target NotSupportedException, context isolation, atomic rejection of duplicate converter types in one group, and same-key idempotency.
 
-- [ ] **Step 2: Confirm red**
+- [x] **Step 2: Confirm red**
 
 Run:
 
@@ -86,13 +86,13 @@ Run:
 
 Expected: compilation fails because the converter API does not exist.
 
-- [ ] **Step 3: Implement the registry**
+- [x] **Step 3: Implement the registry**
 
 The generic wrapper validates a non-empty key and both delegates, and rejects a wrong boxed input type. RegisterRange validates every candidate before mutation: no nulls, no duplicate ValueType values in the incoming group, and no pre-existing different key. Same-key registration is a no-op.
 
 Add a private readonly DataVoValueConverterRegistry to DataVoContext. Get<T>() looks up the name, returns an assignable built-in directly, otherwise dispatches to an exact registered converter. It must not use global state, dynamic, Unity, or reflection.
 
-- [ ] **Step 4: Verify green and portable compilation**
+- [x] **Step 4: Verify green and portable compilation**
 
 Run:
 
@@ -101,7 +101,7 @@ Run:
 
 Expected: focused tests pass and both Core frameworks build.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
     git add DataVo.Core/ValueConversion/IDataVoValueConverter.cs DataVo.Core/ValueConversion/DataVoValueConverter.cs DataVo.Core/ValueConversion/DataVoValueConverterRegistry.cs DataVo.Core/DataVoContext.cs DataVo.Tests/E2E/ValueConversionRegistryTests.cs
     git commit -m "feat: add context value conversion registry"
@@ -118,11 +118,11 @@ Expected: focused tests pass and both Core frameworks build.
     public T Map<T>(IReadOnlyDictionary<string, object?> row);
     public long Insert<T>(string tableName, T entity);
 
-- [ ] **Step 1: Write failing model tests**
+- [x] **Step 1: Write failing model tests**
 
 Use TestTransformRow with public Id, TestVector Position, and string Label properties; use ProjectionRow with TestVector Position and int NotSelected. Test that Map<TestTransformRow>() converts VECTOR(2), ignores NotSelected when it is absent from a projection, propagates a wrong-dimension converter error, and Insert("Transforms", entity) writes a row in Transforms (Id INT PRIMARY KEY, Position VECTOR(2), Label VARCHAR(20)). Test that a missing catalog-column property throws before any row is written.
 
-- [ ] **Step 2: Confirm red**
+- [x] **Step 2: Confirm red**
 
 Run:
 
@@ -130,11 +130,11 @@ Run:
 
 Expected: compilation fails because Map<T>() and Insert<T>() do not exist.
 
-- [ ] **Step 3: Implement cached bindings**
+- [x] **Step 3: Implement cached bindings**
 
 Cache read bindings by model Type and write bindings by (model Type, database, table, catalog schema version). Ignore result fields without writable matching properties. Require public parameterless construction, writable non-indexer properties for reads, and a readable property for every catalog column for writes. Write bindings use catalog order, build a ReactiveRowSchema, convert every value through Task 1, construct all cells, and only then call InsertTyped.
 
-- [ ] **Step 4: Verify green with typed-insert regressions**
+- [x] **Step 4: Verify green with typed-insert regressions**
 
 Run:
 
@@ -142,7 +142,7 @@ Run:
 
 Expected: model tests and existing typed inserts pass.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
     git add DataVo.Core/ValueConversion/DataVoModelBinding.cs DataVo.Core/DataVoContext.cs DataVo.Tests/E2E/AutomaticModelBindingTests.cs
     git commit -m "feat: map typed DataVo model values"
@@ -158,7 +158,7 @@ Expected: model tests and existing typed inserts pass.
 - Modify: DataVo.Tests/E2E/AutomaticModelBindingTests.cs
 - Modify: DataVo.Tests/E2E/CompiledQueryRuntimeTests.cs
 
-- [ ] **Step 1: Write failing boundary tests**
+- [x] **Step 1: Write failing boundary tests**
 
 Register TestVectorConverter. Verify BulkInsert accepts TestVector for a VECTOR(2) column. Add a compiled insert plan:
 
@@ -166,7 +166,7 @@ Register TestVectorConverter. Verify BulkInsert accepts TestVector for a VECTOR(
 
 Pass TestVector as the position parameter and round-trip it with Get<TestVector>(). Add an equivalent compiled UPDATE assignment test.
 
-- [ ] **Step 2: Confirm red**
+- [x] **Step 2: Confirm red**
 
 Run:
 
@@ -174,13 +174,13 @@ Run:
 
 Expected: legacy paths reject TestVector as unsupported VECTOR input.
 
-- [ ] **Step 3: Implement bound-cell transport**
+- [x] **Step 3: Implement bound-cell transport**
 
 DataVoBoundValue wraps a converted CellValue. While copying caller dictionaries, BulkInsert replaces registered values with this carrier. InsertRowService.TryNormalizeValue recognizes it before FormatColumnValue, validates its scalar/vector cell as InsertTyped does, and retains it. RowSerializer.WriteNonNullValue recognizes it and calls WriteTypedCell, so no string format/parse occurs. Vector-index insertion reads its AsVectorReadOnlySpan; all ordinary legacy values retain the VectorParser branch.
 
 Add an internal context binder and call it from compiled INSERT and UPDATE before normal column coercion. Do not change raw parameter behavior or fixed-width compiled overloads.
 
-- [ ] **Step 4: Verify green and legacy regressions**
+- [x] **Step 4: Verify green and legacy regressions**
 
 Run:
 
@@ -188,7 +188,7 @@ Run:
 
 Expected: model, dictionary, compiled INSERT, and compiled UPDATE work with registered vectors; existing bulk/vector-index tests pass.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
     git add DataVo.Core/ValueConversion/DataVoBoundValue.cs DataVo.Core/DataVoContext.cs DataVo.Core/Parser/DML/InsertRowService.cs DataVo.Core/StorageEngine/Serialization/RowSerializer.cs DataVo.Core/CompiledQueries/DataVoCompiledQuery.cs DataVo.Tests/E2E/AutomaticModelBindingTests.cs DataVo.Tests/E2E/CompiledQueryRuntimeTests.cs
     git commit -m "feat: bind registered values across DataVo writes"
@@ -210,7 +210,7 @@ Expected: model, dictionary, compiled INSERT, and compiled UPDATE work with regi
         public static void UseUnityTypes(this DataVoContext context);
     }
 
-- [ ] **Step 1: Add a failing static package contract**
+- [x] **Step 1: Add a failing static package contract**
 
 Add a --type-binding mode to scripts/test-unity-mathematics-package.sh. Require an asmdef named DataVo.Unity.TypeBinding with Unity.Mathematics source reference, DataVo.Core.dll precompiled reference, overrideReferences true, and noEngineReferences false. Require the exact void extension signature and all eight Unity type names.
 
@@ -220,11 +220,11 @@ Run:
 
 Expected: failure because TypeBinding does not exist.
 
-- [ ] **Step 2: Implement all eight converters**
+- [x] **Step 2: Implement all eight converters**
 
 Create the asmdef. Add static DataVoValueConverter instances for Vector2, Vector3, Vector4, Quaternion, float2, float3, float4, and quaternion. Writers use stackalloc plus CellValue.FromVector; readers consume materialized float arrays, require exact dimensions, and construct values directly. Quaternion copies x/y/z/w without normalization. UseUnityTypes null-checks, calls RegisterValueConverters once with all eight, and returns void. It must not reference the two existing adapter assemblies or create an asmdef cycle.
 
-- [ ] **Step 3: Document and verify**
+- [x] **Step 3: Document and verify**
 
 Document:
 
@@ -241,7 +241,7 @@ Run:
 
 Expected: old adapter and new registration contracts pass.
 
-- [ ] **Step 4: Commit Task 4**
+- [x] **Step 4: Commit Task 4**
 
     git add integrations/unity/com.datavo.unity.mathematics/Runtime/TypeBinding integrations/unity/com.datavo.unity.mathematics/README.md integrations/unity/com.datavo.unity.mathematics/Documentation~/README.md scripts/test-unity-mathematics-package.sh
     git commit -m "feat: register automatic Unity type binding"
@@ -255,11 +255,11 @@ Expected: old adapter and new registration contracts pass.
 - Modify: matching Unity meta files only if Unity changes them
 - Modify: docs/superpowers/plans/2026-07-21-unity-automatic-type-binding.md
 
-- [ ] **Step 1: Write failing Unity tests**
+- [x] **Step 1: Write failing Unity tests**
 
 Reference DataVo.Unity.TypeBinding. Add AutoBoundState with Vector3 Position, float3 Velocity, Quaternion Rotation, and quaternion SimulationRotation. Create a table, call UseUnityTypes(), insert the model, select the row, and assert Map<AutoBoundState>() and Get<Vector3>() reproduce values. Add Vector2/float2 coverage and a Get<Vector3>() from VECTOR(2) error mentioning VECTOR(3) and VECTOR(2). Compare quaternion components exactly.
 
-- [ ] **Step 2: Confirm red**
+- [x] **Step 2: Confirm red**
 
 Run:
 
@@ -267,7 +267,7 @@ Run:
 
 Expected: Unity compile failure because the TypeBinding API/reference is missing.
 
-- [ ] **Step 3: Verify green in the real Editor**
+- [x] **Step 3: Verify green in the real Editor**
 
 Run:
 
@@ -276,7 +276,7 @@ Run:
 
 Expected: Unity XML top-level result Passed, failed 0, with old and automatic-binding cases.
 
-- [ ] **Step 4: Add narrow allocation evidence**
+- [x] **Step 4: Add narrow allocation evidence**
 
 Warm the fake converter and binding cache. In ValueConversionAllocationTests, measure GC.GetAllocatedBytesForCurrentThread around direct Insert<T>() and a Get<TestVector>() loop. Bound write allocation to its one owned vector/cell/model overhead and verify reads do not create a second vector array. State in assertion text that this is not a zero-allocation mapper or Unity player-performance claim.
 
@@ -286,7 +286,7 @@ Run:
 
 Expected: allocation and functional tests pass.
 
-- [ ] **Step 5: Run full verification, record evidence, and commit**
+- [x] **Step 5: Run full verification, record evidence, and commit**
 
 Run:
 
@@ -304,3 +304,12 @@ Record Unity revision, result count, lock SHA-256, allocation thresholds, and B2
     git add -f tests/unity/DataVo.UnitySmoke/Assets docs/superpowers/plans/2026-07-21-unity-automatic-type-binding.md
     git commit -m "test: prove Unity automatic type binding"
 
+## Completion evidence — 2026-07-21
+
+- Core slices committed as `166d290`, `e56c736`, and `87a387a`; Unity type registration as `0fad822`; Editor/allocations coverage as `e92e2ee`.
+- `dotnet build DataVo.Core/DataVo.Core.csproj -p:DataVoEnablePortableTarget=true` passed for `netstandard2.1` and `net10.0`. The pre-existing `TopKReactiveQuery` nullable warnings remain outside this work.
+- Focused Core coverage passed: registry/Get, Map/Insert, BulkInsert, compiled INSERT/UPDATE, HNSW update paths, and allocation guard. The allocation guard warms the binding/cache, caps one direct `Insert<T>` at 8,192 bytes, and caps 2,000 `Get<T>` reads at 1,024 bytes. It explicitly does not claim a zero-allocation mapper or Unity player performance.
+- Pinned Editor: Unity `6000.5.4f1`, revision `d550df8bd089`. The real EditMode XML recorded `total=6`, `passed=6`, `failed=0`; package-lock SHA-256 was `58b87ce5a7c2adc18a4839708e215aae36b4b527592dacf1d1ed708c514e780d` before/after the run.
+- `bash scripts/test-unity-mathematics-package.sh --all`, `bash scripts/test-prepare-unity-candidate.sh`, `bash scripts/check-unity-smoke-project.sh --require-candidate`, `bash scripts/run-unity-editor-tests.sh`, and `bash scripts/check-unity-support-status.sh` passed. Candidate provenance was built from `e92e2ee`.
+- The requested full serial xUnit command was invoked but is not clean: unrelated existing Disk-mode tests share/corrupt `Catalog.xml` and then fail with `XmlException` (for example `ChangeCaptureIntegrationTests` and `ReactiveRecursiveCteTests`). The new focused tests pass; this plan does not change disk-test infrastructure.
+- B2c/B2d remain deferred: no Burst/Jobs bridge, IL2CPP/player proof, persistent Unity save-data support, or broad gameplay benchmark claim is introduced by this slice.
