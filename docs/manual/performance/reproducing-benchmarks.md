@@ -60,6 +60,17 @@ The space and recovery workload measures insert time, on-disk size, recovery tim
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario space-and-recovery --records 1000000 --format markdown
 ```
 
+## Unity NPC Memory Arena
+
+On macOS with Unity 6000.5.4f1 and the matching `mac-il2cpp` module installed, run the Editor checks and the actual Medium-stripping IL2CPP Player proof from the repository root.
+
+```bash
+bash scripts/run-unity-arena-editor-tests.sh
+bash scripts/run-unity-macos-il2cpp-arena.sh
+```
+
+The Player script builds once, runs deterministic reactive and polling modes separately, writes their JSON reports under Unity's persistent-data directory, and requires their final leaderboard and aggregate checksums to match. The result compares DataVo incremental maintained views against full-query polling with the same DataVo data and SQL. It is not a DataVo-versus-SQLite benchmark; interpret it with its recorded seed, tick count, and Unity backend.
+
 Record the environment with every run. At minimum, capture the commit SHA, OS, CPU, .NET SDK, storage device, native SQLite extension path, storage mode, and durability setting.
 
 ```bash

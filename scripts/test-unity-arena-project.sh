@@ -7,6 +7,7 @@ project="$root/demos/unity/DataVo.UnityArenaDemo"
 for file in \
   "$project/Packages/manifest.json" \
   "$project/ProjectSettings/ProjectVersion.txt" \
+  "$project/ProjectSettings/SceneTemplateSettings.json" \
   "$project/Assets/DataVoArena/Runtime/DataVo.UnityArena.Runtime.asmdef" \
   "$project/Assets/DataVoArena/Editor/DataVo.UnityArena.EditorTests.asmdef" \
   "$root/scripts/prepare-unity-arena-candidate.sh" \
@@ -25,6 +26,14 @@ rg -Fq 'DataVo.Unity.TypeBinding' "$project/Assets/DataVoArena/Runtime/DataVo.Un
 rg -Fq 'DATAVO_ARENA_RESULT=' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
 rg -Fq -- '-datavoArenaMode' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
 rg -Fq -- '-datavoArenaRunId' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
+rg -Fq 'ProfilerRecorder' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
+rg -Fq 'BuildMacOSIl2Cpp' "$project/Assets/DataVoArena/Editor/ArenaPlayerBuild.cs"
+rg -Fq 'ScriptingImplementation.IL2CPP' "$project/Assets/DataVoArena/Editor/ArenaPlayerBuild.cs"
+rg -Fq 'ManagedStrippingLevel.Medium' "$project/Assets/DataVoArena/Editor/ArenaPlayerBuild.cs"
+test -f "$root/scripts/run-unity-macos-il2cpp-arena.sh"
+rg -Fq 'report.mode !== expectedMode' "$root/scripts/run-unity-macos-il2cpp-arena.sh"
+rg -Fq 'result validation failed.' "$root/scripts/run-unity-macos-il2cpp-arena.sh"
+rg -Fq 'checksum equivalence validation failed.' "$root/scripts/run-unity-macos-il2cpp-arena.sh"
 
 node - "$project/Assets/DataVoArena/Editor/DataVo.UnityArena.EditorTests.asmdef" <<'NODE'
 const fs = require('node:fs');

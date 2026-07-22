@@ -37,5 +37,14 @@ namespace DataVo.UnityArena.EditorTests
             Assert.That(invocation.runId, Is.EqualTo("editor_test_01"));
             Assert.That(invocation.measuredTicks, Is.EqualTo(8));
         }
+
+        [Test]
+        public void Result_LeavesProfilerMetricMissingUntilTheRuntimeRecordsIt()
+        {
+            var result = new ArenaRunResult();
+
+            Assert.That(result.hasManagedAllocationBytes, Is.False);
+            Assert.That(result.managedAllocationBytes, Is.EqualTo(0));
+        }
     }
 }

@@ -3,6 +3,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace DataVo.UnityArena
@@ -34,13 +35,26 @@ namespace DataVo.UnityArena
             try
             {
                 invocation = ParseInvocation(arguments);
-                int gcBefore = GC.CollectionCount(0);
-                result = ArenaBenchmark.Run(new ArenaRunOptions
+                ProfilerRecorder allocationRecorder = default;
+                bool hasAllocationRecorder = TryStartManagedAllocationRecorder(out allocationRecorder);
+
+                try
                 {
-                    Mode = invocation.mode,
-                    MeasuredTicks = invocation.measuredTicks
-                });
-                PopulateRuntimeMetadata(result, gcBefore);
+                    result = ArenaBenchmark.Run(new ArenaRunOptions
+                    {
+                        Mode = invocation.mode,
+                        MeasuredTicks = invocation.measuredTicks
+                    });
+                    PopulateRuntimeMetadata(result, allocationRecorder, hasAllocationRecorder);
+                }
+                finally
+                {
+                    if (hasAllocationRecorder)
+                    {
+                        allocationRecorder.Dispose();
+                    }
+                }
+
                 RequireInternallyConsistent(result, invocation);
                 exitCode = 0;
             }
@@ -114,18 +128,40 @@ namespace DataVo.UnityArena
             return new ArenaHeadlessInvocation(mode, runId, measuredTicks);
         }
 
-        private static void PopulateRuntimeMetadata(ArenaRunResult result, int gcBefore)
+        private static void PopulateRuntimeMetadata(
+            ArenaRunResult result,
+            ProfilerRecorder allocationRecorder,
+            bool hasAllocationRecorder)
         {
             result.unityVersion = Application.unityVersion;
             result.platform = Application.platform.ToString();
             result.scriptingBackend = ScriptingBackendName();
-            result.hasGcCollectionCount = true;
-            result.gcCollectionCount = Math.Max(0, GC.CollectionCount(0) - gcBefore);
+
+            if (hasAllocationRecorder && allocationRecorder.Valid)
+            {
+                result.hasManagedAllocationBytes = true;
+                result.managedAllocationBytes = allocationRecorder.LastValue;
+            }
+        }
+
+        private static bool TryStartManagedAllocationRecorder(out ProfilerRecorder recorder)
+        {
+            try
+            {
+                recorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
+                return recorder.Valid;
+            }
+            catch (ArgumentException)
+            {
+                recorder = default;
+                return false;
+            }
         }
 
         private static void RequireInternallyConsistent(ArenaRunResult result, ArenaHeadlessInvocation invocation)
         {
-            if (result.schemaVersion != 1 || result.status != "passed" || result.measuredTicks != invocation.measuredTicks ||
+            if (result.schemaVersion != 1 || result.status != "passed" || result.mode != ModeName(invocation.mode) ||
+                result.measuredTicks != invocation.measuredTicks ||
                 result.tick.count != invocation.measuredTicks || result.leaderboardChecksum.Length != 64 ||
                 result.aggregateChecksum.Length != 64 || !string.IsNullOrEmpty(result.error))
             {
@@ -139,7 +175,7 @@ namespace DataVo.UnityArena
             {
                 schemaVersion = 1,
                 status = "failed",
-                mode = invocation?.mode == ArenaDeliveryMode.Polling ? "polling" : "reactive",
+                mode = ModeName(invocation?.mode ?? ArenaDeliveryMode.Reactive),
                 seed = 20260721,
                 measuredTicks = invocation?.measuredTicks ?? 0,
                 unityVersion = Application.unityVersion,
@@ -149,6 +185,11 @@ namespace DataVo.UnityArena
             };
 
             return result;
+        }
+
+        private static string ModeName(ArenaDeliveryMode mode)
+        {
+            return mode == ArenaDeliveryMode.Polling ? "polling" : "reactive";
         }
 
         private static void WriteResult(string runId, ArenaRunResult result)

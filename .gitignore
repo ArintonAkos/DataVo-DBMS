@@ -287,6 +287,7 @@ ClientBin/
 !tests/unity/DataVo.UnitySmoke/Packages/
 !tests/unity/DataVo.UnitySmoke/Packages/**
 !tests/unity/DataVo.UnitySmoke/**/*.meta
+!demos/unity/DataVo.UnityArenaDemo/**/*.meta
 *.dbmdl
 *.dbproj.schemaview
 *.jfm
