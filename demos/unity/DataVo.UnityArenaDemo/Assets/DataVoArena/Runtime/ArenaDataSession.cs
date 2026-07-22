@@ -117,6 +117,42 @@ namespace DataVo.UnityArena
             return results[0].Data;
         }
 
+        internal void ApplyMutations(IReadOnlyList<ArenaMutation> mutations)
+        {
+            ThrowIfDisposed();
+
+            if (mutations is null)
+            {
+                throw new ArgumentNullException(nameof(mutations));
+            }
+
+            foreach (ArenaMutation mutation in mutations)
+            {
+                if (mutation.playerId <= 0 || mutation.playerId > options.LogicalNpcCount)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(mutations), "Mutation references an unknown player.");
+                }
+
+                string scoreExpression = "Score + " + mutation.scoreDelta.ToString(CultureInfo.InvariantCulture);
+                string healthExpression = mutation.healthDelta >= 0
+                    ? "Health + " + mutation.healthDelta.ToString(CultureInfo.InvariantCulture)
+                    : "Health - " + (-mutation.healthDelta).ToString(CultureInfo.InvariantCulture);
+                string position = "[" +
+                    mutation.position.x.ToString("R", CultureInfo.InvariantCulture) + "," +
+                    mutation.position.y.ToString("R", CultureInfo.InvariantCulture) + "," +
+                    mutation.position.z.ToString("R", CultureInfo.InvariantCulture) + "]";
+
+                ExecuteSql(
+                    "UPDATE Players SET Score = " + scoreExpression + ", Health = " + healthExpression +
+                    ", Position = '" + position + "', Zone = " + SqlStringLiteral(mutation.zone) +
+                    " WHERE Id = " + mutation.playerId.ToString(CultureInfo.InvariantCulture));
+                ExecuteSql(
+                    "UPDATE Inventory SET ItemId = " + mutation.inventoryItemId.ToString(CultureInfo.InvariantCulture) +
+                    ", Slot = " + mutation.inventorySlot.ToString(CultureInfo.InvariantCulture) +
+                    " WHERE InventoryId = " + mutation.inventoryId.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
         public void Dispose()
         {
             if (disposed)
@@ -276,6 +312,16 @@ namespace DataVo.UnityArena
             }
 
             return (float)Math.Sqrt(squared);
+        }
+
+        private static string SqlStringLiteral(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                throw new ArgumentException("SQL text value is required.", nameof(value));
+            }
+
+            return "'" + value.Replace("'", "''") + "'";
         }
 
         private void ThrowIfDisposed()
