@@ -32,12 +32,15 @@ namespace DataVo.UnityArena
 
             for (int repetition = 1; repetition <= repetitions; repetition++)
             {
+                ArenaCrossEngineHashes[] expectedHashes = ArenaCrossEngineWorkload.CreateExpectedHashSequence(
+                    profile,
+                    profile.warmupBatches + profile.measuredBatches);
                 using ICrossEngineSession session = CreateSession(profile, engine);
                 for (int batchIndex = 0; batchIndex < profile.warmupBatches; batchIndex++)
                 {
                     session.ApplyBatch(ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
                     ArenaCrossEngineReadResult read = session.DemandViews();
-                    RequireExpectedHashes(profile, batchIndex + 1, read.views, engine);
+                    RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
                 }
 
                 session.BeginMeasuredInterval();
@@ -62,7 +65,7 @@ namespace DataVo.UnityArena
                     aggregateLatency.AddMilliseconds(read.aggregateMilliseconds);
                     zoneInventoryLatency.AddMilliseconds(read.zoneInventoryMilliseconds);
                     totalMilliseconds += elapsedMilliseconds;
-                    finalHashes = RequireExpectedHashes(profile, batchIndex + 1, read.views, engine);
+                    finalHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
                 }
 
                 ArenaCrossEngineHashes hashes = finalHashes
@@ -140,13 +143,19 @@ namespace DataVo.UnityArena
         };
 
         private static ArenaCrossEngineHashes RequireExpectedHashes(
-            ArenaCrossEngineProfile profile,
+            ArenaCrossEngineHashes[] expectedHashes,
             int appliedBatchCount,
             ArenaCrossEngineViews actualViews,
             ArenaCrossEngineKind engine)
         {
-            ArenaCrossEngineHashes expected = ArenaCrossEngineWorkload.Hash(
-                ArenaCrossEngineWorkload.CreateExpectedViews(profile, appliedBatchCount));
+            if (appliedBatchCount < 1 || appliedBatchCount > expectedHashes.Length)
+            {
+                throw new InvalidOperationException(
+                    "Cross-engine arena expected hash sequence does not contain batch " +
+                    appliedBatchCount.ToString(CultureInfo.InvariantCulture) + ".");
+            }
+
+            ArenaCrossEngineHashes expected = expectedHashes[appliedBatchCount - 1];
             ArenaCrossEngineHashes actual = ArenaCrossEngineWorkload.Hash(actualViews);
             if (expected != actual)
             {

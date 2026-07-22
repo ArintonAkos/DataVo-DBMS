@@ -22,6 +22,28 @@ namespace DataVo.UnityArena.EditorTests
         }
 
         [Test]
+        public void IncrementalExpectedHashes_MatchFullHistoryWithoutRepeatingItPerDemand()
+        {
+            ArenaCrossEngineProfile profile = ArenaCrossEngineProfile.Gameplay;
+            ArenaCrossEngineWorkload.ResetFullHistoryExpectedViewCallsForTest();
+
+            ArenaCrossEngineHashes[] incremental =
+                ArenaCrossEngineWorkload.CreateExpectedHashSequence(profile, batchCount: 4);
+
+            Assert.That(incremental, Has.Length.EqualTo(4));
+            Assert.That(ArenaCrossEngineWorkload.FullHistoryExpectedViewCallsForTest, Is.EqualTo(0));
+
+            for (int batchCount = 1; batchCount <= incremental.Length; batchCount++)
+            {
+                ArenaCrossEngineHashes fullHistory = ArenaCrossEngineWorkload.Hash(
+                    ArenaCrossEngineWorkload.CreateExpectedViews(profile, batchCount));
+                Assert.That(incremental[batchCount - 1], Is.EqualTo(fullHistory));
+            }
+
+            Assert.That(ArenaCrossEngineWorkload.FullHistoryExpectedViewCallsForTest, Is.EqualTo(4));
+        }
+
+        [Test]
         public void AllEngines_ReportCompatibleGameplayHashes()
         {
             string sqliteVersion = ArenaSqliteNative.GetLibraryVersion();

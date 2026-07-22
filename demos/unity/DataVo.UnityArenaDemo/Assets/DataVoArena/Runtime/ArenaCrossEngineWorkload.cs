@@ -4,8 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+
+[assembly: InternalsVisibleTo("DataVo.UnityArena.EditorTests")]
 
 namespace DataVo.UnityArena
 {
@@ -22,6 +25,13 @@ namespace DataVo.UnityArena
 
         private static readonly string[] Teams = { "amber", "violet", "teal", "coral" };
         private static readonly string[] Zones = { "arena-7", "arena-5", "arena-3", "arena-1" };
+
+        internal static int FullHistoryExpectedViewCallsForTest { get; private set; }
+
+        internal static void ResetFullHistoryExpectedViewCallsForTest()
+        {
+            FullHistoryExpectedViewCallsForTest = 0;
+        }
 
         public static ArenaCrossEnginePlayer[] CreateInitialPlayers(ArenaCrossEngineProfile profile)
         {
@@ -90,6 +100,8 @@ namespace DataVo.UnityArena
                 throw new ArgumentOutOfRangeException(nameof(batchCount));
             }
 
+            FullHistoryExpectedViewCallsForTest++;
+
             ArenaCrossEnginePlayer[] players = CreateInitialPlayers(profile);
             ArenaCrossEngineInventory[] inventory = CreateInitialInventory(profile);
 
@@ -138,6 +150,28 @@ namespace DataVo.UnityArena
                     .OrderBy(row => row.playerId)
                     .ThenBy(row => row.itemId)
                     .ToArray());
+        }
+
+        internal static ArenaCrossEngineHashes[] CreateExpectedHashSequence(
+            ArenaCrossEngineProfile profile,
+            int batchCount)
+        {
+            ValidateProfile(profile);
+            if (batchCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(batchCount));
+            }
+
+            var state = new ExpectedHashOracle(profile);
+            var hashes = new ArenaCrossEngineHashes[batchCount];
+
+            for (int batchIndex = 0; batchIndex < batchCount; batchIndex++)
+            {
+                state.ApplyBatch(CreateBatch(profile, batchIndex));
+                hashes[batchIndex] = Hash(state.CreateViews());
+            }
+
+            return hashes;
         }
 
         public static ArenaCrossEngineHashes Hash(ArenaCrossEngineViews views)
@@ -207,6 +241,118 @@ namespace DataVo.UnityArena
             value *= 0x846CA68Bu;
             value ^= value >> 16;
             return value;
+        }
+
+        private sealed class ExpectedHashOracle
+        {
+            private const string ArenaSeven = "arena-7";
+
+            private static readonly IComparer<ArenaCrossEnginePlayer> LeaderboardComparer =
+                Comparer<ArenaCrossEnginePlayer>.Create((left, right) =>
+                {
+                    int scoreOrder = right.score.CompareTo(left.score);
+                    return scoreOrder != 0 ? scoreOrder : left.id.CompareTo(right.id);
+                });
+
+            private readonly ArenaCrossEnginePlayer[] players;
+            private readonly ArenaCrossEngineInventory[] inventory;
+            private readonly SortedSet<ArenaCrossEnginePlayer> leaderboard = new(LeaderboardComparer);
+            private readonly SortedDictionary<int, int> zoneInventory = new();
+            private readonly Dictionary<string, int> aliveByTeam = new(StringComparer.Ordinal);
+
+            public ExpectedHashOracle(ArenaCrossEngineProfile profile)
+            {
+                players = CreateInitialPlayers(profile);
+                inventory = CreateInitialInventory(profile);
+
+                foreach (ArenaCrossEnginePlayer player in players)
+                {
+                    leaderboard.Add(player);
+                    if (player.health > 0)
+                    {
+                        IncrementAlive(player.team, 1);
+                    }
+
+                    if (player.zone == ArenaSeven)
+                    {
+                        zoneInventory.Add(player.id, inventory[player.id - 1].itemId);
+                    }
+                }
+            }
+
+            public void ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
+            {
+                foreach (ArenaCrossEngineMutation mutation in batch)
+                {
+                    int playerIndex = mutation.playerId - 1;
+                    ArenaCrossEnginePlayer previousPlayer = players[playerIndex];
+                    ArenaCrossEngineInventory previousInventory = inventory[playerIndex];
+
+                    if (!leaderboard.Remove(previousPlayer))
+                    {
+                        throw new InvalidOperationException("Expected hash oracle could not remove a leaderboard player.");
+                    }
+
+                    if (previousPlayer.health > 0)
+                    {
+                        IncrementAlive(previousPlayer.team, -1);
+                    }
+
+                    if (previousPlayer.zone == ArenaSeven)
+                    {
+                        zoneInventory.Remove(previousPlayer.id);
+                    }
+
+                    ArenaCrossEnginePlayer updatedPlayer = previousPlayer with
+                    {
+                        score = previousPlayer.score + mutation.scoreDelta,
+                        health = mutation.replacementHealth,
+                        zone = mutation.replacementZone
+                    };
+                    ArenaCrossEngineInventory updatedInventory = previousInventory with
+                    {
+                        itemId = mutation.inventoryItemId,
+                        slot = mutation.inventorySlot
+                    };
+                    players[playerIndex] = updatedPlayer;
+                    inventory[playerIndex] = updatedInventory;
+
+                    leaderboard.Add(updatedPlayer);
+                    if (updatedPlayer.health > 0)
+                    {
+                        IncrementAlive(updatedPlayer.team, 1);
+                    }
+
+                    if (updatedPlayer.zone == ArenaSeven)
+                    {
+                        zoneInventory[updatedPlayer.id] = updatedInventory.itemId;
+                    }
+                }
+            }
+
+            public ArenaCrossEngineViews CreateViews()
+            {
+                ArenaCrossEngineLeaderboardRow[] leaderboardRows = leaderboard
+                    .Take(20)
+                    .Select(player => new ArenaCrossEngineLeaderboardRow(player.id, player.score))
+                    .ToArray();
+                ArenaCrossEngineAggregateRow[] aggregateRows = aliveByTeam
+                    .Where(pair => pair.Value > 0)
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new ArenaCrossEngineAggregateRow(pair.Key, pair.Value))
+                    .ToArray();
+                ArenaCrossEngineZoneInventoryRow[] zoneInventoryRows = zoneInventory
+                    .Select(pair => new ArenaCrossEngineZoneInventoryRow(pair.Key, pair.Value))
+                    .ToArray();
+
+                return new ArenaCrossEngineViews(leaderboardRows, aggregateRows, zoneInventoryRows);
+            }
+
+            private void IncrementAlive(string team, int delta)
+            {
+                aliveByTeam.TryGetValue(team, out int existing);
+                aliveByTeam[team] = existing + delta;
+            }
         }
     }
 }
