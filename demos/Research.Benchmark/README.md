@@ -217,3 +217,33 @@ There are two different claims, and the benchmark should keep them separate:
 2. **Hand-maintained materialized-state claim:** if an application engineer manually builds and maintains exactly the state table needed for the read, SQLite can be extremely competitive or faster for a narrow point lookup.
 
 The research story is strongest when both are reported: DataVo provides general incremental SQL view maintenance; SQLite/DuckDB can be excellent baselines when the application manually implements equivalent materialized state.
+
+## Arena Live Views cross-engine matrix
+
+The arena matrix is a separate deterministic relational workload: every write batch demands leaderboard, team-aggregate, and zone-inventory views. Vector search is separately measured and is not part of either arena table. All raw JSON artifact paths are part of the result.
+
+### Desktop .NET lane
+
+The desktop .NET lane compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Use an output directory outside tracked source files and run both fixed profiles:
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile gameplay --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-gameplay --format markdown
+
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-ivm-stress --format markdown
+```
+
+### Unity macOS IL2CPP lane
+
+The Unity macOS IL2CPP lane compares only DataVo reactive, DataVo polling, and macOS system SQLite. It uses seven fresh Player processes per engine/profile pair and records each report path; every process has a 120-second hard limit. A timeout, failed Player, or canonical-hash mismatch fails the matrix command.
+
+```bash
+bash scripts/run-unity-macos-il2cpp-arena-cross-engine.sh
+```
+
+do not compare Unity IL2CPP values directly with desktop .NET values
+
+The two lanes are reproducible with the same profile IDs (`gameplay` and `ivm-stress`), seed, mutation rules, SQL semantics, and hashes, but their runtimes and measurements are not interchangeable. Publish only completed seven-repetition artifacts for their own lane; these commands do not state that an unshown Unity matrix has passed.

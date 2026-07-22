@@ -41,6 +41,36 @@ The verified candidate uses `StorageMode.InMemory` only. It registers both Unity
 
 The reproducible Player gate builds one Medium-stripping macOS IL2CPP app, launches it once per delivery mode, records JSON artifacts, and requires both modes to finish with equal leaderboard and aggregate checksums. This establishes that this particular in-memory vector-search and reactive-query workload runs on the pinned macOS target. It does not establish support for arbitrary projects, platforms, storage modes, or save data.
 
+## Cross-engine relational Arena matrix
+
+This is a separate relational benchmark; it does not include the NPC-memory vector-search workload above. Its commands, outputs, and measurements have two intentionally separate lanes. Every run writes raw JSON artifacts, and their paths are part of the result.
+
+### Desktop .NET lane
+
+This table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Run each fixed profile with an output directory outside tracked source files:
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile gameplay --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-gameplay --format markdown
+
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-ivm-stress --format markdown
+```
+
+### Unity macOS IL2CPP lane
+
+This table compares only DataVo reactive, DataVo polling, and macOS system SQLite in IL2CPP. The command builds once, then runs seven fresh Player processes for each engine/profile pair; each Player process has a 120-second hard limit and any timeout, failure, or hash mismatch fails the command.
+
+```bash
+bash scripts/run-unity-macos-il2cpp-arena-cross-engine.sh
+```
+
+do not compare Unity IL2CPP values directly with desktop .NET values
+
+The Unity matrix proves only this pinned macOS IL2CPP relational path when its produced artifacts pass validation. It makes no claim about other platforms, jobs, Burst, persistent storage, or the separate vector-search workload.
+
 ## Proof gate
 
 The exact Unity 6000.5.4f1 macOS Editor and macOS IL2CPP Medium-stripping gates have passed the narrow type-binding smoke and the separate NPC Memory Arena evaluation workload. Support remains unverified for Windows, other Unity versions and targets, Mono, Burst, Jobs, broader vector-search or reactive-query workloads, and persistent storage. Disk and LSM modes require a separate durability proof.
