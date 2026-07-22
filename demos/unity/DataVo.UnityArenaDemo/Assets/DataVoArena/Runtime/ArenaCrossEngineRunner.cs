@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using DataVo.Core;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.UnityArena.Sqlite;
@@ -32,15 +33,51 @@ namespace DataVo.UnityArena
 
             for (int repetition = 1; repetition <= repetitions; repetition++)
             {
+                long expectedHashStart = Stopwatch.GetTimestamp();
                 ArenaCrossEngineHashes[] expectedHashes = ArenaCrossEngineWorkload.CreateExpectedHashSequence(
                     profile,
                     profile.warmupBatches + profile.measuredBatches);
+                ArenaCrossEngineDiagnostics.LogPhase(
+                    profile,
+                    engine,
+                    repetition,
+                    "expected-hashes",
+                    ElapsedMilliseconds(expectedHashStart, Stopwatch.GetTimestamp()));
+
+                long sessionStart = Stopwatch.GetTimestamp();
                 using ICrossEngineSession session = CreateSession(profile, engine);
+                ArenaCrossEngineDiagnostics.LogPhase(
+                    profile,
+                    engine,
+                    repetition,
+                    "session-create",
+                    ElapsedMilliseconds(sessionStart, Stopwatch.GetTimestamp()));
+
+                var warmupDiagnostics = new ArenaCrossEngineDiagnosticWindow();
                 for (int batchIndex = 0; batchIndex < profile.warmupBatches; batchIndex++)
                 {
-                    session.ApplyBatch(ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
+                    ArenaCrossEngineApplyTiming apply = session.ApplyBatch(
+                        ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
+                    long demandStart = Stopwatch.GetTimestamp();
                     ArenaCrossEngineReadResult read = session.DemandViews();
+                    long demandEnd = Stopwatch.GetTimestamp();
+                    long hashStart = Stopwatch.GetTimestamp();
                     RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                    long hashEnd = Stopwatch.GetTimestamp();
+                    warmupDiagnostics.Add(
+                        apply,
+                        ElapsedMilliseconds(demandStart, demandEnd),
+                        ElapsedMilliseconds(hashStart, hashEnd));
+                    if (ArenaCrossEngineDiagnostics.IsProgressBoundary(batchIndex + 1, profile.warmupBatches))
+                    {
+                        ArenaCrossEngineDiagnostics.LogBatchWindow(
+                            profile,
+                            engine,
+                            repetition,
+                            "warmup",
+                            warmupDiagnostics);
+                        warmupDiagnostics.Reset();
+                    }
                 }
 
                 session.BeginMeasuredInterval();
@@ -48,6 +85,7 @@ namespace DataVo.UnityArena
                 var leaderboardLatency = new ArenaLatencyRecorder();
                 var aggregateLatency = new ArenaLatencyRecorder();
                 var zoneInventoryLatency = new ArenaLatencyRecorder();
+                var measuredDiagnostics = new ArenaCrossEngineDiagnosticWindow();
                 double totalMilliseconds = 0d;
                 ArenaCrossEngineHashes? finalHashes = null;
 
@@ -55,17 +93,36 @@ namespace DataVo.UnityArena
                 {
                     int batchIndex = profile.warmupBatches + measuredIndex;
                     long batchStart = Stopwatch.GetTimestamp();
-                    session.ApplyBatch(ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
+                    ArenaCrossEngineApplyTiming apply = session.ApplyBatch(
+                        ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
+                    long demandStart = Stopwatch.GetTimestamp();
                     ArenaCrossEngineReadResult read = session.DemandViews();
-                    long batchEnd = Stopwatch.GetTimestamp();
-                    double elapsedMilliseconds = ElapsedMilliseconds(batchStart, batchEnd);
+                    long demandEnd = Stopwatch.GetTimestamp();
+                    long hashStart = Stopwatch.GetTimestamp();
+                    ArenaCrossEngineHashes actualHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                    long hashEnd = Stopwatch.GetTimestamp();
+                    double elapsedMilliseconds = ElapsedMilliseconds(batchStart, demandEnd);
 
                     batchLatency.AddMilliseconds(elapsedMilliseconds);
                     leaderboardLatency.AddMilliseconds(read.leaderboardMilliseconds);
                     aggregateLatency.AddMilliseconds(read.aggregateMilliseconds);
                     zoneInventoryLatency.AddMilliseconds(read.zoneInventoryMilliseconds);
                     totalMilliseconds += elapsedMilliseconds;
-                    finalHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                    finalHashes = actualHashes;
+                    measuredDiagnostics.Add(
+                        apply,
+                        ElapsedMilliseconds(demandStart, demandEnd),
+                        ElapsedMilliseconds(hashStart, hashEnd));
+                    if (ArenaCrossEngineDiagnostics.IsProgressBoundary(measuredIndex + 1, profile.measuredBatches))
+                    {
+                        ArenaCrossEngineDiagnostics.LogBatchWindow(
+                            profile,
+                            engine,
+                            repetition,
+                            "measured",
+                            measuredDiagnostics);
+                        measuredDiagnostics.Reset();
+                    }
                 }
 
                 ArenaCrossEngineHashes hashes = finalHashes
@@ -201,6 +258,130 @@ namespace DataVo.UnityArena
 #endif
         }
 
+        // The timing boundary deliberately wraps ApplyMutations rather than trying to split the compiled
+        // plan executor: each arena UPDATE is one compiled-plan operation.
+        // Reactive notification is measured separately immediately afterwards.
+        private readonly struct ArenaCrossEngineApplyTiming
+        {
+            public ArenaCrossEngineApplyTiming(double updateExecuteMilliseconds, double reactiveNotificationMilliseconds)
+            {
+                UpdateExecuteMilliseconds = updateExecuteMilliseconds;
+                ReactiveNotificationMilliseconds = reactiveNotificationMilliseconds;
+            }
+
+            public double UpdateExecuteMilliseconds { get; }
+
+            public double ReactiveNotificationMilliseconds { get; }
+        }
+
+        private sealed class ArenaCrossEngineDiagnosticWindow
+        {
+            private int batchCount;
+            private double updateExecuteMilliseconds;
+            private double reactiveNotificationMilliseconds;
+            private double demandViewsMilliseconds;
+            private double hashMilliseconds;
+
+            public int BatchCount => batchCount;
+
+            public double UpdateExecuteMilliseconds => updateExecuteMilliseconds;
+
+            public double ReactiveNotificationMilliseconds => reactiveNotificationMilliseconds;
+
+            public double DemandViewsMilliseconds => demandViewsMilliseconds;
+
+            public double HashMilliseconds => hashMilliseconds;
+
+            public void Add(
+                ArenaCrossEngineApplyTiming apply,
+                double demandViewsElapsedMilliseconds,
+                double hashElapsedMilliseconds)
+            {
+                batchCount++;
+                updateExecuteMilliseconds += apply.UpdateExecuteMilliseconds;
+                reactiveNotificationMilliseconds += apply.ReactiveNotificationMilliseconds;
+                demandViewsMilliseconds += demandViewsElapsedMilliseconds;
+                hashMilliseconds += hashElapsedMilliseconds;
+            }
+
+            public void Reset()
+            {
+                batchCount = 0;
+                updateExecuteMilliseconds = 0d;
+                reactiveNotificationMilliseconds = 0d;
+                demandViewsMilliseconds = 0d;
+                hashMilliseconds = 0d;
+            }
+        }
+
+        private static class ArenaCrossEngineDiagnostics
+        {
+            private static readonly bool enabled = HasArgument("-datavoArenaDiagnostics");
+
+            public static bool IsProgressBoundary(int completedBatchCount, int totalBatchCount) =>
+                enabled && (completedBatchCount == totalBatchCount || completedBatchCount % 100 == 0);
+
+            public static void LogPhase(
+                ArenaCrossEngineProfile profile,
+                ArenaCrossEngineKind engine,
+                int repetition,
+                string phase,
+                double elapsedMilliseconds)
+            {
+                if (!enabled)
+                {
+                    return;
+                }
+
+                UnityEngine.Debug.Log(
+                    "DATAVO_ARENA_CROSS_ENGINE_DIAGNOSTIC profile=" + profile.id +
+                    " engine=" + EngineId(engine) +
+                    " repetition=" + repetition.ToString(CultureInfo.InvariantCulture) +
+                    " phase=" + phase +
+                    " milliseconds=" + elapsedMilliseconds.ToString("F3", CultureInfo.InvariantCulture));
+            }
+
+            public static void LogBatchWindow(
+                ArenaCrossEngineProfile profile,
+                ArenaCrossEngineKind engine,
+                int repetition,
+                string phase,
+                ArenaCrossEngineDiagnosticWindow window)
+            {
+                if (!enabled || window.BatchCount == 0)
+                {
+                    return;
+                }
+
+                UnityEngine.Debug.Log(
+                    "DATAVO_ARENA_CROSS_ENGINE_DIAGNOSTIC profile=" + profile.id +
+                    " engine=" + EngineId(engine) +
+                    " repetition=" + repetition.ToString(CultureInfo.InvariantCulture) +
+                    " phase=" + phase +
+                    " batches=" + window.BatchCount.ToString(CultureInfo.InvariantCulture) +
+                    " updateExecuteMilliseconds=" +
+                    window.UpdateExecuteMilliseconds.ToString("F3", CultureInfo.InvariantCulture) +
+                    " reactiveNotificationMilliseconds=" +
+                    window.ReactiveNotificationMilliseconds.ToString("F3", CultureInfo.InvariantCulture) +
+                    " demandViewsMilliseconds=" +
+                    window.DemandViewsMilliseconds.ToString("F3", CultureInfo.InvariantCulture) +
+                    " hashMilliseconds=" + window.HashMilliseconds.ToString("F3", CultureInfo.InvariantCulture));
+            }
+
+            private static bool HasArgument(string target)
+            {
+                foreach (string argument in Environment.GetCommandLineArgs())
+                {
+                    if (argument == target)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
         private interface ICrossEngineSession : IDisposable
         {
             long ReactiveChanges { get; }
@@ -208,9 +389,30 @@ namespace DataVo.UnityArena
             string SqliteVersion { get; }
 
             void BeginMeasuredInterval();
-            void ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch);
+            ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch);
             ArenaCrossEngineReadResult DemandViews();
         }
+
+        private static readonly DataVoCompiledQueryPlan PlayerMutationUpdatePlan = DataVoCompiledQueryPlan.Update(
+            tableName: "Players",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Score"] = "score",
+                ["Health"] = "health",
+                ["Zone"] = "zone"
+            },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        private static readonly DataVoCompiledQueryPlan InventoryMutationUpdatePlan = DataVoCompiledQueryPlan.Update(
+            tableName: "Inventory",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ItemId"] = "itemId",
+                ["Slot"] = "slot"
+            },
+            whereColumn: "InventoryId",
+            whereParameterName: "inventoryId");
 
         private sealed class SqliteCrossEngineSession : ICrossEngineSession
         {
@@ -229,7 +431,14 @@ namespace DataVo.UnityArena
 
             public void BeginMeasuredInterval() => session.BeginMeasuredInterval();
 
-            public void ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch) => session.ApplyBatch(batch);
+            public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
+            {
+                long updateStart = Stopwatch.GetTimestamp();
+                session.ApplyBatch(batch);
+                return new ArenaCrossEngineApplyTiming(
+                    ElapsedMilliseconds(updateStart, Stopwatch.GetTimestamp()),
+                    0d);
+            }
 
             public ArenaCrossEngineReadResult DemandViews() => session.DemandViews();
 
@@ -239,6 +448,7 @@ namespace DataVo.UnityArena
         private sealed class DataVoPollingCrossEngineSession : ICrossEngineSession
         {
             private readonly DataVoContext context;
+            private readonly DataVoMutationState mutationState;
             private bool recordPollingRows;
             private bool disposed;
 
@@ -246,6 +456,7 @@ namespace DataVo.UnityArena
             {
                 context = CreateContext();
                 Seed(context, profile);
+                mutationState = new DataVoMutationState(profile);
             }
 
             public long ReactiveChanges => 0;
@@ -261,10 +472,14 @@ namespace DataVo.UnityArena
                 PollingRows = 0;
             }
 
-            public void ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
+            public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
             {
                 ThrowIfDisposed();
-                ApplyMutations(context, batch);
+                long updateStart = Stopwatch.GetTimestamp();
+                ApplyMutations(context, mutationState, batch);
+                return new ArenaCrossEngineApplyTiming(
+                    ElapsedMilliseconds(updateStart, Stopwatch.GetTimestamp()),
+                    0d);
             }
 
             public ArenaCrossEngineReadResult DemandViews()
@@ -313,6 +528,7 @@ namespace DataVo.UnityArena
         private sealed class DataVoReactiveCrossEngineSession : ICrossEngineSession
         {
             private readonly DataVoContext context;
+            private readonly DataVoMutationState mutationState;
             private readonly List<IDisposable> subscriptions = new();
             private readonly Dictionary<int, ArenaCrossEngineLeaderboardRow> leaderboard = new();
             private readonly Dictionary<string, ArenaCrossEngineAggregateRow> aggregate = new(StringComparer.Ordinal);
@@ -323,9 +539,10 @@ namespace DataVo.UnityArena
             public DataVoReactiveCrossEngineSession(ArenaCrossEngineProfile profile)
             {
                 context = CreateContext();
-                subscriptions.Add(context.Subscribe(ArenaCrossEngineWorkload.LeaderboardSql, ApplyLeaderboardChange));
-                subscriptions.Add(context.Subscribe(ArenaCrossEngineWorkload.ReactiveAggregateSql, ApplyAggregateChange));
-                subscriptions.Add(context.Subscribe(ArenaCrossEngineWorkload.ReactiveZoneInventorySql, ApplyZoneInventoryChange));
+                mutationState = new DataVoMutationState(profile);
+                subscriptions.Add(context.SubscribeZeroAlloc(ArenaCrossEngineWorkload.LeaderboardSql, ApplyLeaderboardChange));
+                subscriptions.Add(context.SubscribeZeroAlloc(ArenaCrossEngineWorkload.ReactiveAggregateSql, ApplyAggregateChange));
+                subscriptions.Add(context.SubscribeZeroAlloc(ArenaCrossEngineWorkload.ReactiveZoneInventorySql, ApplyZoneInventoryChange));
                 Seed(context, profile);
                 context.DispatchPendingNotifications();
             }
@@ -343,11 +560,16 @@ namespace DataVo.UnityArena
                 ReactiveChanges = 0;
             }
 
-            public void ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
+            public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
             {
                 ThrowIfDisposed();
-                ApplyMutations(context, batch);
+                long updateStart = Stopwatch.GetTimestamp();
+                ApplyMutations(context, mutationState, batch);
+                long notificationStart = Stopwatch.GetTimestamp();
                 context.DispatchPendingNotifications();
+                return new ArenaCrossEngineApplyTiming(
+                    ElapsedMilliseconds(updateStart, notificationStart),
+                    ElapsedMilliseconds(notificationStart, Stopwatch.GetTimestamp()));
             }
 
             public ArenaCrossEngineReadResult DemandViews()
@@ -393,60 +615,104 @@ namespace DataVo.UnityArena
                 context.Dispose();
             }
 
-            private void ApplyLeaderboardChange(QueryChange change)
+            private void ApplyLeaderboardChange(in QueryChangeRef change)
             {
                 CountReactiveRows(change);
-                RemoveRows(change.Removed, row => leaderboard.Remove(ReadInt(row, "Id")));
-                UpsertRows(change.Added, row =>
-                {
-                    int id = ReadInt(row, "Id");
-                    leaderboard[id] = new ArenaCrossEngineLeaderboardRow(id, ReadInt(row, "Score"));
-                });
-                UpsertRows(change.Updated, row =>
-                {
-                    int id = ReadInt(row, "Id");
-                    leaderboard[id] = new ArenaCrossEngineLeaderboardRow(id, ReadInt(row, "Score"));
-                });
+                RemoveLeaderboardRows(change.Removed);
+                UpsertLeaderboardRows(change.Added);
+                UpsertLeaderboardRows(change.Updated);
             }
 
-            private void ApplyAggregateChange(QueryChange change)
+            private void ApplyAggregateChange(in QueryChangeRef change)
             {
                 CountReactiveRows(change);
-                RemoveRows(change.Removed, row => aggregate.Remove(ReadString(row, "Team")));
-                UpsertRows(change.Added, row =>
-                {
-                    string team = ReadString(row, "Team");
-                    aggregate[team] = new ArenaCrossEngineAggregateRow(team, ReadInt(row, "Alive"));
-                });
-                UpsertRows(change.Updated, row =>
-                {
-                    string team = ReadString(row, "Team");
-                    aggregate[team] = new ArenaCrossEngineAggregateRow(team, ReadInt(row, "Alive"));
-                });
+                RemoveAggregateRows(change.Removed);
+                UpsertAggregateRows(change.Added);
+                UpsertAggregateRows(change.Updated);
             }
 
-            private void ApplyZoneInventoryChange(QueryChange change)
+            private void ApplyZoneInventoryChange(in QueryChangeRef change)
             {
                 CountReactiveRows(change);
-                RemoveRows(change.Removed, row => zoneInventory.Remove(ReadInt(row, "p.Id")));
-                RemoveRows(change.UpdatedBefore, row => zoneInventory.Remove(ReadInt(row, "p.Id")));
-                UpsertRows(change.Added, UpsertZoneInventory);
-                UpsertRows(change.Updated, UpsertZoneInventory);
+                RemoveZoneInventoryRows(change.Removed);
+                RemoveZoneInventoryRows(change.UpdatedBefore);
+                UpsertZoneInventoryRows(change.Added);
+                UpsertZoneInventoryRows(change.Updated);
             }
 
-            private void UpsertZoneInventory(IReadOnlyDictionary<string, object?> row)
+            private void RemoveLeaderboardRows(RowSet rows)
             {
-                int playerId = ReadInt(row, "p.Id");
-                zoneInventory[playerId] = new ArenaCrossEngineZoneInventoryRow(playerId, ReadInt(row, "i.ItemId"));
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    leaderboard.Remove(ReadInt(rows[index]["Id"]));
+                }
             }
 
-            private void CountReactiveRows(QueryChange change)
+            private void UpsertLeaderboardRows(RowSet rows)
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    RowRef row = rows[index];
+                    int id = ReadInt(row["Id"]);
+                    leaderboard[id] = new ArenaCrossEngineLeaderboardRow(id, ReadInt(row["Score"]));
+                }
+            }
+
+            private void RemoveAggregateRows(RowSet rows)
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    aggregate.Remove(ReadString(rows[index]["Team"]));
+                }
+            }
+
+            private void UpsertAggregateRows(RowSet rows)
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    RowRef row = rows[index];
+                    string team = ReadString(row["Team"]);
+                    aggregate[team] = new ArenaCrossEngineAggregateRow(team, ReadInt(row["Alive"]));
+                }
+            }
+
+            private void RemoveZoneInventoryRows(RowSet rows)
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    zoneInventory.Remove(ReadInt(rows[index]["p.Id"]));
+                }
+            }
+
+            private void UpsertZoneInventoryRows(RowSet rows)
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    RowRef row = rows[index];
+                    int playerId = ReadInt(row["p.Id"]);
+                    zoneInventory[playerId] = new ArenaCrossEngineZoneInventoryRow(playerId, ReadInt(row["i.ItemId"]));
+                }
+            }
+
+            private void CountReactiveRows(in QueryChangeRef change)
             {
                 if (recordReactiveChanges)
                 {
                     ReactiveChanges += change.Added.Count + change.Removed.Count + change.Updated.Count;
                 }
             }
+
+            private static int ReadInt(CellValue value) => value.Type switch
+            {
+                CellType.Int32 => value.AsInt32(),
+                CellType.Int64 => checked((int)value.AsInt64()),
+                CellType.Decimal => checked((int)value.AsDecimal()),
+                CellType.Double => checked((int)value.AsDouble()),
+                _ => throw new InvalidOperationException("Expected numeric DataVo cell but received " + value.Type + ".")
+            };
+
+            private static string ReadString(CellValue value) =>
+                value.AsString() ?? throw new InvalidOperationException("Expected a non-null DataVo string cell.");
 
             private void ThrowIfDisposed()
             {
@@ -455,6 +721,36 @@ namespace DataVo.UnityArena
                     throw new ObjectDisposedException(nameof(DataVoReactiveCrossEngineSession));
                 }
             }
+        }
+
+        private sealed class DataVoMutationState
+        {
+            private readonly Dictionary<int, int> scores;
+
+            public DataVoMutationState(ArenaCrossEngineProfile profile)
+            {
+                ArenaCrossEnginePlayer[] players = ArenaCrossEngineWorkload.CreateInitialPlayers(profile);
+                scores = new Dictionary<int, int>(players.Length);
+                foreach (ArenaCrossEnginePlayer player in players)
+                {
+                    scores.Add(player.id, player.score);
+                }
+            }
+
+            public int GetUpdatedScore(ArenaCrossEngineMutation mutation)
+            {
+                if (!scores.TryGetValue(mutation.playerId, out int currentScore))
+                {
+                    throw new InvalidOperationException(
+                        "Arena mutation score state does not contain player " +
+                        mutation.playerId.ToString(CultureInfo.InvariantCulture) + ".");
+                }
+
+                return checked(currentScore + mutation.scoreDelta);
+            }
+
+            public void SetScore(ArenaCrossEngineMutation mutation, int updatedScore) =>
+                scores[mutation.playerId] = updatedScore;
         }
 
         private static DataVoContext CreateContext()
@@ -503,7 +799,10 @@ namespace DataVo.UnityArena
             context.BulkInsert("Inventory", inventoryRows);
         }
 
-        private static void ApplyMutations(DataVoContext context, IReadOnlyList<ArenaCrossEngineMutation> batch)
+        private static void ApplyMutations(
+            DataVoContext context,
+            DataVoMutationState mutationState,
+            IReadOnlyList<ArenaCrossEngineMutation> batch)
         {
             if (batch is null)
             {
@@ -512,17 +811,41 @@ namespace DataVo.UnityArena
 
             foreach (ArenaCrossEngineMutation mutation in batch)
             {
-                ExecuteOk(
+                int updatedScore = mutationState.GetUpdatedScore(mutation);
+                int playerRowsAffected = DataVoCompiledQuery.Update(
                     context,
-                    "UPDATE Players SET Score = Score + " + mutation.scoreDelta.ToString(CultureInfo.InvariantCulture) +
-                    ", Health = " + mutation.replacementHealth.ToString(CultureInfo.InvariantCulture) +
-                    ", Zone = " + SqlStringLiteral(mutation.replacementZone) +
-                    " WHERE Id = " + mutation.playerId.ToString(CultureInfo.InvariantCulture));
-                ExecuteOk(
+                    PlayerMutationUpdatePlan,
+                    new DataVoCompiledQueryParameter[]
+                    {
+                        new DataVoCompiledQueryParameter("score", updatedScore),
+                        new DataVoCompiledQueryParameter("health", mutation.replacementHealth),
+                        new DataVoCompiledQueryParameter("zone", mutation.replacementZone),
+                        new DataVoCompiledQueryParameter("id", mutation.playerId)
+                    });
+                RequireSingleAffectedRow(playerRowsAffected, "Players", mutation.playerId);
+
+                int inventoryRowsAffected = DataVoCompiledQuery.Update(
                     context,
-                    "UPDATE Inventory SET ItemId = " + mutation.inventoryItemId.ToString(CultureInfo.InvariantCulture) +
-                    ", Slot = " + mutation.inventorySlot.ToString(CultureInfo.InvariantCulture) +
-                    " WHERE InventoryId = " + mutation.playerId.ToString(CultureInfo.InvariantCulture));
+                    InventoryMutationUpdatePlan,
+                    new DataVoCompiledQueryParameter[]
+                    {
+                        new DataVoCompiledQueryParameter("itemId", mutation.inventoryItemId),
+                        new DataVoCompiledQueryParameter("slot", mutation.inventorySlot),
+                        new DataVoCompiledQueryParameter("inventoryId", mutation.playerId)
+                    });
+                RequireSingleAffectedRow(inventoryRowsAffected, "Inventory", mutation.playerId);
+                mutationState.SetScore(mutation, updatedScore);
+            }
+        }
+
+        private static void RequireSingleAffectedRow(int rowsAffected, string tableName, int primaryKey)
+        {
+            if (rowsAffected != 1)
+            {
+                throw new InvalidOperationException(
+                    "Arena compiled update expected exactly one " + tableName + " row for primary key " +
+                    primaryKey.ToString(CultureInfo.InvariantCulture) + ", but affected " +
+                    rowsAffected.ToString(CultureInfo.InvariantCulture) + ".");
             }
         }
 
@@ -612,14 +935,5 @@ namespace DataVo.UnityArena
             return text;
         }
 
-        private static string SqlStringLiteral(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                throw new ArgumentException("SQL text value is required.", nameof(value));
-            }
-
-            return "'" + value.Replace("'", "''") + "'";
-        }
     }
 }

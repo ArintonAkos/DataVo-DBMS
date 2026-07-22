@@ -386,6 +386,43 @@ public class CompiledQueryRuntimeTests
     }
 
     [Fact]
+    public void CompiledUpdate_PublishesReactiveBeforeAndAfterImages()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Level INT)");
+        context.Execute("INSERT INTO Players VALUES (1, 5)");
+
+        var plan = DataVoCompiledQueryPlan.Update(
+            tableName: "Players",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Level"] = "level"
+            },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        QueryChange? observed = null;
+        using IDisposable subscription = context.Subscribe(
+            "SELECT Id, Level FROM Players",
+            change => observed = change);
+
+        Assert.Equal(1, DataVoCompiledQuery.Update(
+            context,
+            plan,
+            [
+                new DataVoCompiledQueryParameter("id", 1),
+                new DataVoCompiledQueryParameter("level", 7)
+            ]));
+        context.DispatchPendingNotifications();
+
+        Assert.NotNull(observed);
+        Assert.Single(observed!.UpdatedBefore);
+        Assert.Single(observed.Updated);
+        Assert.Equal(5, observed.UpdatedBefore[0]["Level"]);
+        Assert.Equal(7, observed.Updated[0]["Level"]);
+    }
+
+    [Fact]
     public void CompiledUpdate_RejectsActiveTransactions()
     {
         using var context = CreateContext();

@@ -1,6 +1,9 @@
 #nullable enable
 
 using System;
+using System.Reflection;
+using DataVo.Core;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.UnityArena.Sqlite;
 using NUnit.Framework;
 
@@ -68,6 +71,61 @@ namespace DataVo.UnityArena.EditorTests
         }
 
         [Test]
+        public void ReactiveSession_UsesBorrowedDeltaCallbacksAndPreservesAllLiveViewHashes()
+        {
+            AssertBorrowedDeltaCallback("ApplyLeaderboardChange");
+            AssertBorrowedDeltaCallback("ApplyAggregateChange");
+            AssertBorrowedDeltaCallback("ApplyZoneInventoryChange");
+
+            ArenaCrossEngineResult polling = ArenaCrossEngineRunner.Run(
+                ArenaCrossEngineProfile.Gameplay, ArenaCrossEngineKind.DataVoPolling, repetitions: 1);
+            ArenaCrossEngineResult reactive = ArenaCrossEngineRunner.Run(
+                ArenaCrossEngineProfile.Gameplay, ArenaCrossEngineKind.DataVoReactive, repetitions: 1);
+
+            Assert.That(reactive.status, Is.EqualTo("passed"));
+            Assert.That(reactive.leaderboardChecksum, Is.EqualTo(polling.leaderboardChecksum));
+            Assert.That(reactive.aggregateChecksum, Is.EqualTo(polling.aggregateChecksum));
+            Assert.That(reactive.zoneInventoryChecksum, Is.EqualTo(polling.zoneInventoryChecksum));
+        }
+
+        [Test]
+        public void DataVoMutationBatch_DoesNotExecuteRenderedSqlUpdates()
+        {
+            Type? sessionType = typeof(ArenaCrossEngineRunner).GetNestedType(
+                "DataVoPollingCrossEngineSession",
+                BindingFlags.NonPublic);
+            Assert.That(sessionType, Is.Not.Null, "DataVo polling session type was not found.");
+
+            object? session = Activator.CreateInstance(
+                sessionType!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                args: new object[] { ArenaCrossEngineProfile.Gameplay },
+                culture: null);
+            Assert.That(session, Is.Not.Null, "DataVo polling session could not be created.");
+
+            try
+            {
+                FieldInfo? contextField = sessionType!.GetField("context", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(contextField, Is.Not.Null, "DataVo polling session context field was not found.");
+                var context = (DataVoContext)contextField!.GetValue(session!)!;
+                context.Diagnostics.Enabled = true;
+                context.Diagnostics.Clear();
+
+                MethodInfo? applyBatch = sessionType.GetMethod("ApplyBatch", BindingFlags.Instance | BindingFlags.Public);
+                Assert.That(applyBatch, Is.Not.Null, "DataVo polling session ApplyBatch method was not found.");
+                _ = applyBatch!.Invoke(session, new object[] { ArenaCrossEngineWorkload.CreateBatch(ArenaCrossEngineProfile.Gameplay, 0) });
+
+                Assert.That(context.Diagnostics.LastQuery, Is.Null,
+                    "Arena mutations must execute compiled updates without rendering SQL statements.");
+            }
+            finally
+            {
+                ((IDisposable)session!).Dispose();
+            }
+        }
+
+        [Test]
         public void UnavailableSqliteBoundary_ProducesAnExplicitFailure()
         {
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
@@ -75,6 +133,24 @@ namespace DataVo.UnityArena.EditorTests
 
             Assert.That(exception.Message, Is.EqualTo(
                 "macOS sqlite3 native library is unavailable; Unity cross-engine SQLite benchmark cannot run."));
+        }
+
+        private static void AssertBorrowedDeltaCallback(string methodName)
+        {
+            Type? sessionType = typeof(ArenaCrossEngineRunner).GetNestedType(
+                "DataVoReactiveCrossEngineSession",
+                BindingFlags.NonPublic);
+            Assert.That(sessionType, Is.Not.Null, "Reactive cross-engine session type was not found.");
+
+            MethodInfo? method = sessionType!.GetMethod(
+                methodName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null, "Reactive callback was not found: " + methodName);
+
+            ParameterInfo[] parameters = method!.GetParameters();
+            Assert.That(parameters, Has.Length.EqualTo(1));
+            Assert.That(parameters[0].ParameterType.IsByRef, Is.True);
+            Assert.That(parameters[0].ParameterType.GetElementType(), Is.EqualTo(typeof(QueryChangeRef)));
         }
     }
 }

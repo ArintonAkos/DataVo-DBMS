@@ -9,6 +9,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Parser.DML;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
@@ -430,7 +431,26 @@ public static class DataVoCompiledQuery
             List<Dictionary<string, object?>> oldRows = orderedRowIds
                 .Select(rowId => existingRows[rowId])
                 .ToList();
-            ReplaceRows(context, plan.TableName, databaseName, orderedRowIds, oldRows, newRows, statementTxId);
+            ChangeRecorder? recorder = ChangeRecorder.TryCreate(context.Engine, databaseName);
+            long[] newRowIds = ReplaceRows(
+                context,
+                plan.TableName,
+                databaseName,
+                orderedRowIds,
+                oldRows,
+                newRows,
+                statementTxId);
+
+            if (recorder is not null)
+            {
+                for (int i = 0; i < newRows.Count; i++)
+                {
+                    recorder.RecordUpdate(plan.TableName, newRowIds[i], oldRows[i], newRows[i]);
+                }
+
+                recorder.Publish();
+            }
+
             return newRows.Count;
         }
         finally
@@ -1919,7 +1939,7 @@ public static class DataVoCompiledQuery
             .ToList();
     }
 
-    private static void ReplaceRows(
+    private static long[] ReplaceRows(
         DataVoContext context,
         string tableName,
         string databaseName,
@@ -1962,6 +1982,8 @@ public static class DataVoCompiledQuery
 
             ImplicitWalCommit.CommitIfEnabled(context.Engine, databaseName, statementTxId, operations);
         }
+
+        return newRowIds;
     }
 
     /// <summary>
