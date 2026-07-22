@@ -25,7 +25,8 @@ namespace DataVo.UnityArena
 
             foreach (string argument in arguments)
             {
-                if (string.Equals(argument, "-datavoArenaMode", StringComparison.Ordinal))
+                if (string.Equals(argument, "-datavoArenaMode", StringComparison.Ordinal) ||
+                    string.Equals(argument, "-datavoArenaEngine", StringComparison.Ordinal))
                 {
                     return true;
                 }
