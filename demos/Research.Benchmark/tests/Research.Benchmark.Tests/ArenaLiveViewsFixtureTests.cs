@@ -50,4 +50,34 @@ public sealed class ArenaLiveViewsFixtureTests
             64,
             ArenaLiveViewsHasher.Compute(new ArenaLiveViewsViews([], [], [])).Leaderboard.Length);
     }
+
+    [Fact]
+    public void Fixture_RejectsPositiveProfileWithUnapprovedId()
+    {
+        var profile = new ArenaLiveViewsProfile(
+            "custom",
+            20260721,
+            1_000,
+            4,
+            30,
+            300,
+            10);
+
+        Assert.Throws<ArgumentException>(() => ArenaLiveViewsFixture.CreateBatch(profile, 0));
+    }
+
+    [Fact]
+    public void Fixture_RejectsGameplayProfileWithAlteredRate()
+    {
+        var profile = new ArenaLiveViewsProfile(
+            "gameplay",
+            20260721,
+            1_000,
+            5,
+            30,
+            300,
+            10);
+
+        Assert.Throws<ArgumentException>(() => ArenaLiveViewsFixture.CreateBatch(profile, 0));
+    }
 }

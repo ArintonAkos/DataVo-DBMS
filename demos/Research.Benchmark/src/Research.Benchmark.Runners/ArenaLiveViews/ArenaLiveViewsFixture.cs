@@ -149,6 +149,13 @@ public static class ArenaLiveViewsFixture
         {
             throw new ArgumentOutOfRangeException(nameof(profile), "Simulated cadence must be positive.");
         }
+
+        if (profile != ArenaLiveViewsProfile.Gameplay && profile != ArenaLiveViewsProfile.IvmStress)
+        {
+            throw new ArgumentException(
+                "Profile must exactly match the gameplay or ivm-stress definition.",
+                nameof(profile));
+        }
     }
 
     private static uint Next(ref uint state)
