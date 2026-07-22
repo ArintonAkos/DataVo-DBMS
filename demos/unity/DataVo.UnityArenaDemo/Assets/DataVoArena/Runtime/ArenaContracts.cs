@@ -175,6 +175,8 @@ namespace DataVo.UnityArena
         public string unityVersion = string.Empty;
         public string platform = string.Empty;
         public string scriptingBackend = string.Empty;
+        public bool hasGcCollectionCount;
+        public int gcCollectionCount;
         public string error = string.Empty;
     }
 }

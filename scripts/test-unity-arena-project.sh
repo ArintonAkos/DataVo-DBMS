@@ -22,6 +22,9 @@ rg -Fq '"com.datavo.core.candidate": "file:../.generated"' "$project/Packages/ma
 rg -Fq '"com.unity.mathematics": "1.4.0"' "$project/Packages/manifest.json"
 rg -Fq 'check-unity-runtime-bcl.sh' "$root/scripts/prepare-unity-arena-candidate.sh"
 rg -Fq 'DataVo.Unity.TypeBinding' "$project/Assets/DataVoArena/Runtime/DataVo.UnityArena.Runtime.asmdef"
+rg -Fq 'DATAVO_ARENA_RESULT=' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
+rg -Fq -- '-datavoArenaMode' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
+rg -Fq -- '-datavoArenaRunId' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
 
 node - "$project/Assets/DataVoArena/Editor/DataVo.UnityArena.EditorTests.asmdef" <<'NODE'
 const fs = require('node:fs');
