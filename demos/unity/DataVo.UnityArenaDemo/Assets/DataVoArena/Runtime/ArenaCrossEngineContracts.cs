@@ -21,6 +21,8 @@ namespace DataVo.UnityArena
         int measuredBatches,
         int simulatedCadenceHz)
     {
+        public string Id => id;
+
         public static ArenaCrossEngineProfile Gameplay { get; } =
             new("gameplay", 20260721, 1_000, 4, 30, 300, 10);
 

@@ -110,8 +110,9 @@ namespace DataVo.UnityArena.Editor
             }
 
             Directory.CreateDirectory(directory);
-            // ArenaHeadlessBootstrap is retained by RuntimeInitializeOnLoadMethod, so this
-            // deliberately empty scene avoids coupling the Player proof to visual content.
+            // ArenaHeadlessBootstrap and ArenaCrossEngineBootstrap are retained by
+            // RuntimeInitializeOnLoadMethod, so this deliberately empty scene avoids
+            // coupling either Player proof to visual content.
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             if (!EditorSceneManager.SaveScene(scene, GeneratedScenePath, saveAsCopy: false))
