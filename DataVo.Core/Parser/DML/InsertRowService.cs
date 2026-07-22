@@ -1211,6 +1211,13 @@ internal sealed partial class InsertRowService(
                 continue;
             }
 
+            if (IsPrimaryKeyIndex(tableName, indexName)
+                && TryGetSingleIntegerKey(row, index.AttributeNames, out long integerKey))
+            {
+                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName);
+                continue;
+            }
+
             string indexValue = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
             indexes.InsertIntoIndex(indexValue, rowId, indexName, tableName, databaseName);
         }
@@ -1545,6 +1552,32 @@ internal sealed partial class InsertRowService(
         }
 
         return false;
+    }
+
+    private static bool TryGetSingleIntegerKey(
+        IReadOnlyDictionary<string, object?> row,
+        IReadOnlyList<string> attributes,
+        out long key)
+    {
+        key = 0;
+        if (attributes.Count != 1
+            || !row.TryGetValue(attributes[0], out object? value)
+            || value is null)
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+            case int intValue:
+                key = intValue;
+                return true;
+            case long longValue:
+                key = longValue;
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static bool TryGetSingleIntegerKey(

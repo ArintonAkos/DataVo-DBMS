@@ -479,9 +479,13 @@ public class CompiledQueryRuntimeTests
 
     private static void ReplaceIndexWithThrowingIndex(DataVoContext context, string tableName, string indexName)
     {
+        string databaseName = CurrentDatabase(context);
+        // Keep every IndexManager cache coherent before injecting the fault. In particular, an integer
+        // primary-key fast lane must not keep bypassing the deliberately replaced scalar index.
+        context.Engine.IndexManager.RemoveIndex((databaseName, tableName, indexName));
+
         FieldInfo cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var cache = (Dictionary<(string, string, string), IIndexBase>)cacheField.GetValue(context.Engine.IndexManager)!;
-        string databaseName = CurrentDatabase(context);
         var cacheKey = (databaseName, tableName, indexName);
         cache[cacheKey] = new ThrowingIndex();
     }

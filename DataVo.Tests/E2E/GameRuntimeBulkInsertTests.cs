@@ -1,4 +1,5 @@
 using DataVo.Core;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.StorageEngine.Config;
 
@@ -65,6 +66,48 @@ public class GameRuntimeBulkInsertTests
 
         Assert.Single(rows);
         Assert.Equal(2, (int)rows[0]["Id"]);
+    }
+
+    [Fact]
+    public void BulkInsert_IntPrimaryKey_PopulatesIntegerFastLane()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50))");
+
+        context.BulkInsert("Players",
+        [
+            new Dictionary<string, object?> { ["Id"] = 10, ["Name"] = "Ada" },
+            new Dictionary<string, object?> { ["Id"] = 20, ["Name"] = "Bob" }
+        ]);
+
+        Assert.True(context.Engine.IndexManager.TryLookupIntegerPrimaryKey(
+            20,
+            "_PK_Players",
+            "Players",
+            CurrentDatabase(context),
+            out long rowId));
+        Assert.Equal(2L, rowId);
+
+        int affected = DataVoCompiledQuery.Update(
+            context,
+            DataVoCompiledQueryPlan.Update(
+                tableName: "Players",
+                assignments: new Dictionary<string, string> { ["Name"] = "name" },
+                whereColumn: "Id",
+                whereParameterName: "id"),
+            [
+                new DataVoCompiledQueryParameter("name", "Bobby"),
+                new DataVoCompiledQueryParameter("id", 20)
+            ]);
+
+        Assert.Equal(1, affected);
+        Assert.True(context.Engine.IndexManager.TryLookupIntegerPrimaryKey(
+            20,
+            "_PK_Players",
+            "Players",
+            CurrentDatabase(context),
+            out long updatedRowId));
+        Assert.NotEqual(rowId, updatedRowId);
     }
 
     [Fact]
