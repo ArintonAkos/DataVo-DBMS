@@ -336,9 +336,13 @@ Expected: compilation fails because the two DataVo arena engines do not exist.
 Both engines create an in-memory `ArenaLiveViews` database with `Players` and
 `Inventory`, preload fixture rows before timing, and apply every mutation with
 typed or parameter-equivalent DataVo writes. The reactive engine subscribes to
-all three SQL constants before preloading, dispatches notifications after each
-write batch, and maintains sorted projection dictionaries from `QueryChangeRef`.
-Its `ReadViewsAsync` returns those maintained arrays without executing SQL.
+the leaderboard SQL constant before preloading. Current DataVo reactive
+aggregate and join operators reject `ORDER BY`, so its aggregate and zone
+subscriptions use the same `SELECT`/`WHERE`/`GROUP BY`/`JOIN` expressions with
+only the final ordering removed; their maintained projections restore ordinal
+team order and `(PlayerId, ItemId)` order from `QueryChangeRef`. Dispatch
+notifications after each write batch. `ReadViewsAsync` returns those maintained
+arrays without executing SQL.
 
 The polling engine applies the identical writes but executes all three SQL
 constants in `ReadViewsAsync`, maps rows, and returns the same ordered arrays.
