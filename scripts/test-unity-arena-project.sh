@@ -39,7 +39,8 @@ for generated_path in \
   "$project/Temp/" \
   "$project/UserSettings" \
   "$project/.generated" \
-  "$project/Assets/DataVoArena/.generated/"; do
+  "$project/Assets/DataVoArena/.generated/" \
+  "$project/ProjectSettings/PackageManagerSettings.asset"; do
   git -C "$root" check-ignore -q --no-index "$generated_path" || {
     echo "Unity arena generated path is not ignored: $generated_path" >&2
     exit 1

@@ -54,6 +54,8 @@ namespace DataVo.UnityArena
 
         public ArenaRunOptions Options => options;
 
+        public ArenaFrameSnapshot CurrentSnapshot => latestSnapshot;
+
         public void Warmup()
         {
             ThrowIfDisposed();
@@ -319,7 +321,14 @@ namespace DataVo.UnityArena
             aliveByTeam: OrderedAliveByTeam(),
             selectedMemoryMatches: selectedMemoryMatches.ToArray(),
             visibleNpcs: visibleNpcs.Values.OrderBy(npc => npc.id).ToArray(),
-            selectedNpcId: selectedNpcId);
+            selectedNpcId: selectedNpcId,
+            diagnostics: new ArenaFrameDiagnostics(
+                mode: options.Mode,
+                reactiveChanges: reactiveChanges,
+                pollingRows: pollingRows,
+                tick: tickLatency.Snapshot(),
+                leaderboard: leaderboardLatency.Snapshot(),
+                vectorSearch: vectorSearchLatency.Snapshot()));
 
         private IReadOnlyList<ArenaLeaderboardEntry> OrderedLeaderboard() => leaderboard.Values
             .OrderByDescending(entry => entry.score)

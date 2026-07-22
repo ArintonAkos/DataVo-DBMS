@@ -113,13 +113,22 @@ namespace DataVo.UnityArena
 
     public sealed record ArenaMemoryMatch(int id, int npcId, string tag, float distance);
 
+    public sealed record ArenaFrameDiagnostics(
+        ArenaDeliveryMode mode,
+        long reactiveChanges,
+        long pollingRows,
+        ArenaLatencySummary tick,
+        ArenaLatencySummary leaderboard,
+        ArenaLatencySummary vectorSearch);
+
     public sealed record ArenaFrameSnapshot(
         int tick,
         IReadOnlyList<ArenaLeaderboardEntry> leaderboard,
         IReadOnlyList<ArenaTeamAggregate> aliveByTeam,
         IReadOnlyList<ArenaMemoryMatch> selectedMemoryMatches,
         IReadOnlyList<ArenaNpcSeed> visibleNpcs,
-        int selectedNpcId)
+        int selectedNpcId,
+        ArenaFrameDiagnostics diagnostics)
     {
         public static ArenaFrameSnapshot Empty { get; } = new(
             tick: 0,
@@ -127,7 +136,14 @@ namespace DataVo.UnityArena
             aliveByTeam: Array.Empty<ArenaTeamAggregate>(),
             selectedMemoryMatches: Array.Empty<ArenaMemoryMatch>(),
             visibleNpcs: Array.Empty<ArenaNpcSeed>(),
-            selectedNpcId: 0);
+            selectedNpcId: 0,
+            diagnostics: new ArenaFrameDiagnostics(
+                mode: ArenaDeliveryMode.Reactive,
+                reactiveChanges: 0,
+                pollingRows: 0,
+                tick: new ArenaLatencySummary(),
+                leaderboard: new ArenaLatencySummary(),
+                vectorSearch: new ArenaLatencySummary()));
     }
 
     [Serializable]

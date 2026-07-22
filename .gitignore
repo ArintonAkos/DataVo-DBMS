@@ -283,6 +283,7 @@ ClientBin/
 /demos/unity/DataVo.UnityArenaDemo/UserSettings/
 /demos/unity/DataVo.UnityArenaDemo/.generated
 /demos/unity/DataVo.UnityArenaDemo/Assets/DataVoArena/.generated/
+/demos/unity/DataVo.UnityArenaDemo/ProjectSettings/PackageManagerSettings.asset
 !tests/unity/DataVo.UnitySmoke/Packages/
 !tests/unity/DataVo.UnitySmoke/Packages/**
 !tests/unity/DataVo.UnitySmoke/**/*.meta
