@@ -5,6 +5,14 @@ namespace Research.Benchmark.Tests;
 
 public sealed class ArenaLiveViewsDataVoEngineTests
 {
+    private const int OracleBatchCount = 3;
+
+    public static IEnumerable<object[]> ApprovedProfiles()
+    {
+        yield return [ArenaLiveViewsProfile.Gameplay];
+        yield return [ArenaLiveViewsProfile.IvmStress];
+    }
+
     [Fact]
     public async Task ReactiveAndPolling_ProduceEqualHashesAfterTheSameBatches()
     {
@@ -55,5 +63,33 @@ public sealed class ArenaLiveViewsDataVoEngineTests
             reactiveViews.ZoneInventory);
         Assert.Equal(pollingViews.ZoneInventory, reactiveViews.ZoneInventory);
         Assert.Equal(ArenaLiveViewsHasher.Compute(reactiveViews), ArenaLiveViewsHasher.Compute(pollingViews));
+    }
+
+    [Theory]
+    [MemberData(nameof(ApprovedProfiles))]
+    public async Task EachDataVoEngine_MatchesFixtureOracleForApprovedProfiles(ArenaLiveViewsProfile profile)
+    {
+        ArenaLiveViewsHashes expected = ArenaLiveViewsHasher.Compute(
+            ArenaLiveViewsFixture.CreateExpectedViews(profile, OracleBatchCount));
+
+        await AssertMatchesFixtureAsync(new DataVoReactiveArenaLiveViewsEngine(), profile, expected);
+        await AssertMatchesFixtureAsync(new DataVoPollingArenaLiveViewsEngine(), profile, expected);
+    }
+
+    private static async Task AssertMatchesFixtureAsync(
+        IArenaLiveViewsEngine engine,
+        ArenaLiveViewsProfile profile,
+        ArenaLiveViewsHashes expected)
+    {
+        await using (engine)
+        {
+            await engine.InitializeAsync(profile);
+            for (int batch = 0; batch < OracleBatchCount; batch++)
+            {
+                await engine.ApplyBatchAsync(ArenaLiveViewsFixture.CreateBatch(profile, batch));
+            }
+
+            Assert.Equal(expected, ArenaLiveViewsHasher.Compute(await engine.ReadViewsAsync()));
+        }
     }
 }
