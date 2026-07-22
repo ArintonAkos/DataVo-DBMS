@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
@@ -48,14 +49,23 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<ArenaLiveViewsViews> ReadViewsAsync(CancellationToken cancellationToken = default)
+    public ValueTask<ArenaLiveViewsReadResult> ReadViewsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(new ArenaLiveViewsViews(
-            ReadLeaderboard(),
-            ReadAliveByTeam(),
-            ReadZoneInventory()));
+        long leaderboardStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaLeaderboardRow> leaderboard = ReadLeaderboard();
+        long aliveByTeamStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaAliveByTeamRow> aliveByTeam = ReadAliveByTeam();
+        long zoneInventoryStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaZoneInventoryRow> zoneInventory = ReadZoneInventory();
+        long readEnd = Stopwatch.GetTimestamp();
+
+        return ValueTask.FromResult(new ArenaLiveViewsReadResult(
+            new ArenaLiveViewsViews(leaderboard, aliveByTeam, zoneInventory),
+            ElapsedMilliseconds(leaderboardStart, aliveByTeamStart),
+            ElapsedMilliseconds(aliveByTeamStart, zoneInventoryStart),
+            ElapsedMilliseconds(zoneInventoryStart, readEnd)));
     }
 
     public ValueTask DisposeAsync()
@@ -151,6 +161,9 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
 
     private static string SqlStringLiteral(string value) =>
         "'" + (value ?? throw new ArgumentNullException(nameof(value))).Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    private static double ElapsedMilliseconds(long start, long end) =>
+        (end - start) * 1000d / Stopwatch.Frequency;
 
     private DataVoContext EnsureContext() =>
         _context ?? throw new InvalidOperationException("DataVo polling arena engine has not been initialized.");

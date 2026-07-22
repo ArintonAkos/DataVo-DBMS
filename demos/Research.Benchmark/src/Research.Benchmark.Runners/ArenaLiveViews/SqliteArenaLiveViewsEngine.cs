@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Diagnostics;
 using Research.Benchmark.Abstractions;
 
 namespace Research.Benchmark.Runners.ArenaLiveViews;
@@ -73,14 +74,23 @@ public sealed class SqliteArenaLiveViewsEngine : IArenaLiveViewsEngine
         }
     }
 
-    public async ValueTask<ArenaLiveViewsViews> ReadViewsAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<ArenaLiveViewsReadResult> ReadViewsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        return new ArenaLiveViewsViews(
-            await ReadLeaderboardAsync(cancellationToken),
-            await ReadAliveByTeamAsync(cancellationToken),
-            await ReadZoneInventoryAsync(cancellationToken));
+        long leaderboardStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaLeaderboardRow> leaderboard = await ReadLeaderboardAsync(cancellationToken);
+        long aliveByTeamStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaAliveByTeamRow> aliveByTeam = await ReadAliveByTeamAsync(cancellationToken);
+        long zoneInventoryStart = Stopwatch.GetTimestamp();
+        IReadOnlyList<ArenaZoneInventoryRow> zoneInventory = await ReadZoneInventoryAsync(cancellationToken);
+        long readEnd = Stopwatch.GetTimestamp();
+
+        return new ArenaLiveViewsReadResult(
+            new ArenaLiveViewsViews(leaderboard, aliveByTeam, zoneInventory),
+            ElapsedMilliseconds(leaderboardStart, aliveByTeamStart),
+            ElapsedMilliseconds(aliveByTeamStart, zoneInventoryStart),
+            ElapsedMilliseconds(zoneInventoryStart, readEnd));
     }
 
     public async ValueTask DisposeAsync() => await DisposeSqliteAsync();
@@ -229,6 +239,9 @@ public sealed class SqliteArenaLiveViewsEngine : IArenaLiveViewsEngine
 
     private static string CreateConnectionString() =>
         $"Data Source=ResearchBenchmarkArenaLiveViews-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+
+    private static double ElapsedMilliseconds(long start, long end) =>
+        (end - start) * 1000d / Stopwatch.Frequency;
 
     private SqliteConnection EnsureConnection() =>
         _connection ?? throw new InvalidOperationException("SQLite arena live-views engine has not been initialized.");

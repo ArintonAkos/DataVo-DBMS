@@ -29,8 +29,8 @@ public sealed class ArenaLiveViewsDataVoEngineTests
             await polling.ApplyBatchAsync(mutations);
         }
 
-        Assert.Equal(ArenaLiveViewsHasher.Compute(await reactive.ReadViewsAsync()),
-            ArenaLiveViewsHasher.Compute(await polling.ReadViewsAsync()));
+        Assert.Equal(ArenaLiveViewsHasher.Compute((await reactive.ReadViewsAsync()).Views),
+            ArenaLiveViewsHasher.Compute((await polling.ReadViewsAsync()).Views));
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class ArenaLiveViewsDataVoEngineTests
         await reactive.ApplyBatchAsync(ArenaLiveViewsFixture.CreateBatch(profile, 0));
         await polling.ApplyBatchAsync(ArenaLiveViewsFixture.CreateBatch(profile, 0));
 
-        ArenaLiveViewsViews reactiveViews = await reactive.ReadViewsAsync();
-        ArenaLiveViewsViews pollingViews = await polling.ReadViewsAsync();
+        ArenaLiveViewsViews reactiveViews = (await reactive.ReadViewsAsync()).Views;
+        ArenaLiveViewsViews pollingViews = (await polling.ReadViewsAsync()).Views;
 
         Assert.Equal(
             reactiveViews.Leaderboard
@@ -89,7 +89,24 @@ public sealed class ArenaLiveViewsDataVoEngineTests
                 await engine.ApplyBatchAsync(ArenaLiveViewsFixture.CreateBatch(profile, batch));
             }
 
-            Assert.Equal(expected, ArenaLiveViewsHasher.Compute(await engine.ReadViewsAsync()));
+            Assert.Equal(expected, ArenaLiveViewsHasher.Compute((await engine.ReadViewsAsync()).Views));
         }
+    }
+
+    [Fact]
+    public async Task ReactiveRead_ReturnsOwnedViewsWithMeasuredPerViewDurations()
+    {
+        await using IArenaLiveViewsEngine reactive = new DataVoReactiveArenaLiveViewsEngine();
+        await reactive.InitializeAsync(ArenaLiveViewsProfile.Gameplay);
+
+        ArenaLiveViewsReadResult first = await reactive.ReadViewsAsync();
+        ArenaLiveViewsReadResult second = await reactive.ReadViewsAsync();
+
+        Assert.NotSame(first.Views.Leaderboard, second.Views.Leaderboard);
+        Assert.NotSame(first.Views.AliveByTeam, second.Views.AliveByTeam);
+        Assert.NotSame(first.Views.ZoneInventory, second.Views.ZoneInventory);
+        Assert.True(first.LeaderboardMilliseconds >= 0d);
+        Assert.True(first.AliveByTeamMilliseconds >= 0d);
+        Assert.True(first.ZoneInventoryMilliseconds >= 0d);
     }
 }

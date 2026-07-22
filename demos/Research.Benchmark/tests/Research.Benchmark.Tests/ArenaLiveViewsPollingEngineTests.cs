@@ -26,8 +26,25 @@ public sealed class ArenaLiveViewsPollingEngineTests
             await engine.ApplyBatchAsync(batch);
 
             Assert.Equal(
-                ArenaLiveViewsHasher.Compute(await baseline.ReadViewsAsync()),
-                ArenaLiveViewsHasher.Compute(await engine.ReadViewsAsync()));
+                ArenaLiveViewsHasher.Compute((await baseline.ReadViewsAsync()).Views),
+                ArenaLiveViewsHasher.Compute((await engine.ReadViewsAsync()).Views));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(PollingEngines))]
+    public async Task PollingRead_ReportsIndependentPerViewDurations(IArenaLiveViewsEngine engine)
+    {
+        await using (engine)
+        {
+            await engine.InitializeAsync(ArenaLiveViewsProfile.Gameplay);
+
+            ArenaLiveViewsReadResult read = await engine.ReadViewsAsync();
+
+            Assert.NotEmpty(read.Views.Leaderboard);
+            Assert.True(read.LeaderboardMilliseconds >= 0d);
+            Assert.True(read.AliveByTeamMilliseconds >= 0d);
+            Assert.True(read.ZoneInventoryMilliseconds >= 0d);
         }
     }
 }

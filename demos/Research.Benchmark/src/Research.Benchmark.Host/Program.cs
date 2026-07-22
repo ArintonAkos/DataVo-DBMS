@@ -8,12 +8,29 @@ using Research.Benchmark.Runners.DataVo;
 using Research.Benchmark.Runners.DeepDocument;
 using Research.Benchmark.Runners.DiskCrud;
 using Research.Benchmark.Runners.DuckDb;
+using Research.Benchmark.Runners.ArenaLiveViews;
 using Research.Benchmark.Runners.FlatCrud;
 using Research.Benchmark.Runners.Sqlite;
 using Research.Benchmark.Runners.VectorSearch;
 using Research.Benchmark.Runners.Whitepaper;
 
 string benchmarkScenario = ReadStringArg(args, "--scenario", "complex-vip");
+
+if (benchmarkScenario.Equals("arena-live-views", StringComparison.OrdinalIgnoreCase))
+{
+    ArenaLiveViewsCommandOptions command = ArenaLiveViewsCommand.Parse(RemoveScenarioArguments(args));
+    ArenaLiveViewsSummary summary = await ArenaLiveViewsScenarioRunner.RunAsync(
+        command.Profile,
+        command.CreateEngineFactories(),
+        command.Repetitions,
+        command.OutputDirectory);
+
+    Console.Write(command.Format == ArenaLiveViewsOutputFormat.Json
+        ? ArenaLiveViewsScenarioRunner.FormatJson(summary)
+        : ArenaLiveViewsScenarioRunner.FormatMarkdown(summary));
+    return;
+}
+
 int baselineOrders = ReadIntArg(args, "--baseline", 10_000);
 int iterations = ReadIntArg(args, "--iterations", 50_000);
 int progressEvery = ReadIntArg(args, "--progress-every", 1_000);
@@ -216,7 +233,7 @@ else if (benchmarkScenario.Equals("space-and-recovery", StringComparison.Ordinal
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, or space-and-recovery.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use arena-live-views, complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, or space-and-recovery.");
 }
 
 if (outputFormat == "csv")
@@ -1210,6 +1227,23 @@ static string ReadStringArg(string[] args, string name, string defaultValue)
     }
 
     return string.IsNullOrWhiteSpace(args[index + 1]) ? defaultValue : args[index + 1];
+}
+
+static string[] RemoveScenarioArguments(string[] args)
+{
+    var scenarioArgumentsRemoved = new List<string>(args.Length);
+    for (int index = 0; index < args.Length; index++)
+    {
+        if (args[index] == "--scenario")
+        {
+            index++;
+            continue;
+        }
+
+        scenarioArgumentsRemoved.Add(args[index]);
+    }
+
+    return scenarioArgumentsRemoved.ToArray();
 }
 
 static bool HasFlag(string[] args, string name) =>

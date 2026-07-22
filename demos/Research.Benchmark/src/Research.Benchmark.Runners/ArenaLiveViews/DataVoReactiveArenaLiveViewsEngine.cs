@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
@@ -74,15 +75,32 @@ public sealed class DataVoReactiveArenaLiveViewsEngine : IArenaLiveViewsEngine
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<ArenaLiveViewsViews> ReadViewsAsync(CancellationToken cancellationToken = default)
+    public ValueTask<ArenaLiveViewsReadResult> ReadViewsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            return ValueTask.FromResult(new ArenaLiveViewsViews(
-                _leaderboardView,
-                _aliveByTeamView,
-                _zoneInventoryView));
+            long leaderboardStart = Stopwatch.GetTimestamp();
+            IReadOnlyList<ArenaLeaderboardRow> leaderboard = _leaderboardView
+                .OrderByDescending(row => row.Score)
+                .ThenBy(row => row.Id)
+                .ToArray();
+            long aliveByTeamStart = Stopwatch.GetTimestamp();
+            IReadOnlyList<ArenaAliveByTeamRow> aliveByTeam = _aliveByTeamView
+                .OrderBy(row => row.Team, StringComparer.Ordinal)
+                .ToArray();
+            long zoneInventoryStart = Stopwatch.GetTimestamp();
+            IReadOnlyList<ArenaZoneInventoryRow> zoneInventory = _zoneInventoryView
+                .OrderBy(row => row.PlayerId)
+                .ThenBy(row => row.ItemId)
+                .ToArray();
+            long readEnd = Stopwatch.GetTimestamp();
+
+            return ValueTask.FromResult(new ArenaLiveViewsReadResult(
+                new ArenaLiveViewsViews(leaderboard, aliveByTeam, zoneInventory),
+                ElapsedMilliseconds(leaderboardStart, aliveByTeamStart),
+                ElapsedMilliseconds(aliveByTeamStart, zoneInventoryStart),
+                ElapsedMilliseconds(zoneInventoryStart, readEnd)));
         }
     }
 
@@ -246,6 +264,9 @@ public sealed class DataVoReactiveArenaLiveViewsEngine : IArenaLiveViewsEngine
 
     private static string SqlStringLiteral(string value) =>
         "'" + (value ?? throw new ArgumentNullException(nameof(value))).Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    private static double ElapsedMilliseconds(long start, long end) =>
+        (end - start) * 1000d / Stopwatch.Frequency;
 
     private DataVoContext EnsureContext() =>
         _context ?? throw new InvalidOperationException("DataVo reactive arena engine has not been initialized.");

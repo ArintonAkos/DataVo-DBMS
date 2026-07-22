@@ -50,6 +50,12 @@ public sealed record ArenaLiveViewsViews(
     IReadOnlyList<ArenaAliveByTeamRow> AliveByTeam,
     IReadOnlyList<ArenaZoneInventoryRow> ZoneInventory);
 
+public sealed record ArenaLiveViewsReadResult(
+    ArenaLiveViewsViews Views,
+    double LeaderboardMilliseconds,
+    double AliveByTeamMilliseconds,
+    double ZoneInventoryMilliseconds);
+
 public sealed record ArenaLiveViewsHashes(string Leaderboard, string AliveByTeam, string ZoneInventory);
 
 public sealed record ArenaLiveViewsPercentiles(
@@ -98,7 +104,7 @@ public interface IArenaLiveViewsEngine : IAsyncDisposable
         IReadOnlyList<ArenaLiveViewsMutation> batch,
         CancellationToken cancellationToken = default);
 
-    ValueTask<ArenaLiveViewsViews> ReadViewsAsync(CancellationToken cancellationToken = default);
+    ValueTask<ArenaLiveViewsReadResult> ReadViewsAsync(CancellationToken cancellationToken = default);
 }
 
 public static class ArenaLiveViewsHasher
