@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Linq;
 using System.Reflection;
 using DataVo.Core;
 using DataVo.Core.Runtime.Reactive;
@@ -118,6 +119,54 @@ namespace DataVo.UnityArena.EditorTests
 
                 Assert.That(context.Diagnostics.LastQuery, Is.Null,
                     "Arena mutations must execute compiled updates without rendering SQL statements.");
+            }
+            finally
+            {
+                ((IDisposable)session!).Dispose();
+            }
+        }
+
+        [Test]
+        public void DataVoMutationBatch_RepeatedPlayerIdAccumulatesScoreAndKeepsFinalValues()
+        {
+            Type? sessionType = typeof(ArenaCrossEngineRunner).GetNestedType(
+                "DataVoPollingCrossEngineSession",
+                BindingFlags.NonPublic);
+            Assert.That(sessionType, Is.Not.Null, "DataVo polling session type was not found.");
+
+            object? session = Activator.CreateInstance(
+                sessionType!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                args: new object[] { ArenaCrossEngineProfile.Gameplay },
+                culture: null);
+            Assert.That(session, Is.Not.Null, "DataVo polling session could not be created.");
+
+            try
+            {
+                FieldInfo? contextField = sessionType!.GetField("context", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo? applyBatch = sessionType.GetMethod("ApplyBatch", BindingFlags.Instance | BindingFlags.Public);
+                Assert.That(contextField, Is.Not.Null, "DataVo polling session context field was not found.");
+                Assert.That(applyBatch, Is.Not.Null, "DataVo polling session ApplyBatch method was not found.");
+
+                _ = applyBatch!.Invoke(session, new object[]
+                {
+                    new ArenaCrossEngineMutation[]
+                    {
+                        new(1, 3, 11, "arena-1", 777, 4),
+                        new(1, 5, 22, "arena-7", 888, 6)
+                    }
+                });
+
+                var context = (DataVoContext)contextField!.GetValue(session!)!;
+                var player = context.Execute("SELECT Score, Health, Zone FROM Players WHERE Id = 1").Single().Data.Single();
+                var inventory = context.Execute("SELECT ItemId, Slot FROM Inventory WHERE InventoryId = 1").Single().Data.Single();
+
+                Assert.That(player["Score"], Is.EqualTo(45));
+                Assert.That(player["Health"], Is.EqualTo(22));
+                Assert.That(player["Zone"], Is.EqualTo("arena-7"));
+                Assert.That(inventory["ItemId"], Is.EqualTo(888));
+                Assert.That(inventory["Slot"], Is.EqualTo(6));
             }
             finally
             {

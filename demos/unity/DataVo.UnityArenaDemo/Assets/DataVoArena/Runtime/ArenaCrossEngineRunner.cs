@@ -33,38 +33,54 @@ namespace DataVo.UnityArena
 
             for (int repetition = 1; repetition <= repetitions; repetition++)
             {
-                long expectedHashStart = Stopwatch.GetTimestamp();
+                bool captureDiagnostics = ArenaCrossEngineDiagnostics.Enabled;
+                long expectedHashStart = captureDiagnostics ? Stopwatch.GetTimestamp() : 0L;
                 ArenaCrossEngineHashes[] expectedHashes = ArenaCrossEngineWorkload.CreateExpectedHashSequence(
                     profile,
                     profile.warmupBatches + profile.measuredBatches);
-                ArenaCrossEngineDiagnostics.LogPhase(
-                    profile,
-                    engine,
-                    repetition,
-                    "expected-hashes",
-                    ElapsedMilliseconds(expectedHashStart, Stopwatch.GetTimestamp()));
+                if (captureDiagnostics)
+                {
+                    ArenaCrossEngineDiagnostics.LogPhase(
+                        profile,
+                        engine,
+                        repetition,
+                        "expected-hashes",
+                        ElapsedMilliseconds(expectedHashStart, Stopwatch.GetTimestamp()));
+                }
 
-                long sessionStart = Stopwatch.GetTimestamp();
+                long sessionStart = captureDiagnostics ? Stopwatch.GetTimestamp() : 0L;
                 using ICrossEngineSession session = CreateSession(profile, engine);
-                ArenaCrossEngineDiagnostics.LogPhase(
-                    profile,
-                    engine,
-                    repetition,
-                    "session-create",
-                    ElapsedMilliseconds(sessionStart, Stopwatch.GetTimestamp()));
+                if (captureDiagnostics)
+                {
+                    ArenaCrossEngineDiagnostics.LogPhase(
+                        profile,
+                        engine,
+                        repetition,
+                        "session-create",
+                        ElapsedMilliseconds(sessionStart, Stopwatch.GetTimestamp()));
+                }
 
-                var warmupDiagnostics = new ArenaCrossEngineDiagnosticWindow();
+                ArenaCrossEngineDiagnosticWindow? warmupDiagnostics = captureDiagnostics
+                    ? new ArenaCrossEngineDiagnosticWindow()
+                    : null;
                 for (int batchIndex = 0; batchIndex < profile.warmupBatches; batchIndex++)
                 {
                     ArenaCrossEngineApplyTiming apply = session.ApplyBatch(
                         ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
+                    if (!captureDiagnostics)
+                    {
+                        ArenaCrossEngineReadResult read = session.DemandViews();
+                        RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                        continue;
+                    }
+
                     long demandStart = Stopwatch.GetTimestamp();
-                    ArenaCrossEngineReadResult read = session.DemandViews();
+                    ArenaCrossEngineReadResult diagnosticRead = session.DemandViews();
                     long demandEnd = Stopwatch.GetTimestamp();
                     long hashStart = Stopwatch.GetTimestamp();
-                    RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                    RequireExpectedHashes(expectedHashes, batchIndex + 1, diagnosticRead.views, engine);
                     long hashEnd = Stopwatch.GetTimestamp();
-                    warmupDiagnostics.Add(
+                    warmupDiagnostics!.Add(
                         apply,
                         ElapsedMilliseconds(demandStart, demandEnd),
                         ElapsedMilliseconds(hashStart, hashEnd));
@@ -76,7 +92,7 @@ namespace DataVo.UnityArena
                             repetition,
                             "warmup",
                             warmupDiagnostics);
-                        warmupDiagnostics.Reset();
+                        warmupDiagnostics!.Reset();
                     }
                 }
 
@@ -85,7 +101,9 @@ namespace DataVo.UnityArena
                 var leaderboardLatency = new ArenaLatencyRecorder();
                 var aggregateLatency = new ArenaLatencyRecorder();
                 var zoneInventoryLatency = new ArenaLatencyRecorder();
-                var measuredDiagnostics = new ArenaCrossEngineDiagnosticWindow();
+                ArenaCrossEngineDiagnosticWindow? measuredDiagnostics = captureDiagnostics
+                    ? new ArenaCrossEngineDiagnosticWindow()
+                    : null;
                 double totalMilliseconds = 0d;
                 ArenaCrossEngineHashes? finalHashes = null;
 
@@ -95,13 +113,29 @@ namespace DataVo.UnityArena
                     long batchStart = Stopwatch.GetTimestamp();
                     ArenaCrossEngineApplyTiming apply = session.ApplyBatch(
                         ArenaCrossEngineWorkload.CreateBatch(profile, batchIndex));
-                    long demandStart = Stopwatch.GetTimestamp();
-                    ArenaCrossEngineReadResult read = session.DemandViews();
-                    long demandEnd = Stopwatch.GetTimestamp();
-                    long hashStart = Stopwatch.GetTimestamp();
-                    ArenaCrossEngineHashes actualHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
-                    long hashEnd = Stopwatch.GetTimestamp();
-                    double elapsedMilliseconds = ElapsedMilliseconds(batchStart, demandEnd);
+                    ArenaCrossEngineReadResult read;
+                    ArenaCrossEngineHashes actualHashes;
+                    double demandViewsMilliseconds = 0d;
+                    double hashMilliseconds = 0d;
+                    long batchEnd;
+                    if (captureDiagnostics)
+                    {
+                        long demandStart = Stopwatch.GetTimestamp();
+                        read = session.DemandViews();
+                        batchEnd = Stopwatch.GetTimestamp();
+                        long hashStart = Stopwatch.GetTimestamp();
+                        actualHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                        long hashEnd = Stopwatch.GetTimestamp();
+                        demandViewsMilliseconds = ElapsedMilliseconds(demandStart, batchEnd);
+                        hashMilliseconds = ElapsedMilliseconds(hashStart, hashEnd);
+                    }
+                    else
+                    {
+                        read = session.DemandViews();
+                        batchEnd = Stopwatch.GetTimestamp();
+                        actualHashes = RequireExpectedHashes(expectedHashes, batchIndex + 1, read.views, engine);
+                    }
+                    double elapsedMilliseconds = ElapsedMilliseconds(batchStart, batchEnd);
 
                     batchLatency.AddMilliseconds(elapsedMilliseconds);
                     leaderboardLatency.AddMilliseconds(read.leaderboardMilliseconds);
@@ -109,19 +143,22 @@ namespace DataVo.UnityArena
                     zoneInventoryLatency.AddMilliseconds(read.zoneInventoryMilliseconds);
                     totalMilliseconds += elapsedMilliseconds;
                     finalHashes = actualHashes;
-                    measuredDiagnostics.Add(
-                        apply,
-                        ElapsedMilliseconds(demandStart, demandEnd),
-                        ElapsedMilliseconds(hashStart, hashEnd));
-                    if (ArenaCrossEngineDiagnostics.IsProgressBoundary(measuredIndex + 1, profile.measuredBatches))
+                    if (captureDiagnostics)
                     {
-                        ArenaCrossEngineDiagnostics.LogBatchWindow(
-                            profile,
-                            engine,
-                            repetition,
-                            "measured",
-                            measuredDiagnostics);
-                        measuredDiagnostics.Reset();
+                        measuredDiagnostics!.Add(
+                            apply,
+                            demandViewsMilliseconds,
+                            hashMilliseconds);
+                        if (ArenaCrossEngineDiagnostics.IsProgressBoundary(measuredIndex + 1, profile.measuredBatches))
+                        {
+                            ArenaCrossEngineDiagnostics.LogBatchWindow(
+                                profile,
+                                engine,
+                                repetition,
+                                "measured",
+                                measuredDiagnostics);
+                            measuredDiagnostics!.Reset();
+                        }
                     }
                 }
 
@@ -318,6 +355,8 @@ namespace DataVo.UnityArena
         {
             private static readonly bool enabled = HasArgument("-datavoArenaDiagnostics");
 
+            public static bool Enabled => enabled;
+
             public static bool IsProgressBoundary(int completedBatchCount, int totalBatchCount) =>
                 enabled && (completedBatchCount == totalBatchCount || completedBatchCount % 100 == 0);
 
@@ -433,6 +472,12 @@ namespace DataVo.UnityArena
 
             public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
             {
+                if (!ArenaCrossEngineDiagnostics.Enabled)
+                {
+                    session.ApplyBatch(batch);
+                    return default;
+                }
+
                 long updateStart = Stopwatch.GetTimestamp();
                 session.ApplyBatch(batch);
                 return new ArenaCrossEngineApplyTiming(
@@ -475,6 +520,12 @@ namespace DataVo.UnityArena
             public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
             {
                 ThrowIfDisposed();
+                if (!ArenaCrossEngineDiagnostics.Enabled)
+                {
+                    ApplyMutations(context, mutationState, batch);
+                    return default;
+                }
+
                 long updateStart = Stopwatch.GetTimestamp();
                 ApplyMutations(context, mutationState, batch);
                 return new ArenaCrossEngineApplyTiming(
@@ -563,6 +614,13 @@ namespace DataVo.UnityArena
             public ArenaCrossEngineApplyTiming ApplyBatch(IReadOnlyList<ArenaCrossEngineMutation> batch)
             {
                 ThrowIfDisposed();
+                if (!ArenaCrossEngineDiagnostics.Enabled)
+                {
+                    ApplyMutations(context, mutationState, batch);
+                    context.DispatchPendingNotifications();
+                    return default;
+                }
+
                 long updateStart = Stopwatch.GetTimestamp();
                 ApplyMutations(context, mutationState, batch);
                 long notificationStart = Stopwatch.GetTimestamp();
