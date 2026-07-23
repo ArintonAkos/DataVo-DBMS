@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Diagnostics;
 using DataVo.Core;
+using DataVo.Core.CompiledQueries;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
@@ -12,8 +13,28 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
 {
     private static readonly ReactiveRowSchema PlayersSchema = new("Id", "Team", "Zone", "Health", "Score");
     private static readonly ReactiveRowSchema InventorySchema = new("InventoryId", "PlayerId", "ItemId", "Slot");
+    private static readonly DataVoCompiledQueryPlan PlayerMutationUpdatePlan = DataVoCompiledQueryPlan.Update(
+        tableName: "Players",
+        assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Score"] = "score",
+            ["Health"] = "health",
+            ["Zone"] = "zone"
+        },
+        whereColumn: "Id",
+        whereParameterName: "id");
+    private static readonly DataVoCompiledQueryPlan InventoryMutationUpdatePlan = DataVoCompiledQueryPlan.Update(
+        tableName: "Inventory",
+        assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ItemId"] = "itemId",
+            ["Slot"] = "slot"
+        },
+        whereColumn: "InventoryId",
+        whereParameterName: "inventoryId");
 
     private DataVoContext? _context;
+    private DataVoArenaMutationState? _mutationState;
 
     public string EngineId => "datavo-polling";
 
@@ -31,6 +52,7 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
         ExecuteOk(ArenaLiveViewsSql.CreatePlayers);
         ExecuteOk(ArenaLiveViewsSql.CreateInventory);
         Seed(EnsureContext(), profile);
+        _mutationState = new DataVoArenaMutationState(profile);
         return ValueTask.CompletedTask;
     }
 
@@ -76,16 +98,29 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
 
     private void ApplyMutation(ArenaLiveViewsMutation mutation)
     {
-        int playerId = mutation.PlayerId;
-        ExecuteOk(
-            "UPDATE Players SET Score = Score + " + mutation.ScoreDelta.ToString(CultureInfo.InvariantCulture) +
-            ", Health = " + mutation.ReplacementHealth.ToString(CultureInfo.InvariantCulture) +
-            ", Zone = " + SqlStringLiteral(mutation.ReplacementZone) +
-            " WHERE Id = " + playerId.ToString(CultureInfo.InvariantCulture));
-        ExecuteOk(
-            "UPDATE Inventory SET ItemId = " + mutation.InventoryItemId.ToString(CultureInfo.InvariantCulture) +
-            ", Slot = " + mutation.InventorySlot.ToString(CultureInfo.InvariantCulture) +
-            " WHERE InventoryId = " + playerId.ToString(CultureInfo.InvariantCulture));
+        DataVoArenaMutationState mutationState = EnsureMutationState();
+        int updatedScore = mutationState.GetUpdatedScore(mutation);
+        int playerRowsAffected = DataVoCompiledQuery.Update(
+            EnsureContext(),
+            PlayerMutationUpdatePlan,
+            [
+                new DataVoCompiledQueryParameter("score", updatedScore),
+                new DataVoCompiledQueryParameter("health", mutation.ReplacementHealth),
+                new DataVoCompiledQueryParameter("zone", mutation.ReplacementZone),
+                new DataVoCompiledQueryParameter("id", mutation.PlayerId)
+            ]);
+        RequireSingleAffectedRow(playerRowsAffected, "Players", mutation.PlayerId);
+
+        int inventoryRowsAffected = DataVoCompiledQuery.Update(
+            EnsureContext(),
+            InventoryMutationUpdatePlan,
+            [
+                new DataVoCompiledQueryParameter("itemId", mutation.InventoryItemId),
+                new DataVoCompiledQueryParameter("slot", mutation.InventorySlot),
+                new DataVoCompiledQueryParameter("inventoryId", mutation.PlayerId)
+            ]);
+        RequireSingleAffectedRow(inventoryRowsAffected, "Inventory", mutation.PlayerId);
+        mutationState.SetScore(mutation, updatedScore);
     }
 
     private IReadOnlyList<ArenaLeaderboardRow> ReadLeaderboard() =>
@@ -159,14 +194,25 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
     private static string ToRequiredString(object? value) =>
         value as string ?? throw new InvalidOperationException("Expected a non-null DataVo string value.");
 
-    private static string SqlStringLiteral(string value) =>
-        "'" + (value ?? throw new ArgumentNullException(nameof(value))).Replace("'", "''", StringComparison.Ordinal) + "'";
-
     private static double ElapsedMilliseconds(long start, long end) =>
         (end - start) * 1000d / Stopwatch.Frequency;
 
     private DataVoContext EnsureContext() =>
         _context ?? throw new InvalidOperationException("DataVo polling arena engine has not been initialized.");
+
+    private DataVoArenaMutationState EnsureMutationState() =>
+        _mutationState ?? throw new InvalidOperationException("DataVo polling arena mutation state has not been initialized.");
+
+    private static void RequireSingleAffectedRow(int rowsAffected, string tableName, int primaryKey)
+    {
+        if (rowsAffected != 1)
+        {
+            throw new InvalidOperationException(
+                "Arena compiled update expected exactly one " + tableName + " row for primary key " +
+                primaryKey.ToString(CultureInfo.InvariantCulture) + ", but affected " +
+                rowsAffected.ToString(CultureInfo.InvariantCulture) + ".");
+        }
+    }
 
     private void ExecuteOk(string sql)
     {
@@ -181,5 +227,6 @@ public sealed class DataVoPollingArenaLiveViewsEngine : IArenaLiveViewsEngine
     {
         _context?.Dispose();
         _context = null;
+        _mutationState = null;
     }
 }

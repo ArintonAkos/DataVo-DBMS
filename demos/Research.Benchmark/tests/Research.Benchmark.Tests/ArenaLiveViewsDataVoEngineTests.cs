@@ -1,3 +1,5 @@
+using System.Reflection;
+using DataVo.Core;
 using Research.Benchmark.Abstractions;
 using Research.Benchmark.Runners.ArenaLiveViews;
 
@@ -74,6 +76,55 @@ public sealed class ArenaLiveViewsDataVoEngineTests
 
         await AssertMatchesFixtureAsync(new DataVoReactiveArenaLiveViewsEngine(), profile, expected);
         await AssertMatchesFixtureAsync(new DataVoPollingArenaLiveViewsEngine(), profile, expected);
+    }
+
+    [Theory]
+    [InlineData("reactive")]
+    [InlineData("polling")]
+    public async Task DataVoMutationBatch_DoesNotExecuteRenderedSqlUpdates(string engineKind)
+    {
+        await using IArenaLiveViewsEngine engine = engineKind switch
+        {
+            "reactive" => new DataVoReactiveArenaLiveViewsEngine(),
+            "polling" => new DataVoPollingArenaLiveViewsEngine(),
+            _ => throw new ArgumentOutOfRangeException(nameof(engineKind))
+        };
+        await engine.InitializeAsync(ArenaLiveViewsProfile.Gameplay);
+
+        FieldInfo contextField = engine.GetType().GetField("_context", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("DataVo arena engine context field was not found.");
+        var context = (DataVoContext)(contextField.GetValue(engine)
+            ?? throw new InvalidOperationException("DataVo arena engine context was not initialized."));
+        context.Diagnostics.Enabled = true;
+        context.Diagnostics.Clear();
+
+        await engine.ApplyBatchAsync(ArenaLiveViewsFixture.CreateBatch(ArenaLiveViewsProfile.Gameplay, 0));
+
+        Assert.Null(context.Diagnostics.LastQuery);
+    }
+
+    [Theory]
+    [InlineData("reactive")]
+    [InlineData("polling")]
+    public async Task DataVoMutationBatch_RepeatedPlayerIdAccumulatesScoreAndKeepsFinalValues(string engineKind)
+    {
+        await using IArenaLiveViewsEngine engine = engineKind switch
+        {
+            "reactive" => new DataVoReactiveArenaLiveViewsEngine(),
+            "polling" => new DataVoPollingArenaLiveViewsEngine(),
+            _ => throw new ArgumentOutOfRangeException(nameof(engineKind))
+        };
+        await engine.InitializeAsync(ArenaLiveViewsProfile.Gameplay);
+
+        await engine.ApplyBatchAsync(
+        [
+            new ArenaLiveViewsMutation(27, 3, 11, "arena-1", 777, 4),
+            new ArenaLiveViewsMutation(27, 5, 22, "arena-7", 888, 6)
+        ]);
+
+        ArenaLiveViewsViews views = (await engine.ReadViewsAsync()).Views;
+        Assert.Contains(new ArenaLeaderboardRow(27, 1_007), views.Leaderboard);
+        Assert.Contains(new ArenaZoneInventoryRow(27, 888), views.ZoneInventory);
     }
 
     private static async Task AssertMatchesFixtureAsync(
