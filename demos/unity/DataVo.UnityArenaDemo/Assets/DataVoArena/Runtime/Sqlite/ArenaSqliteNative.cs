@@ -47,6 +47,12 @@ namespace DataVo.UnityArena.Sqlite
             IntPtr tail);
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int sqlite3_reset(IntPtr statement);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int sqlite3_clear_bindings(IntPtr statement);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int sqlite3_bind_int(IntPtr statement, int index, int value);
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

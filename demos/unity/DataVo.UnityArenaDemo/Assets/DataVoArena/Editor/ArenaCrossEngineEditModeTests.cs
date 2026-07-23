@@ -72,6 +72,57 @@ namespace DataVo.UnityArena.EditorTests
         }
 
         [Test]
+        public void SqliteSession_ReusesPreparedStatementsForMutationsAndViewsUntilDisposed()
+        {
+            string[] statementFieldNames =
+            {
+                "insertPlayerStatement",
+                "insertInventoryStatement",
+                "updatePlayerStatement",
+                "updateInventoryStatement",
+                "leaderboardStatement",
+                "aggregateStatement",
+                "zoneInventoryStatement"
+            };
+            var session = new ArenaSqlitePollingSession(ArenaCrossEngineProfile.Gameplay);
+
+            try
+            {
+                FieldInfo[] statementFields = statementFieldNames
+                    .Select(name => typeof(ArenaSqlitePollingSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic))
+                    .ToArray()!;
+                Assert.That(statementFields, Has.All.Not.Null,
+                    "SQLite session must retain every prepared seed, mutation, and view statement.");
+
+                IntPtr[] originalHandles = statementFields
+                    .Select(field => (IntPtr)field!.GetValue(session)!)
+                    .ToArray();
+                Assert.That(originalHandles, Has.All.Not.EqualTo(IntPtr.Zero));
+
+                session.ApplyBatch(ArenaCrossEngineWorkload.CreateBatch(ArenaCrossEngineProfile.Gameplay, 0));
+                _ = session.DemandViews();
+
+                for (int index = 0; index < statementFields.Length; index++)
+                {
+                    Assert.That(statementFields[index]!.GetValue(session), Is.EqualTo(originalHandles[index]),
+                        "SQLite statement handle changed during the mutation or view hot path: " + statementFieldNames[index]);
+                }
+
+                session.Dispose();
+
+                foreach (FieldInfo? field in statementFields)
+                {
+                    Assert.That(field!.GetValue(session), Is.EqualTo(IntPtr.Zero),
+                        "Disposed SQLite session must not retain a finalized statement handle: " + field.Name);
+                }
+            }
+            finally
+            {
+                session.Dispose();
+            }
+        }
+
+        [Test]
         public void ReactiveSession_UsesBorrowedDeltaCallbacksAndPreservesAllLiveViewHashes()
         {
             AssertBorrowedDeltaCallback("ApplyLeaderboardChange");

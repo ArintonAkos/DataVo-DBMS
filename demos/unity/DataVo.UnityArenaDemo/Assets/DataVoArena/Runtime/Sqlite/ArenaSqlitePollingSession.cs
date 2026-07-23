@@ -9,6 +9,13 @@ namespace DataVo.UnityArena.Sqlite
     public sealed class ArenaSqlitePollingSession : IDisposable
     {
         private IntPtr database;
+        private IntPtr insertPlayerStatement;
+        private IntPtr insertInventoryStatement;
+        private IntPtr updatePlayerStatement;
+        private IntPtr updateInventoryStatement;
+        private IntPtr leaderboardStatement;
+        private IntPtr aggregateStatement;
+        private IntPtr zoneInventoryStatement;
         private readonly string sqliteVersion;
         private bool recordPollingRows;
         private bool disposed;
@@ -32,11 +39,20 @@ namespace DataVo.UnityArena.Sqlite
                 Execute(ArenaCrossEngineWorkload.CreateInventorySql);
                 Execute("CREATE INDEX IX_Players_Zone ON Players (Zone)");
                 Execute("CREATE INDEX IX_Inventory_PlayerId ON Inventory (PlayerId)");
+                PrepareStatements();
                 Seed(profile);
             }
             catch
             {
-                Dispose();
+                try
+                {
+                    Dispose();
+                }
+                catch
+                {
+                    // Preserve the constructor error after attempting every statement cleanup.
+                }
+
                 throw;
             }
         }
@@ -110,13 +126,34 @@ namespace DataVo.UnityArena.Sqlite
             }
 
             disposed = true;
+            Exception? cleanupError = null;
+            FinalizeStatement(ref insertPlayerStatement, ref cleanupError);
+            FinalizeStatement(ref insertInventoryStatement, ref cleanupError);
+            FinalizeStatement(ref updatePlayerStatement, ref cleanupError);
+            FinalizeStatement(ref updateInventoryStatement, ref cleanupError);
+            FinalizeStatement(ref leaderboardStatement, ref cleanupError);
+            FinalizeStatement(ref aggregateStatement, ref cleanupError);
+            FinalizeStatement(ref zoneInventoryStatement, ref cleanupError);
+
             IntPtr closingDatabase = database;
             database = IntPtr.Zero;
 
             if (closingDatabase != IntPtr.Zero)
             {
-                int closeStatus = ArenaSqliteNative.sqlite3_close_v2(closingDatabase);
-                ArenaSqliteNative.RequireStatus(closingDatabase, closeStatus, "sqlite3_close_v2");
+                try
+                {
+                    int closeStatus = ArenaSqliteNative.sqlite3_close_v2(closingDatabase);
+                    ArenaSqliteNative.RequireStatus(closingDatabase, closeStatus, "sqlite3_close_v2");
+                }
+                catch (Exception exception)
+                {
+                    cleanupError ??= exception;
+                }
+            }
+
+            if (cleanupError is not null)
+            {
+                throw cleanupError;
             }
         }
 
@@ -146,100 +183,60 @@ namespace DataVo.UnityArena.Sqlite
 
         private void InsertPlayer(ArenaCrossEnginePlayer player)
         {
-            IntPtr statement = IntPtr.Zero;
-            try
-            {
-                Prepare("INSERT INTO Players (Id, Team, Zone, Health, Score) VALUES (?, ?, ?, ?, ?)", out statement);
-                BindInt(statement, 1, player.id);
-                BindText(statement, 2, player.team);
-                BindText(statement, 3, player.zone);
-                BindInt(statement, 4, player.health);
-                BindInt(statement, 5, player.score);
-                StepDone(statement);
-            }
-            finally
-            {
-                FinalizeStatement(statement);
-            }
+            ResetAndClear(insertPlayerStatement);
+            BindInt(insertPlayerStatement, 1, player.id);
+            BindText(insertPlayerStatement, 2, player.team);
+            BindText(insertPlayerStatement, 3, player.zone);
+            BindInt(insertPlayerStatement, 4, player.health);
+            BindInt(insertPlayerStatement, 5, player.score);
+            StepDone(insertPlayerStatement);
         }
 
         private void InsertInventory(ArenaCrossEngineInventory inventory)
         {
-            IntPtr statement = IntPtr.Zero;
-            try
-            {
-                Prepare("INSERT INTO Inventory (InventoryId, PlayerId, ItemId, Slot) VALUES (?, ?, ?, ?)", out statement);
-                BindInt(statement, 1, inventory.inventoryId);
-                BindInt(statement, 2, inventory.playerId);
-                BindInt(statement, 3, inventory.itemId);
-                BindInt(statement, 4, inventory.slot);
-                StepDone(statement);
-            }
-            finally
-            {
-                FinalizeStatement(statement);
-            }
+            ResetAndClear(insertInventoryStatement);
+            BindInt(insertInventoryStatement, 1, inventory.inventoryId);
+            BindInt(insertInventoryStatement, 2, inventory.playerId);
+            BindInt(insertInventoryStatement, 3, inventory.itemId);
+            BindInt(insertInventoryStatement, 4, inventory.slot);
+            StepDone(insertInventoryStatement);
         }
 
         private void UpdatePlayer(ArenaCrossEngineMutation mutation)
         {
-            IntPtr statement = IntPtr.Zero;
-            try
-            {
-                Prepare("UPDATE Players SET Score = Score + ?, Health = ?, Zone = ? WHERE Id = ?", out statement);
-                BindInt(statement, 1, mutation.scoreDelta);
-                BindInt(statement, 2, mutation.replacementHealth);
-                BindText(statement, 3, mutation.replacementZone);
-                BindInt(statement, 4, mutation.playerId);
-                StepDone(statement);
-            }
-            finally
-            {
-                FinalizeStatement(statement);
-            }
+            ResetAndClear(updatePlayerStatement);
+            BindInt(updatePlayerStatement, 1, mutation.scoreDelta);
+            BindInt(updatePlayerStatement, 2, mutation.replacementHealth);
+            BindText(updatePlayerStatement, 3, mutation.replacementZone);
+            BindInt(updatePlayerStatement, 4, mutation.playerId);
+            StepDone(updatePlayerStatement);
         }
 
         private void UpdateInventory(ArenaCrossEngineMutation mutation)
         {
-            IntPtr statement = IntPtr.Zero;
-            try
-            {
-                Prepare("UPDATE Inventory SET ItemId = ?, Slot = ? WHERE InventoryId = ?", out statement);
-                BindInt(statement, 1, mutation.inventoryItemId);
-                BindInt(statement, 2, mutation.inventorySlot);
-                BindInt(statement, 3, mutation.playerId);
-                StepDone(statement);
-            }
-            finally
-            {
-                FinalizeStatement(statement);
-            }
+            ResetAndClear(updateInventoryStatement);
+            BindInt(updateInventoryStatement, 1, mutation.inventoryItemId);
+            BindInt(updateInventoryStatement, 2, mutation.inventorySlot);
+            BindInt(updateInventoryStatement, 3, mutation.playerId);
+            StepDone(updateInventoryStatement);
         }
 
         private IReadOnlyList<ArenaCrossEngineLeaderboardRow> ReadLeaderboard()
         {
             var rows = new List<ArenaCrossEngineLeaderboardRow>();
-            IntPtr statement = IntPtr.Zero;
-            try
+            ResetAndClear(leaderboardStatement);
+            while (true)
             {
-                Prepare(ArenaCrossEngineWorkload.LeaderboardSql, out statement);
-                while (true)
+                int status = ArenaSqliteNative.sqlite3_step(leaderboardStatement);
+                if (status == ArenaSqliteNative.SQLITE_DONE)
                 {
-                    int status = ArenaSqliteNative.sqlite3_step(statement);
-                    if (status == ArenaSqliteNative.SQLITE_DONE)
-                    {
-                        break;
-                    }
-
-                    ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
-                    rows.Add(new ArenaCrossEngineLeaderboardRow(
-                        ArenaSqliteNative.sqlite3_column_int(statement, 0),
-                        ArenaSqliteNative.sqlite3_column_int(statement, 1)));
+                    break;
                 }
-            }
-            finally
-            {
-                FinalizeStatement(statement);
+
+                ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
+                rows.Add(new ArenaCrossEngineLeaderboardRow(
+                    ArenaSqliteNative.sqlite3_column_int(leaderboardStatement, 0),
+                    ArenaSqliteNative.sqlite3_column_int(leaderboardStatement, 1)));
             }
 
             return rows;
@@ -248,28 +245,20 @@ namespace DataVo.UnityArena.Sqlite
         private IReadOnlyList<ArenaCrossEngineAggregateRow> ReadAggregate()
         {
             var rows = new List<ArenaCrossEngineAggregateRow>();
-            IntPtr statement = IntPtr.Zero;
-            try
+            ResetAndClear(aggregateStatement);
+            while (true)
             {
-                Prepare(ArenaCrossEngineWorkload.AggregateSql, out statement);
-                while (true)
+                int status = ArenaSqliteNative.sqlite3_step(aggregateStatement);
+                if (status == ArenaSqliteNative.SQLITE_DONE)
                 {
-                    int status = ArenaSqliteNative.sqlite3_step(statement);
-                    if (status == ArenaSqliteNative.SQLITE_DONE)
-                    {
-                        break;
-                    }
-
-                    ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
-                    IntPtr team = ArenaSqliteNative.sqlite3_column_text(statement, 0);
-                    rows.Add(new ArenaCrossEngineAggregateRow(
-                        MarshalText(team),
-                        ArenaSqliteNative.sqlite3_column_int(statement, 1)));
+                    break;
                 }
-            }
-            finally
-            {
-                FinalizeStatement(statement);
+
+                ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
+                IntPtr team = ArenaSqliteNative.sqlite3_column_text(aggregateStatement, 0);
+                rows.Add(new ArenaCrossEngineAggregateRow(
+                    MarshalText(team),
+                    ArenaSqliteNative.sqlite3_column_int(aggregateStatement, 1)));
             }
 
             return rows;
@@ -278,30 +267,33 @@ namespace DataVo.UnityArena.Sqlite
         private IReadOnlyList<ArenaCrossEngineZoneInventoryRow> ReadZoneInventory()
         {
             var rows = new List<ArenaCrossEngineZoneInventoryRow>();
-            IntPtr statement = IntPtr.Zero;
-            try
+            ResetAndClear(zoneInventoryStatement);
+            while (true)
             {
-                Prepare(ArenaCrossEngineWorkload.ZoneInventorySql, out statement);
-                while (true)
+                int status = ArenaSqliteNative.sqlite3_step(zoneInventoryStatement);
+                if (status == ArenaSqliteNative.SQLITE_DONE)
                 {
-                    int status = ArenaSqliteNative.sqlite3_step(statement);
-                    if (status == ArenaSqliteNative.SQLITE_DONE)
-                    {
-                        break;
-                    }
-
-                    ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
-                    rows.Add(new ArenaCrossEngineZoneInventoryRow(
-                        ArenaSqliteNative.sqlite3_column_int(statement, 0),
-                        ArenaSqliteNative.sqlite3_column_int(statement, 1)));
+                    break;
                 }
-            }
-            finally
-            {
-                FinalizeStatement(statement);
+
+                ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsRow: true);
+                rows.Add(new ArenaCrossEngineZoneInventoryRow(
+                    ArenaSqliteNative.sqlite3_column_int(zoneInventoryStatement, 0),
+                    ArenaSqliteNative.sqlite3_column_int(zoneInventoryStatement, 1)));
             }
 
             return rows;
+        }
+
+        private void PrepareStatements()
+        {
+            Prepare("INSERT INTO Players (Id, Team, Zone, Health, Score) VALUES (?, ?, ?, ?, ?)", out insertPlayerStatement);
+            Prepare("INSERT INTO Inventory (InventoryId, PlayerId, ItemId, Slot) VALUES (?, ?, ?, ?)", out insertInventoryStatement);
+            Prepare("UPDATE Players SET Score = Score + ?, Health = ?, Zone = ? WHERE Id = ?", out updatePlayerStatement);
+            Prepare("UPDATE Inventory SET ItemId = ?, Slot = ? WHERE InventoryId = ?", out updateInventoryStatement);
+            Prepare(ArenaCrossEngineWorkload.LeaderboardSql, out leaderboardStatement);
+            Prepare(ArenaCrossEngineWorkload.AggregateSql, out aggregateStatement);
+            Prepare(ArenaCrossEngineWorkload.ZoneInventorySql, out zoneInventoryStatement);
         }
 
         private void Execute(string sql)
@@ -339,15 +331,32 @@ namespace DataVo.UnityArena.Sqlite
             ArenaSqliteNative.RequireStatus(database, status, "sqlite3_step", acceptsDone: true);
         }
 
-        private void FinalizeStatement(IntPtr statement)
+        private void ResetAndClear(IntPtr statement)
         {
-            if (statement == IntPtr.Zero)
+            int resetStatus = ArenaSqliteNative.sqlite3_reset(statement);
+            ArenaSqliteNative.RequireStatus(database, resetStatus, "sqlite3_reset");
+            int clearBindingsStatus = ArenaSqliteNative.sqlite3_clear_bindings(statement);
+            ArenaSqliteNative.RequireStatus(database, clearBindingsStatus, "sqlite3_clear_bindings");
+        }
+
+        private void FinalizeStatement(ref IntPtr statement, ref Exception? cleanupError)
+        {
+            IntPtr closingStatement = statement;
+            statement = IntPtr.Zero;
+            if (closingStatement == IntPtr.Zero)
             {
                 return;
             }
 
-            int status = ArenaSqliteNative.sqlite3_finalize(statement);
-            ArenaSqliteNative.RequireStatus(database, status, "sqlite3_finalize");
+            try
+            {
+                int status = ArenaSqliteNative.sqlite3_finalize(closingStatement);
+                ArenaSqliteNative.RequireStatus(database, status, "sqlite3_finalize");
+            }
+            catch (Exception exception)
+            {
+                cleanupError ??= exception;
+            }
         }
 
         private void TryRollback()

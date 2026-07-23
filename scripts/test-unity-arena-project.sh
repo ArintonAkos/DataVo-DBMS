@@ -29,6 +29,8 @@ rg -Fq -- '-datavoArenaRunId' "$project/Assets/DataVoArena/Runtime/ArenaHeadless
 rg -Fq 'ProfilerRecorder' "$project/Assets/DataVoArena/Runtime/ArenaHeadlessBootstrap.cs"
 rg -Fq 'ArenaCrossEngineBootstrap' "$project/Assets/DataVoArena/Runtime/ArenaCrossEngineBootstrap.cs"
 rg -Fq 'sqlite3_open_v2' "$project/Assets/DataVoArena/Runtime/Sqlite/ArenaSqliteNative.cs"
+rg -Fq 'sqlite3_reset' "$project/Assets/DataVoArena/Runtime/Sqlite/ArenaSqliteNative.cs"
+rg -Fq 'sqlite3_clear_bindings' "$project/Assets/DataVoArena/Runtime/Sqlite/ArenaSqliteNative.cs"
 rg -Fq -- '-datavoArenaEngine' "$project/Assets/DataVoArena/Runtime/ArenaCrossEngineBootstrap.cs"
 rg -Fq -- '-datavoArenaProfile' "$project/Assets/DataVoArena/Runtime/ArenaCrossEngineBootstrap.cs"
 test -x "$root/scripts/run-unity-macos-il2cpp-arena-cross-engine.sh"
