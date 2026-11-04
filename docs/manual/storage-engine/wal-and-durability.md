@@ -66,8 +66,11 @@ Supported: disk WAL (`WalEnabled`, on by default for disk mode), disk sync write
 
 Every SQL statement, and every explicit transaction at `COMMIT`, is written to the data directory's commit log (`commit.wal`) as **one** checksummed record. After a crash, recovery applies each record completely or not at all, so a multi-row `UPDATE` or a transaction that touches several tables is never half-applied. In strict mode a statement returns only after its record is durable; concurrent statements share fsyncs.
 
+## Visibility and Failed Statements in Lsm Mode
+
+A statement's changes (rows, index entries, and change notifications) become visible to other sessions only after its commit record is durable, and statements publish in commit order. Write locks are held until then, so a concurrent statement on the same table never checks its keys against unpublished changes. A statement that fails is discarded entirely: it writes no commit record and leaves no visible change.
+
 ## Known Limitations
 
-- **Visibility before durability (Lsm).** Other sessions can see a statement's changes slightly before its commit record is durable. If the process crashes in that window, those changes are gone after recovery even though a reader may have seen them.
-- **Failed statements (Lsm).** A statement that fails part-way keeps the changes it already made; there is no statement-level rollback yet. Use an explicit transaction when partial changes are unacceptable.
 - **Disk mode is legacy** and not crash-safe for `UPDATE`: it writes the new row version and removes the old one as two separate durable steps, so a crash between them can lose the row. Use Lsm for new applications.
+- **In-memory and Disk transactions.** `COMMIT` re-checks primary keys and UNIQUE values for every table before applying anything. A foreign-key conflict found while applying a later table leaves the earlier tables of that `COMMIT` applied in these modes; Lsm discards the whole transaction.

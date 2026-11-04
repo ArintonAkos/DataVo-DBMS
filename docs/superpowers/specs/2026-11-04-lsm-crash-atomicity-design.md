@@ -11,10 +11,10 @@ commit is one commit-log frame; per-table WALs are retired with one-time migrati
 frames above each table's flushed sequence; pruning follows flushes. `CrashRecoveryTests` passes for
 Lsm, including a two-table transaction and multi-row `UPDATE` invariant.
 
-Deviation, still open: writes are published to the latest-row view when the statement makes them, not
-after the frame is durable, so the "visible only once durable" decision is not implemented yet. A
-statement that fails part-way also keeps its earlier mutations (no statement rollback). Both are tracked
-as the next atomicity slice.
+Visibility slice implemented (2026-11-05): row changes are staged and published after the frame is
+durable, in LSN order; index updates, MVCC registrations, and change notifications are deferred through
+DeferredPublication; write locks are held until publication; a failed DML statement is discarded
+(statement rollback).
 
 ## Problem
 
