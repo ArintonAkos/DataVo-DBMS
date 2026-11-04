@@ -386,7 +386,8 @@ public sealed class DataVoEngine : IDisposable
             return;
         }
 
-        Dictionary<long, Dictionary<string, object?>> rows = StorageContext.GetTableContents(tableName, databaseName);
+        // Typed rows: rebuilding from dictionaries allocated a map per row and dominated cold open.
+        Dictionary<long, StoredRow> rows = StorageContext.GetTypedTableContents(tableName, databaseName);
 
         foreach (IndexFile index in indexFiles)
         {
@@ -402,15 +403,23 @@ public sealed class DataVoEngine : IDisposable
                 continue;
             }
 
-            Dictionary<string, List<long>> values = new(StringComparer.Ordinal);
-            foreach (KeyValuePair<long, Dictionary<string, object?>> row in rows)
+            bool isPrimaryKey = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
+            if (index.AttributeNames.Count == 1
+                && IndexManager.TryRebuildSingleColumnKeyIndex(rows, index.AttributeNames[0], indexName, tableName, databaseName, isPrimaryKey))
             {
-                if (index.AttributeNames.Any(attr => !row.Value.TryGetValue(attr, out object? value) || value == null))
+                continue;
+            }
+
+            Dictionary<string, List<long>> values = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<long, StoredRow> row in rows)
+            {
+                if (!HasAllKeyCells(row.Value, index.AttributeNames))
                 {
                     continue;
                 }
 
-                string key = IndexKeyEncoder.BuildKeyString(row.Value, index.AttributeNames);
+                StoredRowView view = row.Value.AsView();
+                string key = IndexKeyEncoder.BuildKeyString(view.Schema, view.Cells, index.AttributeNames);
                 if (!values.TryGetValue(key, out List<long>? rowIds))
                 {
                     rowIds = [];
@@ -424,11 +433,24 @@ public sealed class DataVoEngine : IDisposable
         }
     }
 
+    private static bool HasAllKeyCells(StoredRow row, IReadOnlyList<string> attributes)
+    {
+        for (int i = 0; i < attributes.Count; i++)
+        {
+            if (!row.TryGet(attributes[i], out CellValue cell) || cell.IsNull)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void RebuildVectorIndex(
         string databaseName,
         string tableName,
         IndexFile index,
-        Dictionary<long, Dictionary<string, object?>> rows)
+        Dictionary<long, StoredRow> rows)
     {
         string indexName = index.IndexFileName;
         if (index.AttributeNames.Count != 1)
@@ -439,19 +461,19 @@ public sealed class DataVoEngine : IDisposable
         string vectorColumn = index.AttributeNames[0];
         List<(long RowId, float[] Vector)> vectors = [];
 
-        foreach (KeyValuePair<long, Dictionary<string, object?>> row in rows)
+        foreach (KeyValuePair<long, StoredRow> row in rows)
         {
-            if (!row.Value.TryGetValue(vectorColumn, out object? rawValue) || rawValue == null)
+            if (!row.Value.TryGet(vectorColumn, out CellValue cell) || cell.IsNull)
             {
                 continue;
             }
 
-            if (!VectorParser.TryCoerceToVector(rawValue, out float[] vector))
+            if (cell.Type != CellType.Vector)
             {
                 throw new InvalidOperationException($"Cannot rebuild vector index '{indexName}' because row {row.Key} does not contain a valid vector.");
             }
 
-            vectors.Add((row.Key, vector));
+            vectors.Add((row.Key, cell.AsVectorReadOnlySpan().ToArray()));
         }
 
         IndexManager.CreateVectorIndex(

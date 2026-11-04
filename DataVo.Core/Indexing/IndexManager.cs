@@ -3,6 +3,7 @@ using DataVo.Core.BTree;
 using DataVo.Core.Compat;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
@@ -583,6 +584,128 @@ public partial class IndexManager : IDisposable
     }
 
     private bool IsLaneComplete(IndexCacheKey cacheKey) => _completeLaneIndexes.ContainsKey(cacheKey);
+
+    /// <summary>
+    /// Rebuilds a single-column index whose keys are all integers (or all GUIDs) straight into complete
+    /// key fast lanes, without building string keys. Only valid when indexes are not persisted (Lsm,
+    /// in-memory), where lanes are the runtime representation of these keys. Returns
+    /// <see langword="false"/> when the keys do not qualify; the caller then uses the generic rebuild.
+    /// </summary>
+    internal bool TryRebuildSingleColumnKeyIndex(
+        Dictionary<long, StoredRow> rows,
+        string columnName,
+        string indexName,
+        string tableName,
+        string databaseName,
+        bool isPrimaryKey)
+    {
+        if (MirrorsFastLanesToScalarIndex || rows.Count == 0)
+        {
+            return false;
+        }
+
+        var integerEntries = new List<(long Key, long RowId)>(rows.Count);
+        var guidEntries = new List<(Guid Key, long RowId)>();
+        foreach (KeyValuePair<long, StoredRow> row in rows)
+        {
+            if (!row.Value.TryGet(columnName, out CellValue cell) || cell.IsNull)
+            {
+                continue;
+            }
+
+            switch (cell.Type)
+            {
+                case CellType.Int32 when guidEntries.Count == 0:
+                    integerEntries.Add((cell.AsInt32(), row.Key));
+                    break;
+                case CellType.Int64 when guidEntries.Count == 0:
+                    integerEntries.Add((cell.AsInt64(), row.Key));
+                    break;
+                case CellType.Guid when integerEntries.Count == 0:
+                    guidEntries.Add((cell.AsGuid(), row.Key));
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        if (integerEntries.Count == 0 && guidEntries.Count == 0)
+        {
+            return false;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        DropIndex(indexName, tableName, databaseName);
+        CreateIndex([], indexName, tableName, databaseName); // empty scalar index, lanes marked complete
+
+        lock (_lock)
+        {
+            if (integerEntries.Count > 0)
+            {
+                if (isPrimaryKey)
+                {
+                    var map = new ConcurrentInt64Int64Map();
+                    foreach ((long key, long rowId) in integerEntries)
+                    {
+                        if (map.TryGetValue(key, out _))
+                        {
+                            return FallBackToGenericRebuildNoLock(cacheKey);
+                        }
+
+                        map.Set(key, rowId);
+                    }
+
+                    _integerPrimaryKeyMaps[cacheKey] = map;
+                }
+                else
+                {
+                    var lane = new Dictionary<long, List<long>>();
+                    foreach ((long key, long rowId) in integerEntries)
+                    {
+                        AddDistinctRowId(lane, key, rowId);
+                    }
+
+                    _integerIndexMaps[cacheKey] = lane;
+                }
+
+                return true;
+            }
+
+            if (isPrimaryKey)
+            {
+                var map = new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance);
+                foreach ((Guid key, long rowId) in guidEntries)
+                {
+                    if (!map.TryAdd(key, rowId))
+                    {
+                        return FallBackToGenericRebuildNoLock(cacheKey);
+                    }
+                }
+
+                _guidPrimaryKeyMaps[cacheKey] = map;
+            }
+            else
+            {
+                var lane = new Dictionary<Guid, List<long>>(GuidSimdEqualityComparer.Instance);
+                foreach ((Guid key, long rowId) in guidEntries)
+                {
+                    AddDistinctRowId(lane, key, rowId);
+                }
+
+                _guidIndexMaps[cacheKey] = lane;
+            }
+
+            return true;
+        }
+    }
+
+    // Duplicate primary keys cannot be represented by a primary-key lane; leave no lanes and let the
+    // caller rebuild through the scalar index, which reports the data as it is.
+    private bool FallBackToGenericRebuildNoLock(IndexCacheKey cacheKey)
+    {
+        _completeLaneIndexes.TryRemove(cacheKey, out _);
+        return false;
+    }
 
     /// <summary>
     /// Rebuilds an existing scalar BTree index from supplied values.
