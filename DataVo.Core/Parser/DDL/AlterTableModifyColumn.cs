@@ -52,7 +52,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

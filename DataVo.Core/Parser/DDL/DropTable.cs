@@ -68,7 +68,7 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

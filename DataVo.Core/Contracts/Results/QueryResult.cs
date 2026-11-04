@@ -43,7 +43,40 @@ public class QueryResult
     /// </summary>
     /// <param name="message">The error message to expose to the caller.</param>
     /// <returns>A failed <see cref="QueryResult"/>.</returns>
-    public static QueryResult Error(string message) => new() { Messages = [message], IsError = true };
+    public static QueryResult Error(string message)
+    {
+        DataVoError error = DataVoErrorClassifier.ClassifyMessage(message);
+        return new() { Messages = [error.Message], IsError = true, ErrorCode = error.Code };
+    }
+
+    /// <summary>
+    /// Builds an error result from an exception: a stable <see cref="ErrorCode"/>, one clean message
+    /// (no exception type names or stack trace), and the position of syntax errors.
+    /// </summary>
+    public static QueryResult FromException(Exception exception)
+    {
+        DataVoError error = DataVoErrorClassifier.Classify(exception);
+        return new()
+        {
+            Messages = [error.Message],
+            IsError = true,
+            ErrorCode = error.Code,
+            ErrorLine = error.Line,
+            ErrorColumn = error.Column,
+        };
+    }
+
+    /// <summary>
+    /// Stable code from <see cref="DataVoErrorCodes"/> when <see cref="IsError"/> is true; otherwise
+    /// <see langword="null"/>.
+    /// </summary>
+    public string? ErrorCode { get; set; }
+
+    /// <summary>1-based line of the offending token for syntax errors; otherwise <see langword="null"/>.</summary>
+    public int? ErrorLine { get; set; }
+
+    /// <summary>1-based column of the offending token for syntax errors; otherwise <see langword="null"/>.</summary>
+    public int? ErrorColumn { get; set; }
 
     /// <summary>
     /// Creates a successful result with messages, data rows, and field metadata.

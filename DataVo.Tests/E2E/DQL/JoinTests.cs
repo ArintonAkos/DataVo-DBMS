@@ -146,7 +146,7 @@ public abstract class JoinTestsBase(DataVoConfig config, string testDbName) : Sq
         var result = ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON DeptId = DeptId");
 
         Assert.True(result.IsError);
-        Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
+        Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.AmbiguousColumn, result.ErrorCode);
     }
 
     [Fact]

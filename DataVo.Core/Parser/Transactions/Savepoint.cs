@@ -21,7 +21,7 @@ internal class Savepoint(string savepointName) : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 }

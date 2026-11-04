@@ -91,7 +91,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 Logger.Error($"[ParserDebug] Parse pipeline failure: {ex.GetType().Name}: {ex.Message}");
             }
 
-            response.Add(QueryResult.Error(ex.ToString()));
+            response.Add(QueryResult.FromException(ex));
             return response;
         }
 
@@ -148,7 +148,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
             catch (Exception ex)
             {
                 diagnosticsBuilder?.RecordError(ex.Message);
-                response.Add(QueryResult.Error(ex.ToString()));
+                response.Add(QueryResult.FromException(ex));
                 break;
             }
         }

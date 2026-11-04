@@ -50,7 +50,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

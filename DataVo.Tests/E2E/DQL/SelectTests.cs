@@ -116,7 +116,7 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         var result = ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON DeptId = DeptId");
 
         Assert.True(result.IsError);
-        Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
+        Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.AmbiguousColumn, result.ErrorCode);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public abstract class SelectTestsBase(DataVoConfig config, string testDbName) : 
         var result = ExecuteAndReturn("SELECT Employees.Name FROM Employees JOIN Departments ON UnknownAlias.DeptId = Departments.DeptId");
 
         Assert.True(result.IsError);
-        Assert.Contains(result.Messages, m => m.Contains("Binding Error"));
+        Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.UnknownTableAlias, result.ErrorCode);
     }
 
     [Fact]

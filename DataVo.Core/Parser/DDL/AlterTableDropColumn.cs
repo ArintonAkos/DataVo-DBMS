@@ -49,7 +49,7 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

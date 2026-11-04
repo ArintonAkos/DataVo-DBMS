@@ -64,7 +64,7 @@ internal class Commit : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

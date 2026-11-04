@@ -56,7 +56,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
         }
         catch (Exception ex)
         {
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
             Logger.Error(ex.ToString());
         }
     }

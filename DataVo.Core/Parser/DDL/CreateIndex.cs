@@ -104,7 +104,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
-            Messages.Add($"Error: {ex.Message}");
+            AddError(ex);
         }
     }
 

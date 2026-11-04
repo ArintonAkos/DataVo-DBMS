@@ -25,4 +25,16 @@ public class DataVoException : Exception
     /// <param name="message">A description of the error.</param>
     /// <param name="innerException">The exception that caused this error.</param>
     public DataVoException(string message, Exception innerException) : base(message, innerException) { }
+
+    /// <summary>
+    /// Stable code from <see cref="DataVo.Core.Contracts.Results.DataVoErrorCodes"/>, when the throw site
+    /// knows it. When unset, the error contract derives a code from the exception type and message.
+    /// </summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>1-based line of the offending SQL token, for syntax errors.</summary>
+    public int? Line { get; init; }
+
+    /// <summary>1-based column of the offending SQL token, for syntax errors.</summary>
+    public int? Column { get; init; }
 }
