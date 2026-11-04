@@ -42,6 +42,14 @@ internal class Commit : BaseDbAction
 
             try
             {
+                // Reject key conflicts with rows other sessions committed meanwhile before anything is
+                // logged or applied, so a failed COMMIT never reaches the WAL.
+                var validator = new DML.InsertRowService(Engine, Context, Catalog, Indexes);
+                foreach (var (tableName, rows) in context.InsertedRows)
+                {
+                    validator.ValidatePendingInserts(databaseName, tableName, rows, checkForeignKeys: false);
+                }
+
                 if (walWriter != null && walEntry != null)
                 {
                     walWriter.Append(walEntry);
@@ -162,8 +170,13 @@ internal class Commit : BaseDbAction
     /// </summary>
     private static void FlushInserts(TransactionContext context, string databaseName, Runtime.DataVoEngine engine, long txId, ChangeRecorder? recorder)
     {
+        var validator = new DML.InsertRowService(engine, engine.StorageContext, engine.Catalog, engine.IndexManager);
         foreach (var (tableName, rows) in context.InsertedRows)
         {
+            // The rows were validated when they were buffered; re-check them against what other sessions
+            // committed since, under this commit's write locks.
+            validator.ValidatePendingInserts(databaseName, tableName, rows);
+
             var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
 
             foreach (var row in rows)

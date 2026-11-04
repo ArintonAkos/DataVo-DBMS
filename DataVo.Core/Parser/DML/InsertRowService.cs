@@ -28,6 +28,59 @@ internal sealed partial class InsertRowService(
     [ThreadStatic]
     private static HashSet<long>? _integerPrimaryKeyScratch;
 
+    /// <summary>
+    /// Re-checks rows that a transaction buffered earlier, right before COMMIT applies them. Other
+    /// sessions may have written conflicting keys since the rows were validated at INSERT time; without
+    /// this check COMMIT could store a duplicate primary key. Throws <see cref="ConstraintViolationException"/>.
+    /// </summary>
+    /// <param name="checkForeignKeys">
+    /// False checks only keys and column rules, for validation before any table of the transaction is
+    /// applied: a buffered child row may reference a parent row inserted earlier in the same transaction.
+    /// </param>
+    private static readonly IReadOnlyDictionary<string, ForeignKey> NoForeignKeys = new Dictionary<string, ForeignKey>();
+
+    internal void ValidatePendingInserts(
+        string databaseName,
+        string tableName,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        bool checkForeignKeys = true)
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
+        var messages = new List<string>();
+        var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
+        var acceptedUniqueValues = metadata.UniqueKeys.ToDictionary(
+            key => key,
+            _ => new HashSet<string>(StringComparer.Ordinal),
+            StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            TryNormalizeRow(
+                tableName,
+                databaseName,
+                i + 1,
+                rows[i],
+                metadata.Columns,
+                metadata.PrimaryKeys,
+                metadata.UniqueKeys,
+                checkForeignKeys ? metadata.ForeignKeysByAttribute : NoForeignKeys,
+                acceptedPrimaryKeys,
+                acceptedUniqueValues,
+                messages,
+                out _);
+        }
+
+        if (messages.Count > 0)
+        {
+            throw RejectedRows(tableName, messages);
+        }
+    }
+
     public InsertRowsResult InsertRows(
         string databaseName,
         string tableName,
