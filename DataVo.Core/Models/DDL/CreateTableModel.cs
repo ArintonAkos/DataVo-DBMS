@@ -78,7 +78,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
             Table = tableName,
             IsPrimaryKey = c.IsPrimaryKey,
             IsUnique = c.IsUnique,
-            IsNull = -1,
+            IsNull = c.IsNotNull ? 0 : -1,
             DefaultValue = c.DefaultExpression != null ? EvaluateDefaultExpression(c.DefaultExpression) : null,
             ForeignKey = c.ReferencesTable != null ? new ForeignKey { AttributeName = c.ColumnName.Name, References = [new Reference { ReferenceTableName = c.ReferencesTable.Name, ReferenceAttributeName = c.ReferencesColumn!.Name }], OnDeleteAction = c.OnDeleteAction } : null
         }).ToList();

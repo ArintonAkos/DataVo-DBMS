@@ -508,6 +508,11 @@ internal sealed partial class InsertRowService(
 
         if (cell.IsNull)
         {
+            if (column.IsNotNull)
+            {
+                throw ColumnNullRule.Violation(column.Name);
+            }
+
             return;
         }
 
@@ -817,6 +822,12 @@ internal sealed partial class InsertRowService(
             if (ColumnLengthRule.Exceeds(tableColumn, normalizedValue, out int length))
             {
                 messages.Add(ColumnLengthRule.Message(tableColumn.Name, tableColumn.Length, length, rowNumber));
+                return false;
+            }
+
+            if (tableColumn.IsNotNull && IsNullValue(normalizedValue))
+            {
+                messages.Add(ColumnNullRule.Message(tableColumn.Name, rowNumber));
                 return false;
             }
 
@@ -1639,6 +1650,9 @@ internal sealed partial class InsertRowService(
         key = cell.AsGuid();
         return true;
     }
+
+    private static bool IsNullValue(object? value) =>
+        value is null || value is DBNull || (value is DataVoBoundValue bound && bound.Cell.IsNull);
 
     /// <summary>
     /// Builds the error for a rejected insert. The first violation decides the error code; the message

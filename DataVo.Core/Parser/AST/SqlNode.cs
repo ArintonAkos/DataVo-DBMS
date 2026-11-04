@@ -598,6 +598,11 @@ public class ColumnDefinitionNode : SqlNode
     public bool IsUnique { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the column was declared NOT NULL.
+    /// </summary>
+    public bool IsNotNull { get; set; }
+
+    /// <summary>
     /// Gets or sets the referenced table for a foreign key.
     /// </summary>
     public IdentifierNode? ReferencesTable { get; set; }

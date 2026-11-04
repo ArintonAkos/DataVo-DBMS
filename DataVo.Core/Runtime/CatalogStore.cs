@@ -378,6 +378,7 @@ internal sealed class CatalogStore
                         ? 0
                         : int.Parse(e.Attribute("Length")!.Value),
                     DefaultValue = e.Attribute("DefaultValue")?.Value,
+                    IsNotNull = e.Attribute("IsNull")?.Value == "0",
                 })
                 .ToList();
         }

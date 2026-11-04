@@ -246,10 +246,11 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
         Dictionary<string, HashSet<string>> batchUniqueValues = InitializeBatchUniqueTracker(primaryKeys, uniqueKeys);
-        List<Models.Catalog.Column> lengthLimitedColumns = Catalog.GetTableColumns(_model.TableName, databaseName)
-            .FindAll(column => column.Length > 0
-                && column.Type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase)
-                && _model.SetExpressions.ContainsKey(column.Name));
+        List<Models.Catalog.Column> assignedColumns = Catalog.GetTableColumns(_model.TableName, databaseName)
+            .FindAll(column => _model.SetExpressions.ContainsKey(column.Name));
+        List<Models.Catalog.Column> lengthLimitedColumns = assignedColumns
+            .FindAll(column => column.Length > 0 && column.Type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase));
+        List<Models.Catalog.Column> notNullColumns = assignedColumns.FindAll(column => column.IsNotNull);
 
         int rowNumber = 1;
         foreach (var (rowId, oldRow) in existingRows)
@@ -259,6 +260,14 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             // Create and add new row to the list of new rows
             var newRow = ApplySetExpressions(oldRow, databaseName);
             newRows.Add(newRow);
+
+            foreach (Models.Catalog.Column column in notNullColumns)
+            {
+                if (!newRow.TryGetValue(column.Name, out object? assigned) || assigned is null || assigned is DBNull)
+                {
+                    throw ColumnNullRule.Violation(column.Name, rowNumber);
+                }
+            }
 
             foreach (Models.Catalog.Column column in lengthLimitedColumns)
             {

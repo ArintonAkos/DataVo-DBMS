@@ -1550,7 +1550,8 @@ public static class DataVoCompiledQuery
                     Name = column.Name,
                     Type = column.Type,
                     Length = column.Length,
-                    DefaultValue = column.DefaultValue
+                    DefaultValue = column.DefaultValue,
+                    IsNotNull = column.IsNotNull,
                 },
                 StringComparer.OrdinalIgnoreCase);
     }
@@ -1582,6 +1583,11 @@ public static class DataVoCompiledQuery
     {
         if (rawValue == null || rawValue is DBNull)
         {
+            if (columnMetadata.IsNotNull)
+            {
+                throw ColumnNullRule.Violation(columnMetadata.Name);
+            }
+
             return null;
         }
 

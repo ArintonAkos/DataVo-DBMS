@@ -1,3 +1,4 @@
+using DataVo.Core.Exceptions;
 namespace DataVo.Core.Models.Catalog;
 
 /// <summary>
@@ -19,4 +20,14 @@ internal static class ColumnLengthRule
     public static string Message(string columnName, int declaredLength, int actualLength, int? rowNumber = null) =>
         $"Value of length {actualLength} is too long for column {columnName} (VARCHAR({declaredLength}))"
         + (rowNumber is int row ? $" in row {row}!" : ".");
+}
+
+/// <summary>NOT NULL columns. The error contract maps the "NOT NULL" message to DV3005_NOT_NULL_VIOLATION.</summary>
+internal static class ColumnNullRule
+{
+    public static string Message(string columnName, int? rowNumber = null) =>
+        $"Column {columnName} is NOT NULL and cannot store NULL" + (rowNumber is int row ? $" (row {row})!" : ".");
+
+    public static ConstraintViolationException Violation(string columnName, int? rowNumber = null) =>
+        new(Message(columnName, rowNumber)) { ErrorCode = Contracts.Results.DataVoErrorCodes.NotNullViolation };
 }

@@ -34,7 +34,7 @@ public class Field
     [Required(ErrorMessage = "Field must have a name!")]
     public required string Name { get; set; }
 
-    /// <summary>Gets or sets whether the field allows NULL values (1) or not (0/-1).</summary>
+    /// <summary>Gets or sets nullability: 0 means NOT NULL; -1 (unspecified) and 1 allow NULL.</summary>
     [XmlAttribute]
     [DefaultValue(value: -1)]
     public int IsNull { get; set; }

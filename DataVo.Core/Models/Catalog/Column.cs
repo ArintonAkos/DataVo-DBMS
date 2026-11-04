@@ -21,6 +21,9 @@ public class Column : IColumn
     /// <summary>Gets or sets the data type of the column (e.g., INT, VARCHAR, DATE).</summary>
     public string Type { get; set; } = null!;
 
+    /// <summary>Gets or sets whether the column rejects NULL (declared NOT NULL).</summary>
+    public bool IsNotNull { get; set; }
+
     /// <summary>Gets or sets the max length for variable-length types like VARCHAR.</summary>
     public int Length { get; set; }
 
