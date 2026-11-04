@@ -1984,13 +1984,95 @@ public partial class IndexManager : IDisposable
             }
 
             index.DeleteValues(toBeDeletedIds);
-            DeleteIntegerPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
-            DeleteGuidPrimaryKeysByRowIdNoLock(cacheKey, toBeDeletedIds);
             MarkDirtyNoLock(cacheKey);
             FlushIfImmediate(cacheKey);
         }
 
         TrackMutation(cacheKey);
+    }
+
+    /// <summary>
+    /// Removes exact (key, row id) mappings. Callers that know the old key of each row (UPDATE, DELETE)
+    /// use this instead of <see cref="DeleteFromIndex"/>, which must scan every key and lane entry to
+    /// find row ids. Keys use the same encoding as inserts (<see cref="IndexKeyEncoder"/>).
+    /// </summary>
+    public void DeleteIndexEntries(IReadOnlyList<(string Key, long RowId)> entries, string indexName, string tableName, string databaseName)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (string Key, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => DeleteIndexEntries(copy, indexName, tableName, databaseName));
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? integerPrimary);
+            _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? integerSecondary);
+            _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? guidPrimary);
+            _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? guidSecondary);
+
+            foreach ((string key, long rowId) in entries)
+            {
+                if (TryParseIntegerPrimaryKey(key, out long integerKey))
+                {
+                    if (integerPrimary is not null && integerPrimary.TryGetValue(integerKey, out long mapped) && mapped == rowId)
+                    {
+                        integerPrimary.TryRemove(integerKey);
+                    }
+
+                    RemoveFromLaneBucket(integerSecondary, integerKey, rowId);
+                }
+                else if (TryParseGuidKey(key, out Guid guidKey))
+                {
+                    if (guidPrimary is not null && guidPrimary.TryGetValue(guidKey, out long mapped) && mapped == rowId)
+                    {
+                        guidPrimary.TryRemove(guidKey, out _);
+                    }
+
+                    RemoveFromLaneBucket(guidSecondary, guidKey, rowId);
+                }
+            }
+
+            IIndex? index = TryGetScalarIndexNoLock(indexName, tableName, databaseName);
+            if (index is null)
+            {
+                return;
+            }
+
+            if (index is JsonBTreeIndex json)
+            {
+                foreach ((string key, long rowId) in entries)
+                {
+                    json.RemoveValue(key, rowId);
+                }
+            }
+            else
+            {
+                index.DeleteValues([.. entries.Select(entry => entry.RowId)]);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutation(cacheKey);
+    }
+
+    private static void RemoveFromLaneBucket<TKey>(Dictionary<TKey, List<long>>? lane, TKey key, long rowId)
+        where TKey : notnull
+    {
+        if (lane is not null && lane.TryGetValue(key, out List<long>? rowIds) && rowIds.Remove(rowId) && rowIds.Count == 0)
+        {
+            lane.Remove(key);
+        }
     }
 
     /// <summary>

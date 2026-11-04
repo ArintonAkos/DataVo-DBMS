@@ -203,10 +203,16 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId);
         }
 
-        if (recorder is { IsEnabled: true })
+        // Old row images: reactive subscriptions need them as Before, and indexes use their keys to remove
+        // exact entries instead of scanning every key for the row ids.
+        List<Models.Catalog.IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+        Dictionary<long, Dictionary<string, object?>>? deletedRows =
+            recorder is { IsEnabled: true } || indexFiles.Count > 0
+                ? Context.GetTableContents(toBeDeleted, tableName, databaseName)
+                : null;
+
+        if (recorder is { IsEnabled: true } && deletedRows is not null)
         {
-            // Capture old row images before the physical delete so reactive subscriptions see Before.
-            var deletedRows = Context.GetTableContents(toBeDeleted, tableName, databaseName);
             foreach (long rowId in toBeDeleted)
             {
                 if (deletedRows.TryGetValue(rowId, out var oldRow))
@@ -220,13 +226,25 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         Context.DeleteFromTable(toBeDeleted, tableName, databaseName);
 
         // Delete entries from all indexes
-        Catalog.GetTableIndexes(tableName, databaseName)
-            .Select(e => e.IndexFileName)
-            .ToList()
-            .ForEach(indexFile =>
+        foreach (Models.Catalog.IndexFile indexFile in indexFiles)
+        {
+            if (Indexes.SupportsVectorIndexType(indexFile.IndexKind ?? string.Empty) || deletedRows is null)
             {
-                Indexes.DeleteFromIndex(toBeDeleted, indexFile, tableName, databaseName);
-            });
+                Indexes.DeleteFromIndex(toBeDeleted, indexFile.IndexFileName, tableName, databaseName);
+                continue;
+            }
+
+            var entries = new List<(string Key, long RowId)>(toBeDeleted.Count);
+            foreach (long rowId in toBeDeleted)
+            {
+                if (deletedRows.TryGetValue(rowId, out var oldRow) && indexFile.AttributeNames.All(oldRow.ContainsKey))
+                {
+                    entries.Add((DataVo.Core.BTree.IndexKeyEncoder.BuildKeyString(oldRow, indexFile.AttributeNames), rowId));
+                }
+            }
+
+            Indexes.DeleteIndexEntries(entries, indexFile.IndexFileName, tableName, databaseName);
+        }
 
         if (ImplicitWalCommit.IsEnabled(Engine))
         {

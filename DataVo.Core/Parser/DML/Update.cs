@@ -498,7 +498,19 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
             else
             {
-                Indexes.DeleteFromIndex(oldRowIds, indexName, _model.TableName, databaseName);
+                // The old rows are known, so remove exact (old key, row id) pairs instead of scanning.
+                var oldEntries = new List<(string Key, long RowId)>(oldRowIds.Count);
+                foreach (long oldRowId in oldRowIds)
+                {
+                    // Same encoding as inserts; removing a pair that was never indexed is a no-op.
+                    if (oldRowsById.TryGetValue(oldRowId, out Dictionary<string, object?>? oldRow)
+                        && index.AttributeNames.All(oldRow.ContainsKey))
+                    {
+                        oldEntries.Add((IndexKeyEncoder.BuildKeyString(oldRow, index.AttributeNames), oldRowId));
+                    }
+                }
+
+                Indexes.DeleteIndexEntries(oldEntries, indexName, _model.TableName, databaseName);
             }
         }
 
