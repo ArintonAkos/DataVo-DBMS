@@ -84,6 +84,7 @@ export default withMermaid(
           collapsed: true,
           items: [
             { text: "Connecting to DataVo", link: "/manual/client-interfaces/datavo-context-api" },
+            { text: "Error Handling", link: "/manual/client-interfaces/error-handling" },
             { text: "Entity Framework Support", link: "/manual/client-interfaces/entity-framework" },
             { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
             { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },

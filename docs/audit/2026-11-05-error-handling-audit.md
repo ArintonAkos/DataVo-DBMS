@@ -6,6 +6,15 @@
 > whether an error is reported (`QueryResult.IsError`), whether an exception escapes, whether data
 > changed, and the message text.
 
+## Status (2026-11-05)
+
+All Critical, High, and Medium findings below are fixed, and the proposed contract is implemented
+(see [Error Handling](../manual/client-interfaces/error-handling.md)). The cases are kept as permanent
+tests in `DataVo.Tests/Errors`, run in both in-memory and Lsm mode. Found during the fixes and also
+fixed: `WHERE Code >= '150'` compared numeric text incorrectly (returned every row), the `<>` operator
+failed with an internal error, and `ALTER TABLE ... MODIFY COLUMN` silently truncated existing values
+when shrinking a `VARCHAR`. Division by zero is an error for any zero divisor, as in PostgreSQL.
+
 ## Summary
 
 | Severity | Count | Meaning |

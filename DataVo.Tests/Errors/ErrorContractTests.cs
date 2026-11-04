@@ -40,6 +40,9 @@ public sealed class ErrorContractTests
         { "UPDATE T SET NoCol = 1 WHERE Id = 1", DataVoErrorCodes.UnknownColumn },
         { "DELETE FROM T WHERE", DataVoErrorCodes.Syntax },
         { "", DataVoErrorCodes.EmptyStatement },
+        { "INSERT INTO T (Id, Name, Code) VALUES (9, 'muchtoolong', 9)", DataVoErrorCodes.ValueTooLong },
+        { "SELECT Id / 0 AS X FROM T", DataVoErrorCodes.DivisionByZero },
+        { "SELECT * FROM T WHERE Id = 'abc'", DataVoErrorCodes.TypeMismatch },
         { "COMMIT", DataVoErrorCodes.NoActiveTransaction },
         { "ROLLBACK", DataVoErrorCodes.NoActiveTransaction },
     };
@@ -55,6 +58,29 @@ public sealed class ErrorContractTests
         Assert.True(result.IsError, string.Join(" / ", result.Messages));
         Assert.Equal(expectedCode, result.ErrorCode);
         AssertClean(result);
+    }
+
+    /// <summary>
+    /// The same catalog against an Lsm database: the code is identical and the failed statement leaves
+    /// the data, including what is on disk, unchanged.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DetectedFailures))]
+    public void Failure_InLsmMode_ReportsSameCode_AndChangesNothing(string sql, string expectedCode)
+    {
+        using DataVoContext db = Seeded(StorageMode.Lsm, TestStorageDirectories.Create("error_catalog"));
+        string before = MalformedStatementTests.Snapshot(db);
+
+        QueryResult result = db.Execute(sql).Single();
+
+        Assert.True(result.IsError, string.Join(" / ", result.Messages));
+        Assert.Equal(expectedCode, result.ErrorCode);
+        AssertClean(result);
+        if (expectedCode != DataVoErrorCodes.NoDatabaseSelected)
+        {
+            db.Execute("USE A");
+            Assert.Equal(before, MalformedStatementTests.Snapshot(db));
+        }
     }
 
     [Fact]
