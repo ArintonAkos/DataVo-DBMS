@@ -63,6 +63,9 @@ public sealed class ComparisonTypeMismatchTests
     [InlineData("SELECT * FROM T WHERE Code >= '150'", 1)]
     [InlineData("SELECT * FROM T WHERE Code < '150'", 1)]
     [InlineData("SELECT * FROM T WHERE Code != '100'", 1)]
+    [InlineData("SELECT * FROM T WHERE Code <> '100'", 1)]
+    [InlineData("SELECT * FROM T WHERE Code <> 100", 1)]
+    [InlineData("SELECT * FROM T WHERE Name <> 'a'", 1)]
     public void ComparableValues_StillWork(string sql, int expectedRows)
     {
         using DataVoContext db = ErrorContractTests.Seeded();

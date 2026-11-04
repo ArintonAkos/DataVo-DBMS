@@ -304,7 +304,9 @@ public class Lexer
         {
             var start = _position;
             var startLoc = GetLineColumn(start);
-            token = new Token(TokenType.Operator, potentialOp, start, startLoc.line, startLoc.column);
+            // "<>" is standard SQL for "not equal"; every evaluator understands the "!=" spelling.
+            string value = potentialOp == "<>" ? Operators.NOT_EQUALS : potentialOp;
+            token = new Token(TokenType.Operator, value, start, startLoc.line, startLoc.column);
             _position += 2;
             return true;
         }
