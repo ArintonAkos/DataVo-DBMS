@@ -1084,7 +1084,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         private readonly List<(TableState State, string Database, string Table)> _touched = [];
 
-        private readonly Dictionary<TableState, Dictionary<long, byte[]?>> _staged = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<TableState, Dictionary<long, byte[]?>> _staged = []; // TableState uses reference equality
 
         public LsmCommitBatch Batch { get; } = new();
 
