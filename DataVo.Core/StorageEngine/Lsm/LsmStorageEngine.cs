@@ -6,6 +6,7 @@ using DataVo.Core.CompiledQueries;
 using DataVo.Core.Compat;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
 
@@ -34,6 +35,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private readonly object _pruneGate = new();
     private readonly AsyncLocal<PendingWrite?> _ambientWrite = new();
     private long _appliedLsn;   // every frame up to here is applied to MemTables
+    private readonly object _publishGate = new();
+    private long _nextPublishLsn; // next LSN allowed to publish its rows and deferred effects
     private long _prunedThrough;
     private bool _recovering;
     private bool _disposed;
@@ -62,6 +65,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         _appliedLsn = _commitLog.LastLsn;
+        _nextPublishLsn = _commitLog.LastLsn + 1;
     }
 
     /// <summary>
@@ -69,7 +73,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// a single commit-log frame, written and made durable when the returned scope is disposed. Scopes
     /// nest; only the outermost one commits. Mutations made outside a scope commit individually.
     /// </summary>
-    internal IDisposable BeginWriteBatch()
+    internal IWriteBatchScope BeginWriteBatch()
     {
         PendingWrite? current = _ambientWrite.Value;
         if (current is not null)
@@ -80,6 +84,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         var pending = new PendingWrite();
         _ambientWrite.Value = pending;
+        DeferredPublication.SetCurrent(pending.Publication);
         return new WriteBatchScope(this, pending);
     }
 
@@ -98,7 +103,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         lock (state.SyncRoot)
         {
             rowId = state.NextRowId++;
-            state.LatestRows.Set(rowId, rowBytes);
+            pending.Stage(state, rowId, rowBytes);
             pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
             pending.Touch(state, databaseName, tableName);
         }
@@ -125,7 +130,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             {
                 DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
                 long rowId = state.NextRowId++;
-                state.LatestRows.Set(rowId, rowBytes);
+                pending.Stage(state, rowId, rowBytes);
                 pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
                 rowIds.Add(rowId);
             }
@@ -146,6 +151,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     public bool HasAnyRows(string databaseName, string tableName)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
+        if (_ambientWrite.Value?.StagedFor(state) is { Count: > 0 })
+        {
+            return ReadAllRows(databaseName, tableName).Any();
+        }
 
         lock (state.SyncRoot)
         {
@@ -162,7 +171,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        return state.LatestRows.TryGet(rowId, out byte[] rowBytes) switch
+        // Other sessions see only published rows; the writing flow also sees its own pending writes.
+        return Lookup(_ambientWrite.Value, state, rowId, out byte[] rowBytes) switch
         {
             LatestRowLookup.Live => rowBytes.ToArray(),
             LatestRowLookup.Tombstone => throw new RowDeletedException(rowId, tableName),
@@ -176,10 +186,48 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
+        List<(long RowId, byte[] RawRow)> rows;
         lock (state.SyncRoot)
         {
-            return CollectLiveRowsSorted(state);
+            rows = CollectLiveRowsSorted(state);
         }
+
+        IReadOnlyDictionary<long, byte[]?>? staged = _ambientWrite.Value?.StagedFor(state);
+        if (staged is not { Count: > 0 })
+        {
+            return rows;
+        }
+
+        var merged = new SortedDictionary<long, byte[]>();
+        foreach ((long rowId, byte[] rawRow) in rows)
+        {
+            merged[rowId] = rawRow;
+        }
+
+        foreach ((long rowId, byte[]? value) in staged)
+        {
+            if (value is null)
+            {
+                merged.Remove(rowId);
+            }
+            else
+            {
+                merged[rowId] = value.ToArray();
+            }
+        }
+
+        return merged.Select(pair => (pair.Key, pair.Value)).ToList();
+    }
+
+    private static LatestRowLookup Lookup(PendingWrite? pending, TableState state, long rowId, out byte[] value)
+    {
+        if (pending is not null && pending.TryGetStaged(state, rowId, out byte[]? staged))
+        {
+            value = staged ?? [];
+            return staged is null ? LatestRowLookup.Tombstone : LatestRowLookup.Live;
+        }
+
+        return state.LatestRows.TryGet(rowId, out value);
     }
 
     /// <inheritdoc />
@@ -190,9 +238,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         lock (state.SyncRoot)
         {
-            if (state.LatestRows.TryGet(rowId, out _) == LatestRowLookup.Live)
+            if (Lookup(pending, state, rowId, out _) == LatestRowLookup.Live)
             {
-                state.LatestRows.SetTombstone(rowId);
+                pending.Stage(state, rowId, null);
                 pending.Batch.Delete(databaseName, tableName, rowId);
                 pending.Touch(state, databaseName, tableName);
             }
@@ -219,7 +267,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         bool patched = false;
         lock (state.SyncRoot)
         {
-            if (state.LatestRows.TryGet(rowId, out byte[] latest) == LatestRowLookup.Live)
+            if (Lookup(pending, state, rowId, out byte[] latest) == LatestRowLookup.Live)
             {
                 // Copy-on-write: published row buffers are immutable so lock-free readers can never
                 // observe a half-applied patch; the new version becomes visible in one reference publish.
@@ -236,7 +284,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
                 if (patched)
                 {
-                    state.LatestRows.Set(rowId, rowBytes);
+                    pending.Stage(state, rowId, rowBytes);
                     pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
                     pending.Touch(state, databaseName, tableName);
                 }
@@ -271,7 +319,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             foreach (FixedWidthPatchOperation operation in operations)
             {
-                if (state.LatestRows.TryGet(operation.RowId, out byte[] latest) != LatestRowLookup.Live)
+                if (Lookup(pending, state, operation.RowId, out byte[] latest) != LatestRowLookup.Live)
                 {
                     continue;
                 }
@@ -286,7 +334,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                     }
                 }
 
-                state.LatestRows.Set(operation.RowId, rowBytes);
+                pending.Stage(state, operation.RowId, rowBytes);
                 pending.Batch.Put(databaseName, tableName, operation.RowId, rowBytes);
                 patched++;
             }
@@ -409,6 +457,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             static (key, owner) => owner.CreateTableState(key.DatabaseName, key.TableName),
             this);
     }
+
+    /// <summary>Test hook: runs after a batch is durable and before its effects are published.</summary>
+    internal Action<long>? BeforePublishForTesting { get; set; }
 
     /// <summary>Test hook: overrides the MemTable rotation threshold for tables created afterwards.</summary>
     internal long? MemTableFlushThresholdOverrideBytes { get; set; }
@@ -631,22 +682,110 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// </summary>
     private void Commit(PendingWrite pending)
     {
-        if (pending.Batch.IsEmpty)
+        try
         {
-            return;
+            if (pending.Batch.IsEmpty)
+            {
+                pending.Publication.RunPublish();
+                return;
+            }
+
+            pending.Batch.CollapseToLatestPerRow();
+            LsmCommitTicket ticket;
+            lock (_commitGate)
+            {
+                ticket = _commitLog.Append(pending.Batch);
+                ApplyToMemTables(pending, checked((ulong)ticket.Lsn));
+                Volatile.Write(ref _appliedLsn, ticket.Lsn);
+            }
+
+            bool durable = false;
+            try
+            {
+                ticket.Wait();
+                durable = true;
+            }
+            finally
+            {
+                // Rows, indexes, and notifications become visible only now, and strictly in commit order.
+                PublishInOrder(ticket.Lsn, durable ? () => PublishStaged(pending) : null);
+            }
+        }
+        finally
+        {
+            pending.Publication.RunFinally();
+            pending.Reset();
+        }
+    }
+
+    /// <summary>Drops a failed statement's pending work: nothing was written, so nothing is published.</summary>
+    private void Discard(PendingWrite pending)
+    {
+        try
+        {
+            pending.Publication.DiscardPublish();
+        }
+        finally
+        {
+            pending.Publication.RunFinally();
+            pending.Reset();
+        }
+    }
+
+    private void PublishStaged(PendingWrite pending)
+    {
+        foreach ((TableState state, Dictionary<long, byte[]?> rows) in pending.StagedTables)
+        {
+            lock (state.SyncRoot)
+            {
+                foreach ((long rowId, byte[]? value) in rows)
+                {
+                    if (value is null)
+                    {
+                        state.LatestRows.SetTombstone(rowId);
+                    }
+                    else
+                    {
+                        state.LatestRows.Set(rowId, value);
+                    }
+                }
+            }
         }
 
-        pending.Batch.CollapseToLatestPerRow();
-        LsmCommitTicket ticket;
-        lock (_commitGate)
+        pending.Publication.RunPublish();
+    }
+
+    /// <summary>
+    /// Waits until every lower LSN is published, runs <paramref name="publish"/> on this flow (locks and
+    /// deferred actions are thread-affine), then lets the next LSN publish. Always advances, even when
+    /// publishing is skipped or fails, so one failed commit cannot stall every later one.
+    /// </summary>
+    private void PublishInOrder(long lsn, Action? publish)
+    {
+        lock (_publishGate)
         {
-            ticket = _commitLog.Append(pending.Batch);
-            ApplyToMemTables(pending, checked((ulong)ticket.Lsn));
-            Volatile.Write(ref _appliedLsn, ticket.Lsn);
+            while (_nextPublishLsn < lsn)
+            {
+                Monitor.Wait(_publishGate);
+            }
         }
 
-        pending.Reset();
-        ticket.Wait();
+        try
+        {
+            if (publish is not null)
+            {
+                BeforePublishForTesting?.Invoke(lsn);
+                publish();
+            }
+        }
+        finally
+        {
+            lock (_publishGate)
+            {
+                _nextPublishLsn = lsn + 1;
+                Monitor.PulseAll(_publishGate);
+            }
+        }
     }
 
     private void ApplyToMemTables(PendingWrite pending, ulong sequence)
@@ -686,7 +825,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             Volatile.Write(ref _appliedLsn, ticket.Lsn);
         }
 
-        _commitLog.EnsureDurableThrough(ticket.Lsn);
+        try
+        {
+            _commitLog.EnsureDurableThrough(ticket.Lsn);
+        }
+        finally
+        {
+            PublishInOrder(ticket.Lsn, publish: null);
+        }
     }
 
     /// <summary>
@@ -938,7 +1084,35 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         private readonly List<(TableState State, string Database, string Table)> _touched = [];
 
+        private readonly Dictionary<TableState, Dictionary<long, byte[]?>> _staged = new(ReferenceEqualityComparer.Instance);
+
         public LsmCommitBatch Batch { get; } = new();
+
+        /// <summary>In-memory effects (indexes, MVCC, notifications, lock releases) held until publication.</summary>
+        public DeferredPublication Publication { get; } = new();
+
+        public IEnumerable<KeyValuePair<TableState, Dictionary<long, byte[]?>>> StagedTables => _staged;
+
+        /// <summary>Records a row's pending version (<see langword="null"/> = deleted) for publication.</summary>
+        public void Stage(TableState state, long rowId, byte[]? value)
+        {
+            if (!_staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows))
+            {
+                rows = [];
+                _staged[state] = rows;
+            }
+
+            rows[rowId] = value;
+        }
+
+        public bool TryGetStaged(TableState state, long rowId, out byte[]? value)
+        {
+            value = null;
+            return _staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows) && rows.TryGetValue(rowId, out value);
+        }
+
+        public IReadOnlyDictionary<long, byte[]?>? StagedFor(TableState state) =>
+            _staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows) ? rows : null;
 
         public int Depth { get; set; } = 1;
 
@@ -961,12 +1135,16 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             Batch.Clear();
             _touched.Clear();
+            _staged.Clear();
         }
     }
 
-    private sealed class WriteBatchScope(LsmStorageEngine owner, PendingWrite pending) : IDisposable
+    private sealed class WriteBatchScope(LsmStorageEngine owner, PendingWrite pending) : IWriteBatchScope
     {
+        private bool _completed;
         private bool _disposed;
+
+        public void Complete() => _completed = true;
 
         public void Dispose()
         {
@@ -982,10 +1160,17 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             }
 
             owner._ambientWrite.Value = null;
+            DeferredPublication.SetCurrent(null); // deferred actions must now run for real
 
-            // Mutations are already visible in the latest-row view, so they are committed even when the
-            // statement failed part-way: the durable state must match what readers have seen.
-            owner.Commit(pending);
+            if (_completed)
+            {
+                owner.Commit(pending);
+            }
+            else
+            {
+                // A failed statement leaves nothing behind: no commit record, no visible change.
+                owner.Discard(pending);
+            }
         }
     }
 

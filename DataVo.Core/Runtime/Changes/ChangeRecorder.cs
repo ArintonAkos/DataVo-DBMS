@@ -76,6 +76,12 @@ internal sealed class ChangeRecorder
             return;
         }
 
+        // Subscribers are notified only once the statement's commit record is durable.
+        if (DeferredPublication.TryDefer(Publish))
+        {
+            return;
+        }
+
         _capture.Publish(new ChangeSet(_capture.NextSequenceId(), _databaseName, _changes));
     }
 

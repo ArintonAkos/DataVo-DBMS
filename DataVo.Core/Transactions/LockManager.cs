@@ -132,6 +132,11 @@ public sealed class LockManager
     public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
+        {
+            return;
+        }
+
         RowLockEntry rowLock = RetainRowLock(rowKey);
         int threadId = Environment.CurrentManagedThreadId;
         WaitRegistration waitRegistration = WaitRegistration.None;
@@ -169,6 +174,11 @@ public sealed class LockManager
     public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
+        {
+            return;
+        }
+
         RowLockEntry rowLock = RetainRowLock(rowKey);
         int threadId = Environment.CurrentManagedThreadId;
         WaitRegistration waitRegistration = WaitRegistration.None;
@@ -206,6 +216,12 @@ public sealed class LockManager
     public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (Runtime.DeferredPublication.Current is { } publication
+            && publication.TryHandleRelease("R:" + rowKey, write: false, static () => { }))
+        {
+            return;
+        }
+
         if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
         {
             throw new InvalidOperationException($"Row read lock not found for key '{rowKey}'.");
@@ -225,6 +241,17 @@ public sealed class LockManager
     public void ReleaseRowWriteLock(string databaseName, string tableName, long rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        if (Runtime.DeferredPublication.Current is { } publication
+            && publication.TryHandleRelease("R:" + rowKey, write: true, () => ReleaseRowWriteLockCore(rowKey)))
+        {
+            return;
+        }
+
+        ReleaseRowWriteLockCore(rowKey);
+    }
+
+    private void ReleaseRowWriteLockCore(string rowKey)
+    {
         if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
         {
             throw new InvalidOperationException($"Row write lock not found for key '{rowKey}'.");
@@ -354,6 +381,12 @@ public sealed class LockManager
 
     private void AcquireTableLock(string tableKey, bool write)
     {
+        // A write lock whose release is deferred until publication is still held by this flow.
+        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("T:" + tableKey) == true)
+        {
+            return;
+        }
+
         TableLockEntry tableLock = RetainTableLock(tableKey);
         int threadId = Environment.CurrentManagedThreadId;
         WaitRegistration waitRegistration = WaitRegistration.None;
@@ -398,6 +431,18 @@ public sealed class LockManager
     }
 
     private void ReleaseTableLock(string tableKey, bool write, bool removeWhenIdle = true)
+    {
+        // Inside a durable write batch, write locks stay held until the statement is published.
+        if (Runtime.DeferredPublication.Current is { } publication
+            && publication.TryHandleRelease("T:" + tableKey, write, () => ReleaseTableLockCore(tableKey, write, removeWhenIdle)))
+        {
+            return;
+        }
+
+        ReleaseTableLockCore(tableKey, write, removeWhenIdle);
+    }
+
+    private void ReleaseTableLockCore(string tableKey, bool write, bool removeWhenIdle)
     {
         if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
         {

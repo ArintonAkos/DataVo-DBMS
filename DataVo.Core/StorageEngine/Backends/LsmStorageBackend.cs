@@ -46,7 +46,7 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
         ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRows(databaseName, tableName, columns, ordinals, operations);
 
     /// <summary>Groups the current flow's mutations into one atomic commit-log frame (see LsmStorageEngine).</summary>
-    internal IDisposable BeginWriteBatch() => _inner.BeginWriteBatch();
+    internal IWriteBatchScope BeginWriteBatch() => _inner.BeginWriteBatch();
 
     public void Dispose()
     {

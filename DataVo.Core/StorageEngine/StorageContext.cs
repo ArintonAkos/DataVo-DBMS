@@ -98,12 +98,16 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Forces all buffered disk writes to the physical device, when the active backend is disk-backed.
     /// Used by the WAL checkpointer to make data-file writes durable before advancing the checkpoint LSN.
     /// </summary>
-    internal IDisposable BeginWriteBatch() =>
+    internal IWriteBatchScope BeginWriteBatch() =>
         _storageEngine is LsmStorageBackend lsm ? lsm.BeginWriteBatch() : NoWriteBatch.Instance;
 
-    private sealed class NoWriteBatch : IDisposable
+    private sealed class NoWriteBatch : IWriteBatchScope
     {
         public static readonly NoWriteBatch Instance = new();
+
+        public void Complete()
+        {
+        }
 
         public void Dispose()
         {

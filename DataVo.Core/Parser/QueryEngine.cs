@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
@@ -145,9 +146,16 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
             {
                 QueryResult result;
                 // One statement (or one COMMIT, which applies a whole transaction) is one atomic write unit.
-                using (_engine.StorageContext.BeginWriteBatch())
+                // A failed DML statement is discarded (statement rollback); DDL changes the catalog
+                // immediately, so its storage work is always kept consistent with it.
+                using (IWriteBatchScope batch = _engine.StorageContext.BeginWriteBatch())
                 {
-                    result = runnable.Dequeue().Perform(session);
+                    IDbAction action = runnable.Dequeue();
+                    result = action.Perform(session);
+                    if (!result.IsError || IsSchemaAction(action))
+                    {
+                        batch.Complete();
+                    }
                 }
 
                 response.Add(result);
@@ -164,6 +172,9 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
             }
         }
     }
+
+    private static bool IsSchemaAction(IDbAction action) =>
+        action.GetType().Namespace?.EndsWith(".DDL", StringComparison.Ordinal) == true;
 
     private static void RecordResultMetrics(RuntimeQueryStatsBuilder builder, QueryResult result)
     {

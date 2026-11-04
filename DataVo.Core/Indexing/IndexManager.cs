@@ -1056,6 +1056,14 @@ public partial class IndexManager : IDisposable
 
     internal void InsertIntoVectorIndex(ReadOnlySpan<float> vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            float[] copy = vector.ToArray();
+            DeferredPublication.TryDefer(() => InsertIntoVectorIndex(copy.AsSpan(), rowId, indexName, tableName, databaseName, indexType));
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         if (vectorIndex is ISpanVectorIndex spanVectorIndex)
@@ -1080,6 +1088,15 @@ public partial class IndexManager : IDisposable
         string databaseName,
         string indexType = "HNSW")
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            long[] rowIdsCopy = rowIds.ToArray();
+            float[] vectorsCopy = vectors.ToArray();
+            DeferredPublication.TryDefer(() => InsertManyIntoVectorIndex(rowIdsCopy, vectorsCopy, vectorDimension, indexName, tableName, databaseName, indexType));
+            return;
+        }
+
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowIds);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(vectors);
         if (vectorDimension <= 0)
@@ -1120,6 +1137,14 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            List<long> copy = [.. toBeDeletedIds];
+            DeferredPublication.TryDefer(() => DeleteFromVectorIndex(copy, indexName, tableName, databaseName, indexType));
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         vectorIndex.Delete(toBeDeletedIds);
@@ -1178,6 +1203,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => InsertIntoIndex(value, rowId, indexName, tableName, databaseName)))
+        {
+            return;
+        }
+
         lock (_lock)
         {
             var cacheKey = GetCacheKey(indexName, tableName, databaseName);
@@ -1282,6 +1313,14 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (string Value, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => InsertManyIntoIndex(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -1314,6 +1353,14 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (long Key, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => InsertIntegerPrimaryKeys(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -1409,6 +1456,15 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            long[] keysCopy = keys.ToArray();
+            long[] rowIdsCopy = rowIds.ToArray();
+            DeferredPublication.TryDefer(() => InsertIntegerPrimaryKeys(keysCopy.AsSpan(), rowIdsCopy.AsSpan(), indexName, tableName, databaseName));
+            return;
+        }
+
         if (keys.IsEmpty)
         {
             return;
@@ -1448,6 +1504,14 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (long Key, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => InsertIntegerIndexEntries(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -1502,6 +1566,14 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (Guid Key, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => InsertGuidPrimaryKeys(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -1549,6 +1621,14 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (Guid Key, long RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => InsertGuidIndexEntries(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -1644,6 +1724,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveIntegerPrimaryKey(long key, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RemoveIntegerPrimaryKey(key, indexName, tableName, databaseName)))
+        {
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
             && map.TryGetValue(key, out long rowId))
@@ -1679,6 +1765,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveGuidPrimaryKey(Guid key, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RemoveGuidPrimaryKey(key, indexName, tableName, databaseName)))
+        {
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
             && map.TryRemove(key, out long rowId))
@@ -1693,6 +1785,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveIntegerIndexEntry(long key, long rowId, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RemoveIntegerIndexEntry(key, rowId, indexName, tableName, databaseName)))
+        {
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1715,6 +1813,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveGuidIndexEntry(Guid key, long rowId, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RemoveGuidIndexEntry(key, rowId, indexName, tableName, databaseName)))
+        {
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1853,6 +1957,14 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            List<long> copy = [.. toBeDeletedIds];
+            DeferredPublication.TryDefer(() => DeleteFromIndex(copy, indexName, tableName, databaseName));
+            return;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {

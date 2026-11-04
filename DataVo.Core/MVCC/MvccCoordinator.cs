@@ -67,6 +67,12 @@ public static class MvccCoordinator
     /// </summary>
     public static void RegisterInsertVersion(DataVoEngine engine, string databaseName, string tableName, long rowId, long transactionId)
     {
+        // Version metadata becomes visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RegisterInsertVersion(engine, databaseName, tableName, rowId, transactionId)))
+        {
+            return;
+        }
+
         if (!engine.TransactionManager.HasAnyActiveTransaction())
         {
             return;
@@ -88,6 +94,14 @@ public static class MvccCoordinator
         IReadOnlyList<long> rowIds,
         long transactionId)
     {
+        // Version metadata becomes visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            long[] copy = [.. rowIds];
+            DeferredPublication.TryDefer(() => RegisterInsertVersions(engine, databaseName, tableName, copy, transactionId));
+            return;
+        }
+
         if (!engine.TransactionManager.HasAnyActiveTransaction())
         {
             return;
@@ -107,6 +121,12 @@ public static class MvccCoordinator
         long newRowId,
         long transactionId)
     {
+        // Version metadata becomes visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RegisterUpdateVersion(engine, databaseName, tableName, oldRowId, newRowId, transactionId)))
+        {
+            return;
+        }
+
         EnsureRowVersionExists(engine, databaseName, tableName, oldRowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, oldRowId, transactionId);
         engine.VersionStorageManager.AllocateVersion(databaseName, tableName, newRowId, transactionId);
@@ -118,6 +138,12 @@ public static class MvccCoordinator
     /// </summary>
     public static void RegisterDeleteVersion(DataVoEngine engine, string databaseName, string tableName, long rowId, long transactionId)
     {
+        // Version metadata becomes visible with the statement, after its commit record is durable.
+        if (DeferredPublication.TryDefer(() => RegisterDeleteVersion(engine, databaseName, tableName, rowId, transactionId)))
+        {
+            return;
+        }
+
         EnsureRowVersionExists(engine, databaseName, tableName, rowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, rowId, transactionId);
     }
