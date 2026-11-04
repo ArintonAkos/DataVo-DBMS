@@ -38,6 +38,9 @@ public sealed class DataVoEngine : IDisposable
     private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
     private bool _disposed;
+    private const long TransactionIdReservationBlock = 4096;
+    private readonly object _transactionIdReservationGate = new();
+    private long _reservedTransactionIdsThrough;
     private string? _sharedRoot;
 
     private DataVoEngine(StorageContext storageContext)
@@ -77,10 +80,32 @@ public sealed class DataVoEngine : IDisposable
             if (persistedHighWaterMark.HasValue)
             {
                 TransactionIdAllocator.RestoreHighWaterMark(persistedHighWaterMark.Value + 1);
+                _reservedTransactionIdsThrough = persistedHighWaterMark.Value;
             }
 
-            TransactionIdAllocator.SetHighWaterMarkObserver(highWaterMark =>
-                _transactionIdStateStore.PersistHighWaterMark(highWaterMark));
+            // Reserve ids in blocks: an id is handed out only after a bound at or above it is durable, so
+            // ids never repeat after a crash, and the state file is written once per block, not per id.
+            TransactionIdAllocator.SetHighWaterMarkObserver(ReserveTransactionIdsThrough);
+        }
+    }
+
+    private void ReserveTransactionIdsThrough(long transactionId)
+    {
+        if (transactionId <= Volatile.Read(ref _reservedTransactionIdsThrough))
+        {
+            return;
+        }
+
+        lock (_transactionIdReservationGate)
+        {
+            if (transactionId <= _reservedTransactionIdsThrough)
+            {
+                return;
+            }
+
+            long reserved = transactionId + TransactionIdReservationBlock;
+            _transactionIdStateStore!.ForcePersistHighWaterMark(reserved);
+            Volatile.Write(ref _reservedTransactionIdsThrough, reserved);
         }
     }
 

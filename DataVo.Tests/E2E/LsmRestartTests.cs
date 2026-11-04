@@ -146,3 +146,27 @@ public sealed class LsmRestartTests
     private static void AssertRejected(List<QueryResult> results) =>
         Assert.True(Assert.Single(results).IsError);
 }
+
+/// <summary>Transaction ids are reserved durably before use, so a crash can never lead to id reuse.</summary>
+public sealed class TransactionIdReservationTests
+{
+    [Fact]
+    public void PersistedBound_CoversEveryHandedOutId_WithoutCleanShutdown()
+    {
+        string path = TestStorageDirectories.Create("txid_reservation");
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = path, LsmStrictFsync = false });
+        db.Execute("CREATE DATABASE R");
+        db.Execute("USE R");
+        db.Execute("CREATE TABLE T (Id INT PRIMARY KEY)");
+        for (int i = 1; i <= 50; i++)
+        {
+            db.Execute($"INSERT INTO T (Id) VALUES ({i})");
+        }
+
+        long handedOut = db.Engine.TransactionIdAllocator.GetCurrentHighWaterMark();
+        long persisted = long.Parse(File.ReadAllText(Path.Combine(path, "datavo.txid")).Trim(), System.Globalization.CultureInfo.InvariantCulture);
+
+        // Read while the engine is still open: this is what a crash right now would leave behind.
+        Assert.True(persisted >= handedOut, $"persisted {persisted} < handed out {handedOut}");
+    }
+}
