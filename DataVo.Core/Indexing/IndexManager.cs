@@ -128,6 +128,14 @@ public partial class IndexManager : IDisposable
     /// </summary>
     private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<long>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
 
+    /// <summary>
+    /// Indexes whose fast lanes hold every key of the scalar index: the index was created (empty or
+    /// seeded) or rebuilt by this manager, so every later write flowed through the lanes. Only then
+    /// does a lane miss prove a key is absent. A lane created lazily over an index loaded from disk
+    /// sees only keys written since startup, so callers must fall back to the scalar index.
+    /// </summary>
+    private readonly ConcurrentDictionary<IndexCacheKey, byte> _completeLaneIndexes = new(CacheKeyComparer.Instance);
+
     private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
     private int _flushMutationThreshold = 256;
 
@@ -406,6 +414,7 @@ public partial class IndexManager : IDisposable
             _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
             _integerIndexMaps.Remove(cacheKey);
             _guidIndexMaps.Remove(cacheKey);
+            _completeLaneIndexes.TryRemove(cacheKey, out _);
 
             if (deleteFile && _cachePaths.TryGetValue(cacheKey, out var path))
             {
@@ -463,9 +472,110 @@ public partial class IndexManager : IDisposable
         }
 
         _cachePaths[CacheKeyOf(metadata)] = BuildIndexPath(metadata);
+        SeedCompleteLanes(CacheKeyOf(metadata), values, indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase));
         MarkDirty(CacheKeyOf(metadata));
         FlushIfImmediate(CacheKeyOf(metadata));
     }
+
+    /// <summary>
+    /// Replaces the lanes of a freshly created index with lanes holding all of its keys, and marks
+    /// them complete. Keys that are not all integers (or all GUIDs) get no lane; an empty index is
+    /// complete as-is because every subsequent write maintains its lanes.
+    /// </summary>
+    private void SeedCompleteLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    {
+        lock (_lock)
+        {
+            _integerPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
+            _integerIndexMaps.Remove(cacheKey);
+            _guidIndexMaps.Remove(cacheKey);
+            _completeLaneIndexes.TryRemove(cacheKey, out _);
+
+            if (values.Count == 0)
+            {
+                _completeLaneIndexes[cacheKey] = 0;
+                return;
+            }
+
+            if (TrySeedIntegerLanes(cacheKey, values, isPrimaryKey) || TrySeedGuidLanes(cacheKey, values, isPrimaryKey))
+            {
+                _completeLaneIndexes[cacheKey] = 0;
+            }
+        }
+    }
+
+    private bool TrySeedIntegerLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    {
+        var entries = new List<(long Key, List<long> RowIds)>(values.Count);
+        foreach (KeyValuePair<string, List<long>> entry in values)
+        {
+            if (!TryParseIntegerPrimaryKey(entry.Key, out long key) || (isPrimaryKey && entry.Value.Count != 1))
+            {
+                return false;
+            }
+
+            entries.Add((key, entry.Value));
+        }
+
+        if (isPrimaryKey)
+        {
+            var map = new ConcurrentInt64Int64Map();
+            foreach ((long key, List<long> rowIds) in entries)
+            {
+                map.Set(key, rowIds[0]);
+            }
+
+            _integerPrimaryKeyMaps[cacheKey] = map;
+            return true;
+        }
+
+        var secondary = new Dictionary<long, List<long>>(entries.Count);
+        foreach ((long key, List<long> rowIds) in entries)
+        {
+            secondary[key] = [.. rowIds];
+        }
+
+        _integerIndexMaps[cacheKey] = secondary;
+        return true;
+    }
+
+    private bool TrySeedGuidLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    {
+        var entries = new List<(Guid Key, List<long> RowIds)>(values.Count);
+        foreach (KeyValuePair<string, List<long>> entry in values)
+        {
+            if (!TryParseGuidKey(entry.Key, out Guid key) || (isPrimaryKey && entry.Value.Count != 1))
+            {
+                return false;
+            }
+
+            entries.Add((key, entry.Value));
+        }
+
+        if (isPrimaryKey)
+        {
+            var map = new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance);
+            foreach ((Guid key, List<long> rowIds) in entries)
+            {
+                map[key] = rowIds[0];
+            }
+
+            _guidPrimaryKeyMaps[cacheKey] = map;
+            return true;
+        }
+
+        var secondary = new Dictionary<Guid, List<long>>(entries.Count, GuidSimdEqualityComparer.Instance);
+        foreach ((Guid key, List<long> rowIds) in entries)
+        {
+            secondary[key] = [.. rowIds];
+        }
+
+        _guidIndexMaps[cacheKey] = secondary;
+        return true;
+    }
+
+    private bool IsLaneComplete(IndexCacheKey cacheKey) => _completeLaneIndexes.ContainsKey(cacheKey);
 
     /// <summary>
     /// Rebuilds an existing scalar BTree index from supplied values.
@@ -590,6 +700,11 @@ public partial class IndexManager : IDisposable
             {
                 _guidIndexMaps.Remove(cacheKey);
             }
+
+            foreach (IndexCacheKey cacheKey in _completeLaneIndexes.Keys.Where(cacheKey => string.Equals(cacheKey.Database, databaseName, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                _completeLaneIndexes.TryRemove(cacheKey, out _);
+            }
         }
 
         foreach (IndexCacheKey cacheKey in keysToRemove)
@@ -614,6 +729,7 @@ public partial class IndexManager : IDisposable
             _integerIndexMaps.Clear();
             _guidPrimaryKeyMaps.Clear();
             _guidIndexMaps.Clear();
+            _completeLaneIndexes.Clear();
         }
 
         if (!Directory.Exists(_indexRootDirectory))
@@ -1060,10 +1176,13 @@ public partial class IndexManager : IDisposable
     /// without re-hashing the cache key for every key. Returns <see langword="null"/> when the
     /// index has no fast lane (callers must fall back to the generic probe).
     /// </summary>
-    internal ConcurrentInt64Int64Map? GetIntegerPrimaryKeyLane(string indexName, string tableName, string databaseName) =>
-        _integerPrimaryKeyMaps.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out ConcurrentInt64Int64Map? map)
+    internal ConcurrentInt64Int64Map? GetIntegerPrimaryKeyLane(string indexName, string tableName, string databaseName)
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        return IsLaneComplete(cacheKey) && _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
             ? map
             : null;
+    }
 
     /// <summary>
     /// Inserts integer primary-key entries into the direct key -> row-id fast lane from parallel
@@ -1262,11 +1381,13 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Returns whether the named index is backed by an integer primary-key fast lane.
+    /// Returns whether the named index is backed by a complete integer primary-key fast lane, so a
+    /// lane miss proves the key is absent.
     /// </summary>
     public bool HasIntegerPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
     {
-        return _integerPrimaryKeyMaps.ContainsKey(GetCacheKey(indexName, tableName, databaseName));
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        return IsLaneComplete(cacheKey) && _integerPrimaryKeyMaps.ContainsKey(cacheKey);
     }
 
     /// <summary>
@@ -1277,7 +1398,7 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            return _integerIndexMaps.ContainsKey(cacheKey);
+            return IsLaneComplete(cacheKey) && _integerIndexMaps.ContainsKey(cacheKey);
         }
     }
 
@@ -1286,7 +1407,8 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool HasGuidPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
     {
-        return _guidPrimaryKeyMaps.ContainsKey(GetCacheKey(indexName, tableName, databaseName));
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        return IsLaneComplete(cacheKey) && _guidPrimaryKeyMaps.ContainsKey(cacheKey);
     }
 
     /// <summary>
@@ -1297,7 +1419,7 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            return _guidIndexMaps.ContainsKey(cacheKey);
+            return IsLaneComplete(cacheKey) && _guidIndexMaps.ContainsKey(cacheKey);
         }
     }
 
@@ -1309,10 +1431,33 @@ public partial class IndexManager : IDisposable
     public void RemoveIntegerPrimaryKey(long key, string indexName, string tableName, string databaseName)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map))
+        if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
+            && map.TryGetValue(key, out long rowId))
         {
             map.TryRemove(key);
+            MirrorLaneRemoval(cacheKey, indexName, tableName, databaseName, rowId);
         }
+    }
+
+    /// <summary>
+    /// Removes a row id that a lane just dropped from the persisted scalar index as well, so a
+    /// reopened engine does not see the stale key.
+    /// </summary>
+    private void MirrorLaneRemoval(IndexCacheKey cacheKey, string indexName, string tableName, string databaseName, long rowId)
+    {
+        if (!MirrorsFastLanesToScalarIndex)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            GetOrLoadScalarIndex(indexName, tableName, databaseName).DeleteValues([rowId]);
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutation(cacheKey);
     }
 
     /// <summary>
@@ -1321,9 +1466,10 @@ public partial class IndexManager : IDisposable
     public void RemoveGuidPrimaryKey(Guid key, string indexName, string tableName, string databaseName)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map))
+        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
+            && map.TryRemove(key, out long rowId))
         {
-            map.TryRemove(key, out _);
+            MirrorLaneRemoval(cacheKey, indexName, tableName, databaseName, rowId);
         }
     }
 
@@ -1346,6 +1492,8 @@ public partial class IndexManager : IDisposable
                 }
             }
         }
+
+        MirrorLaneRemoval(cacheKey, indexName, tableName, databaseName, rowId);
     }
 
     /// <summary>
@@ -1366,6 +1514,8 @@ public partial class IndexManager : IDisposable
                 }
             }
         }
+
+        MirrorLaneRemoval(cacheKey, indexName, tableName, databaseName, rowId);
     }
 
     /// <summary>
@@ -1441,7 +1591,8 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
+            // A partial secondary lane may miss older rows for the same key, so it answers nothing.
+            if (IsLaneComplete(cacheKey) && _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
             {
                 RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
                 rowIds = map.TryGetValue(key, out List<long>? rows)
@@ -1469,7 +1620,7 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
+            if (IsLaneComplete(cacheKey) && _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
             {
                 RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
                 rowIds = map.TryGetValue(key, out List<long>? rows)

@@ -37,6 +37,23 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
 
     [Theory]
     [MemberData(nameof(PersistentModes))]
+    public void SqlInsert_DuplicateOfPersistedKey_IsRejected_AfterNewKeyCreatesLane(StorageMode mode)
+    {
+        using (var first = Open(mode))
+        {
+            CreateBoards(first);
+            AssertOk(first.Execute("INSERT INTO Boards (Id, Name) VALUES (1, 'A')"));
+        }
+
+        using var second = Reopen(mode);
+        AssertOk(second.Execute("INSERT INTO Boards (Id, Name) VALUES (2, 'B')"));
+        AssertPrimaryKeyViolation(second.Execute("INSERT INTO Boards (Id, Name) VALUES (1, 'Dup')"));
+        Assert.Single(second.Execute("SELECT * FROM Boards WHERE Id = 1")[0].Data);
+        Assert.Equal(2, second.Execute("SELECT * FROM Boards")[0].Data.Count);
+    }
+
+    [Theory]
+    [MemberData(nameof(PersistentModes))]
     public void SqlInsert_KeyedReadAndForeignKey_Resolve_AfterRestart(StorageMode mode)
     {
         using (var first = Open(mode))
@@ -66,6 +83,25 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
         using var second = Reopen(mode);
         Assert.Single(second.Execute("SELECT * FROM Boards WHERE Id = 7")[0].Data);
         AssertPrimaryKeyViolation(second.Execute("INSERT INTO Boards (Id, Name) VALUES (7, 'Dup')"));
+    }
+
+    [Theory]
+    [MemberData(nameof(PersistentModes))]
+    public void TypedInsert_DuplicateOfPersistedKey_IsRejected_AfterNewKeyCreatesLane(StorageMode mode)
+    {
+        var schema = new ReactiveRowSchema("Id", "Name");
+        using (var first = Open(mode))
+        {
+            CreateBoards(first);
+            first.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("A")]);
+        }
+
+        using var second = Reopen(mode);
+        second.InsertTyped("Boards", schema, [CellValue.From(2), CellValue.From("B")]);
+
+        Assert.ThrowsAny<Exception>(() => second.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
+        Assert.ThrowsAny<Exception>(() => second.InsertTypedBatch("Boards", schema, [[CellValue.From(1), CellValue.From("DupBatch")]]));
+        Assert.Equal(2, second.Execute("SELECT * FROM Boards")[0].Data.Count);
     }
 
     [Theory]
@@ -106,6 +142,60 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
         Assert.Single(keyed.Data);
         Assert.Equal(9, Convert.ToInt32(keyed.Data[0]["Level"]));
         AssertPrimaryKeyViolation(second.Execute("INSERT INTO Players VALUES (1, 'Dup', 1)"));
+    }
+
+    [Theory]
+    [MemberData(nameof(PersistentModes))]
+    public void CompiledUpdate_OfPersistedKey_Applies_AfterNewKeyCreatesLane(StorageMode mode)
+    {
+        using (var first = Open(mode))
+        {
+            AssertOk(first.Execute("CREATE DATABASE PkDb"));
+            AssertOk(first.Execute("USE PkDb"));
+            AssertOk(first.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)"));
+            AssertOk(first.Execute("INSERT INTO Players VALUES (1, 'Ada', 5)"));
+        }
+
+        using var second = Reopen(mode);
+        AssertOk(second.Execute("INSERT INTO Players VALUES (2, 'Grace', 8)"));
+
+        // A lane holding only key 2 must not make the update of key 1 a silent zero-row no-op.
+        Assert.Equal(1, GeneratedGameQueries.SetPlayerLevel(second, 1, 9));
+        Assert.Equal(9, Convert.ToInt32(second.Execute("SELECT * FROM Players WHERE Id = 1")[0].Data.Single()["Level"]));
+    }
+
+    [Theory]
+    [MemberData(nameof(PersistentModes))]
+    public void SqlUpdate_ChangedPrimaryKey_IsConsistent_AfterRestart(StorageMode mode)
+    {
+        using (var first = Open(mode))
+        {
+            CreateBoards(first);
+            AssertOk(first.Execute("INSERT INTO Boards (Id, Name) VALUES (1, 'A')"));
+            AssertOk(first.Execute("UPDATE Boards SET Id = 5 WHERE Id = 1"));
+        }
+
+        using var second = Reopen(mode);
+        Assert.Empty(second.Execute("SELECT * FROM Boards WHERE Id = 1")[0].Data);
+        Assert.Single(second.Execute("SELECT * FROM Boards WHERE Id = 5")[0].Data);
+        AssertOk(second.Execute("INSERT INTO Boards (Id, Name) VALUES (1, 'Reused')"));
+        AssertPrimaryKeyViolation(second.Execute("INSERT INTO Boards (Id, Name) VALUES (5, 'Dup')"));
+    }
+
+    [Fact]
+    public void InMemorySnapshotRestore_RejectsDuplicateTypedKey()
+    {
+        var schema = new ReactiveRowSchema("Id", "Name");
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        CreateBoards(context);
+        context.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("A")]);
+
+        var snapshot = context.CreateSnapshot();
+        context.RestoreSnapshot(snapshot);
+
+        context.InsertTyped("Boards", schema, [CellValue.From(2), CellValue.From("B")]);
+        Assert.ThrowsAny<Exception>(() => context.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
+        Assert.Equal(2, context.Execute("SELECT * FROM Boards")[0].Data.Count);
     }
 
     public void Dispose()
