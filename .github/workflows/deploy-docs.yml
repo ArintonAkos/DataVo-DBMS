@@ -25,6 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ripgrep (used by the support-claims check)
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
 
