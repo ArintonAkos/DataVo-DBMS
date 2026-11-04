@@ -162,6 +162,13 @@ public partial class IndexManager : IDisposable
         {
             _persistenceMode = IndexPersistenceMode.None;
         }
+
+        // Lsm engines rebuild every index from the durable rows on open, so persisting index files
+        // would only add per-write I/O and a second copy that could drift from the data after a crash.
+        if (config?.StorageMode == StorageMode.Lsm)
+        {
+            _persistenceMode = IndexPersistenceMode.None;
+        }
     }
 
     /// <summary>

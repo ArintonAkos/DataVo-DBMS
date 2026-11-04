@@ -84,9 +84,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return config.StorageMode switch
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
-            StorageMode.Disk => new DiskStorageBackend(config.DiskStoragePath ?? "./datavo_data", config.SyncDiskWrites, config.IoSchedulerMode),
+            StorageMode.Disk => new DiskStorageBackend(config.ResolveDataDirectory()!, config.SyncDiskWrites, config.IoSchedulerMode),
             StorageMode.Lsm => new LsmStorageBackend(
-                config.DiskStoragePath ?? "./datavo_lsm_data",
+                config.ResolveDataDirectory()!,
                 config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer),
             StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),

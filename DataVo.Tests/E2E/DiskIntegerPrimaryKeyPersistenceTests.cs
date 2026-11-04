@@ -16,9 +16,7 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"datavo_pk_persist_{Guid.NewGuid():N}");
 
-    // Lsm is intentionally absent: an Lsm context does not yet persist its catalog or scalar indexes
-    // across restarts, so it cannot reopen a database at all. Add it here once that is supported.
-    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Disk };
+    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Disk, StorageMode.Lsm };
 
     [Theory]
     [MemberData(nameof(PersistentModes))]

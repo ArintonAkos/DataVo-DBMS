@@ -395,6 +395,22 @@ public class DataVoConfig
     public int WalCheckpointIntervalMs { get; set; } = 1000;
 
     /// <summary>
+    /// Resolves the directory that holds this engine's persistent state (data, catalog, and state
+    /// files), or <see langword="null"/> for storage modes that keep no on-disk directory.
+    /// </summary>
+    /// <returns>The configured or default data directory for Disk and Lsm modes; otherwise <see langword="null"/>.</returns>
+    public string? ResolveDataDirectory() => StorageMode switch
+    {
+        StorageMode.Disk => DiskStoragePath ?? DefaultDiskDirectory,
+        StorageMode.Lsm => DiskStoragePath ?? DefaultLsmDirectory,
+        _ => null,
+    };
+
+    internal const string DefaultDiskDirectory = "./datavo_data";
+
+    internal const string DefaultLsmDirectory = "./datavo_lsm_data";
+
+    /// <summary>
     /// Resolves the effective WAL file path for the current configuration.
     /// </summary>
     /// <returns>An absolute or base-directory-relative path to the WAL file.</returns>
@@ -405,9 +421,7 @@ public class DataVoConfig
             return WalFilePath;
         }
 
-        string baseDirectory = StorageMode == StorageMode.Disk
-            ? (DiskStoragePath ?? "./datavo_data")
-            : Directory.GetCurrentDirectory();
+        string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, WalFilePath);
     }
@@ -423,9 +437,7 @@ public class DataVoConfig
             return TransactionIdStateFilePath;
         }
 
-        string baseDirectory = StorageMode == StorageMode.Disk
-            ? (DiskStoragePath ?? "./datavo_data")
-            : Directory.GetCurrentDirectory();
+        string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, TransactionIdStateFilePath);
     }
@@ -441,9 +453,7 @@ public class DataVoConfig
             return CheckpointStateFilePath;
         }
 
-        string baseDirectory = StorageMode == StorageMode.Disk
-            ? (DiskStoragePath ?? "./datavo_data")
-            : Directory.GetCurrentDirectory();
+        string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, CheckpointStateFilePath);
     }

@@ -26,12 +26,7 @@ internal static class DataVoConfigSharing
     /// </summary>
     internal static string? ResolvePersistentRoot(DataVoConfig config)
     {
-        string? root = config.StorageMode switch
-        {
-            StorageMode.Disk => config.DiskStoragePath ?? "./datavo_data",
-            StorageMode.Lsm => config.DiskStoragePath ?? "./datavo_lsm_data",
-            _ => null,
-        };
+        string? root = config.ResolveDataDirectory();
 
         return root is null ? null : TrimTrailingSeparators(Path.GetFullPath(root));
     }

@@ -20,8 +20,10 @@ internal sealed class CatalogStore
 
     public CatalogStore(DataVoConfig config)
     {
-        _persistToDisk = config.StorageMode == StorageMode.Disk;
-        _catalogDirectory = _persistToDisk ? (config.DiskStoragePath ?? "./datavo_data") : null;
+        // Every storage mode with a data directory (Disk, Lsm) must persist its schema, or a reopened
+        // engine would find the data files but no tables.
+        _catalogDirectory = config.ResolveDataDirectory();
+        _persistToDisk = _catalogDirectory is not null;
         _catalogFilePath = _persistToDisk ? Path.Combine(_catalogDirectory!, "Catalog.xml") : null;
         _doc = new XDocument(new XElement("Databases"));
 

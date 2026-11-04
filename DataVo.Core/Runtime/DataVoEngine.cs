@@ -70,7 +70,7 @@ public sealed class DataVoEngine : IDisposable
                 intervalMs: Config.WalCheckpointIntervalMs);
         }
 
-        if (Config.StorageMode == StorageMode.Disk)
+        if (Config.StorageMode is StorageMode.Disk or StorageMode.Lsm)
         {
             _transactionIdStateStore = new TransactionIdStateStore(Config);
             long? persistedHighWaterMark = _transactionIdStateStore.TryReadHighWaterMark();
@@ -237,6 +237,13 @@ public sealed class DataVoEngine : IDisposable
         else if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
         {
             new RecoveryManager(config, engine).Recover();
+        }
+
+        if (config.StorageMode == StorageMode.Lsm)
+        {
+            // Lsm indexes are not persisted: they are derived from the durable rows (SSTables + table
+            // WALs) on open, so they can never disagree with the data after a crash.
+            engine.RebuildAllIndexesFromCatalog();
         }
 
         return engine;
