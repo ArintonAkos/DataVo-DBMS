@@ -1060,11 +1060,77 @@ public partial class IndexManager : IDisposable
             var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.Insert(value, rowId);
+            MirrorScalarEntryIntoLanesNoLock(cacheKey, value, rowId);
             MarkDirtyNoLock(cacheKey);
             FlushIfImmediate(cacheKey);
         }
 
         TrackMutation(GetCacheKey(indexName, tableName, databaseName));
+    }
+
+    /// <summary>
+    /// Keeps existing key fast lanes complete when a key arrives through the generic scalar path (for
+    /// example a SQL insert into a table whose lanes were created by typed inserts or seeded at index
+    /// creation). A key the lane cannot represent drops that index's lanes, which callers then treat
+    /// as absent and fall back to the scalar index.
+    /// </summary>
+    private void MirrorScalarEntryIntoLanesNoLock(IndexCacheKey cacheKey, string value, long rowId)
+    {
+        bool hasIntegerLane = _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? integerPrimary);
+        bool hasIntegerSecondary = _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? integerSecondary);
+        bool hasGuidLane = _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? guidPrimary);
+        bool hasGuidSecondary = _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? guidSecondary);
+        if (!hasIntegerLane && !hasIntegerSecondary && !hasGuidLane && !hasGuidSecondary)
+        {
+            return;
+        }
+
+        if ((hasIntegerLane || hasIntegerSecondary) && TryParseIntegerPrimaryKey(value, out long integerKey))
+        {
+            integerPrimary?.Set(integerKey, rowId);
+            if (integerSecondary is not null)
+            {
+                AddDistinctRowId(integerSecondary, integerKey, rowId);
+            }
+
+            return;
+        }
+
+        if ((hasGuidLane || hasGuidSecondary) && TryParseGuidKey(value, out Guid guidKey))
+        {
+            if (guidPrimary is not null)
+            {
+                guidPrimary[guidKey] = rowId;
+            }
+
+            if (guidSecondary is not null)
+            {
+                AddDistinctRowId(guidSecondary, guidKey, rowId);
+            }
+
+            return;
+        }
+
+        _integerPrimaryKeyMaps.TryRemove(cacheKey, out _);
+        _integerIndexMaps.Remove(cacheKey);
+        _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
+        _guidIndexMaps.Remove(cacheKey);
+        _completeLaneIndexes.TryRemove(cacheKey, out _);
+    }
+
+    private static void AddDistinctRowId<TKey>(Dictionary<TKey, List<long>> lane, TKey key, long rowId)
+        where TKey : notnull
+    {
+        if (!lane.TryGetValue(key, out List<long>? rowIds))
+        {
+            lane[key] = [rowId];
+            return;
+        }
+
+        if (!rowIds.Contains(rowId))
+        {
+            rowIds.Add(rowId);
+        }
     }
 
     /// <summary>
@@ -1089,6 +1155,7 @@ public partial class IndexManager : IDisposable
             {
                 (string value, long rowId) = entries[i];
                 index.Insert(value, rowId);
+                MirrorScalarEntryIntoLanesNoLock(cacheKey, value, rowId);
             }
 
             MarkDirtyNoLock(cacheKey);
