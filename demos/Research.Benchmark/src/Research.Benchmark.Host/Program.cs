@@ -962,8 +962,18 @@ static BenchmarkMetrics RunSpaceAndRecovery(
             engine.OpenExisting();
             recoveryStopwatch.Stop();
 
+            // A recovery that lost data must fail the run instead of reporting a fast time. Engines may
+            // open lazily, so the first read's latency is logged as well (it is not part of the table).
+            var firstReadStopwatch = Stopwatch.StartNew();
+            if (engine.Read(records) is null)
+            {
+                throw new InvalidOperationException($"{engine.Name}: record {records} is missing after recovery.");
+            }
+
+            firstReadStopwatch.Stop();
+
             Console.Error.WriteLine(
-                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalMilliseconds:N1}ms | size {diskSizeMb:N2} MB | recovery {recoveryStopwatch.Elapsed.TotalMilliseconds:N1}ms");
+                $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: insert {insertStopwatch.Elapsed.TotalMilliseconds:N1}ms | size {diskSizeMb:N2} MB | recovery {recoveryStopwatch.Elapsed.TotalMilliseconds:N1}ms | first read after recovery {firstReadStopwatch.Elapsed.TotalMilliseconds:N1}ms");
 
             return new BenchmarkMetrics(
                 engine.Name,

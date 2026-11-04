@@ -61,9 +61,17 @@ public sealed class DataVoWhitepaperBenchmarkEngine : IWhitepaperBenchmarkEngine
             EnableZeroAllocCompiledUpdate = true,
         });
 
-        ExecuteOk("CREATE DATABASE WhitepaperBenchmark");
+        // Reopening must find the persisted schema; recreating it would mask a catalog that was lost.
+        if (fresh)
+        {
+            ExecuteOk("CREATE DATABASE WhitepaperBenchmark");
+        }
+
         ExecuteOk("USE WhitepaperBenchmark");
-        ExecuteOk("CREATE TABLE Records (Id INT PRIMARY KEY, Name VARCHAR(40), Value INT, Score FLOAT)");
+        if (fresh)
+        {
+            ExecuteOk("CREATE TABLE Records (Id INT PRIMARY KEY, Name VARCHAR(40), Value INT, Score FLOAT)");
+        }
         _lookup = DataVoCompiledQuery.PrepareSelectSingleTyped(Ctx(), LookupPlan, RowMapper);
     }
 
