@@ -35,6 +35,8 @@ public sealed class MemTable : IDisposable
     private ulong _rngState = 0x9E3779B97F4A7C15UL; // fixed seed → deterministic structure for tests.
     private bool _frozen;
     private bool _disposed;
+    private ulong _minSequence = ulong.MaxValue;
+    private ulong _maxSequence;
 
     /// <summary>Creates an empty MemTable whose arena uses <paramref name="slabSize"/>-byte slabs.</summary>
     public MemTable(int slabSize = 1 << 20)
@@ -52,6 +54,12 @@ public sealed class MemTable : IDisposable
     /// <summary>Whether the MemTable has been frozen (no further writes accepted).</summary>
     public bool IsFrozen => _frozen;
 
+    /// <summary>Smallest sequence number inserted, or <see langword="null"/> when empty.</summary>
+    internal ulong? MinSequence => Count == 0 ? null : _minSequence;
+
+    /// <summary>Largest sequence number inserted, or <see langword="null"/> when empty.</summary>
+    internal ulong? MaxSequence => Count == 0 ? null : _maxSequence;
+
     internal static int ForwardOffsetForTesting => ForwardOffset;
 
     /// <summary>
@@ -64,6 +72,16 @@ public sealed class MemTable : IDisposable
         if (_frozen)
         {
             throw new InvalidOperationException("Cannot Put into a frozen MemTable.");
+        }
+
+        if (seqno < _minSequence)
+        {
+            _minSequence = seqno;
+        }
+
+        if (seqno > _maxSequence)
+        {
+            _maxSequence = seqno;
         }
 
         int height = RandomHeight();

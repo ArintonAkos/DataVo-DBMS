@@ -17,6 +17,8 @@ public sealed class LsmCommitLogTests : IDisposable
         batch.Delete("Db", "Players", 2);
         batch.Put("Db", "Équipes", 7, []);
         batch.Put("Other", "T", long.MaxValue, Enumerable.Range(0, 2_000_000).Select(i => (byte)i).ToArray());
+        batch.DropTable("Db", "Old");
+        batch.DropDatabase("Gone");
 
         byte[] payload = new byte[LsmCommitBatchCodec.MeasureSize(batch)];
         int written = LsmCommitBatchCodec.Write(payload, batch);
@@ -53,6 +55,24 @@ public sealed class LsmCommitLogTests : IDisposable
         byte[] exact = payload[..^1];
         exact[LsmCommitBatchCodec.FirstOperationOffset] = 99; // operation kind byte
         Assert.False(LsmCommitBatchCodec.TryRead(exact, out _));
+    }
+
+    [Fact]
+    public void Batch_CollapsesRepeatedRowOperations_KeepingTheLast()
+    {
+        var batch = new LsmCommitBatch();
+        batch.Put("Db", "T", 1, [1]);
+        batch.Put("Db", "T", 2, [2]);
+        batch.Delete("Db", "T", 1);
+        batch.Put("Db", "U", 1, [9]);
+        batch.Put("Db", "T", 2, [3]);
+
+        batch.CollapseToLatestPerRow();
+
+        Assert.Equal(
+            [(LsmCommitOperationKind.Delete, "T", 1L), (LsmCommitOperationKind.Put, "U", 1L), (LsmCommitOperationKind.Put, "T", 2L)],
+            batch.Operations.Select(o => (o.Kind, o.Table, o.RowId)));
+        Assert.Equal([3], batch.Operations[^1].Value);
     }
 
     [Fact]

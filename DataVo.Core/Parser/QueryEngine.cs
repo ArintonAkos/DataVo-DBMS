@@ -132,7 +132,13 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
         {
             try
             {
-                QueryResult result = runnable.Dequeue().Perform(session);
+                QueryResult result;
+                // One statement (or one COMMIT, which applies a whole transaction) is one atomic write unit.
+                using (_engine.StorageContext.BeginWriteBatch())
+                {
+                    result = runnable.Dequeue().Perform(session);
+                }
+
                 response.Add(result);
                 if (diagnosticsBuilder is not null)
                 {

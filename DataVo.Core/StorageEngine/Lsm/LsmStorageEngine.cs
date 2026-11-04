@@ -21,9 +21,21 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private static readonly byte[] NextRowIdMetadataKey =
         [0x5F, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x76, 0x6F, 0x5F, 0x6E, 0x65, 0x78, 0x74, 0x5F, 0x72, 0x6F, 0x77, 0x5F, 0x69, 0x64];
 
+    internal const string CommitLogFileName = "commit.wal";
+
     private readonly string _storageDirectory;
     private readonly LsmWalDurabilityMode _walDurabilityMode;
     private readonly ConcurrentDictionary<(string DatabaseName, string TableName), TableState> _tables = new();
+    private readonly LsmCommitLog _commitLog;
+
+    // Serializes "append frame + apply to MemTables" so every table's MemTables always hold a
+    // contiguous LSN prefix; that is what makes a table's highest SSTable sequence its flushed point.
+    private readonly object _commitGate = new();
+    private readonly object _pruneGate = new();
+    private readonly AsyncLocal<PendingWrite?> _ambientWrite = new();
+    private long _appliedLsn;   // every frame up to here is applied to MemTables
+    private long _prunedThrough;
+    private bool _recovering;
     private bool _disposed;
 
     /// <summary>Creates an LSM storage engine rooted at <paramref name="storageDirectory"/>.</summary>
@@ -36,6 +48,39 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;
         Directory.CreateDirectory(_storageDirectory);
+        _commitLog = new LsmCommitLog(Path.Combine(_storageDirectory, CommitLogFileName), walDurabilityMode);
+
+        _recovering = true;
+        try
+        {
+            OpenExistingTables();
+            ReplayCommitLog();
+        }
+        finally
+        {
+            _recovering = false;
+        }
+
+        _appliedLsn = _commitLog.LastLsn;
+    }
+
+    /// <summary>
+    /// Groups every mutation made by the current flow (one SQL statement or one transaction commit) into
+    /// a single commit-log frame, written and made durable when the returned scope is disposed. Scopes
+    /// nest; only the outermost one commits. Mutations made outside a scope commit individually.
+    /// </summary>
+    internal IDisposable BeginWriteBatch()
+    {
+        PendingWrite? current = _ambientWrite.Value;
+        if (current is not null)
+        {
+            current.Depth++;
+            return new WriteBatchScope(this, current);
+        }
+
+        var pending = new PendingWrite();
+        _ambientWrite.Value = pending;
+        return new WriteBatchScope(this, pending);
     }
 
     /// <summary>
@@ -47,28 +92,19 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
 
-        long insertedRowId;
-        LsmWalDurabilityTicket ticket;
+        long rowId;
         lock (state.SyncRoot)
         {
-            long rowId = state.NextRowId++;
-            ulong seqno = state.NextSeqno++;
-            Span<byte> userKey = stackalloc byte[UserKeySize];
-            EncodeRowId(rowId, userKey);
-            ticket = state.Table.PutDeferDurability(userKey, seqno, rowBytes);
-            ticket = state.Table.PutDeferDurability(
-                NextRowIdMetadataKey,
-                state.NextSeqno++,
-                EncodeNextRowIdMetadata(state.NextRowId));
+            rowId = state.NextRowId++;
             state.LatestRows.Set(rowId, rowBytes);
-            insertedRowId = rowId;
+            pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
+            pending.Touch(state, databaseName, tableName);
         }
 
-        // Group commit: durability is awaited outside the table lock so concurrent strict-mode
-        // writers share one fsync instead of serializing one fsync per operation.
-        ticket.Wait();
-        return insertedRowId;
+        CompleteWrite(pending, ownsWrite);
+        return rowId;
     }
 
     /// <summary>
@@ -80,47 +116,25 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowsBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
 
-        List<long> insertedRowIds;
-        LsmWalDurabilityTicket ticket;
+        var rowIds = new List<long>(rowsBytes.Count);
         lock (state.SyncRoot)
         {
-            var rowIds = new List<long>(rowsBytes.Count);
-            LsmBatchRowPutEntry[] batch = ArrayPool<LsmBatchRowPutEntry>.Shared.Rent(rowsBytes.Count);
-            try
+            foreach (byte[] rowBytes in rowsBytes)
             {
-                int count = 0;
-                foreach (byte[] rowBytes in rowsBytes)
-                {
-                    DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
-                    long rowId = state.NextRowId++;
-                    ulong seqno = state.NextSeqno++;
-                    batch[count++] = new LsmBatchRowPutEntry(rowId, seqno, rowBytes);
-                    rowIds.Add(rowId);
-                }
-
-                ReadOnlySpan<LsmBatchRowPutEntry> entries = batch.AsSpan(0, count);
-                ticket = state.Table.PutRowIdBatch(entries);
-                ticket = state.Table.PutDeferDurability(
-                    NextRowIdMetadataKey,
-                    state.NextSeqno++,
-                    EncodeNextRowIdMetadata(state.NextRowId));
-                foreach (LsmBatchRowPutEntry entry in entries)
-                {
-                    state.LatestRows.Set(entry.RowId, entry.Value);
-                }
-
-                insertedRowIds = rowIds;
+                DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
+                long rowId = state.NextRowId++;
+                state.LatestRows.Set(rowId, rowBytes);
+                pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
+                rowIds.Add(rowId);
             }
-            finally
-            {
-                // Entries hold row-buffer references; clear so the pool doesn't pin them.
-                ArrayPool<LsmBatchRowPutEntry>.Shared.Return(batch, clearArray: true);
-            }
+
+            pending.Touch(state, databaseName, tableName);
         }
 
-        ticket.Wait();
-        return insertedRowIds;
+        CompleteWrite(pending, ownsWrite);
+        return rowIds;
     }
 
     /// <summary>
@@ -172,23 +186,19 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     public void DeleteRow(string databaseName, string tableName, long rowId)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
 
-        LsmWalDurabilityTicket ticket;
         lock (state.SyncRoot)
         {
-            if (state.LatestRows.TryGet(rowId, out _) != LatestRowLookup.Live)
+            if (state.LatestRows.TryGet(rowId, out _) == LatestRowLookup.Live)
             {
-                return;
+                state.LatestRows.SetTombstone(rowId);
+                pending.Batch.Delete(databaseName, tableName, rowId);
+                pending.Touch(state, databaseName, tableName);
             }
-
-            ulong seqno = state.NextSeqno++;
-            Span<byte> userKey = stackalloc byte[UserKeySize];
-            EncodeRowId(rowId, userKey);
-            ticket = state.Table.DeleteDeferDurability(userKey, seqno);
-            state.LatestRows.SetTombstone(rowId);
         }
 
-        ticket.Wait();
+        CompleteWrite(pending, ownsWrite);
     }
 
     bool IFixedWidthPatchStorageEngine.TryPatchFixedWidthRow(
@@ -205,34 +215,36 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         TableState state = GetOrCreateTable(databaseName, tableName);
-        LsmWalDurabilityTicket ticket;
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
+        bool patched = false;
         lock (state.SyncRoot)
         {
-            if (state.LatestRows.TryGet(rowId, out byte[] latest) != LatestRowLookup.Live)
+            if (state.LatestRows.TryGet(rowId, out byte[] latest) == LatestRowLookup.Live)
             {
-                return false;
-            }
-
-            // Copy-on-write: published row buffers are immutable so lock-free readers can never
-            // observe a half-applied patch; the new version becomes visible in one reference publish.
-            byte[] rowBytes = latest.ToArray();
-            for (int i = 0; i < ordinals.Length; i++)
-            {
-                if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], values[i]))
+                // Copy-on-write: published row buffers are immutable so lock-free readers can never
+                // observe a half-applied patch; the new version becomes visible in one reference publish.
+                byte[] rowBytes = latest.ToArray();
+                patched = true;
+                for (int i = 0; i < ordinals.Length; i++)
                 {
-                    return false;
+                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], values[i]))
+                    {
+                        patched = false;
+                        break;
+                    }
+                }
+
+                if (patched)
+                {
+                    state.LatestRows.Set(rowId, rowBytes);
+                    pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
+                    pending.Touch(state, databaseName, tableName);
                 }
             }
-
-            ulong seqno = state.NextSeqno++;
-            Span<byte> userKey = stackalloc byte[UserKeySize];
-            EncodeRowId(rowId, userKey);
-            ticket = state.Table.PutDeferDurability(userKey, seqno, rowBytes);
-            state.LatestRows.Set(rowId, rowBytes);
         }
 
-        ticket.Wait();
-        return true;
+        CompleteWrite(pending, ownsWrite);
+        return patched;
     }
 
     int IFixedWidthPatchStorageEngine.TryPatchFixedWidthRows(
@@ -247,59 +259,45 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             return 0;
         }
 
+        if (ordinals.Length > 2)
+        {
+            throw new NotSupportedException("LSM fixed-width batch patch currently supports up to two assignments.");
+        }
+
         TableState state = GetOrCreateTable(databaseName, tableName);
-        int patched;
-        LsmWalDurabilityTicket pendingTicket;
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
+        int patched = 0;
         lock (state.SyncRoot)
         {
-            if (ordinals.Length > 2)
+            foreach (FixedWidthPatchOperation operation in operations)
             {
-                throw new NotSupportedException("LSM fixed-width batch patch currently supports up to two assignments.");
-            }
-
-            LsmBatchRowPutEntry[] batch = ArrayPool<LsmBatchRowPutEntry>.Shared.Rent(operations.Count);
-            try
-            {
-                int count = 0;
-                foreach (FixedWidthPatchOperation operation in operations)
+                if (state.LatestRows.TryGet(operation.RowId, out byte[] latest) != LatestRowLookup.Live)
                 {
-                    if (state.LatestRows.TryGet(operation.RowId, out byte[] latest) != LatestRowLookup.Live)
-                    {
-                        continue;
-                    }
-
-                    // Copy-on-write, same as the single-row patch: keep published buffers immutable.
-                    byte[] rowBytes = latest.ToArray();
-                    for (int i = 0; i < ordinals.Length; i++)
-                    {
-                        if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
-                        {
-                            throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
-                        }
-                    }
-
-                    ulong seqno = state.NextSeqno++;
-                    batch[count++] = new LsmBatchRowPutEntry(operation.RowId, seqno, rowBytes);
+                    continue;
                 }
 
-                ReadOnlySpan<LsmBatchRowPutEntry> entries = batch.AsSpan(0, count);
-                LsmWalDurabilityTicket ticket = state.Table.PutRowIdBatch(entries);
-                foreach (LsmBatchRowPutEntry entry in entries)
+                // Copy-on-write, same as the single-row patch: keep published buffers immutable.
+                byte[] rowBytes = latest.ToArray();
+                for (int i = 0; i < ordinals.Length; i++)
                 {
-                    state.LatestRows.Set(entry.RowId, entry.Value);
+                    if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, columns, ordinals[i], operation.GetValue(i)))
+                    {
+                        throw new InvalidOperationException("LSM fixed-width batch patch could not overwrite a target cell.");
+                    }
                 }
 
-                patched = count;
-                pendingTicket = ticket;
+                state.LatestRows.Set(operation.RowId, rowBytes);
+                pending.Batch.Put(databaseName, tableName, operation.RowId, rowBytes);
+                patched++;
             }
-            finally
+
+            if (patched > 0)
             {
-                // Entries hold row-buffer references; clear so the pool doesn't pin them.
-                ArrayPool<LsmBatchRowPutEntry>.Shared.Return(batch, clearArray: true);
+                pending.Touch(state, databaseName, tableName);
             }
         }
 
-        pendingTicket.Wait();
+        CompleteWrite(pending, ownsWrite);
         return patched;
     }
 
@@ -307,6 +305,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     public void DropTable(string databaseName, string tableName)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+        var marker = new LsmCommitBatch();
+        marker.DropTable(databaseName, tableName);
+        CommitMarker(marker);
+        DropTableCore(databaseName, tableName);
+    }
+
+    private void DropTableCore(string databaseName, string tableName)
+    {
         (string DatabaseName, string TableName) key = (databaseName, tableName);
         if (_tables.TryRemove(key, out TableState? state))
         {
@@ -327,6 +333,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     public void DropDatabase(string databaseName)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+        var marker = new LsmCommitBatch();
+        marker.DropDatabase(databaseName);
+        CommitMarker(marker);
+        DropDatabaseCore(databaseName);
+    }
+
+    private void DropDatabaseCore(string databaseName)
+    {
         foreach ((string DatabaseName, string TableName) key in _tables.Keys)
         {
             if (string.Equals(key.DatabaseName, databaseName, StringComparison.Ordinal)
@@ -373,11 +387,15 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             lock (state.SyncRoot)
             {
-                state.Dispose();
+                state.Dispose(); // flushes the active MemTable to an SSTable
             }
         }
 
         _tables.Clear();
+
+        // Every applied frame is now in SSTables, so a clean shutdown leaves an empty commit log.
+        _commitLog.PruneThrough(Volatile.Read(ref _appliedLsn));
+        _commitLog.Dispose();
     }
 
     private TableState GetOrCreateTable(string databaseName, string tableName)
@@ -401,23 +419,26 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         Directory.CreateDirectory(tableDirectory);
 
         var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
-        var table = new LsmTable(
-            tableDirectory,
-            manifest,
-            Path.Combine(tableDirectory, "active.wal"),
-            _walDurabilityMode);
+        MigrateLegacyTableWal(tableDirectory, manifest);
+
+        // No per-table WAL: durability comes from the shared commit log, and this table's MemTables
+        // hold only mutations whose frames are already in it.
+        var table = new LsmTable(tableDirectory, manifest);
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;
         }
+
         var registry = new LsmFileRegistry(tableDirectory, manifest);
         table.CompactionRegistry = registry;
+        table.BeforeFlushDurabilityBarrier = maxSequence => _commitLog.EnsureDurableThrough(checked((long)maxSequence));
+        table.AfterFlush = PruneCommitLog;
         var state = new TableState(tableDirectory, manifest, table, registry);
 
-        state.Table.FlushActiveMemTable();
         Dictionary<long, LatestRowVersion> latestRows = RebuildLatestRowsFromSstables(
             state,
-            out long persistedNextRowId);
+            out long persistedNextRowId,
+            out ulong maxSequence);
         if (persistedNextRowId > state.NextRowId)
         {
             state.NextRowId = persistedNextRowId;
@@ -430,11 +451,6 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 state.NextRowId = rowId + 1;
             }
 
-            if (version.Sequence >= state.NextSeqno)
-            {
-                state.NextSeqno = version.Sequence + 1;
-            }
-
             if (version.IsTombstone)
             {
                 state.LatestRows.SetTombstone(rowId);
@@ -445,7 +461,267 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             }
         }
 
+        // Everything in SSTables is durable; only commit-log frames above this point still need replay.
+        state.FlushedLsn = checked((long)maxSequence);
         return state;
+    }
+
+    /// <summary>
+    /// Directories written before the shared commit log kept a WAL per table. Replay those segments once
+    /// through a WAL-backed table, flush them to SSTables, and remove them, so nothing is lost on upgrade.
+    /// </summary>
+    private void MigrateLegacyTableWal(string tableDirectory, LsmManifest manifest)
+    {
+        if (!Directory.EnumerateFiles(tableDirectory, "active*.wal").Any())
+        {
+            return;
+        }
+
+        using var legacy = new LsmTable(tableDirectory, manifest, Path.Combine(tableDirectory, "active.wal"), _walDurabilityMode);
+        legacy.FlushActiveMemTable();
+    }
+
+    /// <summary>Opens every table directory on disk, so the LSN floor covers all persisted sequence numbers.</summary>
+    private void OpenExistingTables()
+    {
+        long floor = 0;
+        foreach (string databaseDirectory in Directory.EnumerateDirectories(_storageDirectory))
+        {
+            foreach (string tableDirectory in Directory.EnumerateDirectories(databaseDirectory))
+            {
+                if (!File.Exists(Path.Combine(tableDirectory, "MANIFEST")))
+                {
+                    continue;
+                }
+
+                TableState state = GetOrCreateTable(Path.GetFileName(databaseDirectory), Path.GetFileName(tableDirectory));
+                floor = Math.Max(floor, state.FlushedLsn);
+            }
+        }
+
+        _commitLog.EnsureLsnAtLeast(floor);
+    }
+
+    /// <summary>
+    /// Re-applies every commit-log frame a table has not flushed yet. An operation applies only when its
+    /// LSN is above the flushed point of the table directory now on disk: that skips work already in
+    /// SSTables and keeps an old drop marker from deleting a table that was re-created after it.
+    /// </summary>
+    private void ReplayCommitLog()
+    {
+        Span<byte> userKey = stackalloc byte[UserKeySize];
+        foreach (LsmCommitFrame frame in _commitLog.ReadAll())
+        {
+            ulong sequence = checked((ulong)frame.Lsn);
+            var touched = new HashSet<TableState>();
+            foreach (LsmCommitOperation operation in frame.Operations)
+            {
+                switch (operation.Kind)
+                {
+                    case LsmCommitOperationKind.DropTable:
+                        if (frame.Lsn > GetOrCreateTable(operation.Database, operation.Table).FlushedLsn)
+                        {
+                            DropTableCore(operation.Database, operation.Table);
+                        }
+
+                        continue;
+
+                    case LsmCommitOperationKind.DropDatabase:
+                        ReplayDropDatabase(operation.Database, frame.Lsn);
+                        continue;
+                }
+
+                TableState state = GetOrCreateTable(operation.Database, operation.Table);
+                if (frame.Lsn <= state.FlushedLsn)
+                {
+                    continue;
+                }
+
+                EncodeRowId(operation.RowId, userKey);
+                if (operation.Kind == LsmCommitOperationKind.Put)
+                {
+                    state.Table.Put(userKey, sequence, operation.Value);
+                    state.LatestRows.Set(operation.RowId, operation.Value);
+                }
+                else
+                {
+                    state.Table.Delete(userKey, sequence);
+                    state.LatestRows.SetTombstone(operation.RowId);
+                }
+
+                if (operation.RowId >= state.NextRowId)
+                {
+                    state.NextRowId = operation.RowId + 1;
+                }
+
+                touched.Add(state);
+            }
+
+            foreach (TableState state in touched)
+            {
+                state.Table.Put(NextRowIdMetadataKey, sequence, EncodeNextRowIdMetadata(state.NextRowId));
+            }
+        }
+    }
+
+    private void ReplayDropDatabase(string databaseName, long lsn)
+    {
+        string databaseDirectory = GetDatabaseDirectory(databaseName);
+        if (!Directory.Exists(databaseDirectory))
+        {
+            return;
+        }
+
+        foreach (string tableDirectory in Directory.EnumerateDirectories(databaseDirectory))
+        {
+            string tableName = Path.GetFileName(tableDirectory);
+            if (lsn > GetOrCreateTable(databaseName, tableName).FlushedLsn)
+            {
+                DropTableCore(databaseName, tableName);
+            }
+        }
+
+        if (!Directory.EnumerateFileSystemEntries(databaseDirectory).Any())
+        {
+            Directory.Delete(databaseDirectory);
+        }
+    }
+
+    // A write outside any statement scope commits on its own; reuse one buffer per thread for it so
+    // single-call writes (typed inserts, compiled updates) do not allocate batch objects every time.
+    [ThreadStatic]
+    private static PendingWrite? t_reusableWrite;
+
+    private PendingWrite AcquireWrite(out bool ownsWrite)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+        PendingWrite? ambient = _ambientWrite.Value;
+        ownsWrite = ambient is null;
+        if (ambient is not null)
+        {
+            return ambient;
+        }
+
+        PendingWrite pending = t_reusableWrite ?? new PendingWrite();
+        t_reusableWrite = null;
+        return pending;
+    }
+
+    private void CompleteWrite(PendingWrite pending, bool ownsWrite)
+    {
+        if (!ownsWrite)
+        {
+            return;
+        }
+
+        try
+        {
+            Commit(pending);
+        }
+        finally
+        {
+            pending.Reset();
+            t_reusableWrite = pending;
+        }
+    }
+
+    /// <summary>
+    /// Writes a pending batch as one commit-log frame and applies it to the MemTables, then waits for
+    /// durability outside the gate so concurrent committers share one fsync.
+    /// </summary>
+    private void Commit(PendingWrite pending)
+    {
+        if (pending.Batch.IsEmpty)
+        {
+            return;
+        }
+
+        pending.Batch.CollapseToLatestPerRow();
+        LsmCommitTicket ticket;
+        lock (_commitGate)
+        {
+            ticket = _commitLog.Append(pending.Batch);
+            ApplyToMemTables(pending, checked((ulong)ticket.Lsn));
+            Volatile.Write(ref _appliedLsn, ticket.Lsn);
+        }
+
+        pending.Reset();
+        ticket.Wait();
+    }
+
+    private void ApplyToMemTables(PendingWrite pending, ulong sequence)
+    {
+        Span<byte> userKey = stackalloc byte[UserKeySize];
+        foreach (LsmCommitOperation operation in pending.Batch.Operations)
+        {
+            if (!_tables.TryGetValue((operation.Database, operation.Table), out TableState? state))
+            {
+                continue; // dropped while the statement was running
+            }
+
+            EncodeRowId(operation.RowId, userKey);
+            if (operation.Kind == LsmCommitOperationKind.Put)
+            {
+                state.Table.Put(userKey, sequence, operation.Value);
+            }
+            else
+            {
+                state.Table.Delete(userKey, sequence);
+            }
+        }
+
+        foreach ((TableState state, _, _) in pending.TouchedTables)
+        {
+            state.Table.Put(NextRowIdMetadataKey, sequence, EncodeNextRowIdMetadata(state.ReadNextRowId()));
+        }
+    }
+
+    // Drop markers are durable before any file is deleted, so a crash mid-drop replays the drop.
+    private void CommitMarker(LsmCommitBatch marker)
+    {
+        LsmCommitTicket ticket;
+        lock (_commitGate)
+        {
+            ticket = _commitLog.Append(marker);
+            Volatile.Write(ref _appliedLsn, ticket.Lsn);
+        }
+
+        _commitLog.EnsureDurableThrough(ticket.Lsn);
+    }
+
+    /// <summary>
+    /// Drops commit-log frames whose effects are in SSTables. Reads the applied watermark first: any frame
+    /// at or below it is in some MemTable, so a table still holding it reports it as unflushed.
+    /// Never blocks on the commit gate, because it runs on flush threads that writers may be waiting for.
+    /// </summary>
+    private void PruneCommitLog()
+    {
+        if (_recovering || !Monitor.TryEnter(_pruneGate))
+        {
+            return;
+        }
+
+        try
+        {
+            long watermark = Volatile.Read(ref _appliedLsn);
+            foreach (TableState state in _tables.Values)
+            {
+                if (state.Table.OldestUnflushedSequence is ulong oldest)
+                {
+                    watermark = Math.Min(watermark, checked((long)oldest) - 1);
+                }
+            }
+
+            if (watermark > _prunedThrough)
+            {
+                _commitLog.PruneThrough(watermark);
+                _prunedThrough = watermark;
+            }
+        }
+        finally
+        {
+            Monitor.Exit(_pruneGate);
+        }
     }
 
     private string GetDatabaseDirectory(string databaseName) =>
@@ -466,14 +742,17 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
     private static Dictionary<long, LatestRowVersion> RebuildLatestRowsFromSstables(
         TableState state,
-        out long persistedNextRowId)
+        out long persistedNextRowId,
+        out ulong maxSequence)
     {
         var latest = new Dictionary<long, LatestRowVersion>();
         persistedNextRowId = 1;
+        maxSequence = 0;
         ulong persistedNextRowIdSeqno = 0;
         foreach (SstableEntry entry in ReadAllSstableEntries(state))
         {
             ulong seqno = InternalKey.Sequence(entry.InternalKey);
+            maxSequence = Math.Max(maxSequence, seqno);
             ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
             if (IsNextRowIdMetadataKey(userKey))
             {
@@ -655,6 +934,61 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         return nextRowId;
     }
 
+    private sealed class PendingWrite
+    {
+        private readonly List<(TableState State, string Database, string Table)> _touched = [];
+
+        public LsmCommitBatch Batch { get; } = new();
+
+        public int Depth { get; set; } = 1;
+
+        public IReadOnlyList<(TableState State, string Database, string Table)> TouchedTables => _touched;
+
+        public void Touch(TableState state, string database, string table)
+        {
+            foreach ((TableState existing, _, _) in _touched)
+            {
+                if (ReferenceEquals(existing, state))
+                {
+                    return;
+                }
+            }
+
+            _touched.Add((state, database, table));
+        }
+
+        public void Reset()
+        {
+            Batch.Clear();
+            _touched.Clear();
+        }
+    }
+
+    private sealed class WriteBatchScope(LsmStorageEngine owner, PendingWrite pending) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (--pending.Depth > 0)
+            {
+                return;
+            }
+
+            owner._ambientWrite.Value = null;
+
+            // Mutations are already visible in the latest-row view, so they are committed even when the
+            // statement failed part-way: the durable state must match what readers have seen.
+            owner.Commit(pending);
+        }
+    }
+
     private sealed class TableState : IDisposable
     {
         private long _nextRowId = 1;
@@ -692,7 +1026,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         public long ReadNextRowId() => Volatile.Read(ref _nextRowId);
 
-        public ulong NextSeqno { get; set; } = 1;
+        /// <summary>Highest sequence number already durable in this table's SSTables when it was opened.</summary>
+        public long FlushedLsn { get; set; }
 
         public void Dispose()
         {

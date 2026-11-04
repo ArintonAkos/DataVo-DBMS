@@ -11,6 +11,12 @@ internal enum LsmCommitOperationKind : byte
 
     /// <summary>Removes the row.</summary>
     Delete = 2,
+
+    /// <summary>Drops a whole table; replay discards it unless a newer copy is already on disk.</summary>
+    DropTable = 3,
+
+    /// <summary>Drops every table of a database (the operation's table name is empty).</summary>
+    DropDatabase = 4,
 }
 
 /// <summary>One row mutation recorded in the commit log.</summary>
@@ -50,7 +56,68 @@ internal sealed class LsmCommitBatch
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.Delete, database, table, rowId, []));
     }
 
+    /// <summary>Records that a table is dropped.</summary>
+    public void DropTable(string database, string table)
+    {
+        Validate(database, table, 0);
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropTable, database, table, 0, []));
+    }
+
+    /// <summary>Records that a whole database is dropped.</summary>
+    public void DropDatabase(string database)
+    {
+        if (string.IsNullOrEmpty(database))
+        {
+            throw new ArgumentException("A commit operation needs a database name.", nameof(database));
+        }
+
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropDatabase, database, string.Empty, 0, []));
+    }
+
     public void Clear() => _operations.Clear();
+
+    /// <summary>
+    /// Keeps only the last put or delete per row, in the order those last operations occurred. Every
+    /// mutation of a batch shares one sequence number, so two versions of the same row would be ambiguous.
+    /// </summary>
+    public void CollapseToLatestPerRow()
+    {
+        if (_operations.Count < 2)
+        {
+            return;
+        }
+
+        var lastIndex = new Dictionary<(string Database, string Table, long RowId), int>();
+        bool hasDuplicates = false;
+        for (int i = 0; i < _operations.Count; i++)
+        {
+            LsmCommitOperation operation = _operations[i];
+            if (operation.Kind is LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete)
+            {
+                hasDuplicates |= lastIndex.ContainsKey((operation.Database, operation.Table, operation.RowId));
+                lastIndex[(operation.Database, operation.Table, operation.RowId)] = i;
+            }
+        }
+
+        if (!hasDuplicates)
+        {
+            return;
+        }
+
+        var collapsed = new List<LsmCommitOperation>(lastIndex.Count);
+        for (int i = 0; i < _operations.Count; i++)
+        {
+            LsmCommitOperation operation = _operations[i];
+            if (operation.Kind is not (LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete)
+                || lastIndex[(operation.Database, operation.Table, operation.RowId)] == i)
+            {
+                collapsed.Add(operation);
+            }
+        }
+
+        _operations.Clear();
+        _operations.AddRange(collapsed);
+    }
 
     private static void Validate(string database, string table, long rowId)
     {
@@ -172,19 +239,22 @@ internal static class LsmCommitBatchCodec
             int valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[14..]);
             offset += OperationHeaderSize;
 
-            if (kind is not (LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete)
+            bool isRowOperation = kind is LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete;
+            if (!Enum.IsDefined(typeof(LsmCommitOperationKind), kind)
                 || databaseBytes == 0
-                || tableBytes == 0
+                || (tableBytes == 0) != (kind == LsmCommitOperationKind.DropDatabase)
                 || rowId < 0
                 || valueBytes < 0
-                || (kind == LsmCommitOperationKind.Delete && valueBytes != 0)
+                || (kind != LsmCommitOperationKind.Put && valueBytes != 0)
+                || (!isRowOperation && rowId != 0)
                 || (long)databaseBytes + tableBytes + valueBytes > payload.Length - offset)
             {
                 return false;
             }
 
+            string table = string.Empty;
             if (!TryDecodeName(payload.Slice(offset, databaseBytes), out string database)
-                || !TryDecodeName(payload.Slice(offset + databaseBytes, tableBytes), out string table))
+                || (tableBytes > 0 && !TryDecodeName(payload.Slice(offset + databaseBytes, tableBytes), out table)))
             {
                 return false;
             }

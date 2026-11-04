@@ -19,15 +19,15 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
 {
     private const int CrashCycles = 6;
 
-    // Known bug, reproduced by this test: an autocommit UPDATE is written as two separate durable
-    // operations (tombstone the old row, append the new one). A crash between them loses an already
-    // committed row. Remove the skips once UPDATE is atomic across a crash in each mode.
-    private const string NonAtomicUpdate =
-        "Known bug: a crash during an autocommit UPDATE can delete the committed row (non-atomic tombstone + append).";
+    // Disk is legacy: an autocommit UPDATE there is still two separate durable steps (tombstone the old
+    // row, append the new one), so a crash between them can lose a committed row. Lsm writes every
+    // statement as one commit-log frame and must pass.
+    private const string DiskNotCrashSafe =
+        "Disk mode is legacy and not crash-safe for UPDATE (non-atomic tombstone + append); see WAL And Durability docs.";
 
     [Theory]
-    [InlineData("lsm", Skip = NonAtomicUpdate)]
-    [InlineData("disk", Skip = NonAtomicUpdate)]
+    [InlineData("lsm")]
+    [InlineData("disk", Skip = DiskNotCrashSafe)]
     public void AcknowledgedWrites_SurviveRepeatedHardCrashes(string mode)
     {
         string directory = TestStorageDirectories.Create($"crash_{mode}");
@@ -95,12 +95,53 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void Transactions_AndMultiRowStatements_AreAtomicAcrossHardCrashes()
+    {
+        string directory = TestStorageDirectories.Create("crash_txn");
+        var random = new Random(4111);
+        long maxAcknowledged = 0;
+
+        using (DataVoContext setup = Open(directory, "lsm"))
+        {
+            AssertOk(setup.Execute("CREATE DATABASE CrashDb"));
+            AssertOk(setup.Execute("USE CrashDb"));
+            AssertOk(setup.Execute("CREATE TABLE Lefts (Id BIGINT PRIMARY KEY, Gen BIGINT)"));
+            AssertOk(setup.Execute("CREATE TABLE Rights (Id BIGINT PRIMARY KEY)"));
+        }
+
+        for (int cycle = 0; cycle < CrashCycles; cycle++)
+        {
+            CrashRun run = RunUntilKilled(directory, "lsm", maxAcknowledged + 1, random.Next(5, 60), "txn");
+            if (run.Transactions.Count > 0)
+            {
+                maxAcknowledged = run.Transactions[^1];
+            }
+
+            using DataVoContext context = Open(directory, "lsm");
+            AssertOk(context.Execute("USE CrashDb"));
+            List<Dictionary<string, object?>> lefts = context.Execute("SELECT Id, Gen FROM Lefts")[0].Data;
+            HashSet<long> leftIds = lefts.Select(r => Convert.ToInt64(r["Id"])).ToHashSet();
+            HashSet<long> rightIds = context.Execute("SELECT Id FROM Rights")[0].Data.Select(r => Convert.ToInt64(r["Id"])).ToHashSet();
+            long highest = leftIds.Count == 0 ? 0 : leftIds.Max();
+
+            Assert.True(leftIds.SetEquals(rightIds), $"cycle {cycle}: a transaction was applied to only one of its two tables");
+            Assert.True(highest >= maxAcknowledged, $"cycle {cycle}: acknowledged transaction {maxAcknowledged} is missing (highest {highest})");
+            Assert.True(highest <= maxAcknowledged + 1, $"cycle {cycle}: transaction {highest} appeared beyond the one in flight");
+            Assert.Equal(Enumerable.Range(1, (int)highest).Select(i => (long)i).ToHashSet(), leftIds);
+            Assert.All(lefts, row => Assert.Equal(highest, Convert.ToInt64(row["Gen"])));
+
+            output.WriteLine($"cycle {cycle}: {run.Transactions.Count} transactions acknowledged; {highest} after recovery");
+            maxAcknowledged = highest;
+        }
+    }
+
     // The harness writes updates as (insert id * 1000 + 1); only the update issued after the last
     // acknowledged insert can be durable without having been acknowledged.
     private static bool IsInFlightUpdate(long stored, long maxAcknowledgedId) =>
         stored % 1000 == 1 && stored / 1000 >= maxAcknowledgedId;
 
-    private static CrashRun RunUntilKilled(string directory, string mode, long firstId, int acknowledgementsBeforeKill)
+    private static CrashRun RunUntilKilled(string directory, string mode, long firstId, int acknowledgementsBeforeKill, string workload = "rows")
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -112,6 +153,7 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
         start.ArgumentList.Add(directory);
         start.ArgumentList.Add(mode);
         start.ArgumentList.Add(firstId.ToString(CultureInfo.InvariantCulture));
+        start.ArgumentList.Add(workload);
 
         using Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the crash harness.");
         var run = new CrashRun();
@@ -190,6 +232,8 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
 
         public long? LastAttemptedUpdate { get; private set; }
 
+        public List<long> Transactions { get; } = [];
+
         public bool Record(string line)
         {
             string[] parts = line.Trim().Split(' ');
@@ -206,6 +250,9 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
                     return true;
                 case "UPD":
                     Updates.Add(entry);
+                    return true;
+                case "TXN":
+                    Transactions.Add(entry.Item1);
                     return true;
                 case "TRY":
                     LastAttemptedUpdate = entry.Item1;

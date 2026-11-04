@@ -395,15 +395,11 @@ public sealed class LsmStorageEngineTests
             .GetValue(tableState)!;
     }
 
-    private static int GetWalDurableFlushCount(LsmStorageEngine engine)
-    {
-        object tableState = GetSingleTableState(engine);
-        object table = tableState
-            .GetType()
-            .GetProperty("Table", BindingFlags.Instance | BindingFlags.Public)!
-            .GetValue(tableState)!;
-        return ((LsmTable)table).WalDurableFlushCount;
-    }
+    // Durability now comes from the engine's shared commit log, so that is where fsyncs are counted.
+    private static int GetWalDurableFlushCount(LsmStorageEngine engine) =>
+        ((LsmCommitLog)typeof(LsmStorageEngine)
+            .GetField("_commitLog", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(engine)!).DurableFlushCount;
 
     private static object GetSingleTableState(LsmStorageEngine engine)
     {

@@ -2,16 +2,19 @@ using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.StorageEngine.Config;
 
-// Usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId>
+// Usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn]
 // Writes until killed. A line is printed only after the write call returned successfully:
 //   INS <id> <value>   row <id> was inserted with <value>
 //   UPD <id> <value>   row <id> was updated to <value>
 //   TRY <id> <value>   an update of row <id> is about to start (diagnostic, not acknowledged)
-if (args.Length != 3)
+//   TXN <id> 0         transaction <id> committed (txn workload)
+if (args.Length is not (3 or 4))
 {
-    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId>");
+    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn]");
     return 2;
 }
+
+bool transactionWorkload = args.Length == 4 && args[3] == "txn";
 
 string directory = args[0];
 bool lsm = string.Equals(args[1], "lsm", StringComparison.OrdinalIgnoreCase);
@@ -27,6 +30,22 @@ Require(db.Execute("USE CrashDb"));
 TextWriter output = Console.Out;
 Console.WriteLine("READY");
 Console.Out.Flush();
+
+if (transactionWorkload)
+{
+    // Each transaction touches two tables and rewrites every Left row with one multi-row UPDATE, so a
+    // partially recovered transaction or statement breaks an invariant the test can see.
+    for (long id = nextId; ; id++)
+    {
+        Require(db.Execute("BEGIN"));
+        Require(db.Execute($"INSERT INTO Lefts (Id, Gen) VALUES ({id}, {id})"));
+        Require(db.Execute($"INSERT INTO Rights (Id) VALUES ({id})"));
+        Require(db.Execute($"UPDATE Lefts SET Gen = {id} WHERE Id <= {id}"));
+        Require(db.Execute("COMMIT"));
+        output.WriteLine($"TXN {id} 0");
+        output.Flush();
+    }
+}
 
 var random = new Random(unchecked((int)nextId));
 for (long id = nextId; ; id++)

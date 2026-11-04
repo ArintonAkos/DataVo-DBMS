@@ -57,6 +57,16 @@ public sealed class LsmTable : IDisposable
     /// <summary>File registry used by background compaction; compaction is disabled while null.</summary>
     internal LsmFileRegistry? CompactionRegistry { get; set; }
 
+    /// <summary>
+    /// Called with a MemTable's highest sequence number before it is written as an SSTable. With a shared
+    /// commit log the owner makes that log durable through it first, so an SSTable never holds part of a
+    /// batch whose commit frame could still be lost.
+    /// </summary>
+    internal Action<ulong>? BeforeFlushDurabilityBarrier { get; set; }
+
+    /// <summary>Called (outside this table's locks) after a MemTable has been durably flushed.</summary>
+    internal Action? AfterFlush { get; set; }
+
     private sealed record FrozenGeneration(MemTable Table, LsmWalWriter? Wal);
 
     private readonly object _gate = new();
@@ -72,6 +82,7 @@ public sealed class LsmTable : IDisposable
     private LsmWalWriter? _currentWal;
     private long _walSegmentSeq;
     private MemTable _active = new();
+    private MemTable? _flushing; // frozen generation dequeued by the worker but not yet durable
     private Task _flushWorker = Task.CompletedTask;
     private bool _workerBusy;
     private Exception? _backgroundError;
@@ -249,7 +260,39 @@ public sealed class LsmTable : IDisposable
         }
 
         ScheduleCompactionCheck();
+        AfterFlush?.Invoke();
         return result;
+    }
+
+    /// <summary>
+    /// Smallest sequence number that is not yet durable in an SSTable (active, queued, or in-flight
+    /// generations), or <see langword="null"/> when everything this table holds is flushed.
+    /// </summary>
+    internal ulong? OldestUnflushedSequence
+    {
+        get
+        {
+            lock (_gate)
+            {
+                ulong? oldest = null;
+                void Consider(MemTable? table)
+                {
+                    if (table?.MinSequence is ulong min && (oldest is null || min < oldest))
+                    {
+                        oldest = min;
+                    }
+                }
+
+                Consider(_active);
+                Consider(_flushing);
+                foreach (FrozenGeneration generation in _frozenQueue)
+                {
+                    Consider(generation.Table);
+                }
+
+                return oldest;
+            }
+        }
     }
 
     /// <summary>
@@ -342,6 +385,7 @@ public sealed class LsmTable : IDisposable
                 }
 
                 generation = _frozenQueue.Dequeue();
+                _flushing = generation.Table;
                 _workerBusy = true;
             }
 
@@ -360,6 +404,13 @@ public sealed class LsmTable : IDisposable
 
                 return;
             }
+
+            lock (_gate)
+            {
+                _flushing = null;
+            }
+
+            AfterFlush?.Invoke();
 
             MaybeCompactLevels();
 
@@ -392,6 +443,11 @@ public sealed class LsmTable : IDisposable
 
     private LsmFlushResult FlushMemTableToSstable(MemTable memTable)
     {
+        if (BeforeFlushDurabilityBarrier is { } barrier && memTable.MaxSequence is ulong maxSequence)
+        {
+            barrier(maxSequence);
+        }
+
         lock (_ioGate)
         {
             (byte[] smallest, byte[] largest) = ComputeBounds(memTable);
