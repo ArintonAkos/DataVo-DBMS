@@ -121,7 +121,8 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     {
         lock (_treeLock)
         {
-            return Root.ContainsKey(key);
+            // A key whose rows were all deleted remains as an empty entry until compaction.
+            return Root.SearchReadOnly(key).Count > 0;
         }
     }
 
@@ -195,34 +196,144 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </remarks>
     public void DeleteValues(List<long> valuesToDelete)
     {
+        if (valuesToDelete.Count == 0)
+        {
+            return;
+        }
+
         lock (_treeLock)
         {
-            var allEntries = new List<KeyValuePair<string, List<long>>>();
-            Root.CollectAll(allEntries);
-
-            var toDeleteSet = new HashSet<long>(valuesToDelete);
-
-            // Filter out the values to delete
-            var filtered = new List<KeyValuePair<string, List<long>>>();
-            foreach (var entry in allEntries)
+            // Remove the row ids in place instead of rebuilding the whole tree on every delete (that
+            // rebuild made each UPDATE cost O(n log n) time and megabytes of garbage). A key whose last
+            // row id goes away stays as an empty entry until the next compaction.
+            HashSet<long>? many = valuesToDelete.Count > 1 ? [.. valuesToDelete] : null;
+            _emptyKeys += RemoveValues(Root, valuesToDelete[0], many);
+            if (_emptyKeys >= CompactionThreshold)
             {
-                var remaining = entry.Value.Where(v => !toDeleteSet.Contains(v)).ToList();
-                if (remaining.Count > 0)
-                {
-                    filtered.Add(new KeyValuePair<string, List<long>>(entry.Key, remaining));
-                }
-            }
-
-            // Rebuild
-            Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
-            foreach (var entry in filtered)
-            {
-                foreach (long val in entry.Value)
-                {
-                    InsertCore(entry.Key, val);
-                }
+                Compact();
             }
         }
+    }
+
+    /// <summary>
+    /// Removes one (key, row id) mapping by descending to the key: O(log n), unlike
+    /// <see cref="DeleteValues"/>, which has to visit every key because it is not given one.
+    /// </summary>
+    /// <returns><see langword="true"/> when the mapping existed.</returns>
+    public bool RemoveValue(string key, long rowId)
+    {
+        lock (_treeLock)
+        {
+            BTreeNode<string, long>? node = Root;
+            while (node is not null)
+            {
+                int i = 0;
+                while (i < node.Keys.Count && key.CompareTo(node.Keys[i]) > 0)
+                {
+                    i++;
+                }
+
+                if (i < node.Keys.Count && key.CompareTo(node.Keys[i]) == 0)
+                {
+                    List<long> rowIds = node.Values[i];
+                    if (!rowIds.Contains(rowId))
+                    {
+                        return false;
+                    }
+
+                    // Copy-on-write: the old list may already be published to a lock-free reader.
+                    var remaining = new List<long>(rowIds.Count);
+                    foreach (long existing in rowIds)
+                    {
+                        if (existing != rowId)
+                        {
+                            remaining.Add(existing);
+                        }
+                    }
+
+                    node.Values[i] = remaining;
+                    if (remaining.Count == 0 && ++_emptyKeys >= CompactionThreshold)
+                    {
+                        Compact();
+                    }
+
+                    return true;
+                }
+
+                node = node.IsLeaf ? null : node.Children![i];
+            }
+
+            return false;
+        }
+    }
+
+    private const int CompactionThreshold = 4096;
+    private int _emptyKeys;
+
+    private static int RemoveValues(BTreeNode<string, long> node, long single, HashSet<long>? many)
+    {
+        int emptied = 0;
+        for (int i = 0; i < node.Values.Count; i++)
+        {
+            List<long> rowIds = node.Values[i];
+            bool hit = false;
+            foreach (long rowId in rowIds)
+            {
+                if (many is null ? rowId == single : many.Contains(rowId))
+                {
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (!hit)
+            {
+                continue;
+            }
+
+            // Copy-on-write: the old list may already be published to a lock-free reader.
+            var remaining = new List<long>(rowIds.Count);
+            foreach (long rowId in rowIds)
+            {
+                if (!(many is null ? rowId == single : many.Contains(rowId)))
+                {
+                    remaining.Add(rowId);
+                }
+            }
+
+            node.Values[i] = remaining;
+            if (remaining.Count == 0)
+            {
+                emptied++;
+            }
+        }
+
+        if (node.Children is { } children)
+        {
+            foreach (BTreeNode<string, long> child in children)
+            {
+                emptied += RemoveValues(child, single, many);
+            }
+        }
+
+        return emptied;
+    }
+
+    /// <summary>Rebuilds the tree without keys whose row-id lists became empty.</summary>
+    private void Compact()
+    {
+        var allEntries = new List<KeyValuePair<string, List<long>>>();
+        Root.CollectAll(allEntries);
+        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
+        foreach (KeyValuePair<string, List<long>> entry in allEntries)
+        {
+            foreach (long rowId in entry.Value)
+            {
+                InsertCore(entry.Key, rowId);
+            }
+        }
+
+        _emptyKeys = 0;
     }
 
     /// <summary>
