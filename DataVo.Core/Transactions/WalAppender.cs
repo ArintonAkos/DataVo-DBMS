@@ -11,6 +11,9 @@ internal enum WalFrameOperationType : byte
     Delete = 3,
     TxnCommit = 4,
     Checkpoint = 5,
+
+    /// <summary>An Lsm commit-log frame: every mutation of one statement or transaction.</summary>
+    CommitBatch = 6,
 }
 
 /// <summary>

@@ -442,6 +442,12 @@ internal sealed class WalFileStore
         AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
     }
 
+    /// <summary>
+    /// Closes this file's pooled append handle. Owners call it when they are done with the log, so the
+    /// file is not held open (on Windows an open handle also blocks deleting or replacing the file).
+    /// </summary>
+    internal void ReleaseFileHandle() => ExecuteLocked(() => BinaryFrameHandlePool.Remove(FilePath));
+
     private void EnsureDirectoryExists()
     {
         string? directory = Path.GetDirectoryName(FilePath);
