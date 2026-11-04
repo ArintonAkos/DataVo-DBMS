@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DataVo.Core.BTree;
+using DataVo.Core.Compat;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
@@ -990,12 +991,69 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
-        for (int i = 0; i < entries.Count; i++)
+        if (!MirrorsFastLanesToScalarIndex)
         {
-            (long key, long rowId) = entries[i];
-            map.Set(key, rowId); // reads stay lock-free
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (long key, long rowId) = entries[i];
+                map.Set(key, rowId); // reads stay lock-free
+            }
+
+            return;
         }
+
+        lock (_lock)
+        {
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (long key, long rowId) = entries[i];
+                long? replaced = map.TryGetValue(key, out long previous) ? previous : null;
+                map.Set(key, rowId);
+                MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replaced);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutations(cacheKey, entries.Count);
     }
+
+    /// <summary>
+    /// Fast lanes are process-local caches. When indexes persist (Disk/Lsm), every lane write must also
+    /// reach the authoritative scalar index, or a reopened engine would not see the key at all.
+    /// </summary>
+    private bool MirrorsFastLanesToScalarIndex => _persistenceMode != IndexPersistenceMode.None;
+
+    /// <summary>
+    /// Idempotently records (key, rowId) in the scalar index; callers that also write the scalar index
+    /// directly therefore never create duplicate entries. A primary-key lane that re-points a key drops
+    /// the replaced row id so the persisted index matches the lane.
+    /// </summary>
+    private static void MirrorLaneEntryNoLock(IIndex index, string key, long rowId, long? replacedRowId)
+    {
+        if (replacedRowId is long replaced && replaced != rowId)
+        {
+            index.DeleteValues([replaced]);
+        }
+
+        IReadOnlyList<long> existing = index.SearchReadOnly(key);
+        for (int i = 0; i < existing.Count; i++)
+        {
+            if (existing[i] == rowId)
+            {
+                return;
+            }
+        }
+
+        index.Insert(key, rowId);
+    }
+
+    private static string FormatIntegerKey(long key) =>
+        ScalarKeyFormatter.FormatBracketed(key, System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string FormatGuidKey(Guid key) => key.ToString("D");
 
     /// <summary>
     /// Resolves the integer primary-key fast lane once, so batch validation can probe per row
@@ -1025,7 +1083,27 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
-        map.SetRange(keys, rowIds);
+        if (!MirrorsFastLanesToScalarIndex)
+        {
+            map.SetRange(keys, rowIds);
+            return;
+        }
+
+        lock (_lock)
+        {
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            for (int i = 0; i < keys.Length; i++)
+            {
+                long? replaced = map.TryGetValue(keys[i], out long previous) ? previous : null;
+                map.Set(keys[i], rowIds[i]);
+                MirrorLaneEntryNoLock(index, FormatIntegerKey(keys[i]), rowIds[i], replaced);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutations(cacheKey, keys.Length);
     }
 
     /// <summary>
@@ -1062,7 +1140,24 @@ public partial class IndexManager : IDisposable
 
                 rowIds.Add(rowId);
             }
+
+            if (!MirrorsFastLanesToScalarIndex)
+            {
+                return;
+            }
+
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (long key, long rowId) = entries[i];
+                MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replacedRowId: null);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
         }
+
+        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -1083,11 +1178,33 @@ public partial class IndexManager : IDisposable
         ConcurrentDictionary<Guid, long> map = _guidPrimaryKeyMaps.GetOrAdd(
             cacheKey,
             static _ => new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance));
-        for (int i = 0; i < entries.Count; i++)
+        if (!MirrorsFastLanesToScalarIndex)
         {
-            (Guid key, long rowId) = entries[i];
-            map[key] = rowId;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (Guid key, long rowId) = entries[i];
+                map[key] = rowId;
+            }
+
+            return;
         }
+
+        lock (_lock)
+        {
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (Guid key, long rowId) = entries[i];
+                long? replaced = map.TryGetValue(key, out long previous) ? previous : null;
+                map[key] = rowId;
+                MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replaced);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
+        }
+
+        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -1124,7 +1241,24 @@ public partial class IndexManager : IDisposable
 
                 rowIds.Add(rowId);
             }
+
+            if (!MirrorsFastLanesToScalarIndex)
+            {
+                return;
+            }
+
+            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                (Guid key, long rowId) = entries[i];
+                MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replacedRowId: null);
+            }
+
+            MarkDirtyNoLock(cacheKey);
+            FlushIfImmediate(cacheKey);
         }
+
+        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>

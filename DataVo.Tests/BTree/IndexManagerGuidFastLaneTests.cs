@@ -1,4 +1,5 @@
 using DataVo.Core.Indexing;
+using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.BTree;
 
@@ -34,7 +35,7 @@ public sealed class IndexManagerGuidFastLaneTests
     [Fact]
     public void GuidPrimaryKeyFastLane_LooksUpRowId()
     {
-        var manager = new IndexManager();
+        var manager = CreateInMemoryManager();
         Guid key = Guid.Parse("dd27ec9b-4230-4db9-84a6-7d83d842a9fc");
 
         manager.InsertGuidPrimaryKeys([(key, 42L)], "_PK_Sessions", "Sessions", "Db");
@@ -47,7 +48,7 @@ public sealed class IndexManagerGuidFastLaneTests
     [Fact]
     public void GuidSecondaryFastLane_ReturnsAllRowsForKey()
     {
-        var manager = new IndexManager();
+        var manager = CreateInMemoryManager();
         Guid tenant = Guid.Parse("723af1d7-7402-445c-b260-ceb48fc230db");
 
         manager.InsertGuidIndexEntries([(tenant, 10L), (tenant, 11L)], "IX_Sessions_Tenant", "Sessions", "Db");
@@ -60,7 +61,7 @@ public sealed class IndexManagerGuidFastLaneTests
     [Fact]
     public void FilterUsingIndex_UsesGuidFastLaneForCanonicalStringKey()
     {
-        var manager = new IndexManager();
+        var manager = CreateInMemoryManager();
         Guid key = Guid.Parse("6c0be708-6d7e-4f9b-b448-6a24b0f37e81");
         manager.InsertGuidPrimaryKeys([(key, 7L)], "_PK_Sessions", "Sessions", "Db");
 
@@ -68,4 +69,9 @@ public sealed class IndexManagerGuidFastLaneTests
 
         Assert.Equal([7L], rowIds);
     }
+
+    // These tests cover the process-local lanes alone. A persistent manager also mirrors every lane write
+    // into the authoritative scalar index, which requires the index to exist first.
+    private static IndexManager CreateInMemoryManager() =>
+        new(new DataVoConfig { StorageMode = StorageMode.InMemory }, engineStorageRoot: null);
 }
