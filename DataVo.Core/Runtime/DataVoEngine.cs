@@ -38,6 +38,7 @@ public sealed class DataVoEngine : IDisposable
     private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
     private bool _disposed;
+    private string? _sharedRoot;
 
     private DataVoEngine(StorageContext storageContext)
     {
@@ -210,6 +211,15 @@ public sealed class DataVoEngine : IDisposable
     /// <param name="config">The configuration to initialize.</param>
     /// <returns>A new <see cref="DataVoEngine"/> bound to the initialized storage context.</returns>
     public static DataVoEngine Initialize(DataVoConfig config)
+    {
+        // Disk and Lsm directories are served by one shared engine per process (see DataVoEngineRegistry);
+        // every Initialize must be paired with exactly one Dispose.
+        DataVoEngine engine = DataVoEngineRegistry.Acquire(config, CreateEngine);
+        SetFallback(engine);
+        return engine;
+    }
+
+    private static DataVoEngine CreateEngine(DataVoConfig config)
     {
         var storageContext = new StorageContext(config);
         var engine = new DataVoEngine(storageContext);
@@ -656,6 +666,28 @@ public sealed class DataVoEngine : IDisposable
     /// Releases engine-owned disposable runtime resources.
     /// </summary>
     public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // A shared engine only shuts down when its last owner releases it.
+        if (_sharedRoot is not null)
+        {
+            DataVoEngineRegistry.Release(this, _sharedRoot, DisposeCore);
+            return;
+        }
+
+        DisposeCore();
+    }
+
+    /// <summary>
+    /// Marks this engine as the shared engine for <paramref name="root"/>; called once by the registry.
+    /// </summary>
+    internal void AttachSharedDirectory(string root) => _sharedRoot = root;
+
+    private void DisposeCore()
     {
         if (_disposed)
         {

@@ -42,6 +42,7 @@ namespace DataVo.Core;
 public sealed class DataVoContext : IDisposable
 {
     private InsertRowService? _typedInsertService;
+    private int _disposed;
     private readonly DataVoValueConverterRegistry _valueConverters = new();
     private readonly DataVoModelBinding _modelBindings = new();
     private readonly Dictionary<(string DatabaseName, string TableName), string> _retainedWriteLockKeys = [];
@@ -681,6 +682,13 @@ public sealed class DataVoContext : IDisposable
     /// </summary>
     public void Dispose()
     {
+        // The engine may be shared with other contexts on the same directory, so each context must
+        // release its reference exactly once.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         Engine.Dispose();
     }
 }
