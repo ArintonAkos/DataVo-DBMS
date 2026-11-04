@@ -138,7 +138,15 @@ public class DataVoCommand : DbCommand
         foreach (var result in results)
         {
             if (result.IsError)
-                throw new DataVoException(string.Join("; ", result.Messages));
+            {
+                // Carry the error contract to ADO.NET callers: they branch on ErrorCode, not message text.
+                throw new DataVoException(string.Join("; ", result.Messages))
+                {
+                    ErrorCode = result.ErrorCode,
+                    Line = result.ErrorLine,
+                    Column = result.ErrorColumn,
+                };
+            }
         }
 
         return results;

@@ -9,6 +9,32 @@ public class DataVoEfException : Exception
     public DataVoEfOperation Operation { get; }
 
     /// <summary>
+    /// The engine's stable error code (see <c>DataVoErrorCodes</c>) when the failure came from a DataVo
+    /// statement, for example <c>DV3001_PRIMARY_KEY_VIOLATION</c>; otherwise <see langword="null"/>.
+    /// </summary>
+    public string? ErrorCode => FindErrorCode(InnerException);
+
+    private static string? FindErrorCode(Exception? exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            string? code = current switch
+            {
+                DataVo.Data.DataVoException adoError => adoError.ErrorCode,
+                DataVo.Core.Exceptions.DataVoException engineError => engineError.ErrorCode,
+                _ => null,
+            };
+
+            if (code is not null)
+            {
+                return code;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Initializes a new exception for a failed EF bridge operation.
     /// </summary>
     /// <param name="operation">The operation being performed when the error occurred.</param>

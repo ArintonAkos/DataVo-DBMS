@@ -119,6 +119,7 @@ public class DataVoEfAdvancedBridgeTests
                 ctx.Database.ExecuteDataVoSqlRaw("INSERT INTO Boards (Id, Name) VALUES (1, 'Duplicate');"));
 
             Assert.Equal(DataVoEfOperation.RawSql, ex.Operation);
+            Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.PrimaryKeyViolation, ex.ErrorCode);
         }
         finally
         {
@@ -150,6 +151,7 @@ public class DataVoEfAdvancedBridgeTests
 
             var ex = Assert.Throws<DataVoEfException>(() => ctx2.SaveChanges());
             Assert.Equal(DataVoEfOperation.Insert, ex.Operation);
+            Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.PrimaryKeyViolation, ex.ErrorCode);
         }
         finally
         {
