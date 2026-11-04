@@ -80,6 +80,17 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 Logger.Info($"[ParserDebug] Parsed statements ({statements.Count}): {string.Join(", ", statements.Select(s => s.GetType().Name))}");
             }
 
+            if (statements.Count == 0)
+            {
+                response.Add(new QueryResult
+                {
+                    Messages = ["The query contains no statement."],
+                    IsError = true,
+                    ErrorCode = DataVoErrorCodes.EmptyStatement,
+                });
+                return response;
+            }
+
             var evaluator = new Evaluator(statements, _engine);
             runnables = evaluator.ToRunnables();
         }

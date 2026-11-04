@@ -56,6 +56,37 @@ public class Parser(List<Token> tokens)
     }
 
     /// <summary>
+    /// Consumes the closing parenthesis of a list and returns true; returns false while list items remain.
+    /// End of input inside a list is a syntax error: an unclosed list must never be treated as complete.
+    /// </summary>
+    private bool AtListEnd()
+    {
+        if (Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
+        {
+            return true;
+        }
+
+        if (IsEof())
+        {
+            throw new ParserException($"Parser Error: Expected ')' but found {Current}.");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Rejects a WHERE/HAVING clause without a condition. Treating it as "no condition" would make
+    /// <c>DELETE FROM T WHERE</c> delete every row.
+    /// </summary>
+    private void RequireCondition(Queue<Token> conditionTokens, string clause)
+    {
+        if (conditionTokens.Count == 0)
+        {
+            throw new ParserException($"Parser Error: Expected a condition after {clause} but found {Current}.");
+        }
+    }
+
+    /// <summary>
     /// Parses the token stream into a list of SQL statements.
     /// </summary>
     /// <returns>The parsed statements in input order.</returns>
@@ -251,7 +282,7 @@ public class Parser(List<Token> tokens)
             stmt.TableName = new IdentifierNode(tableNameToken.Value);
 
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
-            while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
+            while (!AtListEnd())
             {
                 if (IsForeignKeyConstraint(Current))
                 {
@@ -764,6 +795,7 @@ public class Parser(List<Token> tokens)
             {
                 expressionTokens.Enqueue(Advance());
             }
+            RequireCondition(expressionTokens, "WHERE");
             stmt.WhereExpression = ParseWhereExpression(expressionTokens);
         }
         else
@@ -838,6 +870,11 @@ public class Parser(List<Token> tokens)
             // If we hit EOF, then there's no WHERE clause.
         }
 
+        if (stmt.SetClauses.Count == 0)
+        {
+            throw new ParserException($"Parser Error: Expected a column assignment after SET but found {Current}.");
+        }
+
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
             var expressionTokens = new Queue<Token>();
@@ -845,6 +882,7 @@ public class Parser(List<Token> tokens)
             {
                 expressionTokens.Enqueue(Advance());
             }
+            RequireCondition(expressionTokens, "WHERE");
             stmt.WhereClause = ParseWhereExpression(expressionTokens);
         }
         else
@@ -865,7 +903,7 @@ public class Parser(List<Token> tokens)
 
         if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
         {
-            while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
+            while (!AtListEnd())
             {
                 stmt.Columns.Add(new IdentifierNode(Consume(TokenType.Identifier, "column name").Value));
                 if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken) Advance();
@@ -879,7 +917,7 @@ public class Parser(List<Token> tokens)
             if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
             {
                 var valuesList = new List<SqlNode>();
-                while (!IsEof() && !Match(TokenType.Punctuation, SqlPunctuation.CloseParenToken))
+                while (!AtListEnd())
                 {
                     Token valToken = Advance();
                     if (valToken.Type == TokenType.Keyword && valToken.Value == SqlKeywords.NULL)
@@ -904,6 +942,11 @@ public class Parser(List<Token> tokens)
                 continue;
             else
                 break;
+        }
+
+        if (stmt.ValuesLists.Count == 0)
+        {
+            throw new ParserException($"Parser Error: Expected '(' after VALUES but found {Current}.");
         }
 
         return stmt;
@@ -1054,6 +1097,7 @@ public class Parser(List<Token> tokens)
         {
             var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
 
+            RequireCondition(expressionTokens, "WHERE");
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
         }
 
@@ -1074,6 +1118,7 @@ public class Parser(List<Token> tokens)
         {
             var expressionTokens = CollectExpressionTokens(() => IsOrderByKeyword() || IsLimitKeyword() || IsUnionKeyword());
 
+            RequireCondition(expressionTokens, "HAVING");
             selectStmt.HavingExpression = ParseWhereExpression(expressionTokens);
         }
 
