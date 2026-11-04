@@ -49,6 +49,7 @@ internal static class ExpressionEvaluator
                     return ApplyNumericOp(left, right, (a, b) => a * b);
                 case "/":
                 case "DIV":
+                    ThrowIfZeroDivisor(left, right);
                     return ApplyNumericOp(left, right, (a, b) => a / b);
                 case Operators.VECTOR_DISTANCE_L2:
                     return EvaluateVectorDistance(bin, left, right, useCosine: false);
@@ -154,6 +155,26 @@ internal static class ExpressionEvaluator
     {
         if (left == null || right == null) throw new EvaluationException("Cannot compare null values");
         return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
+    }
+
+    /// <summary>
+    /// Division by zero is an error, as in PostgreSQL and SQL Server, instead of an infinite result.
+    /// NULL operands still yield NULL.
+    /// </summary>
+    private static void ThrowIfZeroDivisor(object? left, object? right)
+    {
+        if (left is null || right is null || left is string || right is string)
+        {
+            return;
+        }
+
+        if (Convert.ToDouble(right, CultureInfo.InvariantCulture) == 0d)
+        {
+            throw new EvaluationException("Division by zero.")
+            {
+                ErrorCode = Contracts.Results.DataVoErrorCodes.DivisionByZero,
+            };
+        }
     }
 
     private static object? ApplyNumericOp(object? left, object? right, Func<double, double, double> op, Func<object, object, object>? stringConcat = null)

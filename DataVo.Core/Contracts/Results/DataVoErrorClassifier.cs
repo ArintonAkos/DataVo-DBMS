@@ -57,6 +57,12 @@ internal static class DataVoErrorClassifier
             return new DataVoError(explicitCode, message, explicitError.Line, explicitError.Column);
         }
 
+        // Some evaluation paths divide integers natively; the CLR error is a user error, not a bug.
+        if (ex is DivideByZeroException)
+        {
+            return new DataVoError(DataVoErrorCodes.DivisionByZero, "Division by zero.", null, null);
+        }
+
         if (ex is ParserException or LexerException)
         {
             (int? line, int? column) = ReadPosition(message);
