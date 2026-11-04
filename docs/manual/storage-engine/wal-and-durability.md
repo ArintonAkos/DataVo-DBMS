@@ -62,10 +62,12 @@ Misleading:
 
 Supported: disk WAL (`WalEnabled`, on by default for disk mode), disk sync writes (`SyncDiskWrites = true`), LSM strict fsync (`LsmStrictFsync = true`, which waits for WAL durability before acknowledging writes), LSM relaxed OS-buffered mode (faster, but can lose recent writes on power or kernel failure), and WAL checkpoint settings. Relaxed throughput must **not** be presented as strict durability.
 
+## Crash Atomicity in Lsm Mode
+
+Every SQL statement, and every explicit transaction at `COMMIT`, is written to the data directory's commit log (`commit.wal`) as **one** checksummed record. After a crash, recovery applies each record completely or not at all, so a multi-row `UPDATE` or a transaction that touches several tables is never half-applied. In strict mode a statement returns only after its record is durable; concurrent statements share fsyncs.
+
 ## Known Limitations
 
-A hard crash (process kill, power loss) **during an `UPDATE`** can lose the row being updated, in both Lsm strict mode and Disk mode. An `UPDATE` currently writes the new row version and removes the old one as two separate durable steps, and a crash between them leaves neither. Rows that are not being updated at the moment of the crash, and every acknowledged `INSERT`, survive. This is reproduced by the crash-recovery test suite and is the next durability fix for Lsm.
-
-Statements that change several rows, and explicit transactions, are not yet atomic across a crash in Lsm mode: after a crash, some of their changes may be present without the others.
-
-Disk mode is legacy. It will not receive the crash-atomicity fix; use Lsm for new applications.
+- **Visibility before durability (Lsm).** Other sessions can see a statement's changes slightly before its commit record is durable. If the process crashes in that window, those changes are gone after recovery even though a reader may have seen them.
+- **Failed statements (Lsm).** A statement that fails part-way keeps the changes it already made; there is no statement-level rollback yet. Use an explicit transaction when partial changes are unacceptable.
+- **Disk mode is legacy** and not crash-safe for `UPDATE`: it writes the new row version and removes the old one as two separate durable steps, so a crash between them can lose the row. Use Lsm for new applications.

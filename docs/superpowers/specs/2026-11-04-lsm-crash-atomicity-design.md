@@ -6,6 +6,16 @@ Approved 2026-11-04 as written: Option A, with all three open questions answered
 (writes become visible only once durable; per-table WALs are retired with a one-time migration;
 relaxed mode uses the same commit log).
 
+Implementation status (2026-11-04): slices 1–4 are implemented. Every statement and every transaction
+commit is one commit-log frame; per-table WALs are retired with one-time migration; recovery replays
+frames above each table's flushed sequence; pruning follows flushes. `CrashRecoveryTests` passes for
+Lsm, including a two-table transaction and multi-row `UPDATE` invariant.
+
+Deviation, still open: writes are published to the latest-row view when the statement makes them, not
+after the frame is durable, so the "visible only once durable" decision is not implemented yet. A
+statement that fails part-way also keeps its earlier mutations (no statement rollback). Both are tracked
+as the next atomicity slice.
+
 ## Problem
 
 `CrashRecoveryTests` (tests/DataVo.CrashHarness, SIGKILL at random points) shows that a hard crash
