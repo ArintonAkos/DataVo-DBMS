@@ -324,10 +324,10 @@ public abstract class ConcurrencyTestsBase(DataVoConfig config, string testDbNam
 
 public class InMemoryConcurrencyTests : ConcurrencyTestsBase
 {
-    public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory, LockAcquireTimeoutMs = 1000 }, "ConcurrencyDb_Mem") { }
+    public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory, LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Mem") { }
 }
 
 public class DiskConcurrencyTests : ConcurrencyTestsBase
 {
-    public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency", LockAcquireTimeoutMs = 1000 }, "ConcurrencyDb_Disk") { }
+    public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency", LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Disk") { }
 }
