@@ -43,6 +43,29 @@ public sealed class MixedPathSecondaryIndexTests
         Assert.Equal([1, 2, 3, 4], rows.Select(r => Convert.ToInt32(r["Id"])).Order());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UniqueIntegerColumn_RejectsDuplicate_FromTypedOrSqlInsert(bool secondInsertIsTyped)
+    {
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        AssertOk(db.Execute("CREATE DATABASE Uq"));
+        AssertOk(db.Execute("USE Uq"));
+        AssertOk(db.Execute("CREATE TABLE U (Id INT PRIMARY KEY, Code INT UNIQUE)"));
+        db.InsertTyped("U", Schema, [CellValue.From(1), CellValue.From(100)]);
+
+        if (secondInsertIsTyped)
+        {
+            Assert.ThrowsAny<Exception>(() => db.InsertTyped("U", Schema, [CellValue.From(2), CellValue.From(100)]));
+        }
+        else
+        {
+            Assert.Contains("Rows affected: 0", db.Execute("INSERT INTO U (Id, Code) VALUES (2, 100)").SelectMany(r => r.Messages));
+        }
+
+        Assert.Single(db.Execute("SELECT * FROM U")[0].Data);
+    }
+
     private static void AssertOk(List<QueryResult> results)
     {
         QueryResult? error = results.FirstOrDefault(r => r.IsError);

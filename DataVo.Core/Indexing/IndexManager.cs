@@ -1118,6 +1118,23 @@ public partial class IndexManager : IDisposable
         _completeLaneIndexes.TryRemove(cacheKey, out _);
     }
 
+    private bool SecondaryLaneContains<TKey>(
+        Dictionary<IndexCacheKey, Dictionary<TKey, List<long>>> lanes,
+        TKey key,
+        string indexName,
+        string tableName,
+        string databaseName)
+        where TKey : notnull
+    {
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            return lanes.TryGetValue(cacheKey, out Dictionary<TKey, List<long>>? lane)
+                && lane.TryGetValue(key, out List<long>? rowIds)
+                && rowIds.Count > 0;
+        }
+    }
+
     private static void AddDistinctRowId<TKey>(Dictionary<TKey, List<long>> lane, TKey key, long rowId)
         where TKey : notnull
     {
@@ -1782,9 +1799,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
+        // A hit in any lane proves the key exists, even in a partial lane. Secondary lanes matter for
+        // UNIQUE constraints: typed inserts keep integer and GUID unique keys only in those lanes.
         if (TryParseIntegerPrimaryKey(key, out long integerKey))
         {
-            if (TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out _))
+            if (TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out _)
+                || SecondaryLaneContains(_integerIndexMaps, integerKey, indexName, tableName, databaseName))
             {
                 return true;
             }
@@ -1792,11 +1812,11 @@ public partial class IndexManager : IDisposable
 
         if (TryParseGuidKey(key, out Guid guidKey))
         {
-            if (TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out _))
+            if (TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out _)
+                || SecondaryLaneContains(_guidIndexMaps, guidKey, indexName, tableName, databaseName))
             {
                 return true;
             }
-
         }
 
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
