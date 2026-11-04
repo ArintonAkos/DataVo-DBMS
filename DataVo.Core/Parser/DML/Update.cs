@@ -38,11 +38,30 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// and performs an out-of-place update (Delete + Insert) via the storage engine.
     /// </summary>
     /// <param name="session">The current user session ID.</param>
+    /// <summary>
+    /// Rejects SET clauses that name columns the table does not have, before any row is read or written.
+    /// </summary>
+    private void ValidateAssignedColumns(string databaseName)
+    {
+        List<Models.Catalog.Column> columns = Catalog.GetTableColumns(_model.TableName, databaseName);
+        foreach (string assigned in _model.SetExpressions.Keys)
+        {
+            if (!columns.Exists(column => string.Equals(column.Name, assigned, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new BindingException($"Column {assigned} doesn't exist in table {_model.TableName}.")
+                {
+                    ErrorCode = Contracts.Results.DataVoErrorCodes.UnknownColumn,
+                };
+            }
+        }
+    }
+
     public override void PerformAction(Guid session)
     {
         try
         {
             string databaseName = GetDatabaseName(session);
+            ValidateAssignedColumns(databaseName);
             _ = GetMaterializedSetExpressions(databaseName);
 
             var txContext = Transactions.GetContext(session);
