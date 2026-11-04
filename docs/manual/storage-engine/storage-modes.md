@@ -46,6 +46,8 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+
+`StorageMode.Lsm` is the durable mode DataVo is heading toward production with. `StorageMode.Disk` is a legacy mode: it stays available, but it receives no further durability work, and it is not crash-safe for `UPDATE` (see [WAL And Durability](./wal-and-durability.md#known-limitations)). New applications should use Lsm.
 
 Disk and Lsm directories are served by one engine per process: contexts and connections opened on the same directory share it, and a `datavo.lock` file keeps other processes out while it is open. See [LSM Mode](./lsm-mode.md#opening-the-same-directory-twice).

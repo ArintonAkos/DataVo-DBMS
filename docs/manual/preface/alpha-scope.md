@@ -19,7 +19,7 @@ db.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Name VARCHAR(80))");
 db.Execute("INSERT INTO Events (Id, Name) VALUES (1, 'created')");
 ```
 
-The alpha also includes persisted storage modes. For durability-sensitive experiments, prefer LSM strict mode so acknowledged writes wait for WAL durability.
+The alpha also includes persisted storage modes. For durability-sensitive experiments, use LSM strict mode so acknowledged writes wait for WAL durability. Disk mode is legacy and receives no further durability work. Both modes currently share one known crash limitation for `UPDATE`, described in [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations).
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
