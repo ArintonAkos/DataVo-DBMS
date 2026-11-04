@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft for approval, 2026-11-04. Implementation starts only after approval.
+Approved 2026-11-04 as written: Option A, with all three open questions answered as recommended
+(writes become visible only once durable; per-table WALs are retired with a one-time migration;
+relaxed mode uses the same commit log).
 
 ## Problem
 
