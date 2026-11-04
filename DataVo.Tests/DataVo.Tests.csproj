@@ -24,6 +24,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
+    <!-- Built for CrashRecoveryTests, which runs it as a separate process and kills it. -->
+    <ProjectReference Include="..\tests\DataVo.CrashHarness\DataVo.CrashHarness.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
     <ProjectReference Include="..\DataVo.EntityFrameworkCore\DataVo.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\DataVo.Generators\DataVo.Generators.csproj"
