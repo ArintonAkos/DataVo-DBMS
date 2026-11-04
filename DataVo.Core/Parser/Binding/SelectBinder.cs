@@ -136,6 +136,55 @@ internal static class SelectBinder
         }
     }
 
+    private static readonly HashSet<string> ComparisonOperators =
+        new(StringComparer.OrdinalIgnoreCase) { "=", "==", "EQ", "!=", "<>", "NEQ", "<", ">", "<=", ">=" };
+
+    /// <summary>
+    /// <c>WHERE Id = 'abc'</c> on a numeric column can never match; report it instead of silently
+    /// returning nothing. Numeric text such as <c>'150'</c> is rewritten to the number, so ordering
+    /// comparisons (<c>Code &gt;= '150'</c>) compare numerically rather than as text.
+    /// </summary>
+    private static void RejectTextComparedWithNumericColumn(BinaryExpressionNode binary, TableService tableService)
+    {
+        if (!ComparisonOperators.Contains(binary.Operator))
+        {
+            return;
+        }
+
+        (ResolvedColumnRefNode? column, LiteralNode? literal) = (binary.Left, binary.Right) switch
+        {
+            (ResolvedColumnRefNode c, LiteralNode l) => (c, l),
+            (LiteralNode l, ResolvedColumnRefNode c) => (c, l),
+            _ => (null, null),
+        };
+
+        if (column is null
+            || literal?.Value is not string text
+            || text.Length < 2
+            || text[0] != '\''
+            || text[^1] != '\'')
+        {
+            return;
+        }
+
+        string value = text[1..^1];
+        string? type = tableService.TryGetColumnType(column.TableName, column.Column);
+        if (type is not ("INT" or "FLOAT"))
+        {
+            return;
+        }
+
+        if (!double.TryParse(value.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            throw new BindingException($"Cannot compare {type} column {column.Column} with the text value '{value}'.")
+            {
+                ErrorCode = Contracts.Results.DataVoErrorCodes.TypeMismatch,
+            };
+        }
+
+        literal.Value = value.Trim(); // same shape as a number literal
+    }
+
     public static ExpressionNode? BindWhere(ExpressionNode? node, TableService tableService)
     {
         if (node == null) return null;
@@ -144,6 +193,7 @@ internal static class SelectBinder
         {
             binary.Left = BindWhere(binary.Left, tableService)!;
             binary.Right = BindWhere(binary.Right, tableService)!;
+            RejectTextComparedWithNumericColumn(binary, tableService);
             return binary;
         }
 

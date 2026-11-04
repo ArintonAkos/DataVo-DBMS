@@ -29,6 +29,24 @@ namespace DataVo.Core.Services
         }
 
         /// <summary>
+        /// Returns the catalog type (for example INT or VARCHAR) of a column of a table in this query,
+        /// or <see langword="null"/> when it cannot be determined (derived tables, unknown names).
+        /// </summary>
+        internal string? TryGetColumnType(string tableNameOrAlias, string columnName)
+        {
+            try
+            {
+                string tableName = GetTableDetailByAliasOrName(tableNameOrAlias).TableName;
+                return DataVo.Core.Runtime.DataVoEngine.Current().Catalog
+                    .GetTableColumn(tableName, DatabaseName, columnName).Type?.ToUpperInvariant();
+            }
+            catch (DataVoException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Resolves a table by alias or real table name.
         /// </summary>
         /// <param name="aliasOrName">The alias or table name in use.</param>
