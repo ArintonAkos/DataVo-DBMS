@@ -79,6 +79,13 @@ public class ChangeCaptureIntegrationTests
 
     internal static DataVoContext NewContext(StorageMode mode, out string db, string? path = null)
     {
+        // Persistent contexts without an explicit path each get a private directory. Falling back to the
+        // engine default (./datavo_data) made every parallel test class share one catalog file.
+        if (path is null && mode != StorageMode.InMemory)
+        {
+            path = TestStorageDirectories.Create("chg");
+        }
+
         var ctx = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = path });
         db = $"Chg_{Guid.NewGuid():N}";
         ctx.Execute($"CREATE DATABASE {db}");
