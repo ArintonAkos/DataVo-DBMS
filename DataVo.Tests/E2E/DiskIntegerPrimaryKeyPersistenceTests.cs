@@ -97,8 +97,8 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
         using var second = Reopen(mode);
         second.InsertTyped("Boards", schema, [CellValue.From(2), CellValue.From("B")]);
 
-        Assert.ThrowsAny<Exception>(() => second.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
-        Assert.ThrowsAny<Exception>(() => second.InsertTypedBatch("Boards", schema, [[CellValue.From(1), CellValue.From("DupBatch")]]));
+        Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => second.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
+        Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => second.InsertTypedBatch("Boards", schema, [[CellValue.From(1), CellValue.From("DupBatch")]]));
         Assert.Equal(2, second.Execute("SELECT * FROM Boards")[0].Data.Count);
     }
 
@@ -192,7 +192,7 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
         context.RestoreSnapshot(snapshot);
 
         context.InsertTyped("Boards", schema, [CellValue.From(2), CellValue.From("B")]);
-        Assert.ThrowsAny<Exception>(() => context.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
+        Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => context.InsertTyped("Boards", schema, [CellValue.From(1), CellValue.From("Dup")]));
         Assert.Equal(2, context.Execute("SELECT * FROM Boards")[0].Data.Count);
     }
 
@@ -221,12 +221,11 @@ public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
         AssertOk(context.Execute("CREATE TABLE Boards (Id INT PRIMARY KEY, Name VARCHAR(40))"));
     }
 
-    // A rejected duplicate is reported as a violation message with zero affected rows, not as IsError.
     private static void AssertPrimaryKeyViolation(List<QueryResult> results)
     {
-        List<string> messages = results.SelectMany(r => r.Messages).ToList();
-        Assert.Contains(messages, m => m.Contains("Primary key violation", StringComparison.Ordinal));
-        Assert.Contains("Rows affected: 0", messages);
+        QueryResult result = Assert.Single(results);
+        Assert.True(result.IsError);
+        Assert.Equal(DataVoErrorCodes.PrimaryKeyViolation, result.ErrorCode);
     }
 
     private static void AssertOk(List<QueryResult> results)

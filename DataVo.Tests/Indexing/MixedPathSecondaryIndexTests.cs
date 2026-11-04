@@ -56,11 +56,13 @@ public sealed class MixedPathSecondaryIndexTests
 
         if (secondInsertIsTyped)
         {
-            Assert.ThrowsAny<Exception>(() => db.InsertTyped("U", Schema, [CellValue.From(2), CellValue.From(100)]));
+            Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => db.InsertTyped("U", Schema, [CellValue.From(2), CellValue.From(100)]));
         }
         else
         {
-            Assert.Contains("Rows affected: 0", db.Execute("INSERT INTO U (Id, Code) VALUES (2, 100)").SelectMany(r => r.Messages));
+            QueryResult rejected = db.Execute("INSERT INTO U (Id, Code) VALUES (2, 100)").Single();
+            Assert.True(rejected.IsError);
+            Assert.Equal(DataVoErrorCodes.UniqueViolation, rejected.ErrorCode);
         }
 
         Assert.Single(db.Execute("SELECT * FROM U")[0].Data);

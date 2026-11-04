@@ -88,6 +88,12 @@ internal sealed partial class InsertRowService(
             }
         }
 
+        // A statement is all-or-nothing: one rejected row rejects every row, before anything is written.
+        if (messages.Count > 0)
+        {
+            throw RejectedRows(tableName, messages);
+        }
+
         if (acceptedRows.Count == 0)
         {
             return new InsertRowsResult([], 0, messages);
@@ -203,10 +209,7 @@ internal sealed partial class InsertRowService(
                     foreignKeysByAttribute,
                     messages))
             {
-                string message = messages.Count == 0
-                    ? $"Typed insert into {tableName} was rejected."
-                    : string.Join(" ", messages);
-                throw new InvalidOperationException(message);
+                throw RejectedRows(tableName, messages);
             }
         }
 
@@ -362,10 +365,7 @@ internal sealed partial class InsertRowService(
                     foreignKeysByAttribute,
                     messages!))
             {
-                string message = messages!.Count == 0
-                    ? $"Typed insert into {tableName} was rejected."
-                    : string.Join(" ", messages);
-                throw new InvalidOperationException(message);
+                throw RejectedRows(tableName, messages!);
             }
 
             if (primaryKeyValues is not null)
@@ -1633,6 +1633,20 @@ internal sealed partial class InsertRowService(
 
         key = cell.AsGuid();
         return true;
+    }
+
+    /// <summary>
+    /// Builds the error for a rejected insert. The first violation decides the error code; the message
+    /// says how many further rows were also rejected.
+    /// </summary>
+    private static ConstraintViolationException RejectedRows(string tableName, List<string> messages)
+    {
+        string first = messages.Count == 0 ? $"Insert into {tableName} was rejected." : messages[0];
+        string text = messages.Count <= 1 ? first : $"{first} ({messages.Count - 1} more row(s) also rejected.)";
+        return new ConstraintViolationException(text)
+        {
+            ErrorCode = Contracts.Results.DataVoErrorClassifier.ClassifyMessage(first).Code,
+        };
     }
 
     private static bool IsPrimaryKeyIndex(string tableName, string indexName) =>

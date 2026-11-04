@@ -143,7 +143,6 @@ public sealed class LsmRestartTests
         Assert.True(error is null, error is null ? null : string.Join("; ", error.Messages));
     }
 
-    // Constraint violations are reported as messages with zero affected rows.
     private static void AssertRejected(List<QueryResult> results) =>
-        Assert.Contains("Rows affected: 0", results.SelectMany(r => r.Messages));
+        Assert.True(Assert.Single(results).IsError);
 }

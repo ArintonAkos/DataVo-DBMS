@@ -17,7 +17,7 @@ public class InsertTypedConstraintFastPathTests
         var schema = new ReactiveRowSchema("Id", "Name");
         ctx.InsertTyped("Users", schema, [CellValue.From(1), CellValue.From("a")]);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() =>
             ctx.InsertTyped("Users", schema, [CellValue.From(1), CellValue.From("b")]));
     }
 }

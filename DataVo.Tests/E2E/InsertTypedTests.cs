@@ -1,3 +1,4 @@
+using DataVo.Core.Exceptions;
 using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Changes;
@@ -289,7 +290,7 @@ public class InsertTypedTests
         ctx.InsertTyped("Players", PlayerSchema,
             [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ConstraintViolationException ex = Assert.Throws<ConstraintViolationException>(() =>
             ctx.InsertTyped("Players", PlayerSchema,
                 [CellValue.From(1), CellValue.From("Duplicate"), CellValue.From(8)]));
 
@@ -314,7 +315,7 @@ public class InsertTypedTests
         Assert.Contains(rows, row => Equals(row["Id"], 1) && Equals(row["Name"], "Ada"));
         Assert.Contains(rows, row => Equals(row["Id"], 2) && Equals(row["Name"], "Bob"));
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ConstraintViolationException ex = Assert.Throws<ConstraintViolationException>(() =>
             ctx.InsertTypedBatch("Players", PlayerSchema,
             [
                 [CellValue.From(3), CellValue.From("Cara"), CellValue.From(4)],
@@ -366,7 +367,7 @@ public class InsertTypedTests
             [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
         ]);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ConstraintViolationException ex = Assert.Throws<ConstraintViolationException>(() =>
             ctx.InsertTypedBatch("Players", PlayerSchema,
             [
                 [CellValue.From(3), CellValue.From("Cara"), CellValue.From(4)],
@@ -691,7 +692,7 @@ public class InsertTypedTests
         string expectedMessage,
         params string[] sqlStatements)
     {
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(typedInsert);
+        ConstraintViolationException ex = Assert.Throws<ConstraintViolationException>(typedInsert);
         Assert.Equal(expectedMessage, ex.Message);
 
         using DataVoContext sql = CreateContext();
@@ -700,8 +701,11 @@ public class InsertTypedTests
             sql.Execute(sqlStatements[i]);
         }
 
+        // Typed and SQL inserts report the same violation through the same error contract.
         QueryResult result = sql.Execute(sqlStatements[^1]).Single();
+        Assert.True(result.IsError);
         Assert.Contains(expectedMessage, result.Messages);
+        Assert.Equal(ex.ErrorCode, result.ErrorCode);
     }
 
     private static void AssertVectorsEqual(float[] expected, float[] actual)

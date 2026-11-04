@@ -33,14 +33,16 @@ public class GameRuntimeBulkInsertTests
         using var context = CreateContext();
         context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT DEFAULT 1)");
 
-        IReadOnlyList<long> rowIds = context.BulkInsert("Players",
+        // A batch is all-or-nothing: the duplicate rejects the whole batch.
+        var rejected = Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => context.BulkInsert("Players",
         [
             new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada" },
             new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Duplicate" }
-        ]);
+        ]));
+        Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.PrimaryKeyViolation, rejected.ErrorCode);
+        Assert.Empty(Select(context, "SELECT Id FROM Players"));
 
-        Assert.Single(rowIds);
-
+        context.BulkInsert("Players", [new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada" }]);
         List<Dictionary<string, object?>> rows = Select(context, "SELECT Id, Name, Level FROM Players");
         Assert.Single(rows);
         Assert.Equal("Ada", rows[0]["Name"]);
@@ -160,12 +162,10 @@ public class GameRuntimeBulkInsertTests
         context.Engine.Catalog.DropIndex("_PK_Players", "Players", CurrentDatabase(context));
         context.Engine.IndexManager.DropIndex("_PK_Players", "Players", CurrentDatabase(context));
 
-        IReadOnlyList<long> rowIds = context.BulkInsert("Players",
+        Assert.Throws<DataVo.Core.Exceptions.ConstraintViolationException>(() => context.BulkInsert("Players",
         [
             new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Duplicate" }
-        ]);
-
-        Assert.Empty(rowIds);
+        ]));
 
         List<Dictionary<string, object?>> rows = Select(context, "SELECT Id, Name FROM Players");
         Assert.Single(rows);
