@@ -246,6 +246,10 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
         Dictionary<string, HashSet<string>> batchUniqueValues = InitializeBatchUniqueTracker(primaryKeys, uniqueKeys);
+        List<Models.Catalog.Column> lengthLimitedColumns = Catalog.GetTableColumns(_model.TableName, databaseName)
+            .FindAll(column => column.Length > 0
+                && column.Type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase)
+                && _model.SetExpressions.ContainsKey(column.Name));
 
         int rowNumber = 1;
         foreach (var (rowId, oldRow) in existingRows)
@@ -255,6 +259,18 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             // Create and add new row to the list of new rows
             var newRow = ApplySetExpressions(oldRow, databaseName);
             newRows.Add(newRow);
+
+            foreach (Models.Catalog.Column column in lengthLimitedColumns)
+            {
+                if (newRow.TryGetValue(column.Name, out object? assigned)
+                    && ColumnLengthRule.Exceeds(column, assigned, out int length))
+                {
+                    throw new ConstraintViolationException(ColumnLengthRule.Message(column.Name, column.Length, length, rowNumber))
+                    {
+                        ErrorCode = Contracts.Results.DataVoErrorCodes.ValueTooLong,
+                    };
+                }
+            }
 
             // Validate all constraints
             ValidatePrimaryAndUniqueConstraints(newRow, oldRow, primaryKeys, uniqueKeys, batchUniqueValues, rowNumber, databaseName);

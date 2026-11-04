@@ -1608,7 +1608,16 @@ public static class DataVoCompiledQuery
             throw new EvaluationException($"Type of argument doesn't match with column type for {column.Name}!");
         }
 
-        return NormalizeParsedValue(column, parsedValue);
+        object? normalized = NormalizeParsedValue(column, parsedValue);
+        if (ColumnLengthRule.Exceeds(column, normalized, out int length))
+        {
+            throw new ConstraintViolationException(ColumnLengthRule.Message(column.Name, column.Length, length))
+            {
+                ErrorCode = Contracts.Results.DataVoErrorCodes.ValueTooLong,
+            };
+        }
+
+        return normalized;
     }
 
     private static string FormatColumnValue(object rawValue, string columnType)

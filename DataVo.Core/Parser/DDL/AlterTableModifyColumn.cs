@@ -34,9 +34,20 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
                 Field field = ToField(ast.Column, tableName, existingColumn);
                 ValidateDefault(field);
 
+                var resized = new Column { Name = columnName, Type = field.Type.ToString().ToUpperInvariant(), Length = field.Length };
                 foreach (var row in existingRows)
                 {
                     row[columnName] = ConvertExistingValue(row[columnName], field);
+
+                    // Shrinking a column must not silently cut existing data; the schema stays unchanged.
+                    if (ColumnLengthRule.Exceeds(resized, row[columnName], out int length))
+                    {
+                        throw new ConstraintViolationException(
+                            $"Cannot change column {columnName} to VARCHAR({field.Length}): an existing value of length {length} is too long for column {columnName}.")
+                        {
+                            ErrorCode = DataVo.Core.Contracts.Results.DataVoErrorCodes.ValueTooLong,
+                        };
+                    }
                 }
 
                 Catalog.ModifyColumn(tableName, databaseName, field);

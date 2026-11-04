@@ -65,7 +65,8 @@ public class Column : IColumn
 
         return Type.ToUpperInvariant() switch
         {
-            "VARCHAR" => (Length > 0 && Length < rawValue.Length) ? rawValue[..Length] : rawValue,
+            "VARCHAR" => rawValue, // length is enforced by ColumnLengthRule; never truncate
+
             "DATE" => TryParseDate(rawValue, out DataVoDate parsedDate) ? parsedDate : rawValue,
             "GUID" => Guid.TryParse(rawValue, out Guid parsedGuid) ? parsedGuid : rawValue,
             "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,

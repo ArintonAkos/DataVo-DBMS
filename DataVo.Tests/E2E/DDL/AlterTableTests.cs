@@ -114,17 +114,30 @@ public abstract class AlterTableTestsBase : SqlExecutionTestsBase
     }
 
     [Fact]
-    public void AlterTable_ModifyColumn_TruncatesVarcharAndUpdatesDefault()
+    public void AlterTable_ModifyColumn_ShrinkingBelowExistingData_IsRejected()
     {
+        var before = ExecuteAndReturn("SELECT Name FROM Users ORDER BY Id").Data.Select(row => row["Name"]?.ToString()).ToList();
+
         var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Name VARCHAR(3) DEFAULT 'Zed'");
+
+        // Existing names are longer than 3 characters: shrinking would silently cut data.
+        Assert.True(alter.IsError);
+        Assert.Equal(DataVo.Core.Contracts.Results.DataVoErrorCodes.ValueTooLong, alter.ErrorCode);
+        var after = ExecuteAndReturn("SELECT Name FROM Users ORDER BY Id").Data.Select(row => row["Name"]?.ToString()).ToList();
+        Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public void AlterTable_ModifyColumn_UpdatesLengthAndDefault_WhenDataFits()
+    {
+        var alter = ExecuteAndReturn("ALTER TABLE Users MODIFY COLUMN Name VARCHAR(40) DEFAULT 'Zed'");
 
         Assert.False(alter.IsError);
 
         Execute("INSERT INTO Users (Id) VALUES (3)");
 
-        var result = ExecuteAndReturn("SELECT Name FROM Users ORDER BY Id");
-        Assert.False(result.IsError);
-        Assert.Equal(["Ali", "Bob", "Zed"], result.Data.Select(row => row["Name"]?.ToString()).ToList());
+        var result = ExecuteAndReturn("SELECT Name FROM Users WHERE Id = 3");
+        Assert.Equal("Zed", result.Data.Single()["Name"]?.ToString());
     }
 
     [Fact]

@@ -81,7 +81,7 @@ public class InsertTypedTests
         using DataVoContext ctx = CreateContext();
         ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(3), Level INT)");
 
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
+        ConstraintViolationException ex = Assert.Throws<ConstraintViolationException>(() =>
             ctx.InsertTyped("Players", PlayerSchema,
                 [CellValue.From(1), CellValue.From("Ada Lovelace"), CellValue.From(7)]));
 

@@ -517,13 +517,12 @@ internal sealed partial class InsertRowService(
                 $"Typed insert cell for column {column.Name} must be {expected} for {column.Type}; use the dictionary BulkInsert path.");
         }
 
-        if (expected == CellType.String
-            && column.Length > 0
-            && cell.AsString() is string text
-            && text.Length > column.Length)
+        if (expected == CellType.String && ColumnLengthRule.Exceeds(column, cell.AsString(), out int length))
         {
-            throw new NotSupportedException(
-                $"Typed insert cell for column {column.Name} exceeds VARCHAR({column.Length}); use the dictionary BulkInsert path.");
+            throw new ConstraintViolationException(ColumnLengthRule.Message(column.Name, column.Length, length))
+            {
+                ErrorCode = Contracts.Results.DataVoErrorCodes.ValueTooLong,
+            };
         }
 
         if (expected == CellType.Vector
@@ -812,6 +811,12 @@ internal sealed partial class InsertRowService(
             if (!TryNormalizeValue(tableColumn, rawValue, out object? normalizedValue))
             {
                 messages.Add($"Type of argument doesn't match with column type in row {rowNumber}!");
+                return false;
+            }
+
+            if (ColumnLengthRule.Exceeds(tableColumn, normalizedValue, out int length))
+            {
+                messages.Add(ColumnLengthRule.Message(tableColumn.Name, tableColumn.Length, length, rowNumber));
                 return false;
             }
 
