@@ -28,7 +28,7 @@ internal readonly record struct HNSWBuildDiagnosticsSnapshot(
 /// <summary>
 /// Implements an in-memory HNSW (Hierarchical Navigable Small World) vector index.
 /// </summary>
-public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
+public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
 {
     private const int DefaultM = 16;
     private const int DefaultEfConstruction = 64;
@@ -491,6 +491,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
 
     private void InsertCore(long rowId, ReadOnlySpan<float> vector)
     {
+        Interlocked.Increment(ref _mutations);
         lock (_stateGate)
         {
             EnsureVectorDimension(vector.Length);
@@ -595,6 +596,8 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
         {
             return;
         }
+
+        Interlocked.Increment(ref _mutations);
 
         foreach (long rowId in rowIds)
         {
@@ -727,6 +730,7 @@ public class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex,
     /// </summary>
     public void Clear()
     {
+        Interlocked.Increment(ref _mutations);
         _rowIdToOrdinal.Clear();
         _freeOrdinals.Clear();
 

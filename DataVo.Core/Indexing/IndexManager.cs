@@ -1319,6 +1319,30 @@ public partial class IndexManager : IDisposable
         return GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType) as HNSWIndex;
     }
 
+    /// <summary>The HNSW index already in memory, without loading or rebuilding one.</summary>
+    internal HNSWIndex? TryGetLoadedHnswIndex(string indexName, string tableName, string databaseName)
+    {
+        lock (_lock)
+        {
+            return _cache.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out IIndexBase? index)
+                ? index as HNSWIndex
+                : null;
+        }
+    }
+
+    /// <summary>Puts an index built elsewhere (loaded from a snapshot) in place of a rebuild.</summary>
+    internal void InstallVectorIndex(IVectorIndex index, string indexName, string tableName, string databaseName, string indexType)
+    {
+        IndexMetadata metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric: null);
+        IndexCacheKey cacheKey = CacheKeyOf(metadata);
+        lock (_lock)
+        {
+            _cache[cacheKey] = index;
+            _metadata[cacheKey] = metadata;
+            _cachePaths[cacheKey] = BuildIndexPath(metadata);
+        }
+    }
+
     /// <summary>
     /// Performs nearest-neighbor vector search.
     /// </summary>

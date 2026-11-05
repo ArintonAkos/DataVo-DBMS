@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.StorageEngine.Lsm.V2;
 
 namespace DataVo.Core.StorageEngine.Lsm;
@@ -288,7 +289,15 @@ public sealed partial class LsmStorageEngine
         {
             Directory.Delete(directory, recursive: true);
         }
+
+        // A vector index keeps a graph snapshot instead of an index table; a later index of the same
+        // name must never load it.
+        HnswSnapshotFile.Delete(GetVectorSnapshotPath(databaseName, tableName, indexName));
     }
+
+    /// <summary>Where the graph snapshot of a vector index on this table lives.</summary>
+    internal string GetVectorSnapshotPath(string databaseName, string tableName, string indexName) =>
+        Path.Combine(GetTableDirectory(databaseName, tableName), HnswSnapshotFile.DirectoryName, indexName + HnswSnapshotFile.Extension);
 
     private void StageIndexChange(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId, bool live)
     {

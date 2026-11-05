@@ -29,7 +29,7 @@ namespace DataVo.Core.Runtime;
 /// var results = queryEngine.Parse();
 /// </code>
 /// </example>
-public sealed class DataVoEngine : IDisposable
+public sealed partial class DataVoEngine : IDisposable
 {
     private static readonly AsyncLocal<DataVoEngine?> ScopedCurrent = new();
     private static readonly object SyncRoot = new();
@@ -417,6 +417,11 @@ public sealed class DataVoEngine : IDisposable
             IndexManager.IsLsmBacked
             && !IndexManager.SupportsVectorIndexType(index.IndexKind)
             && IndexManager.IsLsmIndexBuilt(index.IndexFileName, tableName, databaseName));
+
+        // Vector indexes with a graph snapshot load it and re-index only rows changed since.
+        indexFiles.RemoveAll(index =>
+            IndexManager.SupportsVectorIndexType(index.IndexKind)
+            && TryRestoreVectorIndexFromSnapshot(databaseName, tableName, index));
         if (indexFiles.Count == 0)
         {
             return;
@@ -779,9 +784,16 @@ public sealed class DataVoEngine : IDisposable
             WalCheckpointer.Dispose();
         }
 
+        // Graphs are captured before the index manager shuts down and written after the storage engine
+        // has flushed, so a snapshot never claims rows that are not durable yet.
+        StorageEngine.Lsm.LsmStorageEngine? lsm = StorageContext.LsmEngine;
+        List<PendingVectorSnapshot> vectorSnapshots = lsm is null ? [] : CaptureVectorSnapshots(lsm);
+        long vectorWatermark = lsm?.AppliedLsn ?? 0;
+
         IndexManager.Dispose();
         VersionStorageManager.Dispose();
         StorageContext.Dispose();
+        WriteVectorSnapshots(vectorSnapshots, vectorWatermark);
         _snapshotLock.Dispose();
 
         lock (SyncRoot)

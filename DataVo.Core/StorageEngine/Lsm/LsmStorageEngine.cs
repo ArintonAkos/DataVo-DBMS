@@ -5,6 +5,7 @@ using System.Threading;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Compat;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
@@ -870,7 +871,10 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         legacy.FlushActiveMemTable();
     }
 
-    /// <summary>Opens every table directory on disk, so the LSN floor covers all persisted sequence numbers.</summary>
+    /// <summary>
+    /// Opens every table directory on disk, so the LSN floor covers all persisted sequence numbers,
+    /// including the watermarks of vector index snapshots.
+    /// </summary>
     private void OpenExistingTables()
     {
         long floor = 0;
@@ -884,6 +888,7 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
                 // Index tables count toward the LSN floor even when the row table has no files yet: new
                 // commits must get LSNs above everything any key space already flushed.
                 floor = Math.Max(floor, OpenExistingIndexTables(databaseName, tableName, tableDirectory));
+                floor = Math.Max(floor, HnswSnapshotFile.MaxWatermark(tableDirectory));
                 if (File.Exists(Path.Combine(tableDirectory, "MANIFEST")))
                 {
                     floor = Math.Max(floor, GetOrCreateTable(databaseName, tableName).FlushedLsn);
