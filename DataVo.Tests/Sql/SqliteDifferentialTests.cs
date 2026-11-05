@@ -204,7 +204,9 @@ public sealed class SqliteDifferentialTests : IDisposable
                     Select($"SELECT Id, A FROM P ORDER BY Id LIMIT {_random.Next(1, 8)} OFFSET {_random.Next(5)}", ordered: true);
                     break;
                 case 7:
-                    Select($"SELECT B, COUNT(*) AS n FROM P GROUP BY B HAVING COUNT(*) > {_random.Next(3)}", ordered: false);
+                    Select(_random.Next(2) == 0
+                        ? $"SELECT B, COUNT(*) AS n FROM P GROUP BY B HAVING COUNT(*) > {_random.Next(3)}"
+                        : $"SELECT COUNT(*) AS n, MAX(A) AS hi, B FROM P GROUP BY B", ordered: false);
                     break;
                 default:
                     Select($"SELECT Id, V FROM C WHERE {Predicate("C", 0)} ORDER BY Id", ordered: true);
@@ -283,13 +285,25 @@ public sealed class SqliteDifferentialTests : IDisposable
             }
 
             List<string> expected = [];
+            List<string> expectedColumns;
             using (SqliteCommand command = _sqlite.CreateCommand())
             {
                 command.CommandText = sql;
                 using SqliteDataReader reader = command.ExecuteReader();
+                expectedColumns = [.. Enumerable.Range(0, reader.FieldCount).Select(reader.GetName)];
                 while (reader.Read())
                 {
                     expected.Add(string.Join("|", Enumerable.Range(0, reader.FieldCount).Select(i => Format(reader.IsDBNull(i) ? null : reader.GetValue(i)))));
+                }
+            }
+
+            // Column names and order must match too (SQLite names an unaliased P.Id just "Id").
+            if (dv.Data.Count > 0)
+            {
+                List<string> actualColumns = [.. dv.Data[0].Keys.Select(name => name.Contains('.') ? name[(name.IndexOf('.') + 1)..] : name)];
+                if (!actualColumns.SequenceEqual(expectedColumns, StringComparer.OrdinalIgnoreCase))
+                {
+                    Fail(sql, $"columns differ\n  SQLite: {string.Join(", ", expectedColumns)}\n  DataVo: {string.Join(", ", dv.Data[0].Keys)}");
                 }
             }
 
