@@ -125,10 +125,11 @@ internal sealed class LsmLatestRowStore
     }
 
     /// <summary>
-    /// Invokes <paramref name="visit"/> for every version in ascending row-id order, with
-    /// <see langword="null"/> for a deletion.
+    /// Invokes <paramref name="visit"/> for every version in ascending row-id order, with its sequence
+    /// and <see langword="null"/> for a deletion. The value is read before the sequence, so a concurrent
+    /// publish can only make a sequence look newer than its value, never older.
     /// </summary>
-    public void ForEach<TState>(TState state, Action<TState, long, byte[]?> visit)
+    public void ForEachVersion<TState>(TState state, Action<TState, long, ulong, byte[]?> visit)
     {
         Page?[] pages = Volatile.Read(ref _pages);
         for (int pageIndex = 0; pageIndex < pages.Length; pageIndex++)
@@ -145,7 +146,8 @@ internal sealed class LsmLatestRowStore
                 byte[]? value = Volatile.Read(ref page.Slots[slot]);
                 if (value is not null)
                 {
-                    visit(state, pageBase + slot, ReferenceEquals(value, TombstoneSentinel) ? null : value);
+                    ulong sequence = Volatile.Read(ref page.Sequences[slot]);
+                    visit(state, pageBase + slot, sequence, ReferenceEquals(value, TombstoneSentinel) ? null : value);
                 }
             }
         }

@@ -1293,17 +1293,39 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
     private string GetTableDirectory(string databaseName, string tableName) =>
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
+    /// <summary>Every live row in row-id order (see <see cref="MergeLiveRows{TState}"/>).</summary>
+    private List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
+    {
+        var rows = new List<(long RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
+        MergeLiveRows(state, rows, static (list, rowId, _, value) => list.Add((rowId, value.ToArray())));
+        return rows;
+    }
+
+    /// <summary>
+    /// Visits the id and version sequence of every live row of a table in row-id order, without copying
+    /// any row. A row whose sequence is at most a known commit LSN has not changed since that commit.
+    /// </summary>
+    public void ForEachLiveRowVersion(string databaseName, string tableName, Action<long, ulong> visit)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(visit);
+        MergeLiveRows(GetOrCreateTable(databaseName, tableName), visit, static (callback, rowId, sequence, _) => callback(rowId, sequence));
+    }
+
+    /// <summary>Highest commit LSN applied to the in-memory tables; every row sequence is at most this.</summary>
+    internal long AppliedLsn => Volatile.Read(ref _appliedLsn);
+
+    private delegate void LiveRowVisitor<TState>(TState state, long rowId, ulong sequence, ReadOnlySpan<byte> value);
+
     /// <summary>
     /// Every live row in row-id order: a k-way merge of the unflushed overlay and the SSTable cursors
     /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
-    /// for the same reason as in <see cref="ResolveRow"/>.
+    /// for the same reason as in <see cref="ResolveRow"/>. The value span is only valid during the call.
     /// </summary>
-    private List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
+    private void MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit)
     {
-        var overlay = new List<(long RowId, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
-        state.LatestRows.ForEach(overlay, static (list, rowId, value) => list.Add((rowId, value)));
+        var overlay = new List<(long RowId, ulong Sequence, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
+        state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)));
 
-        var rows = new List<(long RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
         TableVersion version = state.AcquireVersion();
         try
         {
@@ -1344,10 +1366,10 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
                 bool decided = false;
                 if (overlayIndex < overlay.Count && overlay[overlayIndex].RowId == next)
                 {
-                    byte[]? value = overlay[overlayIndex].Value;
+                    (_, ulong sequence, byte[]? value) = overlay[overlayIndex];
                     if (value is not null)
                     {
-                        rows.Add((next, value.ToArray()));
+                        visit(visitorState, next, sequence, value);
                     }
 
                     decided = true;
@@ -1367,7 +1389,7 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
 
                 if (winner >= 0 && cursors[winner].Type == LsmValueType.Put)
                 {
-                    rows.Add((next, cursors[winner].Value.ToArray()));
+                    visit(visitorState, next, cursors[winner].Sequence, cursors[winner].Value);
                 }
 
                 for (int i = 0; i < cursors.Length; i++)
@@ -1384,8 +1406,6 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         {
             version.Release();
         }
-
-        return rows;
     }
 
     private static List<SstableEntry> ReadSstableEntries(byte[] bytes)
