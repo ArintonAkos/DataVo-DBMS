@@ -51,7 +51,11 @@ Interactive versions of every chart live on the [benchmarks page](https://arinto
 
 ![Vector search allocation](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/vector-search-allocation.png)
 
-![Disk CRUD WAL total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/disk-crud-wal-time.png)
+Durable point updates (`disk-crud-wal`, both engines committing the same way): with every update its
+own power-safe commit, DataVo LSM and SQLite (WAL, `synchronous=FULL`, `fullfsync`) tie at about 4 ms per
+update on macOS, because both wait for the same flush. Without the power-loss guarantee, and when all
+updates commit as one batch, SQLite is currently 1.4-2.6x faster and allocates less. An earlier chart here
+batched DataVo's updates but not SQLite's and has been withdrawn.
 
 Linux CI sqlite-vec rerun plots:
 
