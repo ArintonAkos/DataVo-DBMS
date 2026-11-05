@@ -26,6 +26,39 @@ internal static class AtomicFileOperations
     /// <exception cref="FileNotFoundException">Thrown when <paramref name="tempPath"/> does not exist.</exception>
     public static void ReplaceFromTemp(string tempPath, string destinationPath)
     {
+        // On Windows a just-written file is often opened briefly by antivirus or the search indexer,
+        // which makes replace/move fail with a sharing violation for a few milliseconds. Retry those.
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                ReplaceFromTempOnce(tempPath, destinationPath);
+                return;
+            }
+            catch (Exception ex) when (attempt < SharingViolationRetries && IsTransientSharingViolation(ex))
+            {
+                Thread.Sleep(SharingViolationRetryDelayMs * attempt);
+            }
+        }
+    }
+
+    private const int SharingViolationRetries = 10;
+    private const int SharingViolationRetryDelayMs = 10;
+
+    private static bool IsTransientSharingViolation(Exception exception)
+    {
+        Exception ex = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+        if (ex is not IOException io || !System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        {
+            return false;
+        }
+
+        int win32 = io.HResult & 0xFFFF;
+        return win32 is 32 or 33; // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+    }
+
+    private static void ReplaceFromTempOnce(string tempPath, string destinationPath)
+    {
         if (!File.Exists(tempPath))
         {
             throw new FileNotFoundException($"Temp file not found: {tempPath}", tempPath);

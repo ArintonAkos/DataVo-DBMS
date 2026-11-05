@@ -88,7 +88,8 @@ internal sealed class WalFileStore
         {
             EnsureDirectoryExists();
 
-            using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            // Share like the pooled binary handle does, so concurrent readers never conflict on Windows.
+            using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
             stream.Seek(0, SeekOrigin.End);
 
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))

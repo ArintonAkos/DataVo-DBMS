@@ -112,6 +112,7 @@ internal sealed class WalCheckpointer : IDisposable
         _wake.Set();
         _thread?.Join();
         _wake.Dispose();
+        _walStore.ReleaseFileHandle();
     }
 
     private void WriterLoop()

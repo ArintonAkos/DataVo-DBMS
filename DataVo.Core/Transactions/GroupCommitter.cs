@@ -68,6 +68,10 @@ internal sealed class GroupCommitter : IAsyncDisposable
         _disposed = true;
         _channel.Writer.TryComplete();
         await Task.Run(() => _writerThread.Join()).ConfigureAwait(false);
+
+        // The append handle lives in a process-wide pool; keeping it open after the engine is gone
+        // blocks deleting or replacing the WAL (enforced on Windows).
+        _fileStore.ReleaseFileHandle();
     }
 
     private void WriterLoop()
