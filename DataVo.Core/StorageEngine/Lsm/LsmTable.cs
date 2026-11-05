@@ -86,6 +86,7 @@ public sealed class LsmTable : IDisposable
     private sealed record FrozenGeneration(MemTable Table, LsmWalWriter? Wal);
 
     private readonly object _gate = new();
+    private int _frameHolds; // guarded by _gate
     private readonly object _ioGate = new();
     private readonly string _tableDirectory;
     private readonly LsmManifest _manifest;
@@ -257,6 +258,11 @@ public sealed class LsmTable : IDisposable
         lock (_gate)
         {
             DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+            while (_frameHolds > 0)
+            {
+                Monitor.Wait(_gate); // never flush part of a commit frame (see BeginFrame)
+            }
+
             WaitForFlushPipelineNoLock();
             ThrowIfUnusableNoLock();
 
@@ -353,9 +359,37 @@ public sealed class LsmTable : IDisposable
         active.Dispose();
     }
 
+    /// <summary>
+    /// Keeps the active MemTable from rotating or being flushed until <see cref="EndFrame"/>. Recovery
+    /// replays or skips a commit frame whole, by its LSN, so a frame must land in one MemTable: a file
+    /// flushed halfway through a frame would claim the frame's LSN while the rest was only in memory,
+    /// and a crash then lost those rows.
+    /// </summary>
+    internal void BeginFrame()
+    {
+        lock (_gate)
+        {
+            _frameHolds++;
+        }
+    }
+
+    /// <summary>Ends a <see cref="BeginFrame"/> hold and rotates now if the MemTable outgrew its threshold.</summary>
+    internal void EndFrame()
+    {
+        lock (_gate)
+        {
+            _frameHolds--;
+            Monitor.PulseAll(_gate);
+            if (_frameHolds == 0 && !_disposed)
+            {
+                RotateIfOversizedNoLock();
+            }
+        }
+    }
+
     private void RotateIfOversizedNoLock()
     {
-        if (_active.ApproximateBytes < FlushThresholdBytes)
+        if (_frameHolds > 0 || _active.ApproximateBytes < FlushThresholdBytes)
         {
             return;
         }

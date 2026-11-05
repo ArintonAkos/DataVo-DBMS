@@ -317,7 +317,7 @@ public sealed partial class LsmStorageEngine
     }
 
     /// <summary>Applies an index operation of a committed frame to its index MemTable (commit gate held).</summary>
-    private void ApplyIndexOperation(LsmCommitOperation operation, ulong sequence, bool replaying)
+    private void ApplyIndexOperation(LsmCommitOperation operation, ulong sequence, bool replaying, FrameHold? frame = null)
     {
         (string indexName, byte[] encodedKey) = LsmCommitBatch.DecodeIndexValue(operation.Value);
         IndexTableState state;
@@ -334,6 +334,7 @@ public sealed partial class LsmStorageEngine
             return; // dropped while the statement was running
         }
 
+        frame?.Hold(state.Table);
         byte[] userKey = LsmIndexKeyCodec.UserKey(encodedKey, operation.RowId);
         bool live = operation.Kind == LsmCommitOperationKind.IndexPut;
         if (live)

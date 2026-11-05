@@ -573,6 +573,60 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
     internal long OverlayRowCount(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).LatestRows.Count;
 
+    /// <summary>
+    /// Test hook: stops like a killed process. Background flushes drain and files close, but MemTables
+    /// are not flushed and the commit log is not pruned, so the next open must recover from the log.
+    /// </summary>
+    internal void SimulateCrashForTesting()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        foreach (TableState state in _tables.Values)
+        {
+            lock (state.SyncRoot)
+            {
+                state.Abandon();
+            }
+        }
+
+        _tables.Clear();
+        foreach (IndexTableState index in _indexTables.Values)
+        {
+            index.Abandon();
+        }
+
+        _indexTables.Clear();
+        _commitLog.Dispose();
+    }
+
+    /// <summary>
+    /// Test hook: writes a new version of a live row under the same row id (the storage step of an
+    /// in-place UPDATE). Returns <see langword="false"/> when the row is not live.
+    /// </summary>
+    internal bool OverwriteRowForTesting(string databaseName, string tableName, long rowId, byte[] rowBytes)
+    {
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
+        bool live;
+        lock (state.SyncRoot)
+        {
+            live = Lookup(pending, state, rowId, out _) == LatestRowLookup.Live;
+            if (live)
+            {
+                pending.Stage(state, rowId, rowBytes);
+                pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
+                pending.Touch(state, databaseName, tableName);
+            }
+        }
+
+        CompleteWrite(pending, ownsWrite);
+        return live;
+    }
+
     /// <summary>Diagnostics: forces the table's MemTable into an SSTable now.</summary>
     internal void FlushTableForTesting(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).Table.FlushActiveMemTable();
@@ -909,77 +963,92 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         Span<byte> userKey = stackalloc byte[UserKeySize];
         foreach (LsmCommitFrame frame in _commitLog.ReadAll())
         {
-            ulong sequence = checked((ulong)frame.Lsn);
-            var touched = new HashSet<TableState>();
-            foreach (LsmCommitOperation operation in frame.Operations)
+            var hold = new FrameHold();
+            try
             {
-                switch (operation.Kind)
-                {
-                    case LsmCommitOperationKind.DropTable:
-                        if (frame.Lsn > GetOrCreateTable(operation.Database, operation.Table).FlushedLsn)
-                        {
-                            DropTableCore(operation.Database, operation.Table);
-                        }
+                ReplayFrame(frame, hold, userKey);
+            }
+            finally
+            {
+                hold.Release();
+            }
+        }
+    }
 
-                        continue;
+    private void ReplayFrame(LsmCommitFrame frame, FrameHold hold, Span<byte> userKey)
+    {
+        ulong sequence = checked((ulong)frame.Lsn);
+        var touched = new HashSet<TableState>();
+        foreach (LsmCommitOperation operation in frame.Operations)
+        {
+            switch (operation.Kind)
+            {
+                case LsmCommitOperationKind.DropTable:
+                    if (frame.Lsn > GetOrCreateTable(operation.Database, operation.Table).FlushedLsn)
+                    {
+                        DropTableCore(operation.Database, operation.Table);
+                    }
 
-                    case LsmCommitOperationKind.DropDatabase:
-                        ReplayDropDatabase(operation.Database, frame.Lsn);
-                        continue;
-
-                    case LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete:
-                        ApplyIndexOperation(operation, sequence, replaying: true);
-                        continue;
-                }
-
-                TableState state = GetOrCreateTable(operation.Database, operation.Table);
-                if (frame.Lsn <= state.FlushedLsn)
-                {
                     continue;
-                }
 
-                bool wasLive = ResolveRow(null, state, operation.RowId).Row is { } previous
-                    && !ReferenceEquals(previous, DeletedMarker);
-                EncodeRowId(operation.RowId, userKey);
-                if (operation.Kind == LsmCommitOperationKind.Put)
-                {
-                    state.Table.Put(userKey, sequence, operation.Value);
-                    lock (state.OverlayGate)
-                    {
-                        state.LatestRows.Set(operation.RowId, operation.Value, sequence);
-                    }
+                case LsmCommitOperationKind.DropDatabase:
+                    ReplayDropDatabase(operation.Database, frame.Lsn);
+                    continue;
 
-                    if (!wasLive)
-                    {
-                        state.LiveRowCount++;
-                    }
-                }
-                else
-                {
-                    state.Table.Delete(userKey, sequence);
-                    lock (state.OverlayGate)
-                    {
-                        state.LatestRows.SetTombstone(operation.RowId, sequence);
-                    }
-
-                    if (wasLive)
-                    {
-                        state.LiveRowCount--;
-                    }
-                }
-
-                if (operation.RowId >= state.NextRowId)
-                {
-                    state.NextRowId = operation.RowId + 1;
-                }
-
-                touched.Add(state);
+                case LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete:
+                    ApplyIndexOperation(operation, sequence, replaying: true, hold);
+                    continue;
             }
 
-            foreach (TableState state in touched)
+            TableState state = GetOrCreateTable(operation.Database, operation.Table);
+            if (frame.Lsn <= state.FlushedLsn)
             {
-                state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.NextRowId, state.LiveRowCount));
+                continue;
             }
+
+            hold.Hold(state.Table);
+            bool wasLive = ResolveRow(null, state, operation.RowId).Row is { } previous
+                && !ReferenceEquals(previous, DeletedMarker);
+            EncodeRowId(operation.RowId, userKey);
+            if (operation.Kind == LsmCommitOperationKind.Put)
+            {
+                state.Table.Put(userKey, sequence, operation.Value);
+                lock (state.OverlayGate)
+                {
+                    state.LatestRows.Set(operation.RowId, operation.Value, sequence);
+                }
+
+                if (!wasLive)
+                {
+                    state.LiveRowCount++;
+                }
+            }
+            else
+            {
+                state.Table.Delete(userKey, sequence);
+                lock (state.OverlayGate)
+                {
+                    state.LatestRows.SetTombstone(operation.RowId, sequence);
+                }
+
+                if (wasLive)
+                {
+                    state.LiveRowCount--;
+                }
+            }
+
+            if (operation.RowId >= state.NextRowId)
+            {
+                state.NextRowId = operation.RowId + 1;
+            }
+
+            touched.Add(state);
+        }
+
+        foreach (TableState state in touched)
+        {
+            hold.Hold(state.Table);
+            state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.NextRowId, state.LiveRowCount));
         }
     }
 
@@ -1173,6 +1242,19 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
     private void ApplyToMemTables(PendingWrite pending, ulong sequence)
     {
         DuringApplyForTesting?.Invoke();
+        var frame = new FrameHold();
+        try
+        {
+            ApplyFrame(pending, sequence, frame);
+        }
+        finally
+        {
+            frame.Release();
+        }
+    }
+
+    private void ApplyFrame(PendingWrite pending, ulong sequence, FrameHold frame)
+    {
         Span<byte> userKey = stackalloc byte[UserKeySize];
         foreach (LsmCommitOperation operation in pending.Batch.Operations)
         {
@@ -1186,6 +1268,7 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
                 continue; // dropped while the statement was running
             }
 
+            frame.Hold(state.Table);
             EncodeRowId(operation.RowId, userKey);
             if (operation.Kind == LsmCommitOperationKind.Put)
             {
@@ -1207,6 +1290,7 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
                 continue; // dropped while the statement was running
             }
 
+            frame.Hold(index.Key.Table);
             foreach (KeyValuePair<byte[], bool> change in index.Value)
             {
                 if (change.Value)
@@ -1224,7 +1308,38 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         {
             // Under the commit gate, in LSN order: the persisted count is the count as of this frame.
             state.LiveRowCount += pending.LiveDeltaFor(state);
+            frame.Hold(state.Table);
             state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.ReadNextRowId(), state.LiveRowCount));
+        }
+    }
+
+    /// <summary>The tables one commit frame touches, held so none rotates or flushes mid-frame.</summary>
+    private sealed class FrameHold
+    {
+        private readonly List<LsmTable> _tables = new(2);
+
+        public void Hold(LsmTable table)
+        {
+            foreach (LsmTable held in _tables)
+            {
+                if (ReferenceEquals(held, table))
+                {
+                    return;
+                }
+            }
+
+            table.BeginFrame();
+            _tables.Add(table);
+        }
+
+        public void Release()
+        {
+            foreach (LsmTable table in _tables)
+            {
+                table.EndFrame();
+            }
+
+            _tables.Clear();
         }
     }
 
@@ -1717,6 +1832,12 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         public virtual void Dispose()
         {
             Table.FlushActiveMemTable();
+            Abandon();
+        }
+
+        /// <summary>Closes without flushing the active MemTable (a crash, for tests).</summary>
+        public void Abandon()
+        {
             Table.Dispose();
 
             // Drop the cached file set and unmap every file, so the directory can be deleted (Windows).
