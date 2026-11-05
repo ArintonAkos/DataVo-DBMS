@@ -153,11 +153,13 @@ public static class IndexKeyEncoder
     private static string FormatSingleElementVector(long value) =>
         ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
+    // Index keys must not depend on the thread's culture: CurrentCulture is per thread (ASP.NET sets it
+    // per request), and a comma decimal separator turned 1.25 into the two-element key "[1,25]".
     private static string FormatSingleElementVector(double value) =>
-        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.CurrentCulture);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     private static string FormatSingleElementVector(decimal value) =>
-        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.CurrentCulture);
+        ScalarKeyFormatter.FormatBracketed(value, CultureInfo.InvariantCulture);
 
     private static string SerializeVector(ReadOnlySpan<float> vector)
     {
@@ -192,6 +194,27 @@ public static class IndexKeyEncoder
         if (value is Guid guid)
         {
             return guid.ToString("D");
+        }
+
+        // Numbers are formatted exactly like the typed path (NormalizeCell), culture-invariantly. Going
+        // through value.ToString() used the thread's culture and re-parsed the text as a float vector,
+        // which lost precision and split "1,25" into two elements.
+        switch (value)
+        {
+            case int intValue:
+                return FormatSingleElementVector(intValue);
+            case long longValue:
+                return FormatSingleElementVector(longValue);
+            case short shortValue:
+                return FormatSingleElementVector((int)shortValue);
+            case byte byteValue:
+                return FormatSingleElementVector((int)byteValue);
+            case double doubleValue:
+                return FormatSingleElementVector(doubleValue);
+            case float floatValue:
+                return FormatSingleElementVector((double)floatValue);
+            case decimal decimalValue:
+                return FormatSingleElementVector(decimalValue);
         }
 
         if (VectorParser.TryCoerceToVector(value, out float[] vector))

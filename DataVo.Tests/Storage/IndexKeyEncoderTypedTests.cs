@@ -46,7 +46,7 @@ public class IndexKeyEncoderTypedTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void FloatingKey_UsesCurrentCultureWithoutNumericBoxing(bool useDecimal)
+    public void FloatingKey_IsCultureInvariantWithoutNumericBoxing(bool useDecimal)
     {
         CultureInfo original = CultureInfo.CurrentCulture;
         try
@@ -58,12 +58,13 @@ public class IndexKeyEncoderTypedTests
                 : [CellValue.From(12.5d)];
             string[] attributes = ["Value"];
 
-            Assert.Equal("[12,5]", IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
+            // A comma culture must not change the key (it used to produce "[12,5]").
+            Assert.Equal("[12.5]", IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
 
             long actual = MeasureAllocation(() => IndexKeyEncoder.BuildKeyString(schema, cells, attributes));
             long outputOnly = useDecimal
-                ? MeasureAllocation(static () => string.Create(CultureInfo.GetCultureInfo("fr-FR"), $"[{12.5m}]"))
-                : MeasureAllocation(static () => string.Create(CultureInfo.GetCultureInfo("fr-FR"), $"[{12.5d}]"));
+                ? MeasureAllocation(static () => string.Create(CultureInfo.InvariantCulture, $"[{12.5m}]"))
+                : MeasureAllocation(static () => string.Create(CultureInfo.InvariantCulture, $"[{12.5d}]"));
 
             Assert.True(actual <= outputOnly,
                 $"typed floating key allocated {actual} B/call; output-only formatting allocated {outputOnly} B/call");
