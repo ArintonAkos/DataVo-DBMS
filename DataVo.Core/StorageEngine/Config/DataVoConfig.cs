@@ -344,6 +344,14 @@ public class DataVoConfig
     public bool LsmStrictFsync { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets how LSM mode reads its SSTables. <see cref="Lsm.V2.LsmReadMode.Auto"/> (the default)
+    /// memory-maps them where supported (64-bit, not browser): reads go straight to the OS page cache with
+    /// no copy and no system call per read, and the table no longer has to fit in the managed heap.
+    /// <see cref="Lsm.V2.LsmReadMode.PositionalRead"/> uses positional file reads instead.
+    /// </summary>
+    public Lsm.V2.LsmReadMode LsmReadMode { get; set; } = Lsm.V2.LsmReadMode.Auto;
+
+    /// <summary>
     /// Gets or sets the disk I/O scheduler mode. Phase 1 enables only pooled file handles and
     /// positioned I/O; group commit is reserved for the WAL-as-commit-point implementation.
     /// </summary>

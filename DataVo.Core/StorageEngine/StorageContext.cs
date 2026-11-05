@@ -87,7 +87,8 @@ public class StorageContext(DataVoConfig config) : IDisposable
             StorageMode.Disk => new DiskStorageBackend(config.ResolveDataDirectory()!, config.SyncDiskWrites, config.IoSchedulerMode),
             StorageMode.Lsm => new LsmStorageBackend(
                 config.ResolveDataDirectory()!,
-                config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer),
+                config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer,
+                config.LsmReadMode),
             StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
             _ => throw new ArgumentOutOfRangeException()

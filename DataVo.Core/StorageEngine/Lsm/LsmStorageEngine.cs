@@ -8,6 +8,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.StorageEngine.Lsm.V2;
 using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Core.StorageEngine.Lsm;
@@ -17,15 +18,18 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// </summary>
 public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, IDisposable
 {
-    private const int UserKeySize = sizeof(long);
+    private const int UserKeySize = LsmRowKeyCodec.RowKeySize;
     private const int MaxLevelToScan = LsmTable.DefaultMaxCompactionLevel;
-    private static readonly byte[] NextRowIdMetadataKey =
-        [0x5F, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x76, 0x6F, 0x5F, 0x6E, 0x65, 0x78, 0x74, 0x5F, 0x72, 0x6F, 0x77, 0x5F, 0x69, 0x64];
+    private static readonly byte[] NextRowIdMetadataKey = LsmRowKeyCodec.TableMetadataKey;
+
+    /// <summary>Marks a deleted row in <see cref="ResolveRow"/> results; matched by reference.</summary>
+    private static readonly byte[] DeletedMarker = new byte[1];
 
     internal const string CommitLogFileName = "commit.wal";
 
     private readonly string _storageDirectory;
     private readonly LsmWalDurabilityMode _walDurabilityMode;
+    private readonly LsmReadMode _readMode;
     private readonly ConcurrentDictionary<(string DatabaseName, string TableName), TableState> _tables = new();
     private readonly LsmCommitLog _commitLog;
 
@@ -45,12 +49,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// <summary>Creates an LSM storage engine rooted at <paramref name="storageDirectory"/>.</summary>
     public LsmStorageEngine(
         string storageDirectory,
-        LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync)
+        LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync,
+        LsmReadMode readMode = LsmReadMode.Auto)
     {
         PortableStoragePolicy.ThrowIfUnsupported(StorageMode.Lsm);
         ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;
+        _readMode = readMode;
         Directory.CreateDirectory(_storageDirectory);
         _commitLog = new LsmCommitLog(Path.Combine(_storageDirectory, CommitLogFileName), walDurabilityMode);
 
@@ -107,6 +113,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             pending.Stage(state, rowId, rowBytes);
             pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
             pending.Touch(state, databaseName, tableName);
+            pending.AddLiveDelta(state, 1);
         }
 
         CompleteWrite(pending, ownsWrite);
@@ -137,6 +144,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             }
 
             pending.Touch(state, databaseName, tableName);
+            pending.AddLiveDelta(state, rowsBytes.Count);
         }
 
         CompleteWrite(pending, ownsWrite);
@@ -144,10 +152,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     }
 
     /// <summary>
-    /// Returns whether the table currently holds any live (non-tombstoned) rows, without rescanning
-    /// SSTables or touching the flush cadence: <see cref="TableState.LatestRows"/> is authoritative
-    /// (rebuilt on open, maintained on every mutation). MemTable flushes are size-triggered by
-    /// <see cref="LsmTable"/> itself.
+    /// Returns whether the table currently holds any live rows, from the table's live-row counter
+    /// (maintained in commit order and persisted with every commit), without reading rows.
     /// </summary>
     public bool HasAnyRows(string databaseName, string tableName)
     {
@@ -157,31 +163,36 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             return ReadAllRows(databaseName, tableName).Any();
         }
 
-        // The live-row counter is exact for published rows; scanning every slot made this O(rows).
-        return state.LatestRows.LiveCount > 0;
+        return state.LiveRowCount > 0;
     }
 
-    /// <summary>Published live rows of the table (planner estimate; ignores this flow's staged writes).</summary>
+    /// <summary>Committed live rows of the table (planner estimate; ignores this flow's staged writes).</summary>
     public long EstimateRowCount(string databaseName, string tableName) =>
-        GetOrCreateTable(databaseName, tableName).LatestRows.LiveCount;
+        GetOrCreateTable(databaseName, tableName).LiveRowCount;
 
     /// <summary>
-    /// Lock-free point read. <see cref="TableState.LatestRows"/> is a concurrent map whose published
-    /// value arrays are immutable (patches are copy-on-write), so readers never wait on writers —
-    /// a writer parked in its WAL/MemTable critical section cannot stall the read tail.
+    /// Lock-free point read: this flow's staged writes, then the unflushed overlay, then the SSTables
+    /// (memory-mapped; one Bloom probe and two binary searches per file). Readers never wait on writers.
     /// </summary>
     public byte[] ReadRow(string databaseName, string tableName, long rowId)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
         // Other sessions see only published rows; the writing flow also sees its own pending writes.
-        return Lookup(_ambientWrite.Value, state, rowId, out byte[] rowBytes) switch
+        (byte[]? row, bool owned) = ResolveRow(_ambientWrite.Value, state, rowId);
+        if (row is null)
         {
-            LatestRowLookup.Live => rowBytes.ToArray(),
-            LatestRowLookup.Tombstone => throw new RowDeletedException(rowId, tableName),
-            _ when rowId > 0 && rowId < state.ReadNextRowId() => throw new RowDeletedException(rowId, tableName),
-            _ => throw new RowNotFoundException(rowId, tableName),
-        };
+            throw rowId > 0 && rowId < state.ReadNextRowId()
+                ? new RowDeletedException(rowId, tableName)
+                : new RowNotFoundException(rowId, tableName);
+        }
+
+        if (ReferenceEquals(row, DeletedMarker))
+        {
+            throw new RowDeletedException(rowId, tableName);
+        }
+
+        return owned ? row : row.ToArray();
     }
 
     /// <inheritdoc />
@@ -189,11 +200,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        List<(long RowId, byte[] RawRow)> rows;
-        lock (state.SyncRoot)
-        {
-            rows = CollectLiveRowsSorted(state);
-        }
+        List<(long RowId, byte[] RawRow)> rows = CollectLiveRowsSorted(state);
 
         IReadOnlyDictionary<long, byte[]?>? staged = _ambientWrite.Value?.StagedFor(state);
         if (staged is not { Count: > 0 })
@@ -222,16 +229,98 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         return merged.Select(pair => (pair.Key, pair.Value)).ToList();
     }
 
-    private static LatestRowLookup Lookup(PendingWrite? pending, TableState state, long rowId, out byte[] value)
+    private LatestRowLookup Lookup(PendingWrite? pending, TableState state, long rowId, out byte[] value)
+    {
+        (byte[]? row, _) = ResolveRow(pending, state, rowId);
+        if (row is null)
+        {
+            value = [];
+            return LatestRowLookup.Missing;
+        }
+
+        if (ReferenceEquals(row, DeletedMarker))
+        {
+            value = [];
+            return LatestRowLookup.Tombstone;
+        }
+
+        value = row;
+        return LatestRowLookup.Live;
+    }
+
+    /// <summary>
+    /// The newest version of a row: staged by this flow, in the unflushed overlay, or in an SSTable.
+    /// Returns <see langword="null"/> when no version exists and <see cref="DeletedMarker"/> for a
+    /// deletion. <c>Owned</c> is true when the bytes are a fresh copy the caller may keep or mutate.
+    /// </summary>
+    private (byte[]? Row, bool Owned) ResolveRow(PendingWrite? pending, TableState state, long rowId)
     {
         if (pending is not null && pending.TryGetStaged(state, rowId, out byte[]? staged))
         {
-            value = staged ?? [];
-            return staged is null ? LatestRowLookup.Tombstone : LatestRowLookup.Live;
+            return (staged ?? DeletedMarker, false);
         }
 
-        return state.LatestRows.TryGet(rowId, out value);
+        // The overlay is read before the file set: a flush publishes its file before evicting, so a
+        // version evicted between the two reads is always in the file set taken afterwards.
+        switch (state.LatestRows.TryGet(rowId, out byte[] overlay))
+        {
+            case LatestRowLookup.Live:
+                return (overlay, false);
+            case LatestRowLookup.Tombstone:
+                return (DeletedMarker, false);
+        }
+
+        return (ReadFromSstables(state, rowId), true);
     }
+
+    /// <summary>
+    /// Searches level by level. Within a level the version with the highest sequence wins (level-0 files
+    /// overlap); the first level holding the row decides, because compaction moves a whole level down,
+    /// so every deeper level is older.
+    /// </summary>
+    private byte[]? ReadFromSstables(TableState state, long rowId)
+    {
+        TableVersion version = state.AcquireVersion();
+        try
+        {
+            SstableHit best = default;
+            int bestLevel = -1;
+            foreach (LsmSstableHandle file in version.Files)
+            {
+                int level = file.Metadata.Level;
+                if (bestLevel >= 0 && level != bestLevel)
+                {
+                    break;
+                }
+
+                SsTableV2Reader reader = file.GetV2Reader(_readMode);
+                if (!reader.MayContain(rowId))
+                {
+                    continue;
+                }
+
+                SstableHit hit = reader.Lookup(
+                    rowId,
+                    ulong.MaxValue,
+                    0,
+                    static (type, sequence, value, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? value.ToArray() : DeletedMarker),
+                    default(SstableHit));
+                if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
+                {
+                    best = hit;
+                    bestLevel = level;
+                }
+            }
+
+            return best.Found ? best.Value : null;
+        }
+        finally
+        {
+            version.Release();
+        }
+    }
+
+    private readonly record struct SstableHit(bool Found, ulong Sequence, byte[]? Value);
 
     /// <inheritdoc />
     public void DeleteRow(string databaseName, string tableName, long rowId)
@@ -246,6 +335,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 pending.Stage(state, rowId, null);
                 pending.Batch.Delete(databaseName, tableName, rowId);
                 pending.Touch(state, databaseName, tableName);
+                pending.AddLiveDelta(state, -1);
             }
         }
 
@@ -420,9 +510,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             state.Table.FlushActiveMemTable();
             state.Table.CompactAllLevelsForMaintenance();
-
-            return CollectLiveRowsSorted(state);
         }
+
+        return CollectLiveRowsSorted(state);
     }
 
     /// <summary>Disposes cached table writers. Persisted SSTables and manifests remain on disk.</summary>
@@ -470,6 +560,14 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// <summary>Test hook: overrides the MemTable rotation threshold for tables created afterwards.</summary>
     internal long? MemTableFlushThresholdOverrideBytes { get; set; }
 
+    /// <summary>Diagnostics: row versions held in the managed-heap overlay (published, not yet flushed).</summary>
+    internal long OverlayRowCount(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).LatestRows.Count;
+
+    /// <summary>Diagnostics: forces the table's MemTable into an SSTable now.</summary>
+    internal void FlushTableForTesting(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).Table.FlushActiveMemTable();
+
     private TableState CreateTableState(string databaseName, string tableName)
     {
         string tableDirectory = GetTableDirectory(databaseName, tableName);
@@ -480,7 +578,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         // No per-table WAL: durability comes from the shared commit log, and this table's MemTables
         // hold only mutations whose frames are already in it.
-        var table = new LsmTable(tableDirectory, manifest);
+        var table = new LsmTable(tableDirectory, manifest) { WritesV2 = true, ReadMode = _readMode };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;
@@ -490,37 +588,169 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         table.CompactionRegistry = registry;
         table.BeforeFlushDurabilityBarrier = maxSequence => _commitLog.EnsureDurableThrough(checked((long)maxSequence));
         table.AfterFlush = PruneCommitLog;
-        var state = new TableState(tableDirectory, manifest, table, registry);
+        var state = new TableState(tableDirectory, manifest, table, registry, _readMode);
+        table.AfterSstablePublished = memTable => EvictFlushed(state, memTable);
 
-        Dictionary<long, LatestRowVersion> latestRows = RebuildLatestRowsFromSstables(
-            state,
-            out long persistedNextRowId,
-            out ulong maxSequence);
-        if (persistedNextRowId > state.NextRowId)
+        UpgradeLegacySstables(state);
+        LoadTableMetadata(state);
+        return state;
+    }
+
+    /// <summary>
+    /// Reads the table's next row id, live-row count, and flushed sequence from the SSTable properties
+    /// (O(files), no row is read). Only files upgraded from v1 lack a live count; the rows are then
+    /// counted once, and the next commit persists the count.
+    /// </summary>
+    private void LoadTableMetadata(TableState state)
+    {
+        long nextRowId = 1;
+        long liveRowCount = 0;
+        ulong metadataSequence = 0;
+        bool hasMetadata = false;
+        ulong flushed = 0;
+
+        TableVersion version = state.AcquireVersion();
+        try
         {
-            state.NextRowId = persistedNextRowId;
+            foreach (LsmSstableHandle file in version.Files)
+            {
+                SsTableV2Properties properties = file.GetV2Reader(_readMode).Properties;
+                flushed = Math.Max(flushed, Math.Max(properties.LargestSequence, properties.NextRowIdSequence));
+                nextRowId = Math.Max(nextRowId, properties.LargestRowId + 1);
+                if (properties.NextRowId > 0 && (!hasMetadata || properties.NextRowIdSequence >= metadataSequence))
+                {
+                    hasMetadata = true;
+                    metadataSequence = properties.NextRowIdSequence;
+                    nextRowId = Math.Max(nextRowId, properties.NextRowId);
+                    liveRowCount = properties.LiveRowCount;
+                }
+            }
+        }
+        finally
+        {
+            version.Release();
         }
 
-        foreach ((long rowId, LatestRowVersion version) in latestRows)
+        if (version.Files.Length > 0 && (!hasMetadata || liveRowCount < 0))
         {
-            if (rowId >= state.NextRowId)
-            {
-                state.NextRowId = rowId + 1;
-            }
-
-            if (version.IsTombstone)
-            {
-                state.LatestRows.SetTombstone(rowId);
-            }
-            else
-            {
-                state.LatestRows.Set(rowId, version.Value);
-            }
+            liveRowCount = CollectLiveRowsSorted(state).Count;
         }
+
+        state.NextRowId = Math.Max(state.NextRowId, nextRowId);
+        state.LiveRowCount = liveRowCount;
 
         // Everything in SSTables is durable; only commit-log frames above this point still need replay.
-        state.FlushedLsn = checked((long)maxSequence);
-        return state;
+        state.FlushedLsn = checked((long)flushed);
+    }
+
+    /// <summary>
+    /// Rewrites v1 SSTables (one block per file, read by full scans only) as v2 once, so the read path
+    /// only ever serves page-aligned, indexed files. Each file is replaced atomically through a manifest
+    /// edit at the same level; a crash in between leaves either the old or the new file live.
+    /// </summary>
+    private void UpgradeLegacySstables(TableState state)
+    {
+        for (int level = 0; level <= MaxLevelToScan; level++)
+        {
+            foreach (LsmTableFileMetadata file in state.FileRegistry.ExecuteVersionEdit(() => state.Manifest.GetLiveFiles(level)))
+            {
+                string path = Path.Combine(state.TableDirectory, file.FileName);
+                if (SsTableV2Format.IsV2File(path))
+                {
+                    continue;
+                }
+
+                byte[] bytes = File.ReadAllBytes(path);
+                SsTableReader.Load(bytes);
+                List<SstableEntry> entries = ReadSstableEntries(bytes);
+                byte[]? first = null;
+                byte[]? last = null;
+                foreach (SstableEntry entry in entries)
+                {
+                    if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
+                    {
+                        first ??= entry.InternalKey;
+                        last = entry.InternalKey;
+                    }
+                }
+
+                if (first is null || last is null)
+                {
+                    throw new InvalidDataException($"Legacy SSTable '{file.FileName}' holds no rows and cannot be upgraded.");
+                }
+
+                long fileNumber = state.Manifest.AllocateFileNumber();
+                string fileName = $"{fileNumber:D6}.sst";
+                long length = 0;
+                LsmDurableFileOperations.WriteFileAtomically(
+                    Path.Combine(state.TableDirectory, fileName),
+                    overwrite: false,
+                    stream =>
+                    {
+                        using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count);
+                        foreach (SstableEntry entry in entries)
+                        {
+                            LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
+                        }
+
+                        length = writer.Finish();
+                    },
+                    crashHook: null,
+                    LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+                    LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+                    LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+                var upgraded = new LsmTableFileMetadata(fileNumber, file.Level, first, last, length, fileName);
+                var edit = new LsmVersionEdit();
+                edit.DeleteFile(file.Level, file.FileNumber);
+                edit.AddFile(upgraded);
+                state.FileRegistry.ExecuteVersionEdit(() =>
+                {
+                    state.Manifest.ApplyEdit(edit);
+                    state.FileRegistry.Register(upgraded);
+                    state.FileRegistry.MarkDeleted([file]);
+                    return true;
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops overlay versions that a flushed MemTable wrote to its SSTable. Runs on the flushing thread
+    /// after the file is in the manifest; works in chunks so publishers are never stalled for long.
+    /// </summary>
+    private static void EvictFlushed(TableState state, MemTable memTable)
+    {
+        if (memTable.MaxSequence is not ulong flushedThrough)
+        {
+            return;
+        }
+
+        const int ChunkSize = 1024;
+        int inChunk = 0;
+        Monitor.Enter(state.OverlayGate);
+        try
+        {
+            foreach (MemTableEntry entry in memTable)
+            {
+                ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
+                if (LsmRowKeyCodec.IsRowKey(userKey))
+                {
+                    state.LatestRows.EvictFlushed(LsmRowKeyCodec.DecodeRowId(userKey), flushedThrough);
+                }
+
+                if (++inChunk == ChunkSize)
+                {
+                    inChunk = 0;
+                    Monitor.Exit(state.OverlayGate);
+                    Monitor.Enter(state.OverlayGate);
+                }
+            }
+        }
+        finally
+        {
+            Monitor.Exit(state.OverlayGate);
+        }
     }
 
     /// <summary>
@@ -594,16 +824,34 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                     continue;
                 }
 
+                bool wasLive = ResolveRow(null, state, operation.RowId).Row is { } previous
+                    && !ReferenceEquals(previous, DeletedMarker);
                 EncodeRowId(operation.RowId, userKey);
                 if (operation.Kind == LsmCommitOperationKind.Put)
                 {
                     state.Table.Put(userKey, sequence, operation.Value);
-                    state.LatestRows.Set(operation.RowId, operation.Value);
+                    lock (state.OverlayGate)
+                    {
+                        state.LatestRows.Set(operation.RowId, operation.Value, sequence);
+                    }
+
+                    if (!wasLive)
+                    {
+                        state.LiveRowCount++;
+                    }
                 }
                 else
                 {
                     state.Table.Delete(userKey, sequence);
-                    state.LatestRows.SetTombstone(operation.RowId);
+                    lock (state.OverlayGate)
+                    {
+                        state.LatestRows.SetTombstone(operation.RowId, sequence);
+                    }
+
+                    if (wasLive)
+                    {
+                        state.LiveRowCount--;
+                    }
                 }
 
                 if (operation.RowId >= state.NextRowId)
@@ -616,7 +864,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
             foreach (TableState state in touched)
             {
-                state.Table.Put(NextRowIdMetadataKey, sequence, EncodeNextRowIdMetadata(state.NextRowId));
+                state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.NextRowId, state.LiveRowCount));
             }
         }
     }
@@ -720,7 +968,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
                 // visible only for a durable commit, and strictly in commit order.
                 if (assignedLsn is long lsn)
                 {
-                    PublishInOrder(lsn, durable ? () => PublishStaged(pending) : null);
+                    PublishInOrder(lsn, durable ? () => PublishStaged(pending, checked((ulong)lsn)) : null);
                 }
             }
         }
@@ -745,21 +993,22 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
     }
 
-    private void PublishStaged(PendingWrite pending)
+    private void PublishStaged(PendingWrite pending, ulong sequence)
     {
         foreach ((TableState state, Dictionary<long, byte[]?> rows) in pending.StagedTables)
         {
             lock (state.SyncRoot)
+            lock (state.OverlayGate)
             {
                 foreach ((long rowId, byte[]? value) in rows)
                 {
                     if (value is null)
                     {
-                        state.LatestRows.SetTombstone(rowId);
+                        state.LatestRows.SetTombstone(rowId, sequence);
                     }
                     else
                     {
-                        state.LatestRows.Set(rowId, value);
+                        state.LatestRows.Set(rowId, value, sequence);
                     }
                 }
             }
@@ -830,7 +1079,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         foreach ((TableState state, _, _) in pending.TouchedTables)
         {
-            state.Table.Put(NextRowIdMetadataKey, sequence, EncodeNextRowIdMetadata(state.ReadNextRowId()));
+            // Under the commit gate, in LSN order: the persisted count is the count as of this frame.
+            state.LiveRowCount += pending.LiveDeltaFor(state);
+            state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.ReadNextRowId(), state.LiveRowCount));
         }
     }
 
@@ -895,82 +1146,99 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private string GetTableDirectory(string databaseName, string tableName) =>
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
-    private static List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
+    /// <summary>
+    /// Every live row in row-id order: a k-way merge of the unflushed overlay and the SSTable cursors
+    /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
+    /// for the same reason as in <see cref="ResolveRow"/>.
+    /// </summary>
+    private List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
     {
-        // LatestRows is authoritative (seeded from SSTables on open, maintained on every mutation),
-        // so scans read it directly instead of rescanning SSTables — no flush needed. Slots are laid
-        // out by row id, so the collected rows come out already sorted. Caller holds SyncRoot.
-        var rows = new List<(long RowId, byte[] RawRow)>();
-        state.LatestRows.ForEachLive(rows, static (rows, rowId, value) => rows.Add((rowId, value.ToArray())));
-        return rows;
-    }
+        var overlay = new List<(long RowId, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
+        state.LatestRows.ForEach(overlay, static (list, rowId, value) => list.Add((rowId, value)));
 
-    private static Dictionary<long, LatestRowVersion> RebuildLatestRowsFromSstables(
-        TableState state,
-        out long persistedNextRowId,
-        out ulong maxSequence)
-    {
-        var latest = new Dictionary<long, LatestRowVersion>();
-        persistedNextRowId = 1;
-        maxSequence = 0;
-        ulong persistedNextRowIdSeqno = 0;
-        foreach (SstableEntry entry in ReadAllSstableEntries(state))
+        var rows = new List<(long RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
+        TableVersion version = state.AcquireVersion();
+        try
         {
-            ulong seqno = InternalKey.Sequence(entry.InternalKey);
-            maxSequence = Math.Max(maxSequence, seqno);
-            ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
-            if (IsNextRowIdMetadataKey(userKey))
+            var cursors = new SsTableV2Cursor[version.Files.Length];
+            var hasCurrent = new bool[cursors.Length];
+            for (int i = 0; i < cursors.Length; i++)
             {
-                if (seqno >= persistedNextRowIdSeqno)
+                cursors[i] = version.Files[i].GetV2Reader(_readMode).OpenCursor();
+                hasCurrent[i] = cursors[i].MoveNext();
+            }
+
+            int overlayIndex = 0;
+            while (true)
+            {
+                long next = long.MaxValue;
+                bool any = false;
+                if (overlayIndex < overlay.Count)
                 {
-                    persistedNextRowId = DecodeNextRowIdMetadata(entry.Value);
-                    persistedNextRowIdSeqno = seqno;
+                    next = overlay[overlayIndex].RowId;
+                    any = true;
                 }
 
-                continue;
+                for (int i = 0; i < cursors.Length; i++)
+                {
+                    if (hasCurrent[i] && cursors[i].RowId <= next)
+                    {
+                        next = cursors[i].RowId;
+                        any = true;
+                    }
+                }
+
+                if (!any)
+                {
+                    break;
+                }
+
+                // Sources in priority order: overlay, then files newest first; the first holder wins.
+                bool decided = false;
+                if (overlayIndex < overlay.Count && overlay[overlayIndex].RowId == next)
+                {
+                    byte[]? value = overlay[overlayIndex].Value;
+                    if (value is not null)
+                    {
+                        rows.Add((next, value.ToArray()));
+                    }
+
+                    decided = true;
+                    overlayIndex++;
+                }
+
+                // Otherwise the file version with the highest sequence wins (each cursor sits on the
+                // newest version of the row id in its file).
+                int winner = -1;
+                for (int i = 0; !decided && i < cursors.Length; i++)
+                {
+                    if (hasCurrent[i] && cursors[i].RowId == next && (winner < 0 || cursors[i].Sequence > cursors[winner].Sequence))
+                    {
+                        winner = i;
+                    }
+                }
+
+                if (winner >= 0 && cursors[winner].Type == LsmValueType.Put)
+                {
+                    rows.Add((next, cursors[winner].Value.ToArray()));
+                }
+
+                for (int i = 0; i < cursors.Length; i++)
+                {
+                    // Skip every version of this row id in this file.
+                    while (hasCurrent[i] && cursors[i].RowId == next)
+                    {
+                        hasCurrent[i] = cursors[i].MoveNext();
+                    }
+                }
             }
-
-            long rowId = DecodeRowId(userKey);
-            if (latest.TryGetValue(rowId, out LatestRowVersion existing) && existing.Sequence >= seqno)
-            {
-                continue;
-            }
-
-            LsmValueType valueType = InternalKey.ValueType(entry.InternalKey);
-            latest[rowId] = new LatestRowVersion(
-                entry.Value.ToArray(),
-                valueType == LsmValueType.Deletion,
-                seqno);
         }
-
-        return latest;
-    }
-
-    private static IEnumerable<SstableEntry> ReadAllSstableEntries(TableState state)
-    {
-        foreach (LsmTableFileMetadata file in GetLiveFilesNewestFirst(state.Manifest))
+        finally
         {
-            byte[] bytes = File.ReadAllBytes(Path.Combine(state.TableDirectory, file.FileName));
-            SsTableReader.Load(bytes);
-            foreach (SstableEntry entry in ReadSstableEntries(bytes))
-            {
-                yield return entry;
-            }
-        }
-    }
-
-    private static IEnumerable<LsmTableFileMetadata> GetLiveFilesNewestFirst(LsmManifest manifest)
-    {
-        var files = new List<LsmTableFileMetadata>();
-        for (int level = 0; level <= MaxLevelToScan; level++)
-        {
-            files.AddRange(manifest.GetLiveFiles(level));
+            version.Release();
         }
 
-        foreach (LsmTableFileMetadata file in files.OrderByDescending(file => file.FileNumber))
-        {
-            yield return file;
-        }
+        return rows;
     }
 
     private static List<SstableEntry> ReadSstableEntries(byte[] bytes)
@@ -1073,37 +1341,19 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         return unchecked((long)(flipped ^ (ulong)long.MinValue));
     }
 
-    private static bool IsNextRowIdMetadataKey(ReadOnlySpan<byte> userKey) =>
-        userKey.SequenceEqual(NextRowIdMetadataKey);
-
-    private static byte[] EncodeNextRowIdMetadata(long nextRowId)
-    {
-        var value = new byte[sizeof(long)];
-        BinaryPrimitives.WriteInt64LittleEndian(value, nextRowId);
-        return value;
-    }
-
-    private static long DecodeNextRowIdMetadata(ReadOnlySpan<byte> value)
-    {
-        if (value.Length != sizeof(long))
-        {
-            throw new InvalidDataException("LSM next-row-id metadata value is malformed.");
-        }
-
-        long nextRowId = BinaryPrimitives.ReadInt64LittleEndian(value);
-        if (nextRowId < 1)
-        {
-            throw new InvalidDataException("LSM next-row-id metadata value must be positive.");
-        }
-
-        return nextRowId;
-    }
-
     private sealed class PendingWrite
     {
         private readonly List<(TableState State, string Database, string Table)> _touched = [];
 
         private readonly Dictionary<TableState, Dictionary<long, byte[]?>> _staged = []; // TableState uses reference equality
+
+        // Change in live rows per table, relative to what this flow saw when it staged each write.
+        private readonly Dictionary<TableState, long> _liveDelta = [];
+
+        public void AddLiveDelta(TableState state, long delta) =>
+            _liveDelta[state] = (_liveDelta.TryGetValue(state, out long current) ? current : 0) + delta;
+
+        public long LiveDeltaFor(TableState state) => _liveDelta.TryGetValue(state, out long delta) ? delta : 0;
 
         public LsmCommitBatch Batch { get; } = new();
 
@@ -1155,6 +1405,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             Batch.Clear();
             _touched.Clear();
             _staged.Clear();
+            _liveDelta.Clear();
         }
     }
 
@@ -1197,15 +1448,79 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     {
         private long _nextRowId = 1;
 
-        public TableState(string tableDirectory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry)
+        private TableVersion? _version;
+        private long _liveRowCount;
+
+        public TableState(string tableDirectory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry, LsmReadMode readMode)
         {
             TableDirectory = tableDirectory;
             Manifest = manifest;
             Table = table;
             FileRegistry = fileRegistry;
+            ReadMode = readMode;
         }
 
         public object SyncRoot { get; } = new();
+
+        /// <summary>
+        /// Serializes overlay publishes and flush evictions. Never held while calling into the table, so a
+        /// background flush can always take it (CompactTable holds SyncRoot while waiting for the flush).
+        /// </summary>
+        public object OverlayGate { get; } = new();
+
+        public LsmReadMode ReadMode { get; }
+
+        /// <summary>Live rows as of the last applied commit (updated in LSN order, persisted with each commit).</summary>
+        public long LiveRowCount
+        {
+            get => Volatile.Read(ref _liveRowCount);
+            set => Volatile.Write(ref _liveRowCount, value);
+        }
+
+        /// <summary>
+        /// The current set of live SSTables, with a reference held for the caller. One volatile read of the
+        /// manifest stamp decides whether the cached set is current; it is rebuilt under the file
+        /// registry's version gate (the same gate flush and compaction edit the manifest under).
+        /// </summary>
+        public TableVersion AcquireVersion()
+        {
+            while (true)
+            {
+                TableVersion? current = Volatile.Read(ref _version);
+                if (current is not null && current.Stamp == Manifest.ChangeStamp && current.TryAcquire())
+                {
+                    return current;
+                }
+
+                RefreshVersion();
+            }
+        }
+
+        private void RefreshVersion()
+        {
+            FileRegistry.ExecuteVersionEdit(() =>
+            {
+                long stamp = Manifest.ChangeStamp;
+                TableVersion? current = _version;
+                if (current is not null && current.Stamp == stamp && current.IsLive)
+                {
+                    return false;
+                }
+
+                // Grouped by level, shallowest first; within a level the highest sequence wins.
+                var files = new List<LsmTableFileMetadata>();
+                files.AddRange(Manifest.GetLiveFiles(0).OrderByDescending(static file => file.FileNumber));
+                for (int level = 1; level <= MaxLevelToScan; level++)
+                {
+                    files.AddRange(Manifest.GetLiveFiles(level));
+                }
+
+                var next = new TableVersion(stamp, FileRegistry.AddRefs(files), FileRegistry);
+                Volatile.Write(ref _version, next);
+                current?.Release();
+                return true;
+            });
+        }
 
         public string TableDirectory { get; }
 
@@ -1216,9 +1531,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         public LsmFileRegistry FileRegistry { get; }
 
         /// <summary>
-        /// Authoritative row-id → latest-version map. Read lock-free by point reads; mutated only
-        /// under <see cref="SyncRoot"/>. Published row buffers are immutable (patches copy-on-write),
-        /// so a published slot is always a complete row image.
+        /// Published row versions not yet flushed to an SSTable (flushed versions are evicted and read from
+        /// the mapped files). Read lock-free; mutated under <see cref="OverlayGate"/>.
         /// </summary>
         public LsmLatestRowStore LatestRows { get; } = new();
 
@@ -1237,10 +1551,53 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             Table.FlushActiveMemTable();
             Table.Dispose();
+
+            // Drop the cached file set and unmap every file, so the directory can be deleted (Windows).
+            Interlocked.Exchange(ref _version, null)?.Release();
+            FileRegistry.CloseReaders();
         }
     }
 
-    private readonly record struct LatestRowVersion(byte[] Value, bool IsTombstone, ulong Sequence);
+    /// <summary>
+    /// An immutable set of live SSTables in search order, reference-counted so a reader can finish with a
+    /// file that compaction has already replaced; the files' own references are released (and replaced
+    /// files deleted) when the last reader is done.
+    /// </summary>
+    private sealed class TableVersion(long stamp, LsmSstableHandle[] files, LsmFileRegistry registry)
+    {
+        private int _references = 1; // the owning TableState's reference
+
+        public long Stamp { get; } = stamp;
+
+        public LsmSstableHandle[] Files { get; } = files;
+
+        public bool IsLive => Volatile.Read(ref _references) > 0;
+
+        public bool TryAcquire()
+        {
+            int current;
+            do
+            {
+                current = Volatile.Read(ref _references);
+                if (current == 0)
+                {
+                    return false;
+                }
+            }
+            while (Interlocked.CompareExchange(ref _references, current + 1, current) != current);
+
+            return true;
+        }
+
+        public void Release()
+        {
+            if (Interlocked.Decrement(ref _references) == 0)
+            {
+                registry.Release(Files);
+            }
+        }
+    }
+
 
     private readonly record struct SstableEntry(byte[] InternalKey, byte[] Value);
 }
