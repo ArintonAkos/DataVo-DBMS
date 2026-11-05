@@ -374,7 +374,7 @@ internal partial class Select
             return UnknownRowCountEstimate;
         }
 
-        return _model.FromTable?.TableContentValues?.Count ?? 0;
+        return _model.FromTable?.EstimatedRowCount ?? 0;
     }
 
     private int EstimateJoinInputRowCount(bool useRowMaterializationForEstimates = true)
@@ -385,7 +385,7 @@ internal partial class Select
             return Math.Max(UnknownRowCountEstimate, tableCount * UnknownRowCountEstimate);
         }
 
-        int total = _model.FromTable?.TableContentValues?.Count ?? 0;
+        int total = _model.FromTable?.EstimatedRowCount ?? 0;
         if (_model.TableService == null)
         {
             return total;
@@ -393,7 +393,7 @@ internal partial class Select
 
         foreach (var detail in _model.JoinStatement.Model.JoinTableDetails.Values)
         {
-            total += detail.TableContentValues?.Count ?? 0;
+            total += detail.EstimatedRowCount;
         }
 
         return total;

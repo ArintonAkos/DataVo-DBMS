@@ -170,6 +170,35 @@ namespace DataVo.Core.Models.Statement.Utils
         private List<Record>? _tableContentValuesCache;
 
         /// <summary>
+        /// Row count for planning decisions. Uses the already-loaded content when present, otherwise
+        /// asks the storage engine for a cheap estimate, so that planning a point query never loads the
+        /// whole table. Falls back to loading the content only for backends that cannot estimate.
+        /// </summary>
+        public int EstimatedRowCount
+        {
+            get
+            {
+                if (_tableContentValuesCache != null)
+                {
+                    return _tableContentValuesCache.Count;
+                }
+
+                if (_tableContentCache != null)
+                {
+                    return _tableContentCache.Count;
+                }
+
+                if (DatabaseName is not null
+                    && DataVoEngine.Current().StorageContext.TryEstimateRowCount(TableName, DatabaseName, out long estimate))
+                {
+                    return (int)Math.Min(estimate, int.MaxValue);
+                }
+
+                return TableContentValues?.Count ?? 0;
+            }
+        }
+
+        /// <summary>
         /// Gets table content as a row-value list, materialized from <see cref="TableContent"/> when needed.
         /// </summary>
         public List<Record>? TableContentValues

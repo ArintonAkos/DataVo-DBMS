@@ -54,6 +54,27 @@ public class InMemoryStorageEngine : IStorageEngine, ITypedRowStorageEngine, IIn
     }
 
     /// <summary>
+    /// Row slots of the table, deleted slots included (an upper bound, used only as a planner estimate).
+    /// </summary>
+    public long EstimateRowCount(string databaseName, string tableName)
+    {
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return 0;
+        }
+
+        store.Lock.EnterReadLock();
+        try
+        {
+            return store.Rows.Count;
+        }
+        finally
+        {
+            store.Lock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
     /// Inserts one serialized row and returns its 1-based RowId.
     /// </summary>
     /// <param name="databaseName">The owning database name.</param>

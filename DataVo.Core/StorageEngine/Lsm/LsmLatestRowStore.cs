@@ -78,14 +78,31 @@ internal sealed class LsmLatestRowStore
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
         byte[]?[] page = EnsurePage(rowId);
-        Volatile.Write(ref page[rowId & PageMask], rowBytes);
+        ref byte[]? slot = ref page[rowId & PageMask];
+        if (slot is null || ReferenceEquals(slot, TombstoneSentinel))
+        {
+            Interlocked.Increment(ref _liveCount);
+        }
+
+        Volatile.Write(ref slot, rowBytes);
     }
+
+    private long _liveCount;
+
+    /// <summary>Number of live rows, maintained on every publish. Lock-free read.</summary>
+    public long LiveCount => Volatile.Read(ref _liveCount);
 
     /// <summary>Publishes a tombstone as the latest version of <paramref name="rowId"/>. Writer-locked by the caller.</summary>
     public void SetTombstone(long rowId)
     {
         byte[]?[] page = EnsurePage(rowId);
-        Volatile.Write(ref page[rowId & PageMask], TombstoneSentinel);
+        ref byte[]? slot = ref page[rowId & PageMask];
+        if (slot is not null && !ReferenceEquals(slot, TombstoneSentinel))
+        {
+            Interlocked.Decrement(ref _liveCount);
+        }
+
+        Volatile.Write(ref slot, TombstoneSentinel);
     }
 
     /// <summary>Whether any live (non-tombstoned) row exists. Early-exits on the first hit.</summary>

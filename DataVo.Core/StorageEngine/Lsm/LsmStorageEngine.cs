@@ -157,11 +157,13 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             return ReadAllRows(databaseName, tableName).Any();
         }
 
-        lock (state.SyncRoot)
-        {
-            return state.LatestRows.HasAnyLive();
-        }
+        // The live-row counter is exact for published rows; scanning every slot made this O(rows).
+        return state.LatestRows.LiveCount > 0;
     }
+
+    /// <summary>Published live rows of the table (planner estimate; ignores this flow's staged writes).</summary>
+    public long EstimateRowCount(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).LatestRows.LiveCount;
 
     /// <summary>
     /// Lock-free point read. <see cref="TableState.LatestRows"/> is a concurrent map whose published

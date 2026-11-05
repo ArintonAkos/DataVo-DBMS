@@ -3,7 +3,7 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider
+internal sealed class InMemoryStorageBackend : IStorageBackend, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IRowCountEstimator
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -24,6 +24,7 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, ITypedRowStorage
     public bool HasAnyRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).HasAnyRows(databaseName, tableName);
     public void DeleteRow(string databaseName, string tableName, long rowId) => _inner.DeleteRow(databaseName, tableName, rowId);
+    public long EstimateRowCount(string databaseName, string tableName) => _inner.EstimateRowCount(databaseName, tableName);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);

@@ -467,6 +467,22 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// </summary>
     internal bool RetainsTypedRowBuffers => _storageEngine is ITypedRowStorageEngine;
 
+    /// <summary>
+    /// Cheap row-count estimate for query planning. Returns false when the backend cannot answer
+    /// without reading the table.
+    /// </summary>
+    internal bool TryEstimateRowCount(string tableName, string databaseName, out long count)
+    {
+        if (_storageEngine is IRowCountEstimator estimator)
+        {
+            count = estimator.EstimateRowCount(databaseName, tableName);
+            return true;
+        }
+
+        count = 0;
+        return false;
+    }
+
     internal bool IsTableEmpty(string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)

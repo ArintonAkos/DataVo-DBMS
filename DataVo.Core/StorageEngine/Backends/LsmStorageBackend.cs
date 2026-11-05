@@ -5,7 +5,7 @@ using DataVo.Core.StorageEngine.Lsm;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStorageEngine, IRowExistenceProbe, IDisposable
+internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStorageEngine, IRowExistenceProbe, IRowCountEstimator, IDisposable
 {
     private readonly LsmStorageEngine _inner;
 
@@ -27,6 +27,8 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);
     public bool HasAnyRows(string databaseName, string tableName) => _inner.HasAnyRows(databaseName, tableName);
+
+    public long EstimateRowCount(string databaseName, string tableName) => _inner.EstimateRowCount(databaseName, tableName);
 
     bool IFixedWidthPatchStorageEngine.TryPatchFixedWidthRow(
         string databaseName,

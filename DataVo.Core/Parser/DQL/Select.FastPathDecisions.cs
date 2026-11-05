@@ -188,7 +188,7 @@ internal partial class Select
     {
         reason = "accepted";
 
-        int totalRows = _model.FromTable?.TableContentValues?.Count ?? 0;
+        int totalRows = _model.FromTable?.EstimatedRowCount ?? 0;
         if (totalRows <= 0)
         {
             reason = "empty_input";
