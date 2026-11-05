@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 ﻿using System.Diagnostics.CodeAnalysis;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Models.Catalog;
@@ -297,9 +298,16 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            InsertRowsResult result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId, recorder);
+            // One atomic write unit, like a SQL statement: rows and their index entries share a commit.
+            InsertRowsResult result;
+            using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
+            {
+                result = service.InsertRows(databaseName, tableName, materializedRows, txContext: null, statementTxId, recorder);
+                recorder?.Publish();
+                batch.Complete();
+            }
+
             diagnosticsBuilder?.AddRowsAffected(result.AcceptedRowCount);
-            recorder?.Publish();
             return result.RowIds;
         }
         catch (Exception ex)
@@ -378,9 +386,15 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            long rowId = service.InsertTypedRow(databaseName, tableName, columns, row, statementTxId, recorder);
+            long rowId;
+            using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
+            {
+                rowId = service.InsertTypedRow(databaseName, tableName, columns, row, statementTxId, recorder);
+                recorder?.Publish();
+                batch.Complete();
+            }
+
             diagnosticsBuilder?.AddRowsAffected(1);
-            recorder?.Publish();
             return rowId;
         }
         catch (Exception ex)
@@ -463,9 +477,15 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            IReadOnlyList<long> rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder, callerOwnsRowBuffers);
+            IReadOnlyList<long> rowIds;
+            using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
+            {
+                rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder, callerOwnsRowBuffers);
+                recorder?.Publish();
+                batch.Complete();
+            }
+
             diagnosticsBuilder?.AddRowsAffected(rowIds.Count);
-            recorder?.Publish();
             return rowIds;
         }
         catch (Exception ex)

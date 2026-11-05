@@ -19,6 +19,9 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
 
     public string BackendKind => "Lsm";
 
+    /// <summary>The underlying engine (test hooks and diagnostics).</summary>
+    internal LsmStorageEngine Engine => _inner;
+
     /// <summary>The engine's persisted index storage.</summary>
     internal ILsmIndexStore IndexStore => _inner;
 

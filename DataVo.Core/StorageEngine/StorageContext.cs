@@ -484,6 +484,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return false;
     }
 
+    /// <summary>The LSM engine when it is the backend (test hooks and diagnostics); otherwise null.</summary>
+    internal Lsm.LsmStorageEngine? LsmEngine => (_storageEngine as Backends.LsmStorageBackend)?.Engine;
+
     /// <summary>Persisted index storage when the backend is the LSM engine; otherwise null.</summary>
     internal ILsmIndexStore? LsmIndexStore => (_storageEngine as Backends.LsmStorageBackend)?.IndexStore;
 

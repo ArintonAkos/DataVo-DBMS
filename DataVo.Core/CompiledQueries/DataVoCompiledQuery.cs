@@ -432,23 +432,31 @@ public static class DataVoCompiledQuery
                 .Select(rowId => existingRows[rowId])
                 .ToList();
             ChangeRecorder? recorder = ChangeRecorder.TryCreate(context.Engine, databaseName);
-            long[] newRowIds = ReplaceRows(
-                context,
-                plan.TableName,
-                databaseName,
-                orderedRowIds,
-                oldRows,
-                newRows,
-                statementTxId);
 
-            if (recorder is not null)
+            // Each row is deleted and re-inserted together with its index entries: one atomic write unit,
+            // like a SQL statement, so a crash cannot keep a row without its index entries.
+            using (IWriteBatchScope batch = context.Engine.StorageContext.BeginWriteBatch())
             {
-                for (int i = 0; i < newRows.Count; i++)
+                long[] newRowIds = ReplaceRows(
+                    context,
+                    plan.TableName,
+                    databaseName,
+                    orderedRowIds,
+                    oldRows,
+                    newRows,
+                    statementTxId);
+
+                if (recorder is not null)
                 {
-                    recorder.RecordUpdate(plan.TableName, newRowIds[i], oldRows[i], newRows[i]);
+                    for (int i = 0; i < newRows.Count; i++)
+                    {
+                        recorder.RecordUpdate(plan.TableName, newRowIds[i], oldRows[i], newRows[i]);
+                    }
+
+                    recorder.Publish();
                 }
 
-                recorder.Publish();
+                batch.Complete();
             }
 
             return newRows.Count;
