@@ -426,18 +426,23 @@ internal sealed class WalFileStore
         EnsureDirectoryExists();
 
         string tmpPath = FilePath + ".tmp";
-        using var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
+
+        // The temp file must be closed before it is moved into place: Windows refuses to replace with a
+        // file that still has an open handle.
+        using (var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            foreach (var entry in entries)
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
             {
-                writer.WriteLine(SerializeWalEntry(entry));
+                foreach (var entry in entries)
+                {
+                    writer.WriteLine(SerializeWalEntry(entry));
+                }
+
+                writer.Flush();
             }
 
-            writer.Flush();
+            stream.Flush(true);
         }
-
-        stream.Flush(true);
 
         BinaryFrameHandlePool.Remove(FilePath);
         AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
