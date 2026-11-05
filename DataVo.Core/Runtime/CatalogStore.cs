@@ -27,6 +27,9 @@ internal sealed class CatalogStore
         _catalogFilePath = _persistToDisk ? Path.Combine(_catalogDirectory!, "Catalog.xml") : null;
         _doc = new XDocument(new XElement("Databases"));
 
+        _tableShapes.Clear();
+        _childForeignKeys.Clear();
+
         Initialize();
     }
 
@@ -294,6 +297,12 @@ internal sealed class CatalogStore
     {
         lock (_syncRoot)
         {
+            // Asked on every DELETE/UPDATE of a parent table; the answer only changes with the catalog.
+            if (_childForeignKeys.TryGetValue((databaseName, parentTableName), out var cached))
+            {
+                return [.. cached];
+            }
+
             var result = new List<(string, string, string, string)>();
             var database = GetDatabaseElement(databaseName);
             if (database == null) return result;
@@ -321,9 +330,13 @@ internal sealed class CatalogStore
                 }
             }
 
+            _childForeignKeys[(databaseName, parentTableName)] = [.. result];
             return result;
         }
     }
+
+    private readonly Dictionary<(string Database, string Table), (string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)[]> _childForeignKeys =
+        new(new TableShapeKeyComparer());
 
     public List<string> GetTableUniqueKeys(string tableName, string databaseName)
     {
@@ -346,17 +359,25 @@ internal sealed class CatalogStore
     {
         lock (_syncRoot)
         {
-            var table = GetTableElement(databaseName, tableName);
-
-            if (table == null)
+            TableShape? shape = GetTableShapeNoLock(databaseName, tableName);
+            if (shape is null)
             {
                 return [];
             }
 
-            return table.Elements("IndexFiles")
-                .Elements("IndexFile")
-                .Select(e => ConvertFromXml<IndexFile>(e)!)
-                .ToList();
+            // Copies: callers may change the returned objects, the cache must stay as the catalog says.
+            var indexes = new List<IndexFile>(shape.Indexes.Length);
+            foreach (IndexFile index in shape.Indexes)
+            {
+                indexes.Add(new IndexFile
+                {
+                    IndexFileName = index.IndexFileName,
+                    AttributeNames = [.. index.AttributeNames],
+                    IndexKind = index.IndexKind,
+                });
+            }
+
+            return indexes;
         }
     }
 
@@ -364,27 +385,93 @@ internal sealed class CatalogStore
     {
         lock (_syncRoot)
         {
-            var table = GetTableElement(databaseName, tableName);
+            TableShape shape = GetTableShapeNoLock(databaseName, tableName)
+                ?? throw new CatalogException($"Table {tableName} doesn't exist in database {databaseName}");
 
-            if (table == null)
+            var columns = new List<Column>(shape.Columns.Length);
+            foreach (Column column in shape.Columns)
             {
-                throw new CatalogException($"Table {tableName} doesn't exist in database {databaseName}");
+                columns.Add(new Column
+                {
+                    Name = column.Name,
+                    Type = column.Type,
+                    Length = column.Length,
+                    DefaultValue = column.DefaultValue,
+                    IsNotNull = column.IsNotNull,
+                });
             }
 
-            return table.Elements("Structure")
-                .Elements("Attribute")
-                .Select(e => new Column
-                {
-                    Name = e.Attribute("Name")!.Value,
-                    Type = e.Attribute("Type")!.Value,
-                    Length = string.IsNullOrEmpty(e.Attribute("Length")?.Value)
-                        ? 0
-                        : int.Parse(e.Attribute("Length")!.Value),
-                    DefaultValue = e.Attribute("DefaultValue")?.Value,
-                    IsNotNull = e.Attribute("IsNull")?.Value == "0",
-                })
-                .ToList();
+            return columns;
         }
+    }
+
+    internal IReadOnlyList<Column> GetTableColumnsReadOnly(string tableName, string databaseName)
+    {
+        lock (_syncRoot)
+        {
+            return GetTableShapeNoLock(databaseName, tableName)?.Columns
+                ?? throw new CatalogException($"Table {tableName} doesn't exist in database {databaseName}");
+        }
+    }
+
+    internal IReadOnlyList<IndexFile> GetTableIndexesReadOnly(string tableName, string databaseName)
+    {
+        lock (_syncRoot)
+        {
+            return GetTableShapeNoLock(databaseName, tableName)?.Indexes ?? [];
+        }
+    }
+
+    /// <summary>Parsed columns and indexes of one table, cached until the next catalog change.</summary>
+    private sealed record TableShape(Column[] Columns, IndexFile[] Indexes);
+
+    private readonly Dictionary<(string Database, string Table), TableShape> _tableShapes =
+        new(new TableShapeKeyComparer());
+
+    private sealed class TableShapeKeyComparer : IEqualityComparer<(string Database, string Table)>
+    {
+        public bool Equals((string Database, string Table) x, (string Database, string Table) y) =>
+            string.Equals(x.Database, y.Database, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Database, string Table) key) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.Database),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.Table));
+    }
+
+    private TableShape? GetTableShapeNoLock(string databaseName, string tableName)
+    {
+        if (_tableShapes.TryGetValue((databaseName, tableName), out TableShape? cached))
+        {
+            return cached;
+        }
+
+        XElement? table = GetTableElement(databaseName, tableName);
+        if (table is null)
+        {
+            return null;
+        }
+
+        Column[] columns = [.. table.Elements("Structure")
+            .Elements("Attribute")
+            .Select(e => new Column
+            {
+                Name = e.Attribute("Name")!.Value,
+                Type = e.Attribute("Type")!.Value,
+                Length = string.IsNullOrEmpty(e.Attribute("Length")?.Value)
+                    ? 0
+                    : int.Parse(e.Attribute("Length")!.Value),
+                DefaultValue = e.Attribute("DefaultValue")?.Value,
+                IsNotNull = e.Attribute("IsNull")?.Value == "0",
+            })];
+        IndexFile[] indexes = [.. table.Elements("IndexFiles")
+            .Elements("IndexFile")
+            .Select(e => ConvertFromXml<IndexFile>(e)!)];
+
+        var shape = new TableShape(columns, indexes);
+        _tableShapes[(databaseName, tableName)] = shape;
+        return shape;
     }
 
     public Column GetTableColumn(string tableName, string databaseName, string columnName)
@@ -408,18 +495,25 @@ internal sealed class CatalogStore
 
     public Dictionary<string, string> GetTableIndexedColumns(string tableName, string databaseName)
     {
-        Dictionary<string, string> result = [];
-        List<IndexFile> indexFiles = GetTableIndexes(tableName, databaseName);
-
-        foreach (var index in indexFiles)
+        lock (_syncRoot)
         {
-            foreach (string attribute in index.AttributeNames)
+            Dictionary<string, string> result = [];
+            TableShape? shape = GetTableShapeNoLock(databaseName, tableName);
+            if (shape is null)
             {
-                result.Add(attribute, index.IndexFileName);
+                return result;
             }
-        }
 
-        return result;
+            foreach (IndexFile index in shape.Indexes)
+            {
+                foreach (string attribute in index.AttributeNames)
+                {
+                    result.Add(attribute, index.IndexFileName);
+                }
+            }
+
+            return result;
+        }
     }
 
     public string ExportState()
@@ -439,6 +533,9 @@ internal sealed class CatalogStore
             if (string.IsNullOrWhiteSpace(xml))
             {
                 _doc = new XDocument(new XElement("Databases"));
+
+                _tableShapes.Clear();
+        _childForeignKeys.Clear();
                 _tableSchemaVersions.Clear();
                 return;
             }
@@ -450,6 +547,10 @@ internal sealed class CatalogStore
             }
 
             _doc = loaded;
+
+
+            _tableShapes.Clear();
+        _childForeignKeys.Clear();
             _tableSchemaVersions.Clear();
         }
     }
@@ -459,6 +560,9 @@ internal sealed class CatalogStore
         if (!_persistToDisk)
         {
             _doc = new XDocument(new XElement("Databases"));
+
+            _tableShapes.Clear();
+        _childForeignKeys.Clear();
             return;
         }
 
@@ -467,6 +571,9 @@ internal sealed class CatalogStore
         if (!File.Exists(_catalogFilePath))
         {
             _doc = new XDocument(new XElement("Databases"));
+
+            _tableShapes.Clear();
+        _childForeignKeys.Clear();
             SaveDocument();
             Logger.Info("Created Catalog.xml");
             return;
@@ -477,7 +584,11 @@ internal sealed class CatalogStore
 
     private XElement? GetDatabaseElement(string databaseName)
     {
-        return _doc.Descendants()
+        // Databases are direct children of the root; scanning every descendant made each lookup cost
+        // the size of the whole catalog (all databases, tables, columns, and indexes).
+        XElement? direct = _doc.Root?.Elements("Database")
+            .FirstOrDefault(e => string.Equals(e.Attribute("DatabaseName")?.Value, databaseName, StringComparison.OrdinalIgnoreCase));
+        return direct ?? _doc.Descendants()
             .FirstOrDefault(e => e.Name == "Database"
                 && string.Equals(e.Attribute("DatabaseName")?.Value, databaseName, StringComparison.OrdinalIgnoreCase));
     }
@@ -496,7 +607,9 @@ internal sealed class CatalogStore
 
     private static XElement? GetTableElement(XElement database, string tableName)
     {
-        return database.Descendants()
+        XElement? direct = database.Element("Tables")?.Elements("Table")
+            .FirstOrDefault(e => string.Equals(e.Attribute("TableName")?.Value, tableName, StringComparison.OrdinalIgnoreCase));
+        return direct ?? database.Descendants()
             .FirstOrDefault(e => e.Name == "Table"
                 && string.Equals(e.Attribute("TableName")?.Value, tableName, StringComparison.OrdinalIgnoreCase));
     }
@@ -607,6 +720,10 @@ internal sealed class CatalogStore
     /// </summary>
     private void SaveDocument()
     {
+        // Every catalog change goes through here; drop parsed table shapes so none can go stale.
+        _tableShapes.Clear();
+        _childForeignKeys.Clear();
+
         if (!_persistToDisk)
         {
             return;
@@ -630,6 +747,8 @@ internal sealed class CatalogStore
     /// </summary>
     private void BumpTableSchemaVersion(string databaseName, string tableName)
     {
+        _tableShapes.Clear();
+        _childForeignKeys.Clear();
         string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
         _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
     }

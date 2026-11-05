@@ -43,10 +43,10 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// </summary>
     private void ValidateAssignedColumns(string databaseName)
     {
-        List<Models.Catalog.Column> columns = Catalog.GetTableColumns(_model.TableName, databaseName);
+        IReadOnlyList<Models.Catalog.Column> columns = Catalog.GetTableColumnsReadOnly(_model.TableName, databaseName);
         foreach (string assigned in _model.SetExpressions.Keys)
         {
-            if (!columns.Exists(column => string.Equals(column.Name, assigned, StringComparison.OrdinalIgnoreCase)))
+            if (!HasColumn(columns, assigned))
             {
                 throw new BindingException($"Column {assigned} doesn't exist in table {_model.TableName}.")
                 {
@@ -54,6 +54,19 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 };
             }
         }
+    }
+
+    private static bool HasColumn(IReadOnlyList<Models.Catalog.Column> columns, string name)
+    {
+        foreach (Models.Catalog.Column column in columns)
+        {
+            if (string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public override void PerformAction(Guid session)
@@ -246,8 +259,14 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
         Dictionary<string, HashSet<string>> batchUniqueValues = InitializeBatchUniqueTracker(primaryKeys, uniqueKeys);
-        List<Models.Catalog.Column> assignedColumns = Catalog.GetTableColumns(_model.TableName, databaseName)
-            .FindAll(column => _model.SetExpressions.ContainsKey(column.Name));
+        List<Models.Catalog.Column> assignedColumns = [];
+        foreach (Models.Catalog.Column column in Catalog.GetTableColumnsReadOnly(_model.TableName, databaseName))
+        {
+            if (_model.SetExpressions.ContainsKey(column.Name))
+            {
+                assignedColumns.Add(column);
+            }
+        }
         List<Models.Catalog.Column> lengthLimitedColumns = assignedColumns
             .FindAll(column => column.Length > 0 && column.Type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase));
         List<Models.Catalog.Column> notNullColumns = assignedColumns.FindAll(column => column.IsNotNull);
@@ -478,7 +497,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         long statementTxId,
         ChangeRecorder? recorder)
     {
-        var indexFiles = Catalog.GetTableIndexes(_model.TableName, databaseName);
+        IReadOnlyList<IndexFile> indexFiles = Catalog.GetTableIndexesReadOnly(_model.TableName, databaseName);
 
         // Delete old records from storage & indexes
         Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
