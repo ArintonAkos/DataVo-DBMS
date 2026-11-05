@@ -580,7 +580,7 @@ public static class DataVoCompiledQuery
         if (!schema.Eligible
             || assignmentWidth != plan.Assignments.Count
             || assignmentWidth > 2
-            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+            || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName))
         {
             throw new NotSupportedException("Batched fixed-width primary-key updates require an eligible integer primary-key update plan.");
         }
@@ -642,7 +642,7 @@ public static class DataVoCompiledQuery
         string databaseName = ResolveCurrentDatabase(context);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
         if (!schema.Eligible
-            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+            || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName))
         {
             return false;
         }
@@ -746,7 +746,7 @@ public static class DataVoCompiledQuery
         string databaseName = ResolveCurrentDatabase(context);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
         if (!schema.Eligible
-            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName))
+            || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName))
         {
             return false;
         }
@@ -844,7 +844,7 @@ public static class DataVoCompiledQuery
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: true);
         if (!schema.Eligible
             || schema.AssignOrdinals.Length != assignmentValues.Length
-            || !engine.IndexManager.HasIntegerPrimaryKeyFastLane(schema.PkIndexName, plan.TableName, databaseName)
+            || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName)
             || !TryConvertToInt64(primaryKeyValue, out long primaryKey))
         {
             return false;
@@ -986,6 +986,12 @@ public static class DataVoCompiledQuery
             schema.AssignOrdinals,
             values);
     }
+
+    // The fast path resolves the row through an integer primary-key lookup: a heap lane, or the persisted
+    // index in LSM mode (in place patches there keep the row id, so no index entry changes).
+    private static bool HasPrimaryKeyLookup(DataVoEngine engine, string indexName, string tableName, string databaseName) =>
+        engine.IndexManager.IsLsmBacked
+        || engine.IndexManager.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName);
 
     private static UpdateFastPathSchema ResolveUpdateFastPathSchema(
         DataVoEngine engine,
