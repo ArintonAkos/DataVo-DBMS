@@ -31,6 +31,16 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
                 Field field = ToField(ast.Column, tableName);
                 object? defaultValue = ColumnDefinitionParser.ToColumn(field).ParsedDefaultValue;
 
+                // Existing rows receive the default; without one, a NOT NULL column would start out NULL.
+                if (field.IsNull == 0 && defaultValue is null && existingRows.Count > 0)
+                {
+                    throw new ConstraintViolationException(
+                        $"Cannot add NOT NULL column {field.Name} without a DEFAULT: table {tableName} already has rows.")
+                    {
+                        ErrorCode = DataVo.Core.Contracts.Results.DataVoErrorCodes.NotNullViolation,
+                    };
+                }
+
                 Catalog.AddColumn(tableName, databaseName, field);
 
                 foreach (var row in existingRows)
@@ -114,7 +124,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
             Table = tableName,
             IsPrimaryKey = false,
             IsUnique = false,
-            IsNull = -1,
+            IsNull = column.IsNotNull ? 0 : -1,
             DefaultValue = ColumnDefinitionParser.EvaluateDefaultExpression(column.DefaultExpression, "ALTER TABLE ADD COLUMN"),
             ForeignKey = null
         };

@@ -39,6 +39,15 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
                 {
                     row[columnName] = ConvertExistingValue(row[columnName], field);
 
+                    if (field.IsNull == 0 && row[columnName] is null)
+                    {
+                        throw new ConstraintViolationException(
+                            $"Cannot make column {columnName} NOT NULL: existing rows hold NULL.")
+                        {
+                            ErrorCode = DataVo.Core.Contracts.Results.DataVoErrorCodes.NotNullViolation,
+                        };
+                    }
+
                     // Shrinking a column must not silently cut existing data; the schema stays unchanged.
                     if (ColumnLengthRule.Exceeds(resized, row[columnName], out int length))
                     {
@@ -152,7 +161,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             Table = tableName,
             IsPrimaryKey = false,
             IsUnique = false,
-            IsNull = -1,
+            IsNull = column.IsNotNull ? 0 : -1,
             DefaultValue = column.DefaultExpression != null
                 ? ColumnDefinitionParser.EvaluateDefaultExpression(column.DefaultExpression, "ALTER TABLE MODIFY COLUMN")
                 : existingColumn.DefaultValue,

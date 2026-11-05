@@ -527,6 +527,19 @@ public class Parser(List<Token> tokens)
                 {
                     colDef.IsUnique = true;
                 }
+                else if (Match(TokenType.Keyword, SqlKeywords.NOT_KEYWORD))
+                {
+                    if (!Match(TokenType.Keyword, SqlKeywords.NULL))
+                    {
+                        throw new ParserException($"Parser Error: Expected NULL after NOT but found {Current}.");
+                    }
+
+                    colDef.IsNotNull = true;
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.NULL))
+                {
+                    colDef.IsNotNull = false;
+                }
                 else if (Match(TokenType.Keyword, SqlKeywords.REFERENCES))
                 {
                     colDef.ReferencesTable = new IdentifierNode(Consume(TokenType.Identifier, "reference table name").Value);
@@ -591,6 +604,19 @@ public class Parser(List<Token> tokens)
                 else if (Match(TokenType.Keyword, SqlKeywords.UNIQUE))
                 {
                     colDef.IsUnique = true;
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.NOT_KEYWORD))
+                {
+                    if (!Match(TokenType.Keyword, SqlKeywords.NULL))
+                    {
+                        throw new ParserException($"Parser Error: Expected NULL after NOT but found {Current}.");
+                    }
+
+                    colDef.IsNotNull = true;
+                }
+                else if (Match(TokenType.Keyword, SqlKeywords.NULL))
+                {
+                    colDef.IsNotNull = false;
                 }
                 else if (Match(TokenType.Keyword, SqlKeywords.REFERENCES))
                 {

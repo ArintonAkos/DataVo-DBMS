@@ -150,6 +150,9 @@ internal sealed class CatalogStore
                 attribute.SetAttributeValue("DefaultValue", null);
             }
 
+            // MODIFY redefines nullability too: 0 = NOT NULL; the attribute is omitted for nullable columns.
+            attribute.SetAttributeValue("IsNull", field.IsNull == 0 ? 0 : null);
+
             SaveDocument();
             BumpTableSchemaVersion(databaseName, tableName);
         }
