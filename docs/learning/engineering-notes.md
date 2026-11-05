@@ -33,6 +33,7 @@ Apple Silicon laptop unless stated otherwise.
 | 21% of a point read spent logging | The library wrote every log line to the console | An embedded library must be silent by default |
 | Typed inserts 18x slower after indexes were persisted | Only SQL opened a write batch, so every index entry became its own commit | When you change what a write costs, recheck every write path, not just the one you tested |
 | Compiled UPDATE lost its fast path | The fast path checked for a heap index structure that no longer existed in LSM mode | Feature gates encode assumptions; when the assumption changes, the gate silently turns off |
+| Every open rebuilt the vector index: 1.3 s for 20k vectors | The HNSW graph lived only in memory; LSM mode never saved it | Derived state that is expensive to rebuild needs its own snapshot, tied to the data by a watermark |
 
 ## 3. LSM trees in one page
 
@@ -88,7 +89,31 @@ dangers are files changing or shrinking underneath you). The costs: Windows cann
   readers check memory before the file list. A reader can therefore never miss a row that is "between"
   memory and disk.
 
-## 7. Testing lessons
+## 7. Derived state: snapshots and watermarks
+
+The rows are the truth; an index is *derived* from them. A cheap index (a B-tree) can live in the LSM
+tree itself. An HNSW graph is costly to build (a nearest-neighbour search per inserted vector), so we
+save it as a separate snapshot file, and need a rule for when that snapshot can be trusted.
+
+- **Watermark.** The snapshot records the commit LSN it reflects, W. Every row version carries the
+  LSN that wrote it. On open, a row whose version is <= W is exactly what the snapshot saw (indexed if
+  it had a vector, absent if not); only rows with a version > W are re-read and re-indexed. Rows the
+  index has but the table lacks were deleted after W and are removed. This is the same idea as a
+  database checkpoint plus log replay, applied to an index.
+- **Never run ahead of the data.** The snapshot is written after the storage engine's final flush. If
+  it were written first and the machine lost power, it could contain rows the table never kept.
+- **Numbers must never be reused.** The rule "version <= W means unchanged" only holds if every later
+  write gets an LSN above W. After a restart, LSNs resumed from the highest LSN any table had flushed,
+  which can be below W (when the last commit was a DROP TABLE marker, for example). The fix: open raises
+  the LSN floor to every snapshot's W. Any number that a file trusts must also bound future numbers.
+- **A damaged snapshot only costs time.** It has a checksum; any mismatch means "rebuild from the rows".
+  Losing a cache must never lose data.
+
+A bug worth remembering: the snapshot writer computed the final checksum *before* flushing its last
+buffered bytes, so the checksum never matched. A round-trip test (write, read back, compare) caught it
+at once. Every serializer deserves one.
+
+## 8. Testing lessons
 
 - **A regression test must fail without the fix.** We check this by running the new test against the
   old code; the write-atomicity test saw 5, 3 and 7 commits before the fix and 1 after.
