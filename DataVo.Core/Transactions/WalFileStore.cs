@@ -252,7 +252,7 @@ internal sealed class WalFileStore
                 return records;
             }
 
-            byte[] bytes = File.ReadAllBytes(FilePath);
+            byte[] bytes = ReadAllBytesShared(FilePath);
             int offset = 0;
             while (TryReadValidFrame(bytes, offset, out WalFrameHeader header))
             {
@@ -282,7 +282,7 @@ internal sealed class WalFileStore
                 return;
             }
 
-            byte[] bytes = File.ReadAllBytes(FilePath);
+            byte[] bytes = ReadAllBytesShared(FilePath);
             int offset = 0;
             int keepStart = -1;
             int keepEnd = 0;
@@ -396,7 +396,7 @@ internal sealed class WalFileStore
 
         var entries = new List<WalEntry>();
         int lineNumber = 0;
-        foreach (var line in File.ReadLines(FilePath))
+        foreach (var line in ReadLinesShared(FilePath))
         {
             lineNumber++;
             if (string.IsNullOrWhiteSpace(line))
@@ -440,6 +440,41 @@ internal sealed class WalFileStore
 
         BinaryFrameHandlePool.Remove(FilePath);
         AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
+    }
+
+    /// <summary>
+    /// Reads the whole file while the pooled append handle may still be open. On Windows a plain
+    /// File.ReadAllBytes (FileShare.Read) is refused while another handle holds write access.
+    /// </summary>
+    private static byte[] ReadAllBytesShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var bytes = new byte[stream.Length];
+        int offset = 0;
+        while (offset < bytes.Length)
+        {
+            int read = stream.Read(bytes, offset, bytes.Length - offset);
+            if (read == 0)
+            {
+                Array.Resize(ref bytes, offset); // the file shrank while reading
+                break;
+            }
+
+            offset += read;
+        }
+
+        return bytes;
+    }
+
+    private static IEnumerable<string> ReadLinesShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            yield return line;
+        }
     }
 
     /// <summary>
