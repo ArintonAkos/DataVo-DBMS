@@ -56,7 +56,28 @@ public sealed class ScalarKeyFormattingAllocationTests
             $"scalar key allocated {actualBytes} B/call; output-only formatting allocated {outputOnlyBytes} B/call");
     }
 
+    /// <summary>
+    /// Steady-state bytes per call. Code first runs unoptimized and is recompiled in the background
+    /// (tiered JIT); under a loaded parallel test run that can lag behind the warm-up, and unoptimized
+    /// code may still box. Measuring several rounds and keeping the lowest value isolates the steady
+    /// state this test is about.
+    /// </summary>
     private static long MeasureAllocation(Func<string> action)
+    {
+        long best = long.MaxValue;
+        for (int round = 0; round < 5 && best > 0; round++)
+        {
+            best = Math.Min(best, MeasureRound(action));
+            if (round < 4)
+            {
+                Thread.Sleep(50); // give background tier-up a chance between rounds
+            }
+        }
+
+        return best;
+    }
+
+    private static long MeasureRound(Func<string> action)
     {
         string? sink = null;
         for (int i = 0; i < 2_000; i++)
