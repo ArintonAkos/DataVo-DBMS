@@ -38,7 +38,9 @@ namespace DataVo.Core.Parser.Statements
 
             foreach (var groupedRow in tableData)
             {
-                JoinedRow row = groupedRow.Value.First();
+                // Without GROUP BY the whole table is one group, and it may be empty: SQL still returns
+                // one row (COUNT(*) = 0, SUM/MIN/MAX/AVG = NULL) instead of failing.
+                JoinedRow row = groupedRow.Value.Count > 0 ? groupedRow.Value[0] : new JoinedRow();
                 row.Add(Aggregation.HASH_VALUE, new());
 
                 foreach (var aggregateFunc in Model.Functions)

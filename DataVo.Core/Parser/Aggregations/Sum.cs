@@ -10,6 +10,7 @@ namespace DataVo.Core.Parser.Aggregations
         protected override object? Apply(ListedTable rows)
         {
             double sum = 0;
+            bool any = false;
 
             foreach (var row in rows)
             {
@@ -20,9 +21,11 @@ namespace DataVo.Core.Parser.Aggregations
                 }
 
                 sum += Convert.ToDouble(value);
+                any = true;
             }
 
-            return sum;
+            // SQL: the sum of no values (an empty group, or only NULLs) is NULL, not 0.
+            return any ? sum : null;
         }
 
         protected override void Validate()
