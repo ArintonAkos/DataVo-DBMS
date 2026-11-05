@@ -491,12 +491,16 @@ internal sealed class WalFileStore
 
     private void EnsureDirectoryExists()
     {
-        string? directory = Path.GetDirectoryName(FilePath);
-        if (!string.IsNullOrWhiteSpace(directory))
+        // Runs on every append; compute the directory once and only create it when it is missing
+        // (it can be deleted underneath us, so the existence check stays).
+        string? directory = _directory ??= Path.GetDirectoryName(FilePath) ?? string.Empty;
+        if (directory.Length > 0 && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory);
         }
     }
+
+    private string? _directory;
 
     private void DeleteIfExistsCore()
     {
