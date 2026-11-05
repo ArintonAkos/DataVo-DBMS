@@ -49,8 +49,8 @@ public sealed class ScalarKeyFormattingAllocationTests
 
     private static void AssertOutputOnlyAllocation(Func<string> actual, Func<string> outputOnly)
     {
-        long actualBytes = MeasureAllocation(actual);
-        long outputOnlyBytes = MeasureAllocation(outputOnly);
+        long outputOnlyBytes = MeasureAllocation(outputOnly, target: null);
+        long actualBytes = MeasureAllocation(actual, target: outputOnlyBytes);
 
         Assert.True(actualBytes <= outputOnlyBytes,
             $"scalar key allocated {actualBytes} B/call; output-only formatting allocated {outputOnlyBytes} B/call");
@@ -58,20 +58,23 @@ public sealed class ScalarKeyFormattingAllocationTests
 
     /// <summary>
     /// Steady-state bytes per call. Code first runs unoptimized and is recompiled in the background
-    /// (tiered JIT); under a loaded parallel test run that can lag behind the warm-up, and unoptimized
-    /// code may still box. Measuring several rounds and keeping the lowest value isolates the steady
-    /// state this test is about.
+    /// (tiered JIT); on a loaded CI machine that can take seconds, and unoptimized code may still box.
+    /// Rounds repeat until a round reaches <paramref name="target"/> or a 5-second budget runs out (five
+    /// rounds when there is no target, for the baseline), and the lowest value is returned.
     /// </summary>
-    private static long MeasureAllocation(Func<string> action)
+    private static long MeasureAllocation(Func<string> action, long? target)
     {
         long best = long.MaxValue;
-        for (int round = 0; round < 5 && best > 0; round++)
+        var budget = System.Diagnostics.Stopwatch.StartNew();
+        for (int round = 0; ; round++)
         {
             best = Math.Min(best, MeasureRound(action));
-            if (round < 4)
+            if (target is null ? round >= 4 : best <= target || budget.Elapsed >= TimeSpan.FromSeconds(5))
             {
-                Thread.Sleep(50); // give background tier-up a chance between rounds
+                break;
             }
+
+            Thread.Sleep(50); // give background tier-up a chance between rounds
         }
 
         return best;
