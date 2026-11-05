@@ -66,6 +66,26 @@ public sealed class LsmPersistedIndexSqlTests : IDisposable
     }
 
     [Fact]
+    public void IndexCreatedOnAnEmptyTable_IsServedAfterReopen()
+    {
+        using (DataVoContext context = Open())
+        {
+            Execute(context, "CREATE DATABASE Shop");
+            Execute(context, "USE Shop");
+            Execute(context, "CREATE TABLE Items (Id INT PRIMARY KEY, Code INT)");
+            Execute(context, "CREATE INDEX ix_code ON Items (Code)");
+        }
+
+        // Found by the SQLite differential test: the empty index had no data file, so reopen never
+        // opened it and every query through it failed with "index does not exist" until the first write.
+        using DataVoContext reopened = Open();
+        Execute(reopened, "USE Shop");
+        Assert.Empty(Ids(reopened, "SELECT Id FROM Items WHERE Code = 7"));
+        Execute(reopened, "INSERT INTO Items (Id, Code) VALUES (1, 7)");
+        Assert.Equal([1], Ids(reopened, "SELECT Id FROM Items WHERE Code = 7"));
+    }
+
+    [Fact]
     public void CreateIndex_OnPopulatedTable_BuildsThePersistedIndex()
     {
         using (DataVoContext context = Open())

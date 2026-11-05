@@ -431,7 +431,9 @@ public sealed partial class LsmStorageEngine
         long floor = 0;
         foreach (string indexDirectory in Directory.EnumerateDirectories(indexRoot))
         {
-            if (File.Exists(Path.Combine(indexDirectory, "MANIFEST")))
+            // An index built on an empty table has its BUILT marker but no data file (and so no
+            // MANIFEST); it must still open, or lookups report it missing until the first write.
+            if (File.Exists(Path.Combine(indexDirectory, "MANIFEST")) || File.Exists(Path.Combine(indexDirectory, IndexBuiltMarker)))
             {
                 floor = Math.Max(floor, GetOrCreateIndexTable(databaseName, tableName, Path.GetFileName(indexDirectory)).FlushedLsn);
             }
