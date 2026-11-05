@@ -142,6 +142,12 @@ public sealed class LsmDiskResidentReadTests : IDisposable
         Assert.Throws<RowDeletedException>(() => engine.ReadRow(Db, Table, 7));
         Assert.Equal(499, engine.EstimateRowCount(Db, Table)); // counted once, the legacy metadata had no count
         Assert.Equal(501, engine.InsertRow(Db, Table, Row(501)));
+
+        // The upgrade stored the count in the file's properties: later opens do not recount.
+        string upgraded = Assert.Single(Directory.GetFiles(tableDirectory, "*.sst"));
+        using SsTableV2Reader reader = SsTableV2Reader.Open(upgraded, LsmReadMode.PositionalRead);
+        Assert.Equal(499, reader.Properties.LiveRowCount);
+        Assert.Equal(501, reader.Properties.NextRowId);
     }
 
     [Theory]

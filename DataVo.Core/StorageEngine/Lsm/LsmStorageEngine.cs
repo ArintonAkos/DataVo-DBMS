@@ -648,72 +648,166 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// only ever serves page-aligned, indexed files. Each file is replaced atomically through a manifest
     /// edit at the same level; a crash in between leaves either the old or the new file live.
     /// </summary>
+    /// <remarks>
+    /// v1 metadata has no live-row count. The upgrade counts live rows across all files first and stores
+    /// the count in the file that holds the newest metadata version, so later opens never recount.
+    /// </remarks>
     private void UpgradeLegacySstables(TableState state)
     {
+        var legacy = new List<LsmTableFileMetadata>();
         for (int level = 0; level <= MaxLevelToScan; level++)
         {
             foreach (LsmTableFileMetadata file in state.FileRegistry.ExecuteVersionEdit(() => state.Manifest.GetLiveFiles(level)))
             {
-                string path = Path.Combine(state.TableDirectory, file.FileName);
-                if (SsTableV2Format.IsV2File(path))
+                if (!SsTableV2Format.IsV2File(Path.Combine(state.TableDirectory, file.FileName)))
                 {
-                    continue;
+                    legacy.Add(file);
                 }
-
-                byte[] bytes = File.ReadAllBytes(path);
-                SsTableReader.Load(bytes);
-                List<SstableEntry> entries = ReadSstableEntries(bytes);
-                byte[]? first = null;
-                byte[]? last = null;
-                foreach (SstableEntry entry in entries)
-                {
-                    if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
-                    {
-                        first ??= entry.InternalKey;
-                        last = entry.InternalKey;
-                    }
-                }
-
-                if (first is null || last is null)
-                {
-                    throw new InvalidDataException($"Legacy SSTable '{file.FileName}' holds no rows and cannot be upgraded.");
-                }
-
-                long fileNumber = state.Manifest.AllocateFileNumber();
-                string fileName = $"{fileNumber:D6}.sst";
-                long length = 0;
-                LsmDurableFileOperations.WriteFileAtomically(
-                    Path.Combine(state.TableDirectory, fileName),
-                    overwrite: false,
-                    stream =>
-                    {
-                        using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count);
-                        foreach (SstableEntry entry in entries)
-                        {
-                            LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
-                        }
-
-                        length = writer.Finish();
-                    },
-                    crashHook: null,
-                    LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
-                    LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
-                    LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
-
-                var upgraded = new LsmTableFileMetadata(fileNumber, file.Level, first, last, length, fileName);
-                var edit = new LsmVersionEdit();
-                edit.DeleteFile(file.Level, file.FileNumber);
-                edit.AddFile(upgraded);
-                state.FileRegistry.ExecuteVersionEdit(() =>
-                {
-                    state.Manifest.ApplyEdit(edit);
-                    state.FileRegistry.Register(upgraded);
-                    state.FileRegistry.MarkDeleted([file]);
-                    return true;
-                });
             }
         }
+
+        if (legacy.Count == 0)
+        {
+            return;
+        }
+
+        // Pass 1: newest version per row across every live file, and where the newest metadata lives.
+        var newest = new Dictionary<long, (ulong Sequence, bool Live)>();
+        long metadataFile = -1;
+        ulong metadataSequence = 0;
+        bool sawMetadata = false;
+        void Observe(long rowId, ulong sequence, bool live)
+        {
+            if (!newest.TryGetValue(rowId, out var current) || sequence > current.Sequence)
+            {
+                newest[rowId] = (sequence, live);
+            }
+        }
+
+        foreach (LsmTableFileMetadata file in AllLiveFiles(state))
+        {
+            string path = Path.Combine(state.TableDirectory, file.FileName);
+            if (SsTableV2Format.IsV2File(path))
+            {
+                using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
+                SsTableV2Cursor cursor = reader.OpenCursor();
+                while (cursor.MoveNext())
+                {
+                    Observe(cursor.RowId, cursor.Sequence, cursor.Type == LsmValueType.Put);
+                }
+
+                if (reader.Properties.NextRowId > 0 && (!sawMetadata || reader.Properties.NextRowIdSequence >= metadataSequence))
+                {
+                    sawMetadata = true;
+                    metadataSequence = reader.Properties.NextRowIdSequence;
+                    metadataFile = -1; // a v2 file cannot be rewritten here; open recounts in that rare case
+                }
+
+                continue;
+            }
+
+            byte[] bytes = File.ReadAllBytes(path);
+            SsTableReader.Load(bytes);
+            foreach (SstableEntry entry in ReadSstableEntries(bytes))
+            {
+                ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
+                ulong sequence = InternalKey.Sequence(entry.InternalKey);
+                if (LsmRowKeyCodec.IsRowKey(userKey))
+                {
+                    Observe(LsmRowKeyCodec.DecodeRowId(userKey), sequence, InternalKey.ValueType(entry.InternalKey) == LsmValueType.Put);
+                }
+                else if (LsmRowKeyCodec.IsTableMetadataKey(userKey) && (!sawMetadata || sequence >= metadataSequence))
+                {
+                    sawMetadata = true;
+                    metadataSequence = sequence;
+                    metadataFile = file.FileNumber;
+                }
+            }
+        }
+
+        long liveRows = newest.Values.Count(static version => version.Live);
+        newest.Clear();
+
+        // Pass 2: rewrite each legacy file.
+        foreach (LsmTableFileMetadata file in legacy)
+        {
+            byte[] bytes = File.ReadAllBytes(Path.Combine(state.TableDirectory, file.FileName));
+            List<SstableEntry> entries = ReadSstableEntries(bytes);
+            byte[]? first = null;
+            byte[]? last = null;
+            foreach (SstableEntry entry in entries)
+            {
+                if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
+                {
+                    first ??= entry.InternalKey;
+                    last = entry.InternalKey;
+                }
+            }
+
+            if (first is null || last is null)
+            {
+                throw new InvalidDataException($"Legacy SSTable '{file.FileName}' holds no rows and cannot be upgraded.");
+            }
+
+            long fileNumber = state.Manifest.AllocateFileNumber();
+            string fileName = $"{fileNumber:D6}.sst";
+            long length = 0;
+            bool holdsNewestMetadata = file.FileNumber == metadataFile;
+            LsmDurableFileOperations.WriteFileAtomically(
+                Path.Combine(state.TableDirectory, fileName),
+                overwrite: false,
+                stream =>
+                {
+                    using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count);
+                    long nextRowId = 0;
+                    foreach (SstableEntry entry in entries)
+                    {
+                        LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
+                        if (holdsNewestMetadata
+                            && LsmRowKeyCodec.IsTableMetadataKey(InternalKey.UserKey(entry.InternalKey))
+                            && InternalKey.Sequence(entry.InternalKey) == metadataSequence)
+                        {
+                            nextRowId = LsmRowKeyCodec.DecodeTableMetadata(entry.Value).NextRowId;
+                        }
+                    }
+
+                    if (holdsNewestMetadata && nextRowId > 0)
+                    {
+                        writer.SetTableMetadata(nextRowId, liveRows, metadataSequence);
+                    }
+
+                    length = writer.Finish();
+                },
+                crashHook: null,
+                LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+                LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+                LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+            var upgraded = new LsmTableFileMetadata(fileNumber, file.Level, first, last, length, fileName);
+            var edit = new LsmVersionEdit();
+            edit.DeleteFile(file.Level, file.FileNumber);
+            edit.AddFile(upgraded);
+            state.FileRegistry.ExecuteVersionEdit(() =>
+            {
+                state.Manifest.ApplyEdit(edit);
+                state.FileRegistry.Register(upgraded);
+                state.FileRegistry.MarkDeleted([file]);
+                return true;
+            });
+        }
     }
+
+    private static List<LsmTableFileMetadata> AllLiveFiles(TableState state) =>
+        state.FileRegistry.ExecuteVersionEdit(() =>
+        {
+            var files = new List<LsmTableFileMetadata>();
+            for (int level = 0; level <= MaxLevelToScan; level++)
+            {
+                files.AddRange(state.Manifest.GetLiveFiles(level));
+            }
+
+            return files;
+        });
 
     /// <summary>
     /// Drops overlay versions that a flushed MemTable wrote to its SSTable. Runs on the flushing thread
