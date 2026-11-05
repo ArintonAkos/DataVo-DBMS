@@ -24,6 +24,11 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 internal static class SsTableKeyedFormat
 {
     public const ushort Version = 3;
+
+    /// <summary>Same layout with prefix-compressed data blocks (<see cref="SsTableCompactKeyedBlock"/>).</summary>
+    public const ushort CompactVersion = 5;
+
+    public static bool IsKeyedVersion(ushort version) => version is Version or CompactVersion;
     public const int BlockHeaderSize = 16;
     public const int EntryHeaderSize = sizeof(ushort) + sizeof(uint);
     public const int IndexHeaderSize = 8;
@@ -54,7 +59,7 @@ internal static class SsTableKeyedFormat
             read += n;
         }
 
-        return SsTableV2Format.TryReadVersion(tail, out ushort version) && version == Version;
+        return SsTableV2Format.TryReadVersion(tail, out ushort version) && IsKeyedVersion(version);
     }
 
     /// <summary>64-bit FNV-1a of a byte key, mixed by the Bloom filter: keys are arbitrary bytes here.</summary>
@@ -125,10 +130,21 @@ internal sealed class SsTableKeyedWriter : IDisposable
     private ulong _largestSequence;
     private bool _finished;
 
-    public SsTableKeyedWriter(Stream output, int bloomSuffixLength, int alignment = 0)
+    // Compact (v5) blocks: prefix-compressed entries with restart points.
+    private readonly bool _compact;
+    private readonly List<int> _restartOffsets = [];
+    private int _blockEntries;
+    private ulong _previousTagInBlock;
+
+    /// <param name="compact">
+    /// Writes prefix-compressed blocks (format version 5, see <see cref="SsTableCompactKeyedBlock"/>);
+    /// false writes version 3 blocks, which readers still accept.
+    /// </param>
+    public SsTableKeyedWriter(Stream output, int bloomSuffixLength, int alignment = 0, bool compact = true)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(output);
         _output = output;
+        _compact = compact;
         _bloomSuffixLength = bloomSuffixLength;
         _alignment = alignment == 0 ? SsTableV2Format.DefaultAlignment : alignment;
         _entries = ArrayPool<byte>.Shared.Rent(_alignment);
@@ -157,22 +173,15 @@ internal sealed class SsTableKeyedWriter : IDisposable
             }
         }
 
-        int entryLength = SsTableKeyedFormat.EntryHeaderSize + userKey.Length + value.Length + sizeof(ulong);
-        int blockWithEntry = SsTableKeyedFormat.BlockHeaderSize + ((_entryOffsets.Count + 1) * sizeof(uint)) + _entriesLength + entryLength;
-        if (_entryOffsets.Count > 0 && blockWithEntry > _alignment)
+        ulong tag = SsTableV2Format.PackTag(sequence, type);
+        if (_compact)
         {
-            FlushBlock();
+            AddCompact(userKey, tag, value);
         }
-
-        EnsureCapacity(_entriesLength + entryLength);
-        Span<byte> entry = _entries.AsSpan(_entriesLength, entryLength);
-        BinaryPrimitives.WriteUInt16LittleEndian(entry, (ushort)userKey.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(entry[2..], value.Length);
-        userKey.CopyTo(entry[SsTableKeyedFormat.EntryHeaderSize..]);
-        value.CopyTo(entry[(SsTableKeyedFormat.EntryHeaderSize + userKey.Length)..]);
-        BinaryPrimitives.WriteUInt64LittleEndian(entry[^sizeof(ulong)..], SsTableV2Format.PackTag(sequence, type));
-        _entryOffsets.Add(_entriesLength);
-        _entriesLength += entryLength;
+        else
+        {
+            AddFixed(userKey, tag, value);
+        }
 
         _blockFirstKey ??= userKey.ToArray();
         if (_lastKey is null || !userKey.SequenceEqual(_lastKey))
@@ -213,7 +222,7 @@ internal sealed class SsTableKeyedWriter : IDisposable
         }
 
         _finished = true;
-        if (_entryOffsets.Count > 0)
+        if (_blockEntries > 0)
         {
             FlushBlock();
         }
@@ -298,7 +307,7 @@ internal sealed class SsTableKeyedWriter : IDisposable
         WriteHandle(footer[24..], propertiesOffset, SsTableKeyedFormat.PropertiesSize);
         BinaryPrimitives.WriteInt32LittleEndian(footer[36..], _alignment);
         BinaryPrimitives.WriteInt32LittleEndian(footer[40..], _bloomSuffixLength);
-        BinaryPrimitives.WriteUInt16LittleEndian(footer[44..], SsTableKeyedFormat.Version);
+        BinaryPrimitives.WriteUInt16LittleEndian(footer[44..], _compact ? SsTableKeyedFormat.CompactVersion : SsTableKeyedFormat.Version);
         BinaryPrimitives.WriteUInt32LittleEndian(footer[46..], SsTableV2Format.Magic);
         Write(footer);
         _output.Flush();
@@ -311,8 +320,97 @@ internal sealed class SsTableKeyedWriter : IDisposable
         _entries = [];
     }
 
+    private void AddFixed(ReadOnlySpan<byte> userKey, ulong tag, ReadOnlySpan<byte> value)
+    {
+        int entryLength = SsTableKeyedFormat.EntryHeaderSize + userKey.Length + value.Length + sizeof(ulong);
+        int blockWithEntry = SsTableKeyedFormat.BlockHeaderSize + ((_entryOffsets.Count + 1) * sizeof(uint)) + _entriesLength + entryLength;
+        if (_entryOffsets.Count > 0 && blockWithEntry > _alignment)
+        {
+            FlushBlock();
+        }
+
+        EnsureCapacity(_entriesLength + entryLength);
+        Span<byte> entry = _entries.AsSpan(_entriesLength, entryLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(entry, (ushort)userKey.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(entry[2..], value.Length);
+        userKey.CopyTo(entry[SsTableKeyedFormat.EntryHeaderSize..]);
+        value.CopyTo(entry[(SsTableKeyedFormat.EntryHeaderSize + userKey.Length)..]);
+        BinaryPrimitives.WriteUInt64LittleEndian(entry[^sizeof(ulong)..], tag);
+        _entryOffsets.Add(_entriesLength);
+        _entriesLength += entryLength;
+        _blockEntries++;
+    }
+
+    private void AddCompact(ReadOnlySpan<byte> userKey, ulong tag, ReadOnlySpan<byte> value)
+    {
+        bool restart = _blockEntries % SsTableCompactKeyedBlock.RestartInterval == 0;
+        int size = CompactEntrySize(userKey, tag, value.Length, restart);
+        int restarts = _restartOffsets.Count + (restart ? 1 : 0);
+        long blockWithEntry = SsTableKeyedFormat.BlockHeaderSize + _entriesLength + size + ((restarts + 1) * sizeof(int));
+        if (_blockEntries > 0 && blockWithEntry > _alignment)
+        {
+            FlushBlock();
+            restart = true;
+            size = CompactEntrySize(userKey, tag, value.Length, restart);
+        }
+
+        int shared = restart ? 0 : SharedPrefixLength(userKey);
+        EnsureCapacity(_entriesLength + size);
+        Span<byte> entry = _entries.AsSpan(_entriesLength, size);
+        int written = SsTableCompactRowBlock.WriteVarint(entry, (ulong)shared);
+        written += SsTableCompactRowBlock.WriteVarint(entry[written..], (ulong)(userKey.Length - shared));
+        written += SsTableCompactRowBlock.WriteVarint(entry[written..], (ulong)value.Length);
+        written += SsTableCompactRowBlock.WriteVarint(entry[written..], restart ? tag : SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock));
+        userKey[shared..].CopyTo(entry[written..]);
+        written += userKey.Length - shared;
+        value.CopyTo(entry[written..]);
+        if (restart)
+        {
+            _restartOffsets.Add(_entriesLength);
+        }
+
+        _entriesLength += size;
+        _blockEntries++;
+        _previousTagInBlock = tag;
+    }
+
+    private int CompactEntrySize(ReadOnlySpan<byte> userKey, ulong tag, int valueLength, bool restart)
+    {
+        int shared = restart ? 0 : SharedPrefixLength(userKey);
+        return SsTableCompactRowBlock.VarintSize((ulong)shared)
+            + SsTableCompactRowBlock.VarintSize((ulong)(userKey.Length - shared))
+            + SsTableCompactRowBlock.VarintSize((ulong)valueLength)
+            + SsTableCompactRowBlock.VarintSize(restart ? tag : SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock))
+            + (userKey.Length - shared)
+            + valueLength;
+    }
+
+    // Shared prefix with the previous key of this block (the last key added; _lastKey is updated after).
+    private int SharedPrefixLength(ReadOnlySpan<byte> userKey)
+    {
+        if (_lastKey is null)
+        {
+            return 0;
+        }
+
+        int length = Math.Min(userKey.Length, _lastKey.Length);
+        int shared = 0;
+        while (shared < length && userKey[shared] == _lastKey[shared])
+        {
+            shared++;
+        }
+
+        return shared;
+    }
+
     private void FlushBlock()
     {
+        if (_compact)
+        {
+            FlushCompactBlock();
+            return;
+        }
+
         int count = _entryOffsets.Count;
         int offsetsLength = count * sizeof(uint);
         int dataStart = SsTableKeyedFormat.BlockHeaderSize + offsetsLength;
@@ -350,6 +448,44 @@ internal sealed class SsTableKeyedWriter : IDisposable
         _entryOffsets.Clear();
         _entriesLength = 0;
         _blockFirstKey = null;
+        _blockEntries = 0;
+    }
+
+    private void FlushCompactBlock()
+    {
+        int payloadLength = _entriesLength + ((_restartOffsets.Count + 1) * sizeof(int));
+        int blockLength = SsTableKeyedFormat.BlockHeaderSize + payloadLength;
+        byte[] block = ArrayPool<byte>.Shared.Rent(blockLength);
+        try
+        {
+            Span<byte> span = block.AsSpan(0, blockLength);
+            BinaryPrimitives.WriteInt32LittleEndian(span[4..], _blockEntries);
+            BinaryPrimitives.WriteInt32LittleEndian(span[8..], SsTableCompactKeyedBlock.CompactFlag);
+            BinaryPrimitives.WriteInt32LittleEndian(span[12..], payloadLength);
+            _entries.AsSpan(0, _entriesLength).CopyTo(span[SsTableKeyedFormat.BlockHeaderSize..]);
+            int restarts = SsTableKeyedFormat.BlockHeaderSize + _entriesLength;
+            for (int i = 0; i < _restartOffsets.Count; i++)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(span[(restarts + (i * sizeof(int)))..], SsTableKeyedFormat.BlockHeaderSize + _restartOffsets[i]);
+            }
+
+            BinaryPrimitives.WriteInt32LittleEndian(span[^sizeof(int)..], _restartOffsets.Count);
+            BinaryPrimitives.WriteUInt32LittleEndian(span, WalCrc32C.HashToUInt32(span[4..]));
+
+            long offset = _position;
+            Write(span);
+            PadTo(_alignment);
+            _blocks.Add((offset, blockLength, _blockEntries, _blockFirstKey!, _lastKey!.ToArray()));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(block);
+        }
+
+        _restartOffsets.Clear();
+        _entriesLength = 0;
+        _blockFirstKey = null;
+        _blockEntries = 0;
     }
 
     private void EnsureCapacity(int required)
@@ -429,7 +565,7 @@ internal sealed class SsTableKeyedReader : IDisposable
             }
 
             ReadOnlySpan<byte> footer = source.GetRegion(length - SsTableKeyedFormat.FooterSize, SsTableKeyedFormat.FooterSize).Span;
-            if (!SsTableV2Format.TryReadVersion(footer, out ushort version) || version != SsTableKeyedFormat.Version)
+            if (!SsTableV2Format.TryReadVersion(footer, out ushort version) || !SsTableKeyedFormat.IsKeyedVersion(version))
             {
                 throw new InvalidDataException("SSTable footer is not a keyed (v3) footer.");
             }
@@ -514,6 +650,16 @@ internal sealed class SsTableKeyedReader : IDisposable
             }
 
             ReadOnlySpan<byte> bytes = GetVerifiedBlock(block).Span;
+            if (SsTableCompactKeyedBlock.IsCompact(bytes))
+            {
+                if (!VisitCompactBlockWithPrefix(bytes, bloomKey, state, visit, ref carriedHeap, carried, ref carriedLength))
+                {
+                    return;
+                }
+
+                continue;
+            }
+
             int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
             int start = LowerBound(bytes, count, bloomKey);
             ReadOnlySpan<byte> previous = carriedLength < 0
@@ -561,12 +707,95 @@ internal sealed class SsTableKeyedReader : IDisposable
         }
     }
 
+    /// <summary>
+    /// The prefix scan of one compact block. Returns false once past every key with the prefix. The
+    /// previous visited key is kept in <paramref name="carried"/> (or the heap copy), because decoded keys
+    /// live in a buffer the next entry overwrites.
+    /// </summary>
+    private bool VisitCompactBlockWithPrefix<TState>(
+        ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> bloomKey,
+        TState state,
+        KeyedEntryAction<TState> visit,
+        ref byte[]? carriedHeap,
+        Span<byte> carried,
+        ref int carriedLength)
+    {
+        // Last restart whose key is below the prefix: every matching key starts after it.
+        int low = 0;
+        int high = SsTableCompactKeyedBlock.RestartCount(bytes) - 1;
+        while (low < high)
+        {
+            int mid = (int)((uint)(low + high + 1) >> 1);
+            if (ComparePrefix(SsTableCompactKeyedBlock.RestartKey(bytes, mid), bloomKey) < 0)
+            {
+                low = mid;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        var entries = default(CompactKeyedBlockReader);
+        entries.Seek(bytes, low);
+        while (entries.MoveNext(bytes))
+        {
+            ReadOnlySpan<byte> userKey = entries.Key;
+            int order = ComparePrefix(userKey, bloomKey);
+            if (order > 0)
+            {
+                return false;
+            }
+
+            if (order < 0 || userKey.Length != bloomKey.Length + BloomSuffixLength)
+            {
+                continue;
+            }
+
+            ReadOnlySpan<byte> previous = carriedLength < 0
+                ? ReadOnlySpan<byte>.Empty
+                : (carriedHeap is null ? carried[..carriedLength] : carriedHeap.AsSpan(0, carriedLength));
+            if (carriedLength >= 0 && userKey.SequenceEqual(previous))
+            {
+                continue; // an older version of a key already visited
+            }
+
+            if (userKey.Length <= carried.Length)
+            {
+                userKey.CopyTo(carried);
+                carriedHeap = null;
+            }
+            else
+            {
+                carriedHeap = userKey.ToArray();
+            }
+
+            carriedLength = userKey.Length;
+            visit(userKey, SsTableV2Format.SequenceOf(entries.Tag), SsTableV2Format.TypeOf(entries.Tag), bytes.Slice(entries.ValueOffset, entries.ValueLength), state);
+        }
+
+        return true;
+    }
+
     /// <summary>Visits every entry (all versions) in order.</summary>
     public void ForEach<TState>(TState state, KeyedEntryAction<TState> visit)
     {
         for (int block = 0; block < BlockCount; block++)
         {
             ReadOnlySpan<byte> bytes = GetVerifiedBlock(block).Span;
+            if (SsTableCompactKeyedBlock.IsCompact(bytes))
+            {
+                var entries = default(CompactKeyedBlockReader);
+                entries.Seek(bytes, 0);
+                while (entries.MoveNext(bytes))
+                {
+                    visit(entries.Key, SsTableV2Format.SequenceOf(entries.Tag), SsTableV2Format.TypeOf(entries.Tag), bytes.Slice(entries.ValueOffset, entries.ValueLength), state);
+                }
+
+                continue;
+            }
+
             int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
             for (int i = 0; i < count; i++)
             {
@@ -675,7 +904,8 @@ internal sealed class SsTableKeyedReader : IDisposable
 
         int count = bytes.Length >= SsTableKeyedFormat.BlockHeaderSize ? BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]) : -1;
         int payload = bytes.Length >= SsTableKeyedFormat.BlockHeaderSize ? BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]) : -1;
-        if (count <= 0 || payload < (long)count * sizeof(uint) || SsTableKeyedFormat.BlockHeaderSize + payload != bytes.Length)
+        bool compact = count > 0 && SsTableCompactKeyedBlock.IsCompact(bytes);
+        if (count <= 0 || payload < (compact ? sizeof(int) : (long)count * sizeof(uint)) || SsTableKeyedFormat.BlockHeaderSize + payload != bytes.Length)
         {
             throw new InvalidDataException($"Keyed SSTable block {block} header is corrupt.");
         }
@@ -683,6 +913,13 @@ internal sealed class SsTableKeyedReader : IDisposable
         if (WalCrc32C.HashToUInt32(bytes[4..]) != BinaryPrimitives.ReadUInt32LittleEndian(bytes))
         {
             throw new InvalidDataException($"Keyed SSTable block {block} failed its CRC32C check.");
+        }
+
+        if (compact)
+        {
+            VerifyCompactBlock(block, bytes, count);
+            MarkVerified(word, bit);
+            return;
         }
 
         int dataStart = SsTableKeyedFormat.BlockHeaderSize + (count * sizeof(uint));
@@ -709,6 +946,60 @@ internal sealed class SsTableKeyedReader : IDisposable
             current = Volatile.Read(ref _verifiedBlocks[word]);
         }
         while (Interlocked.CompareExchange(ref _verifiedBlocks[word], current | bit, current) != current);
+    }
+
+    private void MarkVerified(int word, int bit)
+    {
+        int current;
+        do
+        {
+            current = Volatile.Read(ref _verifiedBlocks[word]);
+        }
+        while (Interlocked.CompareExchange(ref _verifiedBlocks[word], current | bit, current) != current);
+    }
+
+    // Decodes every entry once, so later reads can trust every offset, length and shared prefix.
+    private static void VerifyCompactBlock(int block, ReadOnlySpan<byte> bytes, int count)
+    {
+        int restarts = SsTableCompactKeyedBlock.RestartCount(bytes);
+        long restartsStart = (long)bytes.Length - sizeof(int) - ((long)restarts * sizeof(int));
+        if (restarts != (count + SsTableCompactKeyedBlock.RestartInterval - 1) / SsTableCompactKeyedBlock.RestartInterval
+            || restartsStart < SsTableKeyedFormat.BlockHeaderSize)
+        {
+            throw new InvalidDataException($"Keyed SSTable block {block} restart array is corrupt.");
+        }
+
+        try
+        {
+            var entries = default(CompactKeyedBlockReader);
+            entries.Seek(bytes, 0);
+            int restart = 0;
+            byte[]? previous = null;
+            while (entries.MoveNext(bytes))
+            {
+                if (entries.Index % SsTableCompactKeyedBlock.RestartInterval == 0
+                    && SsTableCompactKeyedBlock.RestartOffset(bytes, restart++) != entries.EntryOffset)
+                {
+                    throw new InvalidDataException($"Keyed SSTable block {block} restart {restart - 1} is misplaced.");
+                }
+
+                if (previous is not null && entries.Key.SequenceCompareTo(previous) < 0)
+                {
+                    throw new InvalidDataException($"Keyed SSTable block {block} keys are out of order.");
+                }
+
+                previous = entries.Key.ToArray();
+            }
+
+            if (!entries.EndsAtRestarts)
+            {
+                throw new InvalidDataException($"Keyed SSTable block {block} entries do not fill the block.");
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException or OverflowException)
+        {
+            throw new InvalidDataException($"Keyed SSTable block {block} is corrupt.", ex);
+        }
     }
 
     private static (long Offset, int Length) ReadHandle(ReadOnlySpan<byte> source) =>
