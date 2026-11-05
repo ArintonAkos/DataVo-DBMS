@@ -23,6 +23,14 @@ internal partial class Select
 
         foreach (string column in selectedColumns)
         {
+            // "P.Id AS x" is output as x: the alias replaces the (qualified) column name.
+            int aliasAt = column.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
+            if (aliasAt >= 0)
+            {
+                fields.Add(column[(aliasAt + 4)..].Trim());
+                continue;
+            }
+
             string[] splittedColumn = column.Split('.');
             string tableName = splittedColumn[0];
             string columnName = splittedColumn[1];
@@ -110,9 +118,10 @@ internal partial class Select
         foreach (string nameAssembly in _model.GetSelectedColumns())
         {
             string extractedOriginalName = nameAssembly;
-            if (extractedOriginalName.Contains(" AS "))
+            int aliasAt = extractedOriginalName.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
+            if (aliasAt >= 0)
             {
-                extractedOriginalName = extractedOriginalName.Split(" AS ")[0];
+                extractedOriginalName = extractedOriginalName[..aliasAt];
             }
 
             string[] splittedAssembly = extractedOriginalName.Split('.');
