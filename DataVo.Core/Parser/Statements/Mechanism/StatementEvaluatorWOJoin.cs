@@ -86,6 +86,11 @@ namespace DataVo.Core.Parser.Statements.Mechanism
 
             if (_table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
             {
+                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, indexFile, rightLit.Value, out string secondaryKey))
+                {
+                    return EvaluateUsingSecondaryIndex(secondaryKey, indexFile);
+                }
+
                 HashSet<long> indexed = EvaluateUsingSecondaryIndex(rightValue, indexFile);
                 return indexed.Count > 0
                     ? indexed
@@ -95,6 +100,11 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue);
             if (columnIndex > -1)
             {
+                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, $"_PK_{_table.TableName}", rightLit.Value, out string primaryKey))
+                {
+                    return EvaluateUsingPrimaryKey(primaryKey);
+                }
+
                 HashSet<long> indexed = EvaluateUsingPrimaryKey(rightValue);
                 return indexed.Count > 0
                     ? indexed

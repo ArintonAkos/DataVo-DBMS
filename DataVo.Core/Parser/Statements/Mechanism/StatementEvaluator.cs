@@ -96,6 +96,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         if (table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
         {
+            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, indexFile, rightLit.Value, out string secondaryKey))
+            {
+                return EvaluateUsingSecondaryIndex(table, secondaryKey, indexFile);
+            }
+
             HashedTable indexed = EvaluateUsingSecondaryIndex(table, rightValue, indexFile);
             if (indexed.Count > 0)
             {
@@ -108,6 +113,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue);
         if (columnIndex > -1)
         {
+            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, $"_PK_{table.TableName}", rightLit.Value, out string primaryKey))
+            {
+                return EvaluateUsingPrimaryKey(table, primaryKey);
+            }
+
             HashedTable indexed = EvaluateUsingPrimaryKey(table, rightValue);
             if (indexed.Count > 0)
             {
