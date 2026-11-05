@@ -74,7 +74,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
         try { Engine.IndexManager.DropDatabaseIndexes(TestDb); } catch { }
         try { Engine.Dispose(); } catch { }
 
-        if (Config.StorageMode == StorageMode.Disk && !string.IsNullOrWhiteSpace(Config.DiskStoragePath) && Directory.Exists(Config.DiskStoragePath))
+        if (Config.StorageMode is StorageMode.Disk or StorageMode.Lsm && !string.IsNullOrWhiteSpace(Config.DiskStoragePath) && Directory.Exists(Config.DiskStoragePath))
         {
             try { Directory.Delete(Config.DiskStoragePath, true); } catch { }
         }
@@ -88,7 +88,9 @@ public abstract class SqlExecutionTestsBase : IDisposable
 
     private static DataVoConfig CreateIsolatedConfig(DataVoConfig config)
     {
-        string? diskPath = config.StorageMode == StorageMode.Disk
+        // Every persistent mode gets a private directory; Lsm used to fall back to the shared default
+        // ./datavo_lsm_data, so parallel test classes wrote one commit log.
+        string? diskPath = config.StorageMode is StorageMode.Disk or StorageMode.Lsm
             ? Path.Combine(config.DiskStoragePath ?? Path.Combine(Path.GetTempPath(), "datavo_tests"), Guid.NewGuid().ToString("N"))
             : null;
 
