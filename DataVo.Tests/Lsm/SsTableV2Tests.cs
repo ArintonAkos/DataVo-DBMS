@@ -32,13 +32,14 @@ public sealed class SsTableV2Tests : IDisposable
                 writer.Add(rowId, (ulong)rowId, LsmValueType.Put, Value(rowId));
             }
 
-            writer.SetNextRowId(20_001, 20_000);
+            writer.SetTableMetadata(20_001, 20_000, 20_000);
         });
 
         using SsTableV2Reader reader = SsTableV2Reader.Open(path, mode);
         Assert.Equal(mode == LsmReadMode.MemoryMapped, reader.IsMapped);
         Assert.Equal(20_000, reader.Properties.EntryCount);
         Assert.Equal(20_001, reader.Properties.NextRowId);
+        Assert.Equal(20_000, reader.Properties.LiveRowCount);
         Assert.Equal(1, reader.Properties.SmallestRowId);
         Assert.Equal(20_000, reader.Properties.LargestRowId);
         Assert.True(reader.BlockCount > 1);

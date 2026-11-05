@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using DataVo.Core.Compat;
+using DataVo.Core.StorageEngine.Lsm.V2;
 
 namespace DataVo.Core.StorageEngine.Lsm;
 
@@ -42,6 +43,12 @@ public sealed class LsmCompactor
         _applyEdit = applyEdit ?? manifest.ApplyEdit;
         Directory.CreateDirectory(_tableDirectory);
     }
+
+    /// <summary>Write the output as a row-keyed v2 SSTable (inputs may be v1 or v2).</summary>
+    internal bool WritesV2 { get; set; }
+
+    /// <summary>How v2 inputs are read when no registry handle provides a reader.</summary>
+    internal LsmReadMode ReadMode { get; set; }
 
     internal static LsmCompactor CreateForTesting(
         string tableDirectory,
@@ -86,7 +93,11 @@ public sealed class LsmCompactor
 
             LsmTableFileMetadata? outputMetadata = null;
             string? outputPath = null;
-            if (mergedEntries.Count > 0)
+            if (mergedEntries.Count > 0 && WritesV2)
+            {
+                (outputMetadata, outputPath) = WriteV2Output(mergedEntries, targetLevel);
+            }
+            else if (mergedEntries.Count > 0)
             {
                 var writer = new SsTableWriter(mergedEntries.Count);
                 foreach (SstableEntry entry in mergedEntries)
@@ -176,11 +187,7 @@ public sealed class LsmCompactor
         for (int i = 0; i < files.Count; i++)
         {
             LsmTableFileMetadata file = files[i];
-            byte[] bytes = handles.Count == files.Count
-                ? handles[i].ReadAllBytes()
-                : File.ReadAllBytes(Path.Combine(_tableDirectory, file.FileName));
-            SsTableReader.Load(bytes);
-            List<SstableEntry> entries = ReadEntries(bytes);
+            List<SstableEntry> entries = ReadAnyFormat(file, handles.Count == files.Count ? handles[i] : null);
             entries.Sort(InternalKeyEntryComparer.Instance);
             if (entries.Count == 0)
             {
@@ -193,6 +200,7 @@ public sealed class LsmCompactor
 
         var mergedEntries = new List<SstableEntry>();
         byte[]? previousUserKey = null;
+        SstableEntry? lastDroppedRowTombstone = null;
         while (queue.TryDequeue(out SstableCursor? cursor, out _))
         {
             SstableEntry entry = cursor.Current;
@@ -203,6 +211,10 @@ public sealed class LsmCompactor
                 {
                     mergedEntries.Add(entry);
                 }
+                else if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
+                {
+                    lastDroppedRowTombstone = entry;
+                }
             }
 
             cursor.MoveNext();
@@ -212,7 +224,103 @@ public sealed class LsmCompactor
             }
         }
 
+        // A row-keyed file needs at least one row entry to carry the table metadata (next row id and live
+        // count): when every row was deleted and its tombstone dropped, keep the last tombstone.
+        if (WritesV2
+            && lastDroppedRowTombstone is not null
+            && !mergedEntries.Exists(static e => LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(e.InternalKey)))
+            && mergedEntries.Count > 0)
+        {
+            mergedEntries.Add(lastDroppedRowTombstone);
+            mergedEntries.Sort(InternalKeyEntryComparer.Instance);
+        }
+
         return mergedEntries;
+    }
+
+    /// <summary>Reads every entry of a v1 or v2 file as internal-key entries.</summary>
+    private List<SstableEntry> ReadAnyFormat(LsmTableFileMetadata file, LsmSstableHandle? handle)
+    {
+        string path = Path.Combine(_tableDirectory, file.FileName);
+        bool isV2 = handle?.IsV2() ?? SsTableV2Format.IsV2File(path);
+        if (!isV2)
+        {
+            byte[] bytes = handle?.ReadAllBytes() ?? File.ReadAllBytes(path);
+            SsTableReader.Load(bytes);
+            return ReadEntries(bytes);
+        }
+
+        SsTableV2Reader? owned = handle is null ? SsTableV2Reader.Open(path, ReadMode) : null;
+        try
+        {
+            SsTableV2Reader reader = owned ?? handle!.GetV2Reader(ReadMode);
+            var entries = new List<SstableEntry>((int)Math.Min(reader.Properties.EntryCount + 1, int.MaxValue));
+            SsTableV2Cursor cursor = reader.OpenCursor();
+            while (cursor.MoveNext())
+            {
+                entries.Add(new SstableEntry(
+                    LsmRowKeyCodec.RowInternalKey(cursor.RowId, cursor.Sequence, cursor.Type),
+                    cursor.Type == LsmValueType.Put ? cursor.Value.ToArray() : []));
+            }
+
+            // The properties carry the metadata version this file held; merge it like any other entry.
+            SsTableV2Properties properties = reader.Properties;
+            if (properties.NextRowId > 0)
+            {
+                entries.Add(new SstableEntry(
+                    LsmRowKeyCodec.MetadataInternalKey(properties.NextRowIdSequence),
+                    LsmRowKeyCodec.EncodeTableMetadata(properties.NextRowId, properties.LiveRowCount)));
+            }
+
+            return entries;
+        }
+        finally
+        {
+            owned?.Dispose();
+        }
+    }
+
+    private (LsmTableFileMetadata Metadata, string Path) WriteV2Output(List<SstableEntry> entries, int targetLevel)
+    {
+        byte[]? first = null;
+        byte[]? last = null;
+        foreach (SstableEntry entry in entries)
+        {
+            if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
+            {
+                first ??= entry.InternalKey;
+                last = entry.InternalKey;
+            }
+        }
+
+        if (first is null || last is null)
+        {
+            throw new InvalidOperationException("Compaction output for a row-keyed table has no row entries.");
+        }
+
+        long fileNumber = _manifest.AllocateFileNumber();
+        string fileName = $"{fileNumber:D6}.sst";
+        string outputPath = Path.Combine(_tableDirectory, fileName);
+        long length = 0;
+        LsmDurableFileOperations.WriteFileAtomically(
+            outputPath,
+            overwrite: false,
+            stream =>
+            {
+                using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count);
+                foreach (SstableEntry entry in entries)
+                {
+                    LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
+                }
+
+                length = writer.Finish();
+            },
+            crashHook: null,
+            LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+            LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+            LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+        return (new LsmTableFileMetadata(fileNumber, targetLevel, first, last, length, fileName), outputPath);
     }
 
     private static LsmTableFileMetadata[] SelectTargetOverlapsClosed(

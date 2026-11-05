@@ -54,6 +54,32 @@ internal static class SsTableV2Format
         return true;
     }
 
+    /// <summary>Whether the file at <paramref name="path"/> is a v2 SSTable; reads only its last 6 bytes.</summary>
+    public static bool IsV2File(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length < FooterSize)
+        {
+            return false;
+        }
+
+        Span<byte> tail = stackalloc byte[sizeof(ushort) + sizeof(uint)];
+        stream.Position = stream.Length - tail.Length;
+        int read = 0;
+        while (read < tail.Length)
+        {
+            int n = stream.Read(tail[read..]);
+            if (n == 0)
+            {
+                return false;
+            }
+
+            read += n;
+        }
+
+        return TryReadVersion(tail, out ushort version) && version == Version;
+    }
+
     public static ulong PackTag(ulong sequence, LsmValueType type) => (sequence << 8) | (byte)type;
 
     public static ulong SequenceOf(ulong tag) => tag >> 8;
@@ -74,8 +100,12 @@ internal readonly record struct SsTableV2Properties(
     long TombstoneCount,
     long NextRowId,
     ulong NextRowIdSequence,
-    int BlockCount)
+    int BlockCount,
+    long LiveRowCount)
 {
+    /// <summary>Marks an unknown live-row count (files upgraded from v1); the engine recounts once.</summary>
+    public const long UnknownLiveRowCount = -1;
+
     public void WriteTo(Span<byte> destination)
     {
         destination[..SsTableV2Format.PropertiesSize].Clear();
@@ -89,6 +119,7 @@ internal readonly record struct SsTableV2Properties(
         BinaryPrimitives.WriteInt64LittleEndian(destination[56..], NextRowId);
         BinaryPrimitives.WriteUInt64LittleEndian(destination[64..], NextRowIdSequence);
         BinaryPrimitives.WriteInt32LittleEndian(destination[72..], BlockCount);
+        BinaryPrimitives.WriteInt64LittleEndian(destination[80..], LiveRowCount);
     }
 
     public static SsTableV2Properties ReadFrom(ReadOnlySpan<byte> source) => new(
@@ -101,7 +132,8 @@ internal readonly record struct SsTableV2Properties(
         BinaryPrimitives.ReadInt64LittleEndian(source[48..]),
         BinaryPrimitives.ReadInt64LittleEndian(source[56..]),
         BinaryPrimitives.ReadUInt64LittleEndian(source[64..]),
-        BinaryPrimitives.ReadInt32LittleEndian(source[72..]));
+        BinaryPrimitives.ReadInt32LittleEndian(source[72..]),
+        BinaryPrimitives.ReadInt64LittleEndian(source[80..]));
 }
 
 /// <summary>One block-index record.</summary>

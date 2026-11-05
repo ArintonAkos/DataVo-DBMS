@@ -101,6 +101,14 @@ public sealed class LsmManifest
 
     internal Action<LsmCrashPoint>? CrashHook { get; set; }
 
+    private long _changeStamp;
+
+    /// <summary>
+    /// Increments after every applied edit. Readers compare it with the stamp of their cached file set
+    /// (one volatile read) to know whether the set of live files changed.
+    /// </summary>
+    internal long ChangeStamp => Volatile.Read(ref _changeStamp);
+
     /// <summary>Allocates and persists the next monotonically increasing SSTable file number.</summary>
     public long AllocateFileNumber()
     {
@@ -138,6 +146,7 @@ public sealed class LsmManifest
         }
 
         _nextFileNumber = candidateNextFileNumber;
+        Interlocked.Increment(ref _changeStamp);
     }
 
     /// <summary>Returns a deterministic snapshot of live files in <paramref name="level"/>, sorted by file number.</summary>

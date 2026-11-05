@@ -106,6 +106,15 @@ internal sealed class LsmFileRegistry
         }
     }
 
+    /// <summary>Unmaps every open reader (shutdown or table drop).</summary>
+    public void CloseReaders()
+    {
+        foreach (LsmSstableHandle handle in _handles.Values)
+        {
+            handle.CloseReader();
+        }
+    }
+
     public T ExecuteVersionEdit<T>(Func<T> action)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(action);

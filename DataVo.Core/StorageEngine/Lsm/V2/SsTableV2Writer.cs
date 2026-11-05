@@ -43,6 +43,8 @@ internal sealed class SsTableV2Writer : IDisposable
     private long _tombstoneCount;
     private long _nextRowId;
     private ulong _nextRowIdSequence;
+    private long _liveRowCount = SsTableV2Properties.UnknownLiveRowCount;
+    private bool _hasMetadata;
     private bool _finished;
 
     public SsTableV2Writer(Stream output, int alignment = 0, int expectedEntries = 0)
@@ -138,13 +140,18 @@ internal sealed class SsTableV2Writer : IDisposable
         }
     }
 
-    /// <summary>Records the table's next-row-id watermark (kept in the properties block).</summary>
-    public void SetNextRowId(long nextRowId, ulong sequence)
+    /// <summary>
+    /// Records the table's metadata as of <paramref name="sequence"/>: the next row id and the number of
+    /// live rows (<see cref="SsTableV2Properties.UnknownLiveRowCount"/> when not known). The newest call wins.
+    /// </summary>
+    public void SetTableMetadata(long nextRowId, long liveRowCount, ulong sequence)
     {
-        if (sequence >= _nextRowIdSequence)
+        if (!_hasMetadata || sequence >= _nextRowIdSequence)
         {
             _nextRowId = nextRowId;
+            _liveRowCount = liveRowCount;
             _nextRowIdSequence = sequence;
+            _hasMetadata = true;
         }
     }
 
@@ -230,7 +237,8 @@ internal sealed class SsTableV2Writer : IDisposable
             _tombstoneCount,
             _nextRowId,
             _nextRowIdSequence,
-            _blocks.Count).WriteTo(properties);
+            _blocks.Count,
+            _liveRowCount).WriteTo(properties);
         Write(properties);
 
         // Footer.

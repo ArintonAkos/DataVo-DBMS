@@ -1,3 +1,5 @@
+using DataVo.Core.StorageEngine.Lsm.V2;
+
 namespace DataVo.Core.StorageEngine.Lsm;
 
 /// <summary>Reference-counted physical SSTable ownership for snapshots and compaction deletion.</summary>
@@ -66,6 +68,46 @@ internal sealed class LsmSstableHandle
 
     public byte[] ReadAllBytes() => File.ReadAllBytes(FilePath);
 
+    private readonly object _readerGate = new();
+    private SsTableV2Reader? _reader;
+
+    /// <summary>
+    /// The file's v2 reader, opened (memory-mapped or positional) on first use and kept until the file
+    /// is deleted or <see cref="CloseReader"/> runs. Callers must hold a reference (<see cref="AddRef"/>).
+    /// </summary>
+    public SsTableV2Reader GetV2Reader(LsmReadMode mode)
+    {
+        SsTableV2Reader? reader = Volatile.Read(ref _reader);
+        if (reader is not null)
+        {
+            return reader;
+        }
+
+        lock (_readerGate)
+        {
+            if (Volatile.Read(ref _deleted) != 0)
+            {
+                throw new ObjectDisposedException(nameof(LsmSstableHandle));
+            }
+
+            _reader ??= SsTableV2Reader.Open(FilePath, mode);
+            return _reader;
+        }
+    }
+
+    /// <summary>Whether the file on disk is a v2 SSTable (reads only the footer).</summary>
+    public bool IsV2() => SsTableV2Format.IsV2File(FilePath);
+
+    /// <summary>Unmaps the reader (shutdown, table drop); a later <see cref="GetV2Reader"/> reopens it.</summary>
+    public void CloseReader()
+    {
+        lock (_readerGate)
+        {
+            _reader?.Dispose();
+            _reader = null;
+        }
+    }
+
     private void DeletePhysicalFile()
     {
         lock (_deleteGate)
@@ -75,6 +117,8 @@ internal sealed class LsmSstableHandle
                 return;
             }
 
+            // Unmap first: Windows refuses to delete a file that is still mapped.
+            CloseReader();
             if (File.Exists(FilePath))
             {
                 File.Delete(FilePath);
