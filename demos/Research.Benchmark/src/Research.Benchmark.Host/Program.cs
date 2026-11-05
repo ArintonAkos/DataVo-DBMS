@@ -973,8 +973,10 @@ static BenchmarkMetrics RunSpaceAndRecovery(
             insertStopwatch.Stop();
             long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
 
-            double diskSizeMb = DirectorySizeBytes(workingDir) / 1024d / 1024d;
+            // Footprint at rest, after a clean close, for every engine: measured while open it also counted
+            // logs that a close folds back (DataVo's commit log, SQLite's WAL), which differ in timing.
             engine.CloseForRecovery();
+            double diskSizeMb = DirectorySizeBytes(workingDir) / 1024d / 1024d;
 
             var recoveryStopwatch = Stopwatch.StartNew();
             engine.OpenExisting();
