@@ -7,6 +7,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Transactions;
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core.Parser.DML;
 
@@ -85,15 +86,38 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         VerifyTableColumnsExist(tableColumns);
 
         bool hasColumns = _model.Columns.Count > 0;
-        var inputRows = new List<IReadOnlyDictionary<string, object?>>(_model.RawRows.Count);
-
         foreach (List<string> rawRow in _model.RawRows)
         {
             VerifyRowColumnCountMatches(rawRow, tableColumns.Count, hasColumns);
-            inputRows.Add(BuildInputRow(rawRow, tableColumns, hasColumns));
         }
 
         var service = new InsertRowService(Engine, Context, Catalog, Indexes);
+
+        // Fast path: convert every literal once into typed cells and insert through the typed bulk path,
+        // skipping a dictionary per row and its normalization. Any value the conversion rejects (and
+        // transactions, which buffer rows differently) take the general path below, so error messages
+        // stay exactly those of the general path.
+        // In-memory storage keeps typed inserts as typed row objects, which some older paths (foreign-key
+        // cascades, VACUUM) cannot read; serializing backends (LSM, Disk) store bytes either way.
+        if (txContext is null && !Context.RetainsTypedRowBuffers && TryBuildTypedRows(tableColumns, hasColumns, out ReactiveRowSchema? schema, out List<CellValue[]>? typedRows))
+        {
+            try
+            {
+                return service.InsertTypedRows(databaseName, _model.TableName, schema, typedRows, statementTxId, recorder).Count;
+            }
+            catch (NotSupportedException)
+            {
+                // A row shape the typed path declines (it validates every row before writing any):
+                // the general path below handles it.
+            }
+        }
+
+        var inputRows = new List<IReadOnlyDictionary<string, object?>>(_model.RawRows.Count);
+        foreach (List<string> rawRow in _model.RawRows)
+        {
+            inputRows.Add(BuildInputRow(rawRow, tableColumns, hasColumns));
+        }
+
         InsertRowsResult result = service.InsertRows(databaseName, _model.TableName, inputRows, txContext, statementTxId, recorder);
 
         foreach (string message in result.Messages)
@@ -108,6 +132,59 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     /// Confirms that user-defined explicit columns within the INSERT actually exist inside the table's schema.
     /// </summary>
     /// <param name="tableColumns">The columns sourced directly from the database schema context.</param>
+    /// <summary>
+    /// Builds full rows in catalog order (missing columns take their defaults) with the same conversion
+    /// as the general path. Returns false as soon as a value does not convert cleanly.
+    /// </summary>
+    private bool TryBuildTypedRows(
+        List<Column> tableColumns,
+        bool hasColumns,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ReactiveRowSchema? schema,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<CellValue[]>? rows)
+    {
+        schema = null;
+        rows = null;
+
+        // Ordinal of each table column in the statement's value list (-1: not given, use the default).
+        int[] source = new int[tableColumns.Count];
+        for (int i = 0; i < tableColumns.Count; i++)
+        {
+            source[i] = hasColumns
+                ? _model.Columns.FindIndex(name => string.Equals(name, tableColumns[i].Name, StringComparison.OrdinalIgnoreCase))
+                : i;
+        }
+
+        var built = new List<CellValue[]>(_model.RawRows.Count);
+        foreach (List<string> rawRow in _model.RawRows)
+        {
+            var cells = new CellValue[tableColumns.Count];
+            for (int i = 0; i < tableColumns.Count; i++)
+            {
+                Column column = tableColumns[i];
+                object? raw = source[i] >= 0 ? rawRow[source[i]].Replace("'", "") : column.DefaultValue;
+                if (!InsertRowService.TryNormalizeSqlValue(column, raw, out object? value))
+                {
+                    return false;
+                }
+
+                try
+                {
+                    cells[i] = CellValue.From(value);
+                }
+                catch (NotSupportedException)
+                {
+                    return false;
+                }
+            }
+
+            built.Add(cells);
+        }
+
+        schema = new ReactiveRowSchema(tableColumns.Select(static column => column.Name).ToArray());
+        rows = built;
+        return true;
+    }
+
     private void VerifyTableColumnsExist(List<Column> tableColumns)
     {
         var tableColumnNameSet = tableColumns.Select(column => column.Name).ToHashSet();
@@ -143,7 +220,8 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         List<Column> tableColumns,
         bool hasColumns)
     {
-        var inputRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        // Sized up front: growing per-row dictionaries (0 -> 3 -> 7 slots) was a large share of INSERT garbage.
+        var inputRow = new Dictionary<string, object?>(hasColumns ? _model.Columns.Count : tableColumns.Count, StringComparer.OrdinalIgnoreCase);
 
         if (!hasColumns)
         {

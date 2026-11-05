@@ -858,7 +858,7 @@ internal sealed partial class InsertRowService(
         List<string> messages,
         out Dictionary<string, object?> normalized)
     {
-        normalized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        normalized = new Dictionary<string, object?>(tableColumns.Count, StringComparer.OrdinalIgnoreCase);
 
         foreach (Column tableColumn in tableColumns)
         {
@@ -904,6 +904,10 @@ internal sealed partial class InsertRowService(
 
         return true;
     }
+
+    /// <summary>The SQL path's value conversion, shared with the typed fast path of SQL INSERT.</summary>
+    internal static bool TryNormalizeSqlValue(Column column, object? rawValue, out object? normalizedValue) =>
+        TryNormalizeValue(column, rawValue, out normalizedValue);
 
     private static bool TryNormalizeValue(Column column, object? rawValue, out object? normalizedValue)
     {
