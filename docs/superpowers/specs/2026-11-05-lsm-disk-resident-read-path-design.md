@@ -218,3 +218,68 @@ Selection: `DataVoConfig.LsmReadMode` = `Auto` (default: mmap where supported an
 - Both block sources run the same test set.
 - Benchmarks: open time and allocation, working set, point-read latency (typed and SQL), scan
   throughput, at 1M and 10M rows.
+
+## 11. Phase 2 design: indexes as LSM runs (approved 2026-11-05)
+
+Measured after Phase 1 (1M rows): storage open 0.7 ms, but full open ~650 ms, 87% of it rebuilding
+indexes in the heap by decoding every row. Phase 2 persists scalar (BTREE) indexes and the integer/GUID
+key lanes as LSM data in the same engine and commit frames as the rows.
+
+Out of scope: vector indexes (HNSW, flat) stay heap-resident and are rebuilt on open; persisting a
+graph index is a separate problem.
+
+### 11.1 Entry encoding
+
+Every index is its own key space ("index table") with entries keyed by:
+
+```
+user key := u16 big-endian length(K) | K | row id (8 bytes, order-preserving)
+K        := 0x01 | int64 (8 bytes, order-preserving)     integer keys, also "[n]" strings
+          | 0x02 | GUID (16 bytes)                       GUID keys
+          | 0x03 | UTF-8 bytes                           every other key (strings, composites)
+```
+
+Typed lanes and string keys produce the same K for the same value, so the typed write paths and the SQL
+read path share entries without formatting strings. The length prefix makes keys prefix-free, so all
+entries of one key are contiguous; indexes serve equality only (IIndex has no range operations).
+Values are empty: a put means "row id has key K", a deletion removes that pair.
+
+### 11.2 Keyed run format (SSTable v3)
+
+Same file skeleton as v2 (page-aligned blocks, block index, blocked Bloom filter, properties, footer,
+per-block CRC32C), with variable-size entries:
+
+```
+block := header(16) | u32 entry offset[count] | entry* | padding
+entry := u16 user key length | user key | u64 tag
+index := per block: first user key, last user key (variable, through an offset table)
+bloom := over K only (without the row id), so a lookup of an absent key skips the file
+```
+
+A lookup of K binary-searches the block index for the first block whose last key is >= K's lowest
+user key, then the block's offset table, and walks entries while the K prefix matches.
+
+### 11.3 Write path and visibility
+
+- `LsmCommitBatch` gains `IndexPut` / `IndexDelete` operations (database, table, index, user key);
+  they are written in the same frame as the row operations, so rows and indexes are atomic across
+  crashes. Replay applies them to the index MemTables when the frame is above the index's flushed LSN.
+- Visibility mirrors rows: this flow's staged index operations, then a per-index overlay of published,
+  unflushed entries (with sequences, evicted after flush), then the runs.
+- In LSM mode `IndexManager` stages index changes directly into the engine's pending write instead of
+  deferring in-memory mutations to publication.
+
+### 11.4 IndexManager integration
+
+`IndexManager` keeps its public API. In LSM mode scalar indexes and lanes are backed by the engine
+(`ILsmIndexStore`); the lane APIs encode keys directly (no string formatting). Deleting by row ids only
+(`DeleteFromIndex`) is replaced at its call sites by deletions with keys, which those callers can
+compute from the old rows.
+
+### 11.5 Open, create, drop, migration
+
+- Open no longer rebuilds LSM-backed indexes.
+- `CREATE INDEX` on a populated table bulk-builds the index table from a sorted scan.
+- An index without an index table (databases created before Phase 2) is built once on open and then
+  persists.
+- Dropping an index, table, or database closes and deletes its index tables.
