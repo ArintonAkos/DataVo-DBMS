@@ -280,15 +280,18 @@ public class Lexer
     private bool TryReadMultiCharOperator(out Token? token)
     {
         token = null;
+        // Compared in place: allocating two substrings for every comma and parenthesis added up.
         if (_position + 2 < _input.Length)
         {
-            string potentialThreeCharOp = _input.Substring(_position, 3);
-            if (potentialThreeCharOp == Operators.VECTOR_DISTANCE_L2
-                || potentialThreeCharOp == Operators.VECTOR_DISTANCE_COSINE)
+            ReadOnlySpan<char> three = _input.AsSpan(_position, 3);
+            string? threeCharOp = three.SequenceEqual(Operators.VECTOR_DISTANCE_L2.AsSpan()) ? Operators.VECTOR_DISTANCE_L2
+                : three.SequenceEqual(Operators.VECTOR_DISTANCE_COSINE.AsSpan()) ? Operators.VECTOR_DISTANCE_COSINE
+                : null;
+            if (threeCharOp is not null)
             {
                 var start = _position;
                 var startLoc = GetLineColumn(start);
-                token = new Token(TokenType.Operator, potentialThreeCharOp, start, startLoc.line, startLoc.column);
+                token = new Token(TokenType.Operator, threeCharOp, start, startLoc.line, startLoc.column);
                 _position += 3;
                 return true;
             }
@@ -296,11 +299,13 @@ public class Lexer
 
         if (_position + 1 >= _input.Length) return false;
 
-        string potentialOp = _input.Substring(_position, 2);
-        if (potentialOp == Operators.GREATER_THAN_OR_EQUAL_TO
-            || potentialOp == Operators.LESS_THAN_OR_EQUAL_TO
-            || potentialOp == Operators.NOT_EQUALS
-            || potentialOp == "<>")
+        ReadOnlySpan<char> two = _input.AsSpan(_position, 2);
+        string? potentialOp = two.SequenceEqual(Operators.GREATER_THAN_OR_EQUAL_TO.AsSpan()) ? Operators.GREATER_THAN_OR_EQUAL_TO
+            : two.SequenceEqual(Operators.LESS_THAN_OR_EQUAL_TO.AsSpan()) ? Operators.LESS_THAN_OR_EQUAL_TO
+            : two.SequenceEqual(Operators.NOT_EQUALS.AsSpan()) ? Operators.NOT_EQUALS
+            : two.SequenceEqual("<>".AsSpan()) ? "<>"
+            : null;
+        if (potentialOp is not null)
         {
             var start = _position;
             var startLoc = GetLineColumn(start);
@@ -412,43 +417,41 @@ public class Lexer
     /// <summary>
     /// Determines whether a token should be treated as a recognized SQL keyword.
     /// </summary>
-    private static bool IsKeyword(string value)
-    {
-        if (value == Operators.AND || value == Operators.OR)
-        {
-            return true;
-        }
+    private static readonly HashSet<string> Keywords = new(SqlKeywords.All, StringComparer.Ordinal) { Operators.AND, Operators.OR };
 
-        foreach (string keyword in SqlKeywords.All)
-        {
-            if (keyword == value)
-            {
-                return true;
-            }
-        }
+    private static bool IsKeyword(string value) => Keywords.Contains(value);
 
-        return false;
-    }
+    // Line/column of the last position asked for. Tokens are produced left to right, so each lookup only
+    // scans forward from the previous one: O(input) for the whole statement. Scanning from the start for
+    // every token made tokenizing O(tokens x length), which dominated multi-row INSERT statements.
+    private int _lineColumnPosition;
+    private int _lineColumnLine = 1;
+    private int _lineColumnColumn = 1;
 
     private (int line, int column) GetLineColumn(int position)
     {
-        int line = 1;
-        int column = 1;
+        int target = Math.Min(position, _input.Length);
+        if (target < _lineColumnPosition)
+        {
+            _lineColumnPosition = 0;
+            _lineColumnLine = 1;
+            _lineColumnColumn = 1;
+        }
 
-        int max = Math.Min(position, _input.Length);
-        for (int i = 0; i < max; i++)
+        for (int i = _lineColumnPosition; i < target; i++)
         {
             if (_input[i] == '\n')
             {
-                line++;
-                column = 1;
+                _lineColumnLine++;
+                _lineColumnColumn = 1;
             }
             else
             {
-                column++;
+                _lineColumnColumn++;
             }
         }
 
-        return (line, column);
+        _lineColumnPosition = target;
+        return (_lineColumnLine, _lineColumnColumn);
     }
 }
