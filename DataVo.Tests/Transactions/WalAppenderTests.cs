@@ -104,7 +104,7 @@ public sealed class WalAppenderTests
             var store = new WalFileStore(walPath);
             store.AppendFrame(frame);
 
-            byte[] persisted = File.ReadAllBytes(walPath);
+            byte[] persisted = TestFiles.ReadAllBytesShared(walPath);
 
             Assert.Equal(frame.Range.Span.ToArray(), persisted);
             Assert.True(WalAppender.TryReadFrameHeader(persisted, out WalFrameHeader header));

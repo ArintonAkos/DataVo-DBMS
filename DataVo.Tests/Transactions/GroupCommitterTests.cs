@@ -26,7 +26,7 @@ public sealed class GroupCommitterTests
             Assert.Equal(3, committer.DurableLsn);
             Assert.Equal(1, store.DurableFlushCount);
 
-            byte[] persisted = File.ReadAllBytes(walPath);
+            byte[] persisted = TestFiles.ReadAllBytesShared(walPath);
             Assert.Equal(3, CountValidFrames(persisted));
         }
         finally
@@ -58,7 +58,7 @@ public sealed class GroupCommitterTests
 
             await Task.WhenAll(firstDurable, secondDurable);
 
-            byte[] persisted = File.ReadAllBytes(walPath);
+            byte[] persisted = TestFiles.ReadAllBytesShared(walPath);
             Assert.True(WalAppender.TryReadFrameHeader(persisted, out WalFrameHeader firstHeader));
             Assert.Equal(1, firstHeader.Lsn);
 

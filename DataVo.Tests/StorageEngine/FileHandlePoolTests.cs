@@ -134,7 +134,7 @@ public sealed class FileHandlePoolTests
                 pool.FlushToDisk();
             }
 
-            Assert.Equal(payload, File.ReadAllBytes(path));
+            Assert.Equal(payload, TestFiles.ReadAllBytesShared(path));
         }
         finally
         {

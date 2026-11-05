@@ -21,6 +21,7 @@ public class BinaryBPlusTreeIndexTests
         Assert.Contains(22, index.Search("beta"));
         Assert.Contains(33, index.Search("gamma"));
 
+        index.Dispose(); // release the page file before deleting it (required on Windows)
         File.Delete(path);
     }
 
@@ -83,6 +84,7 @@ public class BinaryBPlusTreeIndexTests
             Assert.Contains(i + 1, rowIds);
         }
 
+        index.Dispose(); // release the page file before deleting it (required on Windows)
         File.Delete(path);
     }
 

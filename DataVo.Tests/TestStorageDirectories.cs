@@ -42,3 +42,16 @@ internal static class TestStorageDirectories
         }
     }
 }
+
+/// <summary>File helpers that behave the same on Windows, where share modes are enforced.</summary>
+internal static class TestFiles
+{
+    /// <summary>Reads a file that the engine may still hold open for writing.</summary>
+    public static byte[] ReadAllBytesShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+}

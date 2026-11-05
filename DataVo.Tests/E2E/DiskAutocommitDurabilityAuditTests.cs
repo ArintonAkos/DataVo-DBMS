@@ -130,7 +130,7 @@ public class DiskGroupCommitAutocommitTests : SqlExecutionTestsBase
         Execute($"INSERT INTO {table} (Id, Name) VALUES (1, 'Alice');");
 
         Assert.True(File.Exists(walPath));
-        byte[] bytes = File.ReadAllBytes(walPath);
+        byte[] bytes = TestFiles.ReadAllBytesShared(walPath);
         Assert.True(bytes.Length >= WalAppender.FrameHeaderSize);
         Assert.True(WalAppender.TryReadFrameHeader(bytes, out WalFrameHeader header));
         Assert.Equal(WalFrameOperationType.TxnCommit, header.OpType);

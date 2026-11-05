@@ -274,7 +274,7 @@ public class BinaryWalRecoveryTests : SqlExecutionTestsBase
     /// </summary>
     private static void CorruptLastByte(string walPath)
     {
-        byte[] bytes = File.ReadAllBytes(walPath);
+        byte[] bytes = TestFiles.ReadAllBytesShared(walPath);
         bytes[^1] ^= 0xFF;
         File.WriteAllBytes(walPath, bytes);
     }
