@@ -140,7 +140,7 @@ internal class LeftJoinStrategy : IJoinStrategy
             foreach (var rightTableRow in rightTableData)
             {
                 if (!rightTableRow.Value.ContainsKey(rightColumn)
-                    || !ExpressionValueComparer.AreEqual(rightTableRow.Value[rightColumn], leftValue, trimQuotedStrings: true, useNumericTolerance: true))
+                    || !ExpressionValueComparer.SqlEquals(rightTableRow.Value[rightColumn], leftValue, trimQuotedStrings: true, useNumericTolerance: true))
                 {
                     continue;
                 }

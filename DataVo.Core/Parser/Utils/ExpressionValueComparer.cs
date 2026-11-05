@@ -6,6 +6,19 @@ namespace DataVo.Core.Parser.Utils;
 internal static class ExpressionValueComparer
 {
     /// <summary>
+    /// SQL <c>&lt;&gt;</c>: a NULL operand makes the result unknown, which a filter treats as false.
+    /// (Plain <c>!AreEqual</c> made <c>B &lt;&gt; 8</c> true for NULL B, so DELETE removed those rows.)
+    /// </summary>
+    public static bool SqlNotEquals(object? leftValue, object? rightValue, bool trimQuotedStrings = false, bool useNumericTolerance = false) =>
+        leftValue is not null && rightValue is not null
+        && !AreEqual(leftValue, rightValue, trimQuotedStrings, useNumericTolerance);
+
+    /// <summary>SQL <c>=</c>: NULL equals nothing, not even NULL (unlike <see cref="AreEqual"/>, used for grouping).</summary>
+    public static bool SqlEquals(object? leftValue, object? rightValue, bool trimQuotedStrings = false, bool useNumericTolerance = false) =>
+        leftValue is not null && rightValue is not null
+        && AreEqual(leftValue, rightValue, trimQuotedStrings, useNumericTolerance);
+
+    /// <summary>
     /// Compares two expression values for equality with optional trimming of quoted strings and numeric tolerance. Handles nulls, numeric types, and string comparisons.
     /// </summary>
     /// <param name="leftValue">The left value to compare.</param>

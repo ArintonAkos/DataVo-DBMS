@@ -298,7 +298,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return op switch
         {
             Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
-            Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], rightVal),
+            Operators.NOT_EQUALS => entry => ExpressionValueComparer.SqlNotEquals(entry.Value[leftValue], rightVal, trimQuotedStrings: true),
             Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) < 0,
             Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
             Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
@@ -360,7 +360,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return op switch
         {
             Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
-            Operators.NOT_EQUALS => entry => !EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
+            Operators.NOT_EQUALS => entry => ExpressionValueComparer.SqlNotEquals(entry.Value[leftValue], entry.Value[rightValue], trimQuotedStrings: true),
             Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) < 0,
             Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
             Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
@@ -411,7 +411,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         return op switch
         {
             Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
-            Operators.NOT_EQUALS => !EvaluateEquality(leftVal, rightVal),
+            Operators.NOT_EQUALS => ExpressionValueComparer.SqlNotEquals(leftVal, rightVal, trimQuotedStrings: true),
             Operators.LESS_THAN => CompareDynamics(leftVal, rightVal) < 0,
             Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
             Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,

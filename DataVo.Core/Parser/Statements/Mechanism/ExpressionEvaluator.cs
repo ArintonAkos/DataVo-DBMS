@@ -55,6 +55,9 @@ internal static class ExpressionEvaluator
                     return EvaluateVectorDistance(bin, left, right, useCosine: false);
                 case Operators.VECTOR_DISTANCE_COSINE:
                     return EvaluateVectorDistance(bin, left, right, useCosine: true);
+                // SQL comparisons with a NULL operand are unknown (NULL), which a filter treats as false.
+                case "=" or "==" or "EQ" or "!=" or "NEQ" or ">" or "<" or ">=" or "<=" when left is null || right is null:
+                    return null;
                 case "=":
                 case "==":
                 case "EQ":
