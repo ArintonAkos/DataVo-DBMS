@@ -4,9 +4,100 @@ using DataVo.Core.StorageEngine.Lsm.V2;
 
 namespace DataVo.Tests.Lsm;
 
-public sealed class SsTableV2Tests : IDisposable
+/// <summary>Fixed 24-byte entries (format version 2): files written before compact blocks.</summary>
+public sealed class SsTableV2FixedTests : SsTableV2Tests
+{
+    protected override bool Compact => false;
+}
+
+/// <summary>Compact entries with restart points (format version 4), the default for new files.</summary>
+public sealed class SsTableV4CompactTests : SsTableV2Tests
+{
+    protected override bool Compact => true;
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void ManyVersionsOfOneRow_SpanRestartPoints_AndSnapshotsFindTheRightOne(LsmReadMode mode)
+    {
+        // 40 versions of row 50 cross two restart points; lookups must start the scan early enough.
+        string path = Write(writer =>
+        {
+            for (long rowId = 1; rowId < 50; rowId++)
+            {
+                writer.Add(rowId, 1, LsmValueType.Put, Value(rowId));
+            }
+
+            for (ulong sequence = 40; sequence >= 1; sequence--)
+            {
+                writer.Add(50, sequence, LsmValueType.Put, Encoding.UTF8.GetBytes($"v{sequence}"));
+            }
+
+            writer.Add(51, 1, LsmValueType.Deletion, ReadOnlySpan<byte>.Empty);
+        });
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, mode);
+        Assert.Equal("v40", Get(reader, 50));
+        Assert.Equal("v17", Get(reader, 50, snapshot: 17));
+        Assert.Equal("v1", Get(reader, 50, snapshot: 1));
+        Assert.Equal("<deleted>", Get(reader, 51));
+        Assert.Equal("row-49", Get(reader, 49));
+    }
+
+    [Fact]
+    public void CompactFiles_AreSmallerThanFixedOnes()
+    {
+        static void Fill(SsTableV2Writer writer)
+        {
+            for (long rowId = 1; rowId <= 20_000; rowId++)
+            {
+                writer.Add(rowId, 9, LsmValueType.Put, Value(rowId));
+            }
+        }
+
+        long compact = new FileInfo(WriteWith(Fill, compact: true)).Length;
+        long fixedSize = new FileInfo(WriteWith(Fill, compact: false)).Length;
+        Assert.True(compact < fixedSize * 0.7, $"compact {compact} B vs fixed {fixedSize} B");
+    }
+
+    [Fact]
+    public void CompactBlock_WithValidChecksumButBrokenEntries_IsRejectedNotMisread()
+    {
+        string path = Write(writer =>
+        {
+            for (long rowId = 1; rowId <= 200; rowId++)
+            {
+                writer.Add(rowId, 1, LsmValueType.Put, Value(rowId));
+            }
+        });
+
+        long offset;
+        int length;
+        using (SsTableV2Reader probe = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead))
+        {
+            SsTableV2BlockInfo info = probe.GetBlockInfo(0);
+            (offset, length) = (info.Offset, info.Length);
+        }
+
+        // Make the second entry's value length huge, then recompute the checksum: only the structural
+        // check can catch it, and it must report corruption instead of reading out of range.
+        byte[] bytes = File.ReadAllBytes(path);
+        Span<byte> block = bytes.AsSpan((int)offset, length);
+        int second = 16 + 8 + 1 + 1 + Value(1).Length; // after restart entry 0: row id, tag, length, value
+        block[second + 2] = 0xFF;
+        block[second + 3] = 0x7F;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(block, DataVo.Core.Transactions.WalCrc32C.HashToUInt32(block[4..]));
+        File.WriteAllBytes(path, bytes);
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
+        Assert.Throws<InvalidDataException>(() => Get(reader, 1));
+    }
+}
+
+public abstract class SsTableV2Tests : IDisposable
 {
     private readonly string _directory = TestStorageDirectories.Create("sstable_v2");
+
+    protected abstract bool Compact { get; }
 
     public static TheoryData<LsmReadMode> Modes => new() { LsmReadMode.MemoryMapped, LsmReadMode.PositionalRead };
 
@@ -255,19 +346,24 @@ public sealed class SsTableV2Tests : IDisposable
         Assert.True(rate < 0.02, $"false-positive rate {rate:P2}");
     }
 
-    private string Write(Action<SsTableV2Writer> fill)
+    private protected string Write(Action<SsTableV2Writer> fill)
+    {
+        return WriteWith(fill, Compact);
+    }
+
+    private protected string WriteWith(Action<SsTableV2Writer> fill, bool compact)
     {
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-        using var writer = new SsTableV2Writer(stream);
+        using var writer = new SsTableV2Writer(stream, compact: compact);
         fill(writer);
         writer.Finish();
         return path;
     }
 
-    private static byte[] Value(long rowId) => Encoding.UTF8.GetBytes($"row-{rowId}");
+    protected static byte[] Value(long rowId) => Encoding.UTF8.GetBytes($"row-{rowId}");
 
-    private static string? Get(SsTableV2Reader reader, long rowId, ulong snapshot = ulong.MaxValue) =>
+    private protected static string? Get(SsTableV2Reader reader, long rowId, ulong snapshot = ulong.MaxValue) =>
         reader.Lookup(
             rowId,
             snapshot,

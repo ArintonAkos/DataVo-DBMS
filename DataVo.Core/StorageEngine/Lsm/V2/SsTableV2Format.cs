@@ -23,6 +23,12 @@ internal static class SsTableV2Format
 {
     public const ushort Version = 2;
 
+    /// <summary>Same layout with compact data blocks (<see cref="SsTableCompactRowBlock"/>).</summary>
+    public const ushort CompactVersion = 4;
+
+    /// <summary>Whether a footer version is a row-keyed SSTable this code reads (v2 or compact v4).</summary>
+    public static bool IsRowKeyedVersion(ushort version) => version is Version or CompactVersion;
+
     /// <summary>Same magic as v1 ("SLVD"); the version field tells the layouts apart.</summary>
     public const uint Magic = SsTableFormat.Magic;
 
@@ -54,7 +60,7 @@ internal static class SsTableV2Format
         return true;
     }
 
-    /// <summary>Whether the file at <paramref name="path"/> is a v2 SSTable; reads only its last 6 bytes.</summary>
+    /// <summary>Whether the file at <paramref name="path"/> is a row-keyed (v2 or v4) SSTable; reads only its last 6 bytes.</summary>
     public static bool IsV2File(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -77,7 +83,7 @@ internal static class SsTableV2Format
             read += n;
         }
 
-        return TryReadVersion(tail, out ushort version) && version == Version;
+        return TryReadVersion(tail, out ushort version) && IsRowKeyedVersion(version);
     }
 
     public static ulong PackTag(ulong sequence, LsmValueType type) => (sequence << 8) | (byte)type;

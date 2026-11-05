@@ -47,10 +47,22 @@ internal sealed class SsTableV2Writer : IDisposable
     private bool _hasMetadata;
     private bool _finished;
 
-    public SsTableV2Writer(Stream output, int alignment = 0, int expectedEntries = 0)
+    // Compact (v4) blocks: entries are encoded into _entries with their values inline.
+    private readonly bool _compact;
+    private readonly List<int> _restartOffsets = [];
+    private int _entriesLength;
+    private long _previousRowIdInBlock;
+    private ulong _previousTagInBlock;
+
+    /// <param name="compact">
+    /// Writes compact blocks (format version 4, see <see cref="SsTableCompactRowBlock"/>); false writes
+    /// fixed 24-byte entries (version 2), which readers still accept.
+    /// </param>
+    public SsTableV2Writer(Stream output, int alignment = 0, int expectedEntries = 0, bool compact = true)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(output);
         _output = output;
+        _compact = compact;
         _alignment = alignment == 0 ? SsTableV2Format.DefaultAlignment : alignment;
         if (_alignment < SsTableV2Format.MinimumAlignment || (_alignment & (_alignment - 1)) != 0)
         {
@@ -91,31 +103,15 @@ internal sealed class SsTableV2Writer : IDisposable
             throw new ArgumentException("A deletion carries no value.", nameof(value));
         }
 
-        int payloadWithEntry = SsTableV2Format.BlockHeaderSize
-            + ((_entryCount + 1) * SsTableV2Format.EntrySize)
-            + _valuesLength
-            + value.Length;
-        if (_entryCount > 0 && payloadWithEntry > _alignment)
+        ulong tag = SsTableV2Format.PackTag(sequence, type);
+        if (_compact)
         {
-            FlushBlock();
+            AddCompact(rowId, tag, value);
         }
-
-        if (_entryCount == 0)
+        else
         {
-            _blockFirstRowId = rowId;
+            AddFixed(rowId, tag, value);
         }
-
-        EnsureCapacity(ref _entries, (_entryCount + 1) * SsTableV2Format.EntrySize);
-        EnsureCapacity(ref _values, _valuesLength + value.Length);
-
-        Span<byte> entry = _entries.AsSpan(_entryCount * SsTableV2Format.EntrySize, SsTableV2Format.EntrySize);
-        BinaryPrimitives.WriteInt64LittleEndian(entry[0..], rowId);
-        BinaryPrimitives.WriteUInt64LittleEndian(entry[8..], SsTableV2Format.PackTag(sequence, type));
-        BinaryPrimitives.WriteInt32LittleEndian(entry[16..], _valuesLength); // rebased when the block is written
-        BinaryPrimitives.WriteInt32LittleEndian(entry[20..], value.Length);
-        value.CopyTo(_values.AsSpan(_valuesLength));
-        _valuesLength += value.Length;
-        _entryCount++;
 
         if (!_hasLast || rowId != _lastRowId)
         {
@@ -138,6 +134,84 @@ internal sealed class SsTableV2Writer : IDisposable
         {
             _tombstoneCount++;
         }
+    }
+
+    private void AddCompact(long rowId, ulong tag, ReadOnlySpan<byte> value)
+    {
+        bool restart = _entryCount % SsTableCompactRowBlock.RestartInterval == 0;
+        int restarts = _restartOffsets.Count + (restart ? 1 : 0);
+        long blockWithEntry = SsTableV2Format.BlockHeaderSize + _entriesLength + CompactEntrySize(rowId, tag, value.Length, restart) + ((restarts + 1) * sizeof(int));
+        if (_entryCount > 0 && blockWithEntry > _alignment)
+        {
+            FlushBlock();
+            restart = true;
+        }
+
+        if (_entryCount == 0)
+        {
+            _blockFirstRowId = rowId;
+        }
+
+        int size = CompactEntrySize(rowId, tag, value.Length, restart);
+        EnsureCapacity(ref _entries, _entriesLength + size);
+        Span<byte> entry = _entries.AsSpan(_entriesLength, size);
+        int written = 0;
+        if (restart)
+        {
+            _restartOffsets.Add(_entriesLength);
+            BinaryPrimitives.WriteInt64LittleEndian(entry, rowId);
+            written = sizeof(long);
+            written += SsTableCompactRowBlock.WriteVarint(entry[written..], tag);
+        }
+        else
+        {
+            written += SsTableCompactRowBlock.WriteVarint(entry, (ulong)(rowId - _previousRowIdInBlock));
+            written += SsTableCompactRowBlock.WriteVarint(entry[written..], SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock));
+        }
+
+        written += SsTableCompactRowBlock.WriteVarint(entry[written..], (ulong)value.Length);
+        value.CopyTo(entry[written..]);
+        _entriesLength += size;
+        _entryCount++;
+        _previousRowIdInBlock = rowId;
+        _previousTagInBlock = tag;
+    }
+
+    private int CompactEntrySize(long rowId, ulong tag, int valueLength, bool restart) =>
+        (restart
+            ? sizeof(long) + SsTableCompactRowBlock.VarintSize(tag)
+            : SsTableCompactRowBlock.VarintSize((ulong)(rowId - _previousRowIdInBlock))
+                + SsTableCompactRowBlock.VarintSize(SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock)))
+        + SsTableCompactRowBlock.VarintSize((ulong)valueLength)
+        + valueLength;
+
+    private void AddFixed(long rowId, ulong tag, ReadOnlySpan<byte> value)
+    {
+        int payloadWithEntry = SsTableV2Format.BlockHeaderSize
+            + ((_entryCount + 1) * SsTableV2Format.EntrySize)
+            + _valuesLength
+            + value.Length;
+        if (_entryCount > 0 && payloadWithEntry > _alignment)
+        {
+            FlushBlock();
+        }
+
+        if (_entryCount == 0)
+        {
+            _blockFirstRowId = rowId;
+        }
+
+        EnsureCapacity(ref _entries, (_entryCount + 1) * SsTableV2Format.EntrySize);
+        EnsureCapacity(ref _values, _valuesLength + value.Length);
+
+        Span<byte> entry = _entries.AsSpan(_entryCount * SsTableV2Format.EntrySize, SsTableV2Format.EntrySize);
+        BinaryPrimitives.WriteInt64LittleEndian(entry[0..], rowId);
+        BinaryPrimitives.WriteUInt64LittleEndian(entry[8..], tag);
+        BinaryPrimitives.WriteInt32LittleEndian(entry[16..], _valuesLength); // rebased when the block is written
+        BinaryPrimitives.WriteInt32LittleEndian(entry[20..], value.Length);
+        value.CopyTo(_values.AsSpan(_valuesLength));
+        _valuesLength += value.Length;
+        _entryCount++;
     }
 
     /// <summary>
@@ -247,7 +321,7 @@ internal sealed class SsTableV2Writer : IDisposable
         WriteHandle(footer[12..], bloomOffset, bloomLength);
         WriteHandle(footer[24..], propertiesOffset, SsTableV2Format.PropertiesSize);
         BinaryPrimitives.WriteInt32LittleEndian(footer[36..], _alignment);
-        BinaryPrimitives.WriteUInt16LittleEndian(footer[40..], SsTableV2Format.Version);
+        BinaryPrimitives.WriteUInt16LittleEndian(footer[40..], _compact ? SsTableV2Format.CompactVersion : SsTableV2Format.Version);
         BinaryPrimitives.WriteUInt32LittleEndian(footer[42..], SsTableV2Format.Magic);
         Write(footer);
         _output.Flush();
@@ -264,6 +338,12 @@ internal sealed class SsTableV2Writer : IDisposable
 
     private void FlushBlock()
     {
+        if (_compact)
+        {
+            FlushCompactBlock();
+            return;
+        }
+
         int entriesLength = _entryCount * SsTableV2Format.EntrySize;
         int valuesStart = SsTableV2Format.BlockHeaderSize + entriesLength;
         int payloadLength = entriesLength + _valuesLength;
@@ -301,6 +381,42 @@ internal sealed class SsTableV2Writer : IDisposable
 
         _entryCount = 0;
         _valuesLength = 0;
+    }
+
+    private void FlushCompactBlock()
+    {
+        int payloadLength = _entriesLength + ((_restartOffsets.Count + 1) * sizeof(int));
+        int blockLength = SsTableV2Format.BlockHeaderSize + payloadLength;
+        byte[] block = ArrayPool<byte>.Shared.Rent(blockLength);
+        try
+        {
+            Span<byte> span = block.AsSpan(0, blockLength);
+            BinaryPrimitives.WriteInt32LittleEndian(span[4..], _entryCount);
+            BinaryPrimitives.WriteInt32LittleEndian(span[8..], SsTableCompactRowBlock.CompactFlag);
+            BinaryPrimitives.WriteInt32LittleEndian(span[12..], payloadLength);
+            _entries.AsSpan(0, _entriesLength).CopyTo(span[SsTableV2Format.BlockHeaderSize..]);
+            int restarts = SsTableV2Format.BlockHeaderSize + _entriesLength;
+            for (int i = 0; i < _restartOffsets.Count; i++)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(span[(restarts + (i * sizeof(int)))..], SsTableV2Format.BlockHeaderSize + _restartOffsets[i]);
+            }
+
+            BinaryPrimitives.WriteInt32LittleEndian(span[^sizeof(int)..], _restartOffsets.Count);
+            BinaryPrimitives.WriteUInt32LittleEndian(span[0..], WalCrc32C.HashToUInt32(span[4..]));
+
+            long blockOffset = _position;
+            Write(span);
+            PadTo(_alignment);
+            _blocks.Add(new SsTableV2BlockInfo(_blockFirstRowId, _previousRowIdInBlock, blockOffset, blockLength, _entryCount));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(block);
+        }
+
+        _entryCount = 0;
+        _entriesLength = 0;
+        _restartOffsets.Clear();
     }
 
     private void Write(ReadOnlySpan<byte> bytes)
