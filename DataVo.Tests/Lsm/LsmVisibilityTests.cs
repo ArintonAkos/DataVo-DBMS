@@ -114,3 +114,38 @@ public sealed class LsmVisibilityTests
             .GetValue(backend)!;
     }
 }
+
+/// <summary>A commit that fails after its LSN is assigned must not stall every later commit.</summary>
+public sealed class LsmCommitFailureTests
+{
+    [Fact]
+    public async Task FailureAfterLsnAssignment_DoesNotBlockLaterCommits()
+    {
+        using var db = new DataVoContext(new DataVoConfig
+        {
+            StorageMode = StorageMode.Lsm,
+            DiskStoragePath = TestStorageDirectories.Create("lsm_commit_failure"),
+            LsmStrictFsync = false,
+        });
+        db.Execute("CREATE DATABASE F");
+        db.Execute("USE F");
+        db.Execute("CREATE TABLE T (Id INT PRIMARY KEY)");
+
+        object backend = typeof(StorageContext)
+            .GetField("_storageEngine", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(db.Engine.StorageContext)!;
+        var engine = (LsmStorageEngine)backend.GetType()
+            .GetField("_inner", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(backend)!;
+
+        engine.DuringApplyForTesting = () => throw new IOException("simulated MemTable failure");
+        QueryResult failed = db.Execute("INSERT INTO T (Id) VALUES (1)").Single();
+        Assert.True(failed.IsError);
+        engine.DuringApplyForTesting = null;
+
+        // Without the fix this second commit waits forever for the failed LSN to publish.
+        Task<List<QueryResult>> next = Task.Run(() => db.Execute("INSERT INTO T (Id) VALUES (2)"));
+        Assert.False((await next.WaitAsync(TimeSpan.FromSeconds(10))).Single().IsError);
+        Assert.Single(db.Execute("SELECT * FROM T WHERE Id = 2").Single().Data);
+    }
+}

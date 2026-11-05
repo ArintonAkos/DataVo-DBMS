@@ -106,9 +106,22 @@ internal sealed class LsmCommitLog : IDisposable
             long lsn;
             lock (_appendGate)
             {
-                lsn = checked(++_lastLsn);
+                // The LSN is consumed only once the frame reached the OS: a failed write must not leave a
+                // gap that later commits would wait on forever.
+                lsn = checked(_lastLsn + 1);
                 WriteHeader(frame, lsn, batch.Count);
-                _store.AppendFrameBytes(frame, flushToDisk: false);
+                try
+                {
+                    _store.AppendFrameBytes(frame, flushToDisk: false);
+                }
+                catch
+                {
+                    // A partial frame would hide every later frame from recovery; cut it off.
+                    _store.TruncateThroughLsn(0);
+                    throw;
+                }
+
+                _lastLsn = lsn;
                 Volatile.Write(ref _appendedLsn, lsn);
             }
 

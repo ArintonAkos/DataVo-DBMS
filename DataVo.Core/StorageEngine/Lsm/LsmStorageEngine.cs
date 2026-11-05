@@ -36,6 +36,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     private readonly AsyncLocal<PendingWrite?> _ambientWrite = new();
     private long _appliedLsn;   // every frame up to here is applied to MemTables
     private readonly object _publishGate = new();
+    private static readonly TimeSpan PublicationTimeout = TimeSpan.FromSeconds(60);
     private long _nextPublishLsn; // next LSN allowed to publish its rows and deferred effects
     private long _prunedThrough;
     private bool _recovering;
@@ -461,6 +462,9 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
     /// <summary>Test hook: runs after a batch is durable and before its effects are published.</summary>
     internal Action<long>? BeforePublishForTesting { get; set; }
 
+    /// <summary>Test hook: runs while a frame is applied to the MemTables (after its LSN is assigned).</summary>
+    internal Action? DuringApplyForTesting { get; set; }
+
     /// <summary>Test hook: overrides the MemTable rotation threshold for tables created afterwards.</summary>
     internal long? MemTableFlushThresholdOverrideBytes { get; set; }
 
@@ -691,24 +695,31 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             }
 
             pending.Batch.CollapseToLatestPerRow();
-            LsmCommitTicket ticket;
-            lock (_commitGate)
-            {
-                ticket = _commitLog.Append(pending.Batch);
-                ApplyToMemTables(pending, checked((ulong)ticket.Lsn));
-                Volatile.Write(ref _appliedLsn, ticket.Lsn);
-            }
-
+            long? assignedLsn = null;
             bool durable = false;
             try
             {
+                LsmCommitTicket ticket;
+                lock (_commitGate)
+                {
+                    ticket = _commitLog.Append(pending.Batch);
+                    assignedLsn = ticket.Lsn;
+                    ApplyToMemTables(pending, checked((ulong)ticket.Lsn));
+                    Volatile.Write(ref _appliedLsn, ticket.Lsn);
+                }
+
                 ticket.Wait();
                 durable = true;
             }
             finally
             {
-                // Rows, indexes, and notifications become visible only now, and strictly in commit order.
-                PublishInOrder(ticket.Lsn, durable ? () => PublishStaged(pending) : null);
+                // Every assigned LSN must take its publication turn, even when the commit failed after the
+                // LSN was assigned: later commits wait for it. Rows, indexes, and notifications become
+                // visible only for a durable commit, and strictly in commit order.
+                if (assignedLsn is long lsn)
+                {
+                    PublishInOrder(lsn, durable ? () => PublishStaged(pending) : null);
+                }
             }
         }
         finally
@@ -766,7 +777,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             while (_nextPublishLsn < lsn)
             {
-                Monitor.Wait(_publishGate);
+                // Backstop: a broken invariant must surface as an error, not as a silent engine-wide hang.
+                if (!Monitor.Wait(_publishGate, PublicationTimeout))
+                {
+                    throw new StorageException(
+                        $"Commit publication stalled: LSN {lsn} waited {PublicationTimeout.TotalSeconds:N0} s for LSN {_nextPublishLsn}.");
+                }
             }
         }
 
@@ -790,6 +806,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
     private void ApplyToMemTables(PendingWrite pending, ulong sequence)
     {
+        DuringApplyForTesting?.Invoke();
         Span<byte> userKey = stackalloc byte[UserKeySize];
         foreach (LsmCommitOperation operation in pending.Batch.Operations)
         {
