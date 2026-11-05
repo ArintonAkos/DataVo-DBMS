@@ -276,7 +276,7 @@ public class BinaryWalRecoveryTests : SqlExecutionTestsBase
     {
         byte[] bytes = TestFiles.ReadAllBytesShared(walPath);
         bytes[^1] ^= 0xFF;
-        File.WriteAllBytes(walPath, bytes);
+        TestFiles.WriteAllBytesShared(walPath, bytes);
     }
 
     /// <summary>

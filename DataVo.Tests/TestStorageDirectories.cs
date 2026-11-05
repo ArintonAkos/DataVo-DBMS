@@ -54,4 +54,12 @@ internal static class TestFiles
         stream.CopyTo(buffer);
         return buffer.ToArray();
     }
+
+    /// <summary>Overwrites a file that the engine may still hold open (for example to corrupt a WAL).</summary>
+    public static void WriteAllBytesShared(string path, byte[] bytes)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        stream.Write(bytes, 0, bytes.Length);
+        stream.SetLength(bytes.Length);
+    }
 }
