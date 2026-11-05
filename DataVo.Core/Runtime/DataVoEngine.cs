@@ -55,6 +55,11 @@ public sealed class DataVoEngine : IDisposable
         TransactionManager = new TransactionManager();
         LockManager = new LockManager(Config.LockAcquireTimeoutMs);
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
+        if (StorageContext.LsmIndexStore is { } lsmIndexStore)
+        {
+            // LSM mode: scalar indexes and key lanes live in the engine's persisted index tables.
+            IndexManager.UseLsmIndexStore(lsmIndexStore);
+        }
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();
         Diagnostics = new DataVoDiagnostics();
@@ -406,6 +411,12 @@ public sealed class DataVoEngine : IDisposable
     private void RebuildTableIndexes(string databaseName, string tableName)
     {
         List<IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
+
+        // Persisted (LSM) scalar indexes that are complete need no work: open must not decode the rows.
+        indexFiles.RemoveAll(index =>
+            IndexManager.IsLsmBacked
+            && !IndexManager.SupportsVectorIndexType(index.IndexKind)
+            && IndexManager.IsLsmIndexBuilt(index.IndexFileName, tableName, databaseName));
         if (indexFiles.Count == 0)
         {
             return;

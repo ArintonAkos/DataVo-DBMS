@@ -212,9 +212,17 @@ internal class Commit : BaseDbAction
                 MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId);
             }
 
+            var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
+
+            // Old rows give the exact index keys to remove; without them every index entry is visited.
+            Dictionary<long, Dictionary<string, object?>>? oldRows =
+                recorder is { IsEnabled: true } || indexFiles.Count > 0
+                    ? engine.StorageContext.GetTableContents(rowIdList, tableName, databaseName)
+                    : null;
+
             if (recorder is { IsEnabled: true })
             {
-                var deletedRows = engine.StorageContext.GetTableContents(rowIdList, tableName, databaseName);
+                var deletedRows = oldRows!;
                 foreach (long rowId in rowIdList)
                 {
                     if (deletedRows.TryGetValue(rowId, out var oldRow))
@@ -226,10 +234,9 @@ internal class Commit : BaseDbAction
 
             engine.StorageContext.DeleteFromTable(rowIdList, tableName, databaseName);
 
-            var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
             foreach (var index in indexFiles)
             {
-                engine.IndexManager.DeleteFromIndex(rowIdList, index.IndexFileName, tableName, databaseName);
+                engine.IndexManager.DeleteRowsFromIndex(index, rowIdList, oldRows, tableName, databaseName);
             }
         }
     }
@@ -260,9 +267,10 @@ internal class Commit : BaseDbAction
 
                 // Delete old + Insert new
                 engine.StorageContext.DeleteFromTable([rowId], tableName, databaseName);
+                var oldRowById = new Dictionary<long, Dictionary<string, object?>> { [rowId] = oldRow };
                 foreach (var index in indexFiles)
                 {
-                    engine.IndexManager.DeleteFromIndex([rowId], index.IndexFileName, tableName, databaseName);
+                    engine.IndexManager.DeleteRowsFromIndex(index, [rowId], oldRowById, tableName, databaseName);
                 }
 
                 long newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);

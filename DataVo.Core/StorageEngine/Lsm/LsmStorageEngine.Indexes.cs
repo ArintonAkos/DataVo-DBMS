@@ -18,6 +18,28 @@ public sealed partial class LsmStorageEngine
 
     private readonly ConcurrentDictionary<(string Database, string Table, string Index), IndexTableState> _indexTables = new();
 
+    void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
+        IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+
+    void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
+        IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+
+    // Lookups never create an index table: a missing index must stay missing (callers fall back to scans).
+    List<long>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey) =>
+        _indexTables.ContainsKey((databaseName, tableName, indexName)) ? IndexLookup(databaseName, tableName, indexName, encodedKey) : null;
+
+    List<(byte[] EncodedKey, long RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName) =>
+        _indexTables.ContainsKey((databaseName, tableName, indexName)) ? IndexEntries(databaseName, tableName, indexName) : null;
+
+    void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, long RowId)> entries) =>
+        BuildIndex(databaseName, tableName, indexName, entries);
+
+    void ILsmIndexStore.DropIndexTable(string databaseName, string tableName, string indexName) =>
+        DropIndexTable(databaseName, tableName, indexName);
+
+    bool ILsmIndexStore.IsIndexBuilt(string databaseName, string tableName, string indexName) =>
+        IsIndexBuilt(databaseName, tableName, indexName);
+
     /// <summary>Whether the index has been fully built (bulk build or creation on an empty table).</summary>
     internal bool IsIndexBuilt(string databaseName, string tableName, string indexName) =>
         File.Exists(Path.Combine(GetIndexDirectory(databaseName, tableName, indexName), IndexBuiltMarker));

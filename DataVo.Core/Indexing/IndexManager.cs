@@ -5,6 +5,7 @@ using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Core.StorageEngine.Lsm.V2;
 using DataVo.Core.Utils;
 using DataVo.Core.Indexing.BTree;
 using DataVo.Core.Indexing.Flat;
@@ -188,6 +189,107 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Gets the singleton instance (for backward compatibility).
     /// </summary>
+    private ILsmIndexStore? _lsmStore;
+
+    /// <summary>
+    /// Backs scalar indexes and the integer/GUID key lanes with the LSM engine's persisted index tables
+    /// (LSM mode). Changes are staged in the current write unit and committed with the row changes, so
+    /// they are not deferred here; nothing is held in heap lanes and open does not rebuild them.
+    /// Vector indexes are unaffected.
+    /// </summary>
+    internal void UseLsmIndexStore(ILsmIndexStore store) => _lsmStore = store;
+
+    /// <summary>Whether scalar indexes are persisted by the LSM engine.</summary>
+    internal bool IsLsmBacked => _lsmStore is not null;
+
+    /// <summary>Whether a persisted scalar index is complete (built or created on an empty table).</summary>
+    internal bool IsLsmIndexBuilt(string indexName, string tableName, string databaseName) =>
+        _lsmStore?.IsIndexBuilt(databaseName, tableName, indexName) == true;
+
+    /// <summary>
+    /// Removes the index entries of deleted (or rewritten) rows. With the old rows the exact (key, row id)
+    /// pairs are removed; without them, or for vector indexes, every entry has to be checked by row id.
+    /// Rows whose key has a null part were never indexed and are skipped.
+    /// </summary>
+    internal void DeleteRowsFromIndex(
+        Models.Catalog.IndexFile index,
+        IReadOnlyList<long> rowIds,
+        IReadOnlyDictionary<long, Dictionary<string, object?>>? oldRows,
+        string tableName,
+        string databaseName)
+    {
+        if (oldRows is null || SupportsVectorIndexType(index.IndexKind ?? string.Empty))
+        {
+            DeleteFromIndex([.. rowIds], index.IndexFileName, tableName, databaseName);
+            return;
+        }
+
+        var entries = new List<(string Key, long RowId)>(rowIds.Count);
+        foreach (long rowId in rowIds)
+        {
+            if (!oldRows.TryGetValue(rowId, out Dictionary<string, object?>? oldRow))
+            {
+                continue;
+            }
+
+            bool hasKey = true;
+            foreach (string attribute in index.AttributeNames)
+            {
+                if (!oldRow.TryGetValue(attribute, out object? value) || value is null)
+                {
+                    hasKey = false;
+                    break;
+                }
+            }
+
+            if (hasKey)
+            {
+                entries.Add((IndexKeyEncoder.BuildKeyString(oldRow, index.AttributeNames), rowId));
+            }
+        }
+
+        DeleteIndexEntries(entries, index.IndexFileName, tableName, databaseName);
+    }
+
+    private static IndexException MissingIndex(string indexName, string tableName) =>
+        new($"Index {indexName} on table {tableName} does not exist!");
+
+    private static IEnumerable<(byte[] EncodedKey, long RowId)> FlattenForLsm(Dictionary<string, List<long>> values)
+    {
+        foreach (KeyValuePair<string, List<long>> entry in values)
+        {
+            byte[] encodedKey = LsmIndexKeyCodec.EncodeString(entry.Key);
+            foreach (long rowId in entry.Value)
+            {
+                yield return (encodedKey, rowId);
+            }
+        }
+    }
+
+    /// <summary>Primary-key semantics: the key maps to exactly <paramref name="rowId"/> afterwards (re-point).</summary>
+    private void LsmUpsertPrimaryKey(byte[] encodedKey, long rowId, string indexName, string tableName, string databaseName)
+    {
+        ILsmIndexStore store = _lsmStore!;
+        foreach (long existing in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
+        {
+            if (existing != rowId)
+            {
+                store.IndexDelete(databaseName, tableName, indexName, encodedKey, existing);
+            }
+        }
+
+        store.IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+    }
+
+    private void LsmRemoveKey(byte[] encodedKey, string indexName, string tableName, string databaseName)
+    {
+        ILsmIndexStore store = _lsmStore!;
+        foreach (long rowId in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
+        {
+            store.IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+        }
+    }
+
     public static IndexManager Instance
     {
         get
@@ -467,6 +569,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
+        if (_lsmStore is { } store)
+        {
+            store.BuildIndex(databaseName, tableName, indexName, FlattenForLsm(values));
+            return;
+        }
+
         IndexMetadata metadata = CreateScalarMetadata(indexName, tableName, databaseName);
 
         var index = (IIndex)CreateIndex("BTREE", metadata, []);
@@ -599,6 +707,11 @@ public partial class IndexManager : IDisposable
         string databaseName,
         bool isPrimaryKey)
     {
+        if (_lsmStore is not null)
+        {
+            return false; // persisted indexes are rebuilt through CreateIndex/RebuildIndex
+        }
+
         if (MirrorsFastLanesToScalarIndex || rows.Count == 0)
         {
             return false;
@@ -721,6 +834,8 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DropIndex(string indexName, string tableName, string databaseName)
     {
+        _lsmStore?.DropIndexTable(databaseName, tableName, indexName);
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         RemoveIndex(cacheKey);
 
@@ -886,6 +1001,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool IsIndexHealthy(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            return store.IsIndexBuilt(databaseName, tableName, indexName);
+        }
+
         try
         {
             _ = GetOrLoadScalarIndex(indexName, tableName, databaseName);
@@ -1203,6 +1323,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(value), rowId);
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => InsertIntoIndex(value, rowId, indexName, tableName, databaseName)))
         {
@@ -1313,6 +1439,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            foreach ((string value, long rowId) in entries)
+            {
+                store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(value), rowId);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1353,6 +1489,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            foreach ((long key, long rowId) in entries)
+            {
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(key), rowId, indexName, tableName, databaseName);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1439,6 +1585,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     internal ConcurrentInt64Int64Map? GetIntegerPrimaryKeyLane(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            return null;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         return IsLaneComplete(cacheKey) && _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
             ? map
@@ -1456,6 +1607,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(keys[i]), rowIds[i], indexName, tableName, databaseName);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1504,6 +1665,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            foreach ((long key, long rowId) in entries)
+            {
+                store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key), rowId);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1566,6 +1737,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            foreach ((Guid key, long rowId) in entries)
+            {
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeGuid(key), rowId, indexName, tableName, databaseName);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1621,6 +1802,16 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            foreach ((Guid key, long rowId) in entries)
+            {
+                store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key), rowId);
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1680,6 +1871,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool HasIntegerPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            return false; // no heap lanes: callers take the keyed paths, which the LSM index serves
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         return IsLaneComplete(cacheKey) && _integerPrimaryKeyMaps.ContainsKey(cacheKey);
     }
@@ -1689,6 +1885,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool HasIntegerIndexFastLane(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            return false; // no heap lanes: callers take the keyed paths, which the LSM index serves
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1701,6 +1902,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool HasGuidPrimaryKeyFastLane(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            return false; // no heap lanes: callers take the keyed paths, which the LSM index serves
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         return IsLaneComplete(cacheKey) && _guidPrimaryKeyMaps.ContainsKey(cacheKey);
     }
@@ -1710,6 +1916,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool HasGuidIndexFastLane(string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            return false; // no heap lanes: callers take the keyed paths, which the LSM index serves
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1724,6 +1935,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveIntegerPrimaryKey(long key, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            LsmRemoveKey(LsmIndexKeyCodec.EncodeInteger(key), indexName, tableName, databaseName);
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RemoveIntegerPrimaryKey(key, indexName, tableName, databaseName)))
         {
@@ -1765,6 +1982,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveGuidPrimaryKey(Guid key, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is not null)
+        {
+            LsmRemoveKey(LsmIndexKeyCodec.EncodeGuid(key), indexName, tableName, databaseName);
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RemoveGuidPrimaryKey(key, indexName, tableName, databaseName)))
         {
@@ -1785,6 +2008,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveIntegerIndexEntry(long key, long rowId, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            store.IndexDelete(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key), rowId);
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RemoveIntegerIndexEntry(key, rowId, indexName, tableName, databaseName)))
         {
@@ -1813,6 +2042,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void RemoveGuidIndexEntry(Guid key, long rowId, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            store.IndexDelete(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key), rowId);
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RemoveGuidIndexEntry(key, rowId, indexName, tableName, databaseName)))
         {
@@ -1846,6 +2081,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         out long rowId)
     {
+        if (_lsmStore is { } store)
+        {
+            List<long>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
+            rowId = rows is { Count: > 0 } ? rows[0] : 0;
+            return rows is { Count: > 0 };
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         // Lock-free: the hot point-lookup path must not serialize 8 concurrent readers on _lock.
         if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
@@ -1869,6 +2111,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         out long rowId)
     {
+        if (_lsmStore is { } store)
+        {
+            List<long>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
+            rowId = rows is { Count: > 0 } ? rows[0] : 0;
+            return rows is { Count: > 0 };
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
             && map.TryGetValue(key, out rowId))
@@ -1906,6 +2155,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         out IReadOnlyList<long> rowIds)
     {
+        if (_lsmStore is { } store)
+        {
+            List<long>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
+            rowIds = found ?? (IReadOnlyList<long>)Array.Empty<long>();
+            return found is not null;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1935,6 +2191,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         out IReadOnlyList<long> rowIds)
     {
+        if (_lsmStore is { } store)
+        {
+            List<long>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
+            rowIds = found ?? (IReadOnlyList<long>)Array.Empty<long>();
+            return found is not null;
+        }
+
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
@@ -1957,6 +2220,21 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            // Without keys every entry must be visited; callers that know the old rows use DeleteIndexEntries.
+            var doomed = new HashSet<long>(toBeDeletedIds);
+            foreach ((byte[] encodedKey, long rowId) in store.IndexEntries(databaseName, tableName, indexName) ?? [])
+            {
+                if (doomed.Contains(rowId))
+                {
+                    store.IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+                }
+            }
+
+            return;
+        }
+
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
@@ -1998,6 +2276,16 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DeleteIndexEntries(IReadOnlyList<(string Key, long RowId)> entries, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            foreach ((string key, long rowId) in entries)
+            {
+                store.IndexDelete(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(key), rowId);
+            }
+
+            return;
+        }
+
         if (entries.Count == 0)
         {
             return;
@@ -2080,6 +2368,13 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public IReadOnlyList<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            return store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(columnValue))
+                ?? throw MissingIndex(indexName, tableName);
+        }
+
         if (TryParseIntegerPrimaryKey(columnValue, out long integerKey)
             && TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out long rowId))
         {
@@ -2116,6 +2411,12 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            return (store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(key))
+                ?? throw MissingIndex(indexName, tableName)).Count > 0;
+        }
+
         // A hit in any lane proves the key exists, even in a partial lane. Secondary lanes matter for
         // UNIQUE constraints: typed inserts keep integer and GUID unique keys only in those lanes.
         if (TryParseIntegerPrimaryKey(key, out long integerKey))
@@ -2296,6 +2597,11 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
     {
+        if (_lsmStore is { } store)
+        {
+            return store.IndexEntries(databaseName, tableName, indexName)?.Exists(entry => entry.RowId == rowId) == true;
+        }
+
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
         bool exists = index.ContainsValue(rowId);
         RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);

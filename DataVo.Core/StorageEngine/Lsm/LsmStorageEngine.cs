@@ -16,7 +16,7 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// <summary>
 /// Minimal LSM-backed storage engine that maps logical 1-based RowIds to encoded LSM user keys.
 /// </summary>
-public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, IDisposable
+public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, ILsmIndexStore, IDisposable
 {
     private const int UserKeySize = LsmRowKeyCodec.RowKeySize;
     private const int MaxLevelToScan = LsmTable.DefaultMaxCompactionLevel;

@@ -19,6 +19,9 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
 
     public string BackendKind => "Lsm";
 
+    /// <summary>The engine's persisted index storage.</summary>
+    internal ILsmIndexStore IndexStore => _inner;
+
     public long InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
     public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => _inner.InsertRows(databaseName, tableName, rowsBytes);
     public byte[] ReadRow(string databaseName, string tableName, long rowId) => _inner.ReadRow(databaseName, tableName, rowId);

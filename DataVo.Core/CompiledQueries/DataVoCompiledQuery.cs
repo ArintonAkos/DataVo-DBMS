@@ -2145,8 +2145,14 @@ public static class DataVoCompiledQuery
             return;
         }
 
-        // Generic scalar (string BTree) path: delete the old row ids, then reinsert non-null keys.
-        indexes.DeleteFromIndex(oldRowIds.ToList(), indexName, tableName, databaseName);
+        // Generic scalar (string BTree) path: delete the old (key, row id) pairs, then reinsert non-null keys.
+        var oldRowsById = new Dictionary<long, Dictionary<string, object?>>(oldRows.Count);
+        for (int i = 0; i < oldRows.Count; i++)
+        {
+            oldRowsById[oldRowIds[i]] = oldRows[i];
+        }
+
+        indexes.DeleteRowsFromIndex(index, oldRowIds, oldRowsById, tableName, databaseName);
         for (int i = 0; i < newRows.Count; i++)
         {
             Dictionary<string, object?> newRow = newRows[i];

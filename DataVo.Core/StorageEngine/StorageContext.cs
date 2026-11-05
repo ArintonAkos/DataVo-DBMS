@@ -484,6 +484,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return false;
     }
 
+    /// <summary>Persisted index storage when the backend is the LSM engine; otherwise null.</summary>
+    internal ILsmIndexStore? LsmIndexStore => (_storageEngine as Backends.LsmStorageBackend)?.IndexStore;
+
     internal bool IsTableEmpty(string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
