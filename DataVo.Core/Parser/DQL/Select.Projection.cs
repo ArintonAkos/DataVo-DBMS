@@ -20,9 +20,11 @@ internal partial class Select
     {
         List<string> selectedColumns = _model.GetSelectedColumns();
         List<string> fields = [];
+        List<int> positions = [];
 
         foreach (string column in selectedColumns)
         {
+            positions.Add(_model.SelectedColumnPositions.TryGetValue(column, out int position) ? position : -1);
             // "P.Id AS x" is output as x: the alias replaces the (qualified) column name.
             int aliasAt = column.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
             if (aliasAt >= 0)
@@ -52,11 +54,13 @@ internal partial class Select
             foreach (var expressionColumn in _model.GetComputedExpressionColumns())
             {
                 fields.Add(expressionColumn.Alias ?? expressionColumn.RawExpression);
+                positions.Add(SelectListPosition(expressionColumn));
             }
 
             foreach (var windowColumn in _model.GetWindowFunctionColumns())
             {
                 fields.Add(windowColumn.Alias ?? windowColumn.RawExpression);
+                positions.Add(SelectListPosition(windowColumn));
             }
         }
 
@@ -64,6 +68,7 @@ internal partial class Select
         {
             foreach (var aggregateColumn in _model.GetAggregateColumns())
             {
+                positions.Add(SelectListPosition(aggregateColumn));
                 if (aggregateColumn.Alias != null)
                 {
                     fields.Add(aggregateColumn.Alias);
@@ -79,11 +84,48 @@ internal partial class Select
 
                     fields.Add(outputName);
                 }
+                else
+                {
+                    positions.RemoveAt(positions.Count - 1); // not projected
+                }
             }
         }
 
-        return fields;
+        return OrderLikeTheSelectList(fields, positions);
     }
+
+    // Rows are built in "build order" (plain columns grouped by table, then expressions, aggregates,
+    // windows); the result must list columns in the order the SELECT wrote them. When the two differ,
+    // this keeps the build order for ExtractRowData and a permutation for CreateDataFromResult.
+    private List<string> _projectionBuildOrder = [];
+    private int[]? _projectionPermutation;
+
+    private List<string> OrderLikeTheSelectList(List<string> fields, List<int> positions)
+    {
+        _projectionBuildOrder = fields;
+        _projectionPermutation = null;
+        if (positions.Count != fields.Count || positions.Contains(-1))
+        {
+            return fields; // SELECT * (or an unmapped column): the build order is the declared order
+        }
+
+        int[] permutation = [.. Enumerable.Range(0, fields.Count).OrderBy(i => positions[i])]; // stable: T.* keeps column order
+        bool identity = true;
+        for (int i = 0; i < permutation.Length && identity; i++)
+        {
+            identity = permutation[i] == i;
+        }
+
+        if (identity)
+        {
+            return fields;
+        }
+
+        _projectionPermutation = permutation;
+        return [.. permutation.Select(i => fields[i])];
+    }
+
+    private int SelectListPosition(SelectColumnNode column) => _model.GetSelectListPosition(column);
 
     /// <summary>
     /// Projects each result row into a dictionary keyed by field name, matching the output schema.
@@ -97,7 +139,23 @@ internal partial class Select
 
         foreach (var row in filteredTable)
         {
-            result.Add(ExtractRowData(row, fieldsList));
+            Dictionary<string, object?> data = ExtractRowData(row, _projectionBuildOrder);
+            if (_projectionPermutation is { } permutation)
+            {
+                var ordered = new Dictionary<string, object?>(data.Count);
+                foreach (int index in permutation)
+                {
+                    string field = _projectionBuildOrder[index];
+                    if (data.TryGetValue(field, out object? value))
+                    {
+                        ordered[field] = value;
+                    }
+                }
+
+                data = ordered;
+            }
+
+            result.Add(data);
         }
 
         return result;

@@ -11,6 +11,13 @@ namespace DataVo.Core.Models.DQL;
 internal class SelectModel
 {
     public Dictionary<string, List<string>>? TableColumnsInUse { get; set; }
+
+    /// <summary>
+    /// Position in the SELECT list of each entry of <see cref="TableColumnsInUse"/> (columns of a
+    /// <c>T.*</c> share the position of the star). <see cref="TableColumnsInUse"/> is grouped by table,
+    /// so the projection uses this to put output columns back in the order they were written.
+    /// </summary>
+    public Dictionary<string, int> SelectedColumnPositions { get; } = new(StringComparer.Ordinal);
     public string? Database { get; set; }
     public TableService? TableService { get; set; }
     public Where WhereStatement { get; set; } = null!;
@@ -63,6 +70,9 @@ internal class SelectModel
 
         return TableColumnsInUse.SelectMany(c => c.Value).ToList();
     }
+
+    /// <summary>Position of a SELECT-list entry, or -1.</summary>
+    public int GetSelectListPosition(SelectColumnNode column) => Ast.Columns.FindIndex(candidate => ReferenceEquals(candidate, column));
 
     public ExpressionNode? GetHavingExpression() => Ast.HavingExpression;
 
@@ -152,7 +162,7 @@ internal class SelectModel
         AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
         WhereStatement.Prepare(TableService);
 
-        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
+        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService, SelectedColumnPositions);
 
         return false;
     }
@@ -174,7 +184,7 @@ internal class SelectModel
         GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
         AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
 
-        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService);
+        TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService, SelectedColumnPositions);
 
         return false;
     }
@@ -194,12 +204,14 @@ internal class SelectModel
         );
     }
 
-    private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SelectColumnNode> columns, TableService tableService)
+    private static Dictionary<string, List<string>>? ParseSelectColumnsFromAst(List<SelectColumnNode> columns, TableService tableService, Dictionary<string, int> positions)
     {
         Dictionary<string, List<string>> selectedColumns = [];
+        positions.Clear();
 
-        foreach (var colNode in columns)
+        for (int position = 0; position < columns.Count; position++)
         {
+            SelectColumnNode colNode = columns[position];
             string name = (colNode.RawExpression ?? string.Empty).Trim();
             string normalizedName = name.Replace(" . ", ".").Replace(" .", ".").Replace(". ", ".");
 
@@ -225,6 +237,7 @@ internal class SelectModel
                     if (!selectedColumns[tableName].Contains(qualified))
                     {
                         selectedColumns[tableName].Add(qualified);
+                        positions[qualified] = position;
                     }
                 }
 
@@ -270,6 +283,7 @@ internal class SelectModel
             if (!selectedColumns[resolvedTableName].Contains(finalColumnName))
             {
                 selectedColumns[resolvedTableName].Add(finalColumnName);
+                positions[finalColumnName] = position;
             }
         }
 

@@ -3,12 +3,15 @@ using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.Sql;
 
-/// <summary>A plain column's alias names the output column ("Id AS x" was returned as "Id AS x").</summary>
-public sealed class SqlColumnAliasTests : IDisposable
+/// <summary>
+/// Output columns are named by their alias ("Id AS x" was returned as "Id AS x") and come in the order
+/// the SELECT list wrote them (they were grouped by table, with aggregates and expressions last).
+/// </summary>
+public sealed class SqlProjectionTests : IDisposable
 {
     private readonly DataVoContext _db = new(new DataVoConfig { StorageMode = StorageMode.InMemory });
 
-    public SqlColumnAliasTests()
+    public SqlProjectionTests()
     {
         foreach (string sql in new[]
         {
@@ -29,7 +32,13 @@ public sealed class SqlColumnAliasTests : IDisposable
     [InlineData("SELECT Id AS x FROM P WHERE Id = 2", "x")]
     [InlineData("SELECT C.Id AS c, P.Id AS p FROM P JOIN C ON P.A = C.PId", "c", "p")]
     [InlineData("SELECT P.Id AS p, COUNT(*) AS n FROM P JOIN C ON P.A = C.PId GROUP BY P.Id", "p", "n")]
-    public void Alias_NamesTheOutputColumn(string sql, params string[] columns)
+    [InlineData("SELECT P.Id AS p, C.Id AS c, A FROM P JOIN C ON P.A = C.PId", "p", "c", "P.A")]
+    [InlineData("SELECT COUNT(*) AS n, A FROM P GROUP BY A", "n", "A")]
+    [InlineData("SELECT MAX(Id) AS m, A, COUNT(*) AS n FROM P GROUP BY A", "m", "A", "n")]
+    [InlineData("SELECT Id + 1 AS nxt, Id FROM P", "nxt", "Id")]
+    [InlineData("SELECT A, Id FROM P", "A", "Id")]
+    [InlineData("SELECT C.Id, P.* FROM P JOIN C ON P.A = C.PId", "C.Id", "P.Id", "P.A")]
+    public void Columns_AreNamedAndOrderedLikeTheSelectList(string sql, params string[] columns)
     {
         var result = _db.Execute(sql)[0];
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
