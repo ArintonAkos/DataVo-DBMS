@@ -264,9 +264,15 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>Primary-key semantics: the key maps to exactly <paramref name="rowId"/> afterwards (re-point).</summary>
-    private void LsmUpsertPrimaryKey(byte[] encodedKey, long rowId, string indexName, string tableName, string databaseName)
+    private void LsmUpsertPrimaryKey(byte[] encodedKey, long rowId, string indexName, string tableName, string databaseName, bool keyIsNew)
     {
         ILsmIndexStore store = _lsmStore!;
+        if (keyIsNew)
+        {
+            store.IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+            return;
+        }
+
         foreach (long existing in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
         {
             if (existing != rowId)
@@ -1483,17 +1489,22 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Inserts integer primary-key entries into the direct key -> row-id fast lane.
     /// </summary>
+    /// <param name="keysAreNew">
+    /// True when the caller has verified that none of the keys exists (INSERT after its duplicate check):
+    /// a persisted index then skips the re-point lookup an upsert needs.
+    /// </param>
     public void InsertIntegerPrimaryKeys(
         IReadOnlyList<(long Key, long RowId)> entries,
         string indexName,
         string tableName,
-        string databaseName)
+        string databaseName,
+        bool keysAreNew = false)
     {
         if (_lsmStore is not null)
         {
             foreach ((long key, long rowId) in entries)
             {
-                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(key), rowId, indexName, tableName, databaseName);
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(key), rowId, indexName, tableName, databaseName, keysAreNew);
             }
 
             return;
@@ -1605,13 +1616,14 @@ public partial class IndexManager : IDisposable
         ReadOnlySpan<long> rowIds,
         string indexName,
         string tableName,
-        string databaseName)
+        string databaseName,
+        bool keysAreNew = false)
     {
         if (_lsmStore is not null)
         {
             for (int i = 0; i < keys.Length; i++)
             {
-                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(keys[i]), rowIds[i], indexName, tableName, databaseName);
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(keys[i]), rowIds[i], indexName, tableName, databaseName, keysAreNew);
             }
 
             return;
@@ -1735,13 +1747,14 @@ public partial class IndexManager : IDisposable
         IReadOnlyList<(Guid Key, long RowId)> entries,
         string indexName,
         string tableName,
-        string databaseName)
+        string databaseName,
+        bool keysAreNew = false)
     {
         if (_lsmStore is not null)
         {
             foreach ((Guid key, long rowId) in entries)
             {
-                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeGuid(key), rowId, indexName, tableName, databaseName);
+                LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeGuid(key), rowId, indexName, tableName, databaseName, keysAreNew);
             }
 
             return;

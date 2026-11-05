@@ -1173,8 +1173,7 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
         {
             if (operation.Kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete)
             {
-                ApplyIndexOperation(operation, sequence, replaying: false);
-                continue;
+                continue; // applied below from the staged changes, already decoded and collapsed
             }
 
             if (!_tables.TryGetValue((operation.Database, operation.Table), out TableState? state))
@@ -1190,6 +1189,29 @@ public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchS
             else
             {
                 state.Table.Delete(userKey, sequence);
+            }
+        }
+
+        // The staged index changes hold exactly the batch's index operations (last change per entry wins,
+        // like the batch collapse), with keys already built: no per-operation decoding.
+        foreach (KeyValuePair<IndexTableState, Dictionary<byte[], bool>> index in pending.StagedIndexes)
+        {
+            if (!_indexTables.TryGetValue((index.Key.Database, index.Key.TableName, index.Key.Index), out IndexTableState? live)
+                || !ReferenceEquals(live, index.Key))
+            {
+                continue; // dropped while the statement was running
+            }
+
+            foreach (KeyValuePair<byte[], bool> change in index.Value)
+            {
+                if (change.Value)
+                {
+                    index.Key.Table.Put(change.Key, sequence, ReadOnlySpan<byte>.Empty);
+                }
+                else
+                {
+                    index.Key.Table.Delete(change.Key, sequence);
+                }
             }
         }
 

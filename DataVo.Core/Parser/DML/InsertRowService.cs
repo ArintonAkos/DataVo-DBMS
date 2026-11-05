@@ -1283,7 +1283,7 @@ internal sealed partial class InsertRowService(
             if (IsPrimaryKeyIndex(tableName, indexName)
                 && TryGetSingleIntegerKey(row, index.AttributeNames, out long integerKey))
             {
-                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName);
+                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName, keysAreNew: true);
                 continue;
             }
 
@@ -1345,14 +1345,14 @@ internal sealed partial class InsertRowService(
             if (IsPrimaryKeyIndex(tableName, indexName)
                 && TryGetSingleIntegerKey(schema, cells, index.AttributeNames, out long integerKey))
             {
-                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName);
+                indexes.InsertIntegerPrimaryKeys([(integerKey, rowId)], indexName, tableName, databaseName, keysAreNew: true);
                 continue;
             }
 
             if (IsPrimaryKeyIndex(tableName, indexName)
                 && TryGetSingleGuidKey(schema, cells, index.AttributeNames, out Guid guidKey))
             {
-                indexes.InsertGuidPrimaryKeys([(guidKey, rowId)], indexName, tableName, databaseName);
+                indexes.InsertGuidPrimaryKeys([(guidKey, rowId)], indexName, tableName, databaseName, keysAreNew: true);
                 continue;
             }
 
@@ -1413,7 +1413,8 @@ internal sealed partial class InsertRowService(
                     AsRowIdSpan(rowIds),
                     indexName,
                     tableName,
-                    databaseName);
+                    databaseName,
+                    keysAreNew: true);
                 continue;
             }
 
@@ -1422,7 +1423,7 @@ internal sealed partial class InsertRowService(
                 && TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidPrimaryEntries)
                 && guidPrimaryEntries is not null)
             {
-                indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, tableName, databaseName);
+                indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, tableName, databaseName, keysAreNew: true);
                 continue;
             }
 

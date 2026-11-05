@@ -385,7 +385,7 @@ public sealed partial class LsmStorageEngine
         table.CompactionRegistry = registry;
         table.BeforeFlushDurabilityBarrier = maxSequence => _commitLog.EnsureDurableThrough(checked((long)maxSequence));
         table.AfterFlush = PruneCommitLog;
-        var state = new IndexTableState(directory, manifest, table, registry);
+        var state = new IndexTableState(directory, manifest, table, registry, databaseName, tableName, indexName);
         table.AfterSstablePublished = memTable => EvictFlushedIndexEntries(state, memTable);
 
         ulong flushed = 0;
@@ -473,9 +473,15 @@ public sealed partial class LsmStorageEngine
         }
     }
 
-    private sealed class IndexTableState(string directory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry)
+    private sealed class IndexTableState(string directory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry, string database, string tableName, string index)
         : LsmKeySpaceState(directory, manifest, table, fileRegistry)
     {
+        public string Database { get; } = database;
+
+        public string TableName { get; } = tableName;
+
+        public string Index { get; } = index;
+
         /// <summary>
         /// Published, unflushed entries: key prefix → row id → newest (sequence, live). Guarded by
         /// <see cref="LsmKeySpaceState.OverlayGate"/> for reads and writes.
