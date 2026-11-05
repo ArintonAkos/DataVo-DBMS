@@ -126,9 +126,9 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 
     public void BeginUpdateBatch()
     {
-        // Keep the update phase in SQLite autocommit mode. For WAL,FULL plus fullfsync this intentionally
-        // forces one physical synchronization boundary per point update, matching the hardware-durability
-        // hypothesis tested by the disk-crud-wal scenario.
+        // Only called with --update-commit batch, and then for every engine: all updates commit together.
+        _transaction = Connection().BeginTransaction();
+        UpdateCommand().Transaction = _transaction;
     }
 
     public void Insert(FlatRecord record)
@@ -144,7 +144,8 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
     public void Update(long id, int newValue, double newScore)
     {
         // Use the calling thread's own connection/command so concurrent writers stay isolated.
-        SqliteCommand command = _threadUpdateCommands?.Value ?? UpdateCommand();
+        // A batch runs on the main connection's transaction; another connection would wait on its lock.
+        SqliteCommand command = _transaction is not null ? UpdateCommand() : _threadUpdateCommands?.Value ?? UpdateCommand();
         command.Parameters["$value"].Value = newValue;
         command.Parameters["$score"].Value = newScore;
         command.Parameters["$id"].Value = id;
@@ -159,7 +160,10 @@ public sealed class SqliteDiskCrudEngine : IDiskCrudEngine
 
     public void CompleteUpdateBatch()
     {
-        // See BeginUpdateBatch: SQLite updates are intentionally unbatched for the fullfsync durability test.
+        _transaction?.Commit();
+        _transaction?.Dispose();
+        _transaction = null;
+        UpdateCommand().Transaction = null;
     }
 
     public void Dispose() => DisposeCore();

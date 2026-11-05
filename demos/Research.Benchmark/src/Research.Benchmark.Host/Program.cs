@@ -92,13 +92,23 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
     // --legacy-update forces the legacy dictionary update path (disables the zero-alloc byte-patch fast path),
     // so the same session can A/B the update-phase allocation and CPU cost against the zero-alloc default.
     bool zeroAllocUpdate = !HasFlag(args, "--legacy-update");
+    // --update-commit each (default): every update is its own durable commit, for every engine.
+    // --update-commit batch: every engine commits all updates as one batch. Per-update latencies then
+    // only measure queuing (an engine may defer all work to the commit), so compare total time only.
+    // Earlier runs batched DataVo's updates but not SQLite's, comparing one fsync with one per update.
+    string updateCommit = ReadStringArg(args, "--update-commit", "each");
+    bool batchUpdates = updateCommit.Equals("batch", StringComparison.OrdinalIgnoreCase);
+    if (!batchUpdates && !updateCommit.Equals("each", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new ArgumentException($"--update-commit must be 'each' or 'batch', not '{updateCommit}'.");
+    }
     string root = Path.Combine(Path.GetTempPath(), $"datavo-disk-crud-wal-{Guid.NewGuid():N}");
 
     try
     {
         BenchmarkMetrics RunDiskScenario(IDiskCrudEngine engine) =>
             writerWorkers == 1
-                ? RunDiskCrud(engine, records, progressEvery, root)
+                ? RunDiskCrud(engine, records, progressEvery, root, batchUpdates)
                 : RunDiskCrudConcurrent(engine, records, writerWorkers, progressEvery, root);
 
         // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
@@ -470,7 +480,7 @@ static BenchmarkMetrics RunFlatCrud(IFlatCrudEngine engine, int records, int pro
     }
 }
 
-static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int progressEvery, string rootDir)
+static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int progressEvery, string rootDir, bool batchUpdates)
 {
     using (engine)
     {
@@ -524,7 +534,11 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
             // Phase 2 — point updates. Engines may open an explicit update batch here to amortize commit cost.
             long updateAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var updateStopwatch = Stopwatch.StartNew();
-            engine.BeginUpdateBatch();
+            if (batchUpdates)
+            {
+                engine.BeginUpdateBatch();
+            }
+
             for (int i = 0; i < records; i++)
             {
                 long id = i + 1;
@@ -543,7 +557,11 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
                 }
             }
 
-            engine.CompleteUpdateBatch();
+            if (batchUpdates)
+            {
+                engine.CompleteUpdateBatch();
+            }
+
             updateStopwatch.Stop();
             long updateAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - updateAllocatedBefore;
             totalStopwatch.Stop();
@@ -559,7 +577,7 @@ static BenchmarkMetrics RunDiskCrud(IDiskCrudEngine engine, int records, int pro
                 $"[{DateTimeOffset.Now:HH:mm:ss}] {engine.Name}: UPDATE alloc {updateAllocatedBytes / 1024d / 1024d:N2} MB total = {updateBytesPerOp:N1} B/op | UPDATE cpu {updateMicrosPerOp:N2} us/op | insert alloc {insertAllocatedBytes / 1024d / 1024d:N2} MB");
 
             return new BenchmarkMetrics(
-                engine.Name,
+                batchUpdates ? engine.Name + " [updates batched]" : engine.Name,
                 totalStopwatch.Elapsed.TotalMilliseconds,
                 p50,
                 p99,
