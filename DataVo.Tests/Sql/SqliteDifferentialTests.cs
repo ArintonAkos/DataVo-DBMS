@@ -16,7 +16,8 @@ namespace DataVo.Tests.Sql;
 /// SQLite is the reference because its behaviour is well specified and tested. The generator avoids
 /// the places where SQL dialects legitimately differ (integer division, case-insensitive LIKE on mixed
 /// case, ordering of NULLs, float formatting), so a mismatch points at a DataVo bug. The failure message
-/// names the seed and the last statements. DATAVO_DIFF_SEEDS and DATAVO_DIFF_STEPS run longer locally.
+/// names the seed and the last statements. DATAVO_DIFF_SEEDS and DATAVO_DIFF_STEPS run longer locally;
+/// DATAVO_SEED_OFFSET starts at another seed.
 /// </remarks>
 public sealed class SqliteDifferentialTests : IDisposable
 {
@@ -25,8 +26,9 @@ public sealed class SqliteDifferentialTests : IDisposable
     public static TheoryData<StorageMode, int> Cases()
     {
         int seeds = int.TryParse(Environment.GetEnvironmentVariable("DATAVO_DIFF_SEEDS"), out int configured) ? configured : 3;
+        int first = int.TryParse(Environment.GetEnvironmentVariable("DATAVO_SEED_OFFSET"), out int offset) ? offset + 1 : 1;
         var cases = new TheoryData<StorageMode, int>();
-        for (int seed = 1; seed <= seeds; seed++)
+        for (int seed = first; seed < first + seeds; seed++)
         {
             cases.Add(StorageMode.InMemory, seed);
             cases.Add(StorageMode.Lsm, seed);

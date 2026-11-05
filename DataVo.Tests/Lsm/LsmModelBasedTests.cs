@@ -13,7 +13,8 @@ namespace DataVo.Tests.Lsm;
 /// </summary>
 /// <remarks>
 /// A failure message names the seed and the last operations, so the exact run can be replayed. Set
-/// DATAVO_MODEL_SEEDS (count) and DATAVO_MODEL_STEPS to run longer locally than in CI.
+/// DATAVO_MODEL_SEEDS (count) and DATAVO_MODEL_STEPS to run longer locally than in CI, and
+/// DATAVO_SEED_OFFSET to start at another seed (the nightly job uses fresh seeds every run).
 /// </remarks>
 public sealed class LsmModelBasedTests : IDisposable
 {
@@ -25,8 +26,9 @@ public sealed class LsmModelBasedTests : IDisposable
     public static TheoryData<int> Seeds()
     {
         int count = int.TryParse(Environment.GetEnvironmentVariable("DATAVO_MODEL_SEEDS"), out int configured) ? configured : 4;
+        int first = int.TryParse(Environment.GetEnvironmentVariable("DATAVO_SEED_OFFSET"), out int offset) ? offset + 1 : 1;
         var seeds = new TheoryData<int>();
-        for (int seed = 1; seed <= count; seed++)
+        for (int seed = first; seed < first + count; seed++)
         {
             seeds.Add(seed);
         }
