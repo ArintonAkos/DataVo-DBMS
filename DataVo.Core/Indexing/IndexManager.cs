@@ -186,9 +186,6 @@ public partial class IndexManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the singleton instance (for backward compatibility).
-    /// </summary>
     private ILsmIndexStore? _lsmStore;
 
     /// <summary>
@@ -290,6 +287,9 @@ public partial class IndexManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets the singleton instance (for backward compatibility).
+    /// </summary>
     public static IndexManager Instance
     {
         get
