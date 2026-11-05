@@ -504,11 +504,22 @@ internal sealed class CatalogStore
                 return result;
             }
 
+            // A column can belong to several indexes. Single-column indexes go first so that a column's
+            // equality lookups use the index that answers them; Add threw on the second index, which
+            // failed every SELECT on such a table.
+            foreach (IndexFile index in shape.Indexes)
+            {
+                if (index.AttributeNames.Count == 1)
+                {
+                    result.TryAdd(index.AttributeNames[0], index.IndexFileName);
+                }
+            }
+
             foreach (IndexFile index in shape.Indexes)
             {
                 foreach (string attribute in index.AttributeNames)
                 {
-                    result.Add(attribute, index.IndexFileName);
+                    result.TryAdd(attribute, index.IndexFileName);
                 }
             }
 

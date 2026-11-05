@@ -517,11 +517,20 @@ public static class Catalog
         Dictionary<string, string> result = [];
         List<IndexFile> indexFiles = GetTableIndexes(tableName, databaseName);
 
+        // Single-column indexes win for their column; a column in several indexes must not throw.
+        foreach (var index in indexFiles)
+        {
+            if (index.AttributeNames.Count == 1)
+            {
+                result.TryAdd(index.AttributeNames[0], index.IndexFileName);
+            }
+        }
+
         foreach (var index in indexFiles)
         {
             foreach (string attribute in index.AttributeNames)
             {
-                result.Add(attribute, index.IndexFileName);
+                result.TryAdd(attribute, index.IndexFileName);
             }
         }
 
