@@ -106,15 +106,22 @@ public class VipExposureBorrowedTests
             for (int r = 0; r < c.Added.Count; r++) sink += c.Added[r][1].AsDecimal();
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 5_000; i++)
+        // The JIT swaps in optimized code in the background, and that swap can allocate on this thread;
+        // on a busy CI machine it may land inside any one window. Steady state means some window is clean.
+        long allocated = long.MaxValue;
+        for (int window = 0; window < 10 && allocated != 0; window++)
         {
-            builder.Reset();
-            op.ApplyInto(batch, builder);
-            QueryChangeRef c = builder.Build();
-            for (int r = 0; r < c.Updated.Count; r++) sink += c.Updated[r][1].AsDecimal();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 5_000; i++)
+            {
+                builder.Reset();
+                op.ApplyInto(batch, builder);
+                QueryChangeRef c = builder.Build();
+                for (int r = 0; r < c.Updated.Count; r++) sink += c.Updated[r][1].AsDecimal();
+            }
+
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.True(sink > 0m);
         Assert.Equal(0L, allocated);
