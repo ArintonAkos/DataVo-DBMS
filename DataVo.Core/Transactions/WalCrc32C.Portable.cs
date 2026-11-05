@@ -3,9 +3,17 @@ namespace DataVo.Core.Transactions;
 
 internal static class WalCrc32C
 {
-    public static uint HashToUInt32(ReadOnlySpan<byte> data)
+    public static uint HashToUInt32(ReadOnlySpan<byte> data) => ~Append(Seed, data);
+
+    /// <summary>Initial running state for <see cref="Append"/>.</summary>
+    public const uint Seed = 0xFFFFFFFFu;
+
+    /// <summary>
+    /// Continues a running checksum over <paramref name="data"/>; the final CRC is the complement of the
+    /// last state. Hashing in pieces gives the same result as hashing the concatenation.
+    /// </summary>
+    public static uint Append(uint crc, ReadOnlySpan<byte> data)
     {
-        uint crc = 0xFFFFFFFFu;
         for (int i = 0; i < data.Length; i++)
         {
             crc ^= data[i];
@@ -17,7 +25,7 @@ internal static class WalCrc32C
             }
         }
 
-        return ~crc;
+        return crc;
     }
 }
 #endif
