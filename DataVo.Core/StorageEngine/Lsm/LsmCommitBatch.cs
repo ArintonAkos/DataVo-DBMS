@@ -17,6 +17,12 @@ internal enum LsmCommitOperationKind : byte
 
     /// <summary>Drops every table of a database (the operation's table name is empty).</summary>
     DropDatabase = 4,
+
+    /// <summary>Adds an index entry (index name and key in <c>Value</c>, see <see cref="LsmCommitBatch.IndexPut"/>).</summary>
+    IndexPut = 5,
+
+    /// <summary>Removes an index entry.</summary>
+    IndexDelete = 6,
 }
 
 /// <summary>One row mutation recorded in the commit log.</summary>
@@ -74,6 +80,83 @@ internal sealed class LsmCommitBatch
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropDatabase, database, string.Empty, 0, []));
     }
 
+    /// <summary>
+    /// Records that index <paramref name="index"/> of the table maps <paramref name="encodedKey"/> to
+    /// <paramref name="rowId"/>. Written in the same frame as the row change, so both survive a crash or
+    /// neither does. Value layout: u16 index name bytes | index name (UTF-8) | encoded key.
+    /// </summary>
+    public void IndexPut(string database, string table, string index, ReadOnlySpan<byte> encodedKey, long rowId)
+    {
+        Validate(database, table, rowId);
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.IndexPut, database, table, rowId, EncodeIndexValue(index, encodedKey)));
+    }
+
+    /// <summary>Records that the index entry (key, row id) is removed.</summary>
+    public void IndexDelete(string database, string table, string index, ReadOnlySpan<byte> encodedKey, long rowId)
+    {
+        Validate(database, table, rowId);
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.IndexDelete, database, table, rowId, EncodeIndexValue(index, encodedKey)));
+    }
+
+    /// <summary>Index name and encoded key of an <see cref="LsmCommitOperationKind.IndexPut"/>/<see cref="LsmCommitOperationKind.IndexDelete"/>.</summary>
+    public static (string Index, byte[] EncodedKey) DecodeIndexValue(byte[] value)
+    {
+        if (!TryDecodeIndexValue(value, out string index, out byte[] key))
+        {
+            throw new InvalidDataException("Index operation value is malformed.");
+        }
+
+        return (index, key);
+    }
+
+    internal static bool TryDecodeIndexValue(ReadOnlySpan<byte> value, out string index, out byte[] encodedKey)
+    {
+        index = string.Empty;
+        encodedKey = [];
+        if (value.Length < sizeof(ushort))
+        {
+            return false;
+        }
+
+        int nameBytes = BinaryPrimitives.ReadUInt16LittleEndian(value);
+        if (nameBytes == 0 || value.Length - sizeof(ushort) - nameBytes < 1)
+        {
+            return false;
+        }
+
+        try
+        {
+            index = new UTF8Encoding(false, true).GetString(value.Slice(sizeof(ushort), nameBytes));
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+
+        encodedKey = value[(sizeof(ushort) + nameBytes)..].ToArray();
+        return true;
+    }
+
+    private static byte[] EncodeIndexValue(string index, ReadOnlySpan<byte> encodedKey)
+    {
+        if (string.IsNullOrEmpty(index))
+        {
+            throw new ArgumentException("An index operation needs an index name.", nameof(index));
+        }
+
+        if (encodedKey.IsEmpty)
+        {
+            throw new ArgumentException("An index operation needs a key.", nameof(encodedKey));
+        }
+
+        int nameBytes = Encoding.UTF8.GetByteCount(index);
+        var value = new byte[sizeof(ushort) + nameBytes + encodedKey.Length];
+        BinaryPrimitives.WriteUInt16LittleEndian(value, checked((ushort)nameBytes));
+        Encoding.UTF8.GetBytes(index, 0, index.Length, value, sizeof(ushort));
+        encodedKey.CopyTo(value.AsSpan(sizeof(ushort) + nameBytes));
+        return value;
+    }
+
     public void Clear() => _operations.Clear();
 
     /// <summary>
@@ -87,15 +170,14 @@ internal sealed class LsmCommitBatch
             return;
         }
 
-        var lastIndex = new Dictionary<(string Database, string Table, long RowId), int>();
+        var lastIndex = new Dictionary<CollapseKey, int>(CollapseKeyComparer.Instance);
         bool hasDuplicates = false;
         for (int i = 0; i < _operations.Count; i++)
         {
-            LsmCommitOperation operation = _operations[i];
-            if (operation.Kind is LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete)
+            if (TryGetCollapseKey(_operations[i], out CollapseKey key))
             {
-                hasDuplicates |= lastIndex.ContainsKey((operation.Database, operation.Table, operation.RowId));
-                lastIndex[(operation.Database, operation.Table, operation.RowId)] = i;
+                hasDuplicates |= lastIndex.ContainsKey(key);
+                lastIndex[key] = i;
             }
         }
 
@@ -108,8 +190,7 @@ internal sealed class LsmCommitBatch
         for (int i = 0; i < _operations.Count; i++)
         {
             LsmCommitOperation operation = _operations[i];
-            if (operation.Kind is not (LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete)
-                || lastIndex[(operation.Database, operation.Table, operation.RowId)] == i)
+            if (!TryGetCollapseKey(operation, out CollapseKey key) || lastIndex[key] == i)
             {
                 collapsed.Add(operation);
             }
@@ -117,6 +198,50 @@ internal sealed class LsmCommitBatch
 
         _operations.Clear();
         _operations.AddRange(collapsed);
+    }
+
+    // Rows collapse per (database, table, row id); index entries per (database, table, index and key, row id).
+    private readonly record struct CollapseKey(string Database, string Table, long RowId, byte[]? IndexValue);
+
+    private static bool TryGetCollapseKey(LsmCommitOperation operation, out CollapseKey key)
+    {
+        switch (operation.Kind)
+        {
+            case LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete:
+                key = new CollapseKey(operation.Database, operation.Table, operation.RowId, null);
+                return true;
+            case LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete:
+                key = new CollapseKey(operation.Database, operation.Table, operation.RowId, operation.Value);
+                return true;
+            default:
+                key = default;
+                return false;
+        }
+    }
+
+    private sealed class CollapseKeyComparer : IEqualityComparer<CollapseKey>
+    {
+        public static readonly CollapseKeyComparer Instance = new();
+
+        public bool Equals(CollapseKey x, CollapseKey y) =>
+            x.RowId == y.RowId
+            && string.Equals(x.Table, y.Table, StringComparison.Ordinal)
+            && string.Equals(x.Database, y.Database, StringComparison.Ordinal)
+            && (x.IndexValue is null ? y.IndexValue is null : y.IndexValue is not null && x.IndexValue.AsSpan().SequenceEqual(y.IndexValue));
+
+        public int GetHashCode(CollapseKey key)
+        {
+            int hash = HashCode.Combine(key.Database, key.Table, key.RowId);
+            if (key.IndexValue is { } value)
+            {
+                foreach (byte b in value)
+                {
+                    hash = (hash * 31) + b;
+                }
+            }
+
+            return hash;
+        }
     }
 
     private static void Validate(string database, string table, long rowId)
@@ -240,13 +365,15 @@ internal static class LsmCommitBatchCodec
             offset += OperationHeaderSize;
 
             bool isRowOperation = kind is LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete;
+            bool isIndexOperation = kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete;
             if (!Enum.IsDefined(typeof(LsmCommitOperationKind), kind)
                 || databaseBytes == 0
                 || (tableBytes == 0) != (kind == LsmCommitOperationKind.DropDatabase)
                 || rowId < 0
                 || valueBytes < 0
-                || (kind != LsmCommitOperationKind.Put && valueBytes != 0)
-                || (!isRowOperation && rowId != 0)
+                || (kind != LsmCommitOperationKind.Put && !isIndexOperation && valueBytes != 0)
+                || (isIndexOperation && !LsmCommitBatch.TryDecodeIndexValue(payload.Slice(offset + databaseBytes + tableBytes, Math.Max(0, Math.Min(valueBytes, payload.Length - offset - databaseBytes - tableBytes))), out _, out _))
+                || (!isRowOperation && !isIndexOperation && rowId != 0)
                 || (long)databaseBytes + tableBytes + valueBytes > payload.Length - offset)
             {
                 return false;

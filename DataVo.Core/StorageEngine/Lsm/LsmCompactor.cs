@@ -44,8 +44,10 @@ public sealed class LsmCompactor
         Directory.CreateDirectory(_tableDirectory);
     }
 
-    /// <summary>Write the output as a row-keyed v2 SSTable (inputs may be v1 or v2).</summary>
-    internal bool WritesV2 { get; set; }
+    /// <summary>Format of the output (inputs may be any format).</summary>
+    internal LsmSstableFormat Format { get; set; }
+
+    private bool WritesV2 => Format == LsmSstableFormat.RowKeyed;
 
     /// <summary>How v2 inputs are read when no registry handle provides a reader.</summary>
     internal LsmReadMode ReadMode { get; set; }
@@ -96,6 +98,10 @@ public sealed class LsmCompactor
             if (mergedEntries.Count > 0 && WritesV2)
             {
                 (outputMetadata, outputPath) = WriteV2Output(mergedEntries, targetLevel);
+            }
+            else if (mergedEntries.Count > 0 && Format == LsmSstableFormat.Keyed)
+            {
+                (outputMetadata, outputPath) = WriteKeyedOutput(mergedEntries, targetLevel);
             }
             else if (mergedEntries.Count > 0)
             {
@@ -242,6 +248,27 @@ public sealed class LsmCompactor
     private List<SstableEntry> ReadAnyFormat(LsmTableFileMetadata file, LsmSstableHandle? handle)
     {
         string path = Path.Combine(_tableDirectory, file.FileName);
+        if (SsTableKeyedFormat.IsKeyedFile(path))
+        {
+            SsTableKeyedReader? ownedKeyed = handle is null ? SsTableKeyedReader.Open(path, ReadMode) : null;
+            try
+            {
+                SsTableKeyedReader keyed = ownedKeyed ?? handle!.GetKeyedReader(ReadMode);
+                var keyedEntries = new List<SstableEntry>((int)Math.Min(keyed.Properties.EntryCount, int.MaxValue));
+                keyed.ForEach(keyedEntries, static (userKey, sequence, type, value, list) =>
+                {
+                    var internalKey = new byte[userKey.Length + InternalKey.TagSize];
+                    InternalKey.Write(internalKey, userKey, sequence, type);
+                    list.Add(new SstableEntry(internalKey, value.ToArray()));
+                });
+                return keyedEntries;
+            }
+            finally
+            {
+                ownedKeyed?.Dispose();
+            }
+        }
+
         bool isV2 = handle?.IsV2() ?? SsTableV2Format.IsV2File(path);
         if (!isV2)
         {
@@ -278,6 +305,33 @@ public sealed class LsmCompactor
         {
             owned?.Dispose();
         }
+    }
+
+    private (LsmTableFileMetadata Metadata, string Path) WriteKeyedOutput(List<SstableEntry> entries, int targetLevel)
+    {
+        long fileNumber = _manifest.AllocateFileNumber();
+        string fileName = $"{fileNumber:D6}.sst";
+        string outputPath = Path.Combine(_tableDirectory, fileName);
+        long length = 0;
+        LsmDurableFileOperations.WriteFileAtomically(
+            outputPath,
+            overwrite: false,
+            stream =>
+            {
+                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+                foreach (SstableEntry entry in entries)
+                {
+                    writer.Add(InternalKey.UserKey(entry.InternalKey), InternalKey.Sequence(entry.InternalKey), InternalKey.ValueType(entry.InternalKey), entry.Value);
+                }
+
+                length = writer.Finish();
+            },
+            crashHook: null,
+            LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+            LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+            LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+        return (new LsmTableFileMetadata(fileNumber, targetLevel, entries[0].InternalKey, entries[^1].InternalKey, length, fileName), outputPath);
     }
 
     private (LsmTableFileMetadata Metadata, string Path) WriteV2Output(List<SstableEntry> entries, int targetLevel)

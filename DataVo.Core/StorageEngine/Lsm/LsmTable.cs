@@ -69,10 +69,10 @@ public sealed class LsmTable : IDisposable
     internal Action? AfterFlush { get; set; }
 
     /// <summary>
-    /// Write row-keyed v2 SSTables (page-aligned blocks, block index, blocked Bloom filter) instead of v1.
-    /// Every user key must then be an 8-byte row key or the table metadata key.
+    /// SSTable format written on flush and compaction. <see cref="LsmSstableFormat.RowKeyed"/> requires
+    /// every user key to be an 8-byte row key or the table metadata key.
     /// </summary>
-    internal bool WritesV2 { get; set; }
+    internal LsmSstableFormat Format { get; set; }
 
     /// <summary>How compaction reads v2 inputs.</summary>
     internal LsmReadMode ReadMode { get; set; }
@@ -464,9 +464,14 @@ public sealed class LsmTable : IDisposable
             barrier(maxSequence);
         }
 
-        if (WritesV2)
+        if (Format == LsmSstableFormat.RowKeyed)
         {
             return FlushMemTableToV2Sstable(memTable);
+        }
+
+        if (Format == LsmSstableFormat.Keyed)
+        {
+            return FlushMemTableToKeyedSstable(memTable);
         }
 
         lock (_ioGate)
@@ -625,6 +630,82 @@ public sealed class LsmTable : IDisposable
         }
     }
 
+    /// <summary>Streams <paramref name="memTable"/> into a keyed (v3) SSTable; see <see cref="FlushMemTableToV2Sstable"/>.</summary>
+    private LsmFlushResult FlushMemTableToKeyedSstable(MemTable memTable)
+    {
+        lock (_ioGate)
+        {
+            (byte[] smallest, byte[] largest) = ComputeBounds(memTable);
+            long fileNumber = _manifest.AllocateFileNumber();
+            string fileName = $"{fileNumber:D6}.sst";
+            string filePath = Path.Combine(_tableDirectory, fileName);
+            long length = 0;
+            LsmDurableFileOperations.WriteFileAtomically(
+                filePath,
+                overwrite: false,
+                stream =>
+                {
+                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+                    foreach (MemTableEntry entry in memTable)
+                    {
+                        writer.Add(
+                            InternalKey.UserKey(entry.InternalKey),
+                            InternalKey.Sequence(entry.InternalKey),
+                            InternalKey.ValueType(entry.InternalKey),
+                            entry.Value);
+                    }
+
+                    length = writer.Finish();
+                },
+                _crashHook,
+                LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+                LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+                LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+            var metadata = new LsmTableFileMetadata(fileNumber, level: 0, smallest, largest, length, fileName);
+            PublishFlushedFile(metadata, filePath);
+            AfterSstablePublished?.Invoke(memTable);
+            return new LsmFlushResult(metadata, length, filePath);
+        }
+    }
+
+    /// <summary>Applies the manifest edit for a flushed file under the registry's version gate.</summary>
+    private void PublishFlushedFile(LsmTableFileMetadata metadata, string filePath)
+    {
+        var edit = new LsmVersionEdit();
+        edit.AddFile(metadata);
+        try
+        {
+            _manifest.CrashHook = _crashHook;
+            if (CompactionRegistry is { } registry)
+            {
+                registry.ExecuteVersionEdit(() =>
+                {
+                    _applyEdit(edit);
+                    registry.Register(metadata);
+                    return true;
+                });
+            }
+            else
+            {
+                _applyEdit(edit);
+            }
+        }
+        catch (LsmCrashSimulationException)
+        {
+            throw;
+        }
+        catch
+        {
+            DeleteFileIfExists(filePath);
+            throw;
+        }
+        finally
+        {
+            _manifest.CrashHook = null;
+        }
+    }
+
     internal void CompactAllLevelsForMaintenance()
     {
         LsmFileRegistry? registry = CompactionRegistry;
@@ -709,7 +790,7 @@ public sealed class LsmTable : IDisposable
     private void CompactEligibleLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { WritesV2 = WritesV2, ReadMode = ReadMode };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode };
 
         bool madeProgress;
         do
@@ -742,7 +823,7 @@ public sealed class LsmTable : IDisposable
     private void CompactAllLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { WritesV2 = WritesV2, ReadMode = ReadMode };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode };
 
         for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
         {

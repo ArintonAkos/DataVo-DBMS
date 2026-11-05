@@ -95,6 +95,29 @@ internal sealed class LsmSstableHandle
         }
     }
 
+    private SsTableKeyedReader? _keyedReader;
+
+    /// <summary>The file's keyed (v3) reader, opened on first use; see <see cref="GetV2Reader"/>.</summary>
+    public SsTableKeyedReader GetKeyedReader(LsmReadMode mode)
+    {
+        SsTableKeyedReader? reader = Volatile.Read(ref _keyedReader);
+        if (reader is not null)
+        {
+            return reader;
+        }
+
+        lock (_readerGate)
+        {
+            if (Volatile.Read(ref _deleted) != 0)
+            {
+                throw new ObjectDisposedException(nameof(LsmSstableHandle));
+            }
+
+            _keyedReader ??= SsTableKeyedReader.Open(FilePath, mode);
+            return _keyedReader;
+        }
+    }
+
     /// <summary>Whether the file on disk is a v2 SSTable (reads only the footer).</summary>
     public bool IsV2() => SsTableV2Format.IsV2File(FilePath);
 
@@ -105,6 +128,8 @@ internal sealed class LsmSstableHandle
         {
             _reader?.Dispose();
             _reader = null;
+            _keyedReader?.Dispose();
+            _keyedReader = null;
         }
     }
 

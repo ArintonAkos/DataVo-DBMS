@@ -2,6 +2,19 @@ using System.Buffers.Binary;
 
 namespace DataVo.Core.StorageEngine.Lsm.V2;
 
+/// <summary>SSTable format a table writes on flush and compaction.</summary>
+internal enum LsmSstableFormat
+{
+    /// <summary>v1: one data block per file (generic byte keys; tests and legacy files).</summary>
+    Legacy = 0,
+
+    /// <summary>v2: row-keyed (8-byte row ids), page-aligned blocks, values.</summary>
+    RowKeyed = 2,
+
+    /// <summary>v3: keyed (variable byte keys), page-aligned blocks; used by index tables.</summary>
+    Keyed = 3,
+}
+
 /// <summary>
 /// Encodings shared by the engine, the flush path, and compaction: row keys inside internal keys
 /// (8-byte, order-preserving) and the per-table metadata entry (next row id and live-row count) that

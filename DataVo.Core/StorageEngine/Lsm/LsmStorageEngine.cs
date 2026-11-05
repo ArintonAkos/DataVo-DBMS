@@ -16,7 +16,7 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// <summary>
 /// Minimal LSM-backed storage engine that maps logical 1-based RowIds to encoded LSM user keys.
 /// </summary>
-public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, IDisposable
+public sealed partial class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEngine, IDisposable
 {
     private const int UserKeySize = LsmRowKeyCodec.RowKeySize;
     private const int MaxLevelToScan = LsmTable.DefaultMaxCompactionLevel;
@@ -454,6 +454,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
     private void DropTableCore(string databaseName, string tableName)
     {
+        CloseIndexTables(databaseName, tableName);
         (string DatabaseName, string TableName) key = (databaseName, tableName);
         if (_tables.TryRemove(key, out TableState? state))
         {
@@ -482,6 +483,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
     private void DropDatabaseCore(string databaseName)
     {
+        CloseIndexTables(databaseName, tableName: null);
         foreach ((string DatabaseName, string TableName) key in _tables.Keys)
         {
             if (string.Equals(key.DatabaseName, databaseName, StringComparison.Ordinal)
@@ -533,6 +535,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         _tables.Clear();
+        foreach (IndexTableState index in _indexTables.Values)
+        {
+            index.Dispose();
+        }
+
+        _indexTables.Clear();
 
         // Every applied frame is now in SSTables, so a clean shutdown leaves an empty commit log.
         _commitLog.PruneThrough(Volatile.Read(ref _appliedLsn));
@@ -578,7 +586,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
         // No per-table WAL: durability comes from the shared commit log, and this table's MemTables
         // hold only mutations whose frames are already in it.
-        var table = new LsmTable(tableDirectory, manifest) { WritesV2 = true, ReadMode = _readMode };
+        var table = new LsmTable(tableDirectory, manifest) { Format = LsmSstableFormat.RowKeyed, ReadMode = _readMode };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;
@@ -870,13 +878,16 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         {
             foreach (string tableDirectory in Directory.EnumerateDirectories(databaseDirectory))
             {
-                if (!File.Exists(Path.Combine(tableDirectory, "MANIFEST")))
-                {
-                    continue;
-                }
+                string databaseName = Path.GetFileName(databaseDirectory);
+                string tableName = Path.GetFileName(tableDirectory);
 
-                TableState state = GetOrCreateTable(Path.GetFileName(databaseDirectory), Path.GetFileName(tableDirectory));
-                floor = Math.Max(floor, state.FlushedLsn);
+                // Index tables count toward the LSN floor even when the row table has no files yet: new
+                // commits must get LSNs above everything any key space already flushed.
+                floor = Math.Max(floor, OpenExistingIndexTables(databaseName, tableName, tableDirectory));
+                if (File.Exists(Path.Combine(tableDirectory, "MANIFEST")))
+                {
+                    floor = Math.Max(floor, GetOrCreateTable(databaseName, tableName).FlushedLsn);
+                }
             }
         }
 
@@ -909,6 +920,10 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
 
                     case LsmCommitOperationKind.DropDatabase:
                         ReplayDropDatabase(operation.Database, frame.Lsn);
+                        continue;
+
+                    case LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete:
+                        ApplyIndexOperation(operation, sequence, replaying: true);
                         continue;
                 }
 
@@ -1108,6 +1123,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             }
         }
 
+        PublishStagedIndexes(pending, sequence);
         pending.Publication.RunPublish();
     }
 
@@ -1155,6 +1171,12 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         Span<byte> userKey = stackalloc byte[UserKeySize];
         foreach (LsmCommitOperation operation in pending.Batch.Operations)
         {
+            if (operation.Kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete)
+            {
+                ApplyIndexOperation(operation, sequence, replaying: false);
+                continue;
+            }
+
             if (!_tables.TryGetValue((operation.Database, operation.Table), out TableState? state))
             {
                 continue; // dropped while the statement was running
@@ -1217,6 +1239,15 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             foreach (TableState state in _tables.Values)
             {
                 if (state.Table.OldestUnflushedSequence is ulong oldest)
+                {
+                    watermark = Math.Min(watermark, checked((long)oldest) - 1);
+                }
+            }
+
+            // Index entries ride in the same frames: a frame stays until its index changes are flushed too.
+            foreach (IndexTableState index in _indexTables.Values)
+            {
+                if (index.Table.OldestUnflushedSequence is ulong oldest)
                 {
                     watermark = Math.Min(watermark, checked((long)oldest) - 1);
                 }
@@ -1444,6 +1475,25 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         // Change in live rows per table, relative to what this flow saw when it staged each write.
         private readonly Dictionary<TableState, long> _liveDelta = [];
 
+        // Index changes of this write unit: user key (key prefix and row id) → live.
+        private readonly Dictionary<IndexTableState, Dictionary<byte[], bool>> _stagedIndexes = [];
+
+        public IEnumerable<KeyValuePair<IndexTableState, Dictionary<byte[], bool>>> StagedIndexes => _stagedIndexes;
+
+        public void StageIndex(IndexTableState state, byte[] userKey, bool live)
+        {
+            if (!_stagedIndexes.TryGetValue(state, out Dictionary<byte[], bool>? changes))
+            {
+                changes = new Dictionary<byte[], bool>(ByteArrayComparer.Instance);
+                _stagedIndexes[state] = changes;
+            }
+
+            changes[userKey] = live;
+        }
+
+        public Dictionary<byte[], bool>? StagedIndexFor(IndexTableState state) =>
+            _stagedIndexes.TryGetValue(state, out Dictionary<byte[], bool>? changes) ? changes : null;
+
         public void AddLiveDelta(TableState state, long delta) =>
             _liveDelta[state] = (_liveDelta.TryGetValue(state, out long current) ? current : 0) + delta;
 
@@ -1500,6 +1550,7 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             _touched.Clear();
             _staged.Clear();
             _liveDelta.Clear();
+            _stagedIndexes.Clear();
         }
     }
 
@@ -1538,23 +1589,29 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
     }
 
-    private sealed class TableState : IDisposable
+    /// <summary>
+    /// What row tables and index tables share: the manifest, file registry, and MemTable owner of one
+    /// key space, the cached file set (version) readers search, and an orderly shutdown.
+    /// </summary>
+    private abstract class LsmKeySpaceState : IDisposable
     {
-        private long _nextRowId = 1;
-
         private TableVersion? _version;
-        private long _liveRowCount;
 
-        public TableState(string tableDirectory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry, LsmReadMode readMode)
+        protected LsmKeySpaceState(string directory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry)
         {
-            TableDirectory = tableDirectory;
+            TableDirectory = directory;
             Manifest = manifest;
             Table = table;
             FileRegistry = fileRegistry;
-            ReadMode = readMode;
         }
 
-        public object SyncRoot { get; } = new();
+        public string TableDirectory { get; }
+
+        public LsmManifest Manifest { get; }
+
+        public LsmTable Table { get; }
+
+        public LsmFileRegistry FileRegistry { get; }
 
         /// <summary>
         /// Serializes overlay publishes and flush evictions. Never held while calling into the table, so a
@@ -1562,14 +1619,8 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         /// </summary>
         public object OverlayGate { get; } = new();
 
-        public LsmReadMode ReadMode { get; }
-
-        /// <summary>Live rows as of the last applied commit (updated in LSN order, persisted with each commit).</summary>
-        public long LiveRowCount
-        {
-            get => Volatile.Read(ref _liveRowCount);
-            set => Volatile.Write(ref _liveRowCount, value);
-        }
+        /// <summary>Highest sequence number already durable in this key space's SSTables when it was opened.</summary>
+        public long FlushedLsn { get; set; }
 
         /// <summary>
         /// The current set of live SSTables, with a reference held for the caller. One volatile read of the
@@ -1616,17 +1667,37 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
             });
         }
 
-        public string TableDirectory { get; }
+        public virtual void Dispose()
+        {
+            Table.FlushActiveMemTable();
+            Table.Dispose();
 
-        public LsmManifest Manifest { get; }
+            // Drop the cached file set and unmap every file, so the directory can be deleted (Windows).
+            Interlocked.Exchange(ref _version, null)?.Release();
+            FileRegistry.CloseReaders();
+        }
+    }
 
-        public LsmTable Table { get; }
+    private sealed class TableState(string tableDirectory, LsmManifest manifest, LsmTable table, LsmFileRegistry fileRegistry, LsmReadMode readMode)
+        : LsmKeySpaceState(tableDirectory, manifest, table, fileRegistry)
+    {
+        private long _nextRowId = 1;
+        private long _liveRowCount;
 
-        public LsmFileRegistry FileRegistry { get; }
+        public object SyncRoot { get; } = new();
+
+        public LsmReadMode ReadMode { get; } = readMode;
+
+        /// <summary>Live rows as of the last applied commit (updated in LSN order, persisted with each commit).</summary>
+        public long LiveRowCount
+        {
+            get => Volatile.Read(ref _liveRowCount);
+            set => Volatile.Write(ref _liveRowCount, value);
+        }
 
         /// <summary>
         /// Published row versions not yet flushed to an SSTable (flushed versions are evicted and read from
-        /// the mapped files). Read lock-free; mutated under <see cref="OverlayGate"/>.
+        /// the mapped files). Read lock-free; mutated under <see cref="LsmKeySpaceState.OverlayGate"/>.
         /// </summary>
         public LsmLatestRowStore LatestRows { get; } = new();
 
@@ -1637,19 +1708,6 @@ public sealed class LsmStorageEngine : IStorageEngine, IFixedWidthPatchStorageEn
         }
 
         public long ReadNextRowId() => Volatile.Read(ref _nextRowId);
-
-        /// <summary>Highest sequence number already durable in this table's SSTables when it was opened.</summary>
-        public long FlushedLsn { get; set; }
-
-        public void Dispose()
-        {
-            Table.FlushActiveMemTable();
-            Table.Dispose();
-
-            // Drop the cached file set and unmap every file, so the directory can be deleted (Windows).
-            Interlocked.Exchange(ref _version, null)?.Release();
-            FileRegistry.CloseReaders();
-        }
     }
 
     /// <summary>
