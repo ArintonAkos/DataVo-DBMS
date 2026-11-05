@@ -113,7 +113,42 @@ A bug worth remembering: the snapshot writer computed the final checksum *before
 buffered bytes, so the checksum never matched. A round-trip test (write, read back, compare) caught it
 at once. Every serializer deserves one.
 
-## 8. Testing lessons
+## 8. Randomized testing: finding the bugs nobody thought to test
+
+1,700 hand-written tests passed while the engine could lose rows after a crash and SQL deleted rows it
+should have kept. Two kinds of randomized test found these bugs within minutes:
+
+- **Model-based testing.** Run random operations against the real engine and against something
+  trivially correct (a dictionary), and compare after every step. Crashes and reopens are just more
+  random operations. It found that a MemTable could rotate in the middle of a commit frame: recovery
+  skips a frame by its LSN, so a file holding half a frame made the other half disappear after a crash.
+- **Differential testing.** Run the same random SQL on DataVo and on SQLite and compare. SQLite is
+  heavily tested, so a difference usually means a DataVo bug. It found: `B <> 8` true for NULL (so a
+  DELETE removed NULL rows), NULL joining NULL, `COUNT(*)` crashing on an empty table, `SUM` of nothing
+  returning 0, ignored column aliases, columns in the wrong order, and an index lost after a reopen.
+
+What makes them work:
+
+- **Seeds make random runs reproducible.** A failure reports its seed and the last operations; the same
+  seed replays the same run. Use fresh seeds in nightly runs, fixed ones in regular CI.
+- **More runs find rarer bugs.** The split-frame bug needed 40 seeds x 1,500 steps; the 6 seeds of the
+  regular run never hit it. That is why a nightly job runs many new seeds.
+- **Separate dialect from bugs.** Avoid generating what SQL dialects legitimately disagree on (integer
+  division, NULL ordering, case-insensitive LIKE), so every remaining difference deserves attention.
+- **Compare everything observable.** Comparing only values missed wrong column names and order.
+
+## 9. Fair benchmarks
+
+A benchmark answers "which is faster for the same work?" only if both sides do the same work. Ours
+committed DataVo's 50,000 updates as one batch (one fsync) but SQLite's one by one (50,000 fsyncs), and
+reported DataVo 580x faster. Done the same way, they tie when every update is power-safe (both wait
+~4 ms for the disk), and SQLite is 1.4-2.6x faster otherwise. Checks before trusting a comparison:
+
+- Same durability (fsync per commit, and `fullfsync` on macOS), same batching, same data.
+- Know what a latency measures: a call that only queues work has near-zero latency and proves nothing.
+- Be most suspicious of results that look too good.
+
+## 10. Testing lessons
 
 - **A regression test must fail without the fix.** We check this by running the new test against the
   old code; the write-atomicity test saw 5, 3 and 7 commits before the fix and 1 after.
