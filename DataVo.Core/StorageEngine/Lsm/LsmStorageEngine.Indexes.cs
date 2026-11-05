@@ -60,7 +60,12 @@ public sealed partial class LsmStorageEngine
     {
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
         byte[] prefix = LsmIndexKeyCodec.KeyPrefix(encodedKey);
-        var newest = new Dictionary<long, (ulong Sequence, bool Live)>();
+
+        // Candidates from every source; merged by (row id, newest sequence) only when more than one source
+        // contributed, because a single file already yields sorted, unique row ids.
+        var found = new List<(long RowId, ulong Sequence, bool Live)>();
+        int sources = 0;
+        bool unsorted = false;
 
         // Overlay before the file set: a flush publishes its file before evicting (see ResolveRow).
         lock (state.OverlayGate)
@@ -69,8 +74,11 @@ public sealed partial class LsmStorageEngine
             {
                 foreach (KeyValuePair<long, (ulong Sequence, bool Live)> entry in published)
                 {
-                    newest[entry.Key] = entry.Value;
+                    found.Add((entry.Key, entry.Value.Sequence, entry.Value.Live));
                 }
+
+                sources++;
+                unsorted = true;
             }
         }
 
@@ -79,14 +87,13 @@ public sealed partial class LsmStorageEngine
         {
             foreach (LsmSstableHandle file in version.Files)
             {
-                file.GetKeyedReader(_readMode).ForEachWithPrefix(prefix, newest, static (userKey, sequence, type, _, versions) =>
+                int before = found.Count;
+                file.GetKeyedReader(_readMode).ForEachWithPrefix(prefix, found, static (userKey, sequence, type, _, list) =>
+                    list.Add((LsmIndexKeyCodec.RowIdOf(userKey), sequence, type == LsmValueType.Put)));
+                if (found.Count > before)
                 {
-                    long rowId = LsmIndexKeyCodec.RowIdOf(userKey);
-                    if (!versions.TryGetValue(rowId, out (ulong Sequence, bool Live) current) || sequence > current.Sequence)
-                    {
-                        versions[rowId] = (sequence, type == LsmValueType.Put);
-                    }
-                });
+                    sources++;
+                }
             }
         }
         finally
@@ -100,21 +107,36 @@ public sealed partial class LsmStorageEngine
             {
                 if (LsmIndexKeyCodec.PrefixOf(change.Key).SequenceEqual(prefix))
                 {
-                    newest[LsmIndexKeyCodec.RowIdOf(change.Key)] = (ulong.MaxValue, change.Value);
+                    found.Add((LsmIndexKeyCodec.RowIdOf(change.Key), ulong.MaxValue, change.Value));
+                    sources++;
+                    unsorted = true;
                 }
             }
         }
 
-        var rows = new List<long>(newest.Count);
-        foreach (KeyValuePair<long, (ulong Sequence, bool Live)> entry in newest)
+        if (sources > 1 || unsorted)
         {
-            if (entry.Value.Live)
+            found.Sort(static (x, y) => x.RowId != y.RowId ? x.RowId.CompareTo(y.RowId) : y.Sequence.CompareTo(x.Sequence));
+        }
+
+        var rows = new List<long>(found.Count);
+        long previousRow = 0;
+        bool hasPrevious = false;
+        foreach ((long rowId, _, bool live) in found)
+        {
+            if (hasPrevious && rowId == previousRow)
             {
-                rows.Add(entry.Key);
+                continue; // an older version of a row already decided
+            }
+
+            previousRow = rowId;
+            hasPrevious = true;
+            if (live)
+            {
+                rows.Add(rowId);
             }
         }
 
-        rows.Sort();
         return rows;
     }
 

@@ -499,8 +499,12 @@ internal sealed class SsTableKeyedReader : IDisposable
         }
 
         int block = FindFirstBlockEndingAtOrAfter(bloomKey);
-        byte[] previousKey = [];
-        bool hasPrevious = false;
+
+        // Versions of one user key are adjacent (sequence descending): only the first is visited. Within a
+        // block the previous entry is compared in place; the last key of a block is kept for the next one.
+        Span<byte> carried = stackalloc byte[256];
+        byte[]? carriedHeap = null;
+        int carriedLength = -1;
         for (; block < BlockCount; block++)
         {
             ReadOnlySpan<byte> firstKey = BlockKey(block, first: true);
@@ -512,6 +516,10 @@ internal sealed class SsTableKeyedReader : IDisposable
             ReadOnlySpan<byte> bytes = GetVerifiedBlock(block).Span;
             int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
             int start = LowerBound(bytes, count, bloomKey);
+            ReadOnlySpan<byte> previous = carriedLength < 0
+                ? ReadOnlySpan<byte>.Empty
+                : (carriedHeap is null ? carried[..carriedLength] : carriedHeap.AsSpan(0, carriedLength));
+            bool hasPrevious = carriedLength >= 0;
             for (int i = start; i < count; i++)
             {
                 ReadEntry(bytes, i, out ReadOnlySpan<byte> userKey, out ReadOnlySpan<byte> value, out ulong tag);
@@ -526,15 +534,29 @@ internal sealed class SsTableKeyedReader : IDisposable
                     continue;
                 }
 
-                // First (newest) version of each user key only.
-                if (hasPrevious && userKey.SequenceEqual(previousKey))
+                if (hasPrevious && userKey.SequenceEqual(previous))
                 {
                     continue;
                 }
 
-                previousKey = userKey.ToArray();
+                previous = userKey;
                 hasPrevious = true;
                 visit(userKey, SsTableV2Format.SequenceOf(tag), SsTableV2Format.TypeOf(tag), value, state);
+            }
+
+            if (hasPrevious)
+            {
+                if (previous.Length <= carried.Length)
+                {
+                    previous.CopyTo(carried);
+                    carriedHeap = null;
+                }
+                else
+                {
+                    carriedHeap = previous.ToArray();
+                }
+
+                carriedLength = previous.Length;
             }
         }
     }
