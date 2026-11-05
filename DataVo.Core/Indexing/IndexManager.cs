@@ -1159,11 +1159,30 @@ public partial class IndexManager : IDisposable
 
         vectorIndex.Clear();
 
-        foreach (var (rowId, vector) in vectors)
+        // Build in parallel when the index supports it (HNSW, flat): rebuilding on open inserted one vector
+        // at a time on one core, about 4x slower than the batch inserts that created the same index.
+        List<(long RowId, float[] Vector)> items = vectors as List<(long RowId, float[] Vector)> ?? [.. vectors];
+        int dimension = items.Count > 0 ? items[0].Vector.Length : 0;
+        bool uniformDimension = items.TrueForAll(item => item.Vector.Length == dimension);
+        if (vectorIndex is IBatchVectorIndex batchIndex && items.Count > 1 && dimension > 0 && uniformDimension)
         {
-            // No defensive copy: vector index implementations copy into their own backing store
-            // on insert, so [.. vector] here was a redundant per-insert float[] allocation.
-            vectorIndex.Insert(rowId, vector);
+            var rowIds = new long[items.Count];
+            var flat = new float[(long)items.Count * dimension];
+            for (int i = 0; i < items.Count; i++)
+            {
+                rowIds[i] = items[i].RowId;
+                items[i].Vector.CopyTo(flat, (long)i * dimension);
+            }
+
+            batchIndex.InsertBatch(rowIds, flat, dimension);
+        }
+        else
+        {
+            foreach (var (rowId, vector) in items)
+            {
+                // No defensive copy: vector index implementations copy into their own backing store.
+                vectorIndex.Insert(rowId, vector);
+            }
         }
 
         _cachePaths[cacheKey] = BuildIndexPath(metadata);
