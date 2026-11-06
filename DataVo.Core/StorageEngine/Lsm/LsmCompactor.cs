@@ -330,7 +330,7 @@ public sealed class LsmCompactor
             overwrite: false,
             stream =>
             {
-                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
+                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
                 foreach (SstableEntry entry in entries)
                 {
                     writer.Add(InternalKey.UserKey(entry.InternalKey), InternalKey.Sequence(entry.InternalKey), InternalKey.ValueType(entry.InternalKey), entry.Value);

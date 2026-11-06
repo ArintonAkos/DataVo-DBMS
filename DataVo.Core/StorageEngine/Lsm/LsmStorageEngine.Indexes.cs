@@ -234,7 +234,7 @@ public sealed partial class LsmStorageEngine
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
+                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
                     byte[]? previous = null;
                     foreach (byte[] userKey in userKeys)
                     {

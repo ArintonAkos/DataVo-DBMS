@@ -16,6 +16,38 @@ public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
 {
     protected override bool Compact => true;
 
+    [Fact]
+    public void IndexEntries_OfEveryKindOfRowKey_RoundTripInRowKeyOrder()
+    {
+        RowKey[] rowKeys =
+        [
+            long.MinValue,
+            -3,
+            0,
+            7,
+            long.MaxValue,
+            RowKey.FromGuid(Guid.Parse("018f2c1e-7b3a-7cde-8f00-123456789abc")),
+            RowKey.FromGuid(Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")),
+        ];
+        byte[] key = LsmIndexKeyCodec.EncodeString("shared");
+        foreach (RowKey rowKey in rowKeys)
+        {
+            byte[] userKey = LsmIndexKeyCodec.UserKey(key, rowKey);
+            Assert.Equal(rowKey, LsmIndexKeyCodec.RowKeyOf(userKey));
+            Assert.True(LsmIndexKeyCodec.PrefixOf(userKey).SequenceEqual(LsmIndexKeyCodec.KeyPrefix(key)));
+            Assert.Equal(2 + key.Length + (rowKey.IsInt64 ? 9 : 17), userKey.Length);
+        }
+
+        // Entries of a neighbouring key must not leak into the prefix scan.
+        var entries = rowKeys.Select(rowKey => (LsmIndexKeyCodec.UserKey(key, rowKey), 1UL, LsmValueType.Put))
+            .Append((LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("sharedX"), 1), 1UL, LsmValueType.Put))
+            .ToList();
+        using SsTableKeyedReader reader = SsTableKeyedReader.Open(WriteWith(entries, compact: true), LsmReadMode.PositionalRead);
+        var seen = new List<RowKey>();
+        reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, _, _, _, list) => list.Add(LsmIndexKeyCodec.RowKeyOf(userKey)));
+        Assert.Equal(rowKeys, seen);
+    }
+
     [Theory]
     [MemberData(nameof(Modes))]
     public void ManyVersionsOfOneEntry_AcrossRestartsAndBlocks_AreVisitedOnce(LsmReadMode mode)
@@ -176,7 +208,7 @@ public abstract class SsTableKeyedTests : IDisposable
     public void Writer_RejectsOutOfOrderKeys()
     {
         using var stream = new MemoryStream();
-        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
+        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
         writer.Add(LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("b"), 1), 1, LsmValueType.Put, []);
         Assert.Throws<InvalidOperationException>(() =>
             writer.Add(LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("a"), 1), 1, LsmValueType.Put, []));
@@ -195,7 +227,7 @@ public abstract class SsTableKeyedTests : IDisposable
 
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize, compact: compact);
+        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix, compact: compact);
         foreach ((byte[] userKey, ulong sequence, LsmValueType type) in entries)
         {
             writer.Add(userKey, sequence, type, []);

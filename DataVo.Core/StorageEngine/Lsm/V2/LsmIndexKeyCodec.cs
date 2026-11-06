@@ -9,8 +9,11 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// in a type-tagged form. Integer and GUID keys are encoded natively, so the typed write paths (long, Guid)
 /// and the string paths ("[42]", "3f2504e0-...") produce identical entries without formatting strings.
 /// The length prefix keeps keys prefix-free: all entries of one key are contiguous and sorted by row key.
-/// The row key is the 16 big-endian bytes of a <see cref="RowKey"/> (index tables written before row
-/// keys were widened held an 8-byte row id and are rebuilt from the rows on open).
+/// The row key is stored order-preserving in 9 or 17 bytes: <c>0x00 | low half</c> for an integer key
+/// (high half zero) and <c>0x01 | all 16 bytes</c> otherwise, big-endian, so entries of one key sort in
+/// <see cref="RowKey"/> order and integer keys cost one byte more than the 8-byte row ids of old index
+/// tables (which are rebuilt from the rows on open). Entries therefore vary in length; files store them
+/// with <see cref="SsTableKeyedFormat.LengthPrefixedBloomKey"/>.
 /// </summary>
 internal static class LsmIndexKeyCodec
 {
@@ -18,7 +21,11 @@ internal static class LsmIndexKeyCodec
     public const byte GuidTag = 0x02;
     public const byte StringTag = 0x03;
 
-    public const int RowKeySize = 16;
+    /// <summary>Bloom setting of index files: the Bloom key is the length-prefixed index key.</summary>
+    public const int BloomSuffix = SsTableKeyedFormat.LengthPrefixedBloomKey;
+
+    private const byte IntegerRowKey = 0x00;
+    private const byte WideRowKey = 0x01;
     public const int LengthPrefixSize = sizeof(ushort);
 
     /// <summary>Largest encoded key (K) an index entry can hold.</summary>
@@ -73,10 +80,22 @@ internal static class LsmIndexKeyCodec
     /// <summary>User key of the entry (K, row key).</summary>
     public static byte[] UserKey(ReadOnlySpan<byte> encodedKey, RowKey rowKey)
     {
-        var userKey = new byte[LengthPrefixSize + encodedKey.Length + RowKeySize];
+        int suffix = rowKey.IsInt64 ? 1 + sizeof(ulong) : 1 + 16;
+        var userKey = new byte[LengthPrefixSize + encodedKey.Length + suffix];
         BinaryPrimitives.WriteUInt16BigEndian(userKey, (ushort)encodedKey.Length);
         encodedKey.CopyTo(userKey.AsSpan(LengthPrefixSize));
-        rowKey.WriteTo(userKey.AsSpan(LengthPrefixSize + encodedKey.Length));
+        Span<byte> tail = userKey.AsSpan(LengthPrefixSize + encodedKey.Length);
+        if (rowKey.IsInt64)
+        {
+            tail[0] = IntegerRowKey;
+            BinaryPrimitives.WriteUInt64BigEndian(tail[1..], rowKey.Low);
+        }
+        else
+        {
+            tail[0] = WideRowKey;
+            rowKey.WriteTo(tail[1..]);
+        }
+
         return userKey;
     }
 
@@ -89,10 +108,22 @@ internal static class LsmIndexKeyCodec
         return prefix;
     }
 
-    public static RowKey RowKeyOf(ReadOnlySpan<byte> userKey) => RowKey.Read(userKey[^RowKeySize..]);
+    public static RowKey RowKeyOf(ReadOnlySpan<byte> userKey)
+    {
+        ReadOnlySpan<byte> tail = userKey[PrefixLength(userKey)..];
+        return tail.Length switch
+        {
+            1 + sizeof(ulong) when tail[0] == IntegerRowKey => new RowKey(0, BinaryPrimitives.ReadUInt64BigEndian(tail[1..])),
+            1 + 16 when tail[0] == WideRowKey => RowKey.Read(tail[1..]),
+            _ => throw new InvalidDataException("Index entry has a malformed row key."),
+        };
+    }
 
     /// <summary>The length-prefixed key of an entry (the user key without its row key).</summary>
-    public static ReadOnlySpan<byte> PrefixOf(ReadOnlySpan<byte> userKey) => userKey[..^RowKeySize];
+    public static ReadOnlySpan<byte> PrefixOf(ReadOnlySpan<byte> userKey) => userKey[..PrefixLength(userKey)];
+
+    private static int PrefixLength(ReadOnlySpan<byte> userKey) =>
+        LengthPrefixSize + BinaryPrimitives.ReadUInt16BigEndian(userKey);
 
     private static bool TryParseInteger(string key, out long value)
     {

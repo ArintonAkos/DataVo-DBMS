@@ -652,7 +652,7 @@ public sealed class LsmTable : IDisposable
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
+                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
                     foreach (MemTableEntry entry in memTable)
                     {
                         writer.Add(

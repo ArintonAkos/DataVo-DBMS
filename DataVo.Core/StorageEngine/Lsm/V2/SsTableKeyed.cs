@@ -16,7 +16,9 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// index  := u32 count | u32 reserved | record(32)[count] | key bytes
 /// record := i64 offset | i32 length | i32 entry count | i32 first key offset | i32 first key length
 ///           | i32 last key offset | i32 last key length            (key offsets from the index start)
-/// bloom  := over user key minus its last BloomSuffixLength bytes (index tables: minus the row id)
+/// bloom  := over user key minus its last BloomSuffixLength bytes; a length of -1 means the key starts
+///           with u16 big-endian length | key and the Bloom key is exactly that (index tables: the index
+///           key without its variable-length row key)
 /// footer := index | bloom | properties handles | u32 alignment | u32 bloom suffix length | u16 version (3) | u32 magic
 /// </code>
 /// Entries are sorted by user key ascending, then sequence descending.
@@ -29,6 +31,29 @@ internal static class SsTableKeyedFormat
     public const ushort CompactVersion = 5;
 
     public static bool IsKeyedVersion(ushort version) => version is Version or CompactVersion;
+
+    /// <summary>
+    /// Bloom suffix setting for user keys that begin with their own length (u16 big-endian) and key: the
+    /// Bloom key is that length-prefixed key, whatever follows it.
+    /// </summary>
+    public const int LengthPrefixedBloomKey = -1;
+
+    /// <summary>Length of the Bloom key of <paramref name="userKey"/>; -1 when the key is too short for the setting.</summary>
+    public static int BloomKeyLength(ReadOnlySpan<byte> userKey, int bloomSuffixLength)
+    {
+        if (bloomSuffixLength != LengthPrefixedBloomKey)
+        {
+            return userKey.Length >= bloomSuffixLength ? userKey.Length - bloomSuffixLength : -1;
+        }
+
+        if (userKey.Length < sizeof(ushort))
+        {
+            return -1;
+        }
+
+        int length = sizeof(ushort) + BinaryPrimitives.ReadUInt16BigEndian(userKey);
+        return length <= userKey.Length ? length : -1;
+    }
     public const int BlockHeaderSize = 16;
     public const int EntryHeaderSize = sizeof(ushort) + sizeof(uint);
     public const int IndexHeaderSize = 8;
@@ -159,7 +184,7 @@ internal sealed class SsTableKeyedWriter : IDisposable
             throw new InvalidOperationException("Cannot add entries after Finish.");
         }
 
-        if (userKey.Length > ushort.MaxValue || userKey.Length < _bloomSuffixLength)
+        if (userKey.Length > ushort.MaxValue || SsTableKeyedFormat.BloomKeyLength(userKey, _bloomSuffixLength) < 0)
         {
             throw new ArgumentException("User key length is out of range.", nameof(userKey));
         }
@@ -187,7 +212,7 @@ internal sealed class SsTableKeyedWriter : IDisposable
         if (_lastKey is null || !userKey.SequenceEqual(_lastKey))
         {
             _lastKey = userKey.ToArray();
-            ReadOnlySpan<byte> bloomKey = userKey[..^_bloomSuffixLength];
+            ReadOnlySpan<byte> bloomKey = userKey[..SsTableKeyedFormat.BloomKeyLength(userKey, _bloomSuffixLength)];
             if (_lastBloomKey is null || !bloomKey.SequenceEqual(_lastBloomKey))
             {
                 _lastBloomKey = bloomKey.ToArray();
@@ -576,7 +601,7 @@ internal sealed class SsTableKeyedReader : IDisposable
             int alignment = BinaryPrimitives.ReadInt32LittleEndian(footer[36..]);
             int bloomSuffix = BinaryPrimitives.ReadInt32LittleEndian(footer[40..]);
             long dataEnd = length - SsTableKeyedFormat.FooterSize;
-            if (alignment < SsTableV2Format.MinimumAlignment || (alignment & (alignment - 1)) != 0 || bloomSuffix < 0
+            if (alignment < SsTableV2Format.MinimumAlignment || (alignment & (alignment - 1)) != 0 || bloomSuffix < SsTableKeyedFormat.LengthPrefixedBloomKey
                 || indexOffset < 0 || indexLength < SsTableKeyedFormat.IndexHeaderSize || indexOffset > dataEnd - indexLength
                 || bloomOffset < 0 || bloomLength < SsTableKeyedFormat.BloomHeaderSize || bloomOffset > dataEnd - bloomLength
                 || propertiesLength != SsTableKeyedFormat.PropertiesSize || propertiesOffset < 0 || propertiesOffset > dataEnd - propertiesLength)
@@ -625,7 +650,7 @@ internal sealed class SsTableKeyedReader : IDisposable
 
     /// <summary>
     /// Visits the newest version (by sequence, file-local) of every user key that starts with
-    /// <paramref name="bloomKey"/> and is exactly <c>bloomKey.Length + BloomSuffixLength</c> long.
+    /// <paramref name="bloomKey"/> and whose own Bloom key is exactly <paramref name="bloomKey"/>.
     /// </summary>
     public void ForEachWithPrefix<TState>(ReadOnlySpan<byte> bloomKey, TState state, KeyedEntryAction<TState> visit)
     {
@@ -675,7 +700,7 @@ internal sealed class SsTableKeyedReader : IDisposable
                     return;
                 }
 
-                if (order < 0 || userKey.Length != bloomKey.Length + BloomSuffixLength)
+                if (order < 0 || SsTableKeyedFormat.BloomKeyLength(userKey, BloomSuffixLength) != bloomKey.Length)
                 {
                     continue;
                 }
@@ -748,7 +773,7 @@ internal sealed class SsTableKeyedReader : IDisposable
                 return false;
             }
 
-            if (order < 0 || userKey.Length != bloomKey.Length + BloomSuffixLength)
+            if (order < 0 || SsTableKeyedFormat.BloomKeyLength(userKey, BloomSuffixLength) != bloomKey.Length)
             {
                 continue;
             }
