@@ -47,6 +47,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     private long _prunedThrough;
     private bool _recovering;
     private bool _disposed;
+    private bool _crashed; // SimulateCrashForTesting ran: nothing may touch the log any more
 
     /// <summary>Creates an LSM storage engine rooted at <paramref name="storageDirectory"/>.</summary>
     public LsmStorageEngine(
@@ -613,6 +614,19 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             return;
         }
 
+        // A killed process runs nothing after the kill. Background flushes still finishing here must not
+        // prune the log: tables already abandoned (or removed from _tables) would no longer hold its
+        // watermark back, so their unflushed frames would be cut. Prunes take the gate with TryEnter, so
+        // holding it here cannot deadlock with a flush this shutdown waits for.
+        lock (_pruneGate)
+        {
+            _crashed = true;
+            SimulateCrashCore();
+        }
+    }
+
+    private void SimulateCrashCore()
+    {
         _disposed = true;
         foreach (TableState state in _tables.Values)
         {
@@ -1403,6 +1417,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     {
         if (_recovering || !Monitor.TryEnter(_pruneGate))
         {
+            return;
+        }
+
+        if (_crashed)
+        {
+            Monitor.Exit(_pruneGate);
             return;
         }
 
