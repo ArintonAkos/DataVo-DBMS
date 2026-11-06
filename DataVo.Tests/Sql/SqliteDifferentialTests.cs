@@ -60,6 +60,16 @@ public sealed class SqliteDifferentialTests : IDisposable
     private sealed class Run : IDisposable
     {
         private const int IdRange = 60;
+
+        // A small pool of GUID keys, so inserts collide and deleted keys come back. Lower-case "D" text is
+        // how DataVo prints a GUID and how SQLite keeps the inserted literal.
+        private static readonly string[] GuidKeys = [.. Enumerable.Range(0, 24).Select(i =>
+            new Guid((i % 3) switch
+            {
+                0 => $"018f2c1e-{i:x4}-7000-8000-000000000000", // time-ordered (version 7 shape)
+                1 => $"{i * 0x0a0b0c0d:x8}-1234-4abc-9def-{i * 7:x12}", // random-looking (version 4 shape)
+                _ => $"00000000-0000-0000-0000-{i:x12}", // high half zero: numerically an integer key
+            }).ToString("D"))];
         private static readonly string[] Words = ["ant", "bee", "cat", "cow", "dog", "eel", "elk", "fox", "", "owl"];
 
         private readonly StorageMode _mode;
@@ -93,6 +103,7 @@ public sealed class SqliteDifferentialTests : IDisposable
         {
             Setup("CREATE TABLE P (Id INT PRIMARY KEY, A INT, B INT, S VARCHAR(8))");
             Setup("CREATE TABLE C (Id INT PRIMARY KEY, PId INT, V INT)");
+            Setup("CREATE TABLE G (Id GUID PRIMARY KEY, A INT, S VARCHAR(8))");
             if (_random.Next(2) == 0)
             {
                 Setup("CREATE INDEX ix_p_a ON P (A)");
@@ -106,21 +117,33 @@ public sealed class SqliteDifferentialTests : IDisposable
             for (_step = 0; _step < steps; _step++)
             {
                 int roll = _random.Next(100);
-                if (roll < 22)
+                if (roll < 18)
                 {
                     Write(InsertP());
                 }
-                else if (roll < 32)
+                else if (roll < 26)
                 {
                     Write(InsertC());
                 }
-                else if (roll < 42)
+                else if (roll < 32)
+                {
+                    Write(InsertG());
+                }
+                else if (roll < 40)
                 {
                     Write(UpdateP());
                 }
-                else if (roll < 48)
+                else if (roll < 44)
+                {
+                    Write(UpdateG());
+                }
+                else if (roll < 50)
                 {
                     Write(DeleteFrom());
+                }
+                else if (roll < 62)
+                {
+                    QueryG();
                 }
                 else if (roll < 98)
                 {
@@ -165,20 +188,74 @@ public sealed class SqliteDifferentialTests : IDisposable
 
         private string UpdateP()
         {
-            string assignment = _random.Next(4) switch
+            string assignment = _random.Next(5) switch
             {
                 0 => $"A = {NullableInt(20)}",
                 1 => $"B = B + {_random.Next(1, 4)}",
                 2 => $"S = {NullableWord()}",
-                _ => $"A = {_random.Next(20)}, B = {_random.Next(5)}",
+                3 => $"A = {_random.Next(20)}, B = {_random.Next(5)}",
+                _ => $"Id = {1 + _random.Next(IdRange)}", // moves the row; a taken key or several rows fail
             };
 
             return $"UPDATE P SET {assignment} WHERE {Predicate("P", depth: 0)}";
         }
 
-        private string DeleteFrom() => _random.Next(3) == 0
-            ? $"DELETE FROM C WHERE {Predicate("C", depth: 0)}"
-            : $"DELETE FROM P WHERE {Predicate("P", depth: 0)}";
+        private string DeleteFrom() => _random.Next(4) switch
+        {
+            0 => $"DELETE FROM C WHERE {Predicate("C", depth: 0)}",
+            1 => $"DELETE FROM G WHERE {PredicateG()}",
+            _ => $"DELETE FROM P WHERE {Predicate("P", depth: 0)}",
+        };
+
+        private string InsertG()
+        {
+            int rows = 1 + _random.Next(3);
+            var values = Enumerable.Range(0, rows).Select(_ => $"({GuidKey()}, {NullableInt(20)}, {NullableWord()})");
+            return $"INSERT INTO G (Id, A, S) VALUES {string.Join(", ", values)}";
+        }
+
+        private string UpdateG()
+        {
+            string assignment = _random.Next(3) switch
+            {
+                0 => $"A = {NullableInt(20)}",
+                1 => $"S = {NullableWord()}, A = {_random.Next(20)}",
+                _ => $"Id = {GuidKey()}", // moves the row to another key
+            };
+
+            return $"UPDATE G SET {assignment} WHERE {PredicateG()}";
+        }
+
+        // GUID order differs between engines (SQLite sorts the text), so G results compare unordered.
+        private void QueryG()
+        {
+            switch (_random.Next(4))
+            {
+                case 0:
+                    Select($"SELECT Id, A, S FROM G WHERE {PredicateG()}", ordered: false);
+                    break;
+                case 1:
+                    Select($"SELECT COUNT(*) AS n, SUM(A) AS s FROM G WHERE {PredicateG()}", ordered: true);
+                    break;
+                case 2:
+                    Select($"SELECT A, S FROM G WHERE Id = {GuidKey()}", ordered: false);
+                    break;
+                default:
+                    Select("SELECT S, COUNT(*) AS n FROM G GROUP BY S", ordered: false);
+                    break;
+            }
+        }
+
+        private string PredicateG() => _random.Next(5) switch
+        {
+            0 => $"Id = {GuidKey()}",
+            1 => $"Id IN ({string.Join(", ", Enumerable.Range(0, 1 + _random.Next(4)).Select(_ => GuidKey()))})",
+            2 => $"Id <> {GuidKey()}",
+            3 => $"S {(_random.Next(2) == 0 ? "IS NULL" : "IS NOT NULL")}",
+            _ => Comparison("A", 20),
+        };
+
+        private string GuidKey() => $"'{GuidKeys[_random.Next(GuidKeys.Length)]}'";
 
         private void Query()
         {
