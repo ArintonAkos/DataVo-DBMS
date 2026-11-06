@@ -69,6 +69,35 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>
+    /// Forgets the version metadata of rows (absent metadata reads as an always-visible base version).
+    /// Free when no metadata is held at all, which is the steady state of auto-commit workloads.
+    /// </summary>
+    public void RemoveVersions(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
+    {
+        if (_versionMetadata.IsEmpty || rowIds.Count == 0)
+        {
+            return;
+        }
+
+        _versionLock.EnterWriteLock();
+        try
+        {
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                _versionMetadata.TryRemove((databaseName, tableName, rowIds[i]), out _);
+            }
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>Forgets the version metadata of one row (see <see cref="RemoveVersions"/>).</summary>
+    public void RemoveVersion(string databaseName, string tableName, RowKey rowId) =>
+        RemoveVersions(databaseName, tableName, [rowId]);
+
+    /// <summary>
     /// Retrieves the current version metadata for a row.
     /// </summary>
     public RowVersion? GetVersion(string databaseName, string tableName, RowKey rowId)

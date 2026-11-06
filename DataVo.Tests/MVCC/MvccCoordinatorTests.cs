@@ -61,11 +61,41 @@ public class MvccCoordinatorTests
     }
 
     [Fact]
+    public void ReinsertingADeletedClusteredKey_DoesNotLookAlreadyDeleted()
+    {
+        // A clustered table reuses a key after a delete; its old version's xmax must not survive.
+        var engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        try
+        {
+            MvccCoordinator.RegisterDeleteVersion(engine, "db", "tbl", 7, transactionId: 3);
+            MvccCoordinator.RegisterInsertVersion(engine, "db", "tbl", 7, transactionId: 4);
+
+            MvccCoordinator.ValidateCanModifyRow(engine, "db", "tbl", 7, snapshot: null, "UPDATE");
+
+            Guid session = Guid.NewGuid();
+            engine.TransactionManager.Begin(session, engine.TransactionIdAllocator);
+            MvccCoordinator.RegisterDeleteVersion(engine, "db", "tbl", 7, transactionId: 5);
+            MvccCoordinator.RegisterInsertVersion(engine, "db", "tbl", 7, transactionId: 6);
+            MvccCoordinator.ValidateCanModifyRow(engine, "db", "tbl", 7, snapshot: null, "UPDATE");
+
+            MvccCoordinator.RegisterUpdateVersion(engine, "db", "tbl", 7, 7, transactionId: 7);
+            Assert.Equal(7, engine.VersionStorageManager.GetVersion("db", "tbl", 7)!.Value.Xmin);
+            Assert.Single(engine.VersionStorageManager.GetVersionChain("db", "tbl", 7)); // no self-link
+        }
+        finally
+        {
+            engine.Dispose();
+        }
+    }
+
+    [Fact]
     public void RegisterUpdateVersion_CreatesLinkedVersionChain()
     {
         var engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
         try
         {
+            // Version metadata is kept only while some transaction could need it.
+            engine.TransactionManager.Begin(Guid.NewGuid(), engine.TransactionIdAllocator);
             engine.VersionStorageManager.AllocateVersion("db", "tbl", 10, xmin: 5);
 
             MvccCoordinator.RegisterUpdateVersion(engine, "db", "tbl", oldRowId: 10, newRowId: 11, transactionId: 6);

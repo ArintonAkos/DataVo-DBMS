@@ -76,6 +76,9 @@ public static class MvccCoordinator
 
         if (!engine.TransactionManager.HasAnyActiveTransaction())
         {
+            // No snapshot can need this version. A clustered key may be re-inserted after a delete, so
+            // drop whatever an earlier version left behind (its xmax would read as a conflict).
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, rowId);
             return;
         }
 
@@ -105,6 +108,7 @@ public static class MvccCoordinator
 
         if (!engine.TransactionManager.HasAnyActiveTransaction())
         {
+            engine.VersionStorageManager.RemoveVersions(databaseName, tableName, rowIds); // see RegisterInsertVersion
             return;
         }
 
@@ -128,6 +132,21 @@ public static class MvccCoordinator
             return;
         }
 
+        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            // No snapshot can see either version: keep no metadata (absent reads as always visible).
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, oldRowId);
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, newRowId);
+            return;
+        }
+
+        if (oldRowId == newRowId)
+        {
+            // A clustered row keeps its key: the new version replaces the old one under the same key.
+            engine.VersionStorageManager.AllocateVersion(databaseName, tableName, newRowId, transactionId);
+            return;
+        }
+
         EnsureRowVersionExists(engine, databaseName, tableName, oldRowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, oldRowId, transactionId);
         engine.VersionStorageManager.AllocateVersion(databaseName, tableName, newRowId, transactionId);
@@ -142,6 +161,14 @@ public static class MvccCoordinator
         // Version metadata becomes visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RegisterDeleteVersion(engine, databaseName, tableName, rowId, transactionId)))
         {
+            return;
+        }
+
+        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            // A deleted row no snapshot can see needs no metadata; keeping it would also make a re-insert
+            // of the same clustered key look already deleted.
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, rowId);
             return;
         }
 
