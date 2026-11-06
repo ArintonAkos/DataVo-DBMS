@@ -6,9 +6,9 @@ namespace DataVo.Core.Exceptions;
 public class RowNotFoundException : StorageException
 {
     /// <summary>
-    /// Gets the requested row identifier.
+    /// Gets the requested row key.
     /// </summary>
-    public long RowId { get; }
+    public RowKey RowId { get; }
 
     /// <summary>
     /// Gets the table name where the row lookup failed.
@@ -18,9 +18,9 @@ public class RowNotFoundException : StorageException
     /// <summary>
     /// Initializes an exception for a missing row lookup.
     /// </summary>
-    /// <param name="rowId">The requested row identifier.</param>
+    /// <param name="rowId">The requested row key.</param>
     /// <param name="tableName">The target table name.</param>
-    public RowNotFoundException(long rowId, string tableName)
+    public RowNotFoundException(RowKey rowId, string tableName)
         : base($"Row {rowId} in table '{tableName}' was not found.")
     {
         RowId = rowId;
@@ -30,10 +30,10 @@ public class RowNotFoundException : StorageException
     /// <summary>
     /// Initializes an exception for a missing row lookup with an inner exception.
     /// </summary>
-    /// <param name="rowId">The requested row identifier.</param>
+    /// <param name="rowId">The requested row key.</param>
     /// <param name="tableName">The target table name.</param>
     /// <param name="innerException">The underlying cause.</param>
-    public RowNotFoundException(long rowId, string tableName, Exception innerException)
+    public RowNotFoundException(RowKey rowId, string tableName, Exception innerException)
         : base($"Row {rowId} in table '{tableName}' was not found.", innerException)
     {
         RowId = rowId;
