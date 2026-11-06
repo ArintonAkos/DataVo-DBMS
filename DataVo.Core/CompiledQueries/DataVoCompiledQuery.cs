@@ -1723,7 +1723,7 @@ public static class DataVoCompiledQuery
         List<(string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)> childForeignKeys =
             context.Engine.Catalog.GetChildForeignKeys(tableName, databaseName);
 
-        Dictionary<string, HashSet<string>> batchUniqueValues = InitializeBatchUniqueTracker(primaryKeys, uniqueKeys);
+        var keyValidator = new DataVo.Core.Parser.DML.UpdateKeyValidator(context.Engine.IndexManager, context.Engine.StorageContext, tableName, databaseName);
 
         for (int i = 0; i < rowIds.Count; i++)
         {
@@ -1732,89 +1732,9 @@ public static class DataVoCompiledQuery
             Dictionary<string, object?> newRow = newRows[i];
             int rowNumber = i + 1;
 
-            ValidatePrimaryAndUniqueConstraints(context, tableName, databaseName, newRow, oldRow, primaryKeys, uniqueKeys, batchUniqueValues, rowNumber);
+            keyValidator.Validate(newRow, oldRow, primaryKeys, uniqueKeys, rowNumber);
             ValidateForeignKeyConstraints(context, databaseName, newRow, oldRow, foreignKeys, rowNumber);
             ValidateChildForeignKeyConstraints(context, tableName, databaseName, newRow, oldRow, childForeignKeys);
-        }
-    }
-
-    private static Dictionary<string, HashSet<string>> InitializeBatchUniqueTracker(
-        IReadOnlyList<string> primaryKeys,
-        IReadOnlyList<string> uniqueKeys)
-    {
-        Dictionary<string, HashSet<string>> batchUniqueValues = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string columnName in primaryKeys.Concat(uniqueKeys))
-        {
-            batchUniqueValues[columnName] = new HashSet<string>(StringComparer.Ordinal);
-        }
-
-        return batchUniqueValues;
-    }
-
-    private static void ValidatePrimaryAndUniqueConstraints(
-        DataVoContext context,
-        string tableName,
-        string databaseName,
-        Dictionary<string, object?> newRow,
-        IReadOnlyDictionary<string, object?> oldRow,
-        IReadOnlyList<string> primaryKeys,
-        IReadOnlyList<string> uniqueKeys,
-        IReadOnlyDictionary<string, HashSet<string>> batchUniqueValues,
-        int rowNumber)
-    {
-        foreach (string columnName in primaryKeys.Concat(uniqueKeys))
-        {
-            if (!newRow.TryGetValue(columnName, out object? value))
-            {
-                continue;
-            }
-
-            if (value == null && primaryKeys.Contains(columnName, StringComparer.OrdinalIgnoreCase))
-            {
-                throw new EvaluationException($"Constraint violation: Primary key column {columnName} cannot be null in row {rowNumber}.");
-            }
-
-            if (value == null)
-            {
-                continue;
-            }
-
-            string valueText = value.ToString()!;
-            string oldValueText = oldRow.TryGetValue(columnName, out object? oldValue)
-                ? oldValue?.ToString() ?? "null_val"
-                : "null_val";
-
-            if (valueText == oldValueText)
-            {
-                continue;
-            }
-
-            if (!batchUniqueValues[columnName].Add(valueText))
-            {
-                throw new EvaluationException($"Update conflict: Duplicate value '{valueText}' generated within the same batch for unique column {columnName}.");
-            }
-
-            string indexName = primaryKeys.Contains(columnName, StringComparer.OrdinalIgnoreCase)
-                ? $"_PK_{tableName}"
-                : $"_UK_{columnName}";
-
-            bool duplicateExists;
-            try
-            {
-                duplicateExists = context.Engine.IndexManager.IndexContainsKey(valueText, indexName, tableName, databaseName);
-            }
-            catch
-            {
-                duplicateExists = context.Engine.StorageContext.GetTableContents(tableName, databaseName)
-                    .Any(entry => entry.Value.TryGetValue(columnName, out object? existing)
-                                  && existing != null
-                                  && string.Equals(existing.ToString(), valueText, StringComparison.Ordinal));
-            }
-
-            if (duplicateExists)
-            {
-                throw new EvaluationException($"Constraint violation: Duplicate value '{valueText}' for unique column {columnName} in row {rowNumber}.");
-            }
         }
     }
 

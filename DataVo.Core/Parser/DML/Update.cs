@@ -258,7 +258,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var foreignKeysList = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
-        Dictionary<string, HashSet<string>> batchUniqueValues = InitializeBatchUniqueTracker(primaryKeys, uniqueKeys);
+        var keyValidator = new UpdateKeyValidator(Indexes, Context, _model.TableName, databaseName);
         List<Models.Catalog.Column> assignedColumns = [];
         foreach (Models.Catalog.Column column in Catalog.GetTableColumnsReadOnly(_model.TableName, databaseName))
         {
@@ -301,7 +301,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
 
             // Validate all constraints
-            ValidatePrimaryAndUniqueConstraints(newRow, oldRow, primaryKeys, uniqueKeys, batchUniqueValues, rowNumber, databaseName);
+            keyValidator.Validate(newRow, oldRow, primaryKeys, uniqueKeys, rowNumber);
             ValidateForeignKeyConstraints(newRow, oldRow, foreignKeysList, rowNumber, databaseName);
             ValidateChildForeignKeyConstraints(newRow, oldRow, childFks, databaseName);
 
@@ -311,18 +311,6 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         return (newRows, oldRowIds);
     }
 
-    /// <summary>
-    /// Initializes a tracker to prevent unique constraint violations within the selfsame bulk update batch.
-    /// </summary>
-    private static Dictionary<string, HashSet<string>> InitializeBatchUniqueTracker(List<string> primaryKeys, List<string> uniqueKeys)
-    {
-        Dictionary<string, HashSet<string>> batchUniqueValues = new();
-        foreach (var col in primaryKeys.Concat(uniqueKeys))
-        {
-            batchUniqueValues[col] = new HashSet<string>();
-        }
-        return batchUniqueValues;
-    }
 
     /// <summary>
     /// Applies the SQL SET expressions to the old row to calculate its new modified state.
@@ -350,69 +338,6 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         return newRow;
-    }
-
-    /// <summary>
-    /// Validates that the newly assigned values do not violate Primary Key or Unique Key constraints.
-    /// </summary>
-    private void ValidatePrimaryAndUniqueConstraints(
-        Dictionary<string, object?> newRow,
-        Dictionary<string, object?> oldRow,
-        List<string> primaryKeys,
-        List<string> uniqueKeys,
-        Dictionary<string, HashSet<string>> batchUniqueValues,
-        int rowNumber,
-        string databaseName)
-    {
-        foreach (var col in primaryKeys.Concat(uniqueKeys))
-        {
-            if (newRow.TryGetValue(col, out var val))
-            {
-                if (val == null && primaryKeys.Contains(col))
-                {
-                    throw new EvaluationException($"Constraint violation: Primary key column {col} cannot be null in row {rowNumber}.");
-                }
-
-                if (val == null) continue; // Unique keys can be null
-
-                string valStr = val.ToString()!;
-                string oldValStr = oldRow.TryGetValue(col, out var oldVal) ? (oldVal?.ToString() ?? "null_val") : "null_val";
-
-                // Fine if it hasn't actually mutated
-                if (valStr == oldValStr) continue;
-
-                if (!batchUniqueValues[col].Add(valStr))
-                {
-                    throw new EvaluationException($"Update conflict: Duplicate value '{valStr}' generated within the same batch for unique column {col}.");
-                }
-
-                string indexName = primaryKeys.Contains(col) ? $"_PK_{_model.TableName}" : $"_UK_{col}";
-                bool duplicateExists = false;
-
-                try
-                {
-                    duplicateExists = Indexes.IndexContainsKey(valStr, indexName, _model.TableName, databaseName);
-                }
-                catch
-                {
-                    // Fall back to row scan below.
-                }
-
-                if (!duplicateExists)
-                {
-                    var rows = Context.GetTableContents(_model.TableName, databaseName);
-                    duplicateExists = rows
-                        .Any(entry => entry.Value.TryGetValue(col, out var existing)
-                                      && existing != null
-                                      && string.Equals(existing.ToString(), valStr, StringComparison.Ordinal));
-                }
-
-                if (duplicateExists)
-                {
-                    throw new EvaluationException($"Constraint violation: Duplicate value '{valStr}' for unique column {col} in row {rowNumber}.");
-                }
-            }
-        }
     }
 
     /// <summary>
