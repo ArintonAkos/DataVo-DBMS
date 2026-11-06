@@ -1,3 +1,4 @@
+using Research.Benchmark.Runners.SqlWorkload;
 using System.Diagnostics;
 using Research.Benchmark.Abstractions;
 using Research.Benchmark.Host;
@@ -240,10 +241,37 @@ else if (benchmarkScenario.Equals("space-and-recovery", StringComparison.Ordinal
         }
     }
 }
+else if (benchmarkScenario.Equals("sql-workload", StringComparison.OrdinalIgnoreCase))
+{
+    var options = new SqlWorkloadOptions(
+        Orders: ReadIntArg(args, "--records", 1_000_000),
+        PointReads: ReadIntArg(args, "--point-reads", 20_000),
+        SecondaryReads: ReadIntArg(args, "--secondary-reads", 2_000),
+        RangeScans: ReadIntArg(args, "--range-scans", 2_000),
+        ScanQueries: ReadIntArg(args, "--scan-queries", 5),
+        Updates: ReadIntArg(args, "--updates", 10_000),
+        Deletes: ReadIntArg(args, "--deletes", 5_000));
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-sql-workload-{Guid.NewGuid():N}");
+    var workloadResults = new List<SqlWorkloadEngineResult>();
+    try
+    {
+        foreach (ISqlWorkloadEngine engine in SqlWorkloadRunner.CreateEngines(engineFilter))
+        {
+            workloadResults.Add(SqlWorkloadRunner.Run(engine, options, root, message => Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {message}")));
+        }
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+    }
+
+    Console.Write(SqlWorkloadRunner.ToMarkdown(workloadResults, options));
+    return;
+}
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use arena-live-views, complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, or space-and-recovery.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use arena-live-views, complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, space-and-recovery, or sql-workload.");
 }
 
 if (outputFormat == "csv")
