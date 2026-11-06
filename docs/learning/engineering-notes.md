@@ -273,3 +273,11 @@ What found the time, and what did not:
   `ConcurrentDictionary` (a lock and a node per insert, resizing under all locks). Our writers are
   already serialized and only readers are concurrent, so an open-addressing table of immutable entries,
   republished on growth, cut that step from 263 to 88 ms per million rows.
+- **Do the work once, and pin once.** A clustered row was serialized whole, read back for its key, and
+  copied without it; the typed path now takes the key from the cells and serializes the stored form
+  directly. The duplicate check pinned the table's file set (two atomic operations) for every key; it now
+  pins it once per batch. Sorting a commit's keys by comparing whole operations cost 72 ms per million
+  rows; sorting the 16-byte keys themselves costs 51. GUID inserts, timed alone: ~800 -> ~680 ms.
+- **Report the less flattering benchmark.** The focused insert benchmark showed GUID inserts nearly level
+  with SQLite; the end-to-end one (open, create, insert, close, as the SQLite run is timed) still shows
+  20% slower. The README carries the end-to-end numbers.

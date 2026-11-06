@@ -65,11 +65,11 @@ column are clustered: rows are stored under their key, with no separate primary-
 | --- | --- | --- | --- |
 | INT key, size | 21.0 MB | 41.4 MB | 19.0 MB (`INTEGER PRIMARY KEY`) |
 | GUID key (version 7), size | 29.3 MB | 61.4 MB | 35.4 MB (16-byte `BLOB`, `WITHOUT ROWID`) |
-| INT key, typed bulk insert, open to close | 0.43 s | 1.5 s | 0.42-0.57 s (one transaction) |
-| GUID key, typed bulk insert, open to close | 0.91 s | 2.3 s | 0.71-0.72 s |
+| INT key, typed bulk insert, open to close | 0.42-0.46 s | 1.6 s | 0.43-0.56 s (one transaction) |
+| GUID key, typed bulk insert, open to close | 0.87-0.92 s | 2.2 s | 0.72 s |
 
 Clustering halves the INT table and makes GUID tables smaller than SQLite's best layout for them. INT
-inserts match SQLite; GUID inserts are about 25% slower. DataVo ran with relaxed durability (no fsync
+inserts match SQLite; GUID inserts are about 20% slower. DataVo ran with relaxed durability (no fsync
 before close) and SQLite with its default one fsync at commit, which favours DataVo slightly. Clustering
 is on by default for new tables (`DataVoConfig.ClusteredPrimaryKeys`).
 
