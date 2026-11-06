@@ -38,6 +38,11 @@ internal static class ExpressionValueComparer
         if (leftValue == null && rightValue == null) return true;
         if (leftValue == null || rightValue == null) return false;
 
+        if (TryAsGuidPair(leftValue, rightValue, out Guid leftGuid, out Guid rightGuid))
+        {
+            return leftGuid == rightGuid;
+        }
+
         if (string.Equals(
             Convert.ToString(leftValue, CultureInfo.InvariantCulture),
             Convert.ToString(rightValue, CultureInfo.InvariantCulture),
@@ -83,6 +88,11 @@ internal static class ExpressionValueComparer
         if (leftValue == null) return -1;
         if (rightValue == null) return 1;
 
+        if (TryAsGuidPair(leftValue, rightValue, out Guid leftGuid, out Guid rightGuid))
+        {
+            return leftGuid.CompareTo(rightGuid);
+        }
+
         if (TryConvertToDouble(leftValue, out double leftNumber) &&
             TryConvertToDouble(rightValue, out double rightNumber))
         {
@@ -98,6 +108,38 @@ internal static class ExpressionValueComparer
             Convert.ToString(leftValue, CultureInfo.InvariantCulture),
             Convert.ToString(rightValue, CultureInfo.InvariantCulture),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A GUID column compared with a literal: the literal arrives as (possibly quoted) text, so compare it
+    /// as a GUID. Comparing the texts missed differences in case and quoting, which made
+    /// <c>Id &lt;&gt; '...'</c> true for the very row it names.
+    /// </summary>
+    private static bool TryAsGuidPair(object leftValue, object rightValue, out Guid left, out Guid right)
+    {
+        left = default;
+        right = default;
+        if (leftValue is not Guid && rightValue is not Guid)
+        {
+            return false;
+        }
+
+        return TryAsGuid(leftValue, out left) && TryAsGuid(rightValue, out right);
+    }
+
+    private static bool TryAsGuid(object value, out Guid guid)
+    {
+        switch (value)
+        {
+            case Guid g:
+                guid = g;
+                return true;
+            case string text:
+                return Guid.TryParse(text.Trim().Trim('\''), out guid);
+            default:
+                guid = default;
+                return false;
+        }
     }
 
     /// <summary>
