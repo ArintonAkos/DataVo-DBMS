@@ -156,3 +156,37 @@ reported DataVo 580x faster. Done the same way, they tie when every update is po
   commit counts and row ids are deterministic.
 - **Allocation tests need steady state.** .NET first runs methods unoptimized and replaces them in the
   background; measure until the optimized code is in place.
+
+## 11. Widening a key without slowing the engine down
+
+Clustered primary keys need the storage engine to key rows by 16 bytes (an integer or a GUID) instead
+of an 8-byte engine row id. Stage 2 of that work changed every place the LSM engine handled a row key.
+What we learned:
+
+- **Version the formats; keep reading the old ones.** Row SSTables gained version 6, commit-log frames
+  version 2, and index tables a new "built" marker. Files and logs written by the previous build are still
+  read (old index tables are rebuilt from the rows on open), so upgrading never loses data. Tests build
+  old-format files by hand and check that they read, merge with new files, and compact.
+- **Old and new keys must compare correctly.** Manifests still record 8-byte bounds for old files. Compared
+  as raw bytes, an 8-byte key sorts after every 16-byte integer key, so compaction would pick the wrong
+  files to merge, which can bring deleted rows back. Old bounds are widened before they are compared.
+- **Fast path plus general path.** The in-memory overlay keeps its dense array for small engine row ids
+  (two array reads, no allocation) and sends every other key (GUIDs, negative or huge integers) to a
+  concurrent hash map, whose reads are also lock-free. A key always lives in one of the two, chosen by
+  the key alone.
+- **Measure, then measure the part.** The first v6 version made SSTable point reads 28% slower
+  (300 -> 385 ns). Three guesses (inlining varints, cheaper comparisons, caching block keys) changed
+  little. Timing the pieces separately located the cost: inside one block, v6 took 120 ns where v4 took
+  64. The fix came from the data. Keys are sorted, so every integer key comes before every GUID; a v6
+  file now stores its integer blocks in the v4 encoding and uses the wide encoding only for GUID blocks.
+  Integer tables read at v4 speed again: 315 vs 300 ns end to end, the rest being the cost of 16-byte
+  handles.
+- **Benchmark against the commit before the change, not a stale branch.** Local `master` was behind
+  `origin/master`; the first baseline would have compared against old code.
+- **Randomized tests also find bugs in test hooks.** A new seed lost a whole table after a simulated
+  crash. Adding a debug dump made it pass, which pointed at timing rather than logic: a background flush
+  that finished during the simulated crash pruned the commit log after the table had been stopped, so
+  nothing held that table's unflushed frames back. A real crash runs no code, so production was safe, but
+  the hook now holds the prune gate while it shuts down. A second failure was the test model's own
+  mistake (an aborted batch that deleted and re-inserted a committed key); read the failure before
+  touching the engine.

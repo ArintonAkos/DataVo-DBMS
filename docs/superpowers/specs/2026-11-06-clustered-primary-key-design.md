@@ -112,10 +112,14 @@ Clustering applies to tables created after the change; existing tables keep surr
    change; the whole suite and the randomized tests must stay green. (Largest stage: mechanical but
    wide.)
 2. Sparse overlay and 16-byte row SSTable format (v6), commit-log frames with 16-byte keys; read old
-   formats.
+   formats. **Done.** Also moved here from stage 5: LSM index entries carry 16-byte row keys (old index
+   tables are rebuilt on open), because GUID-keyed tables need them in stage 3. A v6 file stores blocks
+   of integer keys in the v4 encoding and only GUID blocks in the wide encoding, so integer tables keep
+   v4 size and speed. The engine has `TryInsertRowWithKey` (uniqueness by row existence); stage 3 wires
+   it to SQL.
 3. Clustered inserts for INT and GUID keys on new tables; uniqueness by row existence; no PK index.
 4. PK-changing updates (row moves) and re-pointing.
-5. Index and HNSW format versions with rebuild of old ones.
+5. HNSW format version with rebuild of old snapshots (LSM index entries were widened in stage 2).
 6. Measurements (space, read/write latency, allocation) against the numbers in section 1; docs.
 
 ## 6. Testing
