@@ -190,3 +190,12 @@ What we learned:
   the hook now holds the prune gate while it shuts down. A second failure was the test model's own
   mistake (an aborted batch that deleted and re-inserted a committed key); read the failure before
   touching the engine.
+- **Know what "complete" promises.** The in-memory engine keeps integer index keys in a "fast lane"
+  map and trusts it only when the lane is marked complete. An index created on an empty table was
+  marked complete before any lane existed. SQL inserts wrote only the slower B-tree; a later UPDATE
+  created the lane with just its own row, and lookups answered from it, missing every earlier row
+  (found by the SQLite differential test, seed 2015, reduced from 38 statements to 5 by removing one
+  statement at a time while the failure persisted). The first fix attempt dropped the "complete" flag
+  and broke rows that typed inserts had put only in the lane. The flag's real promise is "the lane
+  holds every entry", so now the first entry starts the lane, and a partial lane never holds an
+  entry alone.
