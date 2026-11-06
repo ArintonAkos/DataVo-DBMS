@@ -46,6 +46,36 @@ public sealed class MixedPathSecondaryIndexTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void LaneCreatedAfterSqlInserts_DoesNotHideTheirRows(bool laneCreatedByUpdate)
+    {
+        // Found by the SQLite differential test (seed 2015): an index created on an empty table counts as
+        // having complete fast lanes. SQL inserts wrote only the scalar index; a later typed write then
+        // created the lane with just its own rows, and lookups answered from that lane.
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        AssertOk(db.Execute("CREATE DATABASE Lanes"));
+        AssertOk(db.Execute("USE Lanes"));
+        AssertOk(db.Execute("CREATE TABLE T (Id INT PRIMARY KEY, Code INT)"));
+        AssertOk(db.Execute("CREATE INDEX ix_code ON T (Code)"));
+        AssertOk(db.Execute("INSERT INTO T (Id, Code) VALUES (1, 5), (2, 9)"));
+
+        if (laneCreatedByUpdate)
+        {
+            AssertOk(db.Execute("UPDATE T SET Code = 7 WHERE Id = 2"));
+        }
+        else
+        {
+            db.InsertTyped("T", Schema, [CellValue.From(3), CellValue.From(7)]);
+        }
+
+        AssertOk(db.Execute("INSERT INTO T (Id, Code) VALUES (4, 5)"));
+
+        Assert.Equal([1, 4], db.Execute("SELECT Id FROM T WHERE Code = 5")[0].Data.Select(r => Convert.ToInt32(r["Id"])).Order());
+        Assert.NotEmpty(db.Execute("SELECT Id FROM T WHERE Code = 7")[0].Data);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void UniqueIntegerColumn_RejectsDuplicate_FromTypedOrSqlInsert(bool secondInsertIsTyped)
     {
         using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });

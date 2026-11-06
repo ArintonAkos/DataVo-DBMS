@@ -1411,6 +1411,11 @@ public partial class IndexManager : IDisposable
         bool hasGuidSecondary = _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? guidSecondary);
         if (!hasIntegerLane && !hasIntegerSecondary && !hasGuidLane && !hasGuidSecondary)
         {
+            if (IsLaneComplete(cacheKey))
+            {
+                StartLaneWithFirstEntryNoLock(cacheKey, value, rowId);
+            }
+
             return;
         }
 
@@ -1444,6 +1449,51 @@ public partial class IndexManager : IDisposable
         _integerIndexMaps.Remove(cacheKey);
         _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
         _guidIndexMaps.Remove(cacheKey);
+        _completeLaneIndexes.TryRemove(cacheKey, out _);
+    }
+
+    /// <summary>
+    /// An index created on an empty table counts as having complete lanes before it has any: the key type
+    /// is unknown until the first entry. When that entry arrives through the scalar path, the lane starts
+    /// with it, so the lane stays complete; otherwise a lane created later by a typed write would hold
+    /// only that write's rows while lookups trusted it. A key no lane can represent ends the claim.
+    /// </summary>
+    private void StartLaneWithFirstEntryNoLock(IndexCacheKey cacheKey, string value, RowKey rowId)
+    {
+        bool isPrimaryKey = string.Equals(cacheKey.Index, $"_PK_{cacheKey.Table}", StringComparison.OrdinalIgnoreCase);
+        if (TryParseIntegerPrimaryKey(value, out long integerKey))
+        {
+            if (isPrimaryKey)
+            {
+                var primary = new ConcurrentInt64Int64Map();
+                primary.Set(integerKey, RowKeyConversions.ToRowId(rowId));
+                _integerPrimaryKeyMaps[cacheKey] = primary;
+            }
+            else
+            {
+                _integerIndexMaps[cacheKey] = new Dictionary<long, List<RowKey>> { [integerKey] = [rowId] };
+            }
+
+            return;
+        }
+
+        if (TryParseGuidKey(value, out Guid guidKey))
+        {
+            if (isPrimaryKey)
+            {
+                var primary = new ConcurrentDictionary<Guid, RowKey>(GuidSimdEqualityComparer.Instance);
+                primary[guidKey] = rowId;
+                _guidPrimaryKeyMaps[cacheKey] = primary;
+            }
+            else
+            {
+                var secondary = new Dictionary<Guid, List<RowKey>>(GuidSimdEqualityComparer.Instance) { [guidKey] = [rowId] };
+                _guidIndexMaps[cacheKey] = secondary;
+            }
+
+            return;
+        }
+
         _completeLaneIndexes.TryRemove(cacheKey, out _);
     }
 
@@ -1779,7 +1829,9 @@ public partial class IndexManager : IDisposable
                 rowIds.Add(rowId);
             }
 
-            if (!MirrorsFastLanesToScalarIndex)
+            // Without persistence the lane is the only copy of these entries, which is right only while
+            // the lane is complete; a partial lane is never read, so the scalar index must get them too.
+            if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
             {
                 return;
             }
@@ -1917,7 +1969,9 @@ public partial class IndexManager : IDisposable
                 rowIds.Add(rowId);
             }
 
-            if (!MirrorsFastLanesToScalarIndex)
+            // Without persistence the lane is the only copy of these entries, which is right only while
+            // the lane is complete; a partial lane is never read, so the scalar index must get them too.
+            if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
             {
                 return;
             }
@@ -2033,7 +2087,8 @@ public partial class IndexManager : IDisposable
     /// </summary>
     private void MirrorLaneRemoval(IndexCacheKey cacheKey, string indexName, string tableName, string databaseName, RowKey rowId)
     {
-        if (!MirrorsFastLanesToScalarIndex)
+        // As for inserts: without persistence only a complete lane is the sole copy of its entries.
+        if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
         {
             return;
         }
