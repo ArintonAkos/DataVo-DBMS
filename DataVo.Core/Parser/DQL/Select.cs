@@ -145,7 +145,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
             try
             {
-                ListedTable result = TryEvaluateTypedSingleTable() ?? EvaluateStatements();
+                ListedTable result = TryEvaluateTypedSingleTable() ?? TryEvaluateTypedJoinAggregate() ?? EvaluateStatements();
 
                 if (_volcanoAggregatePushedDown)
                 {

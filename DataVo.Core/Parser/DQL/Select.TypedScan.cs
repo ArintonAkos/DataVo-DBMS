@@ -215,7 +215,22 @@ internal partial class Select
         return indexed;
     }
 
-    private bool TryCollectTypedPredicates(ExpressionNode node, string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates)
+    private bool TryCollectTypedPredicates(ExpressionNode node, string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates) =>
+        TryCollectSidePredicates(
+            node,
+            reference => ColumnOfTable(reference, tableName) is { } name ? (0, name) : null,
+            [columns],
+            [predicates]);
+
+    /// <summary>
+    /// Collects an AND of <c>column op literal</c> comparisons, assigning each to the table side
+    /// <paramref name="resolve"/> names. False when any part has another shape.
+    /// </summary>
+    private bool TryCollectSidePredicates(
+        ExpressionNode node,
+        Func<ExpressionNode?, (int Side, string Column)?> resolve,
+        IReadOnlyList<Column>[] columnsBySide,
+        List<TypedPredicate>[] predicatesBySide)
     {
         if (node is LiteralNode constant && node is not NullLiteralNode)
         {
@@ -230,18 +245,19 @@ internal partial class Select
 
         if (binary.Operator == Operators.AND)
         {
-            return TryCollectTypedPredicates(binary.Left, tableName, columns, predicates)
-                && TryCollectTypedPredicates(binary.Right, tableName, columns, predicates);
+            return TryCollectSidePredicates(binary.Left, resolve, columnsBySide, predicatesBySide)
+                && TryCollectSidePredicates(binary.Right, resolve, columnsBySide, predicatesBySide);
         }
 
         BinaryExpressionNode comparison = ExpressionNodeNormalizer.NormalizeComparisonNode(binary);
-        string? columnName = ColumnOfTable(comparison.Left, tableName);
-        if (columnName is null || comparison.Right is not LiteralNode literal)
+        if (resolve(comparison.Left) is not { } target || comparison.Right is not LiteralNode literal)
         {
             return false;
         }
 
-        int ordinal = OrdinalOf(columns, columnName);
+        IReadOnlyList<Column> columns = columnsBySide[target.Side];
+        List<TypedPredicate> predicates = predicatesBySide[target.Side];
+        int ordinal = OrdinalOf(columns, target.Column);
         if (ordinal < 0)
         {
             return false;

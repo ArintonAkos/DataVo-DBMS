@@ -70,6 +70,15 @@ namespace DataVo.Core.Parser.Aggregations
         /// </summary>
         /// <param name="rows">The grouped rows.</param>
         /// <returns>The aggregate result value.</returns>
+        /// <summary>The aggregated column, or null for an expression argument.</summary>
+        internal Column? Field => _field;
+
+        /// <summary>The aggregated expression, when the argument is not a plain column.</summary>
+        internal ExpressionNode? ArgumentExpression => _expression;
+
+        /// <summary>Runs the argument checks <see cref="Execute"/> runs, without rows.</summary>
+        internal void ValidateArgument() => Validate();
+
         public object? Execute(ListedTable rows)
         {
             Validate();
