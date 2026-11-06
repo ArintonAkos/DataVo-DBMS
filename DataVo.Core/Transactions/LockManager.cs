@@ -529,7 +529,7 @@ public sealed class LockManager
     private static List<RowKey> BuildOrderedRowLockList(IEnumerable<RowKey> rowIds)
     {
         return rowIds
-            .Where(id => id > 0)
+            .Where(id => id != default) // default marks "no row"; clustered keys may be zero or negative
             .Distinct()
             .OrderBy(id => id)
             .ToList();
