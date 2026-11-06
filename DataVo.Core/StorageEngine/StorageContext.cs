@@ -595,6 +595,61 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName);
     }
 
+    /// <summary>Visits one row of <see cref="ScanTableRows{TState}"/>: serialized bytes, or a typed row for typed backends.</summary>
+    internal delegate bool RawRowVisitor<TState>(ref TState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow);
+
+    /// <summary>
+    /// Streams the live rows of a table with keys in <c>[lower, upper)</c> (null bounds are open), without
+    /// building a table-sized collection. The LSM backend seeks to the range and passes rows in stored form
+    /// (a clustered table's key cell is NULL there; the row key holds it). Returns false when a scan is not
+    /// possible here (an active snapshot or staged writes), so the caller takes the general path.
+    /// </summary>
+    internal bool ScanTableRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    {
+        if (MvccExecutionScope.CurrentSnapshot is not null)
+        {
+            return false;
+        }
+
+        if (LsmEngine is { } lsm)
+        {
+            if (lsm.HasStagedWrites(databaseName, tableName))
+            {
+                return false;
+            }
+
+            var box = (State: state, Visit: visit);
+            lsm.ScanStoredRows(databaseName, tableName, lower, upper, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
+                b.Visit(ref b.State, rowId, bytes, null));
+            state = box.State;
+            return true;
+        }
+
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            foreach ((RowKey rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            {
+                if (InRange(rowId, lower, upper) && !visit(ref state, rowId, default, row))
+                {
+                    return true;
+                }
+            }
+        }
+
+        foreach ((RowKey rowId, byte[] rawRow) in _storageEngine.ReadAllRows(databaseName, tableName))
+        {
+            if (InRange(rowId, lower, upper) && !visit(ref state, rowId, rawRow, null))
+            {
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool InRange(RowKey key, RowKey? lower, RowKey? upper) =>
+        (lower is not { } from || key >= from) && (upper is not { } to || key < to);
+
     private static Dictionary<RowKey, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
         Dictionary<RowKey, Dictionary<string, object?>> rows,
         string tableName,
@@ -971,7 +1026,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return result;
     }
 
-    private static object? ConvertCellForLegacyDictionary(Column column, CellValue cell)
+    internal static object? ConvertCellForLegacyDictionary(Column column, CellValue cell)
     {
         if (cell.IsNull)
         {

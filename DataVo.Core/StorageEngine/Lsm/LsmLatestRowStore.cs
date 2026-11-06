@@ -152,19 +152,43 @@ internal sealed class LsmLatestRowStore
     /// publish can only make a sequence look newer than its value, never older; a sparse version is one
     /// immutable object.
     /// </summary>
-    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit)
+    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit) =>
+        ForEachVersion(state, visit, lower: null, upper: null);
+
+    /// <summary>
+    /// <see cref="ForEachVersion{TState}(TState, Action{TState, RowKey, ulong, byte[]})"/> limited to keys in
+    /// <c>[lower, upper)</c>; a null bound is open. Dense pages outside the range are never touched.
+    /// </summary>
+    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, RowKey? lower, RowKey? upper)
     {
         // Sparse keys sort around the dense ones: negative integers before, large integers and GUIDs after.
         List<KeyValuePair<RowKey, SparseVersion>>? sparse = null;
         if (_sparse.Count > 0)
         {
             sparse = _sparse.Snapshot();
+            if (lower is not null || upper is not null)
+            {
+                sparse.RemoveAll(entry => !InRange(entry.Key, lower, upper));
+            }
+
             sparse.Sort(static (x, y) => x.Key.CompareTo(y.Key));
         }
 
         int next = 0;
         Page?[] pages = Volatile.Read(ref _pages);
-        for (int pageIndex = 0; pageIndex < pages.Length; pageIndex++)
+        int firstPage = 0;
+        if (lower is { } low && low.High == 0)
+        {
+            long lowRow = unchecked((long)(low.Low ^ 0x8000_0000_0000_0000UL));
+            firstPage = lowRow <= 0 ? 0 : (int)Math.Min(pages.Length, lowRow >> PageShift);
+        }
+        else if (lower is not null)
+        {
+            firstPage = pages.Length; // a GUID lower bound sorts after every dense key
+        }
+
+        bool done = false;
+        for (int pageIndex = firstPage; pageIndex < pages.Length && !done; pageIndex++)
         {
             Page? page = Volatile.Read(ref pages[pageIndex]);
             if (page is null)
@@ -178,8 +202,19 @@ internal sealed class LsmLatestRowStore
                 byte[]? value = Volatile.Read(ref page.Slots[slot]);
                 if (value is not null)
                 {
-                    ulong sequence = Volatile.Read(ref page.Sequences[slot]);
                     RowKey key = pageBase + slot;
+                    if (lower is { } from && key < from)
+                    {
+                        continue;
+                    }
+
+                    if (upper is { } to && key >= to)
+                    {
+                        done = true;
+                        break;
+                    }
+
+                    ulong sequence = Volatile.Read(ref page.Sequences[slot]);
                     while (sparse is not null && next < sparse.Count && sparse[next].Key < key)
                     {
                         VisitSparse(state, visit, sparse[next++]);
@@ -195,6 +230,9 @@ internal sealed class LsmLatestRowStore
             VisitSparse(state, visit, sparse[next++]);
         }
     }
+
+    private static bool InRange(RowKey key, RowKey? lower, RowKey? upper) =>
+        (lower is not { } from || key >= from) && (upper is not { } to || key < to);
 
     private static void VisitSparse<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, KeyValuePair<RowKey, SparseVersion> entry) =>
         visit(state, entry.Key, entry.Value.Sequence, ReferenceEquals(entry.Value.Value, TombstoneSentinel) ? null : entry.Value.Value);

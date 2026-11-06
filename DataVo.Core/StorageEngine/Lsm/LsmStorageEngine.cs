@@ -1759,7 +1759,10 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     {
         var rows = new List<(RowKey RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
         MergeLiveRows(state, (Rows: rows, Materializer: materializer), static (target, rowId, _, value) =>
-            target.Rows.Add((rowId, Materialize(target.Materializer, rowId, value))));
+        {
+            target.Rows.Add((rowId, Materialize(target.Materializer, rowId, value)));
+            return true;
+        });
         return rows;
     }
 
@@ -1770,23 +1773,54 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     public void ForEachLiveRowVersion(string databaseName, string tableName, Action<RowKey, ulong> visit)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(visit);
-        MergeLiveRows(GetOrCreateTable(databaseName, tableName), visit, static (callback, rowId, sequence, _) => callback(rowId, sequence));
+        MergeLiveRows(GetOrCreateTable(databaseName, tableName), visit, static (callback, rowId, sequence, _) =>
+        {
+            callback(rowId, sequence);
+            return true;
+        });
+    }
+
+    /// <summary>Visits one live row of a scan; the stored bytes are only valid during the call. Return false to stop.</summary>
+    internal delegate bool StoredRowScanVisitor<TState>(ref TState state, RowKey rowId, ReadOnlySpan<byte> storedRow);
+
+    /// <summary>
+    /// Streams the live rows with keys in <c>[lower, upper)</c> (a null bound is open) in key order, without
+    /// copying them. Rows are passed in their stored form: a clustered table's key cell is NULL and the
+    /// row key carries the value. Only valid outside a write flow (staged writes are not merged).
+    /// </summary>
+    internal void ScanStoredRows<TState>(string databaseName, string tableName, RowKey? lower, RowKey? upper, ref TState state, StoredRowScanVisitor<TState> visit)
+    {
+        var box = new ScanBox<TState>(state, visit);
+        MergeLiveRows(GetOrCreateTable(databaseName, tableName), box, static (b, rowId, _, value) => b.Visit(b, rowId, value), lower, upper);
+        state = box.State;
+    }
+
+    /// <summary>Whether this flow has staged writes to the table that a scan would have to merge (a scan then takes the general path).</summary>
+    internal bool HasStagedWrites(string databaseName, string tableName) =>
+        _ambientWrite.Value?.StagedFor(GetOrCreateTable(databaseName, tableName)) is { Count: > 0 };
+
+    private sealed class ScanBox<TState>(TState state, StoredRowScanVisitor<TState> visitor)
+    {
+        public TState State = state;
+
+        public bool Visit(ScanBox<TState> self, RowKey rowId, ReadOnlySpan<byte> value) => visitor(ref self.State, rowId, value);
     }
 
     /// <summary>Highest commit LSN applied to the in-memory tables; every row sequence is at most this.</summary>
     internal long AppliedLsn => Volatile.Read(ref _appliedLsn);
 
-    private delegate void LiveRowVisitor<TState>(TState state, RowKey rowId, ulong sequence, ReadOnlySpan<byte> value);
+    private delegate bool LiveRowVisitor<TState>(TState state, RowKey rowId, ulong sequence, ReadOnlySpan<byte> value);
 
     /// <summary>
     /// Every live row in key order: a k-way merge of the unflushed overlay and the SSTable cursors
     /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
     /// for the same reason as in <see cref="ResolveRow"/>. The value span is only valid during the call.
     /// </summary>
-    private void MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit)
+    private void MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit, RowKey? lower = null, RowKey? upper = null)
     {
-        var overlay = new List<(RowKey RowId, ulong Sequence, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
-        state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)));
+        bool bounded = lower is not null || upper is not null;
+        var overlay = new List<(RowKey RowId, ulong Sequence, byte[]? Value)>(bounded ? 16 : (int)Math.Min(state.LatestRows.Count, int.MaxValue));
+        state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)), lower, upper);
 
         TableVersion version = state.AcquireVersion();
         try
@@ -1796,7 +1830,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             for (int i = 0; i < cursors.Length; i++)
             {
                 cursors[i] = version.Files[i].GetV2Reader(_readMode).OpenCursor();
-                hasCurrent[i] = cursors[i].MoveNext();
+                hasCurrent[i] = lower is { } from ? cursors[i].SeekTo(from) : cursors[i].MoveNext();
+                if (hasCurrent[i] && upper is { } to && cursors[i].Key >= to)
+                {
+                    hasCurrent[i] = false;
+                }
             }
 
             int overlayIndex = 0;
@@ -1829,9 +1867,9 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 if (overlayIndex < overlay.Count && overlay[overlayIndex].RowId == next)
                 {
                     (_, ulong sequence, byte[]? value) = overlay[overlayIndex];
-                    if (value is not null)
+                    if (value is not null && !visit(visitorState, next, sequence, value))
                     {
-                        visit(visitorState, next, sequence, value);
+                        return;
                     }
 
                     decided = true;
@@ -1849,9 +1887,10 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                     }
                 }
 
-                if (winner >= 0 && cursors[winner].Type == LsmValueType.Put)
+                if (winner >= 0 && cursors[winner].Type == LsmValueType.Put
+                    && !visit(visitorState, next, cursors[winner].Sequence, cursors[winner].Value))
                 {
-                    visit(visitorState, next, cursors[winner].Sequence, cursors[winner].Value);
+                    return;
                 }
 
                 for (int i = 0; i < cursors.Length; i++)
@@ -1860,6 +1899,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                     while (hasCurrent[i] && cursors[i].Key == next)
                     {
                         hasCurrent[i] = cursors[i].MoveNext();
+                    }
+
+                    if (hasCurrent[i] && upper is { } to && cursors[i].Key >= to)
+                    {
+                        hasCurrent[i] = false;
                     }
                 }
             }

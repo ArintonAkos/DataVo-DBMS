@@ -452,7 +452,7 @@ internal sealed class SsTableV2Reader : IDisposable
         BinaryPrimitives.ReadInt64LittleEndian(block[(SsTableV2Format.BlockHeaderSize + (entry * SsTableV2Format.EntrySize))..]);
 
     /// <summary>First block whose last key is at or after <paramref name="key"/>.</summary>
-    private int FindFirstBlockEndingAtOrAfter(RowKey key)
+    internal int FindFirstBlockEndingAtOrAfter(RowKey key)
     {
         ReadOnlySpan<byte> index = _index.Span;
         int low = 0;
@@ -734,6 +734,26 @@ internal sealed class SsTableV2Cursor
 
     /// <summary>The current entry's value; valid until the next <see cref="MoveNext"/>.</summary>
     public ReadOnlySpan<byte> Value => _block.Span.Slice(_valueOffset, _valueLength);
+
+    /// <summary>
+    /// Moves to the first entry whose key is at or after <paramref name="key"/>; returns false when there
+    /// is none. Earlier blocks are skipped through the index, so only one block is read to get there.
+    /// </summary>
+    public bool SeekTo(RowKey key)
+    {
+        _blockIndex = _reader.FindFirstBlockEndingAtOrAfter(key) - 1;
+        _entry = 0;
+        _entryCount = 0;
+        while (MoveNext())
+        {
+            if (Key >= key)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public bool MoveNext()
     {

@@ -39,7 +39,11 @@ namespace DataVo.Core.Models.Statement.Utils
             }
 
             _tableContentValuesCache = [.. inMemoryRows];
+            IsMaterialized = true;
         }
+
+        /// <summary>Whether the rows were supplied in memory (a CTE or derived table) rather than read from storage.</summary>
+        internal bool IsMaterialized { get; }
 
         /// <summary>
         /// Gets or sets the bound database name.

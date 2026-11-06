@@ -523,6 +523,32 @@ public static class RowSerializer
     }
 
     /// <summary>
+    /// Decodes the columns flagged in <paramref name="decode"/> into <paramref name="byOrdinal"/> at their own
+    /// ordinals, skipping the rest without allocating. Cells not flagged are left untouched.
+    /// </summary>
+    public static void DecodeCellsByOrdinal(
+        ReadOnlySpan<byte> data,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<bool> decode,
+        Span<CellValue> byOrdinal)
+    {
+        var reader = new ByteSpanReader(data);
+        int last = decode.LastIndexOf(true);
+        for (int i = 0; i <= last; i++)
+        {
+            bool isNull = reader.ReadBoolean();
+            if (decode[i])
+            {
+                byOrdinal[i] = isNull ? CellValue.Null : DecodeTypedCell(ref reader, columns[i]);
+            }
+            else if (!isNull)
+            {
+                SkipTypedCell(ref reader, columns[i]);
+            }
+        }
+    }
+
+    /// <summary>
     /// Decodes the single cell at <paramref name="ordinal"/> (storage order) of a serialized row, skipping
     /// the cells before it without allocating. Used to read a clustered table's key out of a row.
     /// </summary>
