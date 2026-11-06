@@ -1455,27 +1455,54 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     private void ApplyFrame(PendingWrite pending, ulong sequence, FrameHold frame)
     {
         Span<byte> userKey = stackalloc byte[UserKeySize];
-        foreach (LsmCommitOperation operation in pending.Batch.Operations)
+        IReadOnlyList<LsmCommitOperation> operations = pending.Batch.Operations;
+
+        // A MemTable insert is cheapest right after the previous key. Keys of one frame are distinct and
+        // the frame applies as a whole, so their order is free: apply them in key order when they are not
+        // already in it (time-ordered GUIDs are ordered only to the millisecond).
+        int[]? order = RowOperationsOutOfOrder(operations) ? SortRowOperations(operations) : null;
+        TableState? target = null;
+        try
         {
-            if (operation.Kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete)
+            for (int n = 0; n < operations.Count; n++)
             {
-                continue; // applied below from the staged changes, already decoded and collapsed
-            }
+                LsmCommitOperation operation = operations[order is null ? n : order[n]];
+                if (operation.Kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete)
+                {
+                    continue; // applied below from the staged changes, already decoded and collapsed
+                }
 
-            if (!_tables.TryGetValue((operation.Database, operation.Table), out TableState? state))
-            {
-                continue; // dropped while the statement was running
-            }
+                if (target is null
+                    || !ReferenceEquals(operation.Table, target.TableName)
+                    || !ReferenceEquals(operation.Database, target.DatabaseName))
+                {
+                    if (!_tables.TryGetValue((operation.Database, operation.Table), out target))
+                    {
+                        target = null;
+                        continue; // dropped while the statement was running
+                    }
 
-            frame.Hold(state.Table);
-            LsmRowKeyCodec.EncodeRowKey(operation.RowId, userKey);
-            if (operation.Kind == LsmCommitOperationKind.Put)
-            {
-                state.Table.Put(userKey, sequence, operation.Value);
+                    target.DatabaseName = operation.Database;
+                    target.TableName = operation.Table;
+                }
+
+                frame.Hold(target.Table);
+                LsmRowKeyCodec.EncodeRowKey(operation.RowId, userKey);
+                if (operation.Kind == LsmCommitOperationKind.Put)
+                {
+                    target.Table.Put(userKey, sequence, operation.Value);
+                }
+                else
+                {
+                    target.Table.Delete(userKey, sequence);
+                }
             }
-            else
+        }
+        finally
+        {
+            if (order is not null)
             {
-                state.Table.Delete(userKey, sequence);
+                ArrayPool<int>.Shared.Return(order);
             }
         }
 
@@ -1509,6 +1536,53 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             state.LiveRowCount += pending.LiveDeltaFor(state);
             frame.Hold(state.Table);
             state.Table.Put(NextRowIdMetadataKey, sequence, LsmRowKeyCodec.EncodeTableMetadata(state.ReadNextRowId(), state.LiveRowCount));
+        }
+    }
+
+    private static bool RowOperationsOutOfOrder(IReadOnlyList<LsmCommitOperation> operations)
+    {
+        for (int i = 1; i < operations.Count; i++)
+        {
+            LsmCommitOperation previous = operations[i - 1];
+            LsmCommitOperation current = operations[i];
+            if (current.RowId < previous.RowId
+                && string.Equals(current.Table, previous.Table, StringComparison.Ordinal)
+                && string.Equals(current.Database, previous.Database, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Operation positions ordered by table, then row key (a pooled array; return it).</summary>
+    private static int[] SortRowOperations(IReadOnlyList<LsmCommitOperation> operations)
+    {
+        int[] order = ArrayPool<int>.Shared.Rent(operations.Count);
+        for (int i = 0; i < operations.Count; i++)
+        {
+            order[i] = i;
+        }
+
+        Array.Sort(order, 0, operations.Count, new OperationKeyOrder(operations));
+        return order;
+    }
+
+    private sealed class OperationKeyOrder(IReadOnlyList<LsmCommitOperation> operations) : IComparer<int>
+    {
+        public int Compare(int x, int y)
+        {
+            LsmCommitOperation left = operations[x];
+            LsmCommitOperation right = operations[y];
+            int byDatabase = string.CompareOrdinal(left.Database, right.Database);
+            if (byDatabase != 0)
+            {
+                return byDatabase;
+            }
+
+            int byTable = string.CompareOrdinal(left.Table, right.Table);
+            return byTable != 0 ? byTable : left.RowId.CompareTo(right.RowId);
         }
     }
 
@@ -2068,6 +2142,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     {
         private long _nextRowId = 1;
         private long _liveRowCount;
+
+        /// <summary>The names commit operations carry for this table (cached to skip a lookup per row).</summary>
+        public string? DatabaseName { get; set; }
+
+        public string? TableName { get; set; }
 
         public object SyncRoot { get; } = new();
 
