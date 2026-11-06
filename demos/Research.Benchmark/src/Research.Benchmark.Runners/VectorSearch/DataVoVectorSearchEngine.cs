@@ -106,7 +106,8 @@ public sealed class DataVoVectorSearchEngine : IVectorSearchEngine
 
     public IReadOnlyList<long> Search(float[] query, int k)
     {
-        return Ctx().Engine.IndexManager.SearchVector(query, k, "vidx", "Vectors", "VectorBenchmark", _indexType);
+        // The benchmark contract shares integer ids with SQLite rowids; these tables use integer row keys.
+        return [.. Ctx().Engine.IndexManager.SearchVector(query, k, "vidx", "Vectors", "VectorBenchmark", _indexType).Select(static key => (long)key)];
     }
 
     public bool TryFormatBuildDiagnostics(out string diagnostics)
