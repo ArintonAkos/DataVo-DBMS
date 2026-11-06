@@ -184,6 +184,7 @@ internal static class ExpressionExtractor
             Operators.LESS_THAN_OR_EQUAL_TO => true,
             // Pattern matching
             Operators.LIKE => true,
+            Operators.NOT_LIKE => true,
             // Null checks
             Operators.IS_NULL => true,
             Operators.IS_NOT_NULL => true,

@@ -123,6 +123,7 @@ internal sealed class ReactivePredicate
             Operators.GREATER_THAN_OR_EQUAL_TO => left is not null && right is not null
                 && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true) >= 0,
             Operators.LIKE => ExpressionValueComparer.MatchesLike(left, right, trimQuotedStrings: true),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left, right, trimQuotedStrings: true),
             _ => throw new NotSupportedException($"Reactive subscriptions do not support the operator '{binary.Operator}' in WHERE.")
         };
     }
@@ -162,6 +163,7 @@ internal sealed class ReactivePredicate
             Operators.GREATER_THAN_OR_EQUAL_TO => !left.IsNull && !right.IsNull
                 && ExpressionValueComparer.Compare(left.ToObject(), right.ToObject(), trimQuotedStrings: true) >= 0,
             Operators.LIKE => ExpressionValueComparer.MatchesLike(left.ToObject(), right.ToObject(), trimQuotedStrings: true),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left.ToObject(), right.ToObject(), trimQuotedStrings: true),
             _ => throw new NotSupportedException($"Reactive subscriptions do not support the operator '{binary.Operator}' in WHERE.")
         };
     }

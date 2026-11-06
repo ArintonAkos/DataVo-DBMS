@@ -270,6 +270,7 @@ internal partial class Select
             Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) <= 0,
             Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftValue, rightValue) >= 0,
             Operators.LIKE => ExpressionValueComparer.MatchesLike(leftValue, rightValue, trimQuotedStrings: true),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(leftValue, rightValue, trimQuotedStrings: true),
             Operators.IS_NULL => leftValue == null,
             Operators.IS_NOT_NULL => leftValue != null,
             _ => throw new EvaluationException($"Unsupported HAVING operator: {op}")

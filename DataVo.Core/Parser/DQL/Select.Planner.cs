@@ -353,7 +353,8 @@ internal partial class Select
             return 0.35d;
         }
 
-        if (binary.Operator.Equals(Operators.LIKE, StringComparison.OrdinalIgnoreCase))
+        if (binary.Operator.Equals(Operators.LIKE, StringComparison.OrdinalIgnoreCase)
+            || binary.Operator.Equals(Operators.NOT_LIKE, StringComparison.OrdinalIgnoreCase))
         {
             return 0.25d;
         }

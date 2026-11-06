@@ -149,6 +149,10 @@ internal static class ExpressionValueComparer
     /// <param name="patternValue">The SQL LIKE pattern.</param>
     /// <param name="trimQuotedStrings">Whether to trim single quotes from string values first.</param>
     /// <returns><see langword="true"/> when the input matches the pattern; otherwise <see langword="false"/>.</returns>
+    /// <summary>SQL <c>NOT LIKE</c>: unknown (false) when either side is NULL, otherwise the negated match.</summary>
+    public static bool MatchesNotLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false) =>
+        inputValue is not null && patternValue is not null && !MatchesLike(inputValue, patternValue, trimQuotedStrings);
+
     public static bool MatchesLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false)
     {
         if (inputValue == null || patternValue == null)

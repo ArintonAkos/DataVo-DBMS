@@ -44,6 +44,8 @@ public static class Operators
     /// Represents the SQL LIKE keyword.
     /// </summary>
     public const string LIKE = "LIKE";
+    /// <summary>The negation of <see cref="LIKE"/>: false when either side is NULL.</summary>
+    public const string NOT_LIKE = "NOT LIKE";
 
     /// <summary>
     /// Represents the SQL IS_NULL keyword.
