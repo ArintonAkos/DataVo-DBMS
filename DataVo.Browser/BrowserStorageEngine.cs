@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.JavaScript;
+using DataVo.Core;
 using DataVo.Core.StorageEngine;
 
 namespace DataVo.Browser;
@@ -36,15 +37,15 @@ public partial class BrowserStorageEngine : IStorageEngine
     [JSImport("globalThis.DataVoStorage.dropDatabase")]
     internal static partial void DropDatabaseJS(string databaseName);
 
-    public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
+    public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         string idStr = InsertRowJS(databaseName, tableName, rowBytes);
-        return long.Parse(idStr);
+        return RowKey.Parse(idStr);
     }
 
-    public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
+    public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
-        var ids = new List<long>(rowsBytes.Count);
+        var ids = new List<RowKey>(rowsBytes.Count);
         foreach (var row in rowsBytes)
         {
             ids.Add(InsertRow(databaseName, tableName, row));
@@ -52,14 +53,14 @@ public partial class BrowserStorageEngine : IStorageEngine
         return ids;
     }
 
-    public byte[] ReadRow(string databaseName, string tableName, long rowId)
+    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId)
     {
         var bytes = ReadRowJS(databaseName, tableName, rowId.ToString());
         if (bytes == null) throw new Exception($"Row {rowId} not found in {databaseName}.{tableName}");
         return bytes;
     }
 
-    public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
+    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         string json = ReadAllRowsJS(databaseName, tableName);
         if (string.IsNullOrEmpty(json) || json == "[]") yield break;
@@ -68,7 +69,7 @@ public partial class BrowserStorageEngine : IStorageEngine
         // This avoids System.Text.Json reflection which is disabled in trimmed WASM builds.
         foreach (var entry in ParseRowEntries(json))
         {
-            long rowId = long.Parse(entry.Id);
+            RowKey rowId = RowKey.Parse(entry.Id);
             byte[] rawRow = Convert.FromBase64String(entry.Data);
             yield return (rowId, rawRow);
         }
@@ -114,7 +115,7 @@ public partial class BrowserStorageEngine : IStorageEngine
         }
     }
 
-    public void DeleteRow(string databaseName, string tableName, long rowId)
+    public void DeleteRow(string databaseName, string tableName, RowKey rowId)
     {
         DeleteRowJS(databaseName, tableName, rowId.ToString());
     }
@@ -129,17 +130,17 @@ public partial class BrowserStorageEngine : IStorageEngine
         DropDatabaseJS(databaseName);
     }
 
-    public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
         // For BrowserStorage, compaction is largely delegated to the JS engine or handled here
         // by reading all, dropping, and rewriting.
         var allRows = ReadAllRows(databaseName, tableName).ToList();
         DropTable(databaseName, tableName);
 
-        var rewritten = new List<(long NewRowId, byte[] RawRow)>();
+        var rewritten = new List<(RowKey NewRowId, byte[] RawRow)>();
         foreach (var row in allRows)
         {
-            long newId = InsertRow(databaseName, tableName, row.RawRow);
+            RowKey newId = InsertRow(databaseName, tableName, row.RawRow);
             rewritten.Add((newId, row.RawRow));
         }
         return rewritten;

@@ -10,7 +10,7 @@ namespace DataVo.Core.StorageEngine.Disk;
 /// <summary>
 /// Disk-backed storage engine that persists table rows into .dat files.
 /// </summary>
-public class DiskStorageEngine : IStorageEngine, IDisposable
+public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
 {
     private readonly string _storageDirectory;
     private readonly bool _syncWrites;

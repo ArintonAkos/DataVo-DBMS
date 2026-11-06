@@ -172,7 +172,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             row,
             ResolveCatalog(),
             ResolveSerializerSchemaScopeKey());
-        return _storageEngine.InsertRow(databaseName, tableName, serializedData);
+        return (long)_storageEngine.InsertRow(databaseName, tableName, serializedData);
     }
 
     /// <summary>
@@ -186,7 +186,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <returns>The assigned row identifier.</returns>
     internal long InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
     {
-        return _storageEngine.InsertRow(databaseName, tableName, rowBytes);
+        return (long)_storageEngine.InsertRow(databaseName, tableName, rowBytes);
     }
 
     internal bool TryPatchFixedWidthRow(
@@ -224,7 +224,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     {
         if (rows.Count == 0) return [];
 
-        return _storageEngine.InsertRows(databaseName, tableName, SerializeRows(rows, tableName, databaseName));
+        return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, SerializeRows(rows, tableName, databaseName)));
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             serializedRows.Add(RowSerializer.SerializeCells(columns, row.AsView().Cells));
         }
 
-        return _storageEngine.InsertRows(databaseName, tableName, serializedRows);
+        return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, serializedRows));
     }
 
     /// <summary>
@@ -291,7 +291,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
                 serializedRows.Add(RowSerializer.SerializeCells(columns, rows[i]));
             }
 
-            return _storageEngine.InsertRows(databaseName, tableName, serializedRows);
+            return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, serializedRows));
         }
         finally
         {
@@ -311,7 +311,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
-        return _storageEngine.InsertRow(databaseName, tableName, serialized);
+        return (long)_storageEngine.InsertRow(databaseName, tableName, serialized);
     }
 
     /// <summary>
@@ -642,7 +642,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             }
         }
 
-        return _storageEngine.CompactTable(databaseName, tableName);
+        return RowKeyConversions.ToRowIds(_storageEngine.CompactTable(databaseName, tableName));
     }
 
     internal InMemoryStorageSnapshot CreateInMemorySnapshot()
@@ -851,7 +851,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(
+            parsedTableData[(long)rowTuple.RowId] = RowSerializer.Deserialize(
                 databaseName,
                 tableName,
                 rowTuple.RawRow,
@@ -884,7 +884,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[rowTuple.RowId] = StoredRow.FromOwnedCells(
+            parsedTableData[(long)rowTuple.RowId] = StoredRow.FromOwnedCells(
                 schema,
                 RowSerializer.DeserializeCells(rowTuple.RawRow, columns));
         }

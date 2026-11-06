@@ -8,7 +8,7 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// <summary>
 /// In-memory storage engine used for fast, non-persistent row operations.
 /// </summary>
-public class InMemoryStorageEngine : IStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider
+public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider
 {
     // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> rows. A value-tuple key
     // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs

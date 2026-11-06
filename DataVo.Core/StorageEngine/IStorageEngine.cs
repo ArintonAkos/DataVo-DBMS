@@ -13,7 +13,7 @@ public interface IStorageEngine
     /// <param name="tableName">The table receiving the row.</param>
     /// <param name="rowBytes">The serialized row payload.</param>
     /// <returns>The unique RowId identifying the location of this inserted byte array.</returns>
-    long InsertRow(string databaseName, string tableName, byte[] rowBytes);
+    RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes);
 
     /// <summary>
     /// Appends multiple serialized rows efficiently into the storage.
@@ -22,7 +22,7 @@ public interface IStorageEngine
     /// <param name="tableName">The table receiving the rows.</param>
     /// <param name="rowsBytes">The serialized row payloads.</param>
     /// <returns>A list of RowIds identifying the newly inserted records.</returns>
-    List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes);
+    List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes);
 
     /// <summary>
     /// Fetches the raw byte array for a specific row by its physical RowId coordinate.
@@ -30,14 +30,14 @@ public interface IStorageEngine
     /// <param name="databaseName">The database that owns the table.</param>
     /// <param name="tableName">The table containing the row.</param>
     /// <param name="rowId">The physical row identifier.</param>
-    byte[] ReadRow(string databaseName, string tableName, long rowId);
+    byte[] ReadRow(string databaseName, string tableName, RowKey rowId);
 
     /// <summary>
     /// Retrieves a contiguous stream or list of all rows in the dataset (for Full Table Scans).
     /// </summary>
     /// <param name="databaseName">The database that owns the table.</param>
     /// <param name="tableName">The table to scan.</param>
-    IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName);
+    IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName);
 
     /// <summary>
     /// Deletes the row at the given physical coordinate.
@@ -45,7 +45,7 @@ public interface IStorageEngine
     /// <param name="databaseName">The database that owns the table.</param>
     /// <param name="tableName">The table containing the row.</param>
     /// <param name="rowId">The physical row identifier.</param>
-    void DeleteRow(string databaseName, string tableName, long rowId);
+    void DeleteRow(string databaseName, string tableName, RowKey rowId);
 
     /// <summary>
     /// Clears an entire table from storage.
@@ -66,5 +66,5 @@ public interface IStorageEngine
     /// </summary>
     /// <param name="databaseName">The database that owns the table.</param>
     /// <param name="tableName">The table to compact.</param>
-    List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName);
+    List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName);
 }

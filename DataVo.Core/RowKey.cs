@@ -50,6 +50,29 @@ public readonly struct RowKey : IEquatable<RowKey>, IComparable<RowKey>
     public static RowKey Read(ReadOnlySpan<byte> source) =>
         new(BinaryPrimitives.ReadUInt64BigEndian(source), BinaryPrimitives.ReadUInt64BigEndian(source[8..]));
 
+    /// <summary>Parses the text of <see cref="ToString"/>: an integer, or a GUID.</summary>
+    public static RowKey Parse(string text) =>
+        TryParse(text, out RowKey key) ? key : throw new FormatException($"'{text}' is not a row key (an integer or a GUID).");
+
+    /// <summary>Parses the text of <see cref="ToString"/>: an integer, or a GUID.</summary>
+    public static bool TryParse(string? text, out RowKey key)
+    {
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long integer))
+        {
+            key = FromInt64(integer);
+            return true;
+        }
+
+        if (Guid.TryParse(text, out Guid guid))
+        {
+            key = FromGuid(guid);
+            return true;
+        }
+
+        key = default;
+        return false;
+    }
+
     /// <summary>Whether this key holds an integer (high half zero).</summary>
     public bool IsInt64 => High == 0;
 

@@ -63,6 +63,18 @@ public sealed class RowKeyTests
     }
 
     [Fact]
+    public void Text_RoundTrips_ForIntegersAndGuids()
+    {
+        RowKey[] keys = [-42, 0, long.MaxValue, RowKey.FromGuid(Guid.NewGuid())];
+        foreach (RowKey key in keys)
+        {
+            Assert.Equal(key, RowKey.Parse(key.ToString()));
+        }
+
+        Assert.False(RowKey.TryParse("not a key", out _));
+    }
+
+    [Fact]
     public void EqualKeys_HashAlike()
     {
         Guid guid = Guid.NewGuid();
