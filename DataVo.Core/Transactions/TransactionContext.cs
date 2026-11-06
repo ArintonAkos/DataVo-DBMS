@@ -75,6 +75,13 @@ public class TransactionContext
             DeletedRowIds[tableName] = [];
 
         DeletedRowIds[tableName].Add(rowId);
+
+        // An update buffered earlier for this row is void: COMMIT deletes the row, and a row inserted later
+        // with the same key must not receive it.
+        if (UpdatedRows.TryGetValue(tableName, out var updates))
+        {
+            updates.RemoveAll(entry => entry.RowId == rowId);
+        }
     }
 
     /// <summary>

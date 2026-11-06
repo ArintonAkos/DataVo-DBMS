@@ -39,16 +39,170 @@ internal sealed partial class InsertRowService(
     /// </param>
     private static readonly IReadOnlyDictionary<string, ForeignKey> NoForeignKeys = new Dictionary<string, ForeignKey>();
 
+    /// <summary>
+    /// What a transaction's buffered writes do to a table's keys, which storage does not show until COMMIT:
+    /// keys it frees (rows it deletes, old keys of rows it updates) and keys it takes (rows it inserts, new
+    /// keys of rows it updates). Key checks inside the transaction, and at COMMIT before anything is
+    /// applied, read storage through this view.
+    /// </summary>
+    internal sealed class PendingKeys
+    {
+        public HashSet<string> FreedPrimaryKeys { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> TakenPrimaryKeys { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, HashSet<string>> FreedUniqueValues { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, HashSet<string>> TakenUniqueValues { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public bool IsEmpty => FreedPrimaryKeys.Count == 0 && TakenPrimaryKeys.Count == 0
+            && FreedUniqueValues.Count == 0 && TakenUniqueValues.Count == 0;
+
+        public static bool Has(Dictionary<string, HashSet<string>> byColumn, string column, string value) =>
+            byColumn.TryGetValue(column, out HashSet<string>? values) && values.Contains(value);
+
+        public static void Add(Dictionary<string, HashSet<string>> byColumn, string column, string value)
+        {
+            if (!byColumn.TryGetValue(column, out HashSet<string>? values))
+            {
+                values = new HashSet<string>(StringComparer.Ordinal);
+                byColumn[column] = values;
+            }
+
+            values.Add(value);
+        }
+    }
+
+    /// <summary>Builds the <see cref="PendingKeys"/> of <paramref name="transaction"/> for one table.</summary>
+    /// <param name="includeInserts">Count the buffered inserts as taken keys (statement time); at COMMIT the
+    /// buffered rows are the ones being validated, so they are left out.</param>
+    internal PendingKeys? BuildPendingKeys(TransactionContext transaction, string databaseName, string tableName, bool includeInserts)
+    {
+        TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
+        IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
+        IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
+        if (primaryKeys.Count == 0 && uniqueKeys.Count == 0)
+        {
+            return null;
+        }
+
+        var pending = new PendingKeys();
+        transaction.DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted);
+        transaction.UpdatedRows.TryGetValue(tableName, out List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>? updated);
+
+        var touched = new List<RowKey>();
+        if (deleted is not null) touched.AddRange(deleted);
+        if (updated is not null) touched.AddRange(updated.Select(entry => entry.RowId));
+        Dictionary<RowKey, Dictionary<string, object?>> oldRows = touched.Count > 0
+            ? context.GetTableContents(touched.Distinct().ToList(), tableName, databaseName)
+            : [];
+
+        void Free(Dictionary<string, object?> row)
+        {
+            if (primaryKeys.Count > 0 && primaryKeys.All(key => row.TryGetValue(key, out object? value) && value is not null))
+            {
+                pending.FreedPrimaryKeys.Add(IndexKeyEncoder.BuildKeyString(row, primaryKeys));
+            }
+
+            foreach (string column in uniqueKeys)
+            {
+                if (row.TryGetValue(column, out object? value) && value is not null)
+                {
+                    PendingKeys.Add(pending.FreedUniqueValues, column, IndexKeyEncoder.BuildKeyString(row, [column]));
+                }
+            }
+        }
+
+        void Take(Dictionary<string, object?> row)
+        {
+            if (primaryKeys.Count > 0 && primaryKeys.All(key => row.TryGetValue(key, out object? value) && value is not null))
+            {
+                string key = IndexKeyEncoder.BuildKeyString(row, primaryKeys);
+                pending.TakenPrimaryKeys.Add(key);
+                pending.FreedPrimaryKeys.Remove(key);
+            }
+
+            foreach (string column in uniqueKeys)
+            {
+                if (row.TryGetValue(column, out object? value) && value is not null)
+                {
+                    string unique = IndexKeyEncoder.BuildKeyString(row, [column]);
+                    PendingKeys.Add(pending.TakenUniqueValues, column, unique);
+                    if (pending.FreedUniqueValues.TryGetValue(column, out HashSet<string>? freed))
+                    {
+                        freed.Remove(unique);
+                    }
+                }
+            }
+        }
+
+        // Updates first, then deletes, then inserts: the order COMMIT applies them in.
+        var current = new Dictionary<RowKey, Dictionary<string, object?>>();
+        if (updated is not null)
+        {
+            foreach ((RowKey rowId, Dictionary<string, object?> columns) in updated)
+            {
+                if (deleted?.Contains(rowId) == true)
+                {
+                    continue; // deleted later in the transaction: its update never applies
+                }
+
+                if (!current.TryGetValue(rowId, out Dictionary<string, object?>? row))
+                {
+                    if (!oldRows.TryGetValue(rowId, out Dictionary<string, object?>? original))
+                    {
+                        continue;
+                    }
+
+                    row = new Dictionary<string, object?>(original, StringComparer.OrdinalIgnoreCase);
+                    current[rowId] = row;
+                    Free(row);
+                }
+
+                foreach ((string column, object? value) in columns)
+                {
+                    row[column] = value;
+                }
+            }
+
+            foreach (Dictionary<string, object?> row in current.Values)
+            {
+                Take(row);
+            }
+        }
+
+        if (deleted is not null)
+        {
+            foreach (RowKey rowId in deleted)
+            {
+                if (oldRows.TryGetValue(rowId, out Dictionary<string, object?>? row))
+                {
+                    Free(row);
+                }
+            }
+        }
+
+        if (includeInserts && transaction.InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? inserted))
+        {
+            foreach (Dictionary<string, object?> row in inserted)
+            {
+                Take(row);
+            }
+        }
+
+        return pending.IsEmpty ? null : pending;
+    }
+
     internal void ValidatePendingInserts(
         string databaseName,
         string tableName,
         IReadOnlyList<Dictionary<string, object?>> rows,
-        bool checkForeignKeys = true)
+        bool checkForeignKeys = true,
+        TransactionContext? owner = null)
     {
         if (rows.Count == 0)
         {
             return;
         }
+
+        PendingKeys? pending = owner is null ? null : BuildPendingKeys(owner, databaseName, tableName, includeInserts: false);
 
         TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
         var messages = new List<string>();
@@ -72,7 +226,8 @@ internal sealed partial class InsertRowService(
                 acceptedPrimaryKeys,
                 acceptedUniqueValues,
                 messages,
-                out _);
+                out _,
+                pending);
         }
 
         if (messages.Count > 0)
@@ -111,6 +266,7 @@ internal sealed partial class InsertRowService(
 
         var acceptedRows = new List<Dictionary<string, object?>>(rows.Count);
         var messages = new List<string>();
+        PendingKeys? pending = txContext is null ? null : BuildPendingKeys(txContext, databaseName, tableName, includeInserts: true);
         var acceptedPrimaryKeys = new HashSet<string>(StringComparer.Ordinal);
         var acceptedUniqueValues = uniqueKeys.ToDictionary(
             key => key,
@@ -135,7 +291,8 @@ internal sealed partial class InsertRowService(
                 acceptedPrimaryKeys,
                 acceptedUniqueValues,
                 messages,
-                out Dictionary<string, object?> normalized))
+                out Dictionary<string, object?> normalized,
+                pending))
             {
                 acceptedRows.Add(normalized);
             }
@@ -882,7 +1039,8 @@ internal sealed partial class InsertRowService(
         HashSet<string> acceptedPrimaryKeys,
         IReadOnlyDictionary<string, HashSet<string>> acceptedUniqueValues,
         List<string> messages,
-        out Dictionary<string, object?> normalized)
+        out Dictionary<string, object?> normalized,
+        PendingKeys? pending = null)
     {
         normalized = new Dictionary<string, object?>(tableColumns.Count, StringComparer.OrdinalIgnoreCase);
 
@@ -913,12 +1071,12 @@ internal sealed partial class InsertRowService(
             normalized[tableColumn.Name] = normalizedValue;
         }
 
-        if (!ValidatePrimaryKeys(tableName, databaseName, rowNumber, normalized, primaryKeys, acceptedPrimaryKeys, messages))
+        if (!ValidatePrimaryKeys(tableName, databaseName, rowNumber, normalized, primaryKeys, acceptedPrimaryKeys, messages, pending))
         {
             return false;
         }
 
-        if (!ValidateUniqueKeys(tableName, databaseName, rowNumber, normalized, uniqueKeys, acceptedUniqueValues, messages))
+        if (!ValidateUniqueKeys(tableName, databaseName, rowNumber, normalized, uniqueKeys, acceptedUniqueValues, messages, pending))
         {
             return false;
         }
@@ -1048,7 +1206,8 @@ internal sealed partial class InsertRowService(
         Dictionary<string, object?> row,
         IReadOnlyList<string> primaryKeys,
         HashSet<string> acceptedPrimaryKeys,
-        List<string> messages)
+        List<string> messages,
+        PendingKeys? pending = null)
     {
         if (primaryKeys.Count == 0)
         {
@@ -1062,7 +1221,9 @@ internal sealed partial class InsertRowService(
         }
 
         string primaryKeyValue = IndexKeyEncoder.BuildKeyString(row, primaryKeys);
-        if (acceptedPrimaryKeys.Contains(primaryKeyValue) || PrimaryKeyExists(tableName, databaseName, row, primaryKeys))
+        bool taken = pending?.TakenPrimaryKeys.Contains(primaryKeyValue) == true
+            || (pending?.FreedPrimaryKeys.Contains(primaryKeyValue) != true && PrimaryKeyExists(tableName, databaseName, row, primaryKeys));
+        if (acceptedPrimaryKeys.Contains(primaryKeyValue) || taken)
         {
             messages.Add($"Primary key violation in row {rowNumber}!");
             return false;
@@ -1079,7 +1240,8 @@ internal sealed partial class InsertRowService(
         Dictionary<string, object?> row,
         IReadOnlyList<string> uniqueKeys,
         IReadOnlyDictionary<string, HashSet<string>> acceptedUniqueValues,
-        List<string> messages)
+        List<string> messages,
+        PendingKeys? pending = null)
     {
         foreach (string uniqueKey in uniqueKeys)
         {
@@ -1090,8 +1252,11 @@ internal sealed partial class InsertRowService(
 
             string uniqueValue = IndexKeyEncoder.BuildKeyString(row, [uniqueKey]);
             HashSet<string> acceptedValues = acceptedUniqueValues[uniqueKey];
+            bool taken = (pending is not null && PendingKeys.Has(pending.TakenUniqueValues, uniqueKey, uniqueValue))
+                || ((pending is null || !PendingKeys.Has(pending.FreedUniqueValues, uniqueKey, uniqueValue))
+                    && UniqueValueExists(tableName, databaseName, uniqueKey, row));
 
-            if (acceptedValues.Contains(uniqueValue) || UniqueValueExists(tableName, databaseName, uniqueKey, row))
+            if (acceptedValues.Contains(uniqueValue) || taken)
             {
                 messages.Add($"Unique key violation in row {rowNumber}!");
                 return false;

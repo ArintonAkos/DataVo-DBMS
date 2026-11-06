@@ -47,7 +47,7 @@ internal class Commit : BaseDbAction
                 var validator = new DML.InsertRowService(Engine, Context, Catalog, Indexes);
                 foreach (var (tableName, rows) in context.InsertedRows)
                 {
-                    validator.ValidatePendingInserts(databaseName, tableName, rows, checkForeignKeys: false);
+                    validator.ValidatePendingInserts(databaseName, tableName, rows, checkForeignKeys: false, owner: context);
                 }
 
                 if (walWriter != null && walEntry != null)
@@ -85,9 +85,11 @@ internal class Commit : BaseDbAction
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(activeEngine, databaseName);
 
-        FlushInserts(context, databaseName, activeEngine, txId, recorder);
+        // Deletes and updates name rows that existed before the transaction; inserts add new rows. Applying
+        // the inserts last lets a transaction delete (or re-key) a row and insert its key again.
         FlushDeletes(context, databaseName, activeEngine, txId, recorder);
         FlushUpdates(context, databaseName, activeEngine, txId, recorder);
+        FlushInserts(context, databaseName, activeEngine, txId, recorder);
 
         activeEngine.VersionStorageManager.VacuumTable(databaseName, activeEngine.StorageContext);
 
