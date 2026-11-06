@@ -219,15 +219,25 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         {
             lock (state.SyncRoot)
             {
-                // Check every key before staging any row, so a rejected batch leaves nothing behind.
+                // Check every key before staging any row, so a rejected batch leaves nothing behind. The file
+                // set is pinned once for the batch, not once per key.
                 HashSet<RowKey>? seen = keys.Count > 1 ? new HashSet<RowKey>(keys.Count) : null;
-                for (int i = 0; i < keys.Count; i++)
+                TableVersion? version = null;
+                try
                 {
-                    if ((seen is not null && !seen.Add(keys[i])) || Lookup(pending, state, keys[i], out _) == LatestRowLookup.Live)
+                    for (int i = 0; i < keys.Count; i++)
                     {
-                        duplicate = keys[i];
-                        return false;
+                        RowKey key = keys[i];
+                        if ((seen is not null && !seen.Add(key)) || IsLiveForInsert(pending, state, key, ref version))
+                        {
+                            duplicate = key;
+                            return false;
+                        }
                     }
+                }
+                finally
+                {
+                    version?.Release();
                 }
 
                 pending.Reserve(state, keys.Count);
@@ -372,35 +382,61 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         TableVersion version = state.AcquireVersion();
         try
         {
-            SstableHit best = default;
-            int bestLevel = -1;
-            foreach (LsmSstableHandle file in version.Files)
-            {
-                int level = file.Metadata.Level;
-                if (bestLevel >= 0 && level != bestLevel)
-                {
-                    break;
-                }
-
-                SstableHit hit = file.GetV2Reader(_readMode).Lookup(
-                    key,
-                    ulong.MaxValue,
-                    0,
-                    static (type, sequence, _, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? LiveMarker : null),
-                    default(SstableHit));
-                if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
-                {
-                    best = hit;
-                    bestLevel = level;
-                }
-            }
-
-            return best.Found && best.Value is not null;
+            return IsLiveInSstables(version, key);
         }
         finally
         {
             version.Release();
         }
+    }
+
+    /// <summary>Whether the newest version of <paramref name="key"/> in the file set is a put; copies no row.</summary>
+    private bool IsLiveInSstables(TableVersion version, RowKey key)
+    {
+        SstableHit best = default;
+        int bestLevel = -1;
+        foreach (LsmSstableHandle file in version.Files)
+        {
+            int level = file.Metadata.Level;
+            if (bestLevel >= 0 && level != bestLevel)
+            {
+                break;
+            }
+
+            SstableHit hit = file.GetV2Reader(_readMode).Lookup(
+                key,
+                ulong.MaxValue,
+                0,
+                static (type, sequence, _, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? LiveMarker : null),
+                default(SstableHit));
+            if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
+            {
+                best = hit;
+                bestLevel = level;
+            }
+        }
+
+        return best.Found && best.Value is not null;
+    }
+
+    /// <summary>Whether <paramref name="key"/> is live for this flow, pinning the file set on first need.</summary>
+    private bool IsLiveForInsert(PendingWrite pending, TableState state, RowKey key, ref TableVersion? version)
+    {
+        if (pending.TryGetStaged(state, key, out byte[]? staged))
+        {
+            return staged is not null;
+        }
+
+        switch (state.LatestRows.TryGet(key, out _))
+        {
+            case LatestRowLookup.Live:
+                return true;
+            case LatestRowLookup.Tombstone:
+                return false;
+        }
+
+        version ??= state.AcquireVersion();
+        return IsLiveInSstables(version, key);
     }
 
     /// <summary>Stands for "a live version exists" in <see cref="IsRowLive"/>; never read.</summary>
@@ -1559,13 +1595,39 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// <summary>Operation positions ordered by table, then row key (a pooled array; return it).</summary>
     private static int[] SortRowOperations(IReadOnlyList<LsmCommitOperation> operations)
     {
-        int[] order = ArrayPool<int>.Shared.Rent(operations.Count);
-        for (int i = 0; i < operations.Count; i++)
+        int count = operations.Count;
+        int[] order = ArrayPool<int>.Shared.Rent(count);
+        bool oneTable = true;
+        for (int i = 0; i < count; i++)
         {
             order[i] = i;
+            oneTable &= i == 0
+                || (string.Equals(operations[i].Table, operations[0].Table, StringComparison.Ordinal)
+                    && string.Equals(operations[i].Database, operations[0].Database, StringComparison.Ordinal));
         }
 
-        Array.Sort(order, 0, operations.Count, new OperationKeyOrder(operations));
+        if (!oneTable)
+        {
+            Array.Sort(order, 0, count, new OperationKeyOrder(operations));
+            return order;
+        }
+
+        // One table (the usual frame): sort the 16-byte keys themselves, carrying the positions along.
+        RowKey[] keys = ArrayPool<RowKey>.Shared.Rent(count);
+        try
+        {
+            for (int i = 0; i < count; i++)
+            {
+                keys[i] = operations[i].RowId;
+            }
+
+            Array.Sort(keys, order, 0, count);
+        }
+        finally
+        {
+            ArrayPool<RowKey>.Shared.Return(keys);
+        }
+
         return order;
     }
 
