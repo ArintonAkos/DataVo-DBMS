@@ -51,6 +51,7 @@ internal partial class Select
         public object?[] Keys { get; } = keys;
         public long[] Counts { get; } = new long[aggregates];
         public double[] Sums { get; } = new double[aggregates];
+        public DataVo.Core.Execution.SqlSumAccumulator[] Totals { get; } = new DataVo.Core.Execution.SqlSumAccumulator[aggregates];
         public object?[] Extremes { get; } = new object?[aggregates];
         public bool[] HasExtreme { get; } = new bool[aggregates];
     }
@@ -735,6 +736,15 @@ internal partial class Select
                     group.Counts[i]++;
                     break;
                 case HashAggregateOperator.AggregateFunction.Sum:
+                    switch (cell.Type)
+                    {
+                        case CellType.Int32: group.Totals[i].Add((long)cell.AsInt32()); break;
+                        case CellType.Int64: group.Totals[i].Add(cell.AsInt64()); break;
+                        case CellType.Double: group.Totals[i].Add((double)(float)cell.AsDouble()); break;
+                        default: group.Totals[i].Add(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell)!); break;
+                    }
+
+                    break;
                 case HashAggregateOperator.AggregateFunction.Avg:
                     group.Sums[i] += cell.Type switch
                     {
@@ -784,7 +794,7 @@ internal partial class Select
                 {
                     HashAggregateOperator.AggregateFunction.Count => group.Counts[i],
                     // SQL: SUM and AVG over no non-null values are NULL.
-                    HashAggregateOperator.AggregateFunction.Sum => group.Counts[i] == 0 ? null : group.Sums[i],
+                    HashAggregateOperator.AggregateFunction.Sum => group.Totals[i].Result,
                     HashAggregateOperator.AggregateFunction.Avg => group.Counts[i] == 0 ? null : group.Sums[i] / group.Counts[i],
                     _ => group.Extremes[i],
                 };

@@ -9,23 +9,18 @@ namespace DataVo.Core.Parser.Aggregations
     {
         protected override object? Apply(ListedTable rows)
         {
-            double sum = 0;
-            bool any = false;
-
+            // SQL: an integer sum stays an integer; NULL when there are no values (an empty group, or only NULLs).
+            var sum = new DataVo.Core.Execution.SqlSumAccumulator();
             foreach (var row in rows)
             {
                 var value = SelectColumn(row);
-                if (value == null)
+                if (value != null)
                 {
-                    continue;
+                    sum.Add(value);
                 }
-
-                sum += Convert.ToDouble(value);
-                any = true;
             }
 
-            // SQL: the sum of no values (an empty group, or only NULLs) is NULL, not 0.
-            return any ? sum : null;
+            return sum.Result;
         }
 
         protected override void Validate()

@@ -50,6 +50,7 @@ internal partial class Select
         public JoinedRow Representative { get; } = representative;
         public int[] Counts { get; } = new int[aggregates];
         public double[] Sums { get; } = new double[aggregates];
+        public DataVo.Core.Execution.SqlSumAccumulator[] Totals { get; } = new DataVo.Core.Execution.SqlSumAccumulator[aggregates];
         public object?[] Extremes { get; } = new object?[aggregates];
     }
 
@@ -249,9 +250,9 @@ internal partial class Select
 
     private static object? FinishJoinAggregate(JoinAggregateKind kind, JoinGroup group, int i) => kind switch
     {
-        // The general aggregate functions: COUNT is an int, SUM/AVG are doubles and NULL over no values.
+        // The general aggregate functions: COUNT is an int, SUM is an integer for integers, AVG a double; both NULL over no values.
         JoinAggregateKind.CountRows or JoinAggregateKind.CountValues => group.Counts[i],
-        JoinAggregateKind.Sum => group.Counts[i] == 0 ? null : group.Sums[i],
+        JoinAggregateKind.Sum => group.Totals[i].Result,
         JoinAggregateKind.Avg => group.Counts[i] == 0 ? null : group.Sums[i] / group.Counts[i],
         _ => group.Extremes[i],
     };
@@ -511,6 +512,15 @@ internal partial class Select
                         group.Counts[i]++;
                         break;
                     case JoinAggregateKind.Sum:
+                        switch (cell.Type)
+                        {
+                            case CellType.Int32: group.Totals[i].Add((long)cell.AsInt32()); break;
+                            case CellType.Int64: group.Totals[i].Add(cell.AsInt64()); break;
+                            case CellType.Double: group.Totals[i].Add((double)(float)cell.AsDouble()); break;
+                            default: group.Totals[i].Add(StorageContext.ConvertCellForLegacyDictionary(column, cell)!); break;
+                        }
+
+                        break;
                     case JoinAggregateKind.Avg:
                         group.Sums[i] += cell.Type switch
                         {

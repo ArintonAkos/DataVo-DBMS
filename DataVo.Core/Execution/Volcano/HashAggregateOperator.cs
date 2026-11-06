@@ -1,3 +1,4 @@
+using DataVo.Core.Execution;
 using System.Text.Json;
 using DataVo.Core.Serialization;
 using DataVo.Core.Utils;
@@ -133,6 +134,7 @@ public sealed class HashAggregateOperator : IQueryOperator
     {
         public long Count;
         public double Sum;
+        public SqlSumAccumulator Total;
         public bool HasComparable;
         public object? ComparableValue;
     }
@@ -398,6 +400,8 @@ public sealed class HashAggregateOperator : IQueryOperator
                     targetState.Count += sourceState.Count;
                     break;
                 case AggregateFunction.Sum:
+                    targetState.Total.Merge(sourceState.Total);
+                    break;
                 case AggregateFunction.Avg:
                     targetState.Sum += sourceState.Sum;
                     targetState.Count += sourceState.Count;
@@ -530,8 +534,7 @@ public sealed class HashAggregateOperator : IQueryOperator
             switch (spec.Function)
             {
                 case AggregateFunction.Sum:
-                    state.Sum += Convert.ToDouble(argument);
-                    state.Count++;
+                    state.Total.Add(argument);
                     break;
                 case AggregateFunction.Avg:
                     state.Sum += Convert.ToDouble(argument);
@@ -582,7 +585,7 @@ public sealed class HashAggregateOperator : IQueryOperator
         {
             AggregateFunction.Count => state.Count,
             // SQL: SUM and AVG over no non-null values are NULL.
-            AggregateFunction.Sum => state.Count == 0 ? null : state.Sum,
+            AggregateFunction.Sum => state.Total.Result,
             AggregateFunction.Avg => state.Count == 0 ? null : state.Sum / state.Count,
             AggregateFunction.Min => state.ComparableValue,
             AggregateFunction.Max => state.ComparableValue,
