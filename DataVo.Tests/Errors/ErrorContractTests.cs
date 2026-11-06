@@ -28,7 +28,7 @@ public sealed class ErrorContractTests
         { "INSERT INTO T (Id, Name, Code) VALUES (9, 'x')", DataVoErrorCodes.ValueCountMismatch },
         { "INSERT INTO T (Id, Name, Code) VALUES (9, 'x', 9, 10)", DataVoErrorCodes.ValueCountMismatch },
         { "DELETE FROM Parent WHERE Id = 1", DataVoErrorCodes.ForeignKeyViolation },
-        { "UPDATE T SET Id = 2 WHERE Id = 1", DataVoErrorCodes.UniqueViolation },
+        { "UPDATE T SET Id = 2 WHERE Id = 1", DataVoErrorCodes.PrimaryKeyViolation },
         { "UPDATE T SET Code = 100 WHERE Id >= 1", DataVoErrorCodes.UniqueViolation },
         { "INSERT INTO T (Id, Name, Code) VALUES (1, 'dup', 999)", DataVoErrorCodes.PrimaryKeyViolation },
         { "INSERT INTO T (Id, Name, Code) VALUES (NULL, 'n', 998)", DataVoErrorCodes.NullPrimaryKey },

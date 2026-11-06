@@ -110,7 +110,7 @@ public abstract class UpdateTestsBase(DataVoConfig config, string testDbName) : 
 
         // Try to update row 2 to have PK 1
         var res = ExecuteAndReturn("UPDATE Items SET Id = 1 WHERE Id = 2");
-        Assert.Contains(res.Messages, m => m.Contains("Constraint violation"));
+        Assert.Contains(res.Messages, m => m.Contains("Primary key violation"));
 
         // Both rows should remain intact
         var result = ExecuteAndReturn("SELECT * FROM Items");
