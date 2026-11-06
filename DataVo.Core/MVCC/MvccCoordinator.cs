@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Runtime;
 
 namespace DataVo.Core.MVCC;
@@ -26,7 +27,7 @@ public static class MvccCoordinator
     /// <summary>
     /// Ensures a row has version metadata. Legacy rows are bootstrapped as always-visible base versions.
     /// </summary>
-    public static RowVersion EnsureRowVersionExists(DataVoEngine engine, string databaseName, string tableName, long rowId)
+    public static RowVersion EnsureRowVersionExists(DataVoEngine engine, string databaseName, string tableName, RowKey rowId)
     {
         RowVersion? version = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId);
         if (version.HasValue)
@@ -44,7 +45,7 @@ public static class MvccCoordinator
         DataVoEngine engine,
         string databaseName,
         string tableName,
-        long rowId,
+        RowKey rowId,
         TransactionSnapshot? snapshot,
         string operationName)
     {
@@ -65,7 +66,7 @@ public static class MvccCoordinator
     /// Registers version metadata for a committed insert. Skipped in auto-commit mode with no open
     /// transactions, for the same reason as <see cref="RegisterInsertVersions"/>.
     /// </summary>
-    public static void RegisterInsertVersion(DataVoEngine engine, string databaseName, string tableName, long rowId, long transactionId)
+    public static void RegisterInsertVersion(DataVoEngine engine, string databaseName, string tableName, RowKey rowId, long transactionId)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RegisterInsertVersion(engine, databaseName, tableName, rowId, transactionId)))
@@ -91,13 +92,13 @@ public static class MvccCoordinator
         DataVoEngine engine,
         string databaseName,
         string tableName,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         long transactionId)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            long[] copy = [.. rowIds];
+            RowKey[] copy = [.. rowIds];
             DeferredPublication.TryDefer(() => RegisterInsertVersions(engine, databaseName, tableName, copy, transactionId));
             return;
         }
@@ -117,8 +118,8 @@ public static class MvccCoordinator
         DataVoEngine engine,
         string databaseName,
         string tableName,
-        long oldRowId,
-        long newRowId,
+        RowKey oldRowId,
+        RowKey newRowId,
         long transactionId)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
@@ -136,7 +137,7 @@ public static class MvccCoordinator
     /// <summary>
     /// Registers version metadata for a delete operation.
     /// </summary>
-    public static void RegisterDeleteVersion(DataVoEngine engine, string databaseName, string tableName, long rowId, long transactionId)
+    public static void RegisterDeleteVersion(DataVoEngine engine, string databaseName, string tableName, RowKey rowId, long transactionId)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
         if (DeferredPublication.TryDefer(() => RegisterDeleteVersion(engine, databaseName, tableName, rowId, transactionId)))

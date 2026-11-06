@@ -17,12 +17,12 @@ public class InsertTypedTests
         using DataVoContext typed = CreateContext();
         typed.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
 
-        long typedRowId = typed.InsertTyped("Players", PlayerSchema,
+        RowKey typedRowId = typed.InsertTyped("Players", PlayerSchema,
             [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]);
 
         using DataVoContext dict = CreateContext();
         dict.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
-        IReadOnlyList<long> dictRowIds = dict.BulkInsert("Players",
+        IReadOnlyList<RowKey> dictRowIds = dict.BulkInsert("Players",
         [
             new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Ada", ["Level"] = 7 }
         ]);
@@ -254,7 +254,7 @@ public class InsertTypedTests
         var captured = new List<RowChange>();
         ctx.Changes.Captured += set => captured.AddRange(set.Changes);
 
-        long rowId = ctx.InsertTyped("Players", PlayerSchema,
+        RowKey rowId = ctx.InsertTyped("Players", PlayerSchema,
             [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]);
         ctx.BulkInsert("Players",
         [
@@ -303,7 +303,7 @@ public class InsertTypedTests
         using DataVoContext ctx = CreateContext();
         ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
 
-        IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+        IReadOnlyList<RowKey> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
         [
             [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)],
             [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
@@ -330,7 +330,7 @@ public class InsertTypedTests
     {
         using DataVoContext typed = CreateContext();
         typed.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
-        IReadOnlyList<long> typedRowIds = typed.InsertTypedBatch("Players", PlayerSchema,
+        IReadOnlyList<RowKey> typedRowIds = typed.InsertTypedBatch("Players", PlayerSchema,
         [
             [CellValue.From(10), CellValue.From("Ada"), CellValue.From(7)],
             [CellValue.From(20), CellValue.From("Bob"), CellValue.From(3)],
@@ -339,7 +339,7 @@ public class InsertTypedTests
 
         using DataVoContext dictionary = CreateContext();
         dictionary.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
-        IReadOnlyList<long> dictionaryRowIds = dictionary.BulkInsert("Players",
+        IReadOnlyList<RowKey> dictionaryRowIds = dictionary.BulkInsert("Players",
         [
             new Dictionary<string, object?> { ["Id"] = 10, ["Name"] = "Ada", ["Level"] = 7 },
             new Dictionary<string, object?> { ["Id"] = 20, ["Name"] = "Bob", ["Level"] = 3 },
@@ -438,7 +438,7 @@ public class InsertTypedTests
         using DataVoContext ctx = CreateContext();
         ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
 
-        IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+        IReadOnlyList<RowKey> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
         [
             [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)],
             [CellValue.From(2), CellValue.From("Bob"), CellValue.From(3)]
@@ -464,7 +464,7 @@ public class InsertTypedTests
 
         try
         {
-            IReadOnlyList<long> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
+            IReadOnlyList<RowKey> rowIds = ctx.InsertTypedBatch("Players", PlayerSchema,
             [
                 [CellValue.From(1), CellValue.From("Ada"), CellValue.From(7)]
             ]);
@@ -498,7 +498,7 @@ public class InsertTypedTests
             "_PK_Players",
             "Players",
             databaseName,
-            out long rowId));
+            out RowKey rowId));
         Assert.Equal(2L, rowId);
     }
 
@@ -518,7 +518,7 @@ public class InsertTypedTests
 
         string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
             ?? throw new InvalidOperationException("Expected selected database.");
-        IReadOnlyList<long> rowIds = ctx.Engine.IndexManager.LookupIntegerIndex(
+        IReadOnlyList<RowKey> rowIds = ctx.Engine.IndexManager.LookupIntegerIndex(
             7,
             "ix_Items_OrderId",
             "Items",
@@ -543,7 +543,7 @@ public class InsertTypedTests
 
         string databaseName = ctx.Engine.Sessions.Get(ctx.SessionId)
             ?? throw new InvalidOperationException("Expected selected database.");
-        IReadOnlyList<long> fastLaneRows = ctx.Engine.IndexManager.LookupIntegerIndex(
+        IReadOnlyList<RowKey> fastLaneRows = ctx.Engine.IndexManager.LookupIntegerIndex(
             9,
             "ix_Items_OrderId",
             "Items",

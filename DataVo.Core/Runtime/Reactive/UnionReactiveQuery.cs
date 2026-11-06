@@ -70,7 +70,7 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
     public IReadOnlyCollection<string> Tables { get; }
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         var materialized = rows.ToArray();
 
@@ -86,7 +86,7 @@ internal sealed class UnionReactiveQuery : IReactiveQuery
 
         foreach (SeedBranch branch in SeedBranchesFor(table))
         {
-            foreach ((long _, IReadOnlyDictionary<string, object?> row) in materialized)
+            foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in materialized)
             {
                 if (!branch.Predicate.Matches(row))
                 {

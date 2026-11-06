@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
@@ -107,11 +108,11 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
             Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
         }
 
-        List<long> newRowIds = Context.InsertIntoTable(rows, tableName, databaseName);
+        List<RowKey> newRowIds = Context.InsertIntoTable(rows, tableName, databaseName);
 
         foreach (var index in indexes)
         {
-            Dictionary<string, List<long>> indexData = [];
+            Dictionary<string, List<RowKey>> indexData = [];
 
             for (int i = 0; i < rows.Count; i++)
             {

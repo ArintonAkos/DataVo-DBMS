@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 
@@ -15,8 +16,8 @@ public class VipExposureBorrowedTests
     private static VipExposureReactiveQuery SeededOperator()
     {
         var op = new VipExposureReactiveQuery();
-        op.Seed("Accounts", new[] { (1L, Row(("Id", 1), ("IsVip", true))) });
-        op.Seed("Markets", new[] { (1L, Row(("Id", 1), ("Category", "sports"))) });
+        op.Seed("Accounts", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("IsVip", true))) });
+        op.Seed("Markets", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("Category", "sports"))) });
         return op;
     }
 

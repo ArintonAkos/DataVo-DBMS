@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 namespace DataVo.Core.MVCC;
 
 /// <summary>
@@ -72,8 +73,8 @@ public class SnapshotVisibilityEvaluator
     /// Filters a set of row IDs, keeping only those visible to the snapshot.
     /// Used to exclude deleted/future rows from query results.
     /// </summary>
-    public static List<long> FilterVisibleRows(
-        IEnumerable<long> rowIds,
+    public static List<RowKey> FilterVisibleRows(
+        IEnumerable<RowKey> rowIds,
         VersionStorageManager versionStorage,
         string databaseName,
         string tableName,
@@ -89,9 +90,9 @@ public class SnapshotVisibilityEvaluator
             throw new ArgumentNullException(nameof(snapshot));
         }
 
-        var visibleRows = new List<long>();
+        var visibleRows = new List<RowKey>();
 
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             var version = versionStorage.GetVersion(databaseName, tableName, rowId);
             if (IsRowVisible(version, snapshot))

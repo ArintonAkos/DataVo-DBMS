@@ -29,7 +29,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+                List<RowKey> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
 
                 if (toBeDeleted.Count == 0)
                 {
@@ -37,7 +37,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                     return;
                 }
 
-                foreach (long rowId in toBeDeleted)
+                foreach (RowKey rowId in toBeDeleted)
                 {
                     MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "DELETE");
                     txContext.BufferDelete(_model.TableName, rowId);
@@ -47,7 +47,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
             else
             {
-                List<long> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+                List<RowKey> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
 
                 if (toBeDeleted.Count == 0)
                 {
@@ -55,12 +55,12 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                     return;
                 }
 
-                List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
+                List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
                 ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
                 try
                 {
-                    List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
-                    foreach (long rowId in revalidatedRowIds)
+                    List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
+                    foreach (RowKey rowId in revalidatedRowIds)
                     {
                         MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "DELETE");
                     }
@@ -84,18 +84,18 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         }
     }
 
-    private List<long> RevalidateRowsAfterLock(
+    private List<RowKey> RevalidateRowsAfterLock(
         string databaseName,
-        IReadOnlyList<long> originalCandidates,
-        IReadOnlyList<long> lockCoveredRowIds)
+        IReadOnlyList<RowKey> originalCandidates,
+        IReadOnlyList<RowKey> lockCoveredRowIds)
     {
         if (originalCandidates.Count == 0)
         {
             return [];
         }
 
-        HashSet<long> lockCovered = [.. lockCoveredRowIds];
-        HashSet<long> originalSet = [.. originalCandidates];
+        HashSet<RowKey> lockCovered = [.. lockCoveredRowIds];
+        HashSet<RowKey> originalSet = [.. originalCandidates];
 
         ExpressionNode whereExpression = _model.WhereStatement.GetExpression()!;
         if (IsTriviallyTrueWhere(whereExpression))
@@ -138,7 +138,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         return false;
     }
 
-    private void ExecuteDelete(List<long> toBeDeleted, string tableName, string databaseName, long statementTxId, ChangeRecorder? recorder)
+    private void ExecuteDelete(List<RowKey> toBeDeleted, string tableName, string databaseName, long statementTxId, ChangeRecorder? recorder)
     {
         if (toBeDeleted.Count == 0) return;
 
@@ -162,7 +162,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                     // Look up children via index scan on the child table
                     string childIndexName = $"_FK_{childFk.ChildTable}_{childFk.ChildColumn}";
-                    List<long> childRowIds;
+                    List<RowKey> childRowIds;
 
                     try
                     {
@@ -198,7 +198,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
         }
 
-        foreach (long rowId in toBeDeleted)
+        foreach (RowKey rowId in toBeDeleted)
         {
             MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId);
         }
@@ -206,14 +206,14 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         // Old row images: reactive subscriptions need them as Before, and indexes use their keys to remove
         // exact entries instead of scanning every key for the row ids.
         List<Models.Catalog.IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
-        Dictionary<long, Dictionary<string, object?>>? deletedRows =
+        Dictionary<RowKey, Dictionary<string, object?>>? deletedRows =
             recorder is { IsEnabled: true } || indexFiles.Count > 0
                 ? Context.GetTableContents(toBeDeleted, tableName, databaseName)
                 : null;
 
         if (recorder is { IsEnabled: true } && deletedRows is not null)
         {
-            foreach (long rowId in toBeDeleted)
+            foreach (RowKey rowId in toBeDeleted)
             {
                 if (deletedRows.TryGetValue(rowId, out var oldRow))
                 {
@@ -234,8 +234,8 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
                 continue;
             }
 
-            var entries = new List<(string Key, long RowId)>(toBeDeleted.Count);
-            foreach (long rowId in toBeDeleted)
+            var entries = new List<(string Key, RowKey RowId)>(toBeDeleted.Count);
+            foreach (RowKey rowId in toBeDeleted)
             {
                 if (deletedRows.TryGetValue(rowId, out var oldRow) && indexFile.AttributeNames.All(oldRow.ContainsKey))
                 {
@@ -249,13 +249,13 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         if (ImplicitWalCommit.IsEnabled(Engine))
         {
             var operations = new List<WalOperation>(toBeDeleted.Count);
-            foreach (long rowId in toBeDeleted)
+            foreach (RowKey rowId in toBeDeleted)
             {
                 operations.Add(new WalOperation
                 {
                     OperationType = WalOperationType.Delete,
                     TableName = tableName,
-                    RowId = rowId,
+                    RowId = RowKeyConversions.ToRowId(rowId),
                 });
             }
 
@@ -266,10 +266,10 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
     /// <summary>
     /// Fallback for when no FK index exists — scans the child table for matching rows.
     /// </summary>
-    private static List<long> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
+    private static List<RowKey> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
     {
         var allRows = DataVoEngine.Current().StorageContext.GetTableContents(childTable, databaseName);
-        var matchingIds = new List<long>();
+        var matchingIds = new List<RowKey>();
 
         foreach (var (rowId, row) in allRows)
         {

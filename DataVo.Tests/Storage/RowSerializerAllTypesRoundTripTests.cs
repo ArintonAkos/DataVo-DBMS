@@ -31,7 +31,7 @@ public class RowSerializerAllTypesRoundTripTests
             ]);
 
         // Dict path: WriteNonNullValue on insert, ReadNonNullValue on read.
-        Dictionary<long, Dictionary<string, object?>> dict =
+        Dictionary<RowKey, Dictionary<string, object?>> dict =
             context.Engine.StorageContext.GetTableContents("All_", CurrentDatabase(context));
         Dictionary<string, object?> row7 = dict.Values.Single(r => Convert.ToInt32(r["Id"]) == 7);
         Dictionary<string, object?> row8 = dict.Values.Single(r => Convert.ToInt32(r["Id"]) == 8);

@@ -660,10 +660,10 @@ public class CompiledAccessPathTests
 
     private sealed class ThrowingIndex : IIndex
     {
-        public void Insert(string key, long rowId) => throw new NotSupportedException();
-        public void DeleteValues(List<long> rowIds) => throw new NotSupportedException();
-        public List<long> Search(string key) => throw new InvalidOperationException("boom");
-        public bool ContainsValue(long rowId) => throw new NotSupportedException();
+        public void Insert(string key, RowKey rowId) => throw new NotSupportedException();
+        public void DeleteValues(List<RowKey> rowIds) => throw new NotSupportedException();
+        public List<RowKey> Search(string key) => throw new InvalidOperationException("boom");
+        public bool ContainsValue(RowKey rowId) => throw new NotSupportedException();
         public void Save(string filePath) => throw new NotSupportedException();
     }
 

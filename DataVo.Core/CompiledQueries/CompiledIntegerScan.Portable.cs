@@ -6,7 +6,7 @@ namespace DataVo.Core.CompiledQueries;
 internal static partial class CompiledIntegerScan
 {
     private static void ScanRows<TState>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         Func<StoredRow, TState, bool> onMatch,

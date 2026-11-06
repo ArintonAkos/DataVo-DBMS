@@ -76,7 +76,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                     throw new BindingException("HNSW index can only be created on VECTOR columns.");
                 }
 
-                List<(long RowId, float[] Vector)> vectors = [];
+                List<(RowKey RowId, float[] Vector)> vectors = [];
                 foreach (var row in tableDataRows)
                 {
                     if (!row.Value.TryGetValue(vectorColumnName, out object? value) || value == null)
@@ -94,7 +94,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             }
             else
             {
-                Dictionary<string, List<long>> indexValues = CreateIndexContents(tableDataRows);
+                Dictionary<string, List<RowKey>> indexValues = CreateIndexContents(tableDataRows);
                 Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
             }
 
@@ -117,11 +117,11 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     /// A dictionary where each key is a composite index string (column values joined by <c>"##"</c>)
     /// and each value is a list of row IDs that share that key.
     /// </returns>
-    private Dictionary<string, List<long>> CreateIndexContents(Dictionary<long, Dictionary<string, object?>> tableData)
+    private Dictionary<string, List<RowKey>> CreateIndexContents(Dictionary<RowKey, Dictionary<string, object?>> tableData)
     {
-        Dictionary<string, List<long>> indexContentDict = [];
+        Dictionary<string, List<RowKey>> indexContentDict = [];
 
-        foreach (KeyValuePair<long, Dictionary<string, object?>> row in tableData)
+        foreach (KeyValuePair<RowKey, Dictionary<string, object?>> row in tableData)
         {
             string key = ExtractIndexKeyFromRow(row.Value);
 

@@ -20,7 +20,7 @@ public sealed class RowChange
     /// <param name="kind">The kind of mutation.</param>
     /// <param name="before">The row image prior to the change, or <c>null</c> for inserts.</param>
     /// <param name="after">The row image after the change, or <c>null</c> for deletes.</param>
-    public RowChange(string table, long rowId, ChangeKind kind,
+    public RowChange(string table, RowKey rowId, ChangeKind kind,
         IReadOnlyDictionary<string, object?>? before,
         IReadOnlyDictionary<string, object?>? after)
         : this(table, rowId, kind, before, after, typedAfter: null)
@@ -36,7 +36,7 @@ public sealed class RowChange
     /// <param name="before">The row image prior to the change, or <c>null</c> for inserts.</param>
     /// <param name="after">The row image after the change, or <c>null</c> for deletes.</param>
     /// <param name="typedAfter">The typed row image after the change, or <c>null</c> for dictionary paths and deletes.</param>
-    public RowChange(string table, long rowId, ChangeKind kind,
+    public RowChange(string table, RowKey rowId, ChangeKind kind,
         IReadOnlyDictionary<string, object?>? before,
         IReadOnlyDictionary<string, object?>? after,
         TypedRow? typedAfter)
@@ -57,7 +57,7 @@ public sealed class RowChange
     /// <param name="table">The table the row belongs to.</param>
     /// <param name="rowId">The physical row identifier.</param>
     /// <param name="typedAfter">The typed row image after the insert.</param>
-    public RowChange(string table, long rowId, TypedRow typedAfter)
+    public RowChange(string table, RowKey rowId, TypedRow typedAfter)
     {
         Table = table;
         RowId = rowId;
@@ -79,7 +79,7 @@ public sealed class RowChange
     /// Reactive operators that need a stable per-row identity therefore key on the table's primary key
     /// (or on the before/after predicate result), never on this value.
     /// </remarks>
-    public long RowId { get; }
+    public RowKey RowId { get; }
 
     /// <summary>Gets the kind of mutation.</summary>
     public ChangeKind Kind { get; }

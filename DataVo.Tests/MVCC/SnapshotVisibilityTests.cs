@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.MVCC;
 using Xunit;
 
@@ -114,7 +115,7 @@ public class SnapshotVisibilityEvaluatorTests
         manager.AllocateVersion("testdb", "testtable", rowId: 3, xmin: 10);
         manager.MarkVersionObsolete("testdb", "testtable", rowId: 3, xmax: 80); // deleted
 
-        var rowIds = new[] { 1L, 2L, 3L };
+        var rowIds = new RowKey[] { 1L, 2L, 3L };
         var visible = SnapshotVisibilityEvaluator.FilterVisibleRows(
             rowIds, manager, "testdb", "testtable", snapshot);
 
@@ -129,7 +130,7 @@ public class SnapshotVisibilityEvaluatorTests
         var snapshot = new TransactionSnapshot(snapshotTimestamp: 100, transactionId: 1);
 
         var visible = SnapshotVisibilityEvaluator.FilterVisibleRows(
-            Array.Empty<long>(), manager, "testdb", "testtable", snapshot);
+            Array.Empty<RowKey>(), manager, "testdb", "testtable", snapshot);
 
         Assert.Empty(visible);
     }
@@ -150,6 +151,6 @@ public class SnapshotVisibilityEvaluatorTests
 
         Assert.Throws<ArgumentNullException>(() =>
             SnapshotVisibilityEvaluator.FilterVisibleRows(
-                Array.Empty<long>(), null!, "testdb", "testtable", snapshot));
+                Array.Empty<RowKey>(), null!, "testdb", "testtable", snapshot));
     }
 }

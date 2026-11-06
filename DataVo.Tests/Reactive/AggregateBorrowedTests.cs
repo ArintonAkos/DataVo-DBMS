@@ -116,7 +116,7 @@ public class AggregateBorrowedTests
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(GroupBySql);
         engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
         var op = new AggregateReactiveQuery(select, engine, "AggDb");
-        op.Seed("Orders", new[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        op.Seed("Orders", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
         return op;
     }
 
@@ -166,7 +166,7 @@ public class AggregateBorrowedTests
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(MinMaxSql);
         engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
         var op = new AggregateReactiveQuery(select, engine, "AggDb");
-        op.Seed("Orders", new[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        op.Seed("Orders", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
         return op;
     }
 

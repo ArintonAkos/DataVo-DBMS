@@ -367,7 +367,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
     {
         if (model.Kind == "Insert")
         {
-            return IsReadOnlyListOfInt64(method.ReturnType) ? GeneratedExecutionShape.Insert : GeneratedExecutionShape.Unsupported;
+            return IsReadOnlyListOfRowKey(method.ReturnType) ? GeneratedExecutionShape.Insert : GeneratedExecutionShape.Unsupported;
         }
 
         if (model.Kind == "Update")
@@ -427,13 +427,14 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
                 named.Name == "IReadOnlyList" && named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic");
     }
 
-    private static bool IsReadOnlyListOfInt64(ITypeSymbol returnType)
+    // Insert methods return the inserted rows' keys (DataVo.Core.RowKey: an integer or a GUID primary key).
+    private static bool IsReadOnlyListOfRowKey(ITypeSymbol returnType)
     {
         return returnType is INamedTypeSymbol named &&
                named.Name == "IReadOnlyList" &&
                named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic" &&
                named.TypeArguments.Length == 1 &&
-               named.TypeArguments[0].SpecialType == SpecialType.System_Int64;
+               named.TypeArguments[0].ToDisplayString() == "DataVo.Core.RowKey";
     }
 
     private static string FindMethodParameterName(IMethodSymbol method, string sqlParameter)

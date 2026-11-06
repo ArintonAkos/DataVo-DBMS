@@ -51,7 +51,7 @@ internal sealed class VipExposureReactiveQuery : IBorrowedReactiveQuery
                 && aggregate.FunctionName.Equals("SUM", StringComparison.OrdinalIgnoreCase));
     }
 
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         foreach ((_, IReadOnlyDictionary<string, object?> row) in rows)
         {

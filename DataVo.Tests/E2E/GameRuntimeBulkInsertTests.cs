@@ -13,7 +13,7 @@ public class GameRuntimeBulkInsertTests
         using var context = CreateContext();
         context.Execute("CREATE TABLE Telemetry (Id INT PRIMARY KEY, EventName VARCHAR(50), Frame INT)");
 
-        IReadOnlyList<long> rowIds = context.BulkInsert("Telemetry",
+        IReadOnlyList<RowKey> rowIds = context.BulkInsert("Telemetry",
         [
             new Dictionary<string, object?> { ["Id"] = 1, ["EventName"] = "level_start", ["Frame"] = 10 },
             new Dictionary<string, object?> { ["Id"] = 2, ["EventName"] = "death", ["Frame"] = 42 }
@@ -87,7 +87,7 @@ public class GameRuntimeBulkInsertTests
             "_PK_Players",
             "Players",
             CurrentDatabase(context),
-            out long rowId));
+            out RowKey rowId));
         Assert.Equal(2L, rowId);
 
         int affected = DataVoCompiledQuery.Update(
@@ -108,7 +108,7 @@ public class GameRuntimeBulkInsertTests
             "_PK_Players",
             "Players",
             CurrentDatabase(context),
-            out long updatedRowId));
+            out RowKey updatedRowId));
         Assert.NotEqual(rowId, updatedRowId);
     }
 
@@ -147,7 +147,7 @@ public class GameRuntimeBulkInsertTests
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
 
-        IReadOnlyList<long> rowIds = context.BulkInsert("Events", []);
+        IReadOnlyList<RowKey> rowIds = context.BulkInsert("Events", []);
 
         Assert.Empty(rowIds);
     }

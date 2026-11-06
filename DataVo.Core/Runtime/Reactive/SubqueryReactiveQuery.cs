@@ -76,18 +76,18 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
     private bool IsExistsKind => _shape.Kind is SubqueryKind.Exists or SubqueryKind.NotExists;
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         if (IsOuter(table))
         {
-            foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+            foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
             {
                 AddOuter(row);
             }
         }
         else if (IsInner(table))
         {
-            foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+            foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
             {
                 if (_innerPredicate.Matches(row))
                 {

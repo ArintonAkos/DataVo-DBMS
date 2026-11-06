@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Cache;
 using DataVo.Core.Exceptions;
 using DataVo.Core.MVCC;
@@ -406,7 +407,7 @@ public class AuditFixTests
             engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, object?> { ["Value"] = 123 }, "ScopedTable", "ScopedDb");
             engineA.StorageContext.InsertOneIntoTable(new Dictionary<string, object?> { ["Value"] = 456 }, "ScopedTable", "ScopedDb");
 
-            Dictionary<long, Dictionary<string, object?>> rows = engineA.StorageContext.GetTableContents("ScopedTable", "ScopedDb");
+            Dictionary<RowKey, Dictionary<string, object?>> rows = engineA.StorageContext.GetTableContents("ScopedTable", "ScopedDb");
             List<int> values = rows.Values.Select(r => (int)r["Value"]).OrderBy(v => v).ToList();
 
             Assert.Equal([123, 456], values);

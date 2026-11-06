@@ -68,9 +68,9 @@ internal sealed class DistinctReactiveQuery : IReactiveQuery
     public IReadOnlyCollection<string> Tables => [Table];
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
-        foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
         {
             if (_predicate.Matches(row))
             {

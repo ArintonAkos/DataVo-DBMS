@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
@@ -276,7 +277,7 @@ public partial class DataVoInterop
                         }
 
                         string vectorColumn = index.AttributeNames[0];
-                        List<(long RowId, float[] Vector)> vectors = [];
+                        List<(RowKey RowId, float[] Vector)> vectors = [];
 
                         foreach (var rowEntry in rows)
                         {
@@ -301,7 +302,7 @@ public partial class DataVoInterop
                         continue;
                     }
 
-                    var values = new Dictionary<string, List<long>>();
+                    var values = new Dictionary<string, List<RowKey>>();
 
                     foreach (var rowEntry in rows)
                     {
@@ -312,7 +313,7 @@ public partial class DataVoInterop
                         }
 
                         string key = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
-                        if (!values.TryGetValue(key, out List<long>? rowIds))
+                        if (!values.TryGetValue(key, out List<RowKey>? rowIds))
                         {
                             rowIds = [];
                             values[key] = rowIds;

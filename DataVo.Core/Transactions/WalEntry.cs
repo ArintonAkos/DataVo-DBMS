@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using System.Buffers.Binary;
 
 namespace DataVo.Core.Transactions;
@@ -193,7 +194,7 @@ public sealed class WalEntry
             {
                 OperationType = WalOperationType.Delete,
                 TableName = tableName,
-                RowId = rowId,
+                RowId = RowKeyConversions.ToRowId(rowId),
             }));
         }
     }
@@ -211,7 +212,7 @@ public sealed class WalEntry
             {
                 OperationType = WalOperationType.Update,
                 TableName = tableName,
-                RowId = update.RowId,
+                RowId = RowKeyConversions.ToRowId(update.RowId),
                 UpdatedColumns = CloneRow(update.UpdatedColumns),
             }));
         }

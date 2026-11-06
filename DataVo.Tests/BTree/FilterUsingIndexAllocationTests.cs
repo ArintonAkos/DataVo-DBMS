@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine.Config;
 
@@ -20,7 +21,7 @@ public class FilterUsingIndexAllocationTests : IDisposable
         Directory.CreateDirectory(_dir);
         _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _dir }, _dir);
 
-        var values = new Dictionary<string, List<long>>();
+        var values = new Dictionary<string, List<RowKey>>();
         for (int i = 0; i < 1000; i++) values[$"k{i}"] = [i];
         _manager.CreateIndex(values, "idx", Table, _db);
     }
@@ -46,7 +47,7 @@ public class FilterUsingIndexAllocationTests : IDisposable
     [Fact]
     public void FilterUsingIndex_PointLookup_ReturnsExpectedRowId()
     {
-        Assert.Equal(new[] { 500L }, _manager.FilterUsingIndex("k500", "idx", Table, _db));
+        Assert.Equal(new RowKey[] { 500L }, _manager.FilterUsingIndex("k500", "idx", Table, _db));
         Assert.Empty(_manager.FilterUsingIndex("nope", "idx", Table, _db));
     }
 

@@ -25,7 +25,7 @@ public static partial class GeneratedGameQueries
     public static partial IReadOnlyList<GeneratedPlayer> GetPlayersByName(DataVoContext db, string name);
 
     [DataVoQuery("INSERT INTO Telemetry (Id, EventName, Frame) VALUES (@id, @eventName, @frame)")]
-    public static partial IReadOnlyList<long> InsertTelemetry(DataVoContext db, int id, string eventName, int frame);
+    public static partial IReadOnlyList<RowKey> InsertTelemetry(DataVoContext db, int id, string eventName, int frame);
 
     [DataVoQuery("UPDATE Players SET Level = @level WHERE Id = @id")]
     public static partial int SetPlayerLevel(DataVoContext db, int id, int level);
@@ -70,7 +70,7 @@ public class SourceGeneratedCompiledQueryTests
         using var context = CreateContext();
         context.Execute("CREATE TABLE Telemetry (Id INT PRIMARY KEY, EventName VARCHAR(50), Frame INT)");
 
-        IReadOnlyList<long> ids = GeneratedGameQueries.InsertTelemetry(context, 1, "level_start", 10);
+        IReadOnlyList<RowKey> ids = GeneratedGameQueries.InsertTelemetry(context, 1, "level_start", 10);
 
         Assert.Equal([1L], ids);
         Assert.Single(context.Execute("SELECT * FROM Telemetry WHERE Id = 1").Single().Data);

@@ -44,7 +44,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     private TransactionSnapshot? _activeSnapshot;
 
     private readonly record struct LockedReadResources(
-        Dictionary<string, List<long>> RowReadLocksByTable);
+        Dictionary<string, List<RowKey>> RowReadLocksByTable);
 
     private enum JoinPhysicalAlgorithm
     {
@@ -210,7 +210,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     /// </summary>
     private LockedReadResources AcquireReadLocks(string databaseName)
     {
-        _lockedReadResources = new LockedReadResources(new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase));
+        _lockedReadResources = new LockedReadResources(new Dictionary<string, List<RowKey>>(StringComparer.OrdinalIgnoreCase));
         return _lockedReadResources.Value;
     }
 
@@ -220,15 +220,15 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     /// Read-locks <paramref name="rowIds"/> of <paramref name="tableName"/> for the rest of the statement.
     /// MVCC snapshot reads (inside a transaction) are non-blocking and take no row locks.
     /// </summary>
-    private void LockRowsForRead(string databaseName, string tableName, IEnumerable<long> rowIds)
+    private void LockRowsForRead(string databaseName, string tableName, IEnumerable<RowKey> rowIds)
     {
         if (_activeSnapshot != null || _lockedReadResources is not { } resources)
         {
             return;
         }
 
-        List<long> acquired = Locks.AcquireRowReadLocks(databaseName, tableName, rowIds);
-        if (resources.RowReadLocksByTable.TryGetValue(tableName, out List<long>? existing))
+        List<RowKey> acquired = Locks.AcquireRowReadLocks(databaseName, tableName, rowIds);
+        if (resources.RowReadLocksByTable.TryGetValue(tableName, out List<RowKey>? existing))
         {
             existing.AddRange(acquired);
         }
@@ -247,7 +247,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         {
             string tableName = tableNames[i];
 
-            if (lockedResources.RowReadLocksByTable.TryGetValue(tableName, out List<long>? rowLocks)
+            if (lockedResources.RowReadLocksByTable.TryGetValue(tableName, out List<RowKey>? rowLocks)
                 && rowLocks.Count > 0)
             {
                 Locks.ReleaseRowReadLocks(databaseName, tableName, rowLocks);
@@ -544,7 +544,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         IncrementHybridRoutingCounter($"hybrid.orderby.initial_topk.{initialSizingMode}");
         LogHybridRoutingDecision("accept", topK, initialTopK, seedPredicate);
 
-        List<long> rowIds = SearchVectorWithExpansionIfNeeded(
+        List<RowKey> rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
             indexName,
             tableName,
@@ -558,9 +558,9 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
+        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
@@ -687,7 +687,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         LogVectorPredicateFastPathDecision("accepted", totalRows, topK, distanceSelectivity);
 
-        List<long> rowIds = SearchVectorWithExpansionIfNeeded(
+        List<RowKey> rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
             indexName,
             tableName,
@@ -702,9 +702,9 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
+        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
         TableData seedRows = [];
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
@@ -731,7 +731,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     }
 
 
-    private List<long> SearchVectorWithExpansionIfNeeded(
+    private List<RowKey> SearchVectorWithExpansionIfNeeded(
         float[] queryVector,
         string indexName,
         string tableName,
@@ -747,7 +747,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         bool canEstimatePostFilter = whereExpression != null && !IsAllTrueExpression(whereExpression);
         int lastPostFilterEstimate = -1;
 
-        List<long> rowIds = [];
+        List<RowKey> rowIds = [];
         for (int pass = 0; pass <= maxPasses; pass++)
         {
             rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database!, indexKind);
@@ -838,12 +838,12 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         return result;
     }
 
-    private int EstimatePostFilterCandidateMatches(List<long> candidateRowIds, string tableName, ExpressionNode whereExpression)
+    private int EstimatePostFilterCandidateMatches(List<RowKey> candidateRowIds, string tableName, ExpressionNode whereExpression)
     {
-        Dictionary<long, StoredRow> rows = Context.GetTypedTableContents(candidateRowIds, tableName, _model.Database!);
+        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(candidateRowIds, tableName, _model.Database!);
         int count = 0;
 
-        foreach (long rowId in candidateRowIds)
+        foreach (RowKey rowId in candidateRowIds)
         {
             if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
@@ -1382,14 +1382,14 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             string tableName = _model.FromTable!.TableName;
             string databaseName = _model.Database
                 ?? throw new InvalidOperationException("SELECT requires an active database before evaluating the WHERE clause.");
-            HashSet<long> rowIds = new Where(whereExpression, _model.FromTable).EvaluateWithoutJoin(tableName, databaseName);
+            HashSet<RowKey> rowIds = new Where(whereExpression, _model.FromTable).EvaluateWithoutJoin(tableName, databaseName);
             if (rowIds.Count == 0)
             {
                 return new ListedTable();
             }
 
             LockRowsForRead(databaseName, tableName, rowIds);
-            Dictionary<long, StoredRow> rows = Context.GetTypedTableContents([.. rowIds], tableName, databaseName);
+            Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents([.. rowIds], tableName, databaseName);
             return new ListedTable([.. rowIds
                 .OrderBy(static id => id)
                 .Where(rows.ContainsKey)

@@ -72,7 +72,7 @@ public class TopKBorrowedTests
             $"SELECT Id, Score FROM Players ORDER BY Score DESC LIMIT {windowSize}");
         var op = new TopKReactiveQuery(select, ctx.Engine, "TopKDb");
 
-        var seed = new List<(long, IReadOnlyDictionary<string, object?>)>();
+        var seed = new List<(RowKey, IReadOnlyDictionary<string, object?>)>();
         for (int i = 1; i <= windowSize; i++) seed.Add((i, Row(i, i * 10)));
         op.Seed("Players", seed);
 

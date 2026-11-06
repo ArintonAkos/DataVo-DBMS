@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.BTree.Core;
 using System.Collections.Concurrent;
 using System.Threading;
@@ -482,4 +483,13 @@ public class BinaryBPlusTreeIndex : IIndex, IDisposable
             _disposed = true;
         }
     }
+
+    // The page format stores 8-byte row ids; these trees only serve disk-mode tables, whose ids are integers.
+    void IIndex.Insert(string key, RowKey rowId) => Insert(key, RowKeyConversions.ToRowId(rowId));
+
+    void IIndex.DeleteValues(List<RowKey> rowIds) => DeleteValues(RowKeyConversions.ToRowIds(rowIds));
+
+    List<RowKey> IIndex.Search(string key) => RowKeyConversions.ToRowKeys(Search(key));
+
+    bool IIndex.ContainsValue(RowKey rowId) => ContainsValue(RowKeyConversions.ToRowId(rowId));
 }

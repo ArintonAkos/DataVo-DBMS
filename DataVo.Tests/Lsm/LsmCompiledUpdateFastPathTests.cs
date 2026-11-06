@@ -69,5 +69,5 @@ public sealed class LsmCompiledUpdateFastPathTests : IDisposable
         Convert.ToInt32(context.Execute($"SELECT Value FROM Records WHERE Id = {id}")[0].Data[0]["Value"]);
 
     private static long RowIdOf(DataVoContext context, int id) =>
-        context.Engine.IndexManager.FilterUsingIndex($"[{id}]", "_PK_Records", "Records", "Z")[0];
+        (long)context.Engine.IndexManager.FilterUsingIndex($"[{id}]", "_PK_Records", "Records", "Z")[0];
 }

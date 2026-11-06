@@ -24,13 +24,13 @@ public class InsertAllocationGuardTests
 
         var schema = new ReactiveRowSchema("Id", "AccountId", "MarketId", "Stake");
         var cells = new CellValue[4];
-        long Insert(int id)
+        RowKey Insert(int id)
         {
             cells[0] = CellValue.From(id);
             cells[1] = CellValue.From(id % 1000);
             cells[2] = CellValue.From(id % 50);
             cells[3] = CellValue.From(id);
-            long r = ctx.InsertTyped("Orders", schema, cells);
+            RowKey r = ctx.InsertTyped("Orders", schema, cells);
             ctx.DispatchPendingNotifications();
             return r;
         }

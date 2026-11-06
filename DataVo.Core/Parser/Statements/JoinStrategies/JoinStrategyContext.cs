@@ -47,15 +47,16 @@ public class JoinStrategyContext
     /// <param name="rightRowKey">The secondary hash mapping directly to records.</param>
     /// <param name="insertHashAfter">Determines memory injection sequencing.</param>
     /// <returns>A compounded <see cref="JoinedRowId"/> resolving uniqueness limits.</returns>
-    public static JoinedRowId BuildHash(JoinedRowId? leftRowKey, long? rightRowKey, bool insertHashAfter)
+    public static JoinedRowId BuildHash(JoinedRowId? leftRowKey, RowKey? rightRowKey, bool insertHashAfter)
     {
-        long rKey = rightRowKey ?? long.MinValue;
+        // long.MinValue marks the missing side of an outer join, as before row keys.
+        RowKey rKey = rightRowKey ?? long.MinValue;
         
         if (leftRowKey == null)
         {
             return insertHashAfter 
                 ? new JoinedRowId(long.MinValue, rKey) 
-                : new JoinedRowId(rKey, long.MinValue);
+                : new JoinedRowId(rKey, (RowKey)long.MinValue);
         }
         
         return insertHashAfter

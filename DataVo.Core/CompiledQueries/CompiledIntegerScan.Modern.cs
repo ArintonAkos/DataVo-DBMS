@@ -7,7 +7,7 @@ namespace DataVo.Core.CompiledQueries;
 internal static partial class CompiledIntegerScan
 {
     private static void ScanRows<TState>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         Func<StoredRow, TState, bool> onMatch,
@@ -37,7 +37,7 @@ internal static partial class CompiledIntegerScan
     }
 
     private static void ScanRowsVector256<TState>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         Func<StoredRow, TState, bool> onMatch,
@@ -45,11 +45,11 @@ internal static partial class CompiledIntegerScan
     {
         const int Width = 8;
         Span<int> values = stackalloc int[Width];
-        Span<long> rowIds = stackalloc long[Width];
+        Span<RowKey> rowIds = stackalloc RowKey[Width];
         Vector256<int> target = Vector256.Create(expected);
         int buffered = 0;
 
-        foreach ((long rowId, StoredRow row) in rows)
+        foreach ((RowKey rowId, StoredRow row) in rows)
         {
             if (!TryReadInt32(row, whereColumn, out int value))
             {
@@ -84,7 +84,7 @@ internal static partial class CompiledIntegerScan
     }
 
     private static void ScanRowsVector128<TState>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         Func<StoredRow, TState, bool> onMatch,
@@ -92,11 +92,11 @@ internal static partial class CompiledIntegerScan
     {
         const int Width = 4;
         Span<int> values = stackalloc int[Width];
-        Span<long> rowIds = stackalloc long[Width];
+        Span<RowKey> rowIds = stackalloc RowKey[Width];
         Vector128<int> target = Vector128.Create(expected);
         int buffered = 0;
 
-        foreach ((long rowId, StoredRow row) in rows)
+        foreach ((RowKey rowId, StoredRow row) in rows)
         {
             if (!TryReadInt32(row, whereColumn, out int value))
             {
@@ -132,8 +132,8 @@ internal static partial class CompiledIntegerScan
 
     private static bool FlushVector256<TState>(
         Span<int> values,
-        Span<long> rowIds,
-        Dictionary<long, StoredRow> rows,
+        Span<RowKey> rowIds,
+        Dictionary<RowKey, StoredRow> rows,
         Vector256<int> target,
         Func<StoredRow, TState, bool> onMatch,
         TState state)
@@ -162,8 +162,8 @@ internal static partial class CompiledIntegerScan
 
     private static bool FlushVector128<TState>(
         Span<int> values,
-        Span<long> rowIds,
-        Dictionary<long, StoredRow> rows,
+        Span<RowKey> rowIds,
+        Dictionary<RowKey, StoredRow> rows,
         Vector128<int> target,
         Func<StoredRow, TState, bool> onMatch,
         TState state)

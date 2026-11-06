@@ -140,7 +140,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingSecondaryIndex(TableDetail table, string rightValue, string indexFile)
     {
-        List<long> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!)];
+        List<RowKey> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, indexFile, table.TableName, table.DatabaseName!)];
         return LoadJoinedRowsFromContext(table, ids);
     }
 
@@ -153,7 +153,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <returns>A <see cref="HashedTable"/> containing the matched and joined rows.</returns>
     private HashedTable EvaluateUsingPrimaryKey(TableDetail table, string rightValue)
     {
-        List<long> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!)];
+        List<RowKey> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, $"_PK_{table.TableName}", table.TableName, table.DatabaseName!)];
         return LoadJoinedRowsFromContext(table, ids);
     }
 
@@ -164,7 +164,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <param name="table">The <see cref="TableDetail"/> identifying the source table and database.</param>
     /// <param name="ids">The list of row IDs to retrieve from the storage engine.</param>
     /// <returns>A <see cref="HashedTable"/> containing the loaded rows, fully joined.</returns>
-    private HashedTable LoadJoinedRowsFromContext(TableDetail table, List<long> ids)
+    private HashedTable LoadJoinedRowsFromContext(TableDetail table, List<RowKey> ids)
     {
         var internalRows = Runtime.DataVoEngine.Current().StorageContext.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
 
@@ -223,7 +223,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
-        Func<KeyValuePair<long, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
+        Func<KeyValuePair<RowKey, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
 
         TableData tableRows = [];
         foreach (var t in table.TableContent!.Where(pred))
@@ -293,7 +293,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <param name="rightVal">The literal value to compare against.</param>
     /// <returns>A predicate function that returns <c>true</c> for rows satisfying the condition.</returns>
     /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-    private Func<KeyValuePair<long, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
+    private Func<KeyValuePair<RowKey, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
     {
         return op switch
         {
@@ -336,7 +336,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
-        Func<KeyValuePair<long, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
+        Func<KeyValuePair<RowKey, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
 
         TableData tableRows = [];
         foreach (var t in table.TableContent!.Where(pred))
@@ -355,7 +355,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <param name="rightValue">The name of the second column.</param>
     /// <returns>A predicate function that returns <c>true</c> for rows where the two column values satisfy the operator.</returns>
     /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-    private Func<KeyValuePair<long, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
+    private Func<KeyValuePair<RowKey, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
     {
         return op switch
         {

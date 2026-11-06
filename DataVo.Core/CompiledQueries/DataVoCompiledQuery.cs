@@ -179,11 +179,11 @@ public static class DataVoCompiledQuery
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
 
-        IReadOnlyList<long>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
+        IReadOnlyList<RowKey>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
         if (rowIds is null)
         {
             // Scan fallback: no index path resolved — reuse the full-decode finder + reader (unchanged behavior).
-            List<KeyValuePair<long, StoredRow>> scanned =
+            List<KeyValuePair<RowKey, StoredRow>> scanned =
                 TryReadMatchingStoredRows(context, plan, databaseName, expectedKey);
             var scannedResults = new T[scanned.Count];
             for (int i = 0; i < scanned.Count; i++)
@@ -212,7 +212,7 @@ public static class DataVoCompiledQuery
         var buffer = new CellValue[projectedNames.Count];
 
         var results = new List<T>(rowIds.Count);
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             if (!context.Engine.StorageContext.IsRowVisible(plan.TableName, databaseName, rowId))
             {
@@ -328,7 +328,7 @@ public static class DataVoCompiledQuery
     /// <summary>
     /// Executes an insert plan for a single row and returns inserted row identifiers.
     /// </summary>
-    public static IReadOnlyList<long> Insert(
+    public static IReadOnlyList<RowKey> Insert(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         IReadOnlyList<DataVoCompiledQueryParameter> parameters)
@@ -387,26 +387,26 @@ public static class DataVoCompiledQuery
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
-        List<KeyValuePair<long, Dictionary<string, object?>>> candidates = TryReadMatchingRowEntries(context, plan, databaseName, expectedKey);
+        List<KeyValuePair<RowKey, Dictionary<string, object?>>> candidates = TryReadMatchingRowEntries(context, plan, databaseName, expectedKey);
         if (candidates.Count == 0)
         {
             return 0;
         }
 
-        List<long> candidateRowIds = candidates.Select(static pair => pair.Key).ToList();
-        List<long> rowWriteLocks = context.Engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, candidateRowIds);
+        List<RowKey> candidateRowIds = candidates.Select(static pair => pair.Key).ToList();
+        List<RowKey> rowWriteLocks = context.Engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, candidateRowIds);
 
         try
         {
-            List<long> revalidatedRowIds = RevalidateMatchingRowIdsAfterLock(context, plan, databaseName, expectedKey, candidateRowIds, rowWriteLocks);
+            List<RowKey> revalidatedRowIds = RevalidateMatchingRowIdsAfterLock(context, plan, databaseName, expectedKey, candidateRowIds, rowWriteLocks);
             if (revalidatedRowIds.Count == 0)
             {
                 return 0;
             }
 
-            Dictionary<long, Dictionary<string, object?>> existingRows =
+            Dictionary<RowKey, Dictionary<string, object?>> existingRows =
                 context.Engine.StorageContext.GetTableContents(revalidatedRowIds, plan.TableName, databaseName);
-            List<long> orderedRowIds = revalidatedRowIds
+            List<RowKey> orderedRowIds = revalidatedRowIds
                 .Where(existingRows.ContainsKey)
                 .ToList();
 
@@ -415,7 +415,7 @@ public static class DataVoCompiledQuery
                 return 0;
             }
 
-            foreach (long rowId in orderedRowIds)
+            foreach (RowKey rowId in orderedRowIds)
             {
                 MvccCoordinator.ValidateCanModifyRow(context.Engine, databaseName, plan.TableName, rowId, null, "UPDATE");
             }
@@ -437,7 +437,7 @@ public static class DataVoCompiledQuery
             // like a SQL statement, so a crash cannot keep a row without its index entries.
             using (IWriteBatchScope batch = context.Engine.StorageContext.BeginWriteBatch())
             {
-                long[] newRowIds = ReplaceRows(
+                RowKey[] newRowIds = ReplaceRows(
                     context,
                     plan.TableName,
                     databaseName,
@@ -594,13 +594,13 @@ public static class DataVoCompiledQuery
                 throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(updates));
             }
 
-            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
             {
                 continue;
             }
 
             MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-            operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
+            operations.Add(new FixedWidthPatchOperation(RowKeyConversions.ToRowId(rowId), update.Value0, update.Value1));
         }
 
         return engine.StorageContext.TryPatchFixedWidthRows(
@@ -653,7 +653,7 @@ public static class DataVoCompiledQuery
             return false;
         }
 
-        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
         {
             affected = 0; // No row matches the predicate — a legitimate zero-row update.
             return true;
@@ -671,7 +671,7 @@ public static class DataVoCompiledQuery
             return true;
         }
 
-        List<long> rowWriteLocks = engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, [rowId]);
+        List<RowKey> rowWriteLocks = engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, [rowId]);
         try
         {
             // Re-resolve under the lock: a concurrent update may have moved the row to a new id.
@@ -706,7 +706,7 @@ public static class DataVoCompiledQuery
 
             // Out-of-place: tombstone the old row, append the patched bytes as the new row.
             engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
 
             MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
 
@@ -757,7 +757,7 @@ public static class DataVoCompiledQuery
             return false;
         }
 
-        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
         {
             affected = 0;
             return true;
@@ -804,7 +804,7 @@ public static class DataVoCompiledQuery
 
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
             engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
 
             MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
             engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
@@ -850,7 +850,7 @@ public static class DataVoCompiledQuery
             return false;
         }
 
-        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out long rowId))
+        if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
         {
             affected = 0;
             return true;
@@ -902,7 +902,7 @@ public static class DataVoCompiledQuery
 
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
             engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            long newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
 
             MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
             engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
@@ -926,7 +926,7 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         UpdateFastPathSchema schema,
         string databaseName,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<DataVoCompiledQueryParameter> parameters)
     {
         Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
@@ -961,7 +961,7 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         UpdateFastPathSchema schema,
         string databaseName,
-        long rowId,
+        RowKey rowId,
         ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters)
     {
         Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
@@ -1203,14 +1203,14 @@ public static class DataVoCompiledQuery
         }
     }
 
-    private static List<KeyValuePair<long, Dictionary<string, object?>>> TryReadMatchingRowEntries(
+    private static List<KeyValuePair<RowKey, Dictionary<string, object?>>> TryReadMatchingRowEntries(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
         string expectedKey)
     {
         return TryReadMatchingStoredRows(context, plan, databaseName, expectedKey)
-            .Select(static entry => new KeyValuePair<long, Dictionary<string, object?>>(
+            .Select(static entry => new KeyValuePair<RowKey, Dictionary<string, object?>>(
                 entry.Key,
                 MaterializeStoredRow(entry.Value)))
             .ToList();
@@ -1220,7 +1220,7 @@ public static class DataVoCompiledQuery
     // then a single-column secondary index); returns null to signal the caller should use the full-decode scan
     // path. Mirrors the fall-through behavior of TryReadMatchingStoredRows (empty result or IndexException on an
     // index path falls through to scan).
-    private static IReadOnlyList<long>? TryResolveMatchingRowIds(
+    private static IReadOnlyList<RowKey>? TryResolveMatchingRowIds(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
@@ -1231,7 +1231,7 @@ public static class DataVoCompiledQuery
         {
             try
             {
-                IReadOnlyList<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName);
+                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
@@ -1248,7 +1248,7 @@ public static class DataVoCompiledQuery
             string primaryKeyIndexName = $"_PK_{plan.TableName}";
             try
             {
-                IReadOnlyList<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName);
+                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
@@ -1262,7 +1262,7 @@ public static class DataVoCompiledQuery
         {
             try
             {
-                IReadOnlyList<long> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName);
+                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName);
                 if (ids.Count > 0)
                 {
                     return ids;
@@ -1281,7 +1281,7 @@ public static class DataVoCompiledQuery
     // (dictionary materialization for the legacy path, typed projection for the compiled path). Behavior is
     // identical to the previous TryReadMatchingRowEntries; only the return element type changed (StoredRow
     // instead of an already-materialized dictionary).
-    private static List<KeyValuePair<long, StoredRow>> TryReadMatchingStoredRows(
+    private static List<KeyValuePair<RowKey, StoredRow>> TryReadMatchingStoredRows(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
@@ -1294,7 +1294,7 @@ public static class DataVoCompiledQuery
         {
             try
             {
-                List<KeyValuePair<long, StoredRow>> tagged =
+                List<KeyValuePair<RowKey, StoredRow>> tagged =
                     ReadStoredRowsViaIndex(context, plan, databaseName, plan.ResolvedIndexName, expectedKey);
 
                 if (tagged.Count > 0)
@@ -1316,7 +1316,7 @@ public static class DataVoCompiledQuery
 
             try
             {
-                List<KeyValuePair<long, StoredRow>> matches =
+                List<KeyValuePair<RowKey, StoredRow>> matches =
                     ReadStoredRowsViaIndex(context, plan, databaseName, primaryKeyIndexName, expectedKey);
 
                 if (matches.Count > 0)
@@ -1337,7 +1337,7 @@ public static class DataVoCompiledQuery
             // when the index is stale, matching the primary-key branch's behavior.
             try
             {
-                List<KeyValuePair<long, StoredRow>> matches =
+                List<KeyValuePair<RowKey, StoredRow>> matches =
                     ReadStoredRowsViaIndex(context, plan, databaseName, secondaryIndexName, expectedKey);
 
                 if (matches.Count > 0)
@@ -1350,14 +1350,14 @@ public static class DataVoCompiledQuery
             }
         }
 
-        Dictionary<long, StoredRow> scanned =
+        Dictionary<RowKey, StoredRow> scanned =
             context.Engine.StorageContext.GetTypedTableContents(plan.TableName, databaseName);
 
         // Filter typed (ordinal access + typed key extraction) so only matching rows are kept — non-matching
         // scanned rows are skipped without any materialization.
         string[] whereColumns = [plan.WhereColumn!];
-        var scannedMatches = new List<KeyValuePair<long, StoredRow>>();
-        foreach ((long rowId, StoredRow row) in scanned)
+        var scannedMatches = new List<KeyValuePair<RowKey, StoredRow>>();
+        foreach ((RowKey rowId, StoredRow row) in scanned)
         {
             StoredRowView view = row.AsView();
             if (!view.Schema.TryGetOrdinal(plan.WhereColumn!, out _))
@@ -1373,7 +1373,7 @@ public static class DataVoCompiledQuery
                 continue;
             }
 
-            scannedMatches.Add(new KeyValuePair<long, StoredRow>(rowId, row));
+            scannedMatches.Add(new KeyValuePair<RowKey, StoredRow>(rowId, row));
         }
 
         return scannedMatches;
@@ -1383,24 +1383,24 @@ public static class DataVoCompiledQuery
     /// Reads the StoredRows whose IDs the named B-Tree index returns for <paramref name="expectedKey"/>.
     /// Shared by the tag, primary-key, and secondary-index access paths.
     /// </summary>
-    private static List<KeyValuePair<long, StoredRow>> ReadStoredRowsViaIndex(
+    private static List<KeyValuePair<RowKey, StoredRow>> ReadStoredRowsViaIndex(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
         string indexName,
         string expectedKey)
     {
-        List<long> ids =
+        List<RowKey> ids =
         [
             .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, indexName, plan.TableName, databaseName)
         ];
 
-        Dictionary<long, StoredRow> indexedRows =
+        Dictionary<RowKey, StoredRow> indexedRows =
             context.Engine.StorageContext.GetTypedTableContents(ids, plan.TableName, databaseName);
 
         return ids
             .Where(indexedRows.ContainsKey)
-            .Select(id => new KeyValuePair<long, StoredRow>(id, indexedRows[id]))
+            .Select(id => new KeyValuePair<RowKey, StoredRow>(id, indexedRows[id]))
             .ToList();
     }
 
@@ -1445,21 +1445,21 @@ public static class DataVoCompiledQuery
         return result;
     }
 
-    private static List<long> RevalidateMatchingRowIdsAfterLock(
+    private static List<RowKey> RevalidateMatchingRowIdsAfterLock(
         DataVoContext context,
         DataVoCompiledQueryPlan plan,
         string databaseName,
         string expectedKey,
-        IReadOnlyList<long> originalCandidateRowIds,
-        IReadOnlyList<long> lockCoveredRowIds)
+        IReadOnlyList<RowKey> originalCandidateRowIds,
+        IReadOnlyList<RowKey> lockCoveredRowIds)
     {
         if (originalCandidateRowIds.Count == 0)
         {
             return [];
         }
 
-        HashSet<long> originalCandidates = [.. originalCandidateRowIds];
-        HashSet<long> lockCovered = [.. lockCoveredRowIds];
+        HashSet<RowKey> originalCandidates = [.. originalCandidateRowIds];
+        HashSet<RowKey> lockCovered = [.. lockCoveredRowIds];
 
         return TryReadMatchingRowEntries(context, plan, databaseName, expectedKey)
             .Select(static pair => pair.Key)
@@ -1713,8 +1713,8 @@ public static class DataVoCompiledQuery
         DataVoContext context,
         string tableName,
         string databaseName,
-        IReadOnlyList<long> rowIds,
-        IReadOnlyDictionary<long, Dictionary<string, object?>> existingRows,
+        IReadOnlyList<RowKey> rowIds,
+        IReadOnlyDictionary<RowKey, Dictionary<string, object?>> existingRows,
         IReadOnlyList<Dictionary<string, object?>> newRows)
     {
         List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
@@ -1727,7 +1727,7 @@ public static class DataVoCompiledQuery
 
         for (int i = 0; i < rowIds.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             Dictionary<string, object?> oldRow = existingRows[rowId];
             Dictionary<string, object?> newRow = newRows[i];
             int rowNumber = i + 1;
@@ -1889,7 +1889,7 @@ public static class DataVoCompiledQuery
             }
 
             string childIndexName = $"_FK_{childTable}_{childColumn}";
-            List<long> childRowIds;
+            List<RowKey> childRowIds;
 
             try
             {
@@ -1953,7 +1953,7 @@ public static class DataVoCompiledQuery
                         && string.Equals(value.ToString(), expectedValue, StringComparison.Ordinal));
     }
 
-    private static List<long> FindChildRowsByTableScan(
+    private static List<RowKey> FindChildRowsByTableScan(
         DataVoContext context,
         string childTable,
         string childColumn,
@@ -1968,11 +1968,11 @@ public static class DataVoCompiledQuery
             .ToList();
     }
 
-    private static long[] ReplaceRows(
+    private static RowKey[] ReplaceRows(
         DataVoContext context,
         string tableName,
         string databaseName,
-        IReadOnlyList<long> oldRowIds,
+        IReadOnlyList<RowKey> oldRowIds,
         IReadOnlyList<Dictionary<string, object?>> oldRows,
         IReadOnlyList<Dictionary<string, object?>> newRows,
         long statementTxId)
@@ -1982,10 +1982,10 @@ public static class DataVoCompiledQuery
         // Tombstone the old physical rows, then append the new versions and capture their row ids.
         context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
 
-        var newRowIds = new long[newRows.Count];
+        var newRowIds = new RowKey[newRows.Count];
         for (int i = 0; i < newRows.Count; i++)
         {
-            long assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRows[i], tableName, databaseName);
+            RowKey assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRows[i], tableName, databaseName);
             newRowIds[i] = assignedRowId;
             MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], assignedRowId, statementTxId);
         }
@@ -2004,7 +2004,7 @@ public static class DataVoCompiledQuery
                 {
                     OperationType = WalOperationType.Update,
                     TableName = tableName,
-                    RowId = oldRowIds[i],
+                    RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
                     UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
                 });
             }
@@ -2026,9 +2026,9 @@ public static class DataVoCompiledQuery
         string tableName,
         string databaseName,
         IndexFile index,
-        IReadOnlyList<long> oldRowIds,
+        IReadOnlyList<RowKey> oldRowIds,
         IReadOnlyList<Dictionary<string, object?>> oldRows,
-        IReadOnlyList<long> newRowIds,
+        IReadOnlyList<RowKey> newRowIds,
         IReadOnlyList<Dictionary<string, object?>> newRows)
     {
         string indexName = index.IndexFileName ?? string.Empty;
@@ -2160,7 +2160,7 @@ public static class DataVoCompiledQuery
         }
 
         // Generic scalar (string BTree) path: delete the old (key, row id) pairs, then reinsert non-null keys.
-        var oldRowsById = new Dictionary<long, Dictionary<string, object?>>(oldRows.Count);
+        var oldRowsById = new Dictionary<RowKey, Dictionary<string, object?>>(oldRows.Count);
         for (int i = 0; i < oldRows.Count; i++)
         {
             oldRowsById[oldRowIds[i]] = oldRows[i];

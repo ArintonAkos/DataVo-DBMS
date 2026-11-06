@@ -383,7 +383,7 @@ public sealed class ReactiveRegistry
 
         foreach (string table in subscription.Tables)
         {
-            Dictionary<long, StoredRow> rows =
+            Dictionary<RowKey, StoredRow> rows =
                 _engine.StorageContext.GetTypedTableContents(table, databaseName);
 
             subscription.Seed(table, rows.Select(pair =>

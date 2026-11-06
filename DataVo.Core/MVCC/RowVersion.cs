@@ -23,7 +23,7 @@ public struct RowVersion
     /// <summary>
     /// Pointer to the next version in the chain (row identifier). 0 if no next version.
     /// </summary>
-    public long VersionChain { get; set; }
+    public RowKey VersionChain { get; set; }
 
     /// <summary>
     /// Creates a default RowVersion with all fields zero.

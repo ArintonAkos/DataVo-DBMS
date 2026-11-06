@@ -36,7 +36,7 @@ internal partial class Select
             }
 
             List<Record> rows = [];
-            long rowId = 1;
+            long rowId = 1; // synthetic ids for CTE rows
             foreach (Dictionary<string, object?> row in cteResult.Data)
             {
                 Dictionary<string, object?> values = row.ToDictionary(entry => entry.Key, entry => (object?)entry.Value);

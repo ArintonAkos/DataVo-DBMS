@@ -79,7 +79,7 @@ public class VectorContextTests
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (1, '[1,0,0]', 'A')");
         context.Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
 
-        var vectors = new List<(long RowId, float[] Vector)>
+        var vectors = new List<(RowKey RowId, float[] Vector)>
         {
             (1, [1f, 0f, 0f]),
             (2, [0f, 1f, 0f])

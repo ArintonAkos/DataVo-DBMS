@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime.Changes;
 
@@ -19,7 +20,7 @@ public sealed class ReactiveSubscription : IReactiveQuery
     private readonly ReactivePredicate _predicate;
     private readonly bool _selectStar;
     private readonly List<(string Source, string Output)> _projection = [];
-    private readonly HashSet<long> _matchSet = [];
+    private readonly HashSet<RowKey> _matchSet = [];
 
     /// <summary>
     /// Parses and validates the supplied SQL as a single-table linear reactive query.
@@ -83,9 +84,9 @@ public sealed class ReactiveSubscription : IReactiveQuery
     /// </summary>
     /// <param name="table">The table whose contents are supplied (always this subscription's table).</param>
     /// <param name="rows">The current <c>(rowId, row)</c> pairs in the table.</param>
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
-        foreach ((long rowId, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach ((RowKey rowId, IReadOnlyDictionary<string, object?> row) in rows)
         {
             if (Matches(row))
             {

@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
@@ -43,7 +44,7 @@ internal class FullJoinStrategy : IJoinStrategy
         bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
 
         // Track right row keys that have been matched to cleanly append the unmatched ones
-        HashSet<long> matchedRightKeys = [];
+        HashSet<RowKey> matchedRightKeys = [];
 
         HashedTable result = rightTableData.Count >= IJoinStrategy.HashLookupThreshold
             ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys, context)
@@ -65,7 +66,7 @@ internal class FullJoinStrategy : IJoinStrategy
         string rightTable,
         string rightColumn,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys,
+        HashSet<RowKey> matchedRightKeys,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -125,7 +126,7 @@ internal class FullJoinStrategy : IJoinStrategy
         string rightTable,
         string rightColumn,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys,
+        HashSet<RowKey> matchedRightKeys,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -184,7 +185,7 @@ internal class FullJoinStrategy : IJoinStrategy
         string leftTable,
         string rightTable,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys,
+        HashSet<RowKey> matchedRightKeys,
         HashedTable result,
         JoinStrategyContext context)
     {

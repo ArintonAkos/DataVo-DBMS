@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using System;
 using System.Collections.Generic;
 
@@ -8,18 +9,18 @@ namespace DataVo.Core.Parser.Types
     /// </summary>
     public class JoinedRowId : IEquatable<JoinedRowId>
     {
-        private readonly List<long> _rowIds;
+        private readonly List<RowKey> _rowIds;
 
         /// <summary>
         /// Gets the ordered list of row identifiers that compose this key.
         /// </summary>
-        public IReadOnlyList<long> RowIds => _rowIds;
+        public IReadOnlyList<RowKey> RowIds => _rowIds;
 
         /// <summary>
         /// Initializes a key from a single row identifier.
         /// </summary>
         /// <param name="singleRowId">The single row identifier.</param>
-        public JoinedRowId(long singleRowId)
+        public JoinedRowId(RowKey singleRowId)
         {
             _rowIds = [singleRowId];
         }
@@ -28,7 +29,7 @@ namespace DataVo.Core.Parser.Types
         /// Initializes a key from an existing identifier list.
         /// </summary>
         /// <param name="rowIds">Ordered row identifiers.</param>
-        public JoinedRowId(List<long> rowIds)
+        public JoinedRowId(List<RowKey> rowIds)
         {
             _rowIds = rowIds;
         }
@@ -37,7 +38,7 @@ namespace DataVo.Core.Parser.Types
         /// Initializes a key from one or more identifiers.
         /// </summary>
         /// <param name="rowIds">Ordered row identifiers.</param>
-        public JoinedRowId(params long[] rowIds)
+        public JoinedRowId(params RowKey[] rowIds)
         {
             _rowIds = [.. rowIds];
         }
@@ -47,9 +48,9 @@ namespace DataVo.Core.Parser.Types
         /// </summary>
         /// <param name="rowId">The row identifier to append.</param>
         /// <returns>A new composite key with the appended identifier.</returns>
-        public JoinedRowId Append(long rowId)
+        public JoinedRowId Append(RowKey rowId)
         {
-            var newIds = new List<long>(_rowIds) { rowId };
+            var newIds = new List<RowKey>(_rowIds) { rowId };
             return new JoinedRowId(newIds);
         }
 
@@ -58,9 +59,9 @@ namespace DataVo.Core.Parser.Types
         /// </summary>
         /// <param name="rowId">The row identifier to prepend.</param>
         /// <returns>A new composite key with the prepended identifier.</returns>
-        public JoinedRowId Prepend(long rowId)
+        public JoinedRowId Prepend(RowKey rowId)
         {
-            var newIds = new List<long> { rowId };
+            var newIds = new List<RowKey> { rowId };
             newIds.AddRange(_rowIds);
             return new JoinedRowId(newIds);
         }

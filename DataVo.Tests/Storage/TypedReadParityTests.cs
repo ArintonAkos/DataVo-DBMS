@@ -27,8 +27,8 @@ public class TypedReadParityTests
             },
         ]);
 
-        Dictionary<long, Dictionary<string, object?>> legacy = ctx.Engine.StorageContext.GetTableContents("T", "D");
-        Dictionary<long, StoredRow> typed = ctx.Engine.StorageContext.GetTypedTableContents("T", "D");
+        Dictionary<RowKey, Dictionary<string, object?>> legacy = ctx.Engine.StorageContext.GetTableContents("T", "D");
+        Dictionary<RowKey, StoredRow> typed = ctx.Engine.StorageContext.GetTypedTableContents("T", "D");
 
         Assert.Equal(legacy.Keys, typed.Keys);
         StoredRow row = typed.Values.Single();
@@ -45,18 +45,18 @@ public class TypedReadParityTests
     public void GetTypedTableContents_ById_FiltersRowsAndMatchesLegacyValues()
     {
         using DataVoContext ctx = NewContext();
-        IReadOnlyList<long> rowIds = ctx.BulkInsert("T",
+        IReadOnlyList<RowKey> rowIds = ctx.BulkInsert("T",
         [
             Row(1, "one"),
             Row(2, "two"),
         ]);
 
-        Dictionary<long, Dictionary<string, object?>> legacy =
+        Dictionary<RowKey, Dictionary<string, object?>> legacy =
             ctx.Engine.StorageContext.GetTableContents([rowIds[1]], "T", "D");
-        Dictionary<long, StoredRow> typed =
+        Dictionary<RowKey, StoredRow> typed =
             ctx.Engine.StorageContext.GetTypedTableContents([rowIds[1]], "T", "D");
 
-        KeyValuePair<long, StoredRow> row = Assert.Single(typed);
+        KeyValuePair<RowKey, StoredRow> row = Assert.Single(typed);
         Assert.Equal(rowIds[1], row.Key);
         AssertDictionaryEquivalent(legacy[rowIds[1]], row.Value.AsDictionary());
     }

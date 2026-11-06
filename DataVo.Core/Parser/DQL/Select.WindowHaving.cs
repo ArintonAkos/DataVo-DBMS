@@ -83,7 +83,7 @@ internal partial class Select
     private static Dictionary<JoinedRow, TypedExecutionRow> BuildTypedWindowRows(ListedTable rows)
     {
         var typed = new Dictionary<JoinedRow, TypedExecutionRow>();
-        long rowId = 1;
+        long rowId = 1; // synthetic ids for window rows
 
         foreach (JoinedRow row in rows)
         {

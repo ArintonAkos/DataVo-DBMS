@@ -126,11 +126,11 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
     public IReadOnlyCollection<string> Tables { get; }
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         // Seeding only populates the maintained base relation; the closure itself is computed lazily on
         // the first Apply (see EnsureSeededClosure) so the baseline is established but never delivered.
-        foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
         {
             StoreBase(table, row);
         }

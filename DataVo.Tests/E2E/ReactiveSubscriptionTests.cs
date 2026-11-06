@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 
@@ -21,7 +22,7 @@ public class ReactiveSubscriptionTests
     public void Apply_ComputesEnterLeaveStay()
     {
         var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (long, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) }); // row 1 already matches
+        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) }); // row 1 already matches
 
         var changes = new[]
         {
@@ -42,7 +43,7 @@ public class ReactiveSubscriptionTests
     public void Apply_StayInSet_IsUpdated()
     {
         var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (long, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
+        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
 
         QueryChange qc = sub.Apply(new[]
         {
@@ -59,7 +60,7 @@ public class ReactiveSubscriptionTests
     public void Apply_StayInSet_CarriesBeforeAndAfterImages()
     {
         var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (long, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
+        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
 
         QueryChange qc = sub.Apply(new[]
         {

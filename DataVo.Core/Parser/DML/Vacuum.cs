@@ -62,7 +62,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
                 Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
 
                 // Recreate with fresh data
-                var indexData = new Dictionary<string, List<long>>();
+                var indexData = new Dictionary<string, List<RowKey>>();
 
                 foreach (var (newRowId, rawRow) in compactedRows)
                 {

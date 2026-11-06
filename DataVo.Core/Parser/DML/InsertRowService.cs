@@ -164,11 +164,11 @@ internal sealed partial class InsertRowService(
             return new InsertRowsResult([], acceptedRows.Count, messages);
         }
 
-        List<long> rowIds = context.InsertIntoTable(acceptedRows, tableName, databaseName);
+        List<RowKey> rowIds = context.InsertIntoTable(acceptedRows, tableName, databaseName);
 
         for (int i = 0; i < acceptedRows.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
             InsertIndexes(tableName, databaseName, acceptedRows[i], rowId, indexFiles);
             recorder?.RecordInsert(tableName, rowId, acceptedRows[i]);
@@ -193,7 +193,7 @@ internal sealed partial class InsertRowService(
         return new InsertRowsResult(rowIds, acceptedRows.Count, messages);
     }
 
-    public long InsertTypedRow(
+    public RowKey InsertTypedRow(
         string databaseName,
         string tableName,
         ReactiveRowSchema columns,
@@ -269,7 +269,7 @@ internal sealed partial class InsertRowService(
         // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
         // later uses in this method must remain read-only after handing ownership to StoredRow.
         var storedRow = StoredRow.FromOwnedCells(columns, normalizedCells);
-        long rowId = context.InsertTypedRow(storedRow, tableColumns, tableName, databaseName);
+        RowKey rowId = context.InsertTypedRow(storedRow, tableColumns, tableName, databaseName);
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
         InsertTypedIndexes(tableName, databaseName, columns, normalizedCells, rowId, indexFiles);
 
@@ -300,7 +300,7 @@ internal sealed partial class InsertRowService(
         return rowId;
     }
 
-    public IReadOnlyList<long> InsertTypedRows(
+    public IReadOnlyList<RowKey> InsertTypedRows(
         string databaseName,
         string tableName,
         ReactiveRowSchema columns,
@@ -442,7 +442,7 @@ internal sealed partial class InsertRowService(
             ownedRows = copies;
         }
 
-        IReadOnlyList<long> rowIds;
+        IReadOnlyList<RowKey> rowIds;
         if (context.RetainsTypedRowBuffers)
         {
             var storedRows = new List<StoredRow>(rows.Count);
@@ -1143,7 +1143,7 @@ internal sealed partial class InsertRowService(
         {
         }
 
-        Dictionary<long, Dictionary<string, object?>> existingRows = context.GetTableContents(tableName, databaseName);
+        Dictionary<RowKey, Dictionary<string, object?>> existingRows = context.GetTableContents(tableName, databaseName);
         return existingRows.Values.Any(existingRow =>
             string.Equals(IndexKeyEncoder.BuildKeyString(existingRow, primaryKeys), primaryKeyValue, StringComparison.Ordinal));
     }
@@ -1218,7 +1218,7 @@ internal sealed partial class InsertRowService(
         {
         }
 
-        Dictionary<long, Dictionary<string, object?>> existingRows = context.GetTableContents(tableName, databaseName);
+        Dictionary<RowKey, Dictionary<string, object?>> existingRows = context.GetTableContents(tableName, databaseName);
         return existingRows.Values.Any(existingRow =>
             string.Equals(IndexKeyEncoder.BuildKeyString(existingRow, [columnName]), uniqueValue, StringComparison.Ordinal));
     }
@@ -1238,7 +1238,7 @@ internal sealed partial class InsertRowService(
             {
             }
 
-            Dictionary<long, Dictionary<string, object?>> existingRows = context.GetTableContents(reference.ReferenceTableName, databaseName);
+            Dictionary<RowKey, Dictionary<string, object?>> existingRows = context.GetTableContents(reference.ReferenceTableName, databaseName);
             if (existingRows.Values.Any(existingRow =>
                 existingRow.TryGetValue(reference.ReferenceAttributeName, out object? value)
                 && value != null
@@ -1257,7 +1257,7 @@ internal sealed partial class InsertRowService(
         string tableName,
         string databaseName,
         Dictionary<string, object?> row,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<IndexFile> indexFiles)
     {
         foreach (IndexFile index in indexFiles)
@@ -1319,7 +1319,7 @@ internal sealed partial class InsertRowService(
         string databaseName,
         ReactiveRowSchema schema,
         ReadOnlySpan<CellValue> cells,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<IndexFile> indexFiles)
     {
         foreach (IndexFile index in indexFiles)
@@ -1400,7 +1400,7 @@ internal sealed partial class InsertRowService(
         string databaseName,
         ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IReadOnlyList<IndexFile> indexFiles,
         IReadOnlyList<string> primaryKeys,
         string[]? primaryKeyValues,
@@ -1442,28 +1442,28 @@ internal sealed partial class InsertRowService(
 
             if (IsPrimaryKeyIndex(tableName, indexName)
                 && AttributeNamesEqual(index.AttributeNames, primaryKeys)
-                && TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidPrimaryEntries)
+                && TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, RowKey RowId)>? guidPrimaryEntries)
                 && guidPrimaryEntries is not null)
             {
                 indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, tableName, databaseName, keysAreNew: true);
                 continue;
             }
 
-            if (TryBuildIntegerIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerIndexEntries)
+            if (TryBuildIntegerIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(long Key, RowKey RowId)>? integerIndexEntries)
                 && integerIndexEntries is not null)
             {
                 indexes.InsertIntegerIndexEntries(integerIndexEntries, indexName, tableName, databaseName);
                 continue;
             }
 
-            if (TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidIndexEntries)
+            if (TryBuildGuidIndexEntries(schema, rows, rowIds, index.AttributeNames, out List<(Guid Key, RowKey RowId)>? guidIndexEntries)
                 && guidIndexEntries is not null)
             {
                 indexes.InsertGuidIndexEntries(guidIndexEntries, indexName, tableName, databaseName);
                 continue;
             }
 
-            var entries = new List<(string Value, long RowId)>(rowIds.Count);
+            var entries = new List<(string Value, RowKey RowId)>(rowIds.Count);
             for (int i = 0; i < rows.Count; i++)
             {
                 ReadOnlySpan<CellValue> cells = rows[i];
@@ -1485,9 +1485,9 @@ internal sealed partial class InsertRowService(
     private static bool TryBuildIntegerIndexEntries(
         ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IReadOnlyList<string> attributes,
-        out List<(long Key, long RowId)>? entries)
+        out List<(long Key, RowKey RowId)>? entries)
     {
         entries = null;
         if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
@@ -1495,7 +1495,7 @@ internal sealed partial class InsertRowService(
             return false;
         }
 
-        var result = new List<(long Key, long RowId)>(rowIds.Count);
+        var result = new List<(long Key, RowKey RowId)>(rowIds.Count);
         for (int i = 0; i < rows.Count; i++)
         {
             CellValue cell = rows[i][ordinal];
@@ -1526,9 +1526,9 @@ internal sealed partial class InsertRowService(
     private static bool TryBuildGuidIndexEntries(
         ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IReadOnlyList<string> attributes,
-        out List<(Guid Key, long RowId)>? entries)
+        out List<(Guid Key, RowKey RowId)>? entries)
     {
         entries = null;
         if (attributes.Count != 1 || !schema.TryGetOrdinal(attributes[0], out int ordinal))
@@ -1536,7 +1536,7 @@ internal sealed partial class InsertRowService(
             return false;
         }
 
-        var result = new List<(Guid Key, long RowId)>(rowIds.Count);
+        var result = new List<(Guid Key, RowKey RowId)>(rowIds.Count);
         for (int i = 0; i < rows.Count; i++)
         {
             CellValue cell = rows[i][ordinal];
@@ -1562,7 +1562,7 @@ internal sealed partial class InsertRowService(
         string databaseName,
         ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IndexFile index,
         string indexName,
         string indexKind)
@@ -1606,7 +1606,7 @@ internal sealed partial class InsertRowService(
             return;
         }
 
-        var vectorRowIds = new long[vectorCount];
+        var vectorRowIds = new RowKey[vectorCount];
         var vectorBuffer = new float[checked(vectorCount * vectorDimension)];
         int writeIndex = 0;
         for (int i = 0; i < rows.Count; i++)
@@ -1767,6 +1767,6 @@ internal sealed partial class InsertRowService(
 }
 
 internal sealed record InsertRowsResult(
-    IReadOnlyList<long> RowIds,
+    IReadOnlyList<RowKey> RowIds,
     int AcceptedRowCount,
     IReadOnlyList<string> Messages);

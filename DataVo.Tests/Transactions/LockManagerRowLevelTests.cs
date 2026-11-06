@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Transactions;
 using DataVo.Core.Exceptions;
 using System.Reflection;
@@ -151,7 +152,7 @@ public class LockManagerRowLevelTests
         const string db = "db";
         const string table = "users";
 
-        List<long> acquired = locks.AcquireRowReadLocks(db, table, [5, 2, 2, 9, 5, 3]);
+        List<RowKey> acquired = locks.AcquireRowReadLocks(db, table, [5, 2, 2, 9, 5, 3]);
         try
         {
             Assert.Equal([2, 3, 5, 9], acquired);
@@ -253,7 +254,7 @@ public class LockManagerRowLevelTests
         Task first = Task.Run(() =>
         {
             start.Wait();
-            List<long> acquired = locks.AcquireRowWriteLocks(db, table, new long[] { 2, 1 });
+            List<RowKey> acquired = locks.AcquireRowWriteLocks(db, table, new RowKey[] { 2, 1 });
             try
             {
                 Thread.Sleep(40);
@@ -267,7 +268,7 @@ public class LockManagerRowLevelTests
         Task second = Task.Run(() =>
         {
             start.Wait();
-            List<long> acquired = locks.AcquireRowWriteLocks(db, table, new long[] { 1, 2 });
+            List<RowKey> acquired = locks.AcquireRowWriteLocks(db, table, new RowKey[] { 1, 2 });
             try
             {
                 Thread.Sleep(40);

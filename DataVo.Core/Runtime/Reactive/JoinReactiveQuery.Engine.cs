@@ -46,11 +46,11 @@ internal sealed partial class JoinReactiveQuery
     /// <summary>A single signed image delta for one side of the join.</summary>
     private readonly record struct SideDelta(string PrimaryKey, IReadOnlyDictionary<string, object?> Row, int Weight);
 
-    private void SeedSide(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    private void SeedSide(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         bool isLeft = IsLeftTable(table);
 
-        foreach ((long _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
         {
             if (isLeft)
             {

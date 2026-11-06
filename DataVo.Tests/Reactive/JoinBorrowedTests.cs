@@ -74,8 +74,8 @@ public class JoinBorrowedTests
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(JoinSql);
         Assert.True(ReactiveQueryParser.TryGetJoinShape(select, out var shape));
         var op = new JoinReactiveQuery(shape, ctx.Engine, "JoinDb");
-        op.Seed("S", new[] { (100L, RowS(100, "gold")) });
-        op.Seed("R", new[] { (1L, RowR(1, 100)) });
+        op.Seed("S", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (100L, RowS(100, "gold")) });
+        op.Seed("R", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, RowR(1, 100)) });
 
         var builder = new QueryChangeBuilder(op.OutputSchema);
         // Re-insert the matching R row: one candidate, no output change (no emit), one delta applied.

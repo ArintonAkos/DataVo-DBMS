@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 
@@ -22,7 +23,7 @@ internal sealed class BridgeProbeReactiveQuery : IReactiveQuery
 
     public IReadOnlyCollection<string> Tables { get; } = new[] { "Probe" };
 
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         // No baseline state needed for the bridge probe.
     }

@@ -123,7 +123,7 @@ public sealed class DataVoContext : IDisposable
     /// Inserts a public parameterless model by matching its public readable properties to the selected
     /// table's catalog columns. The binding is cached for the current catalog schema version.
     /// </summary>
-    public long Insert<
+    public RowKey Insert<
         [DynamicallyAccessedMembers(
             DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
         string tableName,
@@ -235,7 +235,7 @@ public sealed class DataVoContext : IDisposable
     /// <summary>
     /// Inserts multiple typed rows into a table using the current <see cref="SessionId"/> database binding.
     /// </summary>
-    public IReadOnlyList<long> BulkInsert(
+    public IReadOnlyList<RowKey> BulkInsert(
         string tableName,
         IEnumerable<IReadOnlyDictionary<string, object?>> rows)
     {
@@ -325,7 +325,7 @@ public sealed class DataVoContext : IDisposable
     /// Inserts one typed row using a strict fast lane. The supplied span is consumed synchronously and
     /// never stored; callers must keep using <see cref="BulkInsert"/> when coercion or partial rows are needed.
     /// </summary>
-    public long InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
+    public RowKey InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
         if (columns.ColumnCount != row.Length)
@@ -386,7 +386,7 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            long rowId;
+            RowKey rowId;
             using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
             {
                 rowId = service.InsertTypedRow(databaseName, tableName, columns, row, statementTxId, recorder);
@@ -415,7 +415,7 @@ public sealed class DataVoContext : IDisposable
     /// arrays immediately after the call returns (e.g. pooled row buffers during bulk ingest); the engine
     /// copies a row only when something actually retains it (in-memory typed storage, change capture).
     /// </summary>
-    public IReadOnlyList<long> InsertTypedBatch(
+    public IReadOnlyList<RowKey> InsertTypedBatch(
         string tableName,
         ReactiveRowSchema columns,
         IReadOnlyList<CellValue[]> rows,
@@ -477,7 +477,7 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            IReadOnlyList<long> rowIds;
+            IReadOnlyList<RowKey> rowIds;
             using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
             {
                 rowIds = service.InsertTypedRows(databaseName, tableName, columns, rows, statementTxId, recorder, callerOwnsRowBuffers);
@@ -600,7 +600,7 @@ public sealed class DataVoContext : IDisposable
         }
 
         using var _ = DataVoEngine.PushCurrent(Engine);
-        List<long> rowIds;
+        List<RowKey> rowIds;
         try
         {
             string indexKind = Engine.Catalog
@@ -623,7 +623,7 @@ public sealed class DataVoContext : IDisposable
 
         try
         {
-            Dictionary<long, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
+            Dictionary<RowKey, Dictionary<string, object?>> rows = Engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
             List<Dictionary<string, object?>> results = rowIds
                 .Where(rows.ContainsKey)
                 .Select(id => rows[id])

@@ -42,12 +42,12 @@ public sealed class CompiledQueryReadAllocationSpikeTests
         Seed(context);
 
         var cachedRows = new StoredRow[RowCount + 1];
-        var rowIdsById = new List<long>[RowCount + 1];
+        var rowIdsById = new List<RowKey>[RowCount + 1];
         var keysById = new string[RowCount + 1];
         for (int id = 1; id <= RowCount; id++)
         {
             keysById[id] = BuildIdKey(id);
-            IReadOnlyList<long> rowIds = context.Engine.IndexManager.FilterUsingIndex(
+            IReadOnlyList<RowKey> rowIds = context.Engine.IndexManager.FilterUsingIndex(
                 keysById[id],
                 "_PK_Records",
                 "Records",
@@ -251,7 +251,7 @@ public sealed class CompiledQueryReadAllocationSpikeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static FlatRecord? DecodeProjectedFreshSetup(DataVoContext context, long rowId)
+    private static FlatRecord? DecodeProjectedFreshSetup(DataVoContext context, RowKey rowId)
     {
         IReadOnlyList<Column> columns = context.Engine.Catalog.GetTableColumns("Records", "FlatCrudSpike");
         bool[] isProjected = new bool[columns.Count];
@@ -273,7 +273,7 @@ public sealed class CompiledQueryReadAllocationSpikeTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static FlatRecord? DecodeProjectedCachedSetup(
         DataVoContext context,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<Column> columns,
         bool[] isProjected,
         ReactiveRowSchema projectedSchema,

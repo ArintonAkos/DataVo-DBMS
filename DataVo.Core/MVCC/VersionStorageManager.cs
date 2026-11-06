@@ -13,7 +13,7 @@ public class VersionStorageManager : IDisposable
     /// Stores version metadata indexed by row ID.
     /// Format: (databaseName, tableName, rowId) -> RowVersion
     /// </summary>
-    private readonly ConcurrentDictionary<(string, string, long), RowVersion> _versionMetadata = new();
+    private readonly ConcurrentDictionary<(string, string, RowKey), RowVersion> _versionMetadata = new();
 
     /// <summary>
     /// Lock for synchronizing version metadata access.
@@ -24,7 +24,7 @@ public class VersionStorageManager : IDisposable
     /// Allocates a new row version with the given xmin (creator transaction).
     /// Creates the initial version metadata for a newly inserted/updated row.
     /// </summary>
-    public RowVersion AllocateVersion(string databaseName, string tableName, long rowId, long xmin)
+    public RowVersion AllocateVersion(string databaseName, string tableName, RowKey rowId, long xmin)
     {
         var version = new RowVersion(xmin: xmin, xmax: 0, versionChain: 0);
         var key = (databaseName, tableName, rowId);
@@ -45,7 +45,7 @@ public class VersionStorageManager : IDisposable
     /// <summary>
     /// Allocates version metadata for a contiguous or non-contiguous insert batch under one write lock.
     /// </summary>
-    public void AllocateInsertVersions(string databaseName, string tableName, IReadOnlyList<long> rowIds, long xmin)
+    public void AllocateInsertVersions(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds, long xmin)
     {
         if (rowIds.Count == 0)
         {
@@ -71,7 +71,7 @@ public class VersionStorageManager : IDisposable
     /// <summary>
     /// Retrieves the current version metadata for a row.
     /// </summary>
-    public RowVersion? GetVersion(string databaseName, string tableName, long rowId)
+    public RowVersion? GetVersion(string databaseName, string tableName, RowKey rowId)
     {
         var key = (databaseName, tableName, rowId);
 
@@ -90,7 +90,7 @@ public class VersionStorageManager : IDisposable
     /// Updates a version's xmax to mark it as superseded/deleted.
     /// Creates a new version chain entry pointing to the next version.
     /// </summary>
-    public void MarkVersionObsolete(string databaseName, string tableName, long rowId, long xmax)
+    public void MarkVersionObsolete(string databaseName, string tableName, RowKey rowId, long xmax)
     {
         var key = (databaseName, tableName, rowId);
 
@@ -113,7 +113,7 @@ public class VersionStorageManager : IDisposable
     /// Updates version_chain to point to the next version in the chain.
     /// Used when an old version is superseded by a new one.
     /// </summary>
-    public void LinkVersionChain(string databaseName, string tableName, long oldRowId, long newRowId)
+    public void LinkVersionChain(string databaseName, string tableName, RowKey oldRowId, RowKey newRowId)
     {
         var oldKey = (databaseName, tableName, oldRowId);
 
@@ -136,10 +136,10 @@ public class VersionStorageManager : IDisposable
     /// Retrieves the full version chain for a row, starting from the given rowId.
     /// Returns versions in order from oldest to newest.
     /// </summary>
-    public List<(long RowId, RowVersion Version)> GetVersionChain(string databaseName, string tableName, long startRowId)
+    public List<(RowKey RowId, RowVersion Version)> GetVersionChain(string databaseName, string tableName, RowKey startRowId)
     {
-        var chain = new List<(long, RowVersion)>();
-        long currentRowId = startRowId;
+        var chain = new List<(RowKey, RowVersion)>();
+        RowKey currentRowId = startRowId;
 
         _versionLock.EnterReadLock();
         try
@@ -213,7 +213,7 @@ public class VersionStorageManager : IDisposable
             throw new ArgumentNullException(nameof(storageContext));
         }
 
-        List<(string DatabaseName, string TableName, long RowId)> candidates;
+        List<(string DatabaseName, string TableName, RowKey RowId)> candidates;
         _versionLock.EnterReadLock();
         try
         {
@@ -227,7 +227,7 @@ public class VersionStorageManager : IDisposable
             _versionLock.ExitReadLock();
         }
 
-        List<(string DatabaseName, string TableName, long RowId)> missingRows = candidates
+        List<(string DatabaseName, string TableName, RowKey RowId)> missingRows = candidates
             .Where(k => !storageContext.TableContainsRow(k.RowId, k.TableName, databaseName))
             .ToList();
 

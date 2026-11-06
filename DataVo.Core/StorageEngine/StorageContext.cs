@@ -164,7 +164,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The assigned row identifier.</returns>
-    public long InsertOneIntoTable(Dictionary<string, object?> row, string tableName, string databaseName)
+    public RowKey InsertOneIntoTable(Dictionary<string, object?> row, string tableName, string databaseName)
     {
         byte[] serializedData = RowSerializer.Serialize(
             databaseName,
@@ -172,7 +172,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             row,
             ResolveCatalog(),
             ResolveSerializerSchemaScopeKey());
-        return (long)_storageEngine.InsertRow(databaseName, tableName, serializedData);
+        return _storageEngine.InsertRow(databaseName, tableName, serializedData);
     }
 
     /// <summary>
@@ -184,21 +184,21 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The assigned row identifier.</returns>
-    internal long InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
+    internal RowKey InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
     {
-        return (long)_storageEngine.InsertRow(databaseName, tableName, rowBytes);
+        return _storageEngine.InsertRow(databaseName, tableName, rowBytes);
     }
 
     internal bool TryPatchFixedWidthRow(
         string tableName,
         string databaseName,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<Column> columns,
         ReadOnlySpan<int> ordinals,
         ReadOnlySpan<DataVoFixedWidthValue> values)
     {
         return _storageEngine is IFixedWidthPatchStorageEngine patchStorage
-            && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
+            && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), columns, ordinals, values);
     }
 
     internal int TryPatchFixedWidthRows(
@@ -220,23 +220,23 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The assigned row identifiers.</returns>
-    public List<long> InsertIntoTable(List<Dictionary<string, object?>> rows, string tableName, string databaseName)
+    public List<RowKey> InsertIntoTable(List<Dictionary<string, object?>> rows, string tableName, string databaseName)
     {
         if (rows.Count == 0) return [];
 
-        return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, SerializeRows(rows, tableName, databaseName)));
+        return (_storageEngine.InsertRows(databaseName, tableName, SerializeRows(rows, tableName, databaseName)));
     }
 
     /// <summary>
     /// Serializes and inserts typed storage rows without materializing dictionaries.
     /// </summary>
-    internal List<long> InsertTypedRows(IReadOnlyList<StoredRow> rows, string tableName, string databaseName)
+    internal List<RowKey> InsertTypedRows(IReadOnlyList<StoredRow> rows, string tableName, string databaseName)
     {
         if (rows.Count == 0) return [];
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            return typedStorage.InsertTypedRows(databaseName, tableName, rows);
+            return RowKeyConversions.ToRowKeys(typedStorage.InsertTypedRows(databaseName, tableName, rows));
         }
 
         IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
@@ -246,7 +246,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             serializedRows.Add(RowSerializer.SerializeCells(columns, row.AsView().Cells));
         }
 
-        return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, serializedRows));
+        return (_storageEngine.InsertRows(databaseName, tableName, serializedRows));
     }
 
     /// <summary>
@@ -265,7 +265,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// when <see cref="RetainsTypedRowBuffers"/> is <see langword="true"/> — in-memory typed storage
     /// needs the row wrappers themselves.
     /// </summary>
-    internal List<long> InsertTypedCellRows(
+    internal List<RowKey> InsertTypedCellRows(
         IReadOnlyList<Column> columns,
         IReadOnlyList<CellValue[]> rows,
         string tableName,
@@ -291,7 +291,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
                 serializedRows.Add(RowSerializer.SerializeCells(columns, rows[i]));
             }
 
-            return RowKeyConversions.ToRowIds(_storageEngine.InsertRows(databaseName, tableName, serializedRows));
+            return (_storageEngine.InsertRows(databaseName, tableName, serializedRows));
         }
         finally
         {
@@ -303,7 +303,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Serializes and inserts a single typed storage row via the single-row backend path, without
     /// per-row List churn or a redundant catalog column lookup. Wire-identical to the batch path.
     /// </summary>
-    internal long InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
+    internal RowKey InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
@@ -311,7 +311,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
-        return (long)_storageEngine.InsertRow(databaseName, tableName, serialized);
+        return _storageEngine.InsertRow(databaseName, tableName, serialized);
     }
 
     /// <summary>
@@ -320,7 +320,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="toBeDeletedIds">The row identifiers to delete.</param>
     /// <param name="tableName">The target table.</param>
     /// <param name="databaseName">The owning database.</param>
-    public void DeleteFromTable(List<long> toBeDeletedIds, string tableName, string databaseName)
+    public void DeleteFromTable(List<RowKey> toBeDeletedIds, string tableName, string databaseName)
     {
         foreach (long id in toBeDeletedIds)
         {
@@ -335,7 +335,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="tableName">The table containing the row.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns><see langword="true"/> when the row exists; otherwise <see langword="false"/>.</returns>
-    public bool TableContainsRow(long rowId, string tableName, string databaseName)
+    public bool TableContainsRow(RowKey rowId, string tableName, string databaseName)
     {
         try
         {
@@ -367,7 +367,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="tableName">The source table.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <returns>The selected rows keyed by row identifier.</returns>
-    public Dictionary<long, Dictionary<string, object?>> SelectFromTable(List<long>? ids, List<string> requestedColumns,
+    public Dictionary<RowKey, Dictionary<string, object?>> SelectFromTable(List<RowKey>? ids, List<string> requestedColumns,
         string tableName, string databaseName)
     {
         return GetTableContents(ids, tableName, databaseName, NormalizeSelectedColumns(requestedColumns));
@@ -376,7 +376,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Fetches all records from a table, decrypting them from bytes back to typed dictionaries.
     /// </summary>
-    public Dictionary<long, Dictionary<string, object?>> GetTableContents(string tableName, string databaseName)
+    public Dictionary<RowKey, Dictionary<string, object?>> GetTableContents(string tableName, string databaseName)
     {
         return GetTableContents(null, tableName, databaseName, null);
     }
@@ -385,7 +385,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Fetches specific records (via IDs/RowIds) from a table, decrypting them from bytes back to typed dictionaries.
     /// Used heavily by Index-driven querying (B+Tree).
     /// </summary>
-    public Dictionary<long, Dictionary<string, object?>> GetTableContents(List<long>? rowIds, string tableName, string databaseName)
+    public Dictionary<RowKey, Dictionary<string, object?>> GetTableContents(List<RowKey>? rowIds, string tableName, string databaseName)
     {
         return GetTableContents(rowIds, tableName, databaseName, null);
     }
@@ -398,10 +398,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="databaseName">The owning database.</param>
     /// <param name="selectedColumns">The projected columns, or <see langword="null"/> for all columns.</param>
     /// <returns>The materialized rows keyed by row identifier.</returns>
-    public Dictionary<long, Dictionary<string, object?>> GetTableContents(List<long>? rowIds, string tableName, string databaseName,
+    public Dictionary<RowKey, Dictionary<string, object?>> GetTableContents(List<RowKey>? rowIds, string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        Dictionary<long, Dictionary<string, object?>> rows = rowIds != null
+        Dictionary<RowKey, Dictionary<string, object?>> rows = rowIds != null
             ? ReadRowsById(rowIds, tableName, databaseName, selectedColumns)
             : ReadAllRows(tableName, databaseName, selectedColumns);
 
@@ -411,7 +411,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Fetches all records from a table as typed storage rows, bypassing dictionary materialization.
     /// </summary>
-    internal Dictionary<long, StoredRow> GetTypedTableContents(string tableName, string databaseName)
+    internal Dictionary<RowKey, StoredRow> GetTypedTableContents(string tableName, string databaseName)
     {
         return GetTypedTableContents(null, tableName, databaseName);
     }
@@ -420,10 +420,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Returns the stored serialized bytes for one row (in-memory: the stored reference, no copy), or
     /// <c>null</c> when the row was deleted or does not exist.
     /// </summary>
-    internal byte[]? TryReadRowBytes(string tableName, string databaseName, long rowId)
+    internal byte[]? TryReadRowBytes(string tableName, string databaseName, RowKey rowId)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out _))
+            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out _))
         {
             return null;
         }
@@ -442,10 +442,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
     }
 
-    internal bool TryReadStoredRow(string tableName, string databaseName, long rowId, out StoredRow? row)
+    internal bool TryReadStoredRow(string tableName, string databaseName, RowKey rowId, out StoredRow? row)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out row))
+            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out row))
         {
             return true;
         }
@@ -514,7 +514,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Per-row MVCC visibility, identical in effect to <see cref="ApplyTypedMvccVisibilityFilter"/>: visible when
     /// there is no active snapshot, otherwise gated by the row version's snapshot visibility.
     /// </summary>
-    internal bool IsRowVisible(string tableName, string databaseName, long rowId)
+    internal bool IsRowVisible(string tableName, string databaseName, RowKey rowId)
     {
         TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
         if (snapshot == null)
@@ -530,17 +530,17 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Fetches specific records from a table as typed storage rows, bypassing dictionary materialization.
     /// </summary>
-    internal Dictionary<long, StoredRow> GetTypedTableContents(List<long>? rowIds, string tableName, string databaseName)
+    internal Dictionary<RowKey, StoredRow> GetTypedTableContents(List<RowKey>? rowIds, string tableName, string databaseName)
     {
-        Dictionary<long, StoredRow> rows = rowIds != null
+        Dictionary<RowKey, StoredRow> rows = rowIds != null
             ? ReadTypedRowsById(rowIds, tableName, databaseName)
             : ReadAllTypedRows(tableName, databaseName);
 
         return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName);
     }
 
-    private static Dictionary<long, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
-        Dictionary<long, Dictionary<string, object?>> rows,
+    private static Dictionary<RowKey, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
+        Dictionary<RowKey, Dictionary<string, object?>> rows,
         string tableName,
         string databaseName)
     {
@@ -551,9 +551,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         DataVoEngine engine = DataVoEngine.Current();
-        List<long> toRemove = [];
+        List<RowKey> toRemove = [];
 
-        foreach (long rowId in rows.Keys)
+        foreach (RowKey rowId in rows.Keys)
         {
             RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
             if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
@@ -567,7 +567,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return rows;
         }
 
-        foreach (long rowId in toRemove)
+        foreach (RowKey rowId in toRemove)
         {
             rows.Remove(rowId);
         }
@@ -575,8 +575,8 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return rows;
     }
 
-    private static Dictionary<long, StoredRow> ApplyTypedMvccVisibilityFilter(
-        Dictionary<long, StoredRow> rows,
+    private static Dictionary<RowKey, StoredRow> ApplyTypedMvccVisibilityFilter(
+        Dictionary<RowKey, StoredRow> rows,
         string tableName,
         string databaseName)
     {
@@ -587,9 +587,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         DataVoEngine engine = DataVoEngine.Current();
-        List<long> toRemove = [];
+        List<RowKey> toRemove = [];
 
-        foreach (long rowId in rows.Keys)
+        foreach (RowKey rowId in rows.Keys)
         {
             RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
             if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
@@ -603,7 +603,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return rows;
         }
 
-        foreach (long rowId in toRemove)
+        foreach (RowKey rowId in toRemove)
         {
             rows.Remove(rowId);
         }
@@ -629,7 +629,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// Set to <see langword="true"/> only when the caller also rebuilds all table indexes from the returned row mapping.
     /// </param>
     /// <returns>The rewritten rows paired with their new identifiers.</returns>
-    public List<(long NewRowId, byte[] RawRow)> CompactTable(string tableName, string databaseName, bool allowIndexedCompaction = false)
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string tableName, string databaseName, bool allowIndexedCompaction = false)
     {
         if (!allowIndexedCompaction)
         {
@@ -642,7 +642,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             }
         }
 
-        return RowKeyConversions.ToRowIds(_storageEngine.CompactTable(databaseName, tableName));
+        return _storageEngine.CompactTable(databaseName, tableName);
     }
 
     internal InMemoryStorageSnapshot CreateInMemorySnapshot()
@@ -698,10 +698,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Reads explicit row identifiers from storage.
     /// </summary>
-    private Dictionary<long, Dictionary<string, object?>> ReadRowsById(List<long> rowIds, string tableName, string databaseName,
+    private Dictionary<RowKey, Dictionary<string, object?>> ReadRowsById(List<RowKey> rowIds, string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        var parsedTableData = new Dictionary<long, Dictionary<string, object?>>();
+        var parsedTableData = new Dictionary<RowKey, Dictionary<string, object?>>();
 
         if (rowIds.Count == 0)
         {
@@ -711,9 +711,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
             IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
-            foreach (long rowId in rowIds)
+            foreach (RowKey rowId in rowIds)
             {
-                if (typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out StoredRow? typedRow)
+                if (typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
                     && typedRow is not null)
                 {
                     parsedTableData[rowId] = CopyStoredRowToLegacyDictionary(typedRow, columns, selectedColumns);
@@ -743,7 +743,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return parsedTableData;
         }
 
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             byte[] rawRow;
             try
@@ -772,9 +772,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Reads explicit row identifiers from storage as typed rows.
     /// </summary>
-    private Dictionary<long, StoredRow> ReadTypedRowsById(List<long> rowIds, string tableName, string databaseName)
+    private Dictionary<RowKey, StoredRow> ReadTypedRowsById(List<RowKey> rowIds, string tableName, string databaseName)
     {
-        var parsedTableData = new Dictionary<long, StoredRow>();
+        var parsedTableData = new Dictionary<RowKey, StoredRow>();
 
         if (rowIds.Count == 0)
         {
@@ -786,9 +786,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            foreach (long rowId in rowIds)
+            foreach (RowKey rowId in rowIds)
             {
-                if (typedStorage.TryReadTypedRow(databaseName, tableName, rowId, out StoredRow? typedRow)
+                if (typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
                     && typedRow is not null)
                 {
                     parsedTableData[rowId] = typedRow;
@@ -812,7 +812,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return parsedTableData;
         }
 
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             byte[] rawRow;
             try
@@ -835,15 +835,15 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Reads every live row from the target table.
     /// </summary>
-    private Dictionary<long, Dictionary<string, object?>> ReadAllRows(string tableName, string databaseName,
+    private Dictionary<RowKey, Dictionary<string, object?>> ReadAllRows(string tableName, string databaseName,
         HashSet<string>? selectedColumns)
     {
-        var parsedTableData = new Dictionary<long, Dictionary<string, object?>>();
+        var parsedTableData = new Dictionary<RowKey, Dictionary<string, object?>>();
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
             IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
-            foreach ((long rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            foreach ((RowKey rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
             {
                 parsedTableData[rowId] = CopyStoredRowToLegacyDictionary(row, columns, selectedColumns);
             }
@@ -851,7 +851,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[(long)rowTuple.RowId] = RowSerializer.Deserialize(
+            parsedTableData[rowTuple.RowId] = RowSerializer.Deserialize(
                 databaseName,
                 tableName,
                 rowTuple.RawRow,
@@ -868,15 +868,15 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <summary>
     /// Reads every live row from the target table as typed rows.
     /// </summary>
-    private Dictionary<long, StoredRow> ReadAllTypedRows(string tableName, string databaseName)
+    private Dictionary<RowKey, StoredRow> ReadAllTypedRows(string tableName, string databaseName)
     {
-        var parsedTableData = new Dictionary<long, StoredRow>();
+        var parsedTableData = new Dictionary<RowKey, StoredRow>();
         IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
         ReactiveRowSchema schema = BuildReactiveSchema(columns);
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            foreach ((long rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            foreach ((RowKey rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
             {
                 parsedTableData[rowId] = row;
             }
@@ -884,7 +884,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (var rowTuple in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            parsedTableData[(long)rowTuple.RowId] = StoredRow.FromOwnedCells(
+            parsedTableData[rowTuple.RowId] = StoredRow.FromOwnedCells(
                 schema,
                 RowSerializer.DeserializeCells(rowTuple.RawRow, columns));
         }

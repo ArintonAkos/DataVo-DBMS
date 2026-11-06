@@ -30,7 +30,7 @@ using DataVo.Core.Indexing;
 ///
 /// <para><b>Row ID:</b></para>
 /// <para>
-/// A <c>long</c> representing the physical position/identifier of the row in the storage engine.
+/// A <c>RowKey</c> representing the physical position/identifier of the row in the storage engine.
 /// Multiple keys can map to the same row ID (e.g., a row appears in several indexes),
 /// and a single key can map to multiple row IDs (e.g., <c>"Alice"</c> → <c>[1, 5, 12]</c>).
 /// </para>
@@ -53,7 +53,7 @@ public interface IIndex : IIndexBase
     /// index.Insert("Alice", 5);  // key "Alice" now maps to [1, 5]
     /// index.Insert("Bob##25", 3); // composite key maps to [3]
     /// </example>
-    void Insert(string key, long rowId);
+    void Insert(string key, RowKey rowId);
 
     /// <summary>
     /// Removes all occurrences of the given row IDs across every key in the index.
@@ -64,7 +64,7 @@ public interface IIndex : IIndexBase
     /// index.DeleteValues([1, 3]);
     /// // Result: "Alice" → [5], "Bob" is removed
     /// </example>
-    void DeleteValues(List<long> rowIds);
+    void DeleteValues(List<RowKey> rowIds);
 
     /// <summary>
     /// Returns all row IDs associated with the given key.
@@ -75,7 +75,7 @@ public interface IIndex : IIndexBase
     /// index.Search("Alice");   // returns [1, 5]
     /// index.Search("Unknown"); // returns []
     /// </example>
-    List<long> Search(string key);
+    List<RowKey> Search(string key);
 
     /// <summary>
     /// Returns the row IDs associated with the given key without copying, as a read-only view.
@@ -88,7 +88,7 @@ public interface IIndex : IIndexBase
     /// index.SearchReadOnly("Alice");   // returns [1, 5] without allocating a copy
     /// index.SearchReadOnly("Unknown"); // returns []
     /// </example>
-    IReadOnlyList<long> SearchReadOnly(string key) => Search(key);
+    IReadOnlyList<RowKey> SearchReadOnly(string key) => Search(key);
 
     /// <summary>
     /// Checks whether the index contains the supplied logical key without materializing the row-id list.
@@ -106,7 +106,7 @@ public interface IIndex : IIndexBase
     /// index.ContainsValue(1);  // true
     /// index.ContainsValue(99); // false
     /// </example>
-    bool ContainsValue(long rowId);
+    bool ContainsValue(RowKey rowId);
 
     /// <summary>
     /// Persists the index to disk at the specified file path.

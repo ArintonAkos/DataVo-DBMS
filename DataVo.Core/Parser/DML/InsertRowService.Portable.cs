@@ -3,9 +3,9 @@ namespace DataVo.Core.Parser.DML;
 
 internal sealed partial class InsertRowService
 {
-    private static ReadOnlySpan<long> AsRowIdSpan(IReadOnlyList<long> rowIds) => rowIds switch
+    private static ReadOnlySpan<RowKey> AsRowIdSpan(IReadOnlyList<RowKey> rowIds) => rowIds switch
     {
-        long[] array => array,
+        RowKey[] array => array,
         _ => rowIds.ToArray(),
     };
 }

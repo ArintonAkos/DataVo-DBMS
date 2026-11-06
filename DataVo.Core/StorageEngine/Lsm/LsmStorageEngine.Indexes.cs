@@ -19,21 +19,38 @@ public sealed partial class LsmStorageEngine
 
     private readonly ConcurrentDictionary<(string Database, string Table, string Index), IndexTableState> _indexTables = new();
 
-    void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
-        IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+    // The index store contract uses RowKey; index entries still store 8-byte row ids (stage 2 widens them).
+    void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
+        IndexPut(databaseName, tableName, indexName, encodedKey, RowKeyConversions.ToRowId(rowId));
 
-    void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
-        IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+    void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
+        IndexDelete(databaseName, tableName, indexName, encodedKey, RowKeyConversions.ToRowId(rowId));
 
     // Lookups never create an index table: a missing index must stay missing (callers fall back to scans).
-    List<long>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey) =>
-        _indexTables.ContainsKey((databaseName, tableName, indexName)) ? IndexLookup(databaseName, tableName, indexName, encodedKey) : null;
+    List<RowKey>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey) =>
+        _indexTables.ContainsKey((databaseName, tableName, indexName))
+            ? RowKeyConversions.ToRowKeys(IndexLookup(databaseName, tableName, indexName, encodedKey))
+            : null;
 
-    List<(byte[] EncodedKey, long RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName) =>
-        _indexTables.ContainsKey((databaseName, tableName, indexName)) ? IndexEntries(databaseName, tableName, indexName) : null;
+    List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName)
+    {
+        if (!_indexTables.ContainsKey((databaseName, tableName, indexName)))
+        {
+            return null;
+        }
 
-    void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, long RowId)> entries) =>
-        BuildIndex(databaseName, tableName, indexName, entries);
+        List<(byte[] EncodedKey, long RowId)> entries = IndexEntries(databaseName, tableName, indexName);
+        var keyed = new List<(byte[] EncodedKey, RowKey RowId)>(entries.Count);
+        foreach ((byte[] encodedKey, long rowId) in entries)
+        {
+            keyed.Add((encodedKey, rowId));
+        }
+
+        return keyed;
+    }
+
+    void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries) =>
+        BuildIndex(databaseName, tableName, indexName, entries.Select(static entry => (entry.EncodedKey, RowKeyConversions.ToRowId(entry.RowId))));
 
     void ILsmIndexStore.DropIndexTable(string databaseName, string tableName, string indexName) =>
         DropIndexTable(databaseName, tableName, indexName);

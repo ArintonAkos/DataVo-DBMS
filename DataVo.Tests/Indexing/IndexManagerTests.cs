@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine.Config;
 using System.Reflection;
@@ -142,7 +143,7 @@ public class IndexManagerTests : IDisposable
             "DbV2",
             "cosine");
 
-        List<long> rowIds = _manager.SearchVector([0.9f, 0.1f, 0f], 1, "idx_v2", "Embeddings", "DbV2");
+        List<RowKey> rowIds = _manager.SearchVector([0.9f, 0.1f, 0f], 1, "idx_v2", "Embeddings", "DbV2");
 
         Assert.Single(rowIds);
         Assert.Equal(1L, rowIds[0]);
@@ -161,13 +162,13 @@ public class IndexManagerTests : IDisposable
             "cosine");
 
         _manager.InsertIntoVectorIndex([0f, 1f, 0f], 2L, "idx_v2_mut", "Embeddings", "DbV2");
-        List<long> nearestB = _manager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_v2_mut", "Embeddings", "DbV2");
+        List<RowKey> nearestB = _manager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_v2_mut", "Embeddings", "DbV2");
 
         Assert.Single(nearestB);
         Assert.Equal(2L, nearestB[0]);
 
         _manager.DeleteFromVectorIndex([2L], "idx_v2_mut", "Embeddings", "DbV2");
-        List<long> nearestAfterDelete = _manager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_v2_mut", "Embeddings", "DbV2");
+        List<RowKey> nearestAfterDelete = _manager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_v2_mut", "Embeddings", "DbV2");
 
         Assert.Single(nearestAfterDelete);
         Assert.Equal(1L, nearestAfterDelete[0]);
@@ -196,7 +197,7 @@ public class IndexManagerTests : IDisposable
             metric: "cosine",
             indexType: "HNSW");
 
-        List<long> rowIds = _manager.SearchVector([0.9f, 0.1f, 0f], 1, "idx_v2_typed", "Embeddings", "DbV2", indexType: "HNSW");
+        List<RowKey> rowIds = _manager.SearchVector([0.9f, 0.1f, 0f], 1, "idx_v2_typed", "Embeddings", "DbV2", indexType: "HNSW");
 
         Assert.Single(rowIds);
         Assert.Equal(10L, rowIds[0]);
@@ -216,7 +217,7 @@ public class IndexManagerTests : IDisposable
             metric: "euclidean",
             indexType: "FLAT");
 
-        List<long> rowIds = _manager.SearchVector([1f, 0f], 1, "idx_flat", "Embeddings", "DbFlat", indexType: "FLAT");
+        List<RowKey> rowIds = _manager.SearchVector([1f, 0f], 1, "idx_flat", "Embeddings", "DbFlat", indexType: "FLAT");
 
         Assert.Single(rowIds);
         Assert.Equal(20L, rowIds[0]);
@@ -238,7 +239,7 @@ public class IndexManagerTests : IDisposable
 
         using var reloaded = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
 
-        List<long> rowIds = reloaded.SearchVector([1f, 0f], 1, "idx_flat_persisted", "Embeddings", "DbFlat", indexType: "FLAT");
+        List<RowKey> rowIds = reloaded.SearchVector([1f, 0f], 1, "idx_flat_persisted", "Embeddings", "DbFlat", indexType: "FLAT");
 
         Assert.Single(rowIds);
         Assert.Equal(20L, rowIds[0]);

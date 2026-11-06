@@ -18,6 +18,7 @@ namespace DataVo.Core;
 /// is explicit and throws for a key that is not an integer.
 /// </para>
 /// </remarks>
+[System.Text.Json.Serialization.JsonConverter(typeof(Serialization.RowKeyJsonConverter))]
 public readonly struct RowKey : IEquatable<RowKey>, IComparable<RowKey>
 {
     private const ulong SignBit = 0x8000_0000_0000_0000UL;

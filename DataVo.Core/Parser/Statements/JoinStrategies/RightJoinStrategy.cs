@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Statement;
@@ -45,7 +46,7 @@ internal class RightJoinStrategy : IJoinStrategy
         bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
 
         // Keep track of which right table rows successfully matched at least one left row
-        HashSet<long> matchedRightKeys = [];
+        HashSet<RowKey> matchedRightKeys = [];
 
         HashedTable result = rightTableData.Count >= IJoinStrategy.HashLookupThreshold
             ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys)
@@ -67,7 +68,7 @@ internal class RightJoinStrategy : IJoinStrategy
         string rightTable,
         string rightColumn,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys)
+        HashSet<RowKey> matchedRightKeys)
     {
         HashedTable result = [];
         JoinLookupTable rightLookup = BuildRightGroupedLookup(rightTableData, rightColumn);
@@ -116,7 +117,7 @@ internal class RightJoinStrategy : IJoinStrategy
         string rightTable,
         string rightColumn,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys)
+        HashSet<RowKey> matchedRightKeys)
     {
         HashedTable result = [];
 
@@ -161,7 +162,7 @@ internal class RightJoinStrategy : IJoinStrategy
         string leftTable,
         string rightTable,
         bool insertHashAfter,
-        HashSet<long> matchedRightKeys,
+        HashSet<RowKey> matchedRightKeys,
         HashedTable result,
         JoinStrategyContext context)
     {

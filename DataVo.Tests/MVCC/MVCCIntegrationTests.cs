@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.MVCC;
 using DataVo.Core.Transactions;
 using Xunit;
@@ -238,7 +239,7 @@ public class MVCCIntegrationTests
         versionStorage.MarkVersionObsolete("db", "tbl", rowId: 2, xmax: tx2Id);
 
         // Filter visible rows for TX2's snapshot
-        var visibleRowIds = new[] { 1L, 2L, 3L };
+        var visibleRowIds = new RowKey[] { 1L, 2L, 3L };
         var filtered = SnapshotVisibilityEvaluator.FilterVisibleRows(
             visibleRowIds, versionStorage, "db", "tbl", snapshot2);
 

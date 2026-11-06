@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
@@ -45,12 +46,13 @@ public class TypedRowChangeTests
     }
 
     [Fact]
-    public void RowChange_ExposesOriginalFiveParameterConstructor_ForBinaryCompatibility()
+    public void RowChange_ExposesTheFiveParameterConstructor_KeyedByRowKey()
     {
+        // Row ids became RowKey (an integer or a GUID primary key); the constructor shape is otherwise kept.
         var constructor = typeof(RowChange).GetConstructor(
         [
             typeof(string),
-            typeof(long),
+            typeof(RowKey),
             typeof(ChangeKind),
             typeof(IReadOnlyDictionary<string, object?>),
             typeof(IReadOnlyDictionary<string, object?>)

@@ -118,17 +118,17 @@ public partial class IndexManager : IDisposable
     /// Fast lane for single-column integer indexes: logical integer key -> physical row ids.
     /// Mirrors scalar BTree indexes for hot in-memory equality predicates.
     /// </summary>
-    private readonly Dictionary<IndexCacheKey, Dictionary<long, List<long>>> _integerIndexMaps = new(CacheKeyComparer.Instance);
+    private readonly Dictionary<IndexCacheKey, Dictionary<long, List<RowKey>>> _integerIndexMaps = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Fast lane for GUID primary keys: logical GUID key -> physical row id.
     /// </summary>
-    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentDictionary<Guid, long>> _guidPrimaryKeyMaps = new(CacheKeyComparer.Instance);
+    private readonly ConcurrentDictionary<IndexCacheKey, ConcurrentDictionary<Guid, RowKey>> _guidPrimaryKeyMaps = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Fast lane for single-column GUID indexes: logical GUID key -> physical row ids.
     /// </summary>
-    private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<long>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
+    private readonly Dictionary<IndexCacheKey, Dictionary<Guid, List<RowKey>>> _guidIndexMaps = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Indexes whose fast lanes hold every key of the scalar index: the index was created (empty or
@@ -210,8 +210,8 @@ public partial class IndexManager : IDisposable
     /// </summary>
     internal void DeleteRowsFromIndex(
         Models.Catalog.IndexFile index,
-        IReadOnlyList<long> rowIds,
-        IReadOnlyDictionary<long, Dictionary<string, object?>>? oldRows,
+        IReadOnlyList<RowKey> rowIds,
+        IReadOnlyDictionary<RowKey, Dictionary<string, object?>>? oldRows,
         string tableName,
         string databaseName)
     {
@@ -221,8 +221,8 @@ public partial class IndexManager : IDisposable
             return;
         }
 
-        var entries = new List<(string Key, long RowId)>(rowIds.Count);
-        foreach (long rowId in rowIds)
+        var entries = new List<(string Key, RowKey RowId)>(rowIds.Count);
+        foreach (RowKey rowId in rowIds)
         {
             if (!oldRows.TryGetValue(rowId, out Dictionary<string, object?>? oldRow))
             {
@@ -251,12 +251,12 @@ public partial class IndexManager : IDisposable
     private static IndexException MissingIndex(string indexName, string tableName) =>
         new($"Index {indexName} on table {tableName} does not exist!");
 
-    private static IEnumerable<(byte[] EncodedKey, long RowId)> FlattenForLsm(Dictionary<string, List<long>> values)
+    private static IEnumerable<(byte[] EncodedKey, RowKey RowId)> FlattenForLsm(Dictionary<string, List<RowKey>> values)
     {
-        foreach (KeyValuePair<string, List<long>> entry in values)
+        foreach (KeyValuePair<string, List<RowKey>> entry in values)
         {
             byte[] encodedKey = LsmIndexKeyCodec.EncodeString(entry.Key);
-            foreach (long rowId in entry.Value)
+            foreach (RowKey rowId in entry.Value)
             {
                 yield return (encodedKey, rowId);
             }
@@ -264,7 +264,7 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>Primary-key semantics: the key maps to exactly <paramref name="rowId"/> afterwards (re-point).</summary>
-    private void LsmUpsertPrimaryKey(byte[] encodedKey, long rowId, string indexName, string tableName, string databaseName, bool keyIsNew)
+    private void LsmUpsertPrimaryKey(byte[] encodedKey, RowKey rowId, string indexName, string tableName, string databaseName, bool keyIsNew)
     {
         ILsmIndexStore store = _lsmStore!;
         if (keyIsNew)
@@ -287,7 +287,7 @@ public partial class IndexManager : IDisposable
     private void LsmRemoveKey(byte[] encodedKey, string indexName, string tableName, string databaseName)
     {
         ILsmIndexStore store = _lsmStore!;
-        foreach (long rowId in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
+        foreach (RowKey rowId in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
         {
             store.IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
         }
@@ -573,7 +573,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Creates or replaces a scalar BTree index.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    public void CreateIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         if (_lsmStore is { } store)
         {
@@ -587,7 +587,7 @@ public partial class IndexManager : IDisposable
 
         foreach (var entry in values)
         {
-            foreach (long rowId in entry.Value)
+            foreach (RowKey rowId in entry.Value)
             {
                 index.Insert(entry.Key, rowId);
             }
@@ -604,7 +604,7 @@ public partial class IndexManager : IDisposable
     /// them complete. Keys that are not all integers (or all GUIDs) get no lane; an empty index is
     /// complete as-is because every subsequent write maintains its lanes.
     /// </summary>
-    private void SeedCompleteLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    private void SeedCompleteLanes(IndexCacheKey cacheKey, Dictionary<string, List<RowKey>> values, bool isPrimaryKey)
     {
         lock (_lock)
         {
@@ -627,10 +627,10 @@ public partial class IndexManager : IDisposable
         }
     }
 
-    private bool TrySeedIntegerLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    private bool TrySeedIntegerLanes(IndexCacheKey cacheKey, Dictionary<string, List<RowKey>> values, bool isPrimaryKey)
     {
-        var entries = new List<(long Key, List<long> RowIds)>(values.Count);
-        foreach (KeyValuePair<string, List<long>> entry in values)
+        var entries = new List<(long Key, List<RowKey> RowIds)>(values.Count);
+        foreach (KeyValuePair<string, List<RowKey>> entry in values)
         {
             if (!TryParseIntegerPrimaryKey(entry.Key, out long key) || (isPrimaryKey && entry.Value.Count != 1))
             {
@@ -643,17 +643,17 @@ public partial class IndexManager : IDisposable
         if (isPrimaryKey)
         {
             var map = new ConcurrentInt64Int64Map();
-            foreach ((long key, List<long> rowIds) in entries)
+            foreach ((long key, List<RowKey> rowIds) in entries)
             {
-                map.Set(key, rowIds[0]);
+                map.Set(key, RowKeyConversions.ToRowId(rowIds[0]));
             }
 
             _integerPrimaryKeyMaps[cacheKey] = map;
             return true;
         }
 
-        var secondary = new Dictionary<long, List<long>>(entries.Count);
-        foreach ((long key, List<long> rowIds) in entries)
+        var secondary = new Dictionary<long, List<RowKey>>(entries.Count);
+        foreach ((long key, List<RowKey> rowIds) in entries)
         {
             secondary[key] = [.. rowIds];
         }
@@ -662,10 +662,10 @@ public partial class IndexManager : IDisposable
         return true;
     }
 
-    private bool TrySeedGuidLanes(IndexCacheKey cacheKey, Dictionary<string, List<long>> values, bool isPrimaryKey)
+    private bool TrySeedGuidLanes(IndexCacheKey cacheKey, Dictionary<string, List<RowKey>> values, bool isPrimaryKey)
     {
-        var entries = new List<(Guid Key, List<long> RowIds)>(values.Count);
-        foreach (KeyValuePair<string, List<long>> entry in values)
+        var entries = new List<(Guid Key, List<RowKey> RowIds)>(values.Count);
+        foreach (KeyValuePair<string, List<RowKey>> entry in values)
         {
             if (!TryParseGuidKey(entry.Key, out Guid key) || (isPrimaryKey && entry.Value.Count != 1))
             {
@@ -677,8 +677,8 @@ public partial class IndexManager : IDisposable
 
         if (isPrimaryKey)
         {
-            var map = new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance);
-            foreach ((Guid key, List<long> rowIds) in entries)
+            var map = new ConcurrentDictionary<Guid, RowKey>(GuidSimdEqualityComparer.Instance);
+            foreach ((Guid key, List<RowKey> rowIds) in entries)
             {
                 map[key] = rowIds[0];
             }
@@ -687,8 +687,8 @@ public partial class IndexManager : IDisposable
             return true;
         }
 
-        var secondary = new Dictionary<Guid, List<long>>(entries.Count, GuidSimdEqualityComparer.Instance);
-        foreach ((Guid key, List<long> rowIds) in entries)
+        var secondary = new Dictionary<Guid, List<RowKey>>(entries.Count, GuidSimdEqualityComparer.Instance);
+        foreach ((Guid key, List<RowKey> rowIds) in entries)
         {
             secondary[key] = [.. rowIds];
         }
@@ -706,7 +706,7 @@ public partial class IndexManager : IDisposable
     /// <see langword="false"/> when the keys do not qualify; the caller then uses the generic rebuild.
     /// </summary>
     internal bool TryRebuildSingleColumnKeyIndex(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string columnName,
         string indexName,
         string tableName,
@@ -723,9 +723,9 @@ public partial class IndexManager : IDisposable
             return false;
         }
 
-        var integerEntries = new List<(long Key, long RowId)>(rows.Count);
-        var guidEntries = new List<(Guid Key, long RowId)>();
-        foreach (KeyValuePair<long, StoredRow> row in rows)
+        var integerEntries = new List<(long Key, RowKey RowId)>(rows.Count);
+        var guidEntries = new List<(Guid Key, RowKey RowId)>();
+        foreach (KeyValuePair<RowKey, StoredRow> row in rows)
         {
             if (!row.Value.TryGet(columnName, out CellValue cell) || cell.IsNull)
             {
@@ -764,22 +764,22 @@ public partial class IndexManager : IDisposable
                 if (isPrimaryKey)
                 {
                     var map = new ConcurrentInt64Int64Map();
-                    foreach ((long key, long rowId) in integerEntries)
+                    foreach ((long key, RowKey rowId) in integerEntries)
                     {
                         if (map.TryGetValue(key, out _))
                         {
                             return FallBackToGenericRebuildNoLock(cacheKey);
                         }
 
-                        map.Set(key, rowId);
+                        map.Set(key, RowKeyConversions.ToRowId(rowId));
                     }
 
                     _integerPrimaryKeyMaps[cacheKey] = map;
                 }
                 else
                 {
-                    var lane = new Dictionary<long, List<long>>();
-                    foreach ((long key, long rowId) in integerEntries)
+                    var lane = new Dictionary<long, List<RowKey>>();
+                    foreach ((long key, RowKey rowId) in integerEntries)
                     {
                         AddDistinctRowId(lane, key, rowId);
                     }
@@ -792,8 +792,8 @@ public partial class IndexManager : IDisposable
 
             if (isPrimaryKey)
             {
-                var map = new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance);
-                foreach ((Guid key, long rowId) in guidEntries)
+                var map = new ConcurrentDictionary<Guid, RowKey>(GuidSimdEqualityComparer.Instance);
+                foreach ((Guid key, RowKey rowId) in guidEntries)
                 {
                     if (!map.TryAdd(key, rowId))
                     {
@@ -805,8 +805,8 @@ public partial class IndexManager : IDisposable
             }
             else
             {
-                var lane = new Dictionary<Guid, List<long>>(GuidSimdEqualityComparer.Instance);
-                foreach ((Guid key, long rowId) in guidEntries)
+                var lane = new Dictionary<Guid, List<RowKey>>(GuidSimdEqualityComparer.Instance);
+                foreach ((Guid key, RowKey rowId) in guidEntries)
                 {
                     AddDistinctRowId(lane, key, rowId);
                 }
@@ -829,7 +829,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Rebuilds an existing scalar BTree index from supplied values.
     /// </summary>
-    public void RebuildIndex(Dictionary<string, List<long>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    public void RebuildIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
     {
         DropIndex(indexName, tableName, databaseName);
         CreateIndex(values, indexName, tableName, databaseName, indexType);
@@ -1030,7 +1030,7 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        Dictionary<string, List<long>> rebuildData,
+        Dictionary<string, List<RowKey>> rebuildData,
         IndexType? indexType = null)
     {
         if (IsIndexHealthy(indexName, tableName, databaseName))
@@ -1134,7 +1134,7 @@ public partial class IndexManager : IDisposable
     /// Compatibility API: creates or replaces a vector index.
     /// </summary>
     public void CreateVectorIndex(
-        IEnumerable<(long RowId, float[] Vector)> vectors,
+        IEnumerable<(RowKey RowId, float[] Vector)> vectors,
         string indexName,
         string tableName,
         string databaseName,
@@ -1161,7 +1161,7 @@ public partial class IndexManager : IDisposable
 
         // Build in parallel when the index supports it (HNSW, flat): rebuilding on open inserted one vector
         // at a time on one core, about 4x slower than the batch inserts that created the same index.
-        List<(long RowId, float[] Vector)> items = vectors as List<(long RowId, float[] Vector)> ?? [.. vectors];
+        List<(RowKey RowId, float[] Vector)> items = vectors as List<(RowKey RowId, float[] Vector)> ?? [.. vectors];
         int dimension = items.Count > 0 ? items[0].Vector.Length : 0;
         bool uniformDimension = items.TrueForAll(item => item.Vector.Length == dimension);
         if (vectorIndex is IBatchVectorIndex batchIndex && items.Count > 1 && dimension > 0 && uniformDimension)
@@ -1170,7 +1170,7 @@ public partial class IndexManager : IDisposable
             var flat = new float[(long)items.Count * dimension];
             for (int i = 0; i < items.Count; i++)
             {
-                rowIds[i] = items[i].RowId;
+                rowIds[i] = RowKeyConversions.ToRowId(items[i].RowId);
                 items[i].Vector.CopyTo(flat, (long)i * dimension);
             }
 
@@ -1181,7 +1181,7 @@ public partial class IndexManager : IDisposable
             foreach (var (rowId, vector) in items)
             {
                 // No defensive copy: vector index implementations copy into their own backing store.
-                vectorIndex.Insert(rowId, vector);
+                vectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector);
             }
         }
 
@@ -1193,13 +1193,13 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Inserts or updates a single vector in an existing vector index.
     /// </summary>
-    public void InsertIntoVectorIndex(float[] vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    public void InsertIntoVectorIndex(float[] vector, RowKey rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(vector);
         InsertIntoVectorIndex(vector.AsSpan(), rowId, indexName, tableName, databaseName, indexType);
     }
 
-    internal void InsertIntoVectorIndex(ReadOnlySpan<float> vector, long rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    internal void InsertIntoVectorIndex(ReadOnlySpan<float> vector, RowKey rowId, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
@@ -1213,11 +1213,11 @@ public partial class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         if (vectorIndex is ISpanVectorIndex spanVectorIndex)
         {
-            spanVectorIndex.Insert(rowId, vector);
+            spanVectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector);
         }
         else
         {
-            vectorIndex.Insert(rowId, vector.ToArray());
+            vectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector.ToArray());
         }
 
         MarkDirty(cacheKey);
@@ -1225,7 +1225,7 @@ public partial class IndexManager : IDisposable
     }
 
     internal void InsertManyIntoVectorIndex(
-        long[] rowIds,
+        RowKey[] rowIds,
         float[] vectors,
         int vectorDimension,
         string indexName,
@@ -1236,7 +1236,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            long[] rowIdsCopy = rowIds.ToArray();
+            RowKey[] rowIdsCopy = rowIds.ToArray();
             float[] vectorsCopy = vectors.ToArray();
             DeferredPublication.TryDefer(() => InsertManyIntoVectorIndex(rowIdsCopy, vectorsCopy, vectorDimension, indexName, tableName, databaseName, indexType));
             return;
@@ -1263,13 +1263,13 @@ public partial class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         if (vectorIndex is IBatchVectorIndex batchVectorIndex)
         {
-            batchVectorIndex.InsertBatch(rowIds, vectors, vectorDimension);
+            batchVectorIndex.InsertBatch(RowKeyConversions.ToRowIds(rowIds), vectors, vectorDimension);
         }
         else
         {
             for (int i = 0; i < rowIds.Length; i++)
             {
-                vectorIndex.Insert(rowIds[i], vectors.AsSpan(i * vectorDimension, vectorDimension).ToArray());
+                vectorIndex.Insert(RowKeyConversions.ToRowId(rowIds[i]), vectors.AsSpan(i * vectorDimension, vectorDimension).ToArray());
             }
         }
 
@@ -1280,19 +1280,19 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Deletes vectors by row IDs.
     /// </summary>
-    public void DeleteFromVectorIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    public void DeleteFromVectorIndex(List<RowKey> toBeDeletedIds, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            List<long> copy = [.. toBeDeletedIds];
+            List<RowKey> copy = [.. toBeDeletedIds];
             DeferredPublication.TryDefer(() => DeleteFromVectorIndex(copy, indexName, tableName, databaseName, indexType));
             return;
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        vectorIndex.Delete(toBeDeletedIds);
+        vectorIndex.Delete(RowKeyConversions.ToRowIds(toBeDeletedIds));
         MarkDirty(cacheKey);
         FlushIfImmediate(cacheKey);
     }
@@ -1346,13 +1346,13 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Performs nearest-neighbor vector search.
     /// </summary>
-    public List<long> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    public List<RowKey> SearchVector(float[] queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(queryVector);
         return SearchVector(queryVector.AsSpan(), topK, indexName, tableName, databaseName, indexType);
     }
 
-    internal List<long> SearchVector(ReadOnlySpan<float> queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
+    internal List<RowKey> SearchVector(ReadOnlySpan<float> queryVector, int topK, string indexName, string tableName, string databaseName, string indexType = "HNSW")
     {
         if (topK <= 0)
         {
@@ -1360,9 +1360,9 @@ public partial class IndexManager : IDisposable
         }
 
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        List<long> results = vectorIndex is ISpanVectorIndex spanVectorIndex
+        List<RowKey> results = RowKeyConversions.ToRowKeys(vectorIndex is ISpanVectorIndex spanVectorIndex
             ? spanVectorIndex.SearchTopK(queryVector, topK)
-            : vectorIndex.SearchTopK(queryVector.ToArray(), topK);
+            : vectorIndex.SearchTopK(queryVector.ToArray(), topK));
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, expansionPasses: 0);
         return results;
     }
@@ -1370,7 +1370,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Inserts a scalar key into a BTree index.
     /// </summary>
-    public void InsertIntoIndex(string value, long rowId, string indexName, string tableName, string databaseName)
+    public void InsertIntoIndex(string value, RowKey rowId, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
@@ -1403,12 +1403,12 @@ public partial class IndexManager : IDisposable
     /// creation). A key the lane cannot represent drops that index's lanes, which callers then treat
     /// as absent and fall back to the scalar index.
     /// </summary>
-    private void MirrorScalarEntryIntoLanesNoLock(IndexCacheKey cacheKey, string value, long rowId)
+    private void MirrorScalarEntryIntoLanesNoLock(IndexCacheKey cacheKey, string value, RowKey rowId)
     {
         bool hasIntegerLane = _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? integerPrimary);
-        bool hasIntegerSecondary = _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? integerSecondary);
-        bool hasGuidLane = _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? guidPrimary);
-        bool hasGuidSecondary = _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? guidSecondary);
+        bool hasIntegerSecondary = _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? integerSecondary);
+        bool hasGuidLane = _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, RowKey>? guidPrimary);
+        bool hasGuidSecondary = _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? guidSecondary);
         if (!hasIntegerLane && !hasIntegerSecondary && !hasGuidLane && !hasGuidSecondary)
         {
             return;
@@ -1416,7 +1416,7 @@ public partial class IndexManager : IDisposable
 
         if ((hasIntegerLane || hasIntegerSecondary) && TryParseIntegerPrimaryKey(value, out long integerKey))
         {
-            integerPrimary?.Set(integerKey, rowId);
+            integerPrimary?.Set(integerKey, RowKeyConversions.ToRowId(rowId));
             if (integerSecondary is not null)
             {
                 AddDistinctRowId(integerSecondary, integerKey, rowId);
@@ -1448,7 +1448,7 @@ public partial class IndexManager : IDisposable
     }
 
     private bool SecondaryLaneContains<TKey>(
-        Dictionary<IndexCacheKey, Dictionary<TKey, List<long>>> lanes,
+        Dictionary<IndexCacheKey, Dictionary<TKey, List<RowKey>>> lanes,
         TKey key,
         string indexName,
         string tableName,
@@ -1458,16 +1458,16 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            return lanes.TryGetValue(cacheKey, out Dictionary<TKey, List<long>>? lane)
-                && lane.TryGetValue(key, out List<long>? rowIds)
+            return lanes.TryGetValue(cacheKey, out Dictionary<TKey, List<RowKey>>? lane)
+                && lane.TryGetValue(key, out List<RowKey>? rowIds)
                 && rowIds.Count > 0;
         }
     }
 
-    private static void AddDistinctRowId<TKey>(Dictionary<TKey, List<long>> lane, TKey key, long rowId)
+    private static void AddDistinctRowId<TKey>(Dictionary<TKey, List<RowKey>> lane, TKey key, RowKey rowId)
         where TKey : notnull
     {
-        if (!lane.TryGetValue(key, out List<long>? rowIds))
+        if (!lane.TryGetValue(key, out List<RowKey>? rowIds))
         {
             lane[key] = [rowId];
             return;
@@ -1483,14 +1483,14 @@ public partial class IndexManager : IDisposable
     /// Inserts a batch of scalar keys into one BTree index under one manager lock.
     /// </summary>
     public void InsertManyIntoIndex(
-        IReadOnlyList<(string Value, long RowId)> entries,
+        IReadOnlyList<(string Value, RowKey RowId)> entries,
         string indexName,
         string tableName,
         string databaseName)
     {
         if (_lsmStore is { } store)
         {
-            foreach ((string value, long rowId) in entries)
+            foreach ((string value, RowKey rowId) in entries)
             {
                 store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(value), rowId);
             }
@@ -1501,7 +1501,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (string Value, long RowId)[] copy = [.. entries];
+            (string Value, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => InsertManyIntoIndex(copy, indexName, tableName, databaseName));
             return;
         }
@@ -1517,7 +1517,7 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < entries.Count; i++)
             {
-                (string value, long rowId) = entries[i];
+                (string value, RowKey rowId) = entries[i];
                 index.Insert(value, rowId);
                 MirrorScalarEntryIntoLanesNoLock(cacheKey, value, rowId);
             }
@@ -1537,7 +1537,7 @@ public partial class IndexManager : IDisposable
     /// a persisted index then skips the re-point lookup an upsert needs.
     /// </param>
     public void InsertIntegerPrimaryKeys(
-        IReadOnlyList<(long Key, long RowId)> entries,
+        IReadOnlyList<(long Key, RowKey RowId)> entries,
         string indexName,
         string tableName,
         string databaseName,
@@ -1545,7 +1545,7 @@ public partial class IndexManager : IDisposable
     {
         if (_lsmStore is not null)
         {
-            foreach ((long key, long rowId) in entries)
+            foreach ((long key, RowKey rowId) in entries)
             {
                 LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(key), rowId, indexName, tableName, databaseName, keysAreNew);
             }
@@ -1556,7 +1556,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (long Key, long RowId)[] copy = [.. entries];
+            (long Key, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => InsertIntegerPrimaryKeys(copy, indexName, tableName, databaseName));
             return;
         }
@@ -1572,8 +1572,8 @@ public partial class IndexManager : IDisposable
         {
             for (int i = 0; i < entries.Count; i++)
             {
-                (long key, long rowId) = entries[i];
-                map.Set(key, rowId); // reads stay lock-free
+                (long key, RowKey rowId) = entries[i];
+                map.Set(key, RowKeyConversions.ToRowId(rowId)); // reads stay lock-free
             }
 
             return;
@@ -1584,9 +1584,9 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < entries.Count; i++)
             {
-                (long key, long rowId) = entries[i];
-                long? replaced = map.TryGetValue(key, out long previous) ? previous : null;
-                map.Set(key, rowId);
+                (long key, RowKey rowId) = entries[i];
+                RowKey? replaced = map.TryGetValue(key, out long previous) ? previous : null;
+                map.Set(key, RowKeyConversions.ToRowId(rowId));
                 MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replaced);
             }
 
@@ -1608,14 +1608,14 @@ public partial class IndexManager : IDisposable
     /// directly therefore never create duplicate entries. A primary-key lane that re-points a key drops
     /// the replaced row id so the persisted index matches the lane.
     /// </summary>
-    private static void MirrorLaneEntryNoLock(IIndex index, string key, long rowId, long? replacedRowId)
+    private static void MirrorLaneEntryNoLock(IIndex index, string key, RowKey rowId, RowKey? replacedRowId)
     {
-        if (replacedRowId is long replaced && replaced != rowId)
+        if (replacedRowId is RowKey replaced && replaced != rowId)
         {
             index.DeleteValues([replaced]);
         }
 
-        IReadOnlyList<long> existing = index.SearchReadOnly(key);
+        IReadOnlyList<RowKey> existing = index.SearchReadOnly(key);
         for (int i = 0; i < existing.Count; i++)
         {
             if (existing[i] == rowId)
@@ -1656,7 +1656,7 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void InsertIntegerPrimaryKeys(
         ReadOnlySpan<long> keys,
-        ReadOnlySpan<long> rowIds,
+        ReadOnlySpan<RowKey> rowIds,
         string indexName,
         string tableName,
         string databaseName,
@@ -1676,7 +1676,7 @@ public partial class IndexManager : IDisposable
         if (DeferredPublication.Current is not null)
         {
             long[] keysCopy = keys.ToArray();
-            long[] rowIdsCopy = rowIds.ToArray();
+            RowKey[] rowIdsCopy = rowIds.ToArray();
             DeferredPublication.TryDefer(() => InsertIntegerPrimaryKeys(keysCopy.AsSpan(), rowIdsCopy.AsSpan(), indexName, tableName, databaseName));
             return;
         }
@@ -1690,7 +1690,22 @@ public partial class IndexManager : IDisposable
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
         if (!MirrorsFastLanesToScalarIndex)
         {
-            map.SetRange(keys, rowIds);
+            // The lane stores integer row ids (in-memory and disk modes only use those).
+            long[] laneValues = System.Buffers.ArrayPool<long>.Shared.Rent(rowIds.Length);
+            try
+            {
+                for (int i = 0; i < rowIds.Length; i++)
+                {
+                    laneValues[i] = RowKeyConversions.ToRowId(rowIds[i]);
+                }
+
+                map.SetRange(keys, laneValues.AsSpan(0, rowIds.Length));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<long>.Shared.Return(laneValues);
+            }
+
             return;
         }
 
@@ -1699,8 +1714,8 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < keys.Length; i++)
             {
-                long? replaced = map.TryGetValue(keys[i], out long previous) ? previous : null;
-                map.Set(keys[i], rowIds[i]);
+                RowKey? replaced = map.TryGetValue(keys[i], out long previous) ? previous : null;
+                map.Set(keys[i], RowKeyConversions.ToRowId(rowIds[i]));
                 MirrorLaneEntryNoLock(index, FormatIntegerKey(keys[i]), rowIds[i], replaced);
             }
 
@@ -1715,14 +1730,14 @@ public partial class IndexManager : IDisposable
     /// Inserts integer scalar-index entries into the direct key -> row-ids fast lane.
     /// </summary>
     public void InsertIntegerIndexEntries(
-        IReadOnlyList<(long Key, long RowId)> entries,
+        IReadOnlyList<(long Key, RowKey RowId)> entries,
         string indexName,
         string tableName,
         string databaseName)
     {
         if (_lsmStore is { } store)
         {
-            foreach ((long key, long rowId) in entries)
+            foreach ((long key, RowKey rowId) in entries)
             {
                 store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key), rowId);
             }
@@ -1733,7 +1748,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (long Key, long RowId)[] copy = [.. entries];
+            (long Key, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => InsertIntegerIndexEntries(copy, indexName, tableName, databaseName));
             return;
         }
@@ -1746,7 +1761,7 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
+            if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map))
             {
                 map = [];
                 _integerIndexMaps[cacheKey] = map;
@@ -1754,8 +1769,8 @@ public partial class IndexManager : IDisposable
 
             for (int i = 0; i < entries.Count; i++)
             {
-                (long key, long rowId) = entries[i];
-                if (!map.TryGetValue(key, out List<long>? rowIds))
+                (long key, RowKey rowId) = entries[i];
+                if (!map.TryGetValue(key, out List<RowKey>? rowIds))
                 {
                     rowIds = [];
                     map[key] = rowIds;
@@ -1772,7 +1787,7 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < entries.Count; i++)
             {
-                (long key, long rowId) = entries[i];
+                (long key, RowKey rowId) = entries[i];
                 MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replacedRowId: null);
             }
 
@@ -1787,7 +1802,7 @@ public partial class IndexManager : IDisposable
     /// Inserts GUID primary-key entries into the direct key -> row-id fast lane.
     /// </summary>
     public void InsertGuidPrimaryKeys(
-        IReadOnlyList<(Guid Key, long RowId)> entries,
+        IReadOnlyList<(Guid Key, RowKey RowId)> entries,
         string indexName,
         string tableName,
         string databaseName,
@@ -1795,7 +1810,7 @@ public partial class IndexManager : IDisposable
     {
         if (_lsmStore is not null)
         {
-            foreach ((Guid key, long rowId) in entries)
+            foreach ((Guid key, RowKey rowId) in entries)
             {
                 LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeGuid(key), rowId, indexName, tableName, databaseName, keysAreNew);
             }
@@ -1806,7 +1821,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (Guid Key, long RowId)[] copy = [.. entries];
+            (Guid Key, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => InsertGuidPrimaryKeys(copy, indexName, tableName, databaseName));
             return;
         }
@@ -1817,14 +1832,14 @@ public partial class IndexManager : IDisposable
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        ConcurrentDictionary<Guid, long> map = _guidPrimaryKeyMaps.GetOrAdd(
+        ConcurrentDictionary<Guid, RowKey> map = _guidPrimaryKeyMaps.GetOrAdd(
             cacheKey,
-            static _ => new ConcurrentDictionary<Guid, long>(GuidSimdEqualityComparer.Instance));
+            static _ => new ConcurrentDictionary<Guid, RowKey>(GuidSimdEqualityComparer.Instance));
         if (!MirrorsFastLanesToScalarIndex)
         {
             for (int i = 0; i < entries.Count; i++)
             {
-                (Guid key, long rowId) = entries[i];
+                (Guid key, RowKey rowId) = entries[i];
                 map[key] = rowId;
             }
 
@@ -1836,8 +1851,8 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < entries.Count; i++)
             {
-                (Guid key, long rowId) = entries[i];
-                long? replaced = map.TryGetValue(key, out long previous) ? previous : null;
+                (Guid key, RowKey rowId) = entries[i];
+                RowKey? replaced = map.TryGetValue(key, out RowKey previous) ? previous : null;
                 map[key] = rowId;
                 MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replaced);
             }
@@ -1853,14 +1868,14 @@ public partial class IndexManager : IDisposable
     /// Inserts GUID scalar-index entries into the direct key -> row-ids fast lane.
     /// </summary>
     public void InsertGuidIndexEntries(
-        IReadOnlyList<(Guid Key, long RowId)> entries,
+        IReadOnlyList<(Guid Key, RowKey RowId)> entries,
         string indexName,
         string tableName,
         string databaseName)
     {
         if (_lsmStore is { } store)
         {
-            foreach ((Guid key, long rowId) in entries)
+            foreach ((Guid key, RowKey rowId) in entries)
             {
                 store.IndexPut(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key), rowId);
             }
@@ -1871,7 +1886,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (Guid Key, long RowId)[] copy = [.. entries];
+            (Guid Key, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => InsertGuidIndexEntries(copy, indexName, tableName, databaseName));
             return;
         }
@@ -1884,16 +1899,16 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
+            if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? map))
             {
-                map = new Dictionary<Guid, List<long>>(GuidSimdEqualityComparer.Instance);
+                map = new Dictionary<Guid, List<RowKey>>(GuidSimdEqualityComparer.Instance);
                 _guidIndexMaps[cacheKey] = map;
             }
 
             for (int i = 0; i < entries.Count; i++)
             {
-                (Guid key, long rowId) = entries[i];
-                if (!map.TryGetValue(key, out List<long>? rowIds))
+                (Guid key, RowKey rowId) = entries[i];
+                if (!map.TryGetValue(key, out List<RowKey>? rowIds))
                 {
                     rowIds = [];
                     map[key] = rowIds;
@@ -1910,7 +1925,7 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             for (int i = 0; i < entries.Count; i++)
             {
-                (Guid key, long rowId) = entries[i];
+                (Guid key, RowKey rowId) = entries[i];
                 MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replacedRowId: null);
             }
 
@@ -2016,7 +2031,7 @@ public partial class IndexManager : IDisposable
     /// Removes a row id that a lane just dropped from the persisted scalar index as well, so a
     /// reopened engine does not see the stale key.
     /// </summary>
-    private void MirrorLaneRemoval(IndexCacheKey cacheKey, string indexName, string tableName, string databaseName, long rowId)
+    private void MirrorLaneRemoval(IndexCacheKey cacheKey, string indexName, string tableName, string databaseName, RowKey rowId)
     {
         if (!MirrorsFastLanesToScalarIndex)
         {
@@ -2051,8 +2066,8 @@ public partial class IndexManager : IDisposable
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
-            && map.TryRemove(key, out long rowId))
+        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, RowKey>? map)
+            && map.TryRemove(key, out RowKey rowId))
         {
             MirrorLaneRemoval(cacheKey, indexName, tableName, databaseName, rowId);
         }
@@ -2062,7 +2077,7 @@ public partial class IndexManager : IDisposable
     /// Removes a single (key, rowId) pair from the integer single-column fast lane, in O(bucket). Used by the
     /// UPDATE path so a moved row's stale row id is dropped from its key bucket before the new id is added.
     /// </summary>
-    public void RemoveIntegerIndexEntry(long key, long rowId, string indexName, string tableName, string databaseName)
+    public void RemoveIntegerIndexEntry(long key, RowKey rowId, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
@@ -2079,8 +2094,8 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map)
-                && map.TryGetValue(key, out List<long>? rowIds))
+            if (_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map)
+                && map.TryGetValue(key, out List<RowKey>? rowIds))
             {
                 rowIds.Remove(rowId);
                 if (rowIds.Count == 0)
@@ -2096,7 +2111,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Removes a single (key, rowId) pair from the GUID single-column fast lane, in O(bucket).
     /// </summary>
-    public void RemoveGuidIndexEntry(Guid key, long rowId, string indexName, string tableName, string databaseName)
+    public void RemoveGuidIndexEntry(Guid key, RowKey rowId, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
@@ -2113,8 +2128,8 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map)
-                && map.TryGetValue(key, out List<long>? rowIds))
+            if (_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? map)
+                && map.TryGetValue(key, out List<RowKey>? rowIds))
             {
                 rowIds.Remove(rowId);
                 if (rowIds.Count == 0)
@@ -2135,11 +2150,11 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        out long rowId)
+        out RowKey rowId)
     {
         if (_lsmStore is { } store)
         {
-            List<long>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
+            List<RowKey>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
             rowId = rows is { Count: > 0 } ? rows[0] : 0;
             return rows is { Count: > 0 };
         }
@@ -2147,9 +2162,10 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         // Lock-free: the hot point-lookup path must not serialize 8 concurrent readers on _lock.
         if (_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
-            && map.TryGetValue(key, out rowId))
+            && map.TryGetValue(key, out long laneRowId))
         {
             RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            rowId = laneRowId;
             return true;
         }
 
@@ -2165,17 +2181,17 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        out long rowId)
+        out RowKey rowId)
     {
         if (_lsmStore is { } store)
         {
-            List<long>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
+            List<RowKey>? rows = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
             rowId = rows is { Count: > 0 } ? rows[0] : 0;
             return rows is { Count: > 0 };
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map)
+        if (_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, RowKey>? map)
             && map.TryGetValue(key, out rowId))
         {
             RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
@@ -2189,15 +2205,15 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Looks up a single-column integer index without building a string key or traversing the generic BTree.
     /// </summary>
-    public IReadOnlyList<long> LookupIntegerIndex(
+    public IReadOnlyList<RowKey> LookupIntegerIndex(
         long key,
         string indexName,
         string tableName,
         string databaseName)
     {
-        return TryLookupIntegerIndex(key, indexName, tableName, databaseName, out IReadOnlyList<long>? rowIds)
+        return TryLookupIntegerIndex(key, indexName, tableName, databaseName, out IReadOnlyList<RowKey>? rowIds)
             ? rowIds
-            : Array.Empty<long>();
+            : Array.Empty<RowKey>();
     }
 
     /// <summary>
@@ -2209,12 +2225,12 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        out IReadOnlyList<long> rowIds)
+        out IReadOnlyList<RowKey> rowIds)
     {
         if (_lsmStore is { } store)
         {
-            List<long>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
-            rowIds = found ?? (IReadOnlyList<long>)Array.Empty<long>();
+            List<RowKey>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key));
+            rowIds = (IReadOnlyList<RowKey>?)found ?? Array.Empty<RowKey>();
             return found is not null;
         }
 
@@ -2222,17 +2238,17 @@ public partial class IndexManager : IDisposable
         lock (_lock)
         {
             // A partial secondary lane may miss older rows for the same key, so it answers nothing.
-            if (IsLaneComplete(cacheKey) && _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map))
+            if (IsLaneComplete(cacheKey) && _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map))
             {
                 RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
-                rowIds = map.TryGetValue(key, out List<long>? rows)
+                rowIds = map.TryGetValue(key, out List<RowKey>? rows)
                     ? rows
-                    : Array.Empty<long>();
+                    : Array.Empty<RowKey>();
                 return true;
             }
         }
 
-        rowIds = Array.Empty<long>();
+        rowIds = Array.Empty<RowKey>();
         return false;
     }
 
@@ -2245,42 +2261,42 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        out IReadOnlyList<long> rowIds)
+        out IReadOnlyList<RowKey> rowIds)
     {
         if (_lsmStore is { } store)
         {
-            List<long>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
-            rowIds = found ?? (IReadOnlyList<long>)Array.Empty<long>();
+            List<RowKey>? found = store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeGuid(key));
+            rowIds = (IReadOnlyList<RowKey>?)found ?? Array.Empty<RowKey>();
             return found is not null;
         }
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         lock (_lock)
         {
-            if (IsLaneComplete(cacheKey) && _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map))
+            if (IsLaneComplete(cacheKey) && _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? map))
             {
                 RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
-                rowIds = map.TryGetValue(key, out List<long>? rows)
+                rowIds = map.TryGetValue(key, out List<RowKey>? rows)
                     ? rows
-                    : Array.Empty<long>();
+                    : Array.Empty<RowKey>();
                 return true;
             }
         }
 
-        rowIds = Array.Empty<long>();
+        rowIds = Array.Empty<RowKey>();
         return false;
     }
 
     /// <summary>
     /// Deletes row IDs from a scalar BTree index.
     /// </summary>
-    public void DeleteFromIndex(List<long> toBeDeletedIds, string indexName, string tableName, string databaseName)
+    public void DeleteFromIndex(List<RowKey> toBeDeletedIds, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
             // Without keys every entry must be visited; callers that know the old rows use DeleteIndexEntries.
-            var doomed = new HashSet<long>(toBeDeletedIds);
-            foreach ((byte[] encodedKey, long rowId) in store.IndexEntries(databaseName, tableName, indexName) ?? [])
+            var doomed = new HashSet<RowKey>(toBeDeletedIds);
+            foreach ((byte[] encodedKey, RowKey rowId) in store.IndexEntries(databaseName, tableName, indexName) ?? [])
             {
                 if (doomed.Contains(rowId))
                 {
@@ -2294,7 +2310,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            List<long> copy = [.. toBeDeletedIds];
+            List<RowKey> copy = [.. toBeDeletedIds];
             DeferredPublication.TryDefer(() => DeleteFromIndex(copy, indexName, tableName, databaseName));
             return;
         }
@@ -2330,11 +2346,11 @@ public partial class IndexManager : IDisposable
     /// use this instead of <see cref="DeleteFromIndex"/>, which must scan every key and lane entry to
     /// find row ids. Keys use the same encoding as inserts (<see cref="IndexKeyEncoder"/>).
     /// </summary>
-    public void DeleteIndexEntries(IReadOnlyList<(string Key, long RowId)> entries, string indexName, string tableName, string databaseName)
+    public void DeleteIndexEntries(IReadOnlyList<(string Key, RowKey RowId)> entries, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
-            foreach ((string key, long rowId) in entries)
+            foreach ((string key, RowKey rowId) in entries)
             {
                 store.IndexDelete(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeString(key), rowId);
             }
@@ -2350,7 +2366,7 @@ public partial class IndexManager : IDisposable
         // Index changes become visible with the statement, after its commit record is durable.
         if (DeferredPublication.Current is not null)
         {
-            (string Key, long RowId)[] copy = [.. entries];
+            (string Key, RowKey RowId)[] copy = [.. entries];
             DeferredPublication.TryDefer(() => DeleteIndexEntries(copy, indexName, tableName, databaseName));
             return;
         }
@@ -2359,11 +2375,11 @@ public partial class IndexManager : IDisposable
         lock (_lock)
         {
             _integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? integerPrimary);
-            _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? integerSecondary);
-            _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? guidPrimary);
-            _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? guidSecondary);
+            _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? integerSecondary);
+            _guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, RowKey>? guidPrimary);
+            _guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? guidSecondary);
 
-            foreach ((string key, long rowId) in entries)
+            foreach ((string key, RowKey rowId) in entries)
             {
                 if (TryParseIntegerPrimaryKey(key, out long integerKey))
                 {
@@ -2376,7 +2392,7 @@ public partial class IndexManager : IDisposable
                 }
                 else if (TryParseGuidKey(key, out Guid guidKey))
                 {
-                    if (guidPrimary is not null && guidPrimary.TryGetValue(guidKey, out long mapped) && mapped == rowId)
+                    if (guidPrimary is not null && guidPrimary.TryGetValue(guidKey, out RowKey mapped) && mapped == rowId)
                     {
                         guidPrimary.TryRemove(guidKey, out _);
                     }
@@ -2393,7 +2409,7 @@ public partial class IndexManager : IDisposable
 
             if (index is JsonBTreeIndex json)
             {
-                foreach ((string key, long rowId) in entries)
+                foreach ((string key, RowKey rowId) in entries)
                 {
                     json.RemoveValue(key, rowId);
                 }
@@ -2410,10 +2426,10 @@ public partial class IndexManager : IDisposable
         TrackMutation(cacheKey);
     }
 
-    private static void RemoveFromLaneBucket<TKey>(Dictionary<TKey, List<long>>? lane, TKey key, long rowId)
+    private static void RemoveFromLaneBucket<TKey>(Dictionary<TKey, List<RowKey>>? lane, TKey key, RowKey rowId)
         where TKey : notnull
     {
-        if (lane is not null && lane.TryGetValue(key, out List<long>? rowIds) && rowIds.Remove(rowId) && rowIds.Count == 0)
+        if (lane is not null && lane.TryGetValue(key, out List<RowKey>? rowIds) && rowIds.Remove(rowId) && rowIds.Count == 0)
         {
             lane.Remove(key);
         }
@@ -2422,7 +2438,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Performs point lookup via scalar BTree index.
     /// </summary>
-    public IReadOnlyList<long> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
+    public IReadOnlyList<RowKey> FilterUsingIndex(string columnValue, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
@@ -2432,26 +2448,26 @@ public partial class IndexManager : IDisposable
         }
 
         if (TryParseIntegerPrimaryKey(columnValue, out long integerKey)
-            && TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out long rowId))
+            && TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out RowKey rowId))
         {
             return [rowId];
         }
 
         if (TryParseGuidKey(columnValue, out Guid guidKey)
-            && TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out long guidRowId))
+            && TryLookupGuidPrimaryKey(guidKey, indexName, tableName, databaseName, out RowKey guidRowId))
         {
             return [guidRowId];
         }
 
         if (TryParseIntegerPrimaryKey(columnValue, out long integerIndexKey)
-            && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> rowIds)
+            && TryLookupIntegerIndex(integerIndexKey, indexName, tableName, databaseName, out IReadOnlyList<RowKey> rowIds)
             && rowIds.Count > 0)
         {
             return rowIds;
         }
 
         if (TryParseGuidKey(columnValue, out Guid guidIndexKey)
-            && TryLookupGuidIndex(guidIndexKey, indexName, tableName, databaseName, out IReadOnlyList<long> guidRowIds)
+            && TryLookupGuidIndex(guidIndexKey, indexName, tableName, databaseName, out IReadOnlyList<RowKey> guidRowIds)
             && guidRowIds.Count > 0)
         {
             return guidRowIds;
@@ -2499,7 +2515,7 @@ public partial class IndexManager : IDisposable
         return exists;
     }
 
-    private void DeleteIntegerPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    private void DeleteIntegerPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<RowKey> rowIds)
     {
         if (!_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map) || map.IsEmpty)
         {
@@ -2508,7 +2524,7 @@ public partial class IndexManager : IDisposable
 
         for (int i = 0; i < rowIds.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             var search = new IntegerPrimaryKeySearch(rowId);
             map.ForEach(search, static (search, key, value) =>
             {
@@ -2529,25 +2545,25 @@ public partial class IndexManager : IDisposable
         }
     }
 
-    private sealed class IntegerPrimaryKeySearch(long rowId)
+    private sealed class IntegerPrimaryKeySearch(RowKey rowId)
     {
-        public long RowId { get; } = rowId;
+        public RowKey RowId { get; } = rowId;
         public long Key { get; set; }
         public bool Found { get; set; }
     }
 
-    private void DeleteGuidPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    private void DeleteGuidPrimaryKeysByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<RowKey> rowIds)
     {
-        if (!_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, long>? map) || map.IsEmpty)
+        if (!_guidPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentDictionary<Guid, RowKey>? map) || map.IsEmpty)
         {
             return;
         }
 
         for (int i = 0; i < rowIds.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             Guid? keyToRemove = null;
-            foreach (KeyValuePair<Guid, long> pair in map)
+            foreach (KeyValuePair<Guid, RowKey> pair in map)
             {
                 if (pair.Value == rowId)
                 {
@@ -2563,18 +2579,18 @@ public partial class IndexManager : IDisposable
         }
     }
 
-    private void DeleteIntegerIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    private void DeleteIntegerIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<RowKey> rowIds)
     {
-        if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<long>>? map) || map.Count == 0)
+        if (!_integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map) || map.Count == 0)
         {
             return;
         }
 
         for (int i = 0; i < rowIds.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             long? keyToRemove = null;
-            foreach (KeyValuePair<long, List<long>> pair in map)
+            foreach (KeyValuePair<long, List<RowKey>> pair in map)
             {
                 if (pair.Value.Remove(rowId) && pair.Value.Count == 0)
                 {
@@ -2590,18 +2606,18 @@ public partial class IndexManager : IDisposable
         }
     }
 
-    private void DeleteGuidIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<long> rowIds)
+    private void DeleteGuidIndexRowsByRowIdNoLock(IndexCacheKey cacheKey, IReadOnlyList<RowKey> rowIds)
     {
-        if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<long>>? map) || map.Count == 0)
+        if (!_guidIndexMaps.TryGetValue(cacheKey, out Dictionary<Guid, List<RowKey>>? map) || map.Count == 0)
         {
             return;
         }
 
         for (int i = 0; i < rowIds.Count; i++)
         {
-            long rowId = rowIds[i];
+            RowKey rowId = rowIds[i];
             Guid? keyToRemove = null;
-            foreach (KeyValuePair<Guid, List<long>> pair in map)
+            foreach (KeyValuePair<Guid, List<RowKey>> pair in map)
             {
                 if (pair.Value.Remove(rowId) && pair.Value.Count == 0)
                 {
@@ -2651,7 +2667,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Checks whether a scalar index references a row ID.
     /// </summary>
-    public bool IndexContainsRow(long rowId, string indexName, string tableName, string databaseName)
+    public bool IndexContainsRow(RowKey rowId, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
@@ -2750,7 +2766,7 @@ public partial class IndexManager : IDisposable
 
             string vectorColumn = catalogIndex.AttributeNames[0];
             var rows = engine.StorageContext.GetTypedTableContents(tableName, databaseName);
-            List<(long RowId, float[] Vector)> vectors = [];
+            List<(RowKey RowId, float[] Vector)> vectors = [];
 
             foreach (var row in rows)
             {

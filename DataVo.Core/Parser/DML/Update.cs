@@ -81,7 +81,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
                 if (toBeUpdated.Count == 0)
                 {
                     Messages.Add("Rows affected: 0");
@@ -90,12 +90,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
                 var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
 
-                foreach (long rowId in toBeUpdated)
+                foreach (RowKey rowId in toBeUpdated)
                 {
                     MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "UPDATE");
                 }
 
-                (List<Dictionary<string, object?>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
+                (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
 
                 for (int i = 0; i < newRows.Count; i++)
                 {
@@ -109,20 +109,20 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
             else
             {
-                List<long> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
                 if (toBeUpdated.Count == 0)
                 {
                     Messages.Add("Rows affected: 0");
                     return;
                 }
 
-                List<long> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
+                List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
                 int rowsAffected;
 
                 try
                 {
-                    List<long> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
-                    Dictionary<long, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
+                    List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
+                    Dictionary<RowKey, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
 
                     if (revalidatedRows.Count == 0)
                     {
@@ -130,9 +130,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     }
                     else
                     {
-                        (List<Dictionary<string, object?>> newRows, List<long> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
+                        (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
 
-                        foreach (long rowId in oldRowIds)
+                        foreach (RowKey rowId in oldRowIds)
                         {
                             MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "UPDATE");
                         }
@@ -163,16 +163,16 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// </summary>
     /// <param name="databaseName">The active database name.</param>
     /// <returns>A list of matching row IDs.</returns>
-    private List<long> IdentifyRowsToUpdate(string databaseName)
+    private List<RowKey> IdentifyRowsToUpdate(string databaseName)
     {
         var whereStatement = new Statements.Where(_model.WhereExpression);
         return whereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
     }
 
-    private List<long> RevalidateRowsAfterLock(
+    private List<RowKey> RevalidateRowsAfterLock(
         string databaseName,
-        IReadOnlyList<long> lockCoveredRowIds,
-        IReadOnlyList<long> originalCandidates)
+        IReadOnlyList<RowKey> lockCoveredRowIds,
+        IReadOnlyList<RowKey> originalCandidates)
     {
         if (originalCandidates.Count == 0)
         {
@@ -184,9 +184,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             return [.. originalCandidates];
         }
 
-        HashSet<long> lockCovered = [.. lockCoveredRowIds];
+        HashSet<RowKey> lockCovered = [.. lockCoveredRowIds];
 
-        HashSet<long> originalSet = [.. originalCandidates];
+        HashSet<RowKey> originalSet = [.. originalCandidates];
 
         return IdentifyRowsToUpdate(databaseName)
             .Where(rowId => originalSet.Contains(rowId))
@@ -246,12 +246,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <param name="existingRows">Dictionary of existing row IDs mapping to old row data.</param>
     /// <param name="databaseName">The active database name.</param>
     /// <returns>A tuple containing the newly evaluated rows and the corresponding old row IDs.</returns>
-    private (List<Dictionary<string, object?>> NewRows, List<long> OldRowIds) EvaluateAndVerifyConstraints(
-        Dictionary<long, Dictionary<string, object?>> existingRows,
+    private (List<Dictionary<string, object?>> NewRows, List<RowKey> OldRowIds) EvaluateAndVerifyConstraints(
+        Dictionary<RowKey, Dictionary<string, object?>> existingRows,
         string databaseName)
     {
         List<Dictionary<string, object?>> newRows = new(existingRows.Count);
-        List<long> oldRowIds = new(existingRows.Count);
+        List<RowKey> oldRowIds = new(existingRows.Count);
 
         var primaryKeys = Catalog.GetTablePrimaryKeys(_model.TableName, databaseName);
         var uniqueKeys = Catalog.GetTableUniqueKeys(_model.TableName, databaseName);
@@ -461,7 +461,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             if (oldParentValStr != newParentValStr && oldParentValStr != "null")
             {
                 string childIndexName = $"_FK_{childFk.ChildTable}_{childFk.ChildColumn}";
-                List<long> childRowIds;
+                List<RowKey> childRowIds;
 
                 try
                 {
@@ -491,8 +491,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// </summary>
     private void ExecuteUpdate(
         List<Dictionary<string, object?>> newRows,
-        List<long> oldRowIds,
-        Dictionary<long, Dictionary<string, object?>> oldRowsById,
+        List<RowKey> oldRowIds,
+        Dictionary<RowKey, Dictionary<string, object?>> oldRowsById,
         string databaseName,
         long statementTxId,
         ChangeRecorder? recorder)
@@ -518,8 +518,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             else
             {
                 // The old rows are known, so remove exact (old key, row id) pairs instead of scanning.
-                var oldEntries = new List<(string Key, long RowId)>(oldRowIds.Count);
-                foreach (long oldRowId in oldRowIds)
+                var oldEntries = new List<(string Key, RowKey RowId)>(oldRowIds.Count);
+                foreach (RowKey oldRowId in oldRowIds)
                 {
                     // Same encoding as inserts; removing a pair that was never indexed is a no-op.
                     if (oldRowsById.TryGetValue(oldRowId, out Dictionary<string, object?>? oldRow)
@@ -534,12 +534,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         // Insert new records into storage & indexes
-        List<long> assignedRowIds = Context.InsertIntoTable(newRows, _model.TableName, databaseName);
+        List<RowKey> assignedRowIds = Context.InsertIntoTable(newRows, _model.TableName, databaseName);
         for (int i = 0; i < newRows.Count; i++)
         {
             var newRow = newRows[i];
-            long oldRowId = oldRowIds[i];
-            long assignedRowId = assignedRowIds[i];
+            RowKey oldRowId = oldRowIds[i];
+            RowKey assignedRowId = assignedRowIds[i];
             MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId);
 
             if (recorder is { IsEnabled: true } && oldRowsById.TryGetValue(oldRowId, out var oldRow))
@@ -559,7 +559,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 {
                     OperationType = WalOperationType.Update,
                     TableName = _model.TableName,
-                    RowId = oldRowIds[i],
+                    RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
                     UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
                 });
             }
@@ -570,7 +570,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
     private void InsertUpdatedIndexesBatch(
         IReadOnlyList<Dictionary<string, object?>> newRows,
-        IReadOnlyList<long> assignedRowIds,
+        IReadOnlyList<RowKey> assignedRowIds,
         IReadOnlyList<IndexFile> indexFiles,
         string databaseName)
     {
@@ -589,26 +589,26 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 continue;
             }
 
-            List<(string Value, long RowId)> entries = BuildScalarIndexEntries(newRows, assignedRowIds, index.AttributeNames);
+            List<(string Value, RowKey RowId)> entries = BuildScalarIndexEntries(newRows, assignedRowIds, index.AttributeNames);
 
             if (IsPrimaryKeyIndex(indexName)
-                && TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerPrimaryEntries)
+                && TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, RowKey RowId)>? integerPrimaryEntries)
                 && integerPrimaryEntries is not null)
             {
                 Indexes.InsertIntegerPrimaryKeys(integerPrimaryEntries, indexName, _model.TableName, databaseName);
             }
             else if (IsPrimaryKeyIndex(indexName)
-                && TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidPrimaryEntries)
+                && TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, RowKey RowId)>? guidPrimaryEntries)
                 && guidPrimaryEntries is not null)
             {
                 Indexes.InsertGuidPrimaryKeys(guidPrimaryEntries, indexName, _model.TableName, databaseName);
             }
-            else if (TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, long RowId)>? integerIndexEntries)
+            else if (TryBuildIntegerIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(long Key, RowKey RowId)>? integerIndexEntries)
                 && integerIndexEntries is not null)
             {
                 Indexes.InsertIntegerIndexEntries(integerIndexEntries, indexName, _model.TableName, databaseName);
             }
-            else if (TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, long RowId)>? guidIndexEntries)
+            else if (TryBuildGuidIndexEntries(newRows, assignedRowIds, index.AttributeNames, out List<(Guid Key, RowKey RowId)>? guidIndexEntries)
                 && guidIndexEntries is not null)
             {
                 Indexes.InsertGuidIndexEntries(guidIndexEntries, indexName, _model.TableName, databaseName);
@@ -620,12 +620,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
     }
 
-    private static List<(string Value, long RowId)> BuildScalarIndexEntries(
+    private static List<(string Value, RowKey RowId)> BuildScalarIndexEntries(
         IReadOnlyList<Dictionary<string, object?>> newRows,
-        IReadOnlyList<long> assignedRowIds,
+        IReadOnlyList<RowKey> assignedRowIds,
         IReadOnlyList<string> attributeNames)
     {
-        var entries = new List<(string Value, long RowId)>(newRows.Count);
+        var entries = new List<(string Value, RowKey RowId)>(newRows.Count);
         for (int i = 0; i < newRows.Count; i++)
         {
             Dictionary<string, object?> newRow = newRows[i];
@@ -643,7 +643,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
     private void InsertUpdatedVectorIndex(
         IReadOnlyList<Dictionary<string, object?>> newRows,
-        IReadOnlyList<long> assignedRowIds,
+        IReadOnlyList<RowKey> assignedRowIds,
         IndexFile index,
         string indexName,
         string indexKind,
@@ -677,9 +677,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
     private static bool TryBuildIntegerIndexEntries(
         IReadOnlyList<Dictionary<string, object?>> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IReadOnlyList<string> attributeNames,
-        out List<(long Key, long RowId)>? entries)
+        out List<(long Key, RowKey RowId)>? entries)
     {
         entries = null;
         if (attributeNames.Count != 1)
@@ -688,7 +688,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         string column = attributeNames[0];
-        var built = new List<(long Key, long RowId)>(rows.Count);
+        var built = new List<(long Key, RowKey RowId)>(rows.Count);
         for (int i = 0; i < rows.Count; i++)
         {
             if (!rows[i].TryGetValue(column, out object? value) || value is null)
@@ -710,9 +710,9 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
     private static bool TryBuildGuidIndexEntries(
         IReadOnlyList<Dictionary<string, object?>> rows,
-        IReadOnlyList<long> rowIds,
+        IReadOnlyList<RowKey> rowIds,
         IReadOnlyList<string> attributeNames,
-        out List<(Guid Key, long RowId)>? entries)
+        out List<(Guid Key, RowKey RowId)>? entries)
     {
         entries = null;
         if (attributeNames.Count != 1)
@@ -721,7 +721,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         string column = attributeNames[0];
-        var built = new List<(Guid Key, long RowId)>(rows.Count);
+        var built = new List<(Guid Key, RowKey RowId)>(rows.Count);
         for (int i = 0; i < rows.Count; i++)
         {
             if (!rows[i].TryGetValue(column, out object? value) || value is null)
@@ -816,10 +816,10 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// Falls back to a linear scan to find dependent child rows if the child table lacks an index on the foreign key column.
     /// </summary>
     /// <returns>A list of Row IDs representing matched child records.</returns>
-    private static List<long> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
+    private static List<RowKey> FindChildRowsByTableScan(string childTable, string childColumn, string parentValue, string databaseName)
     {
         var allRows = DataVoEngine.Current().StorageContext.GetTableContents(childTable, databaseName);
-        var matchingIds = new List<long>();
+        var matchingIds = new List<RowKey>();
 
         foreach (var (rowId, row) in allRows)
         {

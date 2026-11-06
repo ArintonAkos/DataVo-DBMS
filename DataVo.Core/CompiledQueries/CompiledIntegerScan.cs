@@ -6,7 +6,7 @@ namespace DataVo.Core.CompiledQueries;
 internal static partial class CompiledIntegerScan
 {
     public static List<T> ScanMany<T>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         CompiledRowMapper<T> mapper)
@@ -22,7 +22,7 @@ internal static partial class CompiledIntegerScan
     }
 
     public static bool TryScanMany<T>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         CompiledRowMapper<T> mapper,
@@ -39,7 +39,7 @@ internal static partial class CompiledIntegerScan
     }
 
     public static T? ScanSingle<T>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         CompiledRowMapper<T> mapper)
@@ -55,7 +55,7 @@ internal static partial class CompiledIntegerScan
     }
 
     public static bool TryScanSingle<T>(
-        Dictionary<long, StoredRow> rows,
+        Dictionary<RowKey, StoredRow> rows,
         string whereColumn,
         int expected,
         CompiledRowMapper<T> mapper,
@@ -89,7 +89,7 @@ internal static partial class CompiledIntegerScan
         return true;
     }
 
-    private static bool IsInt32ScanEligible(Dictionary<long, StoredRow> rows, string whereColumn)
+    private static bool IsInt32ScanEligible(Dictionary<RowKey, StoredRow> rows, string whereColumn)
     {
         foreach ((_, StoredRow row) in rows)
         {

@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 using System.Diagnostics;
 using System.Globalization;
@@ -52,7 +53,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var createIndexResult = ExecuteAndReturn("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
         Assert.DoesNotContain(createIndexResult.Messages, message => message.Contains("Error", StringComparison.OrdinalIgnoreCase));
 
-        List<long> rowIds = Engine.IndexManager.SearchVector([0.95f, 0.05f, 0f], 1, "idx_emb", "Embeddings", TestDb);
+        List<RowKey> rowIds = Engine.IndexManager.SearchVector([0.95f, 0.05f, 0f], 1, "idx_emb", "Embeddings", TestDb);
 
         Assert.Single(rowIds);
         Assert.True(rowIds[0] >= 0);
@@ -67,7 +68,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var createIndexResult = ExecuteAndReturn("CREATE INDEX idx_flat_emb ON Embeddings (Emb) USING FLAT");
         Assert.DoesNotContain(createIndexResult.Messages, message => message.Contains("Error", StringComparison.OrdinalIgnoreCase));
 
-        List<long> rowIds = Engine.IndexManager.SearchVector([0.95f, 0.05f, 0f], 1, "idx_flat_emb", "Embeddings", TestDb, indexType: "FLAT");
+        List<RowKey> rowIds = Engine.IndexManager.SearchVector([0.95f, 0.05f, 0f], 1, "idx_flat_emb", "Embeddings", TestDb, indexType: "FLAT");
 
         Assert.Single(rowIds);
         Assert.True(rowIds[0] >= 0);
@@ -81,12 +82,12 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var createIndexResult = ExecuteAndReturn("CREATE INDEX idx_emb ON Embeddings (Emb) USING HNSW");
         Assert.DoesNotContain(createIndexResult.Messages, message => message.Contains("Error", StringComparison.OrdinalIgnoreCase));
 
-        List<long> beforeInsert = Engine.IndexManager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_emb", "Embeddings", TestDb);
+        List<RowKey> beforeInsert = Engine.IndexManager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_emb", "Embeddings", TestDb);
         Assert.Single(beforeInsert);
 
         Execute("INSERT INTO Embeddings (Id, Emb, Label) VALUES (2, '[0,1,0]', 'B')");
 
-        List<long> rowIds = Engine.IndexManager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_emb", "Embeddings", TestDb);
+        List<RowKey> rowIds = Engine.IndexManager.SearchVector([0.1f, 0.9f, 0f], 1, "idx_emb", "Embeddings", TestDb);
 
         Assert.Single(rowIds);
         Assert.NotEqual(beforeInsert[0], rowIds[0]);

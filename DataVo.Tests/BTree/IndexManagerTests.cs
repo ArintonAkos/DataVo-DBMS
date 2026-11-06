@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Config;
@@ -29,7 +30,7 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void CreateIndex_WithEmptyData_CreatesIndex()
     {
-        var emptyData = new Dictionary<string, List<long>>();
+        var emptyData = new Dictionary<string, List<RowKey>>();
 
         // This should not throw
         _manager.CreateIndex(emptyData, "test_idx", TestTable, _testDb);
@@ -38,10 +39,10 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void CreateIndex_WithData_CanFilter()
     {
-        var data = new Dictionary<string, List<long>>
+        var data = new Dictionary<string, List<RowKey>>
         {
-            { "42", new List<long> { 1, 2 } },
-            { "43", new List<long> { 3 } }
+            { "42", new List<RowKey> { 1, 2 } },
+            { "43", new List<RowKey> { 3 } }
         };
 
         _manager.CreateIndex(data, "filter_idx", TestTable, _testDb);
@@ -67,9 +68,9 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void IndexContainsRow_ReturnsTrueForExistingValue()
     {
-        var data = new Dictionary<string, List<long>>
+        var data = new Dictionary<string, List<RowKey>>
         {
-            { "99", new List<long> { 1 } }
+            { "99", new List<RowKey> { 1 } }
         };
         _manager.CreateIndex(data, "contains_idx", TestTable, _testDb);
 
@@ -80,10 +81,10 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void DeleteFromIndex_RemovesRowIds()
     {
-        var data = new Dictionary<string, List<long>>
+        var data = new Dictionary<string, List<RowKey>>
         {
-            { "10", new List<long> { 1, 2 } },
-            { "20", new List<long> { 3 } }
+            { "10", new List<RowKey> { 1, 2 } },
+            { "20", new List<RowKey> { 3 } }
         };
         _manager.CreateIndex(data, "delete_idx", TestTable, _testDb);
 
@@ -100,9 +101,9 @@ public class IndexManagerTests : IDisposable
     [Fact]
     public void DropIndex_RemovesIndex()
     {
-        var data = new Dictionary<string, List<long>>
+        var data = new Dictionary<string, List<RowKey>>
         {
-            { "50", new List<long> { 1 } }
+            { "50", new List<RowKey> { 1 } }
         };
         _manager.CreateIndex(data, "drop_idx", TestTable, _testDb);
 

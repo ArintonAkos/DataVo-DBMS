@@ -102,7 +102,7 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
     public IReadOnlyCollection<string> Tables => [_shape.LeftTable, _shape.RightTable];
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
         SeedSide(table, rows);
     }

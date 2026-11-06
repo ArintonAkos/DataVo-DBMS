@@ -25,7 +25,7 @@ internal interface IReactiveQuery
     /// </summary>
     /// <param name="table">The table whose contents are supplied.</param>
     /// <param name="rows">The current <c>(rowId, row)</c> pairs in <paramref name="table"/>.</param>
-    void Seed(string table, IEnumerable<(long RowId, IReadOnlyDictionary<string, object?> Row)> rows);
+    void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows);
 
     /// <summary>
     /// Applies a batch of committed row changes for this query's tables and returns the resulting

@@ -22,7 +22,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// Gets or sets the root node of the B-Tree.
     /// </summary>
     [JsonPropertyName("root")]
-    public BTreeNode<string, long> Root { get; set; } = new BTreeNode<string, long>(minDegree, isLeaf: true);
+    public BTreeNode<string, RowKey> Root { get; set; } = new BTreeNode<string, RowKey>(minDegree, isLeaf: true);
 
     /// <summary>
     /// Gets or sets the minimum degree used by the tree.
@@ -44,7 +44,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// If the root node is full, a new root is created and the old root is split before the insertion continues.
     /// Duplicate keys are supported and append the row ID to the key's value list.
     /// </remarks>
-    public void Insert(string key, long value)
+    public void Insert(string key, RowKey value)
     {
         lock (_treeLock)
         {
@@ -52,11 +52,11 @@ public class JsonBTreeIndex(int minDegree) : IIndex
         }
     }
 
-    private void InsertCore(string key, long value)
+    private void InsertCore(string key, RowKey value)
     {
         if (Root.IsFull)
         {
-            var newRoot = new BTreeNode<string, long>(MinDegree, isLeaf: false);
+            var newRoot = new BTreeNode<string, RowKey>(MinDegree, isLeaf: false);
             newRoot.Children!.Add(Root);
             newRoot.SplitChild(0, Root);
 
@@ -89,7 +89,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </summary>
     /// <param name="key">The logical key to search for.</param>
     /// <returns>A list of matching row IDs, or an empty list if the key is not present.</returns>
-    public List<long> Search(string key)
+    public List<RowKey> Search(string key)
     {
         lock (_treeLock)
         {
@@ -104,7 +104,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </summary>
     /// <param name="key">The logical key to search for.</param>
     /// <returns>The matching row IDs as a read-only list, or an empty list if the key is not present.</returns>
-    public IReadOnlyList<long> SearchReadOnly(string key)
+    public IReadOnlyList<RowKey> SearchReadOnly(string key)
     {
         lock (_treeLock)
         {
@@ -131,7 +131,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// </summary>
     /// <param name="rowId">The row ID to search for.</param>
     /// <returns><see langword="true"/> if the row ID is present; otherwise, <see langword="false"/>.</returns>
-    public bool ContainsValue(long rowId)
+    public bool ContainsValue(RowKey rowId)
     {
         lock (_treeLock)
         {
@@ -148,11 +148,11 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// This helper is not part of <see cref="IIndex"/>, but is available for scenarios that require targeted removal.
     /// The implementation performs an in-order traversal, filters the matching mapping, and rebuilds the tree.
     /// </remarks>
-    public void Delete(string key, long value)
+    public void Delete(string key, RowKey value)
     {
         lock (_treeLock)
         {
-            var allEntries = new List<KeyValuePair<string, List<long>>>();
+            var allEntries = new List<KeyValuePair<string, List<RowKey>>>();
             Root.CollectAll(allEntries);
 
             // Remove the specific value from the matching key. Copy-on-write: filter into a fresh list
@@ -162,9 +162,9 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             {
                 if (allEntries[idx].Key == key)
                 {
-                    var filtered = new List<long>(allEntries[idx].Value);
+                    var filtered = new List<RowKey>(allEntries[idx].Value);
                     filtered.Remove(value);
-                    allEntries[idx] = new KeyValuePair<string, List<long>>(key, filtered);
+                    allEntries[idx] = new KeyValuePair<string, List<RowKey>>(key, filtered);
                     modified = true;
                     break;
                 }
@@ -176,10 +176,10 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             }
 
             // Rebuild the tree from the remaining entries
-            Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
+            Root = new BTreeNode<string, RowKey>(MinDegree, isLeaf: true);
             foreach (var entry in allEntries)
             {
-                foreach (long val in entry.Value)
+                foreach (RowKey val in entry.Value)
                 {
                     InsertCore(entry.Key, val);
                 }
@@ -194,7 +194,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <remarks>
     /// The tree is rebuilt from the filtered entries after the removals are applied.
     /// </remarks>
-    public void DeleteValues(List<long> valuesToDelete)
+    public void DeleteValues(List<RowKey> valuesToDelete)
     {
         if (valuesToDelete.Count == 0)
         {
@@ -206,7 +206,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             // Remove the row ids in place instead of rebuilding the whole tree on every delete (that
             // rebuild made each UPDATE cost O(n log n) time and megabytes of garbage). A key whose last
             // row id goes away stays as an empty entry until the next compaction.
-            HashSet<long>? many = valuesToDelete.Count > 1 ? [.. valuesToDelete] : null;
+            HashSet<RowKey>? many = valuesToDelete.Count > 1 ? [.. valuesToDelete] : null;
             _emptyKeys += RemoveValues(Root, valuesToDelete[0], many);
             if (_emptyKeys >= CompactionThreshold)
             {
@@ -220,11 +220,11 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <see cref="DeleteValues"/>, which has to visit every key because it is not given one.
     /// </summary>
     /// <returns><see langword="true"/> when the mapping existed.</returns>
-    public bool RemoveValue(string key, long rowId)
+    public bool RemoveValue(string key, RowKey rowId)
     {
         lock (_treeLock)
         {
-            BTreeNode<string, long>? node = Root;
+            BTreeNode<string, RowKey>? node = Root;
             while (node is not null)
             {
                 int i = 0;
@@ -235,15 +235,15 @@ public class JsonBTreeIndex(int minDegree) : IIndex
 
                 if (i < node.Keys.Count && key.CompareTo(node.Keys[i]) == 0)
                 {
-                    List<long> rowIds = node.Values[i];
+                    List<RowKey> rowIds = node.Values[i];
                     if (!rowIds.Contains(rowId))
                     {
                         return false;
                     }
 
                     // Copy-on-write: the old list may already be published to a lock-free reader.
-                    var remaining = new List<long>(rowIds.Count);
-                    foreach (long existing in rowIds)
+                    var remaining = new List<RowKey>(rowIds.Count);
+                    foreach (RowKey existing in rowIds)
                     {
                         if (existing != rowId)
                         {
@@ -270,14 +270,14 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     private const int CompactionThreshold = 4096;
     private int _emptyKeys;
 
-    private static int RemoveValues(BTreeNode<string, long> node, long single, HashSet<long>? many)
+    private static int RemoveValues(BTreeNode<string, RowKey> node, RowKey single, HashSet<RowKey>? many)
     {
         int emptied = 0;
         for (int i = 0; i < node.Values.Count; i++)
         {
-            List<long> rowIds = node.Values[i];
+            List<RowKey> rowIds = node.Values[i];
             bool hit = false;
-            foreach (long rowId in rowIds)
+            foreach (RowKey rowId in rowIds)
             {
                 if (many is null ? rowId == single : many.Contains(rowId))
                 {
@@ -292,8 +292,8 @@ public class JsonBTreeIndex(int minDegree) : IIndex
             }
 
             // Copy-on-write: the old list may already be published to a lock-free reader.
-            var remaining = new List<long>(rowIds.Count);
-            foreach (long rowId in rowIds)
+            var remaining = new List<RowKey>(rowIds.Count);
+            foreach (RowKey rowId in rowIds)
             {
                 if (!(many is null ? rowId == single : many.Contains(rowId)))
                 {
@@ -310,7 +310,7 @@ public class JsonBTreeIndex(int minDegree) : IIndex
 
         if (node.Children is { } children)
         {
-            foreach (BTreeNode<string, long> child in children)
+            foreach (BTreeNode<string, RowKey> child in children)
             {
                 emptied += RemoveValues(child, single, many);
             }
@@ -322,12 +322,12 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     /// <summary>Rebuilds the tree without keys whose row-id lists became empty.</summary>
     private void Compact()
     {
-        var allEntries = new List<KeyValuePair<string, List<long>>>();
+        var allEntries = new List<KeyValuePair<string, List<RowKey>>>();
         Root.CollectAll(allEntries);
-        Root = new BTreeNode<string, long>(MinDegree, isLeaf: true);
-        foreach (KeyValuePair<string, List<long>> entry in allEntries)
+        Root = new BTreeNode<string, RowKey>(MinDegree, isLeaf: true);
+        foreach (KeyValuePair<string, List<RowKey>> entry in allEntries)
         {
-            foreach (long rowId in entry.Value)
+            foreach (RowKey rowId in entry.Value)
             {
                 InsertCore(entry.Key, rowId);
             }

@@ -26,7 +26,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
     /// <remarks>
     /// Inherits from <see cref="ExpressionEvaluatorCore{TResult}"/> with <c>TResult</c> = <see cref="HashSet{T}"/> of <see cref="long"/>.
     /// </remarks>
-    internal class StatementEvaluatorWOJoin : ExpressionEvaluatorCore<HashSet<long>>
+    internal class StatementEvaluatorWOJoin : ExpressionEvaluatorCore<HashSet<RowKey>>
     {
         private readonly TableDetail _table;
 
@@ -49,7 +49,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// Returns all row IDs when the WHERE clause resolves to an unconditional <c>TRUE</c>.
         /// </summary>
         /// <returns>A <see cref="HashSet{T}"/> containing the IDs of every row in the table.</returns>
-        protected override HashSet<long> EvaluateTrueLiteral()
+        protected override HashSet<RowKey> EvaluateTrueLiteral()
         {
             return [.. _table.TableContent!.Select(row => row.Key)];
         }
@@ -58,7 +58,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// Returns an empty set when the WHERE clause resolves to an unconditional <c>FALSE</c>.
         /// </summary>
         /// <returns>An empty <see cref="HashSet{T}"/>.</returns>
-        protected override HashSet<long> EvaluateFalseLiteral() => [];
+        protected override HashSet<RowKey> EvaluateFalseLiteral() => [];
 
         /// <summary>
         /// Handles an equality comparison (<c>column = literal</c>) by selecting the fastest available access path:
@@ -71,7 +71,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// </summary>
         /// <param name="root">A <see cref="BinaryExpressionNode"/> with a column reference on the left and a literal on the right.</param>
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that satisfy the equality condition.</returns>
-        protected override HashSet<long> HandleIndexableStatement(BinaryExpressionNode root)
+        protected override HashSet<RowKey> HandleIndexableStatement(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -91,7 +91,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                     return EvaluateUsingSecondaryIndex(secondaryKey, indexFile);
                 }
 
-                HashSet<long> indexed = EvaluateUsingSecondaryIndex(rightValue, indexFile);
+                HashSet<RowKey> indexed = EvaluateUsingSecondaryIndex(rightValue, indexFile);
                 return indexed.Count > 0
                     ? indexed
                     : EvaluateUsingFullScan(leftValue, rightLit.Value);
@@ -105,7 +105,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                     return EvaluateUsingPrimaryKey(primaryKey);
                 }
 
-                HashSet<long> indexed = EvaluateUsingPrimaryKey(rightValue);
+                HashSet<RowKey> indexed = EvaluateUsingPrimaryKey(rightValue);
                 return indexed.Count > 0
                     ? indexed
                     : EvaluateUsingFullScan(leftValue, rightLit.Value);
@@ -120,7 +120,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="rightValue">The value to search for in the index.</param>
         /// <param name="indexFile">The filename of the secondary index B-Tree file.</param>
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that match the index lookup.</returns>
-        private HashSet<long> EvaluateUsingSecondaryIndex(string rightValue, string indexFile)
+        private HashSet<RowKey> EvaluateUsingSecondaryIndex(string rightValue, string indexFile)
         {
             return [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, indexFile, _table.TableName, _table.DatabaseName!)];
         }
@@ -131,7 +131,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// </summary>
         /// <param name="rightValue">The primary key value to search for.</param>
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that match.</returns>
-        private HashSet<long> EvaluateUsingPrimaryKey(string rightValue)
+        private HashSet<RowKey> EvaluateUsingPrimaryKey(string rightValue)
         {
             return [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(rightValue, $"_PK_{_table.TableName}", _table.TableName, _table.DatabaseName!)];
         }
@@ -143,7 +143,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="leftValue">The column name to evaluate in each row.</param>
         /// <param name="rightVal">The expected value to compare against.</param>
         /// <returns>A <see cref="HashSet{T}"/> of matching row IDs.</returns>
-        private HashSet<long> EvaluateUsingFullScan(string leftValue, object? rightVal)
+        private HashSet<RowKey> EvaluateUsingFullScan(string leftValue, object? rightVal)
         {
             return [.. _table.TableContent!
                 .Where(entry => EvaluateEquality(entry.Value[leftValue], rightVal))
@@ -169,7 +169,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// </summary>
         /// <param name="root">A <see cref="BinaryExpressionNode"/> with a column reference on the left and a literal on the right.</param>
         /// <returns>A <see cref="HashSet{T}"/> of row IDs that satisfy the condition.</returns>
-        protected override HashSet<long> HandleNonIndexableStatement(BinaryExpressionNode root)
+        protected override HashSet<RowKey> HandleNonIndexableStatement(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -177,7 +177,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             string leftValue = leftCol.Column;
             var rightVal = rightLit.Value;
 
-            Func<KeyValuePair<long, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
+            Func<KeyValuePair<RowKey, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
 
             return [.. _table.TableContent!
                 .Where(pred)
@@ -187,7 +187,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <summary>
         /// Handles predicates of the form <c>distance(vector_column, literal_vector) &lt;op&gt; threshold</c>.
         /// </summary>
-        protected override HashSet<long> HandleDistanceThresholdExpression(BinaryExpressionNode distanceExpression, string comparisonOperator, object? thresholdLiteral)
+        protected override HashSet<RowKey> HandleDistanceThresholdExpression(BinaryExpressionNode distanceExpression, string comparisonOperator, object? thresholdLiteral)
         {
             if (distanceExpression.Left is not ResolvedColumnRefNode vectorColumn
                 || distanceExpression.Right is not LiteralNode vectorLiteral)
@@ -237,7 +237,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="rightVal">The literal value to compare against.</param>
         /// <returns>A predicate function that returns <c>true</c> for rows satisfying the condition.</returns>
         /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-        private Func<KeyValuePair<long, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
+        private Func<KeyValuePair<RowKey, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
         {
             return op switch
             {
@@ -260,7 +260,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// </summary>
         /// <param name="root">A <see cref="BinaryExpressionNode"/> whose left and right operands are both <see cref="ResolvedColumnRefNode"/> instances.</param>
         /// <returns>A <see cref="HashSet{T}"/> of row IDs where the condition holds.</returns>
-        protected override HashSet<long> HandleTwoColumnExpression(BinaryExpressionNode root)
+        protected override HashSet<RowKey> HandleTwoColumnExpression(BinaryExpressionNode root)
         {
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightCol = (ResolvedColumnRefNode)root.Right;
@@ -268,7 +268,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             string leftValue = leftCol.Column;
             string rightValue = rightCol.Column;
 
-            Func<KeyValuePair<long, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
+            Func<KeyValuePair<RowKey, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
 
             return [.. _table.TableContent!
                 .Where(pred)
@@ -283,7 +283,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="rightValue">The name of the second column.</param>
         /// <returns>A predicate function that returns <c>true</c> for rows where the two column values satisfy the operator.</returns>
         /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-        private Func<KeyValuePair<long, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
+        private Func<KeyValuePair<RowKey, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
         {
             return op switch
             {
@@ -304,7 +304,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// </summary>
         /// <param name="root">A <see cref="BinaryExpressionNode"/> whose left and right operands are both <see cref="LiteralNode"/> instances.</param>
         /// <returns>All row IDs if the condition is true; an empty <see cref="HashSet{T}"/> otherwise.</returns>
-        protected override HashSet<long> HandleConstantExpression(BinaryExpressionNode root)
+        protected override HashSet<RowKey> HandleConstantExpression(BinaryExpressionNode root)
         {
             var leftLit = (LiteralNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
@@ -351,7 +351,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="leftResult">Row IDs from the left sub-expression.</param>
         /// <param name="rightResult">Row IDs from the right sub-expression.</param>
         /// <returns>A <see cref="HashSet{T}"/> containing only row IDs present in both inputs.</returns>
-        protected override HashSet<long> And(HashSet<long> leftResult, HashSet<long> rightResult)
+        protected override HashSet<RowKey> And(HashSet<RowKey> leftResult, HashSet<RowKey> rightResult)
         {
             return [.. leftResult.Intersect(rightResult)];
         }
@@ -363,7 +363,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         /// <param name="leftResult">Row IDs from the left sub-expression.</param>
         /// <param name="rightResult">Row IDs from the right sub-expression.</param>
         /// <returns>A <see cref="HashSet{T}"/> containing all row IDs from both inputs.</returns>
-        protected override HashSet<long> Or(HashSet<long> leftResult, HashSet<long> rightResult)
+        protected override HashSet<RowKey> Or(HashSet<RowKey> leftResult, HashSet<RowKey> rightResult)
         {
             return [.. leftResult.Union(rightResult)];
         }

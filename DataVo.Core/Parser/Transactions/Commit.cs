@@ -96,7 +96,7 @@ internal class Commit : BaseDbAction
 
     private readonly record struct LockedResources(
         List<string> TableWriteLocks,
-        Dictionary<string, List<long>> RowWriteLocksByTable);
+        Dictionary<string, List<RowKey>> RowWriteLocksByTable);
 
     private static LockedResources AcquireWriteLocks(string databaseName, TransactionContext context)
     {
@@ -113,7 +113,7 @@ internal class Commit : BaseDbAction
             .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var rowWriteLocksByTable = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
+        var rowWriteLocksByTable = new Dictionary<string, List<RowKey>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (string tableName in tableWriteLocks)
         {
@@ -122,18 +122,18 @@ internal class Commit : BaseDbAction
 
         foreach (string tableName in rowLockTables)
         {
-            IEnumerable<long> rowIds = Enumerable.Empty<long>();
-            if (context.DeletedRowIds.TryGetValue(tableName, out HashSet<long>? deleted))
+            IEnumerable<RowKey> rowIds = Enumerable.Empty<RowKey>();
+            if (context.DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted))
             {
                 rowIds = rowIds.Concat(deleted);
             }
 
-            if (context.UpdatedRows.TryGetValue(tableName, out List<(long RowId, Dictionary<string, object?> UpdatedColumns)>? updated))
+            if (context.UpdatedRows.TryGetValue(tableName, out List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>? updated))
             {
                 rowIds = rowIds.Concat(updated.Select(entry => entry.RowId));
             }
 
-            List<long> acquiredRowLocks = lockManager.AcquireRowWriteLocks(databaseName, tableName, rowIds);
+            List<RowKey> acquiredRowLocks = lockManager.AcquireRowWriteLocks(databaseName, tableName, rowIds);
             rowWriteLocksByTable[tableName] = acquiredRowLocks;
         }
 
@@ -151,7 +151,7 @@ internal class Commit : BaseDbAction
         {
             string tableName = rowLockTables[i];
 
-            if (lockedResources.RowWriteLocksByTable.TryGetValue(tableName, out List<long>? rowLocks) && rowLocks.Count > 0)
+            if (lockedResources.RowWriteLocksByTable.TryGetValue(tableName, out List<RowKey>? rowLocks) && rowLocks.Count > 0)
             {
                 lockManager.ReleaseRowWriteLocks(databaseName, tableName, rowLocks);
             }
@@ -181,7 +181,7 @@ internal class Commit : BaseDbAction
 
             foreach (var row in rows)
             {
-                long assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
+                RowKey assignedRowId = engine.StorageContext.InsertOneIntoTable(row, tableName, databaseName);
                 MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, assignedRowId, txId);
                 recorder?.RecordInsert(tableName, assignedRowId, row);
 
@@ -206,7 +206,7 @@ internal class Commit : BaseDbAction
         {
             var rowIdList = rowIds.ToList();
 
-            foreach (long rowId in rowIdList)
+            foreach (RowKey rowId in rowIdList)
             {
                 MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, context.Snapshot, "DELETE");
                 MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId);
@@ -215,7 +215,7 @@ internal class Commit : BaseDbAction
             var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
 
             // Old rows give the exact index keys to remove; without them every index entry is visited.
-            Dictionary<long, Dictionary<string, object?>>? oldRows =
+            Dictionary<RowKey, Dictionary<string, object?>>? oldRows =
                 recorder is { IsEnabled: true } || indexFiles.Count > 0
                     ? engine.StorageContext.GetTableContents(rowIdList, tableName, databaseName)
                     : null;
@@ -223,7 +223,7 @@ internal class Commit : BaseDbAction
             if (recorder is { IsEnabled: true })
             {
                 var deletedRows = oldRows!;
-                foreach (long rowId in rowIdList)
+                foreach (RowKey rowId in rowIdList)
                 {
                     if (deletedRows.TryGetValue(rowId, out var oldRow))
                     {
@@ -267,13 +267,13 @@ internal class Commit : BaseDbAction
 
                 // Delete old + Insert new
                 engine.StorageContext.DeleteFromTable([rowId], tableName, databaseName);
-                var oldRowById = new Dictionary<long, Dictionary<string, object?>> { [rowId] = oldRow };
+                var oldRowById = new Dictionary<RowKey, Dictionary<string, object?>> { [rowId] = oldRow };
                 foreach (var index in indexFiles)
                 {
                     engine.IndexManager.DeleteRowsFromIndex(index, [rowId], oldRowById, tableName, databaseName);
                 }
 
-                long newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
+                RowKey newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
                 MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, rowId, newRowId, txId);
                 recorder?.RecordUpdate(tableName, newRowId, oldRow, newRow);
                 foreach (var index in indexFiles)

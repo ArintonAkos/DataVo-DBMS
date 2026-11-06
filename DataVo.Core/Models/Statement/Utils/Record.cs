@@ -5,12 +5,12 @@ namespace DataVo.Core.Models.Statement.Utils;
 /// </summary>
 /// <param name="rowId">The row identifier.</param>
 /// <param name="values">Row values keyed by column name.</param>
-public class Record(long rowId, Dictionary<string, object?> values)
+public class Record(RowKey rowId, Dictionary<string, object?> values)
 {
     /// <summary>
     /// Gets or sets the row identifier.
     /// </summary>
-    public long RowId { get; set; } = rowId;
+    public RowKey RowId { get; set; } = rowId;
 
     /// <summary>
     /// Gets or sets the row values.

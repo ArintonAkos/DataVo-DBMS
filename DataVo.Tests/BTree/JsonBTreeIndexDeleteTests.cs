@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.BTree;
 
 namespace DataVo.Tests.BTree;
@@ -55,7 +56,7 @@ public sealed class JsonBTreeIndexDeleteTests
     public void PublishedValueList_IsNotMutatedByDeletes()
     {
         JsonBTreeIndex index = Build(keys: 10, rowsPerKey: 3);
-        IReadOnlyList<long> before = index.SearchReadOnly("k0005");
+        IReadOnlyList<RowKey> before = index.SearchReadOnly("k0005");
 
         index.DeleteValues([before[0]]);
 

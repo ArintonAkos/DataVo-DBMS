@@ -55,15 +55,17 @@ public sealed partial class DataVoEngine
         graph.Delete(removed);
         if (reindex.Count > 0)
         {
-            foreach (KeyValuePair<long, StoredRow> row in StorageContext.GetTypedTableContents(reindex, tableName, databaseName))
+            // The graph keys nodes by integer row id until its format widens (clustering stage 5).
+            foreach (KeyValuePair<RowKey, StoredRow> row in StorageContext.GetTypedTableContents(RowKeyConversions.ToRowKeys(reindex), tableName, databaseName))
             {
+                long rowId = RowKeyConversions.ToRowId(row.Key);
                 if (row.Value.TryGet(column, out CellValue cell) && !cell.IsNull && cell.Type == CellType.Vector)
                 {
-                    graph.Insert(row.Key, cell.AsVectorReadOnlySpan());
+                    graph.Insert(rowId, cell.AsVectorReadOnlySpan());
                 }
-                else if (graph.ContainsRow(row.Key))
+                else if (graph.ContainsRow(rowId))
                 {
-                    graph.Delete([row.Key]);
+                    graph.Delete([rowId]);
                 }
             }
         }

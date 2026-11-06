@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 using System.Collections.Concurrent;
 using System.Threading;
 using DataVo.Core.Exceptions;
@@ -129,7 +130,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowId">The row identifier.</param>
-    public void AcquireRowReadLock(string databaseName, string tableName, long rowId)
+    public void AcquireRowReadLock(string databaseName, string tableName, RowKey rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
@@ -171,7 +172,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowId">The row identifier.</param>
-    public void AcquireRowWriteLock(string databaseName, string tableName, long rowId)
+    public void AcquireRowWriteLock(string databaseName, string tableName, RowKey rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
@@ -213,7 +214,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowId">The row identifier.</param>
-    public void ReleaseRowReadLock(string databaseName, string tableName, long rowId)
+    public void ReleaseRowReadLock(string databaseName, string tableName, RowKey rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (Runtime.DeferredPublication.Current is { } publication
@@ -238,7 +239,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowId">The row identifier.</param>
-    public void ReleaseRowWriteLock(string databaseName, string tableName, long rowId)
+    public void ReleaseRowWriteLock(string databaseName, string tableName, RowKey rowId)
     {
         string rowKey = BuildRowKey(databaseName, tableName, rowId);
         if (Runtime.DeferredPublication.Current is { } publication
@@ -269,9 +270,9 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     /// <param name="rowIds">Row identifiers to lock.</param>
     /// <returns>The ordered lock acquisition list.</returns>
-    public List<long> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
+    public List<RowKey> AcquireRowWriteLocks(string databaseName, string tableName, IEnumerable<RowKey> rowIds)
     {
-        List<long> ordered = BuildOrderedRowLockList(rowIds);
+        List<RowKey> ordered = BuildOrderedRowLockList(rowIds);
 
         for (int i = 0; i < ordered.Count; i++)
         {
@@ -287,7 +288,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowIds">Row identifiers to unlock.</param>
-    public void ReleaseRowWriteLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
+    public void ReleaseRowWriteLocks(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
     {
         for (int i = rowIds.Count - 1; i >= 0; i--)
         {
@@ -302,9 +303,9 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     /// <param name="rowIds">Row identifiers to lock.</param>
     /// <returns>The ordered lock acquisition list.</returns>
-    public List<long> AcquireRowReadLocks(string databaseName, string tableName, IEnumerable<long> rowIds)
+    public List<RowKey> AcquireRowReadLocks(string databaseName, string tableName, IEnumerable<RowKey> rowIds)
     {
-        List<long> ordered = BuildOrderedRowLockList(rowIds);
+        List<RowKey> ordered = BuildOrderedRowLockList(rowIds);
 
         for (int i = 0; i < ordered.Count; i++)
         {
@@ -320,7 +321,7 @@ public sealed class LockManager
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="rowIds">Row identifiers to unlock.</param>
-    public void ReleaseRowReadLocks(string databaseName, string tableName, IReadOnlyList<long> rowIds)
+    public void ReleaseRowReadLocks(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
     {
         for (int i = rowIds.Count - 1; i >= 0; i--)
         {
@@ -525,7 +526,7 @@ public sealed class LockManager
         }
     }
 
-    private static List<long> BuildOrderedRowLockList(IEnumerable<long> rowIds)
+    private static List<RowKey> BuildOrderedRowLockList(IEnumerable<RowKey> rowIds)
     {
         return rowIds
             .Where(id => id > 0)
@@ -539,7 +540,7 @@ public sealed class LockManager
         return $"{databaseName}.{tableName}";
     }
 
-    private static string BuildRowKey(string databaseName, string tableName, long rowId)
+    private static string BuildRowKey(string databaseName, string tableName, RowKey rowId)
     {
         return $"{databaseName}.{tableName}#row:{rowId}";
     }

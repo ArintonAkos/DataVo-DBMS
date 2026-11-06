@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Collections.Concurrent;
 using DataVo.Core.BTree;
 
@@ -44,7 +45,7 @@ public class SearchReadOnlyTests
     {
         var index = BuildIndex(("dup", 10), ("dup", 20), ("dup", 30));
 
-        Assert.Equal(new[] { 10L, 20L, 30L }, index.SearchReadOnly("dup"));
+        Assert.Equal(new RowKey[] { 10L, 20L, 30L }, index.SearchReadOnly("dup"));
     }
 
     // ---- Isolation (copy-on-write) ------------------------------------------
@@ -59,14 +60,14 @@ public class SearchReadOnlyTests
     {
         var index = BuildIndex(("k", 1), ("k", 2));
 
-        IReadOnlyList<long> snapshot = index.SearchReadOnly("k");
-        Assert.Equal(new[] { 1L, 2L }, snapshot);
+        IReadOnlyList<RowKey> snapshot = index.SearchReadOnly("k");
+        Assert.Equal(new RowKey[] { 1L, 2L }, snapshot);
 
         index.Insert("k", 3); // in-place append would corrupt the live snapshot
 
         Assert.Equal(2, snapshot.Count);
-        Assert.Equal(new[] { 1L, 2L }, snapshot);              // snapshot unchanged
-        Assert.Equal(new[] { 1L, 2L, 3L }, index.SearchReadOnly("k")); // fresh read sees the append
+        Assert.Equal(new RowKey[] { 1L, 2L }, snapshot);              // snapshot unchanged
+        Assert.Equal(new RowKey[] { 1L, 2L, 3L }, index.SearchReadOnly("k")); // fresh read sees the append
     }
 
     // ---- Allocation ---------------------------------------------------------
@@ -118,7 +119,7 @@ public class SearchReadOnlyTests
             {
                 try
                 {
-                    IReadOnlyList<long> snapshot = index.SearchReadOnly("hot");
+                    IReadOnlyList<RowKey> snapshot = index.SearchReadOnly("hot");
                     long expected = 0;
                     foreach (long rowId in snapshot) // full enumeration must not throw / tear
                     {

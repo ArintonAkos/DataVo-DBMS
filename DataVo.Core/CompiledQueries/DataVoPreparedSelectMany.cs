@@ -69,7 +69,7 @@ public sealed class DataVoPreparedSelectMany<T>
                 _indexName,
                 _plan.TableName,
                 _databaseName,
-                out IReadOnlyList<long> rowIds))
+                out IReadOnlyList<RowKey> rowIds))
         {
             var results = new List<T>(rowIds.Count);
             for (int i = 0; i < rowIds.Count; i++)
@@ -85,7 +85,7 @@ public sealed class DataVoPreparedSelectMany<T>
 
         if (value is >= int.MinValue and <= int.MaxValue)
         {
-            Dictionary<long, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
+            Dictionary<RowKey, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
             if (CompiledIntegerScan.TryScanMany(rows, _plan.WhereColumn!, (int)value, _mapper, out List<T> scanResults))
             {
                 return scanResults;
@@ -103,7 +103,7 @@ public sealed class DataVoPreparedSelectMany<T>
                 _indexName,
                 _plan.TableName,
                 _databaseName,
-                out IReadOnlyList<long> rowIds))
+                out IReadOnlyList<RowKey> rowIds))
         {
             var results = new List<T>(rowIds.Count);
             for (int i = 0; i < rowIds.Count; i++)
@@ -126,7 +126,7 @@ public sealed class DataVoPreparedSelectMany<T>
         {
             try
             {
-                IReadOnlyList<long> rowIds = _context.Engine.IndexManager.FilterUsingIndex(
+                IReadOnlyList<RowKey> rowIds = _context.Engine.IndexManager.FilterUsingIndex(
                     expectedKey,
                     _indexName,
                     _plan.TableName,
@@ -151,7 +151,7 @@ public sealed class DataVoPreparedSelectMany<T>
         return ExecuteScanFallback(expectedKey);
     }
 
-    private bool TryProjectRow(long rowId, out T? result)
+    private bool TryProjectRow(RowKey rowId, out T? result)
     {
         result = default;
         if (!_context.Engine.StorageContext.IsRowVisible(_plan.TableName, _databaseName, rowId))
@@ -204,7 +204,7 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteScanFallback(string expectedKey)
     {
-        Dictionary<long, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
+        Dictionary<RowKey, StoredRow> rows = _context.Engine.StorageContext.GetTypedTableContents(_plan.TableName, _databaseName);
         string[] whereColumns = [_plan.WhereColumn!];
         var results = new List<T>();
         foreach ((_, StoredRow row) in rows)

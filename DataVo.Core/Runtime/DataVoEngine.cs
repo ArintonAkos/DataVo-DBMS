@@ -217,7 +217,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// frame: the new-row bytes are written straight into the WAL ring buffer with no JSON, no dictionary,
     /// and no intermediate heap buffer, then flushed through group commit.
     /// </summary>
-    internal void CommitBinaryUpdateFrameThroughGroupCommit(string databaseName, string tableName, long oldRowId, ReadOnlySpan<byte> newRowBytes)
+    internal void CommitBinaryUpdateFrameThroughGroupCommit(string databaseName, string tableName, RowKey oldRowId, ReadOnlySpan<byte> newRowBytes)
     {
         if (WalFrameAppender == null || WalGroupCommitter == null)
         {
@@ -228,9 +228,9 @@ public sealed partial class DataVoEngine : IDisposable
         WalFrameReservation reservation = WalFrameAppender.Reserve(
             WalFrameOperationType.Update,
             tableId: 0,
-            rowId: oldRowId,
+            rowId: RowKeyConversions.ToRowId(oldRowId),
             payloadLength);
-        WalUpdateFramePayload.Write(reservation.PayloadSpan, databaseName, tableName, oldRowId, newRowBytes);
+        WalUpdateFramePayload.Write(reservation.PayloadSpan, databaseName, tableName, RowKeyConversions.ToRowId(oldRowId), newRowBytes);
         WalFrame frame = reservation.Commit();
         WalGroupCommitter.CommitAsync(frame).AsTask().GetAwaiter().GetResult();
     }
@@ -428,7 +428,7 @@ public sealed partial class DataVoEngine : IDisposable
         }
 
         // Typed rows: rebuilding from dictionaries allocated a map per row and dominated cold open.
-        Dictionary<long, StoredRow> rows = StorageContext.GetTypedTableContents(tableName, databaseName);
+        Dictionary<RowKey, StoredRow> rows = StorageContext.GetTypedTableContents(tableName, databaseName);
 
         foreach (IndexFile index in indexFiles)
         {
@@ -451,8 +451,8 @@ public sealed partial class DataVoEngine : IDisposable
                 continue;
             }
 
-            Dictionary<string, List<long>> values = new(StringComparer.Ordinal);
-            foreach (KeyValuePair<long, StoredRow> row in rows)
+            Dictionary<string, List<RowKey>> values = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<RowKey, StoredRow> row in rows)
             {
                 if (!HasAllKeyCells(row.Value, index.AttributeNames))
                 {
@@ -461,7 +461,7 @@ public sealed partial class DataVoEngine : IDisposable
 
                 StoredRowView view = row.Value.AsView();
                 string key = IndexKeyEncoder.BuildKeyString(view.Schema, view.Cells, index.AttributeNames);
-                if (!values.TryGetValue(key, out List<long>? rowIds))
+                if (!values.TryGetValue(key, out List<RowKey>? rowIds))
                 {
                     rowIds = [];
                     values[key] = rowIds;
@@ -491,7 +491,7 @@ public sealed partial class DataVoEngine : IDisposable
         string databaseName,
         string tableName,
         IndexFile index,
-        Dictionary<long, StoredRow> rows)
+        Dictionary<RowKey, StoredRow> rows)
     {
         string indexName = index.IndexFileName;
         if (index.AttributeNames.Count != 1)
@@ -500,9 +500,9 @@ public sealed partial class DataVoEngine : IDisposable
         }
 
         string vectorColumn = index.AttributeNames[0];
-        List<(long RowId, float[] Vector)> vectors = [];
+        List<(RowKey RowId, float[] Vector)> vectors = [];
 
-        foreach (KeyValuePair<long, StoredRow> row in rows)
+        foreach (KeyValuePair<RowKey, StoredRow> row in rows)
         {
             if (!row.Value.TryGet(vectorColumn, out CellValue cell) || cell.IsNull)
             {

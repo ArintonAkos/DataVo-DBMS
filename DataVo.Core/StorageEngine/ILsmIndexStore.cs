@@ -8,17 +8,17 @@ namespace DataVo.Core.StorageEngine;
 /// </summary>
 internal interface ILsmIndexStore
 {
-    void IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId);
+    void IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId);
 
-    void IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId);
+    void IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId);
 
     /// <summary>Row ids under <paramref name="encodedKey"/>, ascending; null when the index does not exist.</summary>
-    List<long>? IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey);
+    List<RowKey>? IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey);
 
     /// <summary>Every live entry (null when the index does not exist); for the rare delete-by-row-id paths.</summary>
-    List<(byte[] EncodedKey, long RowId)>? IndexEntries(string databaseName, string tableName, string indexName);
+    List<(byte[] EncodedKey, RowKey RowId)>? IndexEntries(string databaseName, string tableName, string indexName);
 
-    void BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, long RowId)> entries);
+    void BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries);
 
     void DropIndexTable(string databaseName, string tableName, string indexName);
 

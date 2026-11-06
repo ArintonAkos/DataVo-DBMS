@@ -39,7 +39,7 @@ internal sealed class ChangeRecorder
     public bool IsEnabled => _capture.Enabled;
 
     /// <summary>Records an inserted row image.</summary>
-    public void RecordInsert(string table, long rowId, IReadOnlyDictionary<string, object?> after)
+    public void RecordInsert(string table, RowKey rowId, IReadOnlyDictionary<string, object?> after)
         => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: Clone(after)));
 
     /// <summary>
@@ -47,15 +47,15 @@ internal sealed class ChangeRecorder
     /// materialized lazily (see <see cref="RowChange.After"/>), so borrowed-only subscriptions that read
     /// the typed lane never allocate it.
     /// </summary>
-    public void RecordTypedInsert(string table, long rowId, TypedRow typedAfter)
+    public void RecordTypedInsert(string table, RowKey rowId, TypedRow typedAfter)
         => Add(new RowChange(table, rowId, typedAfter));
 
     /// <summary>Records a deleted row image.</summary>
-    public void RecordDelete(string table, long rowId, IReadOnlyDictionary<string, object?> before)
+    public void RecordDelete(string table, RowKey rowId, IReadOnlyDictionary<string, object?> before)
         => Add(new RowChange(table, rowId, ChangeKind.Delete, before: Clone(before), after: null));
 
     /// <summary>Records an updated row's before and after images.</summary>
-    public void RecordUpdate(string table, long rowId,
+    public void RecordUpdate(string table, RowKey rowId,
         IReadOnlyDictionary<string, object?> before,
         IReadOnlyDictionary<string, object?> after)
         => Add(new RowChange(table, rowId, ChangeKind.Update, before: Clone(before), after: Clone(after)));

@@ -1,5 +1,6 @@
 namespace DataVo.Core.Transactions;
 
+using DataVo.Core.StorageEngine;
 using DataVo.Core.MVCC;
 
 /// <summary>
@@ -18,8 +19,8 @@ public class TransactionContext
     private sealed class BufferedStateSnapshot
     {
         public required Dictionary<string, List<Dictionary<string, object?>>> InsertedRows { get; init; }
-        public required Dictionary<string, HashSet<long>> DeletedRowIds { get; init; }
-        public required Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; init; }
+        public required Dictionary<string, HashSet<RowKey>> DeletedRowIds { get; init; }
+        public required Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; init; }
     }
 
     /// <summary>
@@ -42,13 +43,13 @@ public class TransactionContext
     /// Buffered DELETE operations grouped by table name.
     /// Each entry maps a table name to a set of row IDs marked for deletion.
     /// </summary>
-    public Dictionary<string, HashSet<long>> DeletedRowIds { get; } = new();
+    public Dictionary<string, HashSet<RowKey>> DeletedRowIds { get; } = new();
 
     /// <summary>
     /// Buffered UPDATE operations grouped by table name.
     /// Each entry maps a table name to a list of (RowId, UpdatedColumns) tuples.
     /// </summary>
-    public Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; } = new();
+    public Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; } = new();
 
     /// <summary>
     /// Appends a row to the insert buffer for the specified table.
@@ -68,7 +69,7 @@ public class TransactionContext
     /// </summary>
     /// <param name="tableName">The target table name.</param>
     /// <param name="rowId">The physical row ID to delete.</param>
-    public void BufferDelete(string tableName, long rowId)
+    public void BufferDelete(string tableName, RowKey rowId)
     {
         if (!DeletedRowIds.ContainsKey(tableName))
             DeletedRowIds[tableName] = [];
@@ -82,7 +83,7 @@ public class TransactionContext
     /// <param name="tableName">The target table name.</param>
     /// <param name="rowId">The physical row ID being updated.</param>
     /// <param name="updatedColumns">The column-value pairs to overwrite.</param>
-    public void BufferUpdate(string tableName, long rowId, Dictionary<string, object?> updatedColumns)
+    public void BufferUpdate(string tableName, RowKey rowId, Dictionary<string, object?> updatedColumns)
     {
         if (!UpdatedRows.ContainsKey(tableName))
             UpdatedRows[tableName] = [];
@@ -174,13 +175,13 @@ public class TransactionContext
         }
 
         DeletedRowIds.Clear();
-        foreach ((string tableName, HashSet<long> rowIds) in CloneDeletedRows(snapshot.DeletedRowIds))
+        foreach ((string tableName, HashSet<RowKey> rowIds) in CloneDeletedRows(snapshot.DeletedRowIds))
         {
             DeletedRowIds[tableName] = rowIds;
         }
 
         UpdatedRows.Clear();
-        foreach ((string tableName, List<(long RowId, Dictionary<string, object?> UpdatedColumns)> rows) in CloneUpdatedRows(snapshot.UpdatedRows))
+        foreach ((string tableName, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> rows) in CloneUpdatedRows(snapshot.UpdatedRows))
         {
             UpdatedRows[tableName] = rows;
         }
@@ -198,23 +199,23 @@ public class TransactionContext
         return clone;
     }
 
-    private static Dictionary<string, HashSet<long>> CloneDeletedRows(
-        Dictionary<string, HashSet<long>> source)
+    private static Dictionary<string, HashSet<RowKey>> CloneDeletedRows(
+        Dictionary<string, HashSet<RowKey>> source)
     {
-        var clone = new Dictionary<string, HashSet<long>>(source.Comparer);
-        foreach ((string tableName, HashSet<long> rowIds) in source)
+        var clone = new Dictionary<string, HashSet<RowKey>>(source.Comparer);
+        foreach ((string tableName, HashSet<RowKey> rowIds) in source)
         {
-            clone[tableName] = new HashSet<long>(rowIds, rowIds.Comparer);
+            clone[tableName] = new HashSet<RowKey>(rowIds, rowIds.Comparer);
         }
 
         return clone;
     }
 
-    private static Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> CloneUpdatedRows(
-        Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>> source)
+    private static Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>> CloneUpdatedRows(
+        Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>> source)
     {
-        var clone = new Dictionary<string, List<(long RowId, Dictionary<string, object?> UpdatedColumns)>>(source.Comparer);
-        foreach ((string tableName, List<(long RowId, Dictionary<string, object?> UpdatedColumns)> updates) in source)
+        var clone = new Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>>(source.Comparer);
+        foreach ((string tableName, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> updates) in source)
         {
             clone[tableName] = updates
                 .Select(update => (update.RowId, CloneRow(update.UpdatedColumns)))

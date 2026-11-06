@@ -87,7 +87,7 @@ public sealed class GuidFastPathTests
             "IX_Sessions_TenantId",
             "Sessions",
             databaseName,
-            out IReadOnlyList<long> fastLaneRows));
+            out IReadOnlyList<RowKey>? fastLaneRows));
         Assert.Contains(2L, fastLaneRows);
         Assert.True(context.Engine.IndexManager.IndexContainsKey(
             newTenant.ToString("D"),

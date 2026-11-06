@@ -58,7 +58,7 @@ public sealed class AutomaticModelBindingTests
         context.RegisterValueConverters(CreateTestVectorConverter());
         context.Execute("CREATE TABLE Transforms (Id INT PRIMARY KEY, Position VECTOR(2), Label VARCHAR(20))");
 
-        long rowId = context.Insert("Transforms", new TestTransformRow
+        RowKey rowId = context.Insert("Transforms", new TestTransformRow
         {
             Id = 1,
             Position = new TestVector(0.5f, -8f),
@@ -95,7 +95,7 @@ public sealed class AutomaticModelBindingTests
         context.Execute("CREATE TABLE Samples (Id INT PRIMARY KEY, Position VECTOR(2))");
         context.Execute("CREATE INDEX idx_samples_position ON Samples (Position) USING HNSW");
 
-        IReadOnlyList<long> rowIds = context.BulkInsert("Samples",
+        IReadOnlyList<RowKey> rowIds = context.BulkInsert("Samples",
         [
             new Dictionary<string, object?> { ["Id"] = 1, ["Position"] = new TestVector(6f, -3f) }
         ]);

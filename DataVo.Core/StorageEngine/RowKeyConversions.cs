@@ -14,7 +14,54 @@ internal static class RowKeyConversions
         return keys;
     }
 
-    // Temporary, while the layers above the storage backends still use integer row ids.
+    // Boundaries to layers that still use integer row ids: every call marks a place that changes when
+    // that layer moves to RowKey (grep for RowKeyConversions).
+    public static long ToRowId(RowKey key) => (long)key;
+
+    public static long[] ToRowIds(RowKey[] keys)
+    {
+        var rowIds = new long[keys.Length];
+        for (int i = 0; i < keys.Length; i++)
+        {
+            rowIds[i] = (long)keys[i];
+        }
+
+        return rowIds;
+    }
+
+    public static List<long> ToRowIds(IEnumerable<RowKey> keys)
+    {
+        var rowIds = keys is ICollection<RowKey> collection ? new List<long>(collection.Count) : [];
+        foreach (RowKey key in keys)
+        {
+            rowIds.Add((long)key);
+        }
+
+        return rowIds;
+    }
+
+    public static RowKey[] ToRowKeys(long[] rowIds)
+    {
+        var keys = new RowKey[rowIds.Length];
+        for (int i = 0; i < rowIds.Length; i++)
+        {
+            keys[i] = rowIds[i];
+        }
+
+        return keys;
+    }
+
+    public static List<RowKey> ToRowKeys(IEnumerable<long> rowIds)
+    {
+        var keys = rowIds is ICollection<long> collection ? new List<RowKey>(collection.Count) : [];
+        foreach (long rowId in rowIds)
+        {
+            keys.Add(rowId);
+        }
+
+        return keys;
+    }
+
     public static List<long> ToRowIds(List<RowKey> keys)
     {
         var rowIds = new List<long>(keys.Count);
