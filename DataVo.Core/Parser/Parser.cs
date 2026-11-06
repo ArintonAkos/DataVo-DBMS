@@ -282,8 +282,54 @@ public class Parser(List<Token> tokens)
             stmt.TableName = new IdentifierNode(tableNameToken.Value);
 
             Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+            List<string>? tablePrimaryKey = null;
+            List<string> tableUniqueColumns = [];
             while (!AtListEnd())
             {
+                // An optional CONSTRAINT <name> before a table constraint; the name is not kept.
+                if (Current.Type is TokenType.Keyword or TokenType.Identifier
+                    && Current.Value.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase))
+                {
+                    Advance();
+                    ConsumeIdentifierOrKeyword("constraint name");
+                }
+
+                if (Current.Type == TokenType.Keyword && Current.Value == SqlKeywords.PRIMARY)
+                {
+                    Advance();
+                    Consume(TokenType.Keyword, SqlKeywords.KEY);
+                    if (tablePrimaryKey is not null)
+                    {
+                        throw new ParserException("Parser Error: A table can have only one PRIMARY KEY constraint.");
+                    }
+
+                    tablePrimaryKey = ParseConstraintColumnList("PRIMARY KEY");
+                    if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+                    {
+                        Advance();
+                    }
+
+                    continue;
+                }
+
+                if (Current.Type == TokenType.Keyword && Current.Value == SqlKeywords.UNIQUE)
+                {
+                    Advance();
+                    List<string> uniqueColumns = ParseConstraintColumnList("UNIQUE");
+                    if (uniqueColumns.Count != 1)
+                    {
+                        throw new ParserException("Parser Error: A UNIQUE constraint over several columns is not supported yet; declare UNIQUE on one column, or create a unique index per column.");
+                    }
+
+                    tableUniqueColumns.Add(uniqueColumns[0]);
+                    if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken)
+                    {
+                        Advance();
+                    }
+
+                    continue;
+                }
+
                 if (IsForeignKeyConstraint(Current))
                 {
                     ParseTableLevelForeignKeyConstraint(stmt);
@@ -367,6 +413,8 @@ public class Parser(List<Token> tokens)
 
                 if (Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CommaToken) Advance();
             }
+
+            ApplyTableConstraints(stmt, tablePrimaryKey, tableUniqueColumns);
             return stmt;
         }
         else if (Match(TokenType.Keyword, SqlKeywords.INDEX))
@@ -431,6 +479,59 @@ public class Parser(List<Token> tokens)
             };
         }
         throw new ParserException("Parser Error: Unknown CREATE statement type.");
+    }
+
+    /// <summary>Reads <c>(column, column, ...)</c> after a table constraint keyword.</summary>
+    private List<string> ParseConstraintColumnList(string constraint)
+    {
+        Consume(TokenType.Punctuation, SqlPunctuation.OpenParenToken);
+        var columns = new List<string>();
+        while (true)
+        {
+            string column = Consume(TokenType.Identifier, $"{constraint} column name").Value;
+            if (columns.Contains(column, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new ParserException($"Parser Error: Column '{column}' appears twice in the {constraint} constraint.");
+            }
+
+            columns.Add(column);
+            if (Match(TokenType.Punctuation, SqlPunctuation.CommaToken))
+            {
+                continue;
+            }
+
+            Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+            return columns;
+        }
+    }
+
+    /// <summary>
+    /// Applies table-level PRIMARY KEY (...) and UNIQUE (...) to the declared columns. A table constraint may
+    /// name columns declared after it, so this runs once every column is known.
+    /// </summary>
+    private static void ApplyTableConstraints(CreateTableStatement stmt, List<string>? primaryKey, List<string> uniqueColumns)
+    {
+        ColumnDefinitionNode Find(string name, string constraint) =>
+            stmt.Columns.FirstOrDefault(c => c.ColumnName.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ParserException($"Parser Error: {constraint} names column '{name}', which the table does not declare.");
+
+        if (primaryKey is not null)
+        {
+            if (stmt.Columns.Any(column => column.IsPrimaryKey))
+            {
+                throw new ParserException("Parser Error: A table can have only one PRIMARY KEY; it is declared both on a column and as a table constraint.");
+            }
+
+            foreach (string name in primaryKey)
+            {
+                Find(name, "PRIMARY KEY").IsPrimaryKey = true;
+            }
+        }
+
+        foreach (string name in uniqueColumns)
+        {
+            Find(name, "UNIQUE").IsUnique = true;
+        }
     }
 
     private bool IsForeignKeyConstraint(Token token)
