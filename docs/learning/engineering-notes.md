@@ -241,3 +241,35 @@ Lessons:
 - **Testing the new feature found an old bug.** A GUID-keyed vector table returned no nearest neighbour
   after a DELETE. The same happened with plain INT tables: in LSM mode DELETE never reached the vector
   graph. Always check whether a failure is new before assuming your change caused it.
+
+## 13. Making bulk inserts faster than SQLite
+
+SQLite inserted 1M rows about twice as fast. Warm timings, 1M rows of `(Id, Name, Amount)` through the
+typed batch API:
+
+| | Before | After | SQLite (one transaction) |
+| --- | --- | --- | --- |
+| INT key | ~830 ms, 1.2 GB allocated | ~380-420 ms, ~490 MB | 440-770 ms |
+| GUID key (version 7) | ~1,450 ms | ~800 ms | ~770 ms |
+
+What found the time, and what did not:
+
+- **The profiler pointed at the wrong thing.** A thread-time sample showed the inserter "waiting" on a
+  MemTable lock for half its time. Counting showed 4 contended acquisitions out of 3 million: an object
+  also used for `Monitor.Wait` always takes the slower acquire path, and the sampler blamed it. Stopwatch
+  totals per phase (and allocated bytes per phase) then pointed at the real costs directly.
+- **Skip-list inserts searched from the top every time.** Keys mostly arrive just after the previous key,
+  so each insert now starts from a "finger" (the previous insert's path). The first version walked each
+  level from its own finger, which made near-but-not-adjacent keys (time-ordered GUIDs) walk thousands of
+  nodes: GUID inserts went from 1.4 s to 5 s. The fix is the usual descent, starting each level from
+  whichever is further along, the finger or the level above. Sorting a commit's rows by key before
+  inserting them then makes almost every insert hit the finger.
+- **Work done for cases that do not happen.** Every commit built a map over all its operations to merge
+  repeated writes to one row (200 bytes per row); a bulk insert has none, and the write buffer already
+  knows whether any key repeated. Clustered tables still encoded every primary key for index writes the
+  store then dropped, and probed the key twice (once through a formatted string). The storage engine
+  enforces a clustered key atomically anyway, so those checks are skipped.
+- **A general-purpose concurrent map was the wrong tool.** Unflushed GUID rows lived in a
+  `ConcurrentDictionary` (a lock and a node per insert, resizing under all locks). Our writers are
+  already serialized and only readers are concurrent, so an open-addressing table of immutable entries,
+  republished on growth, cut that step from 263 to 88 ms per million rows.
