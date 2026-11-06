@@ -281,3 +281,14 @@ What found the time, and what did not:
 - **Report the less flattering benchmark.** The focused insert benchmark showed GUID inserts nearly level
   with SQLite; the end-to-end one (open, create, insert, close, as the SQLite run is timed) still shows
   20% slower. The README carries the end-to-end numbers.
+- **Rare code runs unoptimized.** .NET first compiles a method quickly and recompiles it optimized only
+  after many calls. A flush runs a few times per process, so it ran mostly unoptimized: the same flush took
+  87, 78, 47, then 26 ms on successive runs. Marking the flush and compaction loops
+  `MethodImplOptions.AggressiveOptimization` compiles them optimized from the first call (51 ms first,
+  38 ms steady); the close-time flush of an INT table went from ~130 to ~65 ms.
+- **Two experiments that did not pay, and were reverted.** Storing unflushed GUID rows without an object
+  per row (parallel arrays, then an array of slot structs) was no faster: the cost of publishing a row is
+  a cache miss into a large hash table, not the allocation, and rebuilding large arrays triggered more
+  garbage collection than the objects did. Sorting key halves as plain integers instead of 16-byte keys
+  saved 2 ms of 51: the keys of one commit are effectively random, and sorting random keys is already near
+  its floor. Measure the idea before keeping it.
