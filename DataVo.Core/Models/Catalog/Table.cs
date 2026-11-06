@@ -22,6 +22,13 @@ public class Table
     [XmlArrayItem("Attribute")]
     public required List<Field> Fields { get; set; }
 
+    /// <summary>
+    /// Whether rows are stored under their primary key (an INT or GUID column) instead of an
+    /// engine-assigned row id: the key is the row's address, and no separate primary-key index is kept.
+    /// Set at CREATE TABLE in LSM storage; tables created before clustering existed are not clustered.
+    /// </summary>
+    [XmlAttribute] public bool Clustered { get; set; }
+
     /// <summary>Gets or sets the primary key column names.</summary>
     [XmlArray("PrimaryKeys")]
     [XmlArrayItem("PkAttribute")]

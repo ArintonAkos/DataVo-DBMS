@@ -21,31 +21,82 @@ public sealed partial class LsmStorageEngine
 
     private readonly ConcurrentDictionary<(string Database, string Table, string Index), IndexTableState> _indexTables = new();
 
-    void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
-        IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+    /// <summary>
+    /// Resolves a table's clustered key layout (<see langword="null"/> for tables with engine-assigned
+    /// row ids). A clustered table's primary-key index is not stored: its rows are keyed by the primary
+    /// key, so the index is answered from the rows and its writes are dropped.
+    /// </summary>
+    internal Func<string, string, ClusteredKeyLayout?>? ClusteredKeys { get; set; }
 
-    void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
-        IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+    private ClusteredKeyLayout? RowKeyIndex(string databaseName, string tableName, string indexName) =>
+        ClusteredKeys?.Invoke(databaseName, tableName) is { } layout
+        && string.Equals(indexName, layout.PrimaryKeyIndexName, StringComparison.OrdinalIgnoreCase)
+            ? layout
+            : null;
+
+    void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is null)
+        {
+            IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
+        }
+    }
+
+    void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is null)
+        {
+            IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
+        }
+    }
 
     // Lookups never create an index table: a missing index must stay missing (callers fall back to scans).
-    List<RowKey>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey) =>
-        _indexTables.ContainsKey((databaseName, tableName, indexName))
+    List<RowKey>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is not null)
+        {
+            // The key names the row: it is in the index exactly when that row is live for this flow.
+            return ClusteredKeyLayout.KeyOfIndexKey(encodedKey) is RowKey key && IsRowLive(databaseName, tableName, key)
+                ? [key]
+                : [];
+        }
+
+        return _indexTables.ContainsKey((databaseName, tableName, indexName))
             ? IndexLookup(databaseName, tableName, indexName, encodedKey)
             : null;
+    }
 
-    List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName) =>
-        _indexTables.ContainsKey((databaseName, tableName, indexName))
+    List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is { } layout)
+        {
+            var entries = new List<(byte[] EncodedKey, RowKey RowId)>();
+            foreach ((RowKey key, _) in ReadAllRows(databaseName, tableName))
+            {
+                entries.Add((layout.IndexKeyOf(key), key));
+            }
+
+            return entries;
+        }
+
+        return _indexTables.ContainsKey((databaseName, tableName, indexName))
             ? IndexEntries(databaseName, tableName, indexName)
             : null;
+    }
 
-    void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries) =>
-        BuildIndex(databaseName, tableName, indexName, entries);
+    void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is null)
+        {
+            BuildIndex(databaseName, tableName, indexName, entries);
+        }
+    }
 
     void ILsmIndexStore.DropIndexTable(string databaseName, string tableName, string indexName) =>
         DropIndexTable(databaseName, tableName, indexName);
 
     bool ILsmIndexStore.IsIndexBuilt(string databaseName, string tableName, string indexName) =>
-        IsIndexBuilt(databaseName, tableName, indexName);
+        RowKeyIndex(databaseName, tableName, indexName) is not null || IsIndexBuilt(databaseName, tableName, indexName);
 
     /// <summary>Whether the index has been fully built (bulk build or creation on an empty table).</summary>
     internal bool IsIndexBuilt(string databaseName, string tableName, string indexName) =>

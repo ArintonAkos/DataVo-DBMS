@@ -257,6 +257,15 @@ internal sealed class CatalogStore
         }
     }
 
+    /// <summary>Whether the table stores its rows under its primary key (see <see cref="Table.Clustered"/>).</summary>
+    public bool IsTableClustered(string tableName, string databaseName)
+    {
+        lock (_syncRoot)
+        {
+            return string.Equals(GetTableElement(databaseName, tableName)?.Attribute("Clustered")?.Value, "true", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     public List<string> GetTablePrimaryKeys(string tableName, string databaseName)
     {
         lock (_syncRoot)

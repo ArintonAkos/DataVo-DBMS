@@ -39,7 +39,7 @@ public sealed class LsmPersistedIndexSqlTests : IDisposable
 
         string tableDirectory = Path.Combine(_root, "Shop", "Items", ".idx");
         Assert.True(File.Exists(Path.Combine(tableDirectory, "ix_code", "BUILT.v2")));
-        Assert.True(File.Exists(Path.Combine(tableDirectory, "_PK_Items", "BUILT.v2")));
+        Assert.False(Directory.Exists(Path.Combine(tableDirectory, "_PK_Items"))); // clustered: the rows are keyed by Id
 
         using (DataVoContext reopened = Open())
         {

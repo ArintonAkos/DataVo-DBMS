@@ -92,6 +92,14 @@ public enum IoSchedulerMode
 public class DataVoConfig
 {
     /// <summary>
+    /// Whether new LSM tables whose primary key is a single INT or GUID column store their rows under that
+    /// key (a clustered primary key): a primary-key read is one lookup and no separate primary-key index
+    /// is written. Other storage modes, other keys, and tables created with this off use engine-assigned
+    /// row ids. Defaults to <see langword="true"/>; the choice is made per table at CREATE TABLE.
+    /// </summary>
+    public bool ClusteredPrimaryKeys { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether runtime authorization is enabled.
     /// </summary>
     public bool EnableAuthorization { get; set; }

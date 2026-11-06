@@ -98,6 +98,7 @@ internal static class DataVoConfigSharing
         Add(nameof(DataVoConfig.SyncDiskWrites), config.SyncDiskWrites);
         Add(nameof(DataVoConfig.LsmStrictFsync), config.LsmStrictFsync);
         Add(nameof(DataVoConfig.LsmReadMode), config.LsmReadMode);
+        Add(nameof(DataVoConfig.ClusteredPrimaryKeys), config.ClusteredPrimaryKeys);
         Add(nameof(DataVoConfig.IoSchedulerMode), config.IoSchedulerMode);
         Add(nameof(DataVoConfig.EnableZeroAllocCompiledUpdate), config.EnableZeroAllocCompiledUpdate);
         Add(nameof(DataVoConfig.WalEnabled), config.WalEnabled);

@@ -1,3 +1,4 @@
+using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.StorageEngine.Backends.Abstractions;
@@ -25,8 +26,56 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
     /// <summary>The engine's persisted index storage.</summary>
     internal ILsmIndexStore IndexStore => _inner;
 
-    public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
-    public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => _inner.InsertRows(databaseName, tableName, rowsBytes);
+    /// <summary>
+    /// Resolves a table's clustered key layout, or <see langword="null"/> for a table with engine-assigned
+    /// row ids. Set by the storage context, which owns the catalog.
+    /// </summary>
+    internal Func<string, string, ClusteredKeyLayout?>? ClusteredKeys
+    {
+        get => _clusteredKeys;
+        set
+        {
+            _clusteredKeys = value;
+            _inner.ClusteredKeys = value;
+        }
+    }
+
+    private Func<string, string, ClusteredKeyLayout?>? _clusteredKeys;
+
+    public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes)
+    {
+        if (_clusteredKeys?.Invoke(databaseName, tableName) is not { } layout)
+        {
+            return _inner.InsertRow(databaseName, tableName, rowBytes);
+        }
+
+        // A clustered row is stored under its primary key; an existing live row with that key is a duplicate.
+        RowKey key = layout.KeyOf(rowBytes, tableName);
+        return _inner.TryInsertRowWithKey(databaseName, tableName, key, rowBytes)
+            ? key
+            : throw DuplicateKey(key, tableName);
+    }
+
+    public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
+    {
+        if (_clusteredKeys?.Invoke(databaseName, tableName) is not { } layout)
+        {
+            return _inner.InsertRows(databaseName, tableName, rowsBytes);
+        }
+
+        var keys = new List<RowKey>(rowsBytes.Count);
+        foreach (byte[] rowBytes in rowsBytes)
+        {
+            keys.Add(layout.KeyOf(rowBytes, tableName));
+        }
+
+        return _inner.TryInsertRowsWithKeys(databaseName, tableName, keys, rowsBytes, out RowKey duplicate)
+            ? keys
+            : throw DuplicateKey(duplicate, tableName);
+    }
+
+    private static ConstraintViolationException DuplicateKey(RowKey key, string tableName) =>
+        new($"Primary key violation: a row with key {key} already exists in table {tableName}.");
     public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, rowId);
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => _inner.ReadAllRows(databaseName, tableName);
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, rowId);
@@ -44,7 +93,8 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
         IReadOnlyList<Column> columns,
         ReadOnlySpan<int> ordinals,
         ReadOnlySpan<DataVoFixedWidthValue> values) =>
-        ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
+        !PatchesClusteredKey(databaseName, tableName, ordinals)
+        && ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
 
     int IFixedWidthPatchStorageEngine.TryPatchFixedWidthRows(
         string databaseName,
@@ -52,7 +102,16 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
         IReadOnlyList<Column> columns,
         ReadOnlySpan<int> ordinals,
         IReadOnlyList<FixedWidthPatchOperation> operations) =>
-        ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRows(databaseName, tableName, columns, ordinals, operations);
+        PatchesClusteredKey(databaseName, tableName, ordinals)
+            ? throw new InvalidOperationException("A batched in-place patch cannot change a clustered table's key; its callers only patch non-key columns.")
+            : ((IFixedWidthPatchStorageEngine)_inner).TryPatchFixedWidthRows(databaseName, tableName, columns, ordinals, operations);
+
+    /// <summary>
+    /// An in-place patch keeps the row's key, so it must not change a clustered table's key column: such
+    /// updates take the regular path, which moves the row to its new key.
+    /// </summary>
+    private bool PatchesClusteredKey(string databaseName, string tableName, ReadOnlySpan<int> ordinals) =>
+        _clusteredKeys?.Invoke(databaseName, tableName) is { } layout && ordinals.IndexOf(layout.Ordinal) >= 0;
 
     /// <summary>Groups the current flow's mutations into one atomic commit-log frame (see LsmStorageEngine).</summary>
     internal IWriteBatchScope BeginWriteBatch() => _inner.BeginWriteBatch();

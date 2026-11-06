@@ -21,6 +21,7 @@ internal static class CatalogXml
     {
         var element = new XElement("Table",
             new XAttribute("TableName", table.TableName),
+            table.Clustered ? new XAttribute("Clustered", "true") : null,
             new XElement("Structure", (table.Fields ?? []).Select(ToXElement)),
             new XElement("PrimaryKeys",
                 (table.PrimaryKeys ?? []).Select(pk => new XElement("PkAttribute", pk))));

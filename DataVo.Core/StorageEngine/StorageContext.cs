@@ -75,6 +75,47 @@ public class StorageContext(DataVoConfig config) : IDisposable
     {
         _runtimeCatalog = catalog;
         _serializerSchemaScopeKey = engineId.ToString("N");
+        if (_storageEngine is LsmStorageBackend lsm)
+        {
+            lsm.ClusteredKeys = ResolveClusteredKey;
+        }
+    }
+
+    // Clustered key layouts per table, valid for the schema version they were built at.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Database, string Table), (int Version, ClusteredKeyLayout? Layout)> _clusteredLayouts = new();
+
+    /// <summary>
+    /// The clustered key layout of a table (see <see cref="Table.Clustered"/>), or <see langword="null"/>
+    /// when its rows have engine-assigned ids. Asked on every insert and primary-key lookup, so it is
+    /// cached per table and rebuilt only when the table's schema version changes.
+    /// </summary>
+    internal ClusteredKeyLayout? ResolveClusteredKey(string databaseName, string tableName)
+    {
+        EngineCatalog catalog = ResolveCatalog();
+        int version = catalog.GetTableSchemaVersion(tableName, databaseName);
+        if (_clusteredLayouts.TryGetValue((databaseName, tableName), out (int Version, ClusteredKeyLayout? Layout) cached) && cached.Version == version)
+        {
+            return cached.Layout;
+        }
+
+        ClusteredKeyLayout? layout = null;
+        if (catalog.IsTableClustered(tableName, databaseName))
+        {
+            List<string> primaryKeys = catalog.GetTablePrimaryKeys(tableName, databaseName);
+            List<Column> columns = catalog.GetTableColumns(tableName, databaseName);
+            int ordinal = primaryKeys.Count == 1
+                ? columns.FindIndex(column => string.Equals(column.Name, primaryKeys[0], StringComparison.OrdinalIgnoreCase))
+                : -1;
+            if (ordinal < 0)
+            {
+                throw new CatalogException($"Clustered table {tableName} has no single primary-key column.");
+            }
+
+            layout = new ClusteredKeyLayout(columns, ordinal, $"_PK_{tableName}");
+        }
+
+        _clusteredLayouts[(databaseName, tableName)] = (version, layout);
+        return layout;
     }
 
     private static IStorageEngine ResolveStorageEngine(DataVoConfig config)
@@ -322,7 +363,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// <param name="databaseName">The owning database.</param>
     public void DeleteFromTable(List<RowKey> toBeDeletedIds, string tableName, string databaseName)
     {
-        foreach (long id in toBeDeletedIds)
+        foreach (RowKey id in toBeDeletedIds)
         {
             _storageEngine.DeleteRow(databaseName, tableName, id);
         }

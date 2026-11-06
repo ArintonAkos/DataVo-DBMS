@@ -60,7 +60,9 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
                 return;
             }
 
-            Catalog.CreateTable(_model.ToTable(), databaseName);
+            Table table = _model.ToTable();
+            table.Clustered = ShouldCluster(table);
+            Catalog.CreateTable(table, databaseName);
             Context.CreateTable(_model.TableName, databaseName);
 
             CreatePrimaryKeyIndex(databaseName);
@@ -74,6 +76,21 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
             Logger.Error(e.Message);
             Messages.Add($"Error: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// A table is clustered (rows stored under their primary key) when the LSM engine stores it, clustering
+    /// is enabled, and the primary key is one INT or GUID column: the key types a 16-byte row key holds.
+    /// </summary>
+    private bool ShouldCluster(Table table)
+    {
+        if (!Engine.Config.ClusteredPrimaryKeys || Context.LsmEngine is null || table.PrimaryKeys.Count != 1)
+        {
+            return false;
+        }
+
+        Field? key = table.Fields.Find(field => string.Equals(field.Name, table.PrimaryKeys[0], StringComparison.OrdinalIgnoreCase));
+        return key is { Type: Enums.DataTypes.Int or Enums.DataTypes.Guid };
     }
 
     /// <summary>

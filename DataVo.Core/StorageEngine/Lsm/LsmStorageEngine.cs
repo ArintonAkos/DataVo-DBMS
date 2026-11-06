@@ -188,6 +188,70 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     }
 
     /// <summary>
+    /// Inserts rows under caller-chosen keys, all or nothing: when any key is already live (or repeats
+    /// within <paramref name="keys"/>) nothing is written and that key is returned in
+    /// <paramref name="duplicate"/>. Takes ownership of the row buffers like <see cref="InsertRows"/>.
+    /// </summary>
+    internal bool TryInsertRowsWithKeys(
+        string databaseName,
+        string tableName,
+        IReadOnlyList<RowKey> keys,
+        IReadOnlyList<byte[]> rowsBytes,
+        out RowKey duplicate)
+    {
+        if (keys.Count != rowsBytes.Count)
+        {
+            throw new ArgumentException("Every row needs exactly one key.", nameof(keys));
+        }
+
+        duplicate = default;
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
+        bool inserted = false;
+        try
+        {
+            lock (state.SyncRoot)
+            {
+                // Check every key before staging any row, so a rejected batch leaves nothing behind.
+                HashSet<RowKey>? seen = keys.Count > 1 ? new HashSet<RowKey>(keys.Count) : null;
+                for (int i = 0; i < keys.Count; i++)
+                {
+                    if ((seen is not null && !seen.Add(keys[i])) || Lookup(pending, state, keys[i], out _) == LatestRowLookup.Live)
+                    {
+                        duplicate = keys[i];
+                        return false;
+                    }
+                }
+
+                long nextRowId = state.NextRowId;
+                for (int i = 0; i < keys.Count; i++)
+                {
+                    DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowsBytes[i]);
+                    nextRowId = Math.Max(nextRowId, NextRowIdAfter(keys[i]));
+                    pending.Stage(state, keys[i], rowsBytes[i]);
+                    pending.Batch.Put(databaseName, tableName, keys[i], rowsBytes[i]);
+                }
+
+                state.NextRowId = nextRowId;
+                if (keys.Count > 0)
+                {
+                    pending.Touch(state, databaseName, tableName);
+                    pending.AddLiveDelta(state, keys.Count);
+                }
+
+                inserted = true;
+            }
+        }
+        finally
+        {
+            // A rejected batch staged nothing; completing it commits nothing (or returns the reusable buffer).
+            CompleteWrite(pending, ownsWrite);
+        }
+
+        return inserted;
+    }
+
+    /// <summary>
     /// Returns whether the table currently holds any live rows, from the table's live-row counter
     /// (maintained in commit order and persisted with every commit), without reading rows.
     /// </summary>
@@ -264,6 +328,61 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
 
         return merged.Select(pair => (pair.Key, pair.Value)).ToList();
     }
+
+    /// <summary>Whether a live row has <paramref name="key"/>, as this flow sees it (its own staged writes included).</summary>
+    /// <remarks>Copies no row: an SSTable hit reports only whether its newest version is a put.</remarks>
+    internal bool IsRowLive(string databaseName, string tableName, RowKey key)
+    {
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        if (_ambientWrite.Value is { } pending && pending.TryGetStaged(state, key, out byte[]? staged))
+        {
+            return staged is not null;
+        }
+
+        switch (state.LatestRows.TryGet(key, out _))
+        {
+            case LatestRowLookup.Live:
+                return true;
+            case LatestRowLookup.Tombstone:
+                return false;
+        }
+
+        TableVersion version = state.AcquireVersion();
+        try
+        {
+            SstableHit best = default;
+            int bestLevel = -1;
+            foreach (LsmSstableHandle file in version.Files)
+            {
+                int level = file.Metadata.Level;
+                if (bestLevel >= 0 && level != bestLevel)
+                {
+                    break;
+                }
+
+                SstableHit hit = file.GetV2Reader(_readMode).Lookup(
+                    key,
+                    ulong.MaxValue,
+                    0,
+                    static (type, sequence, _, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? LiveMarker : null),
+                    default(SstableHit));
+                if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
+                {
+                    best = hit;
+                    bestLevel = level;
+                }
+            }
+
+            return best.Found && best.Value is not null;
+        }
+        finally
+        {
+            version.Release();
+        }
+    }
+
+    /// <summary>Stands for "a live version exists" in <see cref="IsRowLive"/>; never read.</summary>
+    private static readonly byte[] LiveMarker = [];
 
     private LatestRowLookup Lookup(PendingWrite? pending, TableState state, RowKey rowId, out byte[] value)
     {
