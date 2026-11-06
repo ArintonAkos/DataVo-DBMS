@@ -122,13 +122,15 @@ public readonly struct RowKey : IEquatable<RowKey>, IComparable<RowKey>
 
     public static bool operator !=(RowKey left, RowKey right) => !left.Equals(right);
 
-    public static bool operator <(RowKey left, RowKey right) => left.CompareTo(right) < 0;
+    // Direct comparisons instead of CompareTo: these run on every probe of the storage engine's searches.
+    public static bool operator <(RowKey left, RowKey right) =>
+        left.High < right.High || (left.High == right.High && left.Low < right.Low);
 
-    public static bool operator >(RowKey left, RowKey right) => left.CompareTo(right) > 0;
+    public static bool operator >(RowKey left, RowKey right) => right < left;
 
-    public static bool operator <=(RowKey left, RowKey right) => left.CompareTo(right) <= 0;
+    public static bool operator <=(RowKey left, RowKey right) => !(right < left);
 
-    public static bool operator >=(RowKey left, RowKey right) => left.CompareTo(right) >= 0;
+    public static bool operator >=(RowKey left, RowKey right) => !(left < right);
 
     /// <summary>An integer key prints as the integer, any other key as a GUID.</summary>
     public override string ToString() =>
