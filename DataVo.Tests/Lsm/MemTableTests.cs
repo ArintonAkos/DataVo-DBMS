@@ -257,4 +257,56 @@ public class MemTableTests
             throw readerFailure;
         }
     }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void InsertsInAnyOrder_KeepTheSkipListSortedAndFindable(int seed)
+    {
+        // Inserts usually arrive after the previous key (sequential ids, time-ordered GUIDs) and start
+        // from a finger; mix that with near-ascending, random and repeated keys plus a trailing metadata
+        // key, and check the full order and every lookup.
+        var random = new Random(seed);
+        using var table = new MemTable();
+        var expected = new SortedDictionary<long, (ulong Sequence, string Value)>();
+        ulong sequence = 1;
+        long next = 0;
+        for (int i = 0; i < 20_000; i++)
+        {
+            long key = random.Next(10) switch
+            {
+                < 5 => next += 1 + random.Next(3),          // ascending run
+                < 7 => next + random.Next(-200, 400),       // near the previous key, either side
+                < 9 => random.NextInt64(-1_000_000, 1_000_000),
+                _ => expected.Count > 0 ? expected.Keys.ElementAt(random.Next(expected.Count)) : 0, // new version
+            };
+            string value = $"v{i}";
+            table.Put(Key(key), sequence, LsmValueType.Put, Val(value));
+            expected[key] = (sequence, value);
+            sequence++;
+            if (i % 997 == 0)
+            {
+                table.Put("__meta"u8, sequence++, LsmValueType.Put, Val("m")); // sorts after every row key
+            }
+        }
+
+        byte[]? previous = null;
+        int rows = 0;
+        foreach (MemTableEntry entry in table)
+        {
+            byte[] current = entry.InternalKey.ToArray();
+            Assert.True(previous is null || InternalKey.Compare(previous, current) < 0, "entries out of order");
+            previous = current;
+            rows++;
+        }
+
+        Assert.Equal(table.Count, rows);
+        foreach ((long key, (ulong _, string value)) in expected)
+        {
+            Assert.True(table.TryGet(Key(key), ulong.MaxValue, out ReadOnlySpan<byte> found, out bool tombstone));
+            Assert.False(tombstone);
+            Assert.Equal(value, System.Text.Encoding.UTF8.GetString(found));
+        }
+    }
 }

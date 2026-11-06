@@ -38,11 +38,19 @@ public sealed class MemTable : IDisposable
     private ulong _minSequence = ulong.MaxValue;
     private ulong _maxSequence;
 
+    // The previous insert: its node, and per level the node an insert after it can start from (the node
+    // itself on its own levels, its predecessor above them). Every finger node's key is below the
+    // previous key and tall enough for its level, so a larger key needs no search from the head: keys
+    // that arrive in order (sequential ids, time-ordered GUIDs) walk a step or two per level.
+    private readonly long[] _finger = new long[MaxHeight];
+    private long _lastNode = Null;
+
     /// <summary>Creates an empty MemTable whose arena uses <paramref name="slabSize"/>-byte slabs.</summary>
     public MemTable(int slabSize = 1 << 20)
     {
         _arena = new Arena(slabSize);
         _head = AllocateHead();
+        Array.Fill(_finger, _head);
     }
 
     /// <summary>Number of entries (versions) inserted, including tombstones.</summary>
@@ -89,18 +97,45 @@ public sealed class MemTable : IDisposable
         ReadOnlySpan<byte> internalKey = GetKey(node);
 
         Span<long> update = stackalloc long[MaxHeight];
-        long x = _head;
         int currentMaxHeight = Volatile.Read(ref _maxHeight);
-        for (int level = currentMaxHeight - 1; level >= 0; level--)
+        if (_lastNode != Null && InternalKey.Compare(GetKey(_lastNode), internalKey) < 0)
         {
-            long next = GetForward(x, level);
-            while (next != Null && InternalKey.Compare(GetKey(next), internalKey) < 0)
+            // After the previous key: descend as usual, but start each level from its finger when that is
+            // further along than the node the level above reached. Both are below the new key, so either is
+            // a valid start; taking the further one keeps the walk short for near and far keys alike.
+            long x = _head;
+            for (int level = currentMaxHeight - 1; level >= 0; level--)
             {
-                x = next;
-                next = GetForward(x, level);
-            }
+                long finger = _finger[level];
+                if (finger != _head && (x == _head || InternalKey.Compare(GetKey(x), GetKey(finger)) < 0))
+                {
+                    x = finger;
+                }
 
-            update[level] = x;
+                long next = GetForward(x, level);
+                while (next != Null && InternalKey.Compare(GetKey(next), internalKey) < 0)
+                {
+                    x = next;
+                    next = GetForward(x, level);
+                }
+
+                update[level] = x;
+            }
+        }
+        else
+        {
+            long x = _head;
+            for (int level = currentMaxHeight - 1; level >= 0; level--)
+            {
+                long next = GetForward(x, level);
+                while (next != Null && InternalKey.Compare(GetKey(next), internalKey) < 0)
+                {
+                    x = next;
+                    next = GetForward(x, level);
+                }
+
+                update[level] = x;
+            }
         }
 
         if (height > _maxHeight)
@@ -119,6 +154,13 @@ public sealed class MemTable : IDisposable
             SetForward(update[level], level, node);
         }
 
+        int fingerLevels = Math.Max(currentMaxHeight, height);
+        for (int level = 0; level < fingerLevels; level++)
+        {
+            _finger[level] = level < height ? node : update[level];
+        }
+
+        _lastNode = node;
         Volatile.Write(ref _count, _count + 1);
     }
 
