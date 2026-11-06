@@ -143,6 +143,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         var rowIds = new List<RowKey>(rowsBytes.Count);
         lock (state.SyncRoot)
         {
+            pending.Reserve(state, rowsBytes.Count);
             foreach (byte[] rowBytes in rowsBytes)
             {
                 DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
@@ -229,6 +230,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                     }
                 }
 
+                pending.Reserve(state, keys.Count);
                 long nextRowId = state.NextRowId;
                 for (int i = 0; i < keys.Count; i++)
                 {
@@ -1318,7 +1320,13 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 return;
             }
 
-            pending.Batch.CollapseToLatestPerRow();
+            // Collapsing builds a map over every operation; only a write unit that touched some row or
+            // index entry twice has anything to collapse (bulk inserts never do).
+            if (pending.HasRepeatedWrites)
+            {
+                pending.Batch.CollapseToLatestPerRow();
+            }
+
             long? assignedLsn = null;
             bool durable = false;
             try
@@ -1834,7 +1842,27 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 _stagedIndexes[state] = changes;
             }
 
+            HasRepeatedWrites |= changes.ContainsKey(userKey);
             changes[userKey] = live;
+        }
+
+        /// <summary>Whether some row or index entry was written more than once (the batch then needs collapsing).</summary>
+        public bool HasRepeatedWrites { get; private set; }
+
+        /// <summary>Makes room for <paramref name="rows"/> more staged rows of one table, so a bulk write does not regrow.</summary>
+        public void Reserve(TableState state, int rows)
+        {
+            if (!_staged.TryGetValue(state, out Dictionary<RowKey, byte[]?>? staged))
+            {
+                staged = new Dictionary<RowKey, byte[]?>(rows);
+                _staged[state] = staged;
+            }
+            else
+            {
+                staged.EnsureCapacity(staged.Count + rows);
+            }
+
+            Batch.Reserve(rows);
         }
 
         public Dictionary<byte[], bool>? StagedIndexFor(IndexTableState state) =>
@@ -1861,7 +1889,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 _staged[state] = rows;
             }
 
-            rows[rowId] = value;
+            if (!rows.TryAdd(rowId, value))
+            {
+                rows[rowId] = value;
+                HasRepeatedWrites = true;
+            }
         }
 
         public bool TryGetStaged(TableState state, RowKey rowId, out byte[]? value)
@@ -1897,6 +1929,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             _staged.Clear();
             _liveDelta.Clear();
             _stagedIndexes.Clear();
+            HasRepeatedWrites = false;
         }
     }
 

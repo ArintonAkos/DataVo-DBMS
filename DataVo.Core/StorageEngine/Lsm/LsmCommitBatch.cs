@@ -162,6 +162,15 @@ internal sealed class LsmCommitBatch
 
     public void Clear() => _operations.Clear();
 
+    /// <summary>Makes room for <paramref name="operations"/> more operations.</summary>
+    public void Reserve(int operations)
+    {
+        if (_operations.Capacity < _operations.Count + operations)
+        {
+            _operations.Capacity = _operations.Count + operations;
+        }
+    }
+
     /// <summary>
     /// Keeps only the last put or delete per row, in the order those last operations occurred. Every
     /// mutation of a batch shares one sequence number, so two versions of the same row would be ambiguous.
