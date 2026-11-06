@@ -273,7 +273,7 @@ public partial class IndexManager : IDisposable
             return;
         }
 
-        foreach (long existing in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
+        foreach (RowKey existing in store.IndexLookup(databaseName, tableName, indexName, encodedKey) ?? [])
         {
             if (existing != rowId)
             {
