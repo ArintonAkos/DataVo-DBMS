@@ -1800,9 +1800,22 @@ public class Parser(List<Token> tokens)
                     ReducePendingOperandOperators(values, operators);
                     values.Push(ParseInExpression(values, tokens, isNegated: true));
                 }
+                else if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.LIKE)
+                {
+                    tokens.Dequeue();
+                    PushOperator(values, operators, new Token(TokenType.Operator, Operators.NOT_LIKE));
+                }
+                else if (tokens.Count > 0 && tokens.Peek().Type == TokenType.Keyword && tokens.Peek().Value == SqlKeywords.BETWEEN)
+                {
+                    tokens.Dequeue();
+                    ReducePendingOperandOperators(values, operators);
+                    values.Push(Negate(ParseBetweenExpression(values, tokens)));
+                }
                 else
                 {
-                    throw new ParserException("Parser Error: Only NOT EXISTS and NOT IN subqueries are supported in subquery expressions.");
+                    // Prefix NOT: a unary operator, applied when its operand is reduced. It never pops
+                    // anything, so NOT NOT x and NOT (a AND b) nest as written.
+                    operators.Push(new Token(TokenType.Operator, Operators.NEGATE));
                 }
             }
             else
@@ -2092,11 +2105,6 @@ public class Parser(List<Token> tokens)
             };
         }
 
-        if (isNegated)
-        {
-            throw new ParserException("Parser Error: NOT IN lists are not supported; use NOT IN (SELECT ...) for subqueries.");
-        }
-
         List<ExpressionNode> options = [];
 
         while (tokens.Count > 0)
@@ -2127,6 +2135,27 @@ public class Parser(List<Token> tokens)
         if (options.Count == 0)
         {
             throw new ParserException("Parser Error: IN list cannot be empty.");
+        }
+
+        if (isNegated)
+        {
+            // x NOT IN (a, b) is x <> a AND x <> b; a NULL in the list makes every row unknown, as in SQL.
+            ExpressionNode? all = null;
+            foreach (ExpressionNode option in options)
+            {
+                ExpressionNode differs = new BinaryExpressionNode
+                {
+                    Operator = Operators.NOT_EQUALS,
+                    Left = CloneExpression(left),
+                    Right = option
+                };
+
+                all = all == null
+                    ? differs
+                    : new BinaryExpressionNode { Operator = Operators.AND, Left = all, Right = differs };
+            }
+
+            return all!;
         }
 
         ExpressionNode? combined = null;
@@ -2313,6 +2342,15 @@ public class Parser(List<Token> tokens)
         var opToken = operators.Pop();
         string op = opToken.Value.ToUpperInvariant();
 
+        if (op == Operators.NEGATE)
+        {
+            ExpressionNode operand = values.Count > 0
+                ? values.Pop()
+                : throw new ParserException("Parser Error: NOT is missing an operand.");
+            values.Push(Negate(operand));
+            return;
+        }
+
         // Shunting-Yard normally pops right then left
         var right = values.Count > 0 ? values.Pop() : null;
         var left = values.Count > 0 ? values.Pop() : null;
@@ -2336,11 +2374,71 @@ public class Parser(List<Token> tokens)
         {
             Operators.OR => 1,
             Operators.AND => 2,
-            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.LIKE or Operators.IS_NULL or Operators.IS_NOT_NULL => 3,
-            Operators.VECTOR_DISTANCE_L2 or Operators.VECTOR_DISTANCE_COSINE => 4,
-            Operators.ADD or Operators.SUBTRACT => 4,
-            Operators.MUL or Operators.DIVIDE => 5,
+            Operators.NEGATE => 3,
+            Operators.EQUALS or Operators.NOT_EQUALS or Operators.GREATER_THAN or Operators.LESS_THAN or Operators.GREATER_THAN_OR_EQUAL_TO or Operators.LESS_THAN_OR_EQUAL_TO or Operators.LIKE or Operators.NOT_LIKE or Operators.IS_NULL or Operators.IS_NOT_NULL => 4,
+            Operators.VECTOR_DISTANCE_L2 or Operators.VECTOR_DISTANCE_COSINE => 5,
+            Operators.ADD or Operators.SUBTRACT => 5,
+            Operators.MUL or Operators.DIVIDE => 6,
             _ => -1,
         };
+    }
+
+    /// <summary>
+    /// The logical negation of a condition, pushed down to its comparisons (De Morgan), so every
+    /// evaluator keeps seeing the operators it knows. Comparisons with NULL are false on both sides of a
+    /// negation here, which is SQL's rule that NOT of unknown stays unknown.
+    /// </summary>
+    private static ExpressionNode Negate(ExpressionNode node)
+    {
+        switch (node)
+        {
+            case InSubqueryExpressionNode inSubquery:
+                inSubquery.IsNegated = !inSubquery.IsNegated;
+                return inSubquery;
+            case ExistsSubqueryExpressionNode exists:
+                exists.IsNegated = !exists.IsNegated;
+                return exists;
+            case NullLiteralNode:
+                return node;
+            case LiteralNode literal when literal.Value is bool flag:
+                return new LiteralNode { Value = !flag };
+            case LiteralNode literal when literal.Value is string text && text == SqlLiterals.TrueExpression:
+                return new LiteralNode { Value = false };
+            case BinaryExpressionNode binary:
+                string? flipped = binary.Operator.ToUpperInvariant() switch
+                {
+                    Operators.EQUALS => Operators.NOT_EQUALS,
+                    Operators.NOT_EQUALS => Operators.EQUALS,
+                    Operators.LESS_THAN => Operators.GREATER_THAN_OR_EQUAL_TO,
+                    Operators.GREATER_THAN_OR_EQUAL_TO => Operators.LESS_THAN,
+                    Operators.GREATER_THAN => Operators.LESS_THAN_OR_EQUAL_TO,
+                    Operators.LESS_THAN_OR_EQUAL_TO => Operators.GREATER_THAN,
+                    Operators.LIKE => Operators.NOT_LIKE,
+                    Operators.NOT_LIKE => Operators.LIKE,
+                    Operators.IS_NULL => Operators.IS_NOT_NULL,
+                    Operators.IS_NOT_NULL => Operators.IS_NULL,
+                    _ => null,
+                };
+
+                if (flipped is not null)
+                {
+                    return new BinaryExpressionNode { Operator = flipped, Left = binary.Left, Right = binary.Right };
+                }
+
+                if (binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase)
+                    || binary.Operator.Equals(Operators.OR, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new BinaryExpressionNode
+                    {
+                        Operator = binary.Operator.Equals(Operators.AND, StringComparison.OrdinalIgnoreCase) ? Operators.OR : Operators.AND,
+                        Left = Negate(binary.Left),
+                        Right = Negate(binary.Right),
+                    };
+                }
+
+                break;
+        }
+
+        throw new ParserException("Parser Error: NOT applies to a condition (a comparison, LIKE, IN, BETWEEN, EXISTS or IS NULL).");
     }
 }
