@@ -328,7 +328,7 @@ internal sealed partial class InsertRowService(
 
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
 
-        bool hasIntegerPrimaryKey = TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, out int integerPrimaryKeyOrdinal);
+        bool hasIntegerPrimaryKey = TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, tableColumns, out int integerPrimaryKeyOrdinal);
         bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
         List<string>? messages = hasConstraints ? [] : null;
         HashSet<string>? acceptedPrimaryKeys = hasConstraints && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
@@ -546,13 +546,31 @@ internal sealed partial class InsertRowService(
         }
     }
 
+    /// <summary>
+    /// A single INT primary key takes the integer fast path. Any other key type (GUID, VARCHAR) uses the
+    /// general validation; treating every single-column key as an integer rejected GUID keys outright.
+    /// </summary>
     private static bool TryResolveIntegerPrimaryKeyOrdinal(
         IReadOnlyList<string> primaryKeys,
         ReactiveRowSchema schema,
+        IReadOnlyList<Column> tableColumns,
         out int ordinal)
     {
         ordinal = -1;
-        return primaryKeys.Count == 1 && schema.TryGetOrdinal(primaryKeys[0], out ordinal);
+        if (primaryKeys.Count != 1 || !schema.TryGetOrdinal(primaryKeys[0], out ordinal))
+        {
+            return false;
+        }
+
+        foreach (Column column in tableColumns)
+        {
+            if (column.Name.Equals(primaryKeys[0], StringComparison.OrdinalIgnoreCase))
+            {
+                return ExpectedCellType(column) is CellType.Int32 or CellType.Int64;
+            }
+        }
+
+        return false;
     }
 
     internal static void ValidateTypedCell(Column column, CellValue cell)
