@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Threading;
 
 namespace DataVo.Core.StorageEngine.Lsm;
@@ -24,7 +23,7 @@ internal enum LatestRowLookup
 /// <para>Two places hold versions, chosen by key alone, so a key always lives in the same one. Engine
 /// row ids (small non-negative integers) go to a dense array paged by the integer: a read is two array
 /// loads and a publish allocates nothing. Every other key (a GUID, a negative or very large integer
-/// primary key) goes to a concurrent hash map of immutable entries, whose reads are lock-free too.</para>
+/// primary key) goes to an open-addressing hash map of immutable entries, whose reads are lock-free too.</para>
 /// <para>Concurrency: mutations (publish and eviction) are serialized by the caller; point reads are
 /// lock-free. Published row buffers are immutable (patches are copy-on-write), so a reader sees either
 /// the old complete image or the new one. Every version records its sequence so a flush evicts only
@@ -49,7 +48,7 @@ internal sealed class LsmLatestRowStore
     private static readonly byte[] TombstoneSentinel = new byte[1];
 
     private Page?[] _pages = new Page?[16];
-    private readonly ConcurrentDictionary<RowKey, SparseVersion> _sparse = new();
+    private readonly SparseRowMap _sparse = new();
     private long _count;
 
     /// <summary>Row versions currently held (live rows and tombstones).</summary>
@@ -79,7 +78,7 @@ internal sealed class LsmLatestRowStore
         }
         else
         {
-            value = _sparse.TryGetValue(key, out SparseVersion? version) ? version.Value : null;
+            value = _sparse.Find(key)?.Value;
         }
 
         if (value is null)
@@ -115,9 +114,9 @@ internal sealed class LsmLatestRowStore
     {
         if (!TryGetDenseIndex(key, out long rowId))
         {
-            if (_sparse.TryGetValue(key, out SparseVersion? version)
+            if (_sparse.Find(key) is { } version
                 && version.Sequence <= flushedThrough
-                && _sparse.TryRemove(key, out _))
+                && _sparse.Remove(key))
             {
                 Interlocked.Decrement(ref _count);
             }
@@ -157,9 +156,9 @@ internal sealed class LsmLatestRowStore
     {
         // Sparse keys sort around the dense ones: negative integers before, large integers and GUIDs after.
         List<KeyValuePair<RowKey, SparseVersion>>? sparse = null;
-        if (!_sparse.IsEmpty)
+        if (_sparse.Count > 0)
         {
-            sparse = new List<KeyValuePair<RowKey, SparseVersion>>(_sparse);
+            sparse = _sparse.Snapshot();
             sparse.Sort(static (x, y) => x.Key.CompareTo(y.Key));
         }
 
@@ -205,9 +204,7 @@ internal sealed class LsmLatestRowStore
         if (!TryGetDenseIndex(key, out long rowId))
         {
             // Publishes are serialized, so the check and the write cannot race with another publish.
-            bool added = !_sparse.ContainsKey(key);
-            _sparse[key] = new SparseVersion(value, sequence);
-            if (added)
+            if (_sparse.Set(new SparseVersion(key, value, sequence)))
             {
                 Interlocked.Increment(ref _count);
             }
@@ -270,11 +267,169 @@ internal sealed class LsmLatestRowStore
         public int Occupied;
     }
 
-    /// <summary>An immutable (value, sequence) pair: a reader never sees one without the other.</summary>
-    private sealed class SparseVersion(byte[] value, ulong sequence)
+    /// <summary>An immutable (key, value, sequence) entry: a reader never sees one part without the others.</summary>
+    private sealed class SparseVersion(RowKey key, byte[] value, ulong sequence)
     {
+        public RowKey Key { get; } = key;
+
         public byte[] Value { get; } = value;
 
         public ulong Sequence { get; } = sequence;
+    }
+
+    /// <summary>
+    /// Open-addressing hash map from row keys to <see cref="SparseVersion"/>s, for one serialized writer and
+    /// lock-free readers. A slot holds an immutable entry, written with one reference store; a removal
+    /// leaves a marker so probes continue past it. Growing builds a new table and publishes it with one
+    /// reference store, dropping the markers.
+    /// </summary>
+    /// <remarks>
+    /// A reader holding the previous table may miss a version published while it reads, the same overlap
+    /// any read racing a publish has; an evicted version it still sees is the one now in an SSTable.
+    /// </remarks>
+    private sealed class SparseRowMap
+    {
+        private static readonly SparseVersion Removed = new(default, [], 0);
+
+        private SparseVersion?[] _slots = new SparseVersion?[64];
+        private int _count;
+        private int _used; // live entries plus removal markers
+
+        public int Count => Volatile.Read(ref _count);
+
+        public SparseVersion? Find(RowKey key)
+        {
+            SparseVersion?[] slots = Volatile.Read(ref _slots);
+            int mask = slots.Length - 1;
+            for (int i = Hash(key) & mask; ; i = (i + 1) & mask)
+            {
+                SparseVersion? entry = Volatile.Read(ref slots[i]);
+                if (entry is null)
+                {
+                    return null;
+                }
+
+                if (!ReferenceEquals(entry, Removed) && entry.Key == key)
+                {
+                    return entry;
+                }
+            }
+        }
+
+        /// <summary>Stores <paramref name="version"/> under its key; true when the key was new.</summary>
+        public bool Set(SparseVersion version)
+        {
+            if ((_used + 1) * 2 > _slots.Length)
+            {
+                Grow();
+            }
+
+            SparseVersion?[] slots = _slots;
+            int mask = slots.Length - 1;
+            int firstRemoved = -1;
+            for (int i = Hash(version.Key) & mask; ; i = (i + 1) & mask)
+            {
+                SparseVersion? entry = slots[i];
+                if (entry is null)
+                {
+                    // New key: reuse a removal marker passed on the way, else the empty slot.
+                    int target = firstRemoved >= 0 ? firstRemoved : i;
+                    if (firstRemoved < 0)
+                    {
+                        _used++;
+                    }
+
+                    Volatile.Write(ref slots[target], version);
+                    Volatile.Write(ref _count, _count + 1);
+                    return true;
+                }
+
+                if (ReferenceEquals(entry, Removed))
+                {
+                    if (firstRemoved < 0)
+                    {
+                        firstRemoved = i;
+                    }
+                }
+                else if (entry.Key == version.Key)
+                {
+                    Volatile.Write(ref slots[i], version);
+                    return false;
+                }
+            }
+        }
+
+        public bool Remove(RowKey key)
+        {
+            SparseVersion?[] slots = _slots;
+            int mask = slots.Length - 1;
+            for (int i = Hash(key) & mask; ; i = (i + 1) & mask)
+            {
+                SparseVersion? entry = slots[i];
+                if (entry is null)
+                {
+                    return false;
+                }
+
+                if (!ReferenceEquals(entry, Removed) && entry.Key == key)
+                {
+                    Volatile.Write(ref slots[i], Removed);
+                    Volatile.Write(ref _count, _count - 1);
+                    return true;
+                }
+            }
+        }
+
+        public List<KeyValuePair<RowKey, SparseVersion>> Snapshot()
+        {
+            SparseVersion?[] slots = Volatile.Read(ref _slots);
+            var entries = new List<KeyValuePair<RowKey, SparseVersion>>(Count);
+            foreach (SparseVersion? entry in slots)
+            {
+                if (entry is not null && !ReferenceEquals(entry, Removed))
+                {
+                    entries.Add(new KeyValuePair<RowKey, SparseVersion>(entry.Key, entry));
+                }
+            }
+
+            return entries;
+        }
+
+        private void Grow()
+        {
+            int capacity = 64;
+            while (capacity < (_count + 1) * 4)
+            {
+                capacity *= 2;
+            }
+
+            var grown = new SparseVersion?[capacity];
+            int mask = capacity - 1;
+            foreach (SparseVersion? entry in _slots)
+            {
+                if (entry is null || ReferenceEquals(entry, Removed))
+                {
+                    continue;
+                }
+
+                int i = Hash(entry.Key) & mask;
+                while (grown[i] is not null)
+                {
+                    i = (i + 1) & mask;
+                }
+
+                grown[i] = entry;
+            }
+
+            _used = _count;
+            Volatile.Write(ref _slots, grown);
+        }
+
+        // Spreads both halves (GUID keys differ in either; integer keys only in the low half).
+        private static int Hash(RowKey key)
+        {
+            ulong mixed = (key.High ^ (key.Low * 0x9E37_79B9_7F4A_7C15UL)) * 0xBF58_476D_1CE4_E5B9UL;
+            return (int)(mixed >> 33);
+        }
     }
 }
