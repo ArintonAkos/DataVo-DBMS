@@ -53,6 +53,30 @@ public sealed class LsmClusteredTableTests : IDisposable
     }
 
     [Fact]
+    public void KeyIsStoredOnce_AndRowsThatStillHoldItReadTheSame()
+    {
+        using DataVoContext db = Open();
+        CreateItems(db);
+        Execute(db, "INSERT INTO Items (Id, Name, Code) VALUES (42, 'a', 1)");
+
+        // As stored, the row holds its key cell as NULL: the row key already is the key.
+        LsmStorageEngine lsm = db.Engine.StorageContext.LsmEngine!;
+        var columns = db.Engine.Catalog.GetTableColumns("Items", "Shop");
+        CellValue[] stored = DataVo.Core.StorageEngine.Serialization.RowSerializer.DeserializeCells(lsm.ReadRow("Shop", "Items", 42), columns);
+        Assert.True(stored[0].IsNull);
+        Assert.Equal("a", stored[1].AsString());
+
+        // A row written with its key cell (before keys were stored once) reads unchanged.
+        byte[] full = DataVo.Core.StorageEngine.Serialization.RowSerializer.SerializeCells(columns, [CellValue.From(43), CellValue.From("old"), CellValue.From(1)]);
+        Assert.True(lsm.TryInsertRowWithKey("Shop", "Items", 43, full));
+
+        Assert.Equal([42, 43], Ids(db, "SELECT Id FROM Items WHERE Code = 1 OR Id = 43"));
+        Assert.Equal("old", db.Execute("SELECT Name FROM Items WHERE Id = 43")[0].Data.Single()["Name"]);
+        Execute(db, "UPDATE Items SET Name = 'new' WHERE Id = 43");
+        Assert.Equal("new", db.Execute("SELECT Name FROM Items WHERE Id = 43")[0].Data.Single()["Name"]);
+    }
+
+    [Fact]
     public void DuplicateKey_IsRejected_AndARejectedMultiRowInsertWritesNothing()
     {
         using DataVoContext db = Open();

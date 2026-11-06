@@ -532,6 +532,71 @@ public static class RowSerializer
         return reader.ReadBoolean() ? CellValue.Null : DecodeTypedCell(ref reader, columns[ordinal]);
     }
 
+    /// <summary>
+    /// Finds cell <paramref name="ordinal"/>: the offset of its null flag and the length of its value
+    /// (0 for a null cell).
+    /// </summary>
+    private static (int FlagOffset, int ValueLength) LocateCell(ReadOnlySpan<byte> data, IReadOnlyList<Column> columns, int ordinal)
+    {
+        var reader = new ByteSpanReader(data);
+        for (int i = 0; i < ordinal; i++)
+        {
+            if (!reader.ReadBoolean())
+            {
+                SkipTypedCell(ref reader, columns[i]);
+            }
+        }
+
+        int flagOffset = reader.Position;
+        if (reader.ReadBoolean())
+        {
+            return (flagOffset, 0);
+        }
+
+        SkipTypedCell(ref reader, columns[ordinal]);
+        return (flagOffset, reader.Position - flagOffset - 1);
+    }
+
+    /// <summary>
+    /// A copy of the row with cell <paramref name="ordinal"/> stored as NULL (its value bytes removed).
+    /// Clustered tables store their key this way: the row's key already holds it.
+    /// </summary>
+    public static byte[] WithoutCell(ReadOnlySpan<byte> data, IReadOnlyList<Column> columns, int ordinal)
+    {
+        (int flagOffset, int valueLength) = LocateCell(data, columns, ordinal);
+        if (valueLength == 0)
+        {
+            return data.ToArray();
+        }
+
+        var result = new byte[data.Length - valueLength];
+        data[..flagOffset].CopyTo(result);
+        result[flagOffset] = 1; // null
+        data[(flagOffset + 1 + valueLength)..].CopyTo(result.AsSpan(flagOffset + 1));
+        return result;
+    }
+
+    /// <summary>
+    /// A copy of the row with cell <paramref name="ordinal"/> holding <paramref name="value"/> when it is
+    /// stored as NULL (the inverse of <see cref="WithoutCell"/>); a row that still holds the cell is copied
+    /// unchanged. <paramref name="value"/> is the cell's encoded value, as <see cref="SerializeCells"/> writes it.
+    /// </summary>
+    public static byte[] WithCell(ReadOnlySpan<byte> data, IReadOnlyList<Column> columns, int ordinal, ReadOnlySpan<byte> value)
+    {
+        (int flagOffset, int valueLength) = LocateCell(data, columns, ordinal);
+        if (valueLength != 0 || data[flagOffset] == 0)
+        {
+            return data.ToArray();
+        }
+
+        var result = new byte[data.Length + value.Length];
+        data[..flagOffset].CopyTo(result);
+        result[flagOffset] = 0; // not null
+        value.CopyTo(result.AsSpan(flagOffset + 1));
+        data[(flagOffset + 1)..].CopyTo(result.AsSpan(flagOffset + 1 + value.Length));
+        return result;
+    }
+
     /// <summary>Advances the reader past one non-null typed cell without materializing it.</summary>
     private static void SkipTypedCell(ref ByteSpanReader reader, Column column)
     {

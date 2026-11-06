@@ -14,6 +14,12 @@ using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Core.StorageEngine.Lsm;
 
+/// <summary>Turns a row as stored into the row callers see (a clustered table puts its key back).</summary>
+internal interface IStoredRowMaterializer
+{
+    byte[] Materialize(RowKey key, ReadOnlySpan<byte> stored);
+}
+
 /// <summary>
 /// LSM-backed storage engine. Rows are stored under their 16-byte <see cref="RowKey"/>; tables without a
 /// clustered key get engine-assigned integer keys (1, 2, 3, ...).
@@ -274,12 +280,19 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// Lock-free point read: this flow's staged writes, then the unflushed overlay, then the SSTables
     /// (memory-mapped; one Bloom probe and two binary searches per file). Readers never wait on writers.
     /// </summary>
-    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId)
+    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) =>
+        ReadRow(databaseName, tableName, rowId, materializer: null);
+
+    /// <summary>
+    /// <see cref="ReadRow(string, string, RowKey)"/> with the stored bytes turned into the caller's row by
+    /// <paramref name="materializer"/> (in place of the copy a read makes anyway).
+    /// </summary>
+    internal byte[] ReadRow(string databaseName, string tableName, RowKey rowId, IStoredRowMaterializer? materializer)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
         // Other sessions see only published rows; the writing flow also sees its own pending writes.
-        (byte[]? row, bool owned) = ResolveRow(_ambientWrite.Value, state, rowId);
+        (byte[]? row, bool owned) = ResolveRow(_ambientWrite.Value, state, rowId, materializer);
         if (row is null)
         {
             throw rowId.IsInt64 && rowId.AsInt64() > 0 && rowId.AsInt64() < state.ReadNextRowId()
@@ -292,15 +305,22 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             throw new RowDeletedException(rowId, tableName);
         }
 
-        return owned ? row : row.ToArray();
+        return owned ? row : Materialize(materializer, rowId, row);
     }
 
+    private static byte[] Materialize(IStoredRowMaterializer? materializer, RowKey key, ReadOnlySpan<byte> stored) =>
+        materializer?.Materialize(key, stored) ?? stored.ToArray();
+
     /// <inheritdoc />
-    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
+    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) =>
+        ReadAllRows(databaseName, tableName, materializer: null);
+
+    /// <summary><see cref="ReadAllRows(string, string)"/> with each stored row materialized (see <see cref="ReadRow(string, string, RowKey, IStoredRowMaterializer?)"/>).</summary>
+    internal IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName, IStoredRowMaterializer? materializer)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        List<(RowKey RowId, byte[] RawRow)> rows = CollectLiveRowsSorted(state);
+        List<(RowKey RowId, byte[] RawRow)> rows = CollectLiveRowsSorted(state, materializer);
 
         IReadOnlyDictionary<RowKey, byte[]?>? staged = _ambientWrite.Value?.StagedFor(state);
         if (staged is not { Count: > 0 })
@@ -322,7 +342,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             }
             else
             {
-                merged[rowId] = value.ToArray();
+                merged[rowId] = Materialize(materializer, rowId, value);
             }
         }
 
@@ -408,7 +428,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// Returns <see langword="null"/> when no version exists and <see cref="DeletedMarker"/> for a
     /// deletion. <c>Owned</c> is true when the bytes are a fresh copy the caller may keep or mutate.
     /// </summary>
-    private (byte[]? Row, bool Owned) ResolveRow(PendingWrite? pending, TableState state, RowKey rowId)
+    private (byte[]? Row, bool Owned) ResolveRow(PendingWrite? pending, TableState state, RowKey rowId, IStoredRowMaterializer? materializer = null)
     {
         if (pending is not null && pending.TryGetStaged(state, rowId, out byte[]? staged))
         {
@@ -425,7 +445,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 return (DeletedMarker, false);
         }
 
-        return (ReadFromSstables(state, rowId), true);
+        return (ReadFromSstables(state, rowId, materializer), true);
     }
 
     /// <summary>
@@ -433,7 +453,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// overlap); the first level holding the row decides, because compaction moves a whole level down,
     /// so every deeper level is older.
     /// </summary>
-    private byte[]? ReadFromSstables(TableState state, RowKey rowId)
+    private byte[]? ReadFromSstables(TableState state, RowKey rowId, IStoredRowMaterializer? materializer)
     {
         TableVersion version = state.AcquireVersion();
         try
@@ -452,8 +472,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 SstableHit hit = file.GetV2Reader(_readMode).Lookup(
                     rowId,
                     ulong.MaxValue,
-                    0,
-                    static (type, sequence, value, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? value.ToArray() : DeletedMarker),
+                    (Materializer: materializer, Key: rowId),
+                    static (type, sequence, value, read) => new SstableHit(
+                        true,
+                        sequence,
+                        type == LsmValueType.Put ? Materialize(read.Materializer, read.Key, value) : DeletedMarker),
                     default(SstableHit));
                 if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
                 {
@@ -654,7 +677,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     }
 
     /// <inheritdoc />
-    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) =>
+        CompactTable(databaseName, tableName, materializer: null);
+
+    /// <summary><see cref="CompactTable(string, string)"/> returning materialized rows.</summary>
+    internal List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName, IStoredRowMaterializer? materializer)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
@@ -664,7 +691,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             state.Table.CompactAllLevelsForMaintenance();
         }
 
-        return CollectLiveRowsSorted(state);
+        return CollectLiveRowsSorted(state, materializer);
     }
 
     /// <summary>Disposes cached table writers. Persisted SSTables and manifests remain on disk.</summary>
@@ -1584,10 +1611,11 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
     /// <summary>Every live row in key order (see <see cref="MergeLiveRows{TState}"/>).</summary>
-    private List<(RowKey RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
+    private List<(RowKey RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state, IStoredRowMaterializer? materializer = null)
     {
         var rows = new List<(RowKey RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
-        MergeLiveRows(state, rows, static (list, rowId, _, value) => list.Add((rowId, value.ToArray())));
+        MergeLiveRows(state, (Rows: rows, Materializer: materializer), static (target, rowId, _, value) =>
+            target.Rows.Add((rowId, Materialize(target.Materializer, rowId, value))));
         return rows;
     }
 

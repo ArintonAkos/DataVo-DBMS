@@ -1,6 +1,7 @@
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
 using DataVo.Core.StorageEngine.Serialization;
 
@@ -10,8 +11,15 @@ namespace DataVo.Core.StorageEngine;
 /// Where a clustered table's key lives in its serialized rows, and how the key becomes the row's
 /// <see cref="RowKey"/>: an INT key is the integer, a GUID key its 16 bytes.
 /// </summary>
-internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordinal, string primaryKeyIndexName)
+/// <remarks>
+/// The key is stored once, as the row's key: the row itself holds the key cell as NULL (a primary key is
+/// never NULL), and <see cref="Materialize"/> puts it back on every read. Rows written before this still
+/// hold the key cell and read unchanged.
+/// </remarks>
+internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordinal, string primaryKeyIndexName) : IStoredRowMaterializer
 {
+    private readonly bool _isGuid = string.Equals(columns[ordinal].Type, "GUID", StringComparison.OrdinalIgnoreCase);
+
     public IReadOnlyList<Column> Columns { get; } = columns;
 
     /// <summary>Storage-order position of the key column.</summary>
@@ -54,7 +62,29 @@ internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordi
     }
 
     /// <summary>The encoded index key (<see cref="LsmIndexKeyCodec"/>) of a row key; the inverse of <see cref="KeyOfIndexKey"/>.</summary>
-    public byte[] IndexKeyOf(RowKey key) => Columns[Ordinal].Type.Equals("GUID", StringComparison.OrdinalIgnoreCase)
+    public byte[] IndexKeyOf(RowKey key) => _isGuid
         ? LsmIndexKeyCodec.EncodeGuid(key.AsGuid())
         : LsmIndexKeyCodec.EncodeInteger(key.AsInt64());
+
+    /// <summary>The row as stored: without its key cell, which the row key already holds.</summary>
+    public byte[] StoredForm(ReadOnlySpan<byte> rowBytes) => RowSerializer.WithoutCell(rowBytes, Columns, Ordinal);
+
+    /// <summary>The row as callers see it: the stored row with its key cell restored from <paramref name="key"/>.</summary>
+    public byte[] Materialize(RowKey key, ReadOnlySpan<byte> stored)
+    {
+        Span<byte> value = stackalloc byte[16];
+        int length;
+        if (_isGuid)
+        {
+            key.AsGuid().TryWriteBytes(value); // the cell encoding RowSerializer writes
+            length = 16;
+        }
+        else
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, checked((int)key.AsInt64()));
+            length = sizeof(int);
+        }
+
+        return RowSerializer.WithCell(stored, Columns, Ordinal, value[..length]);
+    }
 }

@@ -51,7 +51,7 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
 
         // A clustered row is stored under its primary key; an existing live row with that key is a duplicate.
         RowKey key = layout.KeyOf(rowBytes, tableName);
-        return _inner.TryInsertRowWithKey(databaseName, tableName, key, rowBytes)
+        return _inner.TryInsertRowWithKey(databaseName, tableName, key, layout.StoredForm(rowBytes))
             ? key
             : throw DuplicateKey(key, tableName);
     }
@@ -64,24 +64,31 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
         }
 
         var keys = new List<RowKey>(rowsBytes.Count);
+        var stored = new List<byte[]>(rowsBytes.Count);
         foreach (byte[] rowBytes in rowsBytes)
         {
             keys.Add(layout.KeyOf(rowBytes, tableName));
+            stored.Add(layout.StoredForm(rowBytes));
         }
 
-        return _inner.TryInsertRowsWithKeys(databaseName, tableName, keys, rowsBytes, out RowKey duplicate)
+        return _inner.TryInsertRowsWithKeys(databaseName, tableName, keys, stored, out RowKey duplicate)
             ? keys
             : throw DuplicateKey(duplicate, tableName);
     }
 
     private static ConstraintViolationException DuplicateKey(RowKey key, string tableName) =>
         new($"Primary key violation: a row with key {key} already exists in table {tableName}.");
-    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, rowId);
-    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => _inner.ReadAllRows(databaseName, tableName);
+    // A clustered table stores rows without their key cell; reads put it back (see ClusteredKeyLayout).
+    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) =>
+        _inner.ReadRow(databaseName, tableName, rowId, _clusteredKeys?.Invoke(databaseName, tableName));
+
+    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) =>
+        _inner.ReadAllRows(databaseName, tableName, _clusteredKeys?.Invoke(databaseName, tableName));
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, rowId);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);
-    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => _inner.CompactTable(databaseName, tableName);
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) =>
+        _inner.CompactTable(databaseName, tableName, _clusteredKeys?.Invoke(databaseName, tableName));
     public bool HasAnyRows(string databaseName, string tableName) => _inner.HasAnyRows(databaseName, tableName);
 
     public long EstimateRowCount(string databaseName, string tableName) => _inner.EstimateRowCount(databaseName, tableName);

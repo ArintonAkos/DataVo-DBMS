@@ -60,6 +60,9 @@ internal ref struct ByteSpanReader
 
     public void Skip(int byteCount) => _position += byteCount;
 
+    /// <summary>Bytes consumed so far.</summary>
+    public readonly int Position => _position;
+
     // Matches BinaryReader.Read7BitEncodedInt / BinaryWriter's length prefix (LEB128, max 5 bytes).
     private int Read7BitEncodedInt()
     {
