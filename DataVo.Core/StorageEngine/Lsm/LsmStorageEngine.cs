@@ -1795,6 +1795,85 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         state = box.State;
     }
 
+    /// <summary>
+    /// Reads several rows by key in one pass, visiting the live ones in the order given, in stored form (a
+    /// clustered table's key cell is NULL). Every key's overlay probe happens before the file set is pinned,
+    /// as in <see cref="ResolveRow"/>, and the file set is pinned once for all keys the overlay lacks.
+    /// Only valid outside a write flow (staged writes are not merged).
+    /// </summary>
+    internal void ReadStoredRowsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> keys, ref TState state, StoredRowScanVisitor<TState> visit)
+    {
+        TableState table = GetOrCreateTable(databaseName, tableName);
+        var found = new byte[]?[keys.Count];
+        var inFiles = new List<int>();
+        for (int i = 0; i < keys.Count; i++)
+        {
+            switch (table.LatestRows.TryGet(keys[i], out byte[] overlay))
+            {
+                case LatestRowLookup.Live:
+                    found[i] = overlay;
+                    break;
+                case LatestRowLookup.Missing:
+                    inFiles.Add(i);
+                    break;
+            }
+        }
+
+        if (inFiles.Count > 0)
+        {
+            TableVersion version = table.AcquireVersion();
+            try
+            {
+                foreach (int i in inFiles)
+                {
+                    byte[]? row = ReadFromVersion(version, keys[i]);
+                    found[i] = ReferenceEquals(row, DeletedMarker) ? null : row;
+                }
+            }
+            finally
+            {
+                version.Release();
+            }
+        }
+
+        for (int i = 0; i < found.Length; i++)
+        {
+            if (found[i] is { } row && !visit(ref state, keys[i], row))
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>The newest version of a row in a pinned file set (see <see cref="ReadFromSstables"/>), copied.</summary>
+    private byte[]? ReadFromVersion(TableVersion version, RowKey rowId)
+    {
+        SstableHit best = default;
+        int bestLevel = -1;
+        foreach (LsmSstableHandle file in version.Files)
+        {
+            int level = file.Metadata.Level;
+            if (bestLevel >= 0 && level != bestLevel)
+            {
+                break;
+            }
+
+            SstableHit hit = file.GetV2Reader(_readMode).Lookup(
+                rowId,
+                ulong.MaxValue,
+                0,
+                static (type, sequence, value, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? value.ToArray() : DeletedMarker),
+                default(SstableHit));
+            if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
+            {
+                best = hit;
+                bestLevel = level;
+            }
+        }
+
+        return best.Found ? best.Value : null;
+    }
+
     /// <summary>Whether this flow has staged writes to the table that a scan would have to merge (a scan then takes the general path).</summary>
     internal bool HasStagedWrites(string databaseName, string tableName) =>
         _ambientWrite.Value?.StagedFor(GetOrCreateTable(databaseName, tableName)) is { Count: > 0 };

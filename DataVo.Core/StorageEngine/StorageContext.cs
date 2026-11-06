@@ -647,6 +647,51 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Visits the given rows (missing or deleted ones are skipped) in the order given, as serialized bytes
+    /// or typed rows. Returns false when this read must take the general path (an active snapshot).
+    /// </summary>
+    internal bool VisitRowsByKey<TState>(string tableName, string databaseName, IReadOnlyList<RowKey> rowIds, ref TState state, RawRowVisitor<TState> visit)
+    {
+        if (MvccExecutionScope.CurrentSnapshot is not null)
+        {
+            return false;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, rowIds.Count);
+        if (LsmEngine is { } lsm && !lsm.HasStagedWrites(databaseName, tableName))
+        {
+            var box = (State: state, Visit: visit);
+            lsm.ReadStoredRowsByKey(databaseName, tableName, rowIds, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
+                b.Visit(ref b.State, rowId, bytes, null));
+            state = box.State;
+            return true;
+        }
+
+        foreach (RowKey rowId in rowIds)
+        {
+            if (_storageEngine is ITypedRowStorageEngine typedStorage
+                && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
+                && typedRow is not null)
+            {
+                if (!visit(ref state, rowId, default, typedRow))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
+            if (bytes is not null && !visit(ref state, rowId, bytes, null))
+            {
+                break;
+            }
+        }
+
+        return true;
+    }
+
     private static bool InRange(RowKey key, RowKey? lower, RowKey? upper) =>
         (lower is not { } from || key >= from) && (upper is not { } to || key < to);
 
