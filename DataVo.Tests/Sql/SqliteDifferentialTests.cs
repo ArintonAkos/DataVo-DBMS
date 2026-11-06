@@ -317,6 +317,11 @@ public sealed class SqliteDifferentialTests : IDisposable
                 return $"({Predicate(table, depth + 1, qualified)} {op} {Predicate(table, depth + 1, qualified)})";
             }
 
+            if (depth < 2 && _random.Next(6) == 0)
+            {
+                return $"NOT ({Predicate(table, depth + 1, qualified)})";
+            }
+
             string prefix = qualified ? table + "." : string.Empty;
             if (table == "C")
             {
@@ -326,10 +331,10 @@ public sealed class SqliteDifferentialTests : IDisposable
 
             return _random.Next(6) switch
             {
-                0 => $"{prefix}S {(_random.Next(2) == 0 ? "LIKE" : "=")} '{Words[_random.Next(Words.Length)]}{(_random.Next(2) == 0 ? "%" : string.Empty)}'",
+                0 => $"{prefix}S {(_random.Next(3) switch { 0 => "LIKE", 1 => "NOT LIKE", _ => "=" })} '{Words[_random.Next(Words.Length)]}{(_random.Next(2) == 0 ? "%" : string.Empty)}'",
                 1 => $"{prefix}{Column()} IS {(_random.Next(2) == 0 ? "NULL" : "NOT NULL")}",
-                2 => $"{prefix}A BETWEEN {_random.Next(10)} AND {_random.Next(10, 20)}",
-                3 => $"{prefix}Id IN ({string.Join(", ", Enumerable.Range(0, 1 + _random.Next(4)).Select(_ => 1 + _random.Next(IdRange)))})",
+                2 => $"{prefix}A {(_random.Next(3) == 0 ? "NOT " : string.Empty)}BETWEEN {_random.Next(10)} AND {_random.Next(10, 20)}",
+                3 => $"{prefix}{(_random.Next(2) == 0 ? "Id" : "A")} {(_random.Next(3) == 0 ? "NOT " : string.Empty)}IN ({string.Join(", ", Enumerable.Range(0, 1 + _random.Next(4)).Select(_ => 1 + _random.Next(IdRange)))})",
                 _ => Comparison(prefix + (_random.Next(3) switch { 0 => "Id", 1 => "A", _ => "B" }), 20),
             };
         }
