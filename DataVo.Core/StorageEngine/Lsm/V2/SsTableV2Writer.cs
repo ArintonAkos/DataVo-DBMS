@@ -106,6 +106,7 @@ internal sealed class SsTableV2Writer : IDisposable
     private bool Wide => _format == SsTableRowFormat.Wide;
 
     /// <summary>Appends one version of a row. Order: row key ascending, sequence descending.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public void Add(RowKey key, ulong sequence, LsmValueType type, ReadOnlySpan<byte> value)
     {
         if (_finished)
@@ -172,6 +173,7 @@ internal sealed class SsTableV2Writer : IDisposable
         }
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     private void AddCompact(RowKey key, ulong tag, ReadOnlySpan<byte> value)
     {
         // A v6 file stores integer keys in v4 blocks (they read as fast as v4 files) and other keys in
@@ -241,6 +243,7 @@ internal sealed class SsTableV2Writer : IDisposable
     private static ulong IntegerStep(RowKey previous, RowKey key) =>
         unchecked((ulong)key.AsInt64() - (ulong)previous.AsInt64());
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     private int CompactEntrySize(RowKey key, ulong tag, int valueLength, bool restart)
     {
         int keyAndTag;
@@ -304,6 +307,7 @@ internal sealed class SsTableV2Writer : IDisposable
     }
 
     /// <summary>Writes the remaining block, the index, the Bloom filter, properties, and the footer.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public long Finish()
     {
         if (_finished)
@@ -458,6 +462,7 @@ internal sealed class SsTableV2Writer : IDisposable
         _valuesLength = 0;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     private void FlushCompactBlock()
     {
         int payloadLength = _entriesLength + ((_restartOffsets.Count + 1) * sizeof(int));

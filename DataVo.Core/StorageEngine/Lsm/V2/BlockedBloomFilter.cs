@@ -38,6 +38,7 @@ internal static class BlockedBloomFilter
     }
 
     /// <summary>Sets the probe bits of <paramref name="key"/> in <paramref name="blocks"/>.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public static void Add(Span<byte> blocks, long key)
     {
         int blockCount = blocks.Length / BlockBytes;

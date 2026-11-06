@@ -39,6 +39,7 @@ internal static class LsmRowKeyCodec
     public static void EncodeRowKey(RowKey key, Span<byte> destination) => key.WriteTo(destination);
 
     /// <summary>Decodes a row user key: 16 bytes, or a legacy 8-byte integer key.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public static RowKey DecodeRowKey(ReadOnlySpan<byte> userKey) => userKey.Length switch
     {
         RowKeySize => RowKey.Read(userKey),
@@ -121,6 +122,7 @@ internal static class LsmRowKeyCodec
     /// Streams one SSTable's worth of entries (rows and metadata versions, in internal-key order) into a
     /// row writer: rows become entries, the newest metadata version becomes the properties.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public static void AddInternalEntry(SsTableV2Writer writer, ReadOnlySpan<byte> internalKey, ReadOnlySpan<byte> value)
     {
         ReadOnlySpan<byte> userKey = InternalKey.UserKey(internalKey);

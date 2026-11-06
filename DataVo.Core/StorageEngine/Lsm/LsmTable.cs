@@ -534,6 +534,54 @@ public sealed class LsmTable : IDisposable
     /// Streams <paramref name="memTable"/> into a v2 SSTable block by block (no whole-file image), publishes
     /// it through the file registry's version gate, then lets the owner evict the flushed versions.
     /// </summary>
+    private readonly record struct RowBounds(
+        bool HasRows,
+        RowKey FirstKey,
+        ulong FirstSequence,
+        LsmValueType FirstType,
+        RowKey LastKey,
+        ulong LastSequence,
+        LsmValueType LastType);
+
+    /// <summary>
+    /// Streams every entry of <paramref name="memTable"/> into <paramref name="writer"/> and returns the first
+    /// and last row versions. Compiled fully optimized up front: a flush runs a few times per process, so
+    /// tiered compilation would otherwise run it mostly as unoptimized code (about 3x slower).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    private static RowBounds WriteRows(SsTableV2Writer writer, MemTable memTable)
+    {
+        bool hasRows = false;
+        RowKey firstKey = default;
+        ulong firstSequence = 0;
+        LsmValueType firstType = LsmValueType.Put;
+        RowKey lastKey = default;
+        ulong lastSequence = 0;
+        LsmValueType lastType = LsmValueType.Put;
+        foreach (MemTableEntry entry in memTable)
+        {
+            LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
+            ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
+            if (!LsmRowKeyCodec.IsRowKey(userKey))
+            {
+                continue;
+            }
+
+            lastKey = LsmRowKeyCodec.DecodeRowKey(userKey);
+            lastSequence = InternalKey.Sequence(entry.InternalKey);
+            lastType = InternalKey.ValueType(entry.InternalKey);
+            if (!hasRows)
+            {
+                hasRows = true;
+                firstKey = lastKey;
+                firstSequence = lastSequence;
+                firstType = lastType;
+            }
+        }
+
+        return new RowBounds(hasRows, firstKey, firstSequence, firstType, lastKey, lastSequence, lastType);
+    }
+
     private LsmFlushResult FlushMemTableToV2Sstable(MemTable memTable)
     {
         lock (_ioGate)
@@ -557,32 +605,14 @@ public sealed class LsmTable : IDisposable
                 stream =>
                 {
                     using var writer = new SsTableV2Writer(stream, alignment: 0, memTable.Count);
-                    foreach (MemTableEntry entry in memTable)
-                    {
-                        LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
-                        ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
-                        if (!LsmRowKeyCodec.IsRowKey(userKey))
-                        {
-                            continue;
-                        }
-
-                        lastRowKey = LsmRowKeyCodec.DecodeRowKey(userKey);
-                        lastSequence = InternalKey.Sequence(entry.InternalKey);
-                        lastType = InternalKey.ValueType(entry.InternalKey);
-                        if (!hasRows)
-                        {
-                            hasRows = true;
-                            firstRowKey = lastRowKey;
-                            firstSequence = lastSequence;
-                            firstType = lastType;
-                        }
-                    }
-
-                    if (!hasRows)
+                    RowBounds bounds = WriteRows(writer, memTable);
+                    if (!bounds.HasRows)
                     {
                         throw new InvalidOperationException("A MemTable without row versions cannot be flushed to a row-keyed SSTable.");
                     }
 
+                    (hasRows, firstRowKey, firstSequence, firstType) = (true, bounds.FirstKey, bounds.FirstSequence, bounds.FirstType);
+                    (lastRowKey, lastSequence, lastType) = (bounds.LastKey, bounds.LastSequence, bounds.LastType);
                     length = writer.Finish();
                 },
                 _crashHook,
