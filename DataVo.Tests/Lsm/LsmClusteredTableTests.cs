@@ -237,6 +237,32 @@ public sealed class LsmClusteredTableTests : IDisposable
         Assert.Equal([77], Ids(db, "SELECT Id FROM Items"));
     }
 
+    [Fact]
+    public void TypedBatch_StoresRowsUnderTheirKey_AndADuplicateWritesNothing()
+    {
+        using DataVoContext db = Open();
+        Execute(db, "CREATE DATABASE Shop");
+        Execute(db, "USE Shop");
+        Execute(db, "CREATE TABLE Orders (Id GUID PRIMARY KEY, Total INT)");
+        var schema = new ReactiveRowSchema("Id", "Total");
+        Guid[] ids = [.. Enumerable.Range(0, 5).Select(_ => Guid.NewGuid())];
+
+        IReadOnlyList<RowKey> keys = db.InsertTypedBatch("Orders", schema, [.. ids.Select((id, i) => new[] { CellValue.From(id), CellValue.From(i) })]);
+        Assert.Equal(ids.Select(RowKey.FromGuid), keys);
+
+        // Stored without the key cell, read back with it.
+        LsmStorageEngine lsm = db.Engine.StorageContext.LsmEngine!;
+        var columns = db.Engine.Catalog.GetTableColumns("Orders", "Shop");
+        Assert.True(DataVo.Core.StorageEngine.Serialization.RowSerializer.DeserializeCells(lsm.ReadRow("Shop", "Orders", keys[2]), columns)[0].IsNull);
+        Assert.Equal(2, Convert.ToInt32(db.Execute($"SELECT Total FROM Orders WHERE Id = '{ids[2]}'")[0].Data.Single()["Total"]));
+
+        Guid fresh = Guid.NewGuid();
+        Assert.ThrowsAny<Exception>(() => db.InsertTypedBatch("Orders", schema, [[CellValue.From(fresh), CellValue.From(9)], [CellValue.From(fresh), CellValue.From(9)]]));
+        Assert.ThrowsAny<Exception>(() => db.InsertTypedBatch("Orders", schema, [[CellValue.From(Guid.NewGuid()), CellValue.From(9)], [CellValue.From(ids[0]), CellValue.From(9)]]));
+        Assert.Empty(db.Execute("SELECT Id FROM Orders WHERE Total = 9")[0].Data);
+        Assert.Equal(5, db.Execute("SELECT Id FROM Orders")[0].Data.Count);
+    }
+
     [Theory]
     [InlineData("CREATE TABLE T (Id VARCHAR(10) PRIMARY KEY, V INT)", "'a'")]
     [InlineData("CREATE TABLE T (A INT PRIMARY KEY, B INT PRIMARY KEY, V INT)", null)]

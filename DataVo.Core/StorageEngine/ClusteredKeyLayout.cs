@@ -66,6 +66,20 @@ internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordi
         ? LsmIndexKeyCodec.EncodeGuid(key.AsGuid())
         : LsmIndexKeyCodec.EncodeInteger(key.AsInt64());
 
+    /// <summary>The row key of a row given as typed cells (the cell form of <see cref="KeyOf"/>).</summary>
+    public RowKey KeyOf(ReadOnlySpan<CellValue> cells, string tableName)
+    {
+        CellValue cell = cells[Ordinal];
+        return cell.Type switch
+        {
+            CellType.Int32 => cell.AsInt32(),
+            CellType.Int64 => cell.AsInt64(),
+            CellType.Guid => RowKey.FromGuid(cell.AsGuid()),
+            _ when cell.IsNull => throw new ConstraintViolationException($"Primary key cannot be null in table {tableName}."),
+            _ => throw new InvalidOperationException($"Clustered table {tableName} has a key of unsupported type {cell.Type}."),
+        };
+    }
+
     /// <summary>The row as stored: without its key cell, which the row key already holds.</summary>
     public byte[] StoredForm(ReadOnlySpan<byte> rowBytes) => RowSerializer.WithoutCell(rowBytes, Columns, Ordinal);
 

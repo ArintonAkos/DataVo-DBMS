@@ -150,7 +150,15 @@ public static class RowSerializer
     /// format the dictionary <see cref="Serialize(string,string,Dictionary{string,object?},EngineCatalog,string)"/>
     /// produces — no dictionary intermediate.
     /// </summary>
-    public static byte[] SerializeCells(IReadOnlyList<Column> columns, ReadOnlySpan<CellValue> cells)
+    public static byte[] SerializeCells(IReadOnlyList<Column> columns, ReadOnlySpan<CellValue> cells) =>
+        SerializeCells(columns, cells, omittedOrdinal: -1);
+
+    /// <summary>
+    /// <see cref="SerializeCells(IReadOnlyList{Column}, ReadOnlySpan{CellValue})"/> with cell
+    /// <paramref name="omittedOrdinal"/> written as NULL: the stored form of a clustered row, whose key
+    /// the row key holds (see <see cref="WithoutCell"/>, which produces the same bytes from a full row).
+    /// </summary>
+    public static byte[] SerializeCells(IReadOnlyList<Column> columns, ReadOnlySpan<CellValue> cells, int omittedOrdinal)
     {
         if (cells.Length != columns.Count)
         {
@@ -166,7 +174,7 @@ public static class RowSerializer
         for (int i = 0; i < columns.Count; i++)
         {
             CellValue cell = cells[i];
-            if (cell.IsNull)
+            if (cell.IsNull || i == omittedOrdinal)
             {
                 writer.Write(true);
                 continue;

@@ -76,6 +76,15 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
             : throw DuplicateKey(duplicate, tableName);
     }
 
+    /// <summary>
+    /// Inserts rows of a clustered table that the caller already keyed and serialized in their stored form
+    /// (key cell NULL): the typed bulk path, which saves serializing a row twice.
+    /// </summary>
+    internal List<RowKey> InsertStoredRows(string databaseName, string tableName, List<RowKey> keys, List<byte[]> storedRows) =>
+        _inner.TryInsertRowsWithKeys(databaseName, tableName, keys, storedRows, out RowKey duplicate)
+            ? keys
+            : throw DuplicateKey(duplicate, tableName);
+
     private static ConstraintViolationException DuplicateKey(RowKey key, string tableName) =>
         new($"Primary key violation: a row with key {key} already exists in table {tableName}.");
     // A clustered table stores rows without their key cell; reads put it back (see ClusteredKeyLayout).

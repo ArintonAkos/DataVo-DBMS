@@ -320,6 +320,21 @@ public class StorageContext(DataVoConfig config) : IDisposable
                 "InsertTypedCellRows is only valid for serialize-through backends; typed storage retains row buffers.");
         }
 
+        // A clustered table's rows go straight to their stored form: the key comes from the cells and the
+        // row is serialized once, without it (instead of serialized whole, read back, and copied).
+        if (_storageEngine is LsmStorageBackend lsm && ResolveClusteredKey(databaseName, tableName) is { } layout)
+        {
+            var keys = new List<RowKey>(rows.Count);
+            var stored = new List<byte[]>(rows.Count);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                keys.Add(layout.KeyOf(rows[i], tableName));
+                stored.Add(RowSerializer.SerializeCells(columns, rows[i], layout.Ordinal));
+            }
+
+            return lsm.InsertStoredRows(databaseName, tableName, keys, stored);
+        }
+
         List<byte[]> serializedRows = _typedInsertSerializeScratch ??= [];
         try
         {
