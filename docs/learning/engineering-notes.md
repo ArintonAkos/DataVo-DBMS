@@ -199,3 +199,35 @@ What we learned:
   and broke rows that typed inserts had put only in the lane. The flag's real promise is "the lane
   holds every entry", so now the first entry starts the lane, and a partial lane never holds an
   entry alone.
+
+## 12. Clustered primary keys: the key is the address
+
+A table whose primary key is one INT or GUID column now stores each row under that key (InnoDB and
+SQL Server call this a clustered index). Before, a row had an engine-assigned id and the primary key
+lived in a separate index mapping key -> id. Measured on 1M rows, same build, clustering on vs off:
+
+| | Insert | Size at rest | SQL point read |
+| --- | --- | --- | --- |
+| INT, engine row ids | 2.8-3.4 s | 41.4 MB | 8.7-10.1 us |
+| INT, clustered | 1.3 s | 25.1 MB | 8.0 us |
+| GUID, engine row ids | 3.3 s | 61.4 MB | 9.4 us |
+| GUID, clustered | 2.3 s | 45.5 MB | 8.7 us |
+
+The whole primary-key index disappears (writing it was half the insert work), and a key lookup is one
+read. The INT table is now smaller than SQLite's 29 MB.
+
+Lessons:
+
+- **Find the narrow waist.** Seven SQL code paths insert rows and many more look up primary keys, but
+  every insert ends in one storage call and every key lookup in one index-store call. Clustering lives in
+  those two places: the LSM backend reads the key out of the serialized row, and the index store answers
+  the primary-key index from the rows ("is a live row stored under this key?"). No SQL path changed.
+- **An UPDATE that changes the key is a move.** The update path already deletes the old version and inserts
+  the new one, so a changed key simply lands under its new address in the same atomic commit.
+- **Reused keys break assumptions written for ids that were never reused.** MVCC kept a "deleted by
+  transaction X" mark per row id forever; with clustered keys, inserting the same key again after a delete
+  inherited that mark and every later statement reported a conflict. Version metadata is now dropped
+  when no transaction could need it, and a new version replaces the old one.
+- **Testing the new feature found an old bug.** A GUID-keyed vector table returned no nearest neighbour
+  after a DELETE. The same happened with plain INT tables: in LSM mode DELETE never reached the vector
+  graph. Always check whether a failure is new before assuming your change caused it.

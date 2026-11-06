@@ -118,8 +118,14 @@ Clustering applies to tables created after the change; existing tables keep surr
    v4 size and speed. The engine has `TryInsertRowWithKey` (uniqueness by row existence); stage 3 wires
    it to SQL.
 3. Clustered inserts for INT and GUID keys on new tables; uniqueness by row existence; no PK index.
-4. PK-changing updates (row moves) and re-pointing.
-5. HNSW format version with rebuild of old snapshots (LSM index entries were widened in stage 2).
+   **Done**, together with 4 and 5: the catalog marks a table `Clustered` at CREATE TABLE (LSM, one INT
+   or GUID key, `DataVoConfig.ClusteredPrimaryKeys`); the LSM backend derives each row's key from the row
+   and the index store serves the PK index from the rows. 1M rows: INT 41.4 -> 25.1 MB, GUID 61.4 ->
+   45.5 MB, inserts 2-2.5x faster.
+4. PK-changing updates (row moves) and re-pointing. **Done in 3**: updates already delete and re-insert,
+   so a changed key moves the row in one commit; MVCC metadata now handles a key reused after a delete.
+5. HNSW format version with rebuild of old snapshots. **Done in 3** (a GUID-keyed vector table must not
+   regress): vector indexes key nodes by RowKey (public `IVectorIndex` changed), snapshot format 2.
 6. Measurements (space, read/write latency, allocation) against the numbers in section 1; docs.
 
 ## 6. Testing
