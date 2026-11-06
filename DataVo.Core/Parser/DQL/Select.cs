@@ -145,29 +145,39 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
             try
             {
-                ListedTable result = TryEvaluateTypedSingleTable() ?? TryEvaluateTypedJoinAggregate() ?? EvaluateStatements();
-
-                if (_volcanoAggregatePushedDown)
+                ListedTable? typedRows = TryEvaluateTypedSingleTable();
+                if (_typedOutput is { } direct)
                 {
-                    result = ApplyHaving(result);
-                    result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                    // The typed path already built the output rows (in order, before OFFSET/LIMIT).
+                    Fields = direct.Fields;
+                    Data = direct.Rows;
                 }
                 else
                 {
-                    GroupedTable groupedTable = GroupResults(result);
+                    ListedTable result = typedRows ?? TryEvaluateTypedJoinAggregate() ?? EvaluateStatements();
 
-                    result = AggregateGroupedTable(groupedTable);
-                    result = ApplyHaving(result);
-                    result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
-                }
-                ComputeWindowFunctionValues(result);
+                    if (_volcanoAggregatePushedDown)
+                    {
+                        result = ApplyHaving(result);
+                        result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                    }
+                    else
+                    {
+                        GroupedTable groupedTable = GroupResults(result);
 
-                Fields = CreateFieldsFromColumns(result);
-                Data = CreateDataFromResult(result, Fields);
+                        result = AggregateGroupedTable(groupedTable);
+                        result = ApplyHaving(result);
+                        result = _volcanoOrderPushedDown ? result : ApplyOrderBy(result);
+                    }
+                    ComputeWindowFunctionValues(result);
 
-                if (_model.IsDistinct && !_volcanoDistinctPushedDown)
-                {
-                    Data = ApplyDistinct(Data);
+                    Fields = CreateFieldsFromColumns(result);
+                    Data = CreateDataFromResult(result, Fields);
+
+                    if (_model.IsDistinct && !_volcanoDistinctPushedDown)
+                    {
+                        Data = ApplyDistinct(Data);
+                    }
                 }
 
                 if (!_volcanoOffsetPushedDown && _model.LimitSkip.HasValue && _model.LimitSkip.Value > 0)

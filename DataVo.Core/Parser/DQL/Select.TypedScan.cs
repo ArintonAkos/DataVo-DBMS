@@ -62,6 +62,15 @@ internal partial class Select
         public required List<TypedPredicate> Predicates { get; init; }
         public required bool[] FilterMask { get; init; }
         public required bool[] RestMask { get; init; }
+
+        /// <summary>Columns the rest of the query reads from a matched row; the others are never decoded or copied.</summary>
+        public bool[]? OutputMask { get; init; }
+
+        /// <summary>When set, matched rows are written as final output rows: field name and column per output position.</summary>
+        public (string Field, int Ordinal)[]? DirectOutput { get; init; }
+
+        /// <summary>Stop once this many rows matched (LIMIT without ORDER BY); -1 for no limit.</summary>
+        public int StopAfter { get; init; } = -1;
         public required CellValue[] Cells { get; init; }
         public required int ClusteredOrdinal { get; init; }
         public required bool ClusteredIsGuid { get; init; }
@@ -71,7 +80,8 @@ internal partial class Select
         public List<JoinedRow>? Rows { get; init; }
         public List<(int Ordinal, bool Ascending)>? OrderKeys { get; init; }
         public int TopLimit { get; init; } = -1;
-        public List<(object?[] Keys, long Sequence, JoinedRow Row)>? Top { get; init; }
+        public List<(object?[] Keys, long Sequence, object Row)>? Top { get; init; }
+        public List<Dictionary<string, object?>>? OutputRows { get; init; }
         public long Sequence;
 
         // Aggregates.
@@ -148,16 +158,45 @@ internal partial class Select
             return null;
         }
 
-        // An equality on a key or an indexed column is an index lookup: the general path does that well.
+        // An equality on the primary key or an indexed column reads only the rows the index names. When the
+        // index key cannot be built exactly (a composite index, a literal of another type), the general
+        // path decides, as before.
+        (string IndexName, string Key)? indexLookup = null;
         List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
-        HashSet<string> indexedColumns = IndexedColumnsOf(engine, tableName, databaseName);
+        Dictionary<string, string> indexedColumns = _model.FromTable.IndexedColumns ?? [];
         foreach (TypedPredicate predicate in predicates)
         {
+            if (predicate.Operator != Operators.EQUALS)
+            {
+                continue;
+            }
+
             string column = columns[predicate.Ordinal].Name;
-            if (predicate.Operator == Operators.EQUALS
-                && (primaryKeys.Contains(column, StringComparer.OrdinalIgnoreCase) || indexedColumns.Contains(column)))
+            bool isKey = primaryKeys.Count == 1 && primaryKeys[0].Equals(column, StringComparison.OrdinalIgnoreCase);
+            string? indexName = isKey ? $"_PK_{tableName}" : indexedColumns.TryGetValue(column, out string? file) ? file : null;
+            if (indexName is null)
+            {
+                if (primaryKeys.Contains(column, StringComparer.OrdinalIgnoreCase))
+                {
+                    return null; // part of a composite key: the general path's key lookup
+                }
+
+                continue;
+            }
+
+            if (!SqlIndexLookupKey.TryBuildAuthoritative(_model.FromTable, column, indexName, predicate.Literal, out string key))
             {
                 return null;
+            }
+
+            if (indexLookup is null || isKey)
+            {
+                indexLookup = (indexName, key);
+            }
+
+            if (isKey)
+            {
+                break;
             }
         }
 
@@ -189,31 +228,27 @@ internal partial class Select
             return null;
         }
 
-        if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
+        if (indexLookup is { } lookup)
+        {
+            var rowIds = engine.IndexManager.FilterUsingIndex(lookup.Key, lookup.IndexName, tableName, databaseName).ToList();
+            rowIds.Sort();
+            LockRowsForRead(databaseName, tableName, rowIds);
+            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, VisitTypedRow))
+            {
+                return null;
+            }
+        }
+        else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
         {
             return null;
         }
 
-        if (lower is null && upper is null)
+        if (indexLookup is null && lower is null && upper is null)
         {
             RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
         }
 
         return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
-    }
-
-    private static HashSet<string> IndexedColumnsOf(DataVoEngine engine, string tableName, string databaseName)
-    {
-        var indexed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (IndexFile index in engine.Catalog.GetTableIndexes(tableName, databaseName))
-        {
-            foreach (string column in index.AttributeNames)
-            {
-                indexed.Add(column);
-            }
-        }
-
-        return indexed;
     }
 
     private bool TryCollectTypedPredicates(ExpressionNode node, string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates) =>
@@ -420,10 +455,16 @@ internal partial class Select
             }
         }
 
+        bool[] outputMask = OutputColumnsOf(tableName, columns, orderKeys);
+        bool fullSortLater = orderBy is { Columns.Count: > 0 } && topLimit < 0;
+        (string Field, int Ordinal)[]? direct = fullSortLater ? null : DirectOutputOf(columns);
+        int stopAfter = direct is not null && orderKeys is null && _model.LimitTake.HasValue
+            ? checked(_model.LimitTake.Value + Math.Max(0, _model.LimitSkip ?? 0))
+            : -1;
         var restMask = new bool[columns.Count];
         for (int i = 0; i < restMask.Length; i++)
         {
-            restMask[i] = !filterMask[i];
+            restMask[i] = outputMask[i] && !filterMask[i];
         }
 
         return new TypedScanState
@@ -436,11 +477,76 @@ internal partial class Select
             ClusteredOrdinal = clusteredOrdinal,
             ClusteredIsGuid = clusteredIsGuid,
             TableName = tableName,
-            Rows = topLimit < 0 ? [] : null,
+            OutputMask = outputMask,
+            DirectOutput = direct,
+            StopAfter = stopAfter,
+            OutputRows = topLimit < 0 && direct is not null ? [] : null,
+            Rows = topLimit < 0 && direct is null ? [] : null,
             OrderKeys = topLimit < 0 ? null : orderKeys,
             TopLimit = topLimit,
             Top = topLimit < 0 ? null : [],
         };
+    }
+
+    /// <summary>
+    /// The columns a plain row result needs: those in the SELECT list and the ORDER BY keys. A SELECT *, or
+    /// any entry this cannot read as a plain column of the table, keeps every column.
+    /// </summary>
+    private bool[] OutputColumnsOf(string tableName, IReadOnlyList<Column> columns, List<(int Ordinal, bool Ascending)>? orderKeys)
+    {
+        var mask = new bool[columns.Count];
+        bool all = _model.TableColumnsInUse is null;
+        if (!all)
+        {
+            foreach (string selected in _model.GetSelectedColumns())
+            {
+                int aliasAt = selected.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
+                string reference = (aliasAt >= 0 ? selected[..aliasAt] : selected).Trim();
+                int dot = reference.LastIndexOf('.');
+                string table = dot > 0 ? reference[..dot] : tableName;
+                int ordinal = OrdinalOf(columns, dot > 0 ? reference[(dot + 1)..] : reference);
+                if (ordinal < 0 || !(table.Equals(tableName, StringComparison.OrdinalIgnoreCase)
+                    || table.Equals(_model.FromTable.TableAlias, StringComparison.OrdinalIgnoreCase)))
+                {
+                    all = true;
+                    break;
+                }
+
+                mask[ordinal] = true;
+            }
+        }
+
+        if (!all && _model.GetOrderByExpression() is { Columns.Count: > 0 } orderBy)
+        {
+            foreach (OrderByColumnNode orderColumn in orderBy.Columns)
+            {
+                string token = orderColumn.Column.Name;
+                int ordinal = OrdinalOf(columns, token.Contains('.') ? token[(token.LastIndexOf('.') + 1)..] : token);
+                if (ordinal >= 0)
+                {
+                    mask[ordinal] = true;
+                }
+                else if (_model.GetSelectColumnByAlias(token) is null)
+                {
+                    all = true; // an ORDER BY the general sort resolves some other way
+                }
+            }
+        }
+
+        if (all)
+        {
+            Array.Fill(mask, true);
+        }
+
+        if (orderKeys is not null)
+        {
+            foreach ((int ordinal, _) in orderKeys)
+            {
+                mask[ordinal] = true;
+            }
+        }
+
+        return mask;
     }
 
     private TypedScanState? BuildAggregateScan(string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates, bool[] filterMask, int clusteredOrdinal, bool clusteredIsGuid)
@@ -535,8 +641,30 @@ internal partial class Select
             return true;
         }
 
+        if (state.OutputRows is { } output)
+        {
+            output.Add(BuildDirectRow(state));
+            return state.StopAfter < 0 || output.Count < state.StopAfter;
+        }
+
         state.Rows!.Add(BuildJoinedRow(state));
         return true;
+    }
+
+    private static object BuildOutputRow(TypedScanState state) =>
+        state.DirectOutput is null ? BuildJoinedRow(state) : BuildDirectRow(state);
+
+    /// <summary>One output row, keyed and ordered exactly as the general projection would build it.</summary>
+    private static Dictionary<string, object?> BuildDirectRow(TypedScanState state)
+    {
+        (string Field, int Ordinal)[] output = state.DirectOutput!;
+        var row = new Dictionary<string, object?>(output.Length);
+        foreach ((string field, int ordinal) in output)
+        {
+            row[field] = StorageContext.ConvertCellForLegacyDictionary(state.Columns[ordinal], state.Cells[ordinal]);
+        }
+
+        return row;
     }
 
     private static void Load(TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow, bool[] mask)
@@ -631,10 +759,14 @@ internal partial class Select
 
     private static JoinedRow BuildJoinedRow(TypedScanState state)
     {
+        bool[]? output = state.OutputMask;
         var values = new Dictionary<string, object?>(state.Columns.Count);
         for (int i = 0; i < state.Columns.Count; i++)
         {
-            values[state.Columns[i].Name] = StorageContext.ConvertCellForLegacyDictionary(state.Columns[i], state.Cells[i]);
+            if (output is null || output[i])
+            {
+                values[state.Columns[i].Name] = StorageContext.ConvertCellForLegacyDictionary(state.Columns[i], state.Cells[i]);
+            }
         }
 
         return new JoinedRow(state.TableName, new Row(values));
@@ -646,7 +778,7 @@ internal partial class Select
     /// </summary>
     private static void OfferTop(TypedScanState state)
     {
-        List<(object?[] Keys, long Sequence, JoinedRow Row)> top = state.Top!;
+        List<(object?[] Keys, long Sequence, object Row)> top = state.Top!;
         var keys = new object?[state.OrderKeys!.Count];
         for (int i = 0; i < keys.Length; i++)
         {
@@ -674,7 +806,7 @@ internal partial class Select
             }
         }
 
-        top.Insert(low, (keys, state.Sequence, BuildJoinedRow(state)));
+        top.Insert(low, (keys, state.Sequence, BuildOutputRow(state)));
         if (top.Count > state.TopLimit)
         {
             top.RemoveAt(top.Count - 1);
@@ -809,8 +941,67 @@ internal partial class Select
         return new ListedTable(rows);
     }
 
-    private static ListedTable FinishRows(TypedScanState state) =>
-        state.Top is not null
-            ? new ListedTable(state.Top.Select(entry => entry.Row).ToList())
+    private ListedTable FinishRows(TypedScanState state)
+    {
+        if (state.DirectOutput is not null)
+        {
+            List<Dictionary<string, object?>> rows = state.Top is not null
+                ? state.Top.Select(entry => (Dictionary<string, object?>)entry.Row).ToList()
+                : state.OutputRows!;
+            _typedOutput = (_typedOutputFields!, rows);
+            return new ListedTable();
+        }
+
+        return state.Top is not null
+            ? new ListedTable(state.Top.Select(entry => (JoinedRow)entry.Row).ToList())
             : new ListedTable(state.Rows!);
+    }
+
+    /// <summary>Output already built by the typed path (fields and rows in final order, before OFFSET/LIMIT).</summary>
+    private (List<string> Fields, List<Dictionary<string, object?>> Rows)? _typedOutput;
+    private List<string>? _typedOutputFields;
+
+    /// <summary>
+    /// The output columns when the typed path can write final rows itself: explicit plain columns of the
+    /// table, and no HAVING, so nothing after the scan reshapes a row. Null when the general projection runs.
+    /// </summary>
+    private (string Field, int Ordinal)[]? DirectOutputOf(IReadOnlyList<Column> columns)
+    {
+        if (_model.TableColumnsInUse is null || _model.GetHavingExpression() is not null)
+        {
+            return null;
+        }
+
+        List<string> selected = _model.GetSelectedColumns();
+        var ordinals = new int[selected.Count];
+        for (int i = 0; i < selected.Count; i++)
+        {
+            string entry = selected[i];
+            int aliasAt = entry.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
+            string reference = (aliasAt >= 0 ? entry[..aliasAt] : entry).Trim();
+            int dot = reference.LastIndexOf('.');
+            ordinals[i] = OrdinalOf(columns, dot > 0 ? reference[(dot + 1)..] : reference);
+            if (ordinals[i] < 0)
+            {
+                return null;
+            }
+        }
+
+        // The general projection's own field names and SELECT-list order.
+        List<string> fields = CreateFieldsFromColumns(new ListedTable());
+        if (_projectionBuildOrder.Count != ordinals.Length)
+        {
+            return null;
+        }
+
+        var output = new (string Field, int Ordinal)[ordinals.Length];
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            int buildIndex = _projectionPermutation is { } permutation ? permutation[i] : i;
+            output[i] = (_projectionBuildOrder[buildIndex], ordinals[buildIndex]);
+        }
+
+        _typedOutputFields = fields;
+        return output;
+    }
 }
