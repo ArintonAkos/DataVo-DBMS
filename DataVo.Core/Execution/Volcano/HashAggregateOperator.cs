@@ -581,8 +581,9 @@ public sealed class HashAggregateOperator : IQueryOperator
         return spec.Function switch
         {
             AggregateFunction.Count => state.Count,
-            AggregateFunction.Sum => state.Count == 0 ? 0d : state.Sum,
-            AggregateFunction.Avg => state.Count == 0 ? 0d : state.Sum / state.Count,
+            // SQL: SUM and AVG over no non-null values are NULL.
+            AggregateFunction.Sum => state.Count == 0 ? null : state.Sum,
+            AggregateFunction.Avg => state.Count == 0 ? null : state.Sum / state.Count,
             AggregateFunction.Min => state.ComparableValue,
             AggregateFunction.Max => state.ComparableValue,
             _ => throw new InvalidOperationException($"Unsupported aggregate function '{spec.Function}'.")
