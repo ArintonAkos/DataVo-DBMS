@@ -44,9 +44,8 @@ public sealed partial class DataVoEngine
             return false;
         }
 
-        (List<long> reindex, List<long> removed) = graph.PlanCatchUp(
-            // The graph keys nodes by integer row id until its format widens (clustering stage 5).
-            visit => lsm.ForEachLiveRowVersion(databaseName, tableName, (rowKey, sequence) => visit(RowKeyConversions.ToRowId(rowKey), sequence)),
+        (List<RowKey> reindex, List<RowKey> removed) = graph.PlanCatchUp(
+            visit => lsm.ForEachLiveRowVersion(databaseName, tableName, visit),
             watermark);
         if (reindex.Count + removed.Count > Math.Max(1_000, graph.Count * SnapshotCatchUpLimit))
         {
@@ -56,17 +55,15 @@ public sealed partial class DataVoEngine
         graph.Delete(removed);
         if (reindex.Count > 0)
         {
-            // The graph keys nodes by integer row id until its format widens (clustering stage 5).
-            foreach (KeyValuePair<RowKey, StoredRow> row in StorageContext.GetTypedTableContents(RowKeyConversions.ToRowKeys(reindex), tableName, databaseName))
+            foreach (KeyValuePair<RowKey, StoredRow> row in StorageContext.GetTypedTableContents(reindex, tableName, databaseName))
             {
-                long rowId = RowKeyConversions.ToRowId(row.Key);
                 if (row.Value.TryGet(column, out CellValue cell) && !cell.IsNull && cell.Type == CellType.Vector)
                 {
-                    graph.Insert(rowId, cell.AsVectorReadOnlySpan());
+                    graph.Insert(row.Key, cell.AsVectorReadOnlySpan());
                 }
-                else if (graph.ContainsRow(rowId))
+                else if (graph.ContainsRow(row.Key))
                 {
-                    graph.Delete([rowId]);
+                    graph.Delete([row.Key]);
                 }
             }
         }

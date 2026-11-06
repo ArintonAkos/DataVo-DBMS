@@ -66,16 +66,16 @@ public class IndexManagerTests : IDisposable
 
         public int BatchVectorDimension { get; private set; }
 
-        public long[] BatchRowIds { get; private set; } = [];
+        public RowKey[] BatchRowIds { get; private set; } = [];
 
         public float[] BatchVectors { get; private set; } = [];
 
-        public void Insert(long rowId, float[] vector)
+        public void Insert(RowKey rowId, float[] vector)
         {
             SingleInsertCalls++;
         }
 
-        public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+        public void InsertBatch(RowKey[] rowIds, float[] vectors, int vectorDimension)
         {
             BatchInsertCalls++;
             BatchVectorDimension = vectorDimension;
@@ -83,9 +83,9 @@ public class IndexManagerTests : IDisposable
             BatchVectors = [.. vectors];
         }
 
-        public void Delete(List<long> rowIds) { }
+        public void Delete(List<RowKey> rowIds) { }
 
-        public List<long> SearchTopK(float[] queryVector, int topK) => [];
+        public List<RowKey> SearchTopK(float[] queryVector, int topK) => [];
 
         public void Clear() { }
     }

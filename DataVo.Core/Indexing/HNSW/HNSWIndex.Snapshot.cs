@@ -4,7 +4,7 @@ namespace DataVo.Core.Indexing.HNSW;
 /// Binary snapshot of the whole graph, so opening a database does not rebuild it from the rows.
 /// </summary>
 /// <remarks>
-/// Layout: settings, per-node arrays (row id, active flag, level, prune mask), the vectors page by page,
+/// Layout: settings, per-node arrays (row key, active flag, level, prune mask), the vectors page by page,
 /// then each active node's links for levels 0..its level only. Upper-level slots are mostly empty, so
 /// writing the full fixed stride would make the file several times larger. Arrays are written as raw
 /// little-endian memory; the caller checks <see cref="BitConverter.IsLittleEndian"/>.
@@ -23,10 +23,10 @@ public partial class HNSWIndex
     /// every live row's id and version sequence. Returns the rows to (re)index from the table (written
     /// after <paramref name="watermark"/>) and the indexed rows the table no longer has.
     /// </summary>
-    internal (List<long> Reindex, List<long> Removed) PlanCatchUp(Action<Action<long, ulong>> scanLiveRows, long watermark)
+    internal (List<RowKey> Reindex, List<RowKey> Removed) PlanCatchUp(Action<Action<RowKey, ulong>> scanLiveRows, long watermark)
     {
         var seen = new bool[_nextOrdinal];
-        var reindex = new List<long>();
+        var reindex = new List<RowKey>();
         ulong unchangedThrough = (ulong)watermark;
         scanLiveRows((rowId, sequence) =>
         {
@@ -43,7 +43,7 @@ public partial class HNSWIndex
             }
         });
 
-        var removed = new List<long>();
+        var removed = new List<RowKey>();
         for (int ordinal = 0; ordinal < seen.Length; ordinal++)
         {
             if (_isActive[ordinal] && !seen[ordinal])
@@ -56,7 +56,7 @@ public partial class HNSWIndex
     }
 
     /// <summary>Whether a row is in the index.</summary>
-    internal bool ContainsRow(long rowId) => _rowIdToOrdinal.TryGetValue(rowId, out int ordinal) && _isActive[ordinal];
+    internal bool ContainsRow(RowKey rowId) => _rowIdToOrdinal.TryGetValue(rowId, out int ordinal) && _isActive[ordinal];
 
     /// <summary>Writes the index. Must not run concurrently with writes to it.</summary>
     internal void WriteSnapshot(ChecksummedWriter writer)
@@ -82,7 +82,7 @@ public partial class HNSWIndex
         writer.WriteBoolean(EnableAdaptiveEfSearch);
 
         writer.WriteBoolean(EntryPointId.HasValue);
-        writer.WriteInt64(EntryPointId ?? 0);
+        writer.WriteSpan<RowKey>([EntryPointId ?? default]);
         writer.WriteInt32(MaxLevel);
         writer.WriteInt32(_count);
         writer.WriteInt32(_vectorDimension);
@@ -92,7 +92,7 @@ public partial class HNSWIndex
         writer.WriteSpan<int>(_levelOffsets);
 
         int nodes = _nextOrdinal;
-        writer.WriteSpan<long>(_rowIdByOrdinal.AsSpan(0, nodes));
+        writer.WriteSpan<RowKey>(_rowIdByOrdinal.AsSpan(0, nodes));
         writer.WriteSpan<bool>(_isActive.AsSpan(0, nodes));
         writer.WriteSpan<int>(_nodeLevels.AsSpan(0, nodes));
         writer.WriteSpan<ulong>(_diversityPrunedLevelMaskByOrdinal.AsSpan(0, nodes));
@@ -145,7 +145,9 @@ public partial class HNSWIndex
         };
 
         bool hasEntryPoint = reader.ReadBoolean();
-        long entryPoint = reader.ReadInt64();
+        Span<RowKey> entryPointSlot = stackalloc RowKey[1];
+        reader.ReadSpan(entryPointSlot);
+        RowKey entryPoint = entryPointSlot[0];
         int maxLevel = reader.ReadInt32();
         int count = reader.ReadInt32();
         int dimension = reader.ReadInt32();
@@ -182,7 +184,7 @@ public partial class HNSWIndex
         index.EnsureCapacity(nodes);
         index._nextOrdinal = nodes;
 
-        reader.ReadSpan<long>(index._rowIdByOrdinal.AsSpan(0, nodes));
+        reader.ReadSpan<RowKey>(index._rowIdByOrdinal.AsSpan(0, nodes));
         var active = new byte[nodes];
         reader.ReadBytes(active);
         reader.ReadSpan<int>(index._nodeLevels.AsSpan(0, nodes));

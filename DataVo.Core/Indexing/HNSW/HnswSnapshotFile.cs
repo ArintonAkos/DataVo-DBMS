@@ -17,7 +17,8 @@ internal static class HnswSnapshotFile
     public const string Extension = ".hnsw";
 
     private const long Magic = 0x31_57_53_4E_48_4F_56_44; // "DVOHNSW1" little-endian
-    private const int FormatVersion = 1;
+    // 2: nodes are keyed by 16-byte row keys (version 1 held 8-byte row ids; such files are rebuilt).
+    private const int FormatVersion = 2;
     private const int MaxColumnBytes = 4096;
     private const long MaxPlausibleWatermark = 1L << 62;
 

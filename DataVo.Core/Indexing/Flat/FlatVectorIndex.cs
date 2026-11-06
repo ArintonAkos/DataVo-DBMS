@@ -7,11 +7,11 @@ namespace DataVo.Core.Indexing.Flat;
 /// </summary>
 public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
 {
-    private readonly Dictionary<long, int> _rowIdToOrdinal = [];
+    private readonly Dictionary<RowKey, int> _rowIdToOrdinal = [];
     private readonly object _stateGate = new();
     private float[] _vectorData = [];
     private float[] _inverseNormByOrdinal = [];
-    private long[] _rowIdByOrdinal = [];
+    private RowKey[] _rowIdByOrdinal = [];
     private bool[] _isActive = [];
     private int[] _freeOrdinals = [];
     private int _vectorDimension = -1;
@@ -70,7 +70,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <summary>
     /// Inserts or replaces a vector for the supplied row id.
     /// </summary>
-    public void Insert(long rowId, float[] vector)
+    public void Insert(RowKey rowId, float[] vector)
     {
         if (vector == null)
         {
@@ -83,7 +83,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <summary>
     /// Inserts or replaces a vector for the supplied row id.
     /// </summary>
-    public void Insert(long rowId, ReadOnlySpan<float> vector)
+    public void Insert(RowKey rowId, ReadOnlySpan<float> vector)
     {
         if (vector.Length == 0)
         {
@@ -114,7 +114,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <param name="rowIds">Row ids mapped one-to-one to vectors.</param>
     /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
     /// <param name="vectorDimension">Dimension of each vector.</param>
-    public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+    public void InsertBatch(RowKey[] rowIds, float[] vectors, int vectorDimension)
     {
         if (rowIds == null)
         {
@@ -161,7 +161,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <summary>
     /// Deletes vectors for the supplied row ids.
     /// </summary>
-    public void Delete(List<long> rowIds)
+    public void Delete(List<RowKey> rowIds)
     {
         if (rowIds == null || rowIds.Count == 0)
         {
@@ -170,7 +170,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
         lock (_stateGate)
         {
-            foreach (long rowId in rowIds)
+            foreach (RowKey rowId in rowIds)
             {
                 if (!_rowIdToOrdinal.Remove(rowId, out int ordinal) || !_isActive[ordinal])
                 {
@@ -189,7 +189,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <summary>
     /// Returns the exact nearest row ids for the supplied query vector.
     /// </summary>
-    public List<long> SearchTopK(float[] queryVector, int topK)
+    public List<RowKey> SearchTopK(float[] queryVector, int topK)
     {
         if (queryVector == null)
         {
@@ -202,7 +202,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
     /// <summary>
     /// Returns the exact nearest row ids for the supplied query vector.
     /// </summary>
-    public List<long> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
+    public List<RowKey> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
     {
         if (queryVector.Length == 0)
         {
@@ -230,24 +230,24 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
             if (take <= 128)
             {
-                Span<long> rowIds = stackalloc long[take];
+                Span<RowKey> rowIds = stackalloc RowKey[take];
                 Span<float> distances = stackalloc float[take];
                 SearchIntoTopK(queryVector, useEuclidean, queryInvNorm, rowIds, distances, ref resultCount);
                 return BuildResult(rowIds, resultCount);
             }
 
-            long[] rentedRowIds = System.Buffers.ArrayPool<long>.Shared.Rent(take);
+            RowKey[] rentedRowIds = System.Buffers.ArrayPool<RowKey>.Shared.Rent(take);
             float[] rentedDistances = System.Buffers.ArrayPool<float>.Shared.Rent(take);
             try
             {
-                Span<long> rowIds = rentedRowIds.AsSpan(0, take);
+                Span<RowKey> rowIds = rentedRowIds.AsSpan(0, take);
                 Span<float> distances = rentedDistances.AsSpan(0, take);
                 SearchIntoTopK(queryVector, useEuclidean, queryInvNorm, rowIds, distances, ref resultCount);
                 return BuildResult(rowIds, resultCount);
             }
             finally
             {
-                System.Buffers.ArrayPool<long>.Shared.Return(rentedRowIds);
+                System.Buffers.ArrayPool<RowKey>.Shared.Return(rentedRowIds);
                 System.Buffers.ArrayPool<float>.Shared.Return(rentedDistances);
             }
         }
@@ -257,7 +257,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         ReadOnlySpan<float> queryVector,
         bool useEuclidean,
         float queryInvNorm,
-        Span<long> rowIds,
+        Span<RowKey> rowIds,
         Span<float> distances,
         ref int resultCount)
     {
@@ -273,7 +273,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
                 ? SimdDistanceKernels.EuclideanDistance(queryVector, candidate)
                 : CosineDistanceFromDot(queryVector, candidate, queryInvNorm, _inverseNormByOrdinal[ordinal]);
 
-            long rowId = _rowIdByOrdinal[ordinal];
+            RowKey rowId = _rowIdByOrdinal[ordinal];
             if (resultCount < rowIds.Length)
             {
                 InsertSorted(rowIds, distances, resultCount, rowId, distance);
@@ -289,9 +289,9 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         }
     }
 
-    private static List<long> BuildResult(ReadOnlySpan<long> rowIds, int resultCount)
+    private static List<RowKey> BuildResult(ReadOnlySpan<RowKey> rowIds, int resultCount)
     {
-        var result = new List<long>(resultCount);
+        var result = new List<RowKey>(resultCount);
         for (int i = 0; i < resultCount; i++)
         {
             result.Add(rowIds[i]);
@@ -366,11 +366,11 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         public required int NextOrdinal { get; init; }
         public required int Count { get; init; }
         public required float[] VectorData { get; init; }
-        public required long[] RowIds { get; init; }
+        public required RowKey[] RowIds { get; init; }
         public required bool[] IsActive { get; init; }
     }
 
-    private int AcquireOrdinal(long rowId)
+    private int AcquireOrdinal(RowKey rowId)
     {
         int ordinal;
         if (_freeCount > 0)
@@ -444,11 +444,11 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         _freeOrdinals[_freeCount++] = ordinal;
     }
 
-    internal List<(long RowId, float[] Vector)> ExportEntries()
+    internal List<(RowKey RowId, float[] Vector)> ExportEntries()
     {
         lock (_stateGate)
         {
-            var entries = new List<(long RowId, float[] Vector)>(_count);
+            var entries = new List<(RowKey RowId, float[] Vector)>(_count);
             for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
             {
                 if (_isActive[ordinal])
@@ -479,7 +479,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         }
     }
 
-    internal void ImportEntries(IEnumerable<(long RowId, float[] Vector)> entries)
+    internal void ImportEntries(IEnumerable<(RowKey RowId, float[] Vector)> entries)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entries);
 
@@ -493,7 +493,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         }
     }
 
-    private static void InsertSorted(Span<long> rowIds, Span<float> distances, int lastIndex, long rowId, float distance)
+    private static void InsertSorted(Span<RowKey> rowIds, Span<float> distances, int lastIndex, RowKey rowId, float distance)
     {
         int index = lastIndex;
         while (index > 0 && IsBetter(distance, rowId, distances[index - 1], rowIds[index - 1]))
@@ -507,7 +507,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         distances[index] = distance;
     }
 
-    private static bool IsBetter(float leftDistance, long leftRowId, float rightDistance, long rightRowId)
+    private static bool IsBetter(float leftDistance, RowKey leftRowId, float rightDistance, RowKey rightRowId)
     {
         int distanceComparison = leftDistance.CompareTo(rightDistance);
         return distanceComparison < 0 || distanceComparison == 0 && leftRowId < rightRowId;

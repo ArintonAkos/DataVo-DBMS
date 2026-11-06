@@ -1166,11 +1166,11 @@ public partial class IndexManager : IDisposable
         bool uniformDimension = items.TrueForAll(item => item.Vector.Length == dimension);
         if (vectorIndex is IBatchVectorIndex batchIndex && items.Count > 1 && dimension > 0 && uniformDimension)
         {
-            var rowIds = new long[items.Count];
+            var rowIds = new RowKey[items.Count];
             var flat = new float[(long)items.Count * dimension];
             for (int i = 0; i < items.Count; i++)
             {
-                rowIds[i] = RowKeyConversions.ToRowId(items[i].RowId);
+                rowIds[i] = items[i].RowId;
                 items[i].Vector.CopyTo(flat, (long)i * dimension);
             }
 
@@ -1181,7 +1181,7 @@ public partial class IndexManager : IDisposable
             foreach (var (rowId, vector) in items)
             {
                 // No defensive copy: vector index implementations copy into their own backing store.
-                vectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector);
+                vectorIndex.Insert(rowId, vector);
             }
         }
 
@@ -1213,11 +1213,11 @@ public partial class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         if (vectorIndex is ISpanVectorIndex spanVectorIndex)
         {
-            spanVectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector);
+            spanVectorIndex.Insert(rowId, vector);
         }
         else
         {
-            vectorIndex.Insert(RowKeyConversions.ToRowId(rowId), vector.ToArray());
+            vectorIndex.Insert(rowId, vector.ToArray());
         }
 
         MarkDirty(cacheKey);
@@ -1263,13 +1263,13 @@ public partial class IndexManager : IDisposable
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         if (vectorIndex is IBatchVectorIndex batchVectorIndex)
         {
-            batchVectorIndex.InsertBatch(RowKeyConversions.ToRowIds(rowIds), vectors, vectorDimension);
+            batchVectorIndex.InsertBatch(rowIds, vectors, vectorDimension);
         }
         else
         {
             for (int i = 0; i < rowIds.Length; i++)
             {
-                vectorIndex.Insert(RowKeyConversions.ToRowId(rowIds[i]), vectors.AsSpan(i * vectorDimension, vectorDimension).ToArray());
+                vectorIndex.Insert(rowIds[i], vectors.AsSpan(i * vectorDimension, vectorDimension).ToArray());
             }
         }
 
@@ -1292,7 +1292,7 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        vectorIndex.Delete(RowKeyConversions.ToRowIds(toBeDeletedIds));
+        vectorIndex.Delete(toBeDeletedIds);
         MarkDirty(cacheKey);
         FlushIfImmediate(cacheKey);
     }
@@ -1360,9 +1360,9 @@ public partial class IndexManager : IDisposable
         }
 
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
-        List<RowKey> results = RowKeyConversions.ToRowKeys(vectorIndex is ISpanVectorIndex spanVectorIndex
+        List<RowKey> results = vectorIndex is ISpanVectorIndex spanVectorIndex
             ? spanVectorIndex.SearchTopK(queryVector, topK)
-            : vectorIndex.SearchTopK(queryVector.ToArray(), topK));
+            : vectorIndex.SearchTopK(queryVector.ToArray(), topK);
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, expansionPasses: 0);
         return results;
     }

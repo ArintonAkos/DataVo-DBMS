@@ -23,7 +23,8 @@ public class HNSWIndexPersistence : IIndexPersistence
 
     internal sealed class FallbackEntry
     {
-        public long RowId { get; set; }
+        // An integer key serializes as a JSON number, as the long it replaced, so older files still read.
+        public RowKey RowId { get; set; }
         public float[] Vector { get; set; } = [];
     }
 

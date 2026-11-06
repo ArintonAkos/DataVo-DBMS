@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing;
 using DataVo.Core.Indexing.HNSW;
 using System.Diagnostics;
@@ -119,11 +120,11 @@ public class HNSWIndexTests : IDisposable
         Assert.NotNull(index.EntryPointId);
         Assert.True(index.MaxLevel >= 0);
 
-        List<long> nearestToX = index.SearchTopK([0.99f, 0.01f, 0f], 2);
+        List<RowKey> nearestToX = index.SearchTopK([0.99f, 0.01f, 0f], 2);
         Assert.NotEmpty(nearestToX);
         Assert.Equal(1, nearestToX[0]);
 
-        List<long> nearestToY = index.SearchTopK([0f, 1f, 0f], 2);
+        List<RowKey> nearestToY = index.SearchTopK([0f, 1f, 0f], 2);
         Assert.NotEmpty(nearestToY);
         Assert.Equal(3, nearestToY[0]);
     }
@@ -141,12 +142,12 @@ public class HNSWIndexTests : IDisposable
         index.Insert(20, [0f, 1f, 0f]);
         index.Insert(30, [0f, 0f, 1f]);
 
-        List<long> nearest = index.SearchTopK([0.98f, 0.02f, 0f], 2);
+        List<RowKey> nearest = index.SearchTopK([0.98f, 0.02f, 0f], 2);
 
         Assert.Equal(2, nearest.Count);
         Assert.Equal(10, nearest[0]);
 
-        List<long> mismatch = index.SearchTopK([1f, 0f], 2);
+        List<RowKey> mismatch = index.SearchTopK([1f, 0f], 2);
         Assert.Empty(mismatch);
     }
 
@@ -205,17 +206,17 @@ public class HNSWIndexTests : IDisposable
             query[i] = (float)rng.NextDouble();
         }
 
-        List<long> expected = data
+        List<RowKey> expected = data
             .Select(entry => (entry.Key, Distance: metric == "cosine"
                 ? DistanceCosine(query, entry.Value)
                 : DistanceEuclidean(query, entry.Value)))
             .OrderBy(item => item.Distance)
             .ThenBy(item => item.Key)
             .Select(item => item.Key)
-            .ToList();
+            .Select(id => (RowKey)id).ToList();
 
         // topK >= count forces exact path and validates kernel parity deterministically.
-        List<long> actual = index.SearchTopK(query, vectors);
+        List<RowKey> actual = index.SearchTopK(query, vectors);
 
         Assert.Equal(expected, actual);
     }
@@ -275,7 +276,7 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal(index.Count, loaded.Count);
         Assert.NotNull(loaded.EntryPointId);
 
-        List<long> nearest = loaded.SearchTopK([0.95f, 0.05f, 0f], 1);
+        List<RowKey> nearest = loaded.SearchTopK([0.95f, 0.05f, 0f], 1);
         Assert.Single(nearest);
     }
 
@@ -298,8 +299,8 @@ public class HNSWIndexTests : IDisposable
 
         Assert.Equal(2, index.Count);
 
-        List<long> nearestLeft = index.SearchTopK([0.05f, 0f], 1);
-        List<long> nearestRight = index.SearchTopK([1.95f, 0f], 1);
+        List<RowKey> nearestLeft = index.SearchTopK([0.05f, 0f], 1);
+        List<RowKey> nearestRight = index.SearchTopK([1.95f, 0f], 1);
 
         Assert.Single(nearestLeft);
         Assert.Single(nearestRight);
@@ -354,14 +355,14 @@ public class HNSWIndexTests : IDisposable
                 query[i] = (float)random.NextDouble();
             }
 
-            List<long> ann = index.SearchTopK(query, topK);
-            List<long> exact = exactDataset
+            List<RowKey> ann = index.SearchTopK(query, topK);
+            List<RowKey> exact = exactDataset
                 .Select(entry => (entry.RowId, DistanceCosine(query, entry.Vector)))
                 .OrderBy(item => item.Item2)
                 .ThenBy(item => item.RowId)
                 .Take(topK)
                 .Select(item => item.RowId)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             int overlap = ann.Intersect(exact).Count();
             totalRecall += (double)overlap / topK;
@@ -536,15 +537,15 @@ public class HNSWIndexTests : IDisposable
 
         for (int cycle = 0; cycle < churnCycles; cycle++)
         {
-            List<long> removable = activeRows.Keys
+            List<RowKey> removable = activeRows.Keys
                 .OrderBy(_ => random.Next())
                 .Take(churnBatch)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             index.Delete(removable);
             for (int i = 0; i < removable.Count; i++)
             {
-                activeRows.Remove(removable[i]);
+                activeRows.Remove((long)removable[i]);
             }
 
             for (int i = 0; i < churnBatch; i++)
@@ -629,15 +630,15 @@ public class HNSWIndexTests : IDisposable
 
             for (int cycle = 0; cycle < churnCycles; cycle++)
             {
-                List<long> removable = activeRows.Keys
+                List<RowKey> removable = activeRows.Keys
                     .OrderBy(_ => random.Next())
                     .Take(churnBatch)
-                    .ToList();
+                    .Select(id => (RowKey)id).ToList();
 
                 index.Delete(removable);
                 for (int i = 0; i < removable.Count; i++)
                 {
-                    activeRows.Remove(removable[i]);
+                    activeRows.Remove((long)removable[i]);
                 }
 
                 for (int i = 0; i < churnBatch; i++)
@@ -811,7 +812,7 @@ public class HNSWIndexTests : IDisposable
 
             long memoryBefore = GC.GetTotalMemory(forceFullCollection: false);
             var insertTotal = Stopwatch.StartNew();
-            index.InsertBatchParallel(ids, vectors, dimensions, buildDop);
+            index.InsertBatchParallel(Array.ConvertAll(ids, id => (RowKey)id), vectors, dimensions, buildDop);
 
             insertTotal.Stop();
             long memoryAfter = GC.GetTotalMemory(forceFullCollection: false);
@@ -860,7 +861,7 @@ public class HNSWIndexTests : IDisposable
 
         var dataset = BuildDataset(seed: 20260440, vectors, dimension);
         var querySet = BuildQueries(seed: 20260441, queries, dimension);
-        List<List<long>> exactBaseline = BuildExactTopKBaseline(dataset, querySet, topK);
+        List<List<RowKey>> exactBaseline = BuildExactTopKBaseline(dataset, querySet, topK);
 
         (QueryQualitySnapshot low, ProfileBreakdown lowProfile) = EvaluateRecallAndLatencyProfileAtK(
             dataset,
@@ -917,7 +918,7 @@ public class HNSWIndexTests : IDisposable
 
         var dataset = BuildDataset(seed: 20260442, vectors, dimension);
         var querySet = BuildQueries(seed: 20260443, queries, dimension);
-        List<List<long>> exactBaseline = BuildExactTopKBaseline(dataset, querySet, topK);
+        List<List<RowKey>> exactBaseline = BuildExactTopKBaseline(dataset, querySet, topK);
 
         (QueryQualitySnapshot lowM, ProfileBreakdown lowProfile) = EvaluateRecallAndLatencyProfileAtK(
             dataset,
@@ -1043,14 +1044,14 @@ public class HNSWIndexTests : IDisposable
         double totalRecall = 0d;
         foreach (float[] query in querySet)
         {
-            List<long> ann = index.SearchTopK(query, topK);
-            List<long> exact = dataset
+            List<RowKey> ann = index.SearchTopK(query, topK);
+            List<RowKey> exact = dataset
                 .Select(entry => (entry.RowId, DistanceCosine(query, entry.Vector)))
                 .OrderBy(item => item.Item2)
                 .ThenBy(item => item.RowId)
                 .Take(topK)
                 .Select(item => item.RowId)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             int overlap = ann.Intersect(exact).Count();
             totalRecall += (double)overlap / topK;
@@ -1064,14 +1065,14 @@ public class HNSWIndexTests : IDisposable
         double totalRecall = 0d;
         foreach (float[] query in querySet)
         {
-            List<long> ann = index.SearchTopK(query, topK);
-            List<long> exact = dataset
+            List<RowKey> ann = index.SearchTopK(query, topK);
+            List<RowKey> exact = dataset
                 .Select(entry => (entry.Key, DistanceCosine(query, entry.Value)))
                 .OrderBy(item => item.Item2)
                 .ThenBy(item => item.Key)
                 .Take(topK)
                 .Select(item => item.Key)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             int overlap = ann.Intersect(exact).Count();
             totalRecall += (double)overlap / topK;
@@ -1088,17 +1089,17 @@ public class HNSWIndexTests : IDisposable
         foreach (float[] query in querySet)
         {
             var stopwatch = Stopwatch.StartNew();
-            List<long> ann = index.SearchTopK(query, topK);
+            List<RowKey> ann = index.SearchTopK(query, topK);
             stopwatch.Stop();
             latencies.Add(stopwatch.Elapsed.TotalMilliseconds);
 
-            List<long> exact = dataset
+            List<RowKey> exact = dataset
                 .Select(entry => (entry.Key, DistanceCosine(query, entry.Value)))
                 .OrderBy(item => item.Item2)
                 .ThenBy(item => item.Key)
                 .Take(topK)
                 .Select(item => item.Key)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             int overlap = ann.Intersect(exact).Count();
             totalRecall += (double)overlap / topK;
@@ -1158,7 +1159,7 @@ public class HNSWIndexTests : IDisposable
         int m,
         int efConstruction,
         int efSearch,
-        List<List<long>>? exactTopKBaseline = null)
+        List<List<RowKey>>? exactTopKBaseline = null)
     {
         var buildStopwatch = Stopwatch.StartNew();
         long memoryBeforeBuildBytes = GC.GetTotalMemory(forceFullCollection: false);
@@ -1202,14 +1203,14 @@ public class HNSWIndexTests : IDisposable
 
             annStopwatch.Start();
             var latencyStopwatch = Stopwatch.StartNew();
-            List<long> ann = index.SearchTopK(query, topK);
+            List<RowKey> ann = index.SearchTopK(query, topK);
             latencyStopwatch.Stop();
             annStopwatch.Stop();
 
             latencies.Add(latencyStopwatch.Elapsed.TotalMilliseconds);
 
             exactStopwatch.Start();
-            List<long> exact;
+            List<RowKey> exact;
             if (exactTopKBaseline != null)
             {
                 exact = exactTopKBaseline[i];
@@ -1222,7 +1223,7 @@ public class HNSWIndexTests : IDisposable
                     .ThenBy(item => item.RowId)
                     .Take(topK)
                     .Select(item => item.RowId)
-                    .ToList();
+                    .Select(id => (RowKey)id).ToList();
             }
 
             exactStopwatch.Stop();
@@ -1247,21 +1248,21 @@ public class HNSWIndexTests : IDisposable
         return (snapshot, profile);
     }
 
-    private static List<List<long>> BuildExactTopKBaseline(
+    private static List<List<RowKey>> BuildExactTopKBaseline(
         List<(long RowId, float[] Vector)> dataset,
         List<float[]> querySet,
         int topK)
     {
-        var baseline = new List<List<long>>(querySet.Count);
+        var baseline = new List<List<RowKey>>(querySet.Count);
         foreach (float[] query in querySet)
         {
-            List<long> exact = dataset
+            List<RowKey> exact = dataset
                 .Select(entry => (entry.RowId, DistanceCosine(query, entry.Vector)))
                 .OrderBy(item => item.Item2)
                 .ThenBy(item => item.RowId)
                 .Take(topK)
                 .Select(item => item.RowId)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             baseline.Add(exact);
         }
@@ -1321,15 +1322,15 @@ public class HNSWIndexTests : IDisposable
 
         for (int cycle = 0; cycle < churnCycles; cycle++)
         {
-            List<long> removable = activeRows.Keys
+            List<RowKey> removable = activeRows.Keys
                 .OrderBy(_ => random.Next())
                 .Take(churnBatch)
-                .ToList();
+                .Select(id => (RowKey)id).ToList();
 
             index.Delete(removable);
             for (int i = 0; i < removable.Count; i++)
             {
-                activeRows.Remove(removable[i]);
+                activeRows.Remove((long)removable[i]);
             }
 
             for (int i = 0; i < churnBatch; i++)

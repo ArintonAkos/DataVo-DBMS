@@ -2,12 +2,12 @@ namespace DataVo.Core.Indexing.HNSW;
 
 internal sealed class BrowserFallbackVectorIndex : IVectorIndex
 {
-    private readonly Dictionary<long, float[]> _vectors = [];
+    private readonly Dictionary<RowKey, float[]> _vectors = [];
 
     public string IndexType => "HNSW";
     public string Metric { get; set; } = "cosine";
 
-    public void Insert(long rowId, float[] vector)
+    public void Insert(RowKey rowId, float[] vector)
     {
         if (vector == null || vector.Length == 0)
         {
@@ -17,20 +17,20 @@ internal sealed class BrowserFallbackVectorIndex : IVectorIndex
         _vectors[rowId] = [.. vector];
     }
 
-    public void Delete(List<long> rowIds)
+    public void Delete(List<RowKey> rowIds)
     {
         if (rowIds == null)
         {
             return;
         }
 
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             _vectors.Remove(rowId);
         }
     }
 
-    public List<long> SearchTopK(float[] queryVector, int topK)
+    public List<RowKey> SearchTopK(float[] queryVector, int topK)
     {
         if (queryVector == null || queryVector.Length == 0 || topK <= 0 || _vectors.Count == 0)
         {
@@ -60,14 +60,14 @@ internal sealed class BrowserFallbackVectorIndex : IVectorIndex
         _vectors.Clear();
     }
 
-    internal List<(long RowId, float[] Vector)> ExportEntries()
+    internal List<(RowKey RowId, float[] Vector)> ExportEntries()
     {
         return _vectors
             .Select(entry => (RowId: entry.Key, Vector: (float[])[.. entry.Value]))
             .ToList();
     }
 
-    internal void ImportEntries(IEnumerable<(long RowId, float[] Vector)> entries)
+    internal void ImportEntries(IEnumerable<(RowKey RowId, float[] Vector)> entries)
     {
         _vectors.Clear();
         foreach (var entry in entries)

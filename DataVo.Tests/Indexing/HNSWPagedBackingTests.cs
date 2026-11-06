@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing.HNSW;
 
 namespace DataVo.Tests.Indexing;
@@ -40,7 +41,7 @@ public class HNSWPagedBackingTests
         // deterministic (no dependence on Random.Shared graph structure).
         foreach ((long id, float[] vector) in data)
         {
-            List<long> ranked = index.SearchTopK(vector, vectors);
+            List<RowKey> ranked = index.SearchTopK(vector, vectors);
             Assert.Equal(id, ranked[0]);
         }
     }
@@ -77,7 +78,7 @@ public class HNSWPagedBackingTests
         int found = 0;
         foreach ((long id, float[] vector) in data)
         {
-            List<long> ann = index.SearchTopK(vector, 10);
+            List<RowKey> ann = index.SearchTopK(vector, 10);
             if (ann.Contains(id))
             {
                 found++;
@@ -116,7 +117,7 @@ public class HNSWPagedBackingTests
             // Flatten (export) -> page (import) must preserve every stored vector exactly.
             foreach ((long id, float[] vector) in data)
             {
-                List<long> ranked = loaded.SearchTopK(vector, vectors);
+                List<RowKey> ranked = loaded.SearchTopK(vector, vectors);
                 Assert.Equal(id, ranked[0]);
             }
         }

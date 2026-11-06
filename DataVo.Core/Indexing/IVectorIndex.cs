@@ -8,17 +8,17 @@ public interface IVectorIndex : IIndexBase
     /// <summary>
     /// Inserts or updates a vector by row identifier.
     /// </summary>
-    void Insert(long rowId, float[] vector);
+    void Insert(RowKey rowId, float[] vector);
 
     /// <summary>
     /// Deletes vectors for the provided row identifiers.
     /// </summary>
-    void Delete(List<long> rowIds);
+    void Delete(List<RowKey> rowIds);
 
     /// <summary>
     /// Returns the nearest row identifiers for the query vector.
     /// </summary>
-    List<long> SearchTopK(float[] queryVector, int topK);
+    List<RowKey> SearchTopK(float[] queryVector, int topK);
 
     /// <summary>
     /// Clears all entries from the index.

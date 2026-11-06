@@ -42,7 +42,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 #else
     private readonly Random _random = new();
 #endif
-    private readonly Dictionary<long, int> _rowIdToOrdinal = [];
+    private readonly Dictionary<RowKey, int> _rowIdToOrdinal = [];
     private readonly Stack<int> _freeOrdinals = [];
     private readonly object _stateGate = new();
 
@@ -63,7 +63,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     private int _graphPageMask;
     private int _graphPageOrdinals = 1;
 
-    private long[] _rowIdByOrdinal = [];
+    private RowKey[] _rowIdByOrdinal = [];
     private bool[] _isActive = [];
     private int[] _nodeLevels = [];
     private float[] _inverseNormByOrdinal = [];
@@ -196,7 +196,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         public required bool EnableDeleteGraphRepair { get; init; }
         public required bool EnableAdaptiveEfSearch { get; init; }
         public required double AdaptiveEfSearchMultiplier { get; init; }
-        public required long? EntryPointId { get; init; }
+        public required RowKey? EntryPointId { get; init; }
         public required int MaxLevel { get; init; }
         public required int Count { get; init; }
 
@@ -205,14 +205,14 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         public required int NextOrdinal { get; init; }
 
         public required float[] VectorData { get; init; }
-        public required long[] RowIdByOrdinal { get; init; }
+        public required RowKey[] RowIdByOrdinal { get; init; }
         public required bool[] IsActive { get; init; }
         public required int[] NodeLevels { get; init; }
         public required int[] GraphLinks { get; init; }
         public required int[] LevelStrides { get; init; }
         public required int[] LevelOffsets { get; init; }
 
-        public required long[] RowIds { get; init; }
+        public required RowKey[] RowIds { get; init; }
         public required int[] Ordinals { get; init; }
     }
 
@@ -321,7 +321,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// <summary>
     /// Gets the current entry-point row id used for top-layer navigation.
     /// </summary>
-    public long? EntryPointId { get; private set; }
+    public RowKey? EntryPointId { get; private set; }
 
     /// <summary>
     /// Gets the highest level currently present in the graph.
@@ -409,7 +409,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
     /// <param name="vectorDimension">Dimension of each vector.</param>
     /// <param name="maxDegreeOfParallelism">Optional parallelism override; when zero or negative, processor count is used.</param>
-    public void InsertBatchParallel(long[] rowIds, float[] vectors, int vectorDimension, int maxDegreeOfParallelism = 0)
+    public void InsertBatchParallel(RowKey[] rowIds, float[] vectors, int vectorDimension, int maxDegreeOfParallelism = 0)
     {
         if (rowIds == null)
         {
@@ -453,7 +453,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// <param name="rowIds">Row ids mapped one-to-one to vectors.</param>
     /// <param name="vectors">Flat vector buffer of size <c>rowIds.Length * vectorDimension</c>.</param>
     /// <param name="vectorDimension">Dimension of each vector.</param>
-    public void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension)
+    public void InsertBatch(RowKey[] rowIds, float[] vectors, int vectorDimension)
     {
         InsertBatchParallel(rowIds, vectors, vectorDimension);
     }
@@ -463,7 +463,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// </summary>
     /// <param name="rowId">Row id to associate with the vector.</param>
     /// <param name="vector">Vector payload to index.</param>
-    public void Insert(long rowId, float[] vector)
+    public void Insert(RowKey rowId, float[] vector)
     {
         if (vector == null || vector.Length == 0)
         {
@@ -478,7 +478,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// </summary>
     /// <param name="rowId">Row id to associate with the vector.</param>
     /// <param name="vector">Vector payload to index.</param>
-    public void Insert(long rowId, ReadOnlySpan<float> vector)
+    public void Insert(RowKey rowId, ReadOnlySpan<float> vector)
     {
         if (vector.Length == 0)
         {
@@ -489,7 +489,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         InsertCore(rowId, vector);
     }
 
-    private void InsertCore(long rowId, ReadOnlySpan<float> vector)
+    private void InsertCore(RowKey rowId, ReadOnlySpan<float> vector)
     {
         Interlocked.Increment(ref _mutations);
         lock (_stateGate)
@@ -590,7 +590,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// Deletes indexed vectors for the provided row ids.
     /// </summary>
     /// <param name="rowIds">Row ids to remove.</param>
-    public void Delete(List<long> rowIds)
+    public void Delete(List<RowKey> rowIds)
     {
         if (rowIds == null || rowIds.Count == 0)
         {
@@ -599,7 +599,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
         Interlocked.Increment(ref _mutations);
 
-        foreach (long rowId in rowIds)
+        foreach (RowKey rowId in rowIds)
         {
             if (!_rowIdToOrdinal.TryGetValue(rowId, out int ordinal) || !_isActive[ordinal])
             {
@@ -651,7 +651,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// <param name="queryVector">Query vector.</param>
     /// <param name="topK">Maximum number of matches to return.</param>
     /// <returns>A list of row ids ordered from nearest to farthest.</returns>
-    public List<long> SearchTopK(float[] queryVector, int topK)
+    public List<RowKey> SearchTopK(float[] queryVector, int topK)
     {
         if (queryVector == null)
         {
@@ -667,7 +667,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     /// <param name="queryVector">Query vector.</param>
     /// <param name="topK">Maximum number of matches to return.</param>
     /// <returns>A list of row ids ordered from nearest to farthest.</returns>
-    public List<long> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
+    public List<RowKey> SearchTopK(ReadOnlySpan<float> queryVector, int topK)
     {
         if (queryVector.Length == 0)
         {
@@ -708,13 +708,13 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         int resultCount = SearchLayer(queryVector, queryInvNorm, current, ef, 0, workspace);
 
         int take = Math.Min(topK, resultCount);
-        var result = new List<long>(take);
+        var result = new List<RowKey>(take);
         for (int i = 0; i < take; i++)
         {
             int ordinal = workspace.ResultOrdinals[i];
             if ((uint)ordinal < (uint)_rowIdByOrdinal.Length)
             {
-                long rowId = _rowIdByOrdinal[ordinal];
+                RowKey rowId = _rowIdByOrdinal[ordinal];
                 if (rowId != 0)
                 {
                     result.Add(rowId);
@@ -759,7 +759,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
     internal FlatState ExportFlatState()
     {
-        long[] rowIds = new long[_rowIdToOrdinal.Count];
+        RowKey[] rowIds = new RowKey[_rowIdToOrdinal.Count];
         int[] ordinals = new int[_rowIdToOrdinal.Count];
         int idx = 0;
         foreach (var pair in _rowIdToOrdinal)
@@ -1045,7 +1045,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         }
     }
 
-    private int AcquireOrdinal(long rowId)
+    private int AcquireOrdinal(RowKey rowId)
     {
         int ordinal = _freeOrdinals.Count > 0 ? _freeOrdinals.Pop() : _nextOrdinal++;
         EnsureCapacity(ordinal + 1);
@@ -1766,7 +1766,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         }
     }
 
-    private List<long> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
+    private List<RowKey> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
     {
         int take = Math.Min(topK, _count);
         var maxHeap = new DataVoPriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
@@ -1826,7 +1826,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             distances[j + 1] = dist;
         }
 
-        var result = new List<long>(ordinals.Count);
+        var result = new List<RowKey>(ordinals.Count);
         for (int i = 0; i < ordinals.Count; i++)
         {
             result.Add(_rowIdByOrdinal[ordinals[i]]);
@@ -1839,7 +1839,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     {
         int bestOrdinal = -1;
         int bestLevel = -1;
-        long bestRowId = long.MaxValue;
+        RowKey bestRowId = new(ulong.MaxValue, ulong.MaxValue);
 
         for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
         {
@@ -1849,7 +1849,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             }
 
             int level = _nodeLevels[ordinal];
-            long rowId = _rowIdByOrdinal[ordinal];
+            RowKey rowId = _rowIdByOrdinal[ordinal];
             if (level > bestLevel || (level == bestLevel && rowId < bestRowId))
             {
                 bestOrdinal = ordinal;

@@ -2,5 +2,5 @@ namespace DataVo.Core.Indexing;
 
 internal interface IBatchVectorIndex
 {
-    void InsertBatch(long[] rowIds, float[] vectors, int vectorDimension);
+    void InsertBatch(RowKey[] rowIds, float[] vectors, int vectorDimension);
 }

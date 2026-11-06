@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.Indexing.Flat;
 
 namespace DataVo.Tests.Indexing;
@@ -13,7 +14,7 @@ public class FlatVectorIndexTests
         index.Insert(10, [1f, 0f, 0f]);
         index.Insert(20, [0.8f, 0.2f, 0f]);
 
-        List<long> nearest = index.SearchTopK([0.95f, 0.05f, 0f], 3);
+        List<RowKey> nearest = index.SearchTopK([0.95f, 0.05f, 0f], 3);
 
         Assert.Equal([10L, 20L, 30L], nearest);
     }
