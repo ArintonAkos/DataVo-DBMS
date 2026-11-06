@@ -140,7 +140,8 @@ internal struct CompactRowBlockReader
         }
         else
         {
-            RowId = checked(RowId + (long)SsTableCompactRowBlock.ReadVarint(block, ref _position, _limit));
+            // Unsigned wrap-around: a delta between a very negative and a very positive id exceeds long.
+            RowId = unchecked((long)((ulong)RowId + SsTableCompactRowBlock.ReadVarint(block, ref _position, _limit)));
             Tag = (ulong)((long)Tag + SsTableCompactRowBlock.UnZigZag(SsTableCompactRowBlock.ReadVarint(block, ref _position, _limit)));
         }
 

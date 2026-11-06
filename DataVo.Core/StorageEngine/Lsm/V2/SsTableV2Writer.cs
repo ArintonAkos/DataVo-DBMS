@@ -165,7 +165,7 @@ internal sealed class SsTableV2Writer : IDisposable
         }
         else
         {
-            written += SsTableCompactRowBlock.WriteVarint(entry, (ulong)(rowId - _previousRowIdInBlock));
+            written += SsTableCompactRowBlock.WriteVarint(entry, unchecked((ulong)rowId - (ulong)_previousRowIdInBlock));
             written += SsTableCompactRowBlock.WriteVarint(entry[written..], SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock));
         }
 
@@ -180,7 +180,7 @@ internal sealed class SsTableV2Writer : IDisposable
     private int CompactEntrySize(long rowId, ulong tag, int valueLength, bool restart) =>
         (restart
             ? sizeof(long) + SsTableCompactRowBlock.VarintSize(tag)
-            : SsTableCompactRowBlock.VarintSize((ulong)(rowId - _previousRowIdInBlock))
+            : SsTableCompactRowBlock.VarintSize(unchecked((ulong)rowId - (ulong)_previousRowIdInBlock))
                 + SsTableCompactRowBlock.VarintSize(SsTableCompactRowBlock.ZigZag((long)tag - (long)_previousTagInBlock)))
         + SsTableCompactRowBlock.VarintSize((ulong)valueLength)
         + valueLength;

@@ -44,6 +44,36 @@ public sealed class SsTableV4CompactTests : SsTableV2Tests
     }
 
     [Fact]
+    public void RowIdsAcrossTheWholeLongRange_ShareABlock()
+    {
+        // Adjacent entries at both ends of the range: their delta does not fit in a long.
+        long[] rowIds = [long.MinValue + 1, long.MaxValue - 1];
+        string path = Write(writer =>
+        {
+            foreach (long rowId in rowIds)
+            {
+                writer.Add(rowId, 1, LsmValueType.Put, Value(rowId));
+            }
+        });
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
+        Assert.Equal(1, reader.BlockCount);
+        foreach (long rowId in rowIds)
+        {
+            Assert.Equal($"row-{rowId}", Get(reader, rowId));
+        }
+
+        var scanned = new List<long>();
+        SsTableV2Cursor cursor = reader.OpenCursor();
+        while (cursor.MoveNext())
+        {
+            scanned.Add(cursor.RowId);
+        }
+
+        Assert.Equal(rowIds, scanned);
+    }
+
+    [Fact]
     public void CompactFiles_AreSmallerThanFixedOnes()
     {
         static void Fill(SsTableV2Writer writer)
