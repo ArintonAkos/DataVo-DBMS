@@ -15,42 +15,31 @@ public sealed partial class LsmStorageEngine
     /// <summary>Directory (inside a table's directory) holding one subdirectory per index table.</summary>
     internal const string IndexDirectoryName = ".idx";
 
-    private const string IndexBuiltMarker = "BUILT";
+    // Versioned: index tables of an older entry layout (8-byte row ids, marker "BUILT") are not
+    // "built" for this code, so opening a database rebuilds them from the rows.
+    private const string IndexBuiltMarker = "BUILT.v2";
 
     private readonly ConcurrentDictionary<(string Database, string Table, string Index), IndexTableState> _indexTables = new();
 
-    // The index store contract uses RowKey; index entries still store 8-byte row ids (stage 2 widens them).
     void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
-        IndexPut(databaseName, tableName, indexName, encodedKey, RowKeyConversions.ToRowId(rowId));
+        IndexPut(databaseName, tableName, indexName, encodedKey, rowId);
 
     void ILsmIndexStore.IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
-        IndexDelete(databaseName, tableName, indexName, encodedKey, RowKeyConversions.ToRowId(rowId));
+        IndexDelete(databaseName, tableName, indexName, encodedKey, rowId);
 
     // Lookups never create an index table: a missing index must stay missing (callers fall back to scans).
     List<RowKey>? ILsmIndexStore.IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey) =>
         _indexTables.ContainsKey((databaseName, tableName, indexName))
-            ? RowKeyConversions.ToRowKeys(IndexLookup(databaseName, tableName, indexName, encodedKey))
+            ? IndexLookup(databaseName, tableName, indexName, encodedKey)
             : null;
 
-    List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName)
-    {
-        if (!_indexTables.ContainsKey((databaseName, tableName, indexName)))
-        {
-            return null;
-        }
-
-        List<(byte[] EncodedKey, long RowId)> entries = IndexEntries(databaseName, tableName, indexName);
-        var keyed = new List<(byte[] EncodedKey, RowKey RowId)>(entries.Count);
-        foreach ((byte[] encodedKey, long rowId) in entries)
-        {
-            keyed.Add((encodedKey, rowId));
-        }
-
-        return keyed;
-    }
+    List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName) =>
+        _indexTables.ContainsKey((databaseName, tableName, indexName))
+            ? IndexEntries(databaseName, tableName, indexName)
+            : null;
 
     void ILsmIndexStore.BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries) =>
-        BuildIndex(databaseName, tableName, indexName, entries.Select(static entry => (entry.EncodedKey, RowKeyConversions.ToRowId(entry.RowId))));
+        BuildIndex(databaseName, tableName, indexName, entries);
 
     void ILsmIndexStore.DropIndexTable(string databaseName, string tableName, string indexName) =>
         DropIndexTable(databaseName, tableName, indexName);
@@ -63,34 +52,34 @@ public sealed partial class LsmStorageEngine
         File.Exists(Path.Combine(GetIndexDirectory(databaseName, tableName, indexName), IndexBuiltMarker));
 
     /// <summary>Stages index entry (key, row id) in the current write unit.</summary>
-    internal void IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
+    internal void IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
         StageIndexChange(databaseName, tableName, indexName, encodedKey, rowId, live: true);
 
     /// <summary>Stages the removal of index entry (key, row id) in the current write unit.</summary>
-    internal void IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId) =>
+    internal void IndexDelete(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId) =>
         StageIndexChange(databaseName, tableName, indexName, encodedKey, rowId, live: false);
 
     /// <summary>
-    /// Row ids indexed under <paramref name="encodedKey"/>, ascending: this flow's staged changes, then
-    /// the published overlay, then the index runs, newest version per row id winning.
+    /// Row keys indexed under <paramref name="encodedKey"/>, ascending: this flow's staged changes, then
+    /// the published overlay, then the index runs, newest version per row key winning.
     /// </summary>
-    internal List<long> IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey)
+    internal List<RowKey> IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey)
     {
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
         byte[] prefix = LsmIndexKeyCodec.KeyPrefix(encodedKey);
 
         // Candidates from every source; merged by (row id, newest sequence) only when more than one source
         // contributed, because a single file already yields sorted, unique row ids.
-        var found = new List<(long RowId, ulong Sequence, bool Live)>();
+        var found = new List<(RowKey RowId, ulong Sequence, bool Live)>();
         int sources = 0;
         bool unsorted = false;
 
         // Overlay before the file set: a flush publishes its file before evicting (see ResolveRow).
         lock (state.OverlayGate)
         {
-            if (state.Overlay.TryGetValue(prefix, out Dictionary<long, (ulong Sequence, bool Live)>? published))
+            if (state.Overlay.TryGetValue(prefix, out Dictionary<RowKey, (ulong Sequence, bool Live)>? published))
             {
-                foreach (KeyValuePair<long, (ulong Sequence, bool Live)> entry in published)
+                foreach (KeyValuePair<RowKey, (ulong Sequence, bool Live)> entry in published)
                 {
                     found.Add((entry.Key, entry.Value.Sequence, entry.Value.Live));
                 }
@@ -107,7 +96,7 @@ public sealed partial class LsmStorageEngine
             {
                 int before = found.Count;
                 file.GetKeyedReader(_readMode).ForEachWithPrefix(prefix, found, static (userKey, sequence, type, _, list) =>
-                    list.Add((LsmIndexKeyCodec.RowIdOf(userKey), sequence, type == LsmValueType.Put)));
+                    list.Add((LsmIndexKeyCodec.RowKeyOf(userKey), sequence, type == LsmValueType.Put)));
                 if (found.Count > before)
                 {
                     sources++;
@@ -125,7 +114,7 @@ public sealed partial class LsmStorageEngine
             {
                 if (LsmIndexKeyCodec.PrefixOf(change.Key).SequenceEqual(prefix))
                 {
-                    found.Add((LsmIndexKeyCodec.RowIdOf(change.Key), ulong.MaxValue, change.Value));
+                    found.Add((LsmIndexKeyCodec.RowKeyOf(change.Key), ulong.MaxValue, change.Value));
                     sources++;
                     unsorted = true;
                 }
@@ -137,10 +126,10 @@ public sealed partial class LsmStorageEngine
             found.Sort(static (x, y) => x.RowId != y.RowId ? x.RowId.CompareTo(y.RowId) : y.Sequence.CompareTo(x.Sequence));
         }
 
-        var rows = new List<long>(found.Count);
-        long previousRow = 0;
+        var rows = new List<RowKey>(found.Count);
+        RowKey previousRow = default;
         bool hasPrevious = false;
-        foreach ((long rowId, _, bool live) in found)
+        foreach ((RowKey rowId, _, bool live) in found)
         {
             if (hasPrevious && rowId == previousRow)
             {
@@ -159,15 +148,15 @@ public sealed partial class LsmStorageEngine
     }
 
     /// <summary>Every live (key, row id) entry of the index; used by the rare delete-by-row-id paths.</summary>
-    internal List<(byte[] EncodedKey, long RowId)> IndexEntries(string databaseName, string tableName, string indexName)
+    internal List<(byte[] EncodedKey, RowKey RowId)> IndexEntries(string databaseName, string tableName, string indexName)
     {
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
         var newest = new Dictionary<byte[], (ulong Sequence, bool Live)>(ByteArrayComparer.Instance);
         lock (state.OverlayGate)
         {
-            foreach (KeyValuePair<byte[], Dictionary<long, (ulong Sequence, bool Live)>> key in state.Overlay)
+            foreach (KeyValuePair<byte[], Dictionary<RowKey, (ulong Sequence, bool Live)>> key in state.Overlay)
             {
-                foreach (KeyValuePair<long, (ulong Sequence, bool Live)> row in key.Value)
+                foreach (KeyValuePair<RowKey, (ulong Sequence, bool Live)> row in key.Value)
                 {
                     newest[LsmIndexKeyCodec.UserKey(key.Key.AsSpan(LsmIndexKeyCodec.LengthPrefixSize), row.Key)] = row.Value;
                 }
@@ -202,12 +191,12 @@ public sealed partial class LsmStorageEngine
             }
         }
 
-        var entries = new List<(byte[] EncodedKey, long RowId)>();
+        var entries = new List<(byte[] EncodedKey, RowKey RowId)>();
         foreach (KeyValuePair<byte[], (ulong Sequence, bool Live)> entry in newest)
         {
             if (entry.Value.Live)
             {
-                entries.Add((LsmIndexKeyCodec.PrefixOf(entry.Key)[LsmIndexKeyCodec.LengthPrefixSize..].ToArray(), LsmIndexKeyCodec.RowIdOf(entry.Key)));
+                entries.Add((LsmIndexKeyCodec.PrefixOf(entry.Key)[LsmIndexKeyCodec.LengthPrefixSize..].ToArray(), LsmIndexKeyCodec.RowKeyOf(entry.Key)));
             }
         }
 
@@ -220,13 +209,13 @@ public sealed partial class LsmStorageEngine
     /// CREATE INDEX on a populated table and to migrate indexes that predate persisted indexes.
     /// The caller holds the table's write lock, so no commit touches this index meanwhile.
     /// </summary>
-    internal void BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, long RowId)> entries)
+    internal void BuildIndex(string databaseName, string tableName, string indexName, IEnumerable<(byte[] EncodedKey, RowKey RowId)> entries)
     {
         DropIndexTable(databaseName, tableName, indexName);
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
 
         var userKeys = new List<byte[]>();
-        foreach ((byte[] encodedKey, long rowId) in entries)
+        foreach ((byte[] encodedKey, RowKey rowId) in entries)
         {
             userKeys.Add(LsmIndexKeyCodec.UserKey(encodedKey, rowId));
         }
@@ -245,7 +234,7 @@ public sealed partial class LsmStorageEngine
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
                     byte[]? previous = null;
                     foreach (byte[] userKey in userKeys)
                     {
@@ -316,7 +305,7 @@ public sealed partial class LsmStorageEngine
     internal string GetVectorSnapshotPath(string databaseName, string tableName, string indexName) =>
         Path.Combine(GetTableDirectory(databaseName, tableName), HnswSnapshotFile.DirectoryName, indexName + HnswSnapshotFile.Extension);
 
-    private void StageIndexChange(string databaseName, string tableName, string indexName, byte[] encodedKey, long rowId, bool live)
+    private void StageIndexChange(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId, bool live)
     {
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
         PendingWrite pending = AcquireWrite(out bool ownsWrite);
@@ -512,32 +501,32 @@ public sealed partial class LsmStorageEngine
         public string Index { get; } = index;
 
         /// <summary>
-        /// Published, unflushed entries: key prefix → row id → newest (sequence, live). Guarded by
+        /// Published, unflushed entries: key prefix → row key → newest (sequence, live). Guarded by
         /// <see cref="LsmKeySpaceState.OverlayGate"/> for reads and writes.
         /// </summary>
-        public Dictionary<byte[], Dictionary<long, (ulong Sequence, bool Live)>> Overlay { get; } = new(ByteArrayComparer.Instance);
+        public Dictionary<byte[], Dictionary<RowKey, (ulong Sequence, bool Live)>> Overlay { get; } = new(ByteArrayComparer.Instance);
 
         public void Publish(byte[] userKey, ulong sequence, bool live)
         {
             byte[] prefix = LsmIndexKeyCodec.PrefixOf(userKey).ToArray();
-            if (!Overlay.TryGetValue(prefix, out Dictionary<long, (ulong Sequence, bool Live)>? rows))
+            if (!Overlay.TryGetValue(prefix, out Dictionary<RowKey, (ulong Sequence, bool Live)>? rows))
             {
                 rows = [];
                 Overlay[prefix] = rows;
             }
 
-            rows[LsmIndexKeyCodec.RowIdOf(userKey)] = (sequence, live);
+            rows[LsmIndexKeyCodec.RowKeyOf(userKey)] = (sequence, live);
         }
 
         public void Evict(ReadOnlySpan<byte> userKey, ulong flushedThrough)
         {
             byte[] prefix = LsmIndexKeyCodec.PrefixOf(userKey).ToArray();
-            if (!Overlay.TryGetValue(prefix, out Dictionary<long, (ulong Sequence, bool Live)>? rows))
+            if (!Overlay.TryGetValue(prefix, out Dictionary<RowKey, (ulong Sequence, bool Live)>? rows))
             {
                 return;
             }
 
-            long rowId = LsmIndexKeyCodec.RowIdOf(userKey);
+            RowKey rowId = LsmIndexKeyCodec.RowKeyOf(userKey);
             if (rows.TryGetValue(rowId, out (ulong Sequence, bool Live) version) && version.Sequence <= flushedThrough)
             {
                 rows.Remove(rowId);

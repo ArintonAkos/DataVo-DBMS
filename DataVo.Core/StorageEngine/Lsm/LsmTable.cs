@@ -13,8 +13,6 @@ public readonly record struct LsmFlushResult(
     long ByteCount,
     string FilePath);
 
-internal readonly record struct LsmBatchRowPutEntry(long RowId, ulong Seqno, byte[] Value);
-
 /// <summary>
 /// Coordinates the active MemTable, a queue of frozen (immutable) MemTable generations awaiting
 /// background flush, SSTable/manifest publication, and background Level-0 compaction.
@@ -195,31 +193,6 @@ public sealed class LsmTable : IDisposable
                 _currentWal?.AppendMutationBuffered(userKey, seqno, LsmValueType.Put, value)
                 ?? LsmWalDurabilityTicket.None;
             _active.Put(userKey, seqno, LsmValueType.Put, value);
-            RotateIfOversizedNoLock();
-            return ticket;
-        }
-    }
-
-    internal LsmWalDurabilityTicket PutRowIdBatch(ReadOnlySpan<LsmBatchRowPutEntry> entries)
-    {
-        lock (_gate)
-        {
-            ThrowIfUnusableNoLock();
-            if (entries.IsEmpty)
-            {
-                return LsmWalDurabilityTicket.None;
-            }
-
-            LsmWalDurabilityTicket ticket =
-                _currentWal?.AppendRowIdPutMutationsBatch(entries) ?? LsmWalDurabilityTicket.None;
-
-            Span<byte> userKey = stackalloc byte[sizeof(long)];
-            foreach (LsmBatchRowPutEntry entry in entries)
-            {
-                InternalKey.EncodeInt64UserKey(userKey, entry.RowId);
-                _active.Put(userKey, entry.Seqno, LsmValueType.Put, entry.Value);
-            }
-
             RotateIfOversizedNoLock();
             return ticket;
         }
@@ -571,10 +544,10 @@ public sealed class LsmTable : IDisposable
 
             long length = 0;
             bool hasRows = false;
-            long firstRowId = 0;
+            RowKey firstRowKey = default;
             ulong firstSequence = 0;
             LsmValueType firstType = LsmValueType.Put;
-            long lastRowId = 0;
+            RowKey lastRowKey = default;
             ulong lastSequence = 0;
             LsmValueType lastType = LsmValueType.Put;
 
@@ -593,13 +566,13 @@ public sealed class LsmTable : IDisposable
                             continue;
                         }
 
-                        lastRowId = LsmRowKeyCodec.DecodeRowId(userKey);
+                        lastRowKey = LsmRowKeyCodec.DecodeRowKey(userKey);
                         lastSequence = InternalKey.Sequence(entry.InternalKey);
                         lastType = InternalKey.ValueType(entry.InternalKey);
                         if (!hasRows)
                         {
                             hasRows = true;
-                            firstRowId = lastRowId;
+                            firstRowKey = lastRowKey;
                             firstSequence = lastSequence;
                             firstType = lastType;
                         }
@@ -620,8 +593,8 @@ public sealed class LsmTable : IDisposable
             var metadata = new LsmTableFileMetadata(
                 fileNumber,
                 level: 0,
-                LsmRowKeyCodec.RowInternalKey(firstRowId, firstSequence, firstType),
-                LsmRowKeyCodec.RowInternalKey(lastRowId, lastSequence, lastType),
+                LsmRowKeyCodec.RowInternalKey(firstRowKey, firstSequence, firstType),
+                LsmRowKeyCodec.RowInternalKey(lastRowKey, lastSequence, lastType),
                 length,
                 fileName);
 
@@ -679,7 +652,7 @@ public sealed class LsmTable : IDisposable
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
                     foreach (MemTableEntry entry in memTable)
                     {
                         writer.Add(

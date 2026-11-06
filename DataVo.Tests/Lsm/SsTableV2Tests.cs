@@ -1,4 +1,5 @@
 using System.Text;
+using DataVo.Core;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
 
@@ -7,13 +8,13 @@ namespace DataVo.Tests.Lsm;
 /// <summary>Fixed 24-byte entries (format version 2): files written before compact blocks.</summary>
 public sealed class SsTableV2FixedTests : SsTableV2Tests
 {
-    protected override bool Compact => false;
+    private protected override SsTableRowFormat Format => SsTableRowFormat.Fixed;
 }
 
-/// <summary>Compact entries with restart points (format version 4), the default for new files.</summary>
+/// <summary>Compact entries with restart points and integer keys (format version 4).</summary>
 public sealed class SsTableV4CompactTests : SsTableV2Tests
 {
-    protected override bool Compact => true;
+    private protected override SsTableRowFormat Format => SsTableRowFormat.Compact;
 
     [Theory]
     [MemberData(nameof(Modes))]
@@ -67,7 +68,7 @@ public sealed class SsTableV4CompactTests : SsTableV2Tests
         SsTableV2Cursor cursor = reader.OpenCursor();
         while (cursor.MoveNext())
         {
-            scanned.Add(cursor.RowId);
+            scanned.Add((long)cursor.Key);
         }
 
         Assert.Equal(rowIds, scanned);
@@ -84,8 +85,8 @@ public sealed class SsTableV4CompactTests : SsTableV2Tests
             }
         }
 
-        long compact = new FileInfo(WriteWith(Fill, compact: true)).Length;
-        long fixedSize = new FileInfo(WriteWith(Fill, compact: false)).Length;
+        long compact = new FileInfo(WriteWith(Fill, SsTableRowFormat.Compact)).Length;
+        long fixedSize = new FileInfo(WriteWith(Fill, SsTableRowFormat.Fixed)).Length;
         Assert.True(compact < fixedSize * 0.7, $"compact {compact} B vs fixed {fixedSize} B");
     }
 
@@ -123,11 +124,214 @@ public sealed class SsTableV4CompactTests : SsTableV2Tests
     }
 }
 
+/// <summary>Compact entries keyed by 16-byte row keys (format version 6), the format the engine writes.</summary>
+public sealed class SsTableV6WideTests : SsTableV2Tests
+{
+    private protected override SsTableRowFormat Format => SsTableRowFormat.Wide;
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void GuidKeys_RoundTrip_InKeyOrder(LsmReadMode mode)
+    {
+        var random = new Random(11);
+        List<RowKey> keys = [.. Enumerable.Range(0, 5_000)
+            .Select(_ => RowKey.FromGuid(RandomGuid(random)))
+            .Distinct()
+            .Order()];
+        string path = Write(writer =>
+        {
+            foreach (RowKey key in keys)
+            {
+                writer.Add(key, 3, LsmValueType.Put, Value(key));
+            }
+        });
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, mode);
+        Assert.True(reader.BlockCount > 1);
+        Assert.Equal(keys[0], reader.Properties.SmallestKey);
+        Assert.Equal(keys[^1], reader.Properties.LargestKey);
+        foreach (RowKey key in keys)
+        {
+            Assert.Equal($"row-{key}", Get(reader, key));
+        }
+
+        for (int i = 0; i < 200; i++)
+        {
+            RowKey absent = RowKey.FromGuid(RandomGuid(random));
+            if (keys.BinarySearch(absent) < 0)
+            {
+                Assert.Null(Get(reader, absent));
+            }
+        }
+
+        Assert.Equal(keys, Scan(reader));
+    }
+
+    [Fact]
+    public void EveryKeyStep_RoundTrips()
+    {
+        // Same high half with a small and a 62-bit-overflowing low step; a small and a huge high step;
+        // negative, positive and extreme integers before the GUID-like keys.
+        RowKey[] keys =
+        [
+            long.MinValue,
+            -1,
+            0,
+            1,
+            2,
+            long.MaxValue,
+            new RowKey(1, 0),
+            new RowKey(1, ulong.MaxValue),
+            new RowKey(2, 5),
+            new RowKey(0x4000_0000_0000_0000UL, 7),
+            new RowKey(ulong.MaxValue - 1, 0),
+            new RowKey(ulong.MaxValue, ulong.MaxValue),
+        ];
+        string path = Write(writer =>
+        {
+            foreach (RowKey key in keys)
+            {
+                writer.Add(key, 1, LsmValueType.Put, Value(key));
+            }
+        });
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
+
+        // Integer keys sort first and get a v4-encoded block; the rest get a wide block.
+        Assert.Equal(2, reader.BlockCount);
+        Assert.Equal((RowKey)long.MaxValue, reader.GetBlockInfo(0).LastKey);
+        Assert.Equal(new RowKey(1, 0), reader.GetBlockInfo(1).FirstKey);
+        foreach (RowKey key in keys)
+        {
+            Assert.Equal($"row-{key}", Get(reader, key));
+        }
+
+        Assert.Equal(keys, Scan(reader));
+        Assert.Null(Get(reader, new RowKey(1, 1)));
+        Assert.Null(Get(reader, 3));
+    }
+
+    [Fact]
+    public void IntegerKeys_CostAboutWhatTheyCostInV4()
+    {
+        static void Fill(SsTableV2Writer writer)
+        {
+            for (long rowId = 1; rowId <= 20_000; rowId++)
+            {
+                writer.Add(rowId, 9, LsmValueType.Put, Value(rowId));
+            }
+        }
+
+        long wide = new FileInfo(WriteWith(Fill, SsTableRowFormat.Wide)).Length;
+        long compact = new FileInfo(WriteWith(Fill, SsTableRowFormat.Compact)).Length;
+        Assert.True(wide <= compact * 1.05, $"v6 {wide} B vs v4 {compact} B");
+    }
+
+    [Fact]
+    public void TimeOrderedGuids_AreSmallerThanTheirRawKeys()
+    {
+        // Sorted version 7 GUIDs share their timestamp bits with the previous key: a step plus the low half.
+        var random = new Random(3);
+        long millis = 1_700_000_000_000;
+        List<RowKey> keys = [.. Enumerable.Range(0, 20_000)
+            .Select(i => RowKey.FromGuid(Version7Guid(millis + (i / 50), random)))
+            .Distinct()
+            .Order()];
+        string path = Write(writer =>
+        {
+            foreach (RowKey key in keys)
+            {
+                writer.Add(key, 9, LsmValueType.Put, ReadOnlySpan<byte>.Empty);
+            }
+        });
+
+        long length = new FileInfo(path).Length;
+        Assert.True(length < keys.Count * 16L, $"{length} B for {keys.Count} keys");
+    }
+
+    [Fact]
+    public void IntegerFormats_RejectNonIntegerKeys()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new SsTableV2Writer(stream, format: SsTableRowFormat.Compact);
+        Assert.Throws<ArgumentException>(() => writer.Add(new RowKey(1, 0), 1, LsmValueType.Put, "a"u8));
+    }
+
+    [Fact]
+    public void WideBlock_WithValidChecksumButBrokenEntries_IsRejectedNotMisread()
+    {
+        // Keys with a non-zero high half, so the block uses the wide encoding.
+        string path = Write(writer =>
+        {
+            for (ulong low = 1; low <= 200; low++)
+            {
+                writer.Add(new RowKey(1, low), 1, LsmValueType.Put, Value(1));
+            }
+        });
+
+        long offset;
+        int length;
+        using (SsTableV2Reader probe = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead))
+        {
+            SsTableV2BlockInfo info = probe.GetBlockInfo(0);
+            (offset, length) = (info.Offset, info.Length);
+        }
+
+        // The second entry is a one-byte key step, a one-byte tag delta, then its value length: make the
+        // length huge and fix the checksum, so only the structural check can catch it.
+        byte[] bytes = File.ReadAllBytes(path);
+        Span<byte> block = bytes.AsSpan((int)offset, length);
+        int second = 16 + 1 + 8 + 1 + 1 + Value(1).Length; // after restart entry 0: key (high varint, low), tag, length, value
+        Assert.Equal(SsTableWideRowBlock.WideFlag, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(block[8..]));
+        block[second + 2] = 0xFF;
+        block[second + 3] = 0x7F;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(block, DataVo.Core.Transactions.WalCrc32C.HashToUInt32(block[4..]));
+        File.WriteAllBytes(path, bytes);
+
+        using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
+        Assert.Throws<InvalidDataException>(() => Get(reader, new RowKey(1, 1)));
+    }
+
+    private static List<RowKey> Scan(SsTableV2Reader reader)
+    {
+        var scanned = new List<RowKey>();
+        SsTableV2Cursor cursor = reader.OpenCursor();
+        while (cursor.MoveNext())
+        {
+            scanned.Add(cursor.Key);
+        }
+
+        return scanned;
+    }
+
+    private static Guid RandomGuid(Random random)
+    {
+        byte[] bytes = new byte[16];
+        random.NextBytes(bytes);
+        return new Guid(bytes);
+    }
+
+    private static Guid Version7Guid(long unixMillis, Random random)
+    {
+        // RFC 9562 layout: 48-bit timestamp, version 7, then random bits.
+        Span<byte> bytes = stackalloc byte[16];
+        random.NextBytes(bytes);
+        for (int i = 0; i < 6; i++)
+        {
+            bytes[i] = (byte)(unixMillis >> (40 - (8 * i)));
+        }
+
+        bytes[6] = (byte)(0x70 | (bytes[6] & 0x0F));
+        bytes[8] = (byte)(0x80 | (bytes[8] & 0x3F));
+        return new Guid(bytes, bigEndian: true);
+    }
+}
+
 public abstract class SsTableV2Tests : IDisposable
 {
     private readonly string _directory = TestStorageDirectories.Create("sstable_v2");
 
-    protected abstract bool Compact { get; }
+    private protected abstract SsTableRowFormat Format { get; }
 
     public static TheoryData<LsmReadMode> Modes => new() { LsmReadMode.MemoryMapped, LsmReadMode.PositionalRead };
 
@@ -161,8 +365,9 @@ public abstract class SsTableV2Tests : IDisposable
         Assert.Equal(20_000, reader.Properties.EntryCount);
         Assert.Equal(20_001, reader.Properties.NextRowId);
         Assert.Equal(20_000, reader.Properties.LiveRowCount);
-        Assert.Equal(1, reader.Properties.SmallestRowId);
-        Assert.Equal(20_000, reader.Properties.LargestRowId);
+        Assert.Equal((ushort)Format, reader.Version);
+        Assert.Equal((RowKey)1, reader.Properties.SmallestKey);
+        Assert.Equal((RowKey)20_000, reader.Properties.LargestKey);
         Assert.True(reader.BlockCount > 1);
 
         for (long rowId = 1; rowId <= 20_000; rowId += 7)
@@ -282,18 +487,18 @@ public abstract class SsTableV2Tests : IDisposable
 
         using SsTableV2Reader reader = SsTableV2Reader.Open(path, mode);
         SsTableV2Cursor cursor = reader.OpenCursor();
-        long previousRow = long.MinValue;
+        RowKey previousRow = default;
         ulong previousSequence = ulong.MaxValue;
         int count = 0;
         while (cursor.MoveNext())
         {
-            Assert.True(cursor.RowId > previousRow || (cursor.RowId == previousRow && cursor.Sequence < previousSequence));
+            Assert.True(count == 0 || cursor.Key > previousRow || (cursor.Key == previousRow && cursor.Sequence < previousSequence));
             if (cursor.Type == LsmValueType.Put)
             {
-                Assert.Equal($"row-{cursor.RowId}", Encoding.UTF8.GetString(cursor.Value));
+                Assert.Equal($"row-{cursor.Key}", Encoding.UTF8.GetString(cursor.Value));
             }
 
-            previousRow = cursor.RowId;
+            previousRow = cursor.Key;
             previousSequence = cursor.Sequence;
             count++;
         }
@@ -378,22 +583,22 @@ public abstract class SsTableV2Tests : IDisposable
 
     private protected string Write(Action<SsTableV2Writer> fill)
     {
-        return WriteWith(fill, Compact);
+        return WriteWith(fill, Format);
     }
 
-    private protected string WriteWith(Action<SsTableV2Writer> fill, bool compact)
+    private protected string WriteWith(Action<SsTableV2Writer> fill, SsTableRowFormat format)
     {
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-        using var writer = new SsTableV2Writer(stream, compact: compact);
+        using var writer = new SsTableV2Writer(stream, format: format);
         fill(writer);
         writer.Finish();
         return path;
     }
 
-    protected static byte[] Value(long rowId) => Encoding.UTF8.GetBytes($"row-{rowId}");
+    private protected static byte[] Value(RowKey rowId) => Encoding.UTF8.GetBytes($"row-{rowId}");
 
-    private protected static string? Get(SsTableV2Reader reader, long rowId, ulong snapshot = ulong.MaxValue) =>
+    private protected static string? Get(SsTableV2Reader reader, RowKey rowId, ulong snapshot = ulong.MaxValue) =>
         reader.Lookup(
             rowId,
             snapshot,

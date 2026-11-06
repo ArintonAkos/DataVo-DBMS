@@ -5,10 +5,12 @@ using System.Text;
 namespace DataVo.Core.StorageEngine.Lsm.V2;
 
 /// <summary>
-/// Canonical byte encoding of index entries: <c>u16 length(K) | K | row id</c>, where K is the index key
+/// Canonical byte encoding of index entries: <c>u16 length(K) | K | row key</c>, where K is the index key
 /// in a type-tagged form. Integer and GUID keys are encoded natively, so the typed write paths (long, Guid)
 /// and the string paths ("[42]", "3f2504e0-...") produce identical entries without formatting strings.
-/// The length prefix keeps keys prefix-free: all entries of one key are contiguous and sorted by row id.
+/// The length prefix keeps keys prefix-free: all entries of one key are contiguous and sorted by row key.
+/// The row key is the 16 big-endian bytes of a <see cref="RowKey"/> (index tables written before row
+/// keys were widened held an 8-byte row id and are rebuilt from the rows on open).
 /// </summary>
 internal static class LsmIndexKeyCodec
 {
@@ -16,7 +18,7 @@ internal static class LsmIndexKeyCodec
     public const byte GuidTag = 0x02;
     public const byte StringTag = 0x03;
 
-    public const int RowIdSize = sizeof(long);
+    public const int RowKeySize = 16;
     public const int LengthPrefixSize = sizeof(ushort);
 
     /// <summary>Largest encoded key (K) an index entry can hold.</summary>
@@ -68,13 +70,13 @@ internal static class LsmIndexKeyCodec
         return encoded;
     }
 
-    /// <summary>User key of the entry (K, rowId).</summary>
-    public static byte[] UserKey(ReadOnlySpan<byte> encodedKey, long rowId)
+    /// <summary>User key of the entry (K, row key).</summary>
+    public static byte[] UserKey(ReadOnlySpan<byte> encodedKey, RowKey rowKey)
     {
-        var userKey = new byte[LengthPrefixSize + encodedKey.Length + RowIdSize];
+        var userKey = new byte[LengthPrefixSize + encodedKey.Length + RowKeySize];
         BinaryPrimitives.WriteUInt16BigEndian(userKey, (ushort)encodedKey.Length);
         encodedKey.CopyTo(userKey.AsSpan(LengthPrefixSize));
-        BinaryPrimitives.WriteUInt64BigEndian(userKey.AsSpan(LengthPrefixSize + encodedKey.Length), unchecked((ulong)(rowId ^ long.MinValue)));
+        rowKey.WriteTo(userKey.AsSpan(LengthPrefixSize + encodedKey.Length));
         return userKey;
     }
 
@@ -87,11 +89,10 @@ internal static class LsmIndexKeyCodec
         return prefix;
     }
 
-    public static long RowIdOf(ReadOnlySpan<byte> userKey) =>
-        unchecked((long)(BinaryPrimitives.ReadUInt64BigEndian(userKey[^RowIdSize..]) ^ (ulong)long.MinValue));
+    public static RowKey RowKeyOf(ReadOnlySpan<byte> userKey) => RowKey.Read(userKey[^RowKeySize..]);
 
-    /// <summary>The length-prefixed key of an entry (the user key without its row id).</summary>
-    public static ReadOnlySpan<byte> PrefixOf(ReadOnlySpan<byte> userKey) => userKey[..^RowIdSize];
+    /// <summary>The length-prefixed key of an entry (the user key without its row key).</summary>
+    public static ReadOnlySpan<byte> PrefixOf(ReadOnlySpan<byte> userKey) => userKey[..^RowKeySize];
 
     private static bool TryParseInteger(string key, out long value)
     {

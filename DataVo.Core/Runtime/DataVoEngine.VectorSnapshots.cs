@@ -45,7 +45,8 @@ public sealed partial class DataVoEngine
         }
 
         (List<long> reindex, List<long> removed) = graph.PlanCatchUp(
-            visit => lsm.ForEachLiveRowVersion(databaseName, tableName, visit),
+            // The graph keys nodes by integer row id until its format widens (clustering stage 5).
+            visit => lsm.ForEachLiveRowVersion(databaseName, tableName, (rowKey, sequence) => visit(RowKeyConversions.ToRowId(rowKey), sequence)),
             watermark);
         if (reindex.Count + removed.Count > Math.Max(1_000, graph.Count * SnapshotCatchUpLimit))
         {

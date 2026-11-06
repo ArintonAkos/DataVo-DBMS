@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Text;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
@@ -32,7 +33,7 @@ public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
 
         using SsTableKeyedReader reader = SsTableKeyedReader.Open(path, mode);
         var seen = new List<(long RowId, ulong Sequence)>();
-        reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, sequence, _, _, list) => list.Add((LsmIndexKeyCodec.RowIdOf(userKey), sequence)));
+        reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, sequence, _, _, list) => list.Add(((long)LsmIndexKeyCodec.RowKeyOf(userKey), sequence)));
         Assert.Equal([(1L, 600UL), (2L, 1UL)], seen);
     }
 
@@ -107,7 +108,7 @@ public abstract class SsTableKeyedTests : IDisposable
         Assert.Equal(LsmIndexKeyCodec.StringTag, LsmIndexKeyCodec.EncodeString("[1.25]")[0]);
 
         byte[] userKey = LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("abc"), 123);
-        Assert.Equal(123, LsmIndexKeyCodec.RowIdOf(userKey));
+        Assert.Equal(123, (long)LsmIndexKeyCodec.RowKeyOf(userKey));
         Assert.Equal(LsmIndexKeyCodec.KeyPrefix(LsmIndexKeyCodec.EncodeString("abc")), LsmIndexKeyCodec.PrefixOf(userKey).ToArray());
     }
 
@@ -151,7 +152,7 @@ public abstract class SsTableKeyedTests : IDisposable
 
         using SsTableKeyedReader reader = SsTableKeyedReader.Open(path, mode);
         var seen = new List<(long RowId, LsmValueType Type)>();
-        reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, _, type, _, list) => list.Add((LsmIndexKeyCodec.RowIdOf(userKey), type)));
+        reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, _, type, _, list) => list.Add(((long)LsmIndexKeyCodec.RowKeyOf(userKey), type)));
         Assert.Equal([(1L, LsmValueType.Deletion), (2L, LsmValueType.Put)], seen);
     }
 
@@ -175,7 +176,7 @@ public abstract class SsTableKeyedTests : IDisposable
     public void Writer_RejectsOutOfOrderKeys()
     {
         using var stream = new MemoryStream();
-        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
         writer.Add(LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("b"), 1), 1, LsmValueType.Put, []);
         Assert.Throws<InvalidOperationException>(() =>
             writer.Add(LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("a"), 1), 1, LsmValueType.Put, []));
@@ -194,7 +195,7 @@ public abstract class SsTableKeyedTests : IDisposable
 
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize, compact: compact);
+        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize, compact: compact);
         foreach ((byte[] userKey, ulong sequence, LsmValueType type) in entries)
         {
             writer.Add(userKey, sequence, type, []);
@@ -217,7 +218,7 @@ public abstract class SsTableKeyedTests : IDisposable
         {
             if (type == LsmValueType.Put)
             {
-                list.Add(LsmIndexKeyCodec.RowIdOf(userKey));
+                list.Add((long)LsmIndexKeyCodec.RowKeyOf(userKey));
             }
         });
         return rows;

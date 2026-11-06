@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Diagnostics;
 using System.Text;
 using DataVo.Core.StorageEngine.Lsm;
@@ -63,7 +64,7 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
         };
 
         const int Rows = 500;
-        var rowIds = new long[Rows];
+        var rowIds = new RowKey[Rows];
         for (int i = 0; i < Rows; i++)
         {
             rowIds[i] = engine.InsertRow("db", "users", Value(i));
@@ -268,7 +269,7 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
         };
 
         const int Rows = 300;
-        var rowIds = new long[Rows];
+        var rowIds = new RowKey[Rows];
         for (int i = 0; i < Rows; i++)
         {
             rowIds[i] = engine.InsertRow("db", "orders", Value(i));

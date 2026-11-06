@@ -30,7 +30,7 @@ internal readonly record struct LsmCommitOperation(
     LsmCommitOperationKind Kind,
     string Database,
     string Table,
-    long RowId,
+    RowKey RowId,
     byte[] Value);
 
 /// <summary>
@@ -39,6 +39,9 @@ internal readonly record struct LsmCommitOperation(
 /// </summary>
 internal sealed class LsmCommitBatch
 {
+    /// <summary>The key recorded by operations that address no row (drops): integer 0, as version 1 wrote it.</summary>
+    internal static readonly RowKey NoRow = 0L;
+
     private readonly List<LsmCommitOperation> _operations = [];
 
     public IReadOnlyList<LsmCommitOperation> Operations => _operations;
@@ -48,25 +51,25 @@ internal sealed class LsmCommitBatch
     public bool IsEmpty => _operations.Count == 0;
 
     /// <summary>Records that <paramref name="value"/> becomes the row's current version. The batch keeps the array.</summary>
-    public void Put(string database, string table, long rowId, byte[] value)
+    public void Put(string database, string table, RowKey rowId, byte[] value)
     {
-        Validate(database, table, rowId);
+        Validate(database, table);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(value);
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.Put, database, table, rowId, value));
     }
 
     /// <summary>Records that the row is removed.</summary>
-    public void Delete(string database, string table, long rowId)
+    public void Delete(string database, string table, RowKey rowId)
     {
-        Validate(database, table, rowId);
+        Validate(database, table);
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.Delete, database, table, rowId, []));
     }
 
     /// <summary>Records that a table is dropped.</summary>
     public void DropTable(string database, string table)
     {
-        Validate(database, table, 0);
-        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropTable, database, table, 0, []));
+        Validate(database, table);
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropTable, database, table, NoRow, []));
     }
 
     /// <summary>Records that a whole database is dropped.</summary>
@@ -77,7 +80,7 @@ internal sealed class LsmCommitBatch
             throw new ArgumentException("A commit operation needs a database name.", nameof(database));
         }
 
-        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropDatabase, database, string.Empty, 0, []));
+        _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.DropDatabase, database, string.Empty, NoRow, []));
     }
 
     /// <summary>
@@ -85,16 +88,16 @@ internal sealed class LsmCommitBatch
     /// <paramref name="rowId"/>. Written in the same frame as the row change, so both survive a crash or
     /// neither does. Value layout: u16 index name bytes | index name (UTF-8) | encoded key.
     /// </summary>
-    public void IndexPut(string database, string table, string index, ReadOnlySpan<byte> encodedKey, long rowId)
+    public void IndexPut(string database, string table, string index, ReadOnlySpan<byte> encodedKey, RowKey rowId)
     {
-        Validate(database, table, rowId);
+        Validate(database, table);
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.IndexPut, database, table, rowId, EncodeIndexValue(index, encodedKey)));
     }
 
     /// <summary>Records that the index entry (key, row id) is removed.</summary>
-    public void IndexDelete(string database, string table, string index, ReadOnlySpan<byte> encodedKey, long rowId)
+    public void IndexDelete(string database, string table, string index, ReadOnlySpan<byte> encodedKey, RowKey rowId)
     {
-        Validate(database, table, rowId);
+        Validate(database, table);
         _operations.Add(new LsmCommitOperation(LsmCommitOperationKind.IndexDelete, database, table, rowId, EncodeIndexValue(index, encodedKey)));
     }
 
@@ -201,7 +204,7 @@ internal sealed class LsmCommitBatch
     }
 
     // Rows collapse per (database, table, row id); index entries per (database, table, index and key, row id).
-    private readonly record struct CollapseKey(string Database, string Table, long RowId, byte[]? IndexValue);
+    private readonly record struct CollapseKey(string Database, string Table, RowKey RowId, byte[]? IndexValue);
 
     private static bool TryGetCollapseKey(LsmCommitOperation operation, out CollapseKey key)
     {
@@ -244,7 +247,7 @@ internal sealed class LsmCommitBatch
         }
     }
 
-    private static void Validate(string database, string table, long rowId)
+    private static void Validate(string database, string table)
     {
         if (string.IsNullOrEmpty(database))
         {
@@ -255,28 +258,27 @@ internal sealed class LsmCommitBatch
         {
             throw new ArgumentException("A commit operation needs a table name.", nameof(table));
         }
-
-        if (rowId < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(rowId), "Row ids are never negative.");
-        }
     }
 }
 
 /// <summary>
-/// Payload format of an Lsm commit-log frame (version 1, little-endian):
+/// Payload format of an Lsm commit-log frame (version 2, little-endian):
 /// <code>
 /// u16 version | u16 reserved | i32 operationCount
-/// per operation: u8 kind | u8 reserved | u16 databaseBytes | u16 tableBytes | i64 rowId | i32 valueBytes
-///                | database (UTF-8) | table (UTF-8) | value
+/// per operation: u8 kind | u8 reserved | u16 databaseBytes | u16 tableBytes | u64 key high | u64 key low
+///                | i32 valueBytes | database (UTF-8) | table (UTF-8) | value
 /// </code>
-/// Decoding is strict: any length or kind that does not add up exactly makes the payload invalid.
+/// Version 1 frames (written before row keys were widened) hold an i64 row id in place of the two key
+/// halves; they are still read, so a log written by an older build replays. Decoding is strict: any
+/// length or kind that does not add up exactly makes the payload invalid.
 /// </summary>
 internal static class LsmCommitBatchCodec
 {
-    private const ushort CurrentVersion = 1;
+    private const ushort CurrentVersion = 2;
+    private const ushort RowIdVersion = 1;
     private const int BatchHeaderSize = 8;
-    private const int OperationHeaderSize = 18;
+    private const int OperationHeaderSize = 26;
+    private const int RowIdOperationHeaderSize = 18;
 
     /// <summary>Byte offset of the first operation's kind byte (for format tests).</summary>
     internal const int FirstOperationOffset = BatchHeaderSize;
@@ -319,8 +321,9 @@ internal static class LsmCommitBatchCodec
             header[1] = 0;
             BinaryPrimitives.WriteUInt16LittleEndian(header[2..], (ushort)databaseBytes);
             BinaryPrimitives.WriteUInt16LittleEndian(header[4..], (ushort)tableBytes);
-            BinaryPrimitives.WriteInt64LittleEndian(header[6..], operation.RowId);
-            BinaryPrimitives.WriteInt32LittleEndian(header[14..], operation.Value.Length);
+            BinaryPrimitives.WriteUInt64LittleEndian(header[6..], operation.RowId.High);
+            BinaryPrimitives.WriteUInt64LittleEndian(header[14..], operation.RowId.Low);
+            BinaryPrimitives.WriteInt32LittleEndian(header[22..], operation.Value.Length);
             offset += OperationHeaderSize;
 
             offset += StrictUtf8.GetBytes(operation.Database, destination[offset..]);
@@ -335,14 +338,21 @@ internal static class LsmCommitBatchCodec
     public static bool TryRead(ReadOnlySpan<byte> payload, out List<LsmCommitOperation> operations)
     {
         operations = [];
-        if (payload.Length < BatchHeaderSize
-            || BinaryPrimitives.ReadUInt16LittleEndian(payload) != CurrentVersion)
+        if (payload.Length < BatchHeaderSize)
         {
             return false;
         }
 
+        ushort version = BinaryPrimitives.ReadUInt16LittleEndian(payload);
+        if (version is not CurrentVersion and not RowIdVersion)
+        {
+            return false;
+        }
+
+        bool wide = version == CurrentVersion;
+        int operationHeaderSize = wide ? OperationHeaderSize : RowIdOperationHeaderSize;
         int count = BinaryPrimitives.ReadInt32LittleEndian(payload[4..]);
-        if (count <= 0 || count > (payload.Length - BatchHeaderSize) / OperationHeaderSize)
+        if (count <= 0 || count > (payload.Length - BatchHeaderSize) / operationHeaderSize)
         {
             return false;
         }
@@ -351,29 +361,45 @@ internal static class LsmCommitBatchCodec
         int offset = BatchHeaderSize;
         for (int i = 0; i < count; i++)
         {
-            if (payload.Length - offset < OperationHeaderSize)
+            if (payload.Length - offset < operationHeaderSize)
             {
                 return false;
             }
 
-            ReadOnlySpan<byte> header = payload.Slice(offset, OperationHeaderSize);
+            ReadOnlySpan<byte> header = payload.Slice(offset, operationHeaderSize);
             var kind = (LsmCommitOperationKind)header[0];
             int databaseBytes = BinaryPrimitives.ReadUInt16LittleEndian(header[2..]);
             int tableBytes = BinaryPrimitives.ReadUInt16LittleEndian(header[4..]);
-            long rowId = BinaryPrimitives.ReadInt64LittleEndian(header[6..]);
-            int valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[14..]);
-            offset += OperationHeaderSize;
+            RowKey rowId;
+            int valueBytes;
+            if (wide)
+            {
+                rowId = new RowKey(BinaryPrimitives.ReadUInt64LittleEndian(header[6..]), BinaryPrimitives.ReadUInt64LittleEndian(header[14..]));
+                valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[22..]);
+            }
+            else
+            {
+                long legacyRowId = BinaryPrimitives.ReadInt64LittleEndian(header[6..]);
+                if (legacyRowId < 0)
+                {
+                    return false; // version 1 wrote engine row ids only, never negative
+                }
+
+                rowId = legacyRowId;
+                valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[14..]);
+            }
+
+            offset += operationHeaderSize;
 
             bool isRowOperation = kind is LsmCommitOperationKind.Put or LsmCommitOperationKind.Delete;
             bool isIndexOperation = kind is LsmCommitOperationKind.IndexPut or LsmCommitOperationKind.IndexDelete;
             if (!Enum.IsDefined(typeof(LsmCommitOperationKind), kind)
                 || databaseBytes == 0
                 || (tableBytes == 0) != (kind == LsmCommitOperationKind.DropDatabase)
-                || rowId < 0
                 || valueBytes < 0
                 || (kind != LsmCommitOperationKind.Put && !isIndexOperation && valueBytes != 0)
                 || (isIndexOperation && !LsmCommitBatch.TryDecodeIndexValue(payload.Slice(offset + databaseBytes + tableBytes, Math.Max(0, Math.Min(valueBytes, payload.Length - offset - databaseBytes - tableBytes))), out _, out _))
-                || (!isRowOperation && !isIndexOperation && rowId != 0)
+                || (!isRowOperation && !isIndexOperation && rowId != LsmCommitBatch.NoRow)
                 || (long)databaseBytes + tableBytes + valueBytes > payload.Length - offset)
             {
                 return false;

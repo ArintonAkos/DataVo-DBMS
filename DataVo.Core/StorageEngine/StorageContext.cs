@@ -198,7 +198,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         ReadOnlySpan<DataVoFixedWidthValue> values)
     {
         return _storageEngine is IFixedWidthPatchStorageEngine patchStorage
-            && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), columns, ordinals, values);
+            && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
     }
 
     internal int TryPatchFixedWidthRows(

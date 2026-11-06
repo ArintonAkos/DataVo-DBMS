@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Reflection;
 using System.Text;
 using DataVo.Core.CompiledQueries;
@@ -16,7 +17,7 @@ public sealed class LsmStorageEngineTests
     {
         using var fixture = new LsmStorageEngineFixture();
 
-        long rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
+        RowKey rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
 
         Assert.Equal(1, rowId);
         Assert.Equal(Val("alice"), fixture.Engine.ReadRow("db", "users", rowId));
@@ -27,7 +28,7 @@ public sealed class LsmStorageEngineTests
     {
         using var fixture = new LsmStorageEngineFixture();
 
-        List<long> rowIds = fixture.Engine.InsertRows(
+        List<RowKey> rowIds = fixture.Engine.InsertRows(
             "db",
             "users",
             [Val("charlie"), Val("alice"), Val("bob")]);
@@ -42,7 +43,7 @@ public sealed class LsmStorageEngineTests
     public void DeleteRow_TombstonesLogicalRowIdAndReadAllRowsSkipsIt()
     {
         using var fixture = new LsmStorageEngineFixture();
-        List<long> rowIds = fixture.Engine.InsertRows(
+        List<RowKey> rowIds = fixture.Engine.InsertRows(
             "db",
             "users",
             [Val("one"), Val("two"), Val("three")]);
@@ -67,13 +68,13 @@ public sealed class LsmStorageEngineTests
     public void CompactTable_DoesNotRemapLogicalRowIds()
     {
         using var fixture = new LsmStorageEngineFixture();
-        List<long> rowIds = fixture.Engine.InsertRows(
+        List<RowKey> rowIds = fixture.Engine.InsertRows(
             "db",
             "users",
             [Val("one"), Val("two"), Val("three")]);
         fixture.Engine.DeleteRow("db", "users", rowIds[1]);
 
-        List<(long NewRowId, byte[] RawRow)> compacted = fixture.Engine.CompactTable("db", "users");
+        List<(RowKey NewRowId, byte[] RawRow)> compacted = fixture.Engine.CompactTable("db", "users");
 
         AssertRows(
             [(1L, Val("one")), (3L, Val("three"))],
@@ -103,7 +104,7 @@ public sealed class LsmStorageEngineTests
     public void Reopen_AfterHighestRowIdTombstoneAndCompaction_PreservesDeletionAndNextRowId()
     {
         using var fixture = new LsmStorageEngineFixture();
-        List<long> rowIds = fixture.Engine.InsertRows(
+        List<RowKey> rowIds = fixture.Engine.InsertRows(
             "db",
             "users",
             [Val("one"), Val("two"), Val("three")]);
@@ -128,7 +129,7 @@ public sealed class LsmStorageEngineTests
         try
         {
             var first = new LsmStorageEngine(root);
-            long rowId = first.InsertRow("db", "users", Val("wal-only"));
+            RowKey rowId = first.InsertRow("db", "users", Val("wal-only"));
             first = null;
 
             reopened = new LsmStorageEngine(root);
@@ -167,13 +168,13 @@ public sealed class LsmStorageEngineTests
             }
         });
 
-        Task<List<long>> insertTask = Task.Run(() =>
+        Task<List<RowKey>> insertTask = Task.Run(() =>
             fixture.Engine.InsertRows(
                 "db",
                 "users",
                 Enumerable.Range(0, rows).Select(i => Val($"bulk-{i}")).ToList()));
 
-        List<long> rowIds;
+        List<RowKey> rowIds;
         try
         {
             rowIds = await insertTask.WaitAsync(TimeSpan.FromSeconds(10));
@@ -209,7 +210,7 @@ public sealed class LsmStorageEngineTests
     public void HasAnyRows_AfterDeletingAllRowsReturnsFalse()
     {
         using var fixture = new LsmStorageEngineFixture();
-        long rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
+        RowKey rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
         fixture.Engine.DeleteRow("db", "users", rowId);
 
         Assert.False(fixture.Engine.HasAnyRows("db", "users"));
@@ -270,7 +271,7 @@ public sealed class LsmStorageEngineTests
         // (e.g. mid-WAL-append) must not stall readers. Monitor is thread-affine, so the test stays
         // synchronous — enter and exit must happen on the same thread.
         using var fixture = new LsmStorageEngineFixture();
-        long rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
+        RowKey rowId = fixture.Engine.InsertRow("db", "users", Val("alice"));
         object syncRoot = GetSyncRoot(fixture.Engine);
 
         Monitor.Enter(syncRoot);
@@ -300,7 +301,7 @@ public sealed class LsmStorageEngineTests
         byte[] initial = new byte[10]; // [notnull][int32][notnull][int32]
         RowSerializer.TryOverwriteFixedWidthCell(initial, columns, 0, 0);
         RowSerializer.TryOverwriteFixedWidthCell(initial, columns, 1, 0);
-        long rowId = fixture.Engine.InsertRow("db", "pairs", initial);
+        RowKey rowId = fixture.Engine.InsertRow("db", "pairs", initial);
         var patcher = (IFixedWidthPatchStorageEngine)fixture.Engine;
 
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -375,8 +376,8 @@ public sealed class LsmStorageEngineTests
     }
 
     private static void AssertRows(
-        IReadOnlyList<(long RowId, byte[] RawRow)> expected,
-        IReadOnlyList<(long RowId, byte[] RawRow)> actual)
+        IReadOnlyList<(RowKey RowId, byte[] RawRow)> expected,
+        IReadOnlyList<(RowKey RowId, byte[] RawRow)> actual)
     {
         Assert.Equal(expected.Count, actual.Count);
         for (int i = 0; i < expected.Count; i++)

@@ -4,7 +4,7 @@ using DataVo.Core.CompiledQueries;
 namespace DataVo.Core.StorageEngine;
 
 internal readonly record struct FixedWidthPatchOperation(
-    long RowId,
+    RowKey RowId,
     DataVoFixedWidthValue Value0,
     DataVoFixedWidthValue Value1)
 {
@@ -21,7 +21,7 @@ internal interface IFixedWidthPatchStorageEngine
     bool TryPatchFixedWidthRow(
         string databaseName,
         string tableName,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<Column> columns,
         ReadOnlySpan<int> ordinals,
         ReadOnlySpan<DataVoFixedWidthValue> values);

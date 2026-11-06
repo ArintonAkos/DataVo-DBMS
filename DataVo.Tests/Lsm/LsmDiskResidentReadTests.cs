@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Text;
 using DataVo.Core.Exceptions;
 using DataVo.Core.StorageEngine.Lsm;
@@ -37,15 +38,15 @@ public sealed class LsmDiskResidentReadTests : IDisposable
     public void FlushedRows_LeaveTheHeapOverlay_AndStayReadable(LsmReadMode mode)
     {
         using var engine = new LsmStorageEngine(_root, Relaxed, mode);
-        List<long> rowIds = engine.InsertRows(Db, Table, [.. Enumerable.Range(1, 5_000).Select(Row)]);
+        List<RowKey> rowIds = engine.InsertRows(Db, Table, [.. Enumerable.Range(1, 5_000).Select(Row)]);
         Assert.Equal(5_000, engine.OverlayRowCount(Db, Table));
 
         engine.FlushTableForTesting(Db, Table);
 
         Assert.Equal(0, engine.OverlayRowCount(Db, Table));
-        foreach (long rowId in rowIds.Where(id => id % 97 == 0))
+        foreach (RowKey rowId in rowIds.Where(id => (long)id % 97 == 0))
         {
-            Assert.Equal(Row((int)rowId), engine.ReadRow(Db, Table, rowId));
+            Assert.Equal(Row((int)(long)rowId), engine.ReadRow(Db, Table, rowId));
         }
 
         Assert.Equal(5_000, engine.EstimateRowCount(Db, Table));
@@ -85,7 +86,7 @@ public sealed class LsmDiskResidentReadTests : IDisposable
         Assert.Equal(2_699, reopened.EstimateRowCount(Db, Table));
         Assert.True(reopened.HasAnyRows(Db, Table));
 
-        List<(long RowId, byte[] RawRow)> all = [.. reopened.ReadAllRows(Db, Table)];
+        List<(RowKey RowId, byte[] RawRow)> all = [.. reopened.ReadAllRows(Db, Table)];
         Assert.Equal(2_699, all.Count);
         Assert.True(all.Zip(all.Skip(1)).All(pair => pair.First.RowId < pair.Second.RowId));
         Assert.Equal(3_001, reopened.InsertRow(Db, Table, Row(3_001)));
@@ -97,7 +98,7 @@ public sealed class LsmDiskResidentReadTests : IDisposable
     {
         using (var engine = new LsmStorageEngine(_root, Relaxed, mode))
         {
-            List<long> rowIds = engine.InsertRows(Db, Table, [Row(1), Row(2), Row(3)]);
+            List<RowKey> rowIds = engine.InsertRows(Db, Table, [Row(1), Row(2), Row(3)]);
             foreach (long rowId in rowIds)
             {
                 engine.DeleteRow(Db, Table, rowId);
@@ -120,14 +121,15 @@ public sealed class LsmDiskResidentReadTests : IDisposable
         var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
         using (var legacy = new LsmTable(tableDirectory, manifest)) // v1 writer, as before this format
         {
+            // Row keys of that era: 8-byte order-preserving integers.
             Span<byte> key = stackalloc byte[8];
             for (int rowId = 1; rowId <= 500; rowId++)
             {
-                LsmRowKeyCodec.EncodeRowId(rowId, key);
+                InternalKey.EncodeInt64UserKey(key, rowId);
                 legacy.Put(key, (ulong)rowId, Row(rowId));
             }
 
-            LsmRowKeyCodec.EncodeRowId(7, key);
+            InternalKey.EncodeInt64UserKey(key, 7);
             legacy.Delete(key, 600);
             legacy.Put(LsmRowKeyCodec.TableMetadataKey, 600, BitConverter.GetBytes(501L)); // pre-count 8-byte form
             legacy.FlushActiveMemTable();
@@ -207,7 +209,7 @@ public sealed class LsmDiskResidentReadTests : IDisposable
     public void ConcurrentReaders_OfStableRows_NeverFailWhileOtherRowsFlush(LsmReadMode mode)
     {
         using var engine = new LsmStorageEngine(_root, Relaxed, mode) { MemTableFlushThresholdOverrideBytes = 32 * 1024 };
-        List<long> stable = engine.InsertRows(Db, Table, [.. Enumerable.Range(1, 1_000).Select(Row)]);
+        List<RowKey> stable = engine.InsertRows(Db, Table, [.. Enumerable.Range(1, 1_000).Select(Row)]);
 
         using var stop = new CancellationTokenSource();
         Exception? readerFailure = null;
@@ -219,8 +221,8 @@ public sealed class LsmDiskResidentReadTests : IDisposable
             {
                 while (!stop.IsCancellationRequested)
                 {
-                    long rowId = stable[random.Next(stable.Count)];
-                    Assert.Equal(Row((int)rowId), engine.ReadRow(Db, Table, rowId));
+                    RowKey rowId = stable[random.Next(stable.Count)];
+                    Assert.Equal(Row((int)(long)rowId), engine.ReadRow(Db, Table, rowId));
                     Interlocked.Increment(ref reads);
                 }
             }

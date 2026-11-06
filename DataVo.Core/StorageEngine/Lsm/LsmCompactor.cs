@@ -85,7 +85,8 @@ public sealed class LsmCompactor
 
         LsmTableFileMetadata[] targetOverlaps = SelectTargetOverlapsClosed(
             sourceFiles,
-            _manifest.GetLiveFiles(targetLevel));
+            _manifest.GetLiveFiles(targetLevel),
+            rowKeyed: WritesV2);
 
         LsmTableFileMetadata[] selectedFiles = sourceFiles.Concat(targetOverlaps).ToArray();
         LsmSstableHandle[] selectedHandles = _fileRegistry?.AddRefs(selectedFiles) ?? [];
@@ -274,7 +275,18 @@ public sealed class LsmCompactor
         {
             byte[] bytes = handle?.ReadAllBytes() ?? File.ReadAllBytes(path);
             SsTableReader.Load(bytes);
-            return ReadEntries(bytes);
+            List<SstableEntry> legacy = ReadEntries(bytes);
+            if (WritesV2)
+            {
+                // A v1 row file holds 8-byte row keys; merge them in their 16-byte form so they order
+                // correctly against rows read from newer files.
+                for (int i = 0; i < legacy.Count; i++)
+                {
+                    legacy[i] = legacy[i] with { InternalKey = WidenRowInternalKey(legacy[i].InternalKey) };
+                }
+            }
+
+            return legacy;
         }
 
         SsTableV2Reader? owned = handle is null ? SsTableV2Reader.Open(path, ReadMode) : null;
@@ -286,7 +298,7 @@ public sealed class LsmCompactor
             while (cursor.MoveNext())
             {
                 entries.Add(new SstableEntry(
-                    LsmRowKeyCodec.RowInternalKey(cursor.RowId, cursor.Sequence, cursor.Type),
+                    LsmRowKeyCodec.RowInternalKey(cursor.Key, cursor.Sequence, cursor.Type),
                     cursor.Type == LsmValueType.Put ? cursor.Value.ToArray() : []));
             }
 
@@ -318,7 +330,7 @@ public sealed class LsmCompactor
             overwrite: false,
             stream =>
             {
-                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowIdSize);
+                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.RowKeySize);
                 foreach (SstableEntry entry in entries)
                 {
                     writer.Add(InternalKey.UserKey(entry.InternalKey), InternalKey.Sequence(entry.InternalKey), InternalKey.ValueType(entry.InternalKey), entry.Value);
@@ -377,11 +389,35 @@ public sealed class LsmCompactor
         return (new LsmTableFileMetadata(fileNumber, targetLevel, first, last, length, fileName), outputPath);
     }
 
+    private static byte[] WidenRowInternalKey(byte[] internalKey)
+    {
+        ReadOnlySpan<byte> userKey = InternalKey.UserKey(internalKey);
+        if (userKey.Length != LsmRowKeyCodec.LegacyRowKeySize)
+        {
+            return internalKey;
+        }
+
+        var widened = new byte[LsmRowKeyCodec.RowKeySize + InternalKey.TagSize];
+        userKey.CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize - LsmRowKeyCodec.LegacyRowKeySize));
+        internalKey.AsSpan(userKey.Length).CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize));
+        return widened;
+    }
+
+    /// <summary>
+    /// The user key a file's bounds are compared by. Row tables' manifests may still record 8-byte keys
+    /// of files written before row keys were widened; those are compared in their 16-byte form.
+    /// </summary>
+    private static byte[] BoundUserKey(byte[] internalKey, bool rowKeyed) =>
+        rowKeyed
+            ? LsmRowKeyCodec.NormalizeUserKey(InternalKey.UserKey(internalKey))
+            : InternalKey.UserKey(internalKey).ToArray();
+
     private static LsmTableFileMetadata[] SelectTargetOverlapsClosed(
         IReadOnlyList<LsmTableFileMetadata> sourceFiles,
-        IReadOnlyList<LsmTableFileMetadata> targetFiles)
+        IReadOnlyList<LsmTableFileMetadata> targetFiles,
+        bool rowKeyed)
     {
-        (byte[] smallestUserKey, byte[] largestUserKey) = UserKeyBounds(sourceFiles);
+        (byte[] smallestUserKey, byte[] largestUserKey) = UserKeyBounds(sourceFiles, rowKeyed);
         var selectedTargets = new List<LsmTableFileMetadata>();
         var selectedTargetFileNumbers = new HashSet<long>();
 
@@ -391,23 +427,29 @@ public sealed class LsmCompactor
             expanded = false;
             foreach (LsmTableFileMetadata target in targetFiles)
             {
-                if (selectedTargetFileNumbers.Contains(target.FileNumber)
-                    || !UserKeyRangeOverlaps(smallestUserKey, largestUserKey, target))
+                if (selectedTargetFileNumbers.Contains(target.FileNumber))
+                {
+                    continue;
+                }
+
+                byte[] targetSmallest = BoundUserKey(target.SmallestInternalKey, rowKeyed);
+                byte[] targetLargest = BoundUserKey(target.LargestInternalKey, rowKeyed);
+                if (!UserKeyRangeOverlaps(smallestUserKey, largestUserKey, targetSmallest, targetLargest))
                 {
                     continue;
                 }
 
                 selectedTargets.Add(target);
                 selectedTargetFileNumbers.Add(target.FileNumber);
-                if (InternalKey.UserKey(target.SmallestInternalKey).SequenceCompareTo(smallestUserKey) < 0)
+                if (targetSmallest.AsSpan().SequenceCompareTo(smallestUserKey) < 0)
                 {
-                    smallestUserKey = InternalKey.UserKey(target.SmallestInternalKey).ToArray();
+                    smallestUserKey = targetSmallest;
                     expanded = true;
                 }
 
-                if (InternalKey.UserKey(target.LargestInternalKey).SequenceCompareTo(largestUserKey) > 0)
+                if (targetLargest.AsSpan().SequenceCompareTo(largestUserKey) > 0)
                 {
-                    largestUserKey = InternalKey.UserKey(target.LargestInternalKey).ToArray();
+                    largestUserKey = targetLargest;
                     expanded = true;
                 }
             }
@@ -418,25 +460,24 @@ public sealed class LsmCompactor
     }
 
     private static (byte[] SmallestUserKey, byte[] LargestUserKey) UserKeyBounds(
-        IReadOnlyList<LsmTableFileMetadata> files)
+        IReadOnlyList<LsmTableFileMetadata> files,
+        bool rowKeyed)
     {
-        ReadOnlySpan<byte> smallest = InternalKey.UserKey(files[0].SmallestInternalKey);
-        ReadOnlySpan<byte> largest = InternalKey.UserKey(files[0].LargestInternalKey);
-        byte[] smallestUserKey = smallest.ToArray();
-        byte[] largestUserKey = largest.ToArray();
+        byte[] smallestUserKey = BoundUserKey(files[0].SmallestInternalKey, rowKeyed);
+        byte[] largestUserKey = BoundUserKey(files[0].LargestInternalKey, rowKeyed);
 
         for (int i = 1; i < files.Count; i++)
         {
-            ReadOnlySpan<byte> candidateSmallest = InternalKey.UserKey(files[i].SmallestInternalKey);
-            if (candidateSmallest.SequenceCompareTo(smallestUserKey) < 0)
+            byte[] candidateSmallest = BoundUserKey(files[i].SmallestInternalKey, rowKeyed);
+            if (candidateSmallest.AsSpan().SequenceCompareTo(smallestUserKey) < 0)
             {
-                smallestUserKey = candidateSmallest.ToArray();
+                smallestUserKey = candidateSmallest;
             }
 
-            ReadOnlySpan<byte> candidateLargest = InternalKey.UserKey(files[i].LargestInternalKey);
-            if (candidateLargest.SequenceCompareTo(largestUserKey) > 0)
+            byte[] candidateLargest = BoundUserKey(files[i].LargestInternalKey, rowKeyed);
+            if (candidateLargest.AsSpan().SequenceCompareTo(largestUserKey) > 0)
             {
-                largestUserKey = candidateLargest.ToArray();
+                largestUserKey = candidateLargest;
             }
         }
 
@@ -488,11 +529,9 @@ public sealed class LsmCompactor
     private static bool UserKeyRangeOverlaps(
         ReadOnlySpan<byte> leftSmallest,
         ReadOnlySpan<byte> leftLargest,
-        LsmTableFileMetadata right)
+        ReadOnlySpan<byte> rightSmallest,
+        ReadOnlySpan<byte> rightLargest)
     {
-        ReadOnlySpan<byte> rightSmallest = InternalKey.UserKey(right.SmallestInternalKey);
-        ReadOnlySpan<byte> rightLargest = InternalKey.UserKey(right.LargestInternalKey);
-
         return leftSmallest.SequenceCompareTo(rightLargest) <= 0
             && rightSmallest.SequenceCompareTo(leftLargest) <= 0;
     }

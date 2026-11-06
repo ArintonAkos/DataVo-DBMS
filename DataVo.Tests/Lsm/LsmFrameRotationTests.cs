@@ -1,3 +1,4 @@
+using DataVo.Core;
 using DataVo.Core.StorageEngine.Lsm;
 
 namespace DataVo.Tests.Lsm;
@@ -27,7 +28,7 @@ public sealed class LsmFrameRotationTests : IDisposable
     {
         var engine = new LsmStorageEngine(_root, LsmWalDurabilityMode.RelaxedOsBuffer) { MemTableFlushThresholdOverrideBytes = 4_096 };
         List<byte[]> rows = [.. Enumerable.Range(0, 40).Select(i => Enumerable.Repeat((byte)i, 300).ToArray())];
-        List<long> rowIds = engine.InsertRows("db", "t", rows); // one frame of ~12 KB: rotates mid-frame
+        List<RowKey> rowIds = engine.InsertRows("db", "t", rows); // one frame of ~12 KB: rotates mid-frame
         engine.SimulateCrashForTesting();
 
         using var reopened = new LsmStorageEngine(_root, LsmWalDurabilityMode.RelaxedOsBuffer);

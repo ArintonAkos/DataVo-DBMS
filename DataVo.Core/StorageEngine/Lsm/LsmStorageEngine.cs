@@ -15,9 +15,10 @@ using DataVo.Core.StorageEngine.Serialization;
 namespace DataVo.Core.StorageEngine.Lsm;
 
 /// <summary>
-/// Minimal LSM-backed storage engine that maps logical 1-based RowIds to encoded LSM user keys.
+/// LSM-backed storage engine. Rows are stored under their 16-byte <see cref="RowKey"/>; tables without a
+/// clustered key get engine-assigned integer keys (1, 2, 3, ...).
 /// </summary>
-public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthPatchStorageEngine, ILsmIndexStore, IDisposable
+public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, ILsmIndexStore, IDisposable
 {
     private const int UserKeySize = LsmRowKeyCodec.RowKeySize;
     private const int MaxLevelToScan = LsmTable.DefaultMaxCompactionLevel;
@@ -101,13 +102,13 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// latest in-memory row version (the MemTable copies it into its arena) and must not be mutated by
     /// the caller afterwards.
     /// </summary>
-    public long InsertRow(string databaseName, string tableName, byte[] rowBytes)
+    public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
         PendingWrite pending = AcquireWrite(out bool ownsWrite);
 
-        long rowId;
+        RowKey rowId;
         lock (state.SyncRoot)
         {
             rowId = state.NextRowId++;
@@ -126,19 +127,19 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// <see cref="InsertRow"/>). Row keys are encoded on the stack per entry — no per-row key or
     /// value copies.
     /// </summary>
-    public List<long> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
+    public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowsBytes);
         TableState state = GetOrCreateTable(databaseName, tableName);
         PendingWrite pending = AcquireWrite(out bool ownsWrite);
 
-        var rowIds = new List<long>(rowsBytes.Count);
+        var rowIds = new List<RowKey>(rowsBytes.Count);
         lock (state.SyncRoot)
         {
             foreach (byte[] rowBytes in rowsBytes)
             {
                 DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
-                long rowId = state.NextRowId++;
+                RowKey rowId = state.NextRowId++;
                 pending.Stage(state, rowId, rowBytes);
                 pending.Batch.Put(databaseName, tableName, rowId, rowBytes);
                 rowIds.Add(rowId);
@@ -150,6 +151,39 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
 
         CompleteWrite(pending, ownsWrite);
         return rowIds;
+    }
+
+    /// <summary>
+    /// Inserts a row under a caller-chosen key (a clustered primary key) and takes ownership of
+    /// <paramref name="rowBytes"/> like <see cref="InsertRow"/>. Returns <see langword="false"/>, writing
+    /// nothing, when a live row (committed, or staged by this flow) already has the key.
+    /// </summary>
+    /// <remarks>
+    /// An integer key also moves the table's next engine row id past it, so a table that mixes chosen
+    /// and engine-assigned keys never hands out a key that is taken; replay does the same.
+    /// </remarks>
+    internal bool TryInsertRowWithKey(string databaseName, string tableName, RowKey key, byte[] rowBytes)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        PendingWrite pending = AcquireWrite(out bool ownsWrite);
+
+        bool inserted = false;
+        lock (state.SyncRoot)
+        {
+            if (Lookup(pending, state, key, out _) != LatestRowLookup.Live)
+            {
+                state.NextRowId = Math.Max(state.NextRowId, NextRowIdAfter(key));
+                pending.Stage(state, key, rowBytes);
+                pending.Batch.Put(databaseName, tableName, key, rowBytes);
+                pending.Touch(state, databaseName, tableName);
+                pending.AddLiveDelta(state, 1);
+                inserted = true;
+            }
+        }
+
+        CompleteWrite(pending, ownsWrite);
+        return inserted;
     }
 
     /// <summary>
@@ -175,7 +209,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// Lock-free point read: this flow's staged writes, then the unflushed overlay, then the SSTables
     /// (memory-mapped; one Bloom probe and two binary searches per file). Readers never wait on writers.
     /// </summary>
-    public byte[] ReadRow(string databaseName, string tableName, long rowId)
+    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
@@ -183,7 +217,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
         (byte[]? row, bool owned) = ResolveRow(_ambientWrite.Value, state, rowId);
         if (row is null)
         {
-            throw rowId > 0 && rowId < state.ReadNextRowId()
+            throw rowId.IsInt64 && rowId.AsInt64() > 0 && rowId.AsInt64() < state.ReadNextRowId()
                 ? new RowDeletedException(rowId, tableName)
                 : new RowNotFoundException(rowId, tableName);
         }
@@ -197,25 +231,25 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     }
 
     /// <inheritdoc />
-    public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
+    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
-        List<(long RowId, byte[] RawRow)> rows = CollectLiveRowsSorted(state);
+        List<(RowKey RowId, byte[] RawRow)> rows = CollectLiveRowsSorted(state);
 
-        IReadOnlyDictionary<long, byte[]?>? staged = _ambientWrite.Value?.StagedFor(state);
+        IReadOnlyDictionary<RowKey, byte[]?>? staged = _ambientWrite.Value?.StagedFor(state);
         if (staged is not { Count: > 0 })
         {
             return rows;
         }
 
-        var merged = new SortedDictionary<long, byte[]>();
-        foreach ((long rowId, byte[] rawRow) in rows)
+        var merged = new SortedDictionary<RowKey, byte[]>();
+        foreach ((RowKey rowId, byte[] rawRow) in rows)
         {
             merged[rowId] = rawRow;
         }
 
-        foreach ((long rowId, byte[]? value) in staged)
+        foreach ((RowKey rowId, byte[]? value) in staged)
         {
             if (value is null)
             {
@@ -230,7 +264,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
         return merged.Select(pair => (pair.Key, pair.Value)).ToList();
     }
 
-    private LatestRowLookup Lookup(PendingWrite? pending, TableState state, long rowId, out byte[] value)
+    private LatestRowLookup Lookup(PendingWrite? pending, TableState state, RowKey rowId, out byte[] value)
     {
         (byte[]? row, _) = ResolveRow(pending, state, rowId);
         if (row is null)
@@ -254,7 +288,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// Returns <see langword="null"/> when no version exists and <see cref="DeletedMarker"/> for a
     /// deletion. <c>Owned</c> is true when the bytes are a fresh copy the caller may keep or mutate.
     /// </summary>
-    private (byte[]? Row, bool Owned) ResolveRow(PendingWrite? pending, TableState state, long rowId)
+    private (byte[]? Row, bool Owned) ResolveRow(PendingWrite? pending, TableState state, RowKey rowId)
     {
         if (pending is not null && pending.TryGetStaged(state, rowId, out byte[]? staged))
         {
@@ -279,7 +313,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// overlap); the first level holding the row decides, because compaction moves a whole level down,
     /// so every deeper level is older.
     /// </summary>
-    private byte[]? ReadFromSstables(TableState state, long rowId)
+    private byte[]? ReadFromSstables(TableState state, RowKey rowId)
     {
         TableVersion version = state.AcquireVersion();
         try
@@ -294,13 +328,8 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                     break;
                 }
 
-                SsTableV2Reader reader = file.GetV2Reader(_readMode);
-                if (!reader.MayContain(rowId))
-                {
-                    continue;
-                }
-
-                SstableHit hit = reader.Lookup(
+                // Lookup starts with the range check and the Bloom probe; a miss costs only those.
+                SstableHit hit = file.GetV2Reader(_readMode).Lookup(
                     rowId,
                     ulong.MaxValue,
                     0,
@@ -324,7 +353,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     private readonly record struct SstableHit(bool Found, ulong Sequence, byte[]? Value);
 
     /// <inheritdoc />
-    public void DeleteRow(string databaseName, string tableName, long rowId)
+    public void DeleteRow(string databaseName, string tableName, RowKey rowId)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
         PendingWrite pending = AcquireWrite(out bool ownsWrite);
@@ -346,7 +375,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     bool IFixedWidthPatchStorageEngine.TryPatchFixedWidthRow(
         string databaseName,
         string tableName,
-        long rowId,
+        RowKey rowId,
         IReadOnlyList<Column> columns,
         ReadOnlySpan<int> ordinals,
         ReadOnlySpan<DataVoFixedWidthValue> values)
@@ -505,7 +534,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     }
 
     /// <inheritdoc />
-    public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
 
@@ -607,7 +636,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// Test hook: writes a new version of a live row under the same row id (the storage step of an
     /// in-place UPDATE). Returns <see langword="false"/> when the row is not live.
     /// </summary>
-    internal bool OverwriteRowForTesting(string databaseName, string tableName, long rowId, byte[] rowBytes)
+    internal bool OverwriteRowForTesting(string databaseName, string tableName, RowKey rowId, byte[] rowBytes)
     {
         TableState state = GetOrCreateTable(databaseName, tableName);
         PendingWrite pending = AcquireWrite(out bool ownsWrite);
@@ -679,7 +708,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             {
                 SsTableV2Properties properties = file.GetV2Reader(_readMode).Properties;
                 flushed = Math.Max(flushed, Math.Max(properties.LargestSequence, properties.NextRowIdSequence));
-                nextRowId = Math.Max(nextRowId, properties.LargestRowId + 1);
+                nextRowId = Math.Max(nextRowId, NextRowIdAfter(properties.LargestKey));
                 if (properties.NextRowId > 0 && (!hasMetadata || properties.NextRowIdSequence >= metadataSequence))
                 {
                     hasMetadata = true;
@@ -735,11 +764,11 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
         }
 
         // Pass 1: newest version per row across every live file, and where the newest metadata lives.
-        var newest = new Dictionary<long, (ulong Sequence, bool Live)>();
+        var newest = new Dictionary<RowKey, (ulong Sequence, bool Live)>();
         long metadataFile = -1;
         ulong metadataSequence = 0;
         bool sawMetadata = false;
-        void Observe(long rowId, ulong sequence, bool live)
+        void Observe(RowKey rowId, ulong sequence, bool live)
         {
             if (!newest.TryGetValue(rowId, out var current) || sequence > current.Sequence)
             {
@@ -756,7 +785,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                 SsTableV2Cursor cursor = reader.OpenCursor();
                 while (cursor.MoveNext())
                 {
-                    Observe(cursor.RowId, cursor.Sequence, cursor.Type == LsmValueType.Put);
+                    Observe(cursor.Key, cursor.Sequence, cursor.Type == LsmValueType.Put);
                 }
 
                 if (reader.Properties.NextRowId > 0 && (!sawMetadata || reader.Properties.NextRowIdSequence >= metadataSequence))
@@ -777,7 +806,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                 ulong sequence = InternalKey.Sequence(entry.InternalKey);
                 if (LsmRowKeyCodec.IsRowKey(userKey))
                 {
-                    Observe(LsmRowKeyCodec.DecodeRowId(userKey), sequence, InternalKey.ValueType(entry.InternalKey) == LsmValueType.Put);
+                    Observe(LsmRowKeyCodec.DecodeRowKey(userKey), sequence, InternalKey.ValueType(entry.InternalKey) == LsmValueType.Put);
                 }
                 else if (LsmRowKeyCodec.IsTableMetadataKey(userKey) && (!sawMetadata || sequence >= metadataSequence))
                 {
@@ -800,10 +829,15 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             byte[]? last = null;
             foreach (SstableEntry entry in entries)
             {
-                if (LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(entry.InternalKey)))
+                ReadOnlySpan<byte> rowUserKey = InternalKey.UserKey(entry.InternalKey);
+                if (LsmRowKeyCodec.IsRowKey(rowUserKey))
                 {
-                    first ??= entry.InternalKey;
-                    last = entry.InternalKey;
+                    byte[] widened = LsmRowKeyCodec.RowInternalKey(
+                        LsmRowKeyCodec.DecodeRowKey(rowUserKey),
+                        InternalKey.Sequence(entry.InternalKey),
+                        InternalKey.ValueType(entry.InternalKey));
+                    first ??= widened;
+                    last = widened;
                 }
             }
 
@@ -893,7 +927,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                 ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
                 if (LsmRowKeyCodec.IsRowKey(userKey))
                 {
-                    state.LatestRows.EvictFlushed(LsmRowKeyCodec.DecodeRowId(userKey), flushedThrough);
+                    state.LatestRows.EvictFlushed(LsmRowKeyCodec.DecodeRowKey(userKey), flushedThrough);
                 }
 
                 if (++inChunk == ChunkSize)
@@ -1009,7 +1043,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             hold.Hold(state.Table);
             bool wasLive = ResolveRow(null, state, operation.RowId).Row is { } previous
                 && !ReferenceEquals(previous, DeletedMarker);
-            EncodeRowId(operation.RowId, userKey);
+            LsmRowKeyCodec.EncodeRowKey(operation.RowId, userKey);
             if (operation.Kind == LsmCommitOperationKind.Put)
             {
                 state.Table.Put(userKey, sequence, operation.Value);
@@ -1037,10 +1071,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                 }
             }
 
-            if (operation.RowId >= state.NextRowId)
-            {
-                state.NextRowId = operation.RowId + 1;
-            }
+            state.NextRowId = Math.Max(state.NextRowId, NextRowIdAfter(operation.RowId));
 
             touched.Add(state);
         }
@@ -1178,12 +1209,12 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
 
     private void PublishStaged(PendingWrite pending, ulong sequence)
     {
-        foreach ((TableState state, Dictionary<long, byte[]?> rows) in pending.StagedTables)
+        foreach ((TableState state, Dictionary<RowKey, byte[]?> rows) in pending.StagedTables)
         {
             lock (state.SyncRoot)
             lock (state.OverlayGate)
             {
-                foreach ((long rowId, byte[]? value) in rows)
+                foreach ((RowKey rowId, byte[]? value) in rows)
                 {
                     if (value is null)
                     {
@@ -1269,7 +1300,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             }
 
             frame.Hold(state.Table);
-            EncodeRowId(operation.RowId, userKey);
+            LsmRowKeyCodec.EncodeRowKey(operation.RowId, userKey);
             if (operation.Kind == LsmCommitOperationKind.Put)
             {
                 state.Table.Put(userKey, sequence, operation.Value);
@@ -1413,19 +1444,19 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     private string GetTableDirectory(string databaseName, string tableName) =>
         Path.Combine(GetDatabaseDirectory(databaseName), tableName);
 
-    /// <summary>Every live row in row-id order (see <see cref="MergeLiveRows{TState}"/>).</summary>
-    private List<(long RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
+    /// <summary>Every live row in key order (see <see cref="MergeLiveRows{TState}"/>).</summary>
+    private List<(RowKey RowId, byte[] RawRow)> CollectLiveRowsSorted(TableState state)
     {
-        var rows = new List<(long RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
+        var rows = new List<(RowKey RowId, byte[] RawRow)>((int)Math.Min(Math.Max(state.LiveRowCount, 0), int.MaxValue));
         MergeLiveRows(state, rows, static (list, rowId, _, value) => list.Add((rowId, value.ToArray())));
         return rows;
     }
 
     /// <summary>
-    /// Visits the id and version sequence of every live row of a table in row-id order, without copying
+    /// Visits the key and version sequence of every live row of a table in key order, without copying
     /// any row. A row whose sequence is at most a known commit LSN has not changed since that commit.
     /// </summary>
-    public void ForEachLiveRowVersion(string databaseName, string tableName, Action<long, ulong> visit)
+    public void ForEachLiveRowVersion(string databaseName, string tableName, Action<RowKey, ulong> visit)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(visit);
         MergeLiveRows(GetOrCreateTable(databaseName, tableName), visit, static (callback, rowId, sequence, _) => callback(rowId, sequence));
@@ -1434,16 +1465,16 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
     /// <summary>Highest commit LSN applied to the in-memory tables; every row sequence is at most this.</summary>
     internal long AppliedLsn => Volatile.Read(ref _appliedLsn);
 
-    private delegate void LiveRowVisitor<TState>(TState state, long rowId, ulong sequence, ReadOnlySpan<byte> value);
+    private delegate void LiveRowVisitor<TState>(TState state, RowKey rowId, ulong sequence, ReadOnlySpan<byte> value);
 
     /// <summary>
-    /// Every live row in row-id order: a k-way merge of the unflushed overlay and the SSTable cursors
+    /// Every live row in key order: a k-way merge of the unflushed overlay and the SSTable cursors
     /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
     /// for the same reason as in <see cref="ResolveRow"/>. The value span is only valid during the call.
     /// </summary>
     private void MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit)
     {
-        var overlay = new List<(long RowId, ulong Sequence, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
+        var overlay = new List<(RowKey RowId, ulong Sequence, byte[]? Value)>((int)Math.Min(state.LatestRows.Count, int.MaxValue));
         state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)));
 
         TableVersion version = state.AcquireVersion();
@@ -1460,7 +1491,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             int overlayIndex = 0;
             while (true)
             {
-                long next = long.MaxValue;
+                RowKey next = default;
                 bool any = false;
                 if (overlayIndex < overlay.Count)
                 {
@@ -1470,9 +1501,9 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
 
                 for (int i = 0; i < cursors.Length; i++)
                 {
-                    if (hasCurrent[i] && cursors[i].RowId <= next)
+                    if (hasCurrent[i] && (!any || cursors[i].Key < next))
                     {
-                        next = cursors[i].RowId;
+                        next = cursors[i].Key;
                         any = true;
                     }
                 }
@@ -1501,7 +1532,7 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
                 int winner = -1;
                 for (int i = 0; !decided && i < cursors.Length; i++)
                 {
-                    if (hasCurrent[i] && cursors[i].RowId == next && (winner < 0 || cursors[i].Sequence > cursors[winner].Sequence))
+                    if (hasCurrent[i] && cursors[i].Key == next && (winner < 0 || cursors[i].Sequence > cursors[winner].Sequence))
                     {
                         winner = i;
                     }
@@ -1514,8 +1545,8 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
 
                 for (int i = 0; i < cursors.Length; i++)
                 {
-                    // Skip every version of this row id in this file.
-                    while (hasCurrent[i] && cursors[i].RowId == next)
+                    // Skip every version of this row key in this file.
+                    while (hasCurrent[i] && cursors[i].Key == next)
                     {
                         hasCurrent[i] = cursors[i].MoveNext();
                     }
@@ -1607,32 +1638,18 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
         return span;
     }
 
-    private static void EncodeRowId(long rowId, Span<byte> destination)
-    {
-        if (destination.Length != UserKeySize)
-        {
-            throw new ArgumentException("LSM storage engine expected an 8-byte RowId destination.", nameof(destination));
-        }
-
-        InternalKey.EncodeInt64UserKey(destination, rowId);
-    }
-
-    private static long DecodeRowId(ReadOnlySpan<byte> userKey)
-    {
-        if (userKey.Length != UserKeySize)
-        {
-            throw new InvalidDataException("LSM storage engine expected an 8-byte RowId user key.");
-        }
-
-        ulong flipped = BinaryPrimitives.ReadUInt64BigEndian(userKey);
-        return unchecked((long)(flipped ^ (ulong)long.MinValue));
-    }
+    /// <summary>
+    /// The engine row id that must follow <paramref name="key"/>: one past it for a positive integer key,
+    /// otherwise 1 (negative integers and GUIDs are never engine-assigned, so they reserve nothing).
+    /// </summary>
+    private static long NextRowIdAfter(RowKey key) =>
+        key.IsInt64 && key.AsInt64() is > 0 and < long.MaxValue ? key.AsInt64() + 1 : 1;
 
     private sealed class PendingWrite
     {
         private readonly List<(TableState State, string Database, string Table)> _touched = [];
 
-        private readonly Dictionary<TableState, Dictionary<long, byte[]?>> _staged = []; // TableState uses reference equality
+        private readonly Dictionary<TableState, Dictionary<RowKey, byte[]?>> _staged = []; // TableState uses reference equality
 
         // Change in live rows per table, relative to what this flow saw when it staged each write.
         private readonly Dictionary<TableState, long> _liveDelta = [];
@@ -1666,12 +1683,12 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
         /// <summary>In-memory effects (indexes, MVCC, notifications, lock releases) held until publication.</summary>
         public DeferredPublication Publication { get; } = new();
 
-        public IEnumerable<KeyValuePair<TableState, Dictionary<long, byte[]?>>> StagedTables => _staged;
+        public IEnumerable<KeyValuePair<TableState, Dictionary<RowKey, byte[]?>>> StagedTables => _staged;
 
         /// <summary>Records a row's pending version (<see langword="null"/> = deleted) for publication.</summary>
-        public void Stage(TableState state, long rowId, byte[]? value)
+        public void Stage(TableState state, RowKey rowId, byte[]? value)
         {
-            if (!_staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows))
+            if (!_staged.TryGetValue(state, out Dictionary<RowKey, byte[]?>? rows))
             {
                 rows = [];
                 _staged[state] = rows;
@@ -1680,14 +1697,14 @@ public sealed partial class LsmStorageEngine : IRowIdStorageEngine, IFixedWidthP
             rows[rowId] = value;
         }
 
-        public bool TryGetStaged(TableState state, long rowId, out byte[]? value)
+        public bool TryGetStaged(TableState state, RowKey rowId, out byte[]? value)
         {
             value = null;
-            return _staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows) && rows.TryGetValue(rowId, out value);
+            return _staged.TryGetValue(state, out Dictionary<RowKey, byte[]?>? rows) && rows.TryGetValue(rowId, out value);
         }
 
-        public IReadOnlyDictionary<long, byte[]?>? StagedFor(TableState state) =>
-            _staged.TryGetValue(state, out Dictionary<long, byte[]?>? rows) ? rows : null;
+        public IReadOnlyDictionary<RowKey, byte[]?>? StagedFor(TableState state) =>
+            _staged.TryGetValue(state, out Dictionary<RowKey, byte[]?>? rows) ? rows : null;
 
         public int Depth { get; set; } = 1;
 

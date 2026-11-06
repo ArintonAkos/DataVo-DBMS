@@ -600,7 +600,7 @@ public static class DataVoCompiledQuery
             }
 
             MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-            operations.Add(new FixedWidthPatchOperation(RowKeyConversions.ToRowId(rowId), update.Value0, update.Value1));
+            operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
         }
 
         return engine.StorageContext.TryPatchFixedWidthRows(

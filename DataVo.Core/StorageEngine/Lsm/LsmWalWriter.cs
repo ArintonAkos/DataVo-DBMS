@@ -80,28 +80,6 @@ internal sealed class LsmWalWriter
         }
     }
 
-    internal LsmWalDurabilityTicket AppendRowIdPutMutationsBatch(ReadOnlySpan<LsmBatchRowPutEntry> entries)
-    {
-        if (entries.IsEmpty)
-        {
-            return LsmWalDurabilityTicket.None;
-        }
-
-        int offset = 0;
-        Span<byte> userKey = stackalloc byte[sizeof(long)];
-        foreach (LsmBatchRowPutEntry entry in entries)
-        {
-            ValidateMutation(entry.Seqno, LsmValueType.Put, entry.Value);
-            InternalKey.EncodeInt64UserKey(userKey, entry.RowId);
-            offset = WriteBatchFrameOrFlush(offset, userKey, entry.Seqno, entry.Value);
-        }
-
-        AppendBatchTail(offset);
-        return _durabilityMode == LsmWalDurabilityMode.StrictFsync
-            ? new LsmWalDurabilityTicket(this, Volatile.Read(ref _appendedLsn))
-            : LsmWalDurabilityTicket.None;
-    }
-
     internal void FlushBufferedMutations()
     {
         if (_durabilityMode == LsmWalDurabilityMode.StrictFsync)
@@ -210,45 +188,6 @@ internal sealed class LsmWalWriter
         uint checksum = WalCrc32C.HashToUInt32(target[8..frameLength]);
         BinaryPrimitives.WriteUInt32LittleEndian(target.Slice(4, sizeof(uint)), checksum);
         return frameLength;
-    }
-
-    private int WriteBatchFrameOrFlush(
-        int offset,
-        ReadOnlySpan<byte> userKey,
-        ulong seqno,
-        ReadOnlySpan<byte> value)
-    {
-        int frameLength = checked(WalAppender.FrameHeaderSize + LsmWalRecordCodec.MeasureSize(userKey, value));
-        if (frameLength > _frameBuffer.Length)
-        {
-            if (offset > 0)
-            {
-                _store.AppendFrameBytes(_frameBuffer.AsSpan(0, offset), flushToDisk: false);
-                Volatile.Write(ref _appendedLsn, _nextLsn);
-            }
-
-            AppendMutation(userKey, seqno, LsmValueType.Put, value, flushToDisk: false);
-            return 0;
-        }
-
-        if (offset + frameLength > _frameBuffer.Length)
-        {
-            _store.AppendFrameBytes(_frameBuffer.AsSpan(0, offset), flushToDisk: false);
-            Volatile.Write(ref _appendedLsn, _nextLsn);
-            offset = 0;
-        }
-
-        return offset + WriteMutationFrame(_frameBuffer.AsSpan(offset, frameLength), userKey, seqno, LsmValueType.Put, value);
-    }
-
-    private void AppendBatchTail(int offset)
-    {
-        if (offset > 0)
-        {
-            _store.AppendFrameBytes(_frameBuffer.AsSpan(0, offset), flushToDisk: false);
-        }
-
-        Volatile.Write(ref _appendedLsn, _nextLsn);
     }
 }
 

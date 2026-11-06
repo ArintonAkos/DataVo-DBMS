@@ -1,3 +1,4 @@
+using DataVo.Core;
 using System.Text;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
@@ -78,14 +79,14 @@ public sealed class LsmIndexTableTests : IDisposable
         {
             using (var batch = engine.BeginWriteBatch())
             {
-                long rowId = engine.InsertRow(Db, Table, Encoding.UTF8.GetBytes("row"));
+                RowKey rowId = engine.InsertRow(Db, Table, Encoding.UTF8.GetBytes("row"));
                 engine.IndexPut(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(42), rowId);
                 batch.Complete();
             }
 
             using (var failed = engine.BeginWriteBatch())
             {
-                long rowId = engine.InsertRow(Db, Table, Encoding.UTF8.GetBytes("discarded"));
+                RowKey rowId = engine.InsertRow(Db, Table, Encoding.UTF8.GetBytes("discarded"));
                 engine.IndexPut(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(43), rowId);
                 // not completed: the statement failed, nothing may persist
             }
@@ -119,9 +120,9 @@ public sealed class LsmIndexTableTests : IDisposable
         }
 
         using var reopened = new LsmStorageEngine(_root, Relaxed, mode);
-        List<long> rows = reopened.IndexLookup(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(42));
+        List<RowKey> rows = reopened.IndexLookup(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(42));
         Assert.Equal(60, rows.Count);
-        Assert.All(rows, rowId => Assert.Equal(42, rowId % 100));
+        Assert.All(rows, rowId => Assert.Equal(42, (long)rowId % 100));
         Assert.Equal(3_000, reopened.IndexEntries(Db, Table, Index).Count);
     }
 
@@ -131,7 +132,7 @@ public sealed class LsmIndexTableTests : IDisposable
         var abandoned = new LsmStorageEngine(_root, Relaxed);
         using (var batch = abandoned.BeginWriteBatch())
         {
-            long rowId = abandoned.InsertRow(Db, Table, Encoding.UTF8.GetBytes("row"));
+            RowKey rowId = abandoned.InsertRow(Db, Table, Encoding.UTF8.GetBytes("row"));
             abandoned.IndexPut(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(5), rowId);
             batch.Complete();
         }
@@ -152,7 +153,7 @@ public sealed class LsmIndexTableTests : IDisposable
         {
             Assert.False(engine.IsIndexBuilt(Db, Table, Index));
             engine.IndexPut(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(1), 99); // replaced by the build
-            engine.BuildIndex(Db, Table, Index, Enumerable.Range(1, 1_000).Select(i => (LsmIndexKeyCodec.EncodeInteger(i % 10), (long)i)));
+            engine.BuildIndex(Db, Table, Index, Enumerable.Range(1, 1_000).Select(i => (LsmIndexKeyCodec.EncodeInteger(i % 10), (RowKey)i)));
             Assert.True(engine.IsIndexBuilt(Db, Table, Index));
             Assert.Equal(100, engine.IndexLookup(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(3)).Count);
             Assert.DoesNotContain(99L, engine.IndexLookup(Db, Table, Index, LsmIndexKeyCodec.EncodeInteger(1)));

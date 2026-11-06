@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading;
 
 namespace DataVo.Core.StorageEngine.Lsm;
@@ -5,25 +6,29 @@ namespace DataVo.Core.StorageEngine.Lsm;
 /// <summary>Tri-state result of an overlay lookup.</summary>
 internal enum LatestRowLookup
 {
-    /// <summary>The overlay has no version of this row id: consult the SSTables.</summary>
+    /// <summary>The overlay has no version of this row key: consult the SSTables.</summary>
     Missing = 0,
-    /// <summary>The row id resolves to a live row image.</summary>
+    /// <summary>The row key resolves to a live row image.</summary>
     Live = 1,
-    /// <summary>The row id was deleted (latest version is a tombstone).</summary>
+    /// <summary>The row was deleted (latest version is a tombstone).</summary>
     Tombstone = 2,
 }
 
 /// <summary>
-/// Lock-free overlay of row versions that are published but not yet flushed to an SSTable, keyed by the
-/// engine's dense row ids. Once a MemTable is flushed, its versions are evicted here and served from the
+/// Lock-free overlay of row versions that are published but not yet flushed to an SSTable, keyed by
+/// <see cref="RowKey"/>. Once a MemTable is flushed, its versions are evicted here and served from the
 /// memory-mapped SSTables instead, so the overlay holds recent writes only and the GC heap no longer
 /// grows with the table.
 /// </summary>
 /// <remarks>
+/// <para>Two places hold versions, chosen by key alone, so a key always lives in the same one. Engine
+/// row ids (small non-negative integers) go to a dense array paged by the integer: a read is two array
+/// loads and a publish allocates nothing. Every other key (a GUID, a negative or very large integer
+/// primary key) goes to a concurrent hash map of immutable entries, whose reads are lock-free too.</para>
 /// <para>Concurrency: mutations (publish and eviction) are serialized by the caller; point reads are
 /// lock-free. Published row buffers are immutable (patches are copy-on-write), so a reader sees either
-/// the old complete image or the new one. Every slot records the sequence of its version so a flush
-/// evicts only versions it wrote, never a newer one published meanwhile.</para>
+/// the old complete image or the new one. Every version records its sequence so a flush evicts only
+/// versions it wrote, never a newer one published meanwhile.</para>
 /// <para>Ordering with flushes: a flush publishes its SSTable (manifest edit) before evicting, and readers
 /// check the overlay before taking the current file set; a reader that misses an evicted slot therefore
 /// always sees the new file.</para>
@@ -34,71 +39,89 @@ internal sealed class LsmLatestRowStore
     private const int PageSize = 1 << PageShift; // 4K slots: small enough that sparse recent writes stay cheap
     private const int PageMask = PageSize - 1;
 
+    /// <summary>
+    /// Integers below this use the dense pages (65,536 pages, a page table of at most 512 KB); larger
+    /// ones would make the page table itself huge, so they go to the sparse map.
+    /// </summary>
+    internal const long DenseLimit = 1L << (PageShift + 16);
+
     /// <summary>Sentinel published for deleted rows; matched by reference, never by content.</summary>
     private static readonly byte[] TombstoneSentinel = new byte[1];
 
     private Page?[] _pages = new Page?[16];
+    private readonly ConcurrentDictionary<RowKey, SparseVersion> _sparse = new();
     private long _count;
 
     /// <summary>Row versions currently held (live rows and tombstones).</summary>
     public long Count => Volatile.Read(ref _count);
 
-    /// <summary>Looks up the overlay version of <paramref name="rowId"/>. Lock-free.</summary>
-    public LatestRowLookup TryGet(long rowId, out byte[] rowBytes)
+    /// <summary>Looks up the overlay version of <paramref name="key"/>. Lock-free.</summary>
+    public LatestRowLookup TryGet(RowKey key, out byte[] rowBytes)
     {
         rowBytes = [];
-        if (rowId < 0)
+        byte[]? value;
+        if (TryGetDenseIndex(key, out long rowId))
+        {
+            long pageIndex = rowId >> PageShift;
+            Page?[] pages = Volatile.Read(ref _pages);
+            if (pageIndex >= pages.Length)
+            {
+                return LatestRowLookup.Missing;
+            }
+
+            Page? page = Volatile.Read(ref pages[pageIndex]);
+            if (page is null)
+            {
+                return LatestRowLookup.Missing;
+            }
+
+            value = Volatile.Read(ref page.Slots[rowId & PageMask]);
+        }
+        else
+        {
+            value = _sparse.TryGetValue(key, out SparseVersion? version) ? version.Value : null;
+        }
+
+        if (value is null)
         {
             return LatestRowLookup.Missing;
         }
 
-        long pageIndex = rowId >> PageShift;
-        Page?[] pages = Volatile.Read(ref _pages);
-        if (pageIndex >= pages.Length)
-        {
-            return LatestRowLookup.Missing;
-        }
-
-        Page? page = Volatile.Read(ref pages[pageIndex]);
-        if (page is null)
-        {
-            return LatestRowLookup.Missing;
-        }
-
-        byte[]? slot = Volatile.Read(ref page.Slots[rowId & PageMask]);
-        if (slot is null)
-        {
-            return LatestRowLookup.Missing;
-        }
-
-        if (ReferenceEquals(slot, TombstoneSentinel))
+        if (ReferenceEquals(value, TombstoneSentinel))
         {
             return LatestRowLookup.Tombstone;
         }
 
-        rowBytes = slot;
+        rowBytes = value;
         return LatestRowLookup.Live;
     }
 
     /// <summary>Publishes a live version. Serialized by the caller.</summary>
-    public void Set(long rowId, byte[] rowBytes, ulong sequence)
+    public void Set(RowKey key, byte[] rowBytes, ulong sequence)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rowBytes);
-        Publish(rowId, rowBytes, sequence);
+        Publish(key, rowBytes, sequence);
     }
 
     /// <summary>Publishes a deletion. Serialized by the caller.</summary>
-    public void SetTombstone(long rowId, ulong sequence) => Publish(rowId, TombstoneSentinel, sequence);
+    public void SetTombstone(RowKey key, ulong sequence) => Publish(key, TombstoneSentinel, sequence);
 
     /// <summary>
-    /// Drops the version of <paramref name="rowId"/> when it is at or below <paramref name="flushedThrough"/>,
+    /// Drops the version of <paramref name="key"/> when it is at or below <paramref name="flushedThrough"/>,
     /// i.e. it is now in an SSTable. A newer version (published after the flushed MemTable) stays.
     /// Serialized by the caller with publishes.
     /// </summary>
-    public void EvictFlushed(long rowId, ulong flushedThrough)
+    public void EvictFlushed(RowKey key, ulong flushedThrough)
     {
-        if (rowId < 0)
+        if (!TryGetDenseIndex(key, out long rowId))
         {
+            if (_sparse.TryGetValue(key, out SparseVersion? version)
+                && version.Sequence <= flushedThrough
+                && _sparse.TryRemove(key, out _))
+            {
+                Interlocked.Decrement(ref _count);
+            }
+
             return;
         }
 
@@ -125,12 +148,22 @@ internal sealed class LsmLatestRowStore
     }
 
     /// <summary>
-    /// Invokes <paramref name="visit"/> for every version in ascending row-id order, with its sequence
-    /// and <see langword="null"/> for a deletion. The value is read before the sequence, so a concurrent
-    /// publish can only make a sequence look newer than its value, never older.
+    /// Invokes <paramref name="visit"/> for every version in ascending key order, with its sequence and
+    /// <see langword="null"/> for a deletion. A dense value is read before its sequence, so a concurrent
+    /// publish can only make a sequence look newer than its value, never older; a sparse version is one
+    /// immutable object.
     /// </summary>
-    public void ForEachVersion<TState>(TState state, Action<TState, long, ulong, byte[]?> visit)
+    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit)
     {
+        // Sparse keys sort around the dense ones: negative integers before, large integers and GUIDs after.
+        List<KeyValuePair<RowKey, SparseVersion>>? sparse = null;
+        if (!_sparse.IsEmpty)
+        {
+            sparse = new List<KeyValuePair<RowKey, SparseVersion>>(_sparse);
+            sparse.Sort(static (x, y) => x.Key.CompareTo(y.Key));
+        }
+
+        int next = 0;
         Page?[] pages = Volatile.Read(ref _pages);
         for (int pageIndex = 0; pageIndex < pages.Length; pageIndex++)
         {
@@ -147,14 +180,41 @@ internal sealed class LsmLatestRowStore
                 if (value is not null)
                 {
                     ulong sequence = Volatile.Read(ref page.Sequences[slot]);
-                    visit(state, pageBase + slot, sequence, ReferenceEquals(value, TombstoneSentinel) ? null : value);
+                    RowKey key = pageBase + slot;
+                    while (sparse is not null && next < sparse.Count && sparse[next].Key < key)
+                    {
+                        VisitSparse(state, visit, sparse[next++]);
+                    }
+
+                    visit(state, key, sequence, ReferenceEquals(value, TombstoneSentinel) ? null : value);
                 }
             }
         }
+
+        while (sparse is not null && next < sparse.Count)
+        {
+            VisitSparse(state, visit, sparse[next++]);
+        }
     }
 
-    private void Publish(long rowId, byte[] value, ulong sequence)
+    private static void VisitSparse<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, KeyValuePair<RowKey, SparseVersion> entry) =>
+        visit(state, entry.Key, entry.Value.Sequence, ReferenceEquals(entry.Value.Value, TombstoneSentinel) ? null : entry.Value.Value);
+
+    private void Publish(RowKey key, byte[] value, ulong sequence)
     {
+        if (!TryGetDenseIndex(key, out long rowId))
+        {
+            // Publishes are serialized, so the check and the write cannot race with another publish.
+            bool added = !_sparse.ContainsKey(key);
+            _sparse[key] = new SparseVersion(value, sequence);
+            if (added)
+            {
+                Interlocked.Increment(ref _count);
+            }
+
+            return;
+        }
+
         Page page = EnsurePage(rowId);
         int slot = (int)(rowId & PageMask);
         if (page.Slots[slot] is null)
@@ -168,15 +228,16 @@ internal sealed class LsmLatestRowStore
         Volatile.Write(ref page.Slots[slot], value);
     }
 
+    /// <summary>Whether <paramref name="key"/> lives in the dense pages, and at which integer.</summary>
+    private static bool TryGetDenseIndex(RowKey key, out long rowId)
+    {
+        rowId = unchecked((long)(key.Low ^ 0x8000_0000_0000_0000UL));
+        return key.High == 0 && (ulong)rowId < DenseLimit;
+    }
+
     private Page EnsurePage(long rowId)
     {
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNegative(rowId);
         long pageIndex = rowId >> PageShift;
-        if (pageIndex > int.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(nameof(rowId), rowId, "Row id exceeds the overlay's addressable range.");
-        }
-
         Page?[] pages = _pages;
         if (pageIndex >= pages.Length)
         {
@@ -207,5 +268,13 @@ internal sealed class LsmLatestRowStore
         public readonly byte[]?[] Slots = new byte[]?[PageSize];
         public readonly ulong[] Sequences = new ulong[PageSize];
         public int Occupied;
+    }
+
+    /// <summary>An immutable (value, sequence) pair: a reader never sees one without the other.</summary>
+    private sealed class SparseVersion(byte[] value, ulong sequence)
+    {
+        public byte[] Value { get; } = value;
+
+        public ulong Sequence { get; } = sequence;
     }
 }
