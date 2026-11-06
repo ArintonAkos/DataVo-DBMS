@@ -94,6 +94,11 @@ internal static class SubqueryExpressionMaterializer
         }
 
         string fieldName = subqueryResult.Fields[0];
+        if (node.IsNegated)
+        {
+            return MaterializeNotIn(node, subqueryResult, fieldName);
+        }
+
         ExpressionNode? combined = null;
         HashSet<string> seenValues = [];
 
@@ -129,6 +134,47 @@ internal static class SubqueryExpressionMaterializer
         }
 
         return combined ?? new LiteralNode { Value = false };
+    }
+
+    /// <summary>
+    /// SQL <c>x NOT IN (subquery)</c>: true for every row when the subquery is empty; unknown (no row) when it
+    /// returned a NULL, since x could equal it; otherwise x differs from every value. A NULL x compares false.
+    /// </summary>
+    private static ExpressionNode MaterializeNotIn(InSubqueryExpressionNode node, QueryResult subqueryResult, string fieldName)
+    {
+        if (subqueryResult.Data.Count == 0)
+        {
+            return new LiteralNode { Value = true };
+        }
+
+        ExpressionNode? combined = null;
+        HashSet<string> seenValues = [];
+        foreach (var row in subqueryResult.Data)
+        {
+            row.TryGetValue(fieldName, out var value);
+            if (value == null)
+            {
+                return new LiteralNode { Value = false };
+            }
+
+            if (!seenValues.Add(BuildValueSignature(value)))
+            {
+                continue;
+            }
+
+            ExpressionNode differs = new BinaryExpressionNode
+            {
+                Operator = Operators.NOT_EQUALS,
+                Left = CloneExpression(node.Left),
+                Right = ToLiteralNode(value)
+            };
+
+            combined = combined == null
+                ? differs
+                : new BinaryExpressionNode { Operator = Operators.AND, Left = combined, Right = differs };
+        }
+
+        return combined!;
     }
 
     private static string BuildValueSignature(object value)
