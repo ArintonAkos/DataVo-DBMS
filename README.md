@@ -57,6 +57,20 @@ update on macOS, because both wait for the same flush. Without the power-loss gu
 updates commit as one batch, SQLite is currently 1.4-2.6x faster and allocates less. An earlier chart here
 batched DataVo's updates but not SQLite's and has been withdrawn.
 
+Storage footprint (November 6, 2026, macOS arm64, 1M rows of `(Id, Name VARCHAR(20), Amount INT)`, both
+engines given identical data, sizes after a clean close). LSM tables whose primary key is one INT or GUID
+column are clustered: rows are stored under their key, with no separate primary-key index.
+
+| 1M rows | DataVo LSM (clustered) | DataVo LSM (engine row ids) | SQLite |
+| --- | --- | --- | --- |
+| INT key, size | 21.0 MB | 41.4 MB | 19.0 MB (`INTEGER PRIMARY KEY`) |
+| GUID key (version 7), size | 29.3 MB | 61.4 MB | 35.4 MB (16-byte `BLOB`, `WITHOUT ROWID`) |
+| INT key, typed bulk insert | 1.0 s | 2.2-3.1 s | 0.44-0.77 s (one transaction) |
+| GUID key, typed bulk insert | 1.8 s | 2.8 s | 0.77 s |
+
+Clustering halves the INT table and makes GUID tables smaller than SQLite's best layout for them; SQLite
+still inserts faster. Clustering is on by default for new tables (`DataVoConfig.ClusteredPrimaryKeys`).
+
 Linux CI sqlite-vec rerun plots:
 
 ![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.png)
