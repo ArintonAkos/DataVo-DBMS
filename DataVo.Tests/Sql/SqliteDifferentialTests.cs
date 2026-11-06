@@ -322,6 +322,13 @@ public sealed class SqliteDifferentialTests : IDisposable
                 return $"NOT ({Predicate(table, depth + 1, qualified)})";
             }
 
+            if (table == "P" && depth < 2 && _random.Next(8) == 0)
+            {
+                // C.PId can be NULL, which makes NOT IN unknown for every row.
+                string where = _random.Next(2) == 0 ? string.Empty : $" WHERE V > {_random.Next(100)}";
+                return $"{(qualified ? "P." : string.Empty)}Id {(_random.Next(2) == 0 ? "NOT " : string.Empty)}IN (SELECT PId FROM C{where})";
+            }
+
             string prefix = qualified ? table + "." : string.Empty;
             if (table == "C")
             {
