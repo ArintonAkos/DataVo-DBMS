@@ -212,9 +212,14 @@ lived in a separate index mapping key -> id. Measured on 1M rows, same build, cl
 | INT, clustered | 1.3 s | 25.1 MB | 8.0 us |
 | GUID, engine row ids | 3.3 s | 61.4 MB | 9.4 us |
 | GUID, clustered | 2.3 s | 45.5 MB | 8.7 us |
+| INT, clustered, key stored once | 1.0 s | 21.0 MB | 8.2 us |
+| GUID, clustered, key stored once | 1.8 s | 29.3 MB | 9.0 us |
 
 The whole primary-key index disappears (writing it was half the insert work), and a key lookup is one
-read. The INT table is now smaller than SQLite's 29 MB.
+read. SQLite holds the same rows in 19.0 MB (INT) and 35.4 MB (GUID as a 16-byte BLOB key, WITHOUT
+ROWID), so DataVo is still about 1.3x larger. An earlier version of this note claimed "smaller than
+SQLite's 29 MB": that SQLite figure came from a different row shape. Compare sizes only on identical
+data, measured in the same run.
 
 Lessons:
 
@@ -228,6 +233,11 @@ Lessons:
   transaction X" mark per row id forever; with clustered keys, inserting the same key again after a delete
   inherited that mark and every later statement reported a conflict. Version metadata is now dropped
   when no transaction could need it, and a new version replaces the old one.
+- **Store the key once.** A clustered row still carried its key inside the row value, so a GUID was
+  stored twice (16 bytes plus a flag per row). A primary key is never NULL, so the stored row now marks
+  the key cell NULL and every read puts it back from the row key; rows written before still hold the
+  key and read unchanged. GUID table 45.5 -> 29.3 MB (SQLite: 35.4 MB), INT 25.1 -> 21.0 MB (SQLite:
+  19.0 MB), and inserts got faster too, since less is written.
 - **Testing the new feature found an old bug.** A GUID-keyed vector table returned no nearest neighbour
   after a DELETE. The same happened with plain INT tables: in LSM mode DELETE never reached the vector
   graph. Always check whether a failure is new before assuming your change caused it.
