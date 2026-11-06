@@ -55,10 +55,10 @@ public static class SqlWorkloadRunner
                 random = new Random(10);
                 results.Add(Repeat("Key range scan (100 rows)", options.RangeScans, _ => engine.RangeScan(random.Next(1, data.Orders - 100), 100)));
                 log($"{engine.Name}: point and range reads done");
-                results.Add(Repeat("COUNT with filter (full scan)", options.ScanQueries, _ => engine.FilteredCount()));
-                results.Add(Repeat("GROUP BY (full scan)", options.ScanQueries, _ => engine.GroupByStatus()));
-                results.Add(Repeat("JOIN + GROUP BY", options.ScanQueries, _ => engine.JoinByRegion()));
-                results.Add(Repeat("ORDER BY ... LIMIT 10", options.ScanQueries, _ => engine.TopTen()));
+                results.Add(Repeat("COUNT with filter (full scan)", options.ScanQueries, _ => engine.FilteredCount(), warmupCalls: 2));
+                results.Add(Repeat("GROUP BY (full scan)", options.ScanQueries, _ => engine.GroupByStatus(), warmupCalls: 2));
+                results.Add(Repeat("JOIN + GROUP BY", options.ScanQueries, _ => engine.JoinByRegion(), warmupCalls: 2));
+                results.Add(Repeat("ORDER BY ... LIMIT 10", options.ScanQueries, _ => engine.TopTen(), warmupCalls: 2));
                 log($"{engine.Name}: analytic queries done");
 
                 random = new Random(11);
@@ -191,8 +191,14 @@ public static class SqlWorkloadRunner
         return new SqlWorkloadMeasurement(operation, stopwatch.Elapsed.TotalMilliseconds, 1, 0, 0, checksum);
     }
 
-    private static SqlWorkloadMeasurement Repeat(string operation, int count, Func<int, long> action)
+    private static SqlWorkloadMeasurement Repeat(string operation, int count, Func<int, long> action, int warmupCalls = 0)
     {
+        // Unmeasured calls first, so no engine is timed while it is still compiling its code path.
+        for (int i = 0; i < warmupCalls; i++)
+        {
+            action(i);
+        }
+
         Collect();
         // Warm up with a few calls that are not measured (JIT, statement preparation, caches).
         int warmup = Math.Min(3, count);
