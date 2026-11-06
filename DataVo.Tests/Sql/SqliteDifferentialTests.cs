@@ -259,11 +259,27 @@ public sealed class SqliteDifferentialTests : IDisposable
 
         private void Query()
         {
-            switch (_random.Next(9))
+            switch (_random.Next(12))
             {
                 case 0:
                     Select($"SELECT Id, A, B, S FROM P WHERE {Predicate("P", 0)} ORDER BY Id", ordered: true);
                     break;
+                case 9:
+                    // A join aggregated per group, with or without filters on either side.
+                    Select(_random.Next(2) == 0
+                        ? $"SELECT P.B AS b, COUNT(*) AS n, SUM(C.V) AS s, MAX(C.V) AS hi FROM P JOIN C ON P.Id = C.PId WHERE {Predicate("C", 1, qualified: true)} GROUP BY P.B"
+                        : $"SELECT COUNT(*) AS n, MIN(C.V) AS lo, SUM(P.A) AS s FROM P JOIN C ON P.Id = C.PId WHERE {Predicate("P", 1, qualified: true)}", ordered: false);
+                    break;
+                case 10:
+                    // A top-N on a non-key column; Id breaks ties so the expected order is unique.
+                    Select($"SELECT Id, A FROM P WHERE A IS NOT NULL ORDER BY A {(_random.Next(2) == 0 ? "DESC" : "ASC")}, Id LIMIT {_random.Next(1, 6)}", ordered: true);
+                    break;
+                case 11:
+                    {
+                        int from = _random.Next(IdRange);
+                        Select($"SELECT Id, A, B FROM P WHERE Id >= {from} AND Id < {from + _random.Next(1, 10)} ORDER BY Id", ordered: true);
+                        break;
+                    }
                 case 1:
                     Select($"SELECT COUNT(*) AS n FROM P WHERE {Predicate("P", 0)}", ordered: true);
                     break;
