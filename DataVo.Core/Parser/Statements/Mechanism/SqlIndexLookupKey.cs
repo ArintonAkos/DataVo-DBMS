@@ -74,8 +74,38 @@ internal static class SqlIndexLookupKey
             return TryBuildStringKey(literal, out key);
         }
 
-        // GUID (the scan compares text case-sensitively), DATE, BIT and VECTOR keep the scan fallback.
+        if (column.Type.Equals("GUID", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryBuildGuidKey(literal, out key);
+        }
+
+        // DATE, BIT and VECTOR keep the scan fallback.
         return false;
+    }
+
+    /// <summary>
+    /// A GUID column equals a literal that parses as the same GUID, in any case or format (as in SQL
+    /// Server). Without an authoritative key, every lookup of a GUID that does not exist fell back to a
+    /// full table scan to confirm the miss: about a second per query on a million rows.
+    /// </summary>
+    private static bool TryBuildGuidKey(object literal, out string key)
+    {
+        Guid value;
+        switch (literal)
+        {
+            case Guid guid:
+                value = guid;
+                break;
+            case string text when Guid.TryParse(text.Trim('\''), out Guid parsed):
+                value = parsed;
+                break;
+            default:
+                key = string.Empty; // not a GUID: no GUID value can equal it, and the empty key finds nothing
+                return true;
+        }
+
+        key = value.ToString("D");
+        return true;
     }
 
     private static bool TryBuildIntegerKey(object literal, out string key)
