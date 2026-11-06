@@ -23,4 +23,13 @@ internal interface ILsmIndexStore
     void DropIndexTable(string databaseName, string tableName, string indexName);
 
     bool IsIndexBuilt(string databaseName, string tableName, string indexName);
+
+    /// <summary>
+    /// Whether the index is a clustered table's primary key, which the rows themselves serve: its writes
+    /// are dropped, so callers can skip encoding them.
+    /// </summary>
+    bool IsRowKeyIndex(string databaseName, string tableName, string indexName);
+
+    /// <summary>For a <see cref="IsRowKeyIndex"/> index: whether a live row has <paramref name="key"/>, without allocating.</summary>
+    bool RowKeyIndexContains(string databaseName, string tableName, RowKey key);
 }

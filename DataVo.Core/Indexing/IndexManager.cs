@@ -1593,8 +1593,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         bool keysAreNew = false)
     {
-        if (_lsmStore is not null)
+        if (_lsmStore is { } store)
         {
+            if (store.IsRowKeyIndex(databaseName, tableName, indexName))
+            {
+                return; // a clustered table's rows are its primary-key index
+            }
+
             foreach ((long key, RowKey rowId) in entries)
             {
                 LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(key), rowId, indexName, tableName, databaseName, keysAreNew);
@@ -1712,8 +1717,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         bool keysAreNew = false)
     {
-        if (_lsmStore is not null)
+        if (_lsmStore is { } store)
         {
+            if (store.IsRowKeyIndex(databaseName, tableName, indexName))
+            {
+                return; // a clustered table's rows are its primary-key index
+            }
+
             for (int i = 0; i < keys.Length; i++)
             {
                 LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeInteger(keys[i]), rowIds[i], indexName, tableName, databaseName, keysAreNew);
@@ -1860,8 +1870,13 @@ public partial class IndexManager : IDisposable
         string databaseName,
         bool keysAreNew = false)
     {
-        if (_lsmStore is not null)
+        if (_lsmStore is { } store)
         {
+            if (store.IsRowKeyIndex(databaseName, tableName, indexName))
+            {
+                return; // a clustered table's rows are its primary-key index
+            }
+
             foreach ((Guid key, RowKey rowId) in entries)
             {
                 LsmUpsertPrimaryKey(LsmIndexKeyCodec.EncodeGuid(key), rowId, indexName, tableName, databaseName, keysAreNew);
@@ -2200,6 +2215,29 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Looks up an integer primary key without building a string key or traversing the generic BTree.
     /// </summary>
+    /// <summary>
+    /// Whether a persisted (LSM) primary-key index holds <paramref name="key"/>. Returns
+    /// <see langword="null"/> when the answer is not authoritative (no persisted index, or it is missing),
+    /// so the caller falls back to its slower probes.
+    /// </summary>
+    internal bool? PersistedIntegerPrimaryKeyExists(long key, string indexName, string tableName, string databaseName)
+    {
+        if (_lsmStore is not { } store)
+        {
+            return null;
+        }
+
+        // A clustered table answers from its rows without encoding the key or building a result list.
+        if (store.IsRowKeyIndex(databaseName, tableName, indexName))
+        {
+            return store.RowKeyIndexContains(databaseName, tableName, key);
+        }
+
+        return store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(key)) is { } rows
+            ? rows.Count > 0
+            : null;
+    }
+
     public bool TryLookupIntegerPrimaryKey(
         long key,
         string indexName,

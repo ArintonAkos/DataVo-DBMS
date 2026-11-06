@@ -328,6 +328,14 @@ internal sealed partial class InsertRowService(
 
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
 
+        // A clustered table's storage enforces its primary key (present, unique, also within the batch)
+        // atomically when it stores the rows, so the key needs no checks or index entries here.
+        bool clustered = context.ResolveClusteredKey(databaseName, tableName) is not null;
+        if (clustered)
+        {
+            primaryKeys = [];
+        }
+
         bool hasIntegerPrimaryKey = TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, tableColumns, out int integerPrimaryKeyOrdinal);
         bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
         List<string>? messages = hasConstraints ? [] : null;
@@ -1151,6 +1159,14 @@ internal sealed partial class InsertRowService(
     private bool IntegerPrimaryKeyExists(string tableName, string databaseName, long primaryKeyValue)
     {
         string indexName = GetPrimaryKeyIndexName(tableName);
+
+        // A persisted index answers authoritatively in one probe, hit or miss (for a clustered table it is
+        // the row lookup itself): no fast lane to consult, and no key string to build for a second probe.
+        if (indexes.PersistedIntegerPrimaryKeyExists(primaryKeyValue, indexName, tableName, databaseName) is bool persisted)
+        {
+            return persisted;
+        }
+
         if (indexes.TryLookupIntegerPrimaryKey(primaryKeyValue, indexName, tableName, databaseName, out _))
         {
             return true;
@@ -1412,6 +1428,11 @@ internal sealed partial class InsertRowService(
             if (string.IsNullOrWhiteSpace(indexName))
             {
                 continue;
+            }
+
+            if (IsPrimaryKeyIndex(tableName, indexName) && context.ResolveClusteredKey(databaseName, tableName) is not null)
+            {
+                continue; // a clustered table's rows are its primary-key index
             }
 
             string indexKind = index.IndexKind ?? string.Empty;

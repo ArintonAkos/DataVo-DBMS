@@ -34,6 +34,12 @@ public sealed partial class LsmStorageEngine
             ? layout
             : null;
 
+    bool ILsmIndexStore.IsRowKeyIndex(string databaseName, string tableName, string indexName) =>
+        RowKeyIndex(databaseName, tableName, indexName) is not null;
+
+    bool ILsmIndexStore.RowKeyIndexContains(string databaseName, string tableName, RowKey key) =>
+        IsRowLive(databaseName, tableName, key);
+
     void ILsmIndexStore.IndexPut(string databaseName, string tableName, string indexName, byte[] encodedKey, RowKey rowId)
     {
         if (RowKeyIndex(databaseName, tableName, indexName) is null)
