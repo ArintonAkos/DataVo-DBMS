@@ -548,7 +548,7 @@ public sealed class LsmTable : IDisposable
     /// and last row versions. Compiled fully optimized up front: a flush runs a few times per process, so
     /// tiered compilation would otherwise run it mostly as unoptimized code (about 3x slower).
     /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private static RowBounds WriteRows(SsTableV2Writer writer, MemTable memTable)
     {
         bool hasRows = false;

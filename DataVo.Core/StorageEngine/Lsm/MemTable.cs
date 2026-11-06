@@ -283,7 +283,7 @@ public sealed class MemTable : IDisposable
         return handle;
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private long GetForward(long node, int level)
     {
         ref long link = ref _arena.ResolveInt64Reference(node, ForwardOffset + (8 * level));
@@ -296,7 +296,7 @@ public sealed class MemTable : IDisposable
         Volatile.Write(ref link, next);
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private ReadOnlySpan<byte> GetKey(long node)
     {
         Span<byte> hdr = _arena.Resolve(node, ForwardOffset);
@@ -308,7 +308,7 @@ public sealed class MemTable : IDisposable
         return full.Slice(keyStart, keyLen);
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private ReadOnlySpan<byte> GetValue(long node)
     {
         Span<byte> hdr = _arena.Resolve(node, ForwardOffset);
@@ -391,12 +391,12 @@ public sealed class MemTable : IDisposable
         /// <summary>The current entry. Valid only after a successful <see cref="MoveNext"/>.</summary>
         public readonly MemTableEntry Current
         {
-            [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
             get => new(_table.GetKey(_node), _table.GetValue(_node));
         }
 
         /// <summary>Advances to the next entry; returns <see langword="false"/> at the end.</summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
         public bool MoveNext()
         {
             _node = _table.GetForward(_node, 0);

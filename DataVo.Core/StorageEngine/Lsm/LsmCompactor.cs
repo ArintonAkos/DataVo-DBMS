@@ -186,7 +186,7 @@ public sealed class LsmCompactor
     }
 
     // Compaction runs rarely, so tiered compilation would leave it mostly unoptimized.
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private List<SstableEntry> MergeSelectedEntries(
         IReadOnlyList<LsmTableFileMetadata> files,
         IReadOnlyList<LsmSstableHandle> handles,
@@ -248,7 +248,7 @@ public sealed class LsmCompactor
     }
 
     /// <summary>Reads every entry of a v1 or v2 file as internal-key entries.</summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private List<SstableEntry> ReadAnyFormat(LsmTableFileMetadata file, LsmSstableHandle? handle)
     {
         string path = Path.Combine(_tableDirectory, file.FileName);
@@ -349,7 +349,7 @@ public sealed class LsmCompactor
         return (new LsmTableFileMetadata(fileNumber, targetLevel, entries[0].InternalKey, entries[^1].InternalKey, length, fileName), outputPath);
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private (LsmTableFileMetadata Metadata, string Path) WriteV2Output(List<SstableEntry> entries, int targetLevel)
     {
         byte[]? first = null;
