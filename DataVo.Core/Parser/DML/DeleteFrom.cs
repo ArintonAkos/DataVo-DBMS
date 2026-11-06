@@ -228,7 +228,16 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         // Delete entries from all indexes
         foreach (Models.Catalog.IndexFile indexFile in indexFiles)
         {
-            if (Indexes.SupportsVectorIndexType(indexFile.IndexKind ?? string.Empty) || deletedRows is null)
+            string indexKind = indexFile.IndexKind ?? string.Empty;
+            if (Indexes.SupportsVectorIndexType(indexKind))
+            {
+                // Vector indexes are graphs, not key/row-id entries: the scalar removal below (and the LSM
+                // index store) never reaches them, which left deleted rows in nearest-neighbour results.
+                Indexes.DeleteFromVectorIndex(toBeDeleted, indexFile.IndexFileName, tableName, databaseName, indexKind);
+                continue;
+            }
+
+            if (deletedRows is null)
             {
                 Indexes.DeleteFromIndex(toBeDeleted, indexFile.IndexFileName, tableName, databaseName);
                 continue;
