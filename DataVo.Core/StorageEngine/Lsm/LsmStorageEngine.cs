@@ -741,21 +741,35 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         }
 
         _disposed = true;
-        foreach (TableState state in _tables.Values)
-        {
-            lock (state.SyncRoot)
-            {
-                state.Dispose(); // flushes the active MemTable to an SSTable
-            }
-        }
 
-        _tables.Clear();
-        foreach (IndexTableState index in _indexTables.Values)
+        // Closing writes each MemTable to an SSTable, and the wait is mostly disk syncs per file. Every key
+        // space has its own manifest and files, so tables and indexes flush side by side; the commit log
+        // below is pruned only once all of them have succeeded.
+        LsmKeySpaceState[] keySpaces = [.. _tables.Values, .. _indexTables.Values];
+        try
         {
-            index.Dispose();
+            Parallel.ForEach(keySpaces, static keySpace =>
+            {
+                if (keySpace is TableState table)
+                {
+                    lock (table.SyncRoot)
+                    {
+                        table.Dispose();
+                    }
+                }
+                else
+                {
+                    keySpace.Dispose();
+                }
+            });
+        }
+        catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw();
         }
 
         _indexTables.Clear();
+        _tables.Clear();
 
         // Every applied frame is now in SSTables, so a clean shutdown leaves an empty commit log.
         _commitLog.PruneThrough(Volatile.Read(ref _appliedLsn));
