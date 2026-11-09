@@ -69,6 +69,28 @@ public static class DataVoGeneratedTableSupport
     /// <summary>Reads a nullable INT column.</summary>
     public static int? ReadNullableInt32(object? value, string column) => value is null ? null : ReadInt32(value, column);
 
+    /// <summary>Reads a required BIGINT column.</summary>
+    public static long ReadInt64(object? value, string column) => value switch
+    {
+        long number => number,
+        null => throw NullColumn(column),
+        _ => Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>Reads a nullable BIGINT column.</summary>
+    public static long? ReadNullableInt64(object? value, string column) => value is null ? null : ReadInt64(value, column);
+
+    /// <summary>Reads a required DOUBLE column.</summary>
+    public static double ReadDouble(object? value, string column) => value switch
+    {
+        double number => number,
+        null => throw NullColumn(column),
+        _ => Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>Reads a nullable DOUBLE column.</summary>
+    public static double? ReadNullableDouble(object? value, string column) => value is null ? null : ReadDouble(value, column);
+
     /// <summary>Reads a required FLOAT column.</summary>
     public static float ReadSingle(object? value, string column) => value switch
     {

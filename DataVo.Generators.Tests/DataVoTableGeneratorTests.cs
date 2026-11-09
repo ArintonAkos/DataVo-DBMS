@@ -73,8 +73,7 @@ public class DataVoTableGeneratorTests
     }
 
     [Theory]
-    [InlineData("public long Big { get; set; }", "DATAVOT003")]
-    [InlineData("public double Ratio { get; set; }", "DATAVOT003")]
+    [InlineData("public ulong Big { get; set; }", "DATAVOT003")]
     [InlineData("public DateTime When { get; set; }", "DATAVOT003")]
     [InlineData("public decimal Price { get; set; }", "DATAVOT003")]
     [InlineData("[PrimaryKey] public int Second { get; set; }", "DATAVOT002")]
@@ -101,7 +100,7 @@ public class DataVoTableGeneratorTests
     [Fact]
     public void Diagnostic_PointsAtTheOffendingProperty()
     {
-        string source = ValidModel.Replace("public string? Name { get; set; }", "public long Big { get; set; }");
+        string source = ValidModel.Replace("public string? Name { get; set; }", "public ulong Big { get; set; }");
 
         Diagnostic diagnostic = Assert.Single(Run(source).Diagnostics);
         Assert.Contains("Big", diagnostic.GetMessage());

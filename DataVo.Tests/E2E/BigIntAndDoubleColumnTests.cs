@@ -1,9 +1,24 @@
 using DataVo.Core;
+using DataVo.Core.Annotations;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.PreparedStatements;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.E2E.ColumnTypes;
+
+[DataVoTable("ledger")]
+public sealed class LedgerEntry
+{
+    [PrimaryKey] public long Id { get; set; }
+
+    [Indexed] public long Account { get; set; }
+
+    public double Amount { get; set; }
+
+    public long? Parent { get; set; }
+
+    public double? Rate { get; set; }
+}
 
 /// <summary>
 /// BIGINT and DOUBLE on every read and write path. The values around 2^53 are chosen because a double
@@ -368,6 +383,30 @@ public sealed class BigIntAndDoubleColumnTests : IDisposable
         Assert.Equal(1L, row["Id"]);
         Assert.Equal(2L, row["V"]);
         Assert.Equal(3d, row["D"]);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void GeneratedModel_UsesLongAndDouble(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        db.EnsureLedgerEntryTable();
+
+        db.Insert(new LedgerEntry { Id = NextToExact, Account = long.MaxValue, Amount = Math.PI, Parent = null, Rate = 0.1 });
+        LedgerEntry loaded = db.GetLedgerEntryById(NextToExact)!;
+        Assert.Equal(long.MaxValue, loaded.Account);
+        Assert.Equal(Math.PI, loaded.Amount);
+        Assert.Null(loaded.Parent);
+        Assert.Equal(0.1, loaded.Rate);
+        Assert.Null(db.GetLedgerEntryById(Exact));
+
+        Assert.True(db.Update(new LedgerEntry { Id = NextToExact, Account = 1, Amount = 2, Parent = Exact, Rate = null }));
+        loaded = db.GetLedgerEntryById(NextToExact)!;
+        Assert.Equal(1, loaded.Account);
+        Assert.Equal(Exact, loaded.Parent);
+        Assert.Null(loaded.Rate);
+
+        db.EnsureLedgerEntryTable();
     }
 
     private DataVoContext Open(StorageMode mode)

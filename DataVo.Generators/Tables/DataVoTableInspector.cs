@@ -232,7 +232,9 @@ internal static class DataVoTableInspector
         ColumnType? column = core.SpecialType switch
         {
             SpecialType.System_Int32 => new ColumnType("INT", prefix + "Int32", string.Empty, true, false),
+            SpecialType.System_Int64 => new ColumnType("BIGINT", prefix + "Int64", string.Empty, true, false),
             SpecialType.System_Single => new ColumnType("FLOAT", prefix + "Single", string.Empty, true, false),
+            SpecialType.System_Double => new ColumnType("DOUBLE", prefix + "Double", string.Empty, true, false),
             SpecialType.System_Boolean => new ColumnType("BIT", prefix + "Boolean", string.Empty, true, false),
             SpecialType.System_String => new ColumnType("VARCHAR", prefix + "String", string.Empty, false, false),
             _ => core.ToDisplayString() switch
