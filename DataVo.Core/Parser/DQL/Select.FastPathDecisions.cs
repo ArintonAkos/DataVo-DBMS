@@ -31,7 +31,7 @@ internal partial class Select
             return Math.Min(totalRows, Math.Min(adaptiveTopK, cap));
         }
 
-        int requested = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
+        int requested = _model.RowsNeededForLimit;
         if (requested <= 0)
         {
             return totalRows;

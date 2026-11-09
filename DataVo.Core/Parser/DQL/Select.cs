@@ -525,7 +525,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return null;
         }
 
-        int topK = _model.LimitTake.Value + (_model.LimitSkip ?? 0);
+        int topK = _model.RowsNeededForLimit;
         if (topK <= 0)
         {
             IncrementHybridRoutingCounter("hybrid.orderby.reject.invalid_topk");
@@ -753,7 +753,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         int topK = ClampInt(initialTopK, 1, totalRows);
         int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
-        int requiredRows = (_model.LimitTake ?? 0) + (_model.LimitSkip ?? 0);
+        int requiredRows = _model.RowsNeededForLimit;
         bool canEstimatePostFilter = whereExpression != null && !IsAllTrueExpression(whereExpression);
         int lastPostFilterEstimate = -1;
 

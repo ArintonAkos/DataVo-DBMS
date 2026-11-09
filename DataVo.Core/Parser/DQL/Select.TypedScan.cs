@@ -451,7 +451,7 @@ internal partial class Select
                     orderKeys.Add((ordinal, orderColumn.IsAscending));
                 }
 
-                topLimit = checked(_model.LimitTake.Value + Math.Max(0, _model.LimitSkip ?? 0));
+                topLimit = _model.RowsNeededForLimit;
             }
         }
 
@@ -459,7 +459,7 @@ internal partial class Select
         bool fullSortLater = orderBy is { Columns.Count: > 0 } && topLimit < 0;
         (string Field, int Ordinal)[]? direct = fullSortLater ? null : DirectOutputOf(columns);
         int stopAfter = direct is not null && orderKeys is null && _model.LimitTake.HasValue
-            ? checked(_model.LimitTake.Value + Math.Max(0, _model.LimitSkip ?? 0))
+            ? _model.RowsNeededForLimit
             : -1;
         var restMask = new bool[columns.Count];
         for (int i = 0; i < restMask.Length; i++)

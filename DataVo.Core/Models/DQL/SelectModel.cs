@@ -28,6 +28,12 @@ internal class SelectModel
     public bool IsDistinct { get; set; } = false;
     public int? LimitTake { get; set; }
     public int? LimitSkip { get; set; }
+
+    /// <summary>
+    /// Gets how many rows must be produced to satisfy LIMIT plus OFFSET. OFFSET alone parses as a take of
+    /// <see cref="int.MaxValue"/>, so the sum saturates instead of overflowing.
+    /// </summary>
+    public int RowsNeededForLimit => (int)Math.Min((long)(LimitTake ?? 0) + Math.Max(0, LimitSkip ?? 0), int.MaxValue);
     public Dictionary<string, TableDetail> CteTables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     private SelectStatement Ast { get; set; } = null!;
