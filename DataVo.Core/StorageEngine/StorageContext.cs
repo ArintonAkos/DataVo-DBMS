@@ -458,7 +458,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         HashSet<string>? selectedColumns)
     {
         Dictionary<RowKey, Dictionary<string, object?>> rows = rowIds != null
-            ? ReadRowsById(rowIds, tableName, databaseName, selectedColumns)
+            ? ReadRowsById(WithoutBufferedRowKeys(rowIds), tableName, databaseName, selectedColumns)
             : ReadAllRows(tableName, databaseName, selectedColumns);
 
         return ApplyMvccVisibilityFilter(rows, tableName, databaseName, rowIds, selectedColumns);
@@ -589,7 +589,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     internal Dictionary<RowKey, StoredRow> GetTypedTableContents(List<RowKey>? rowIds, string tableName, string databaseName)
     {
         Dictionary<RowKey, StoredRow> rows = rowIds != null
-            ? ReadTypedRowsById(rowIds, tableName, databaseName)
+            ? ReadTypedRowsById(WithoutBufferedRowKeys(rowIds), tableName, databaseName)
             : ReadAllTypedRows(tableName, databaseName);
 
         return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName, rowIds);
@@ -793,7 +793,71 @@ public class StorageContext(DataVoConfig config) : IDisposable
             rows[image.RowId] = ProjectImage(image.Row, selectedColumns);
         }
 
+        foreach ((RowKey rowId, IReadOnlyDictionary<string, object?>? row) in OwnWrites(rows.ContainsKey, tableName, requestedIds))
+        {
+            if (row is null)
+            {
+                rows.Remove(rowId);
+            }
+            else
+            {
+                rows[rowId] = ProjectImage(row, selectedColumns);
+            }
+        }
+
         return rows;
+    }
+
+    /// <summary>A buffered insert has no storage key yet; reads identify it by this reserved key range.</summary>
+    private const ulong BufferedRowKeyHigh = ulong.MaxValue;
+
+    private static List<RowKey> WithoutBufferedRowKeys(List<RowKey> rowIds) =>
+        MvccExecutionScope.CurrentTransaction is null ? rowIds : rowIds.FindAll(rowId => rowId.High != BufferedRowKeyHigh);
+
+    /// <summary>
+    /// Lists the current transaction's uncommitted effects on a table, in the order they apply. A row of
+    /// <see langword="null"/> means the key is deleted from the result.
+    /// </summary>
+    private static IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?>? Row)> OwnWrites(
+        Func<RowKey, bool> isVisible,
+        string tableName,
+        List<RowKey>? requestedIds)
+    {
+        if (MvccExecutionScope.CurrentTransaction is not { } transaction || !transaction.HasBufferedWrites(tableName))
+        {
+            yield break;
+        }
+
+        if (transaction.UpdatedRows.TryGetValue(tableName, out var updates))
+        {
+            foreach ((RowKey rowId, Dictionary<string, object?> updatedRow) in updates)
+            {
+                if (isVisible(rowId))
+                {
+                    yield return (rowId, updatedRow);
+                }
+            }
+        }
+
+        if (transaction.DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted))
+        {
+            foreach (RowKey rowId in deleted)
+            {
+                yield return (rowId, null);
+            }
+        }
+
+        if (transaction.InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? inserted))
+        {
+            for (int index = 0; index < inserted.Count; index++)
+            {
+                var rowId = new RowKey(BufferedRowKeyHigh, (ulong)index);
+                if (requestedIds is null || requestedIds.Contains(rowId))
+                {
+                    yield return (rowId, inserted[index]);
+                }
+            }
+        }
     }
 
     private static IEnumerable<RetainedRowImage> VisibleImages(
@@ -868,6 +932,18 @@ public class StorageContext(DataVoConfig config) : IDisposable
         foreach (RetainedRowImage image in VisibleImages(engine, tableName, databaseName, snapshot, requestedIds))
         {
             rows[image.RowId] = ToStoredRow(image.Row);
+        }
+
+        foreach ((RowKey rowId, IReadOnlyDictionary<string, object?>? row) in OwnWrites(rows.ContainsKey, tableName, requestedIds))
+        {
+            if (row is null)
+            {
+                rows.Remove(rowId);
+            }
+            else
+            {
+                rows[rowId] = ToStoredRow(row);
+            }
         }
 
         return rows;

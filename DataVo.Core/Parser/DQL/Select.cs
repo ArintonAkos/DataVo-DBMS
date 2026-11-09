@@ -128,6 +128,19 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         try
         {
+            if (ast.FromTable is null)
+            {
+                ProjectConstants();
+                return;
+            }
+
+            // A subquery runs under a temporary session; it reads as part of the enclosing transaction.
+            TransactionContext? txContext = Transactions.GetContext(session) ?? MvccExecutionScope.CurrentTransaction;
+            _activeSnapshot = txContext?.Snapshot;
+
+            // Validation materializes subqueries, so it must already read as this transaction.
+            using IDisposable mvccScope = MvccExecutionScope.PushTransaction(txContext);
+
             if (ast.Ctes.Count > 0)
             {
                 _model.SetCteTables(MaterializeCtes(ast.Ctes, session));
@@ -135,11 +148,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
             string database = ValidateDatabase(session);
             _activeDatabaseName = database;
-
-            TransactionContext? txContext = Transactions.GetContext(session);
-            _activeSnapshot = txContext?.Snapshot;
-
-            using IDisposable mvccScope = MvccExecutionScope.PushSnapshot(_activeSnapshot);
 
             LockedReadResources lockedResources = AcquireReadLocks(database);
 
@@ -209,6 +217,27 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     }
 
     // CTE materialization extracted to Select.Cte.cs partial.
+
+    /// <summary>Builds the single row of a SELECT that has constants and no table.</summary>
+    private void ProjectConstants()
+    {
+        var row = new Dictionary<string, object?>(ast.Columns.Count);
+        foreach (SelectColumnNode column in ast.Columns)
+        {
+            string name = column.Alias ?? column.RawExpression;
+            Fields.Add(name);
+            row[name] = ProjectedConstant(ScalarEvaluator.Evaluate(column.Expression!, row), column.Expression);
+        }
+
+        Data = [row];
+        Messages.Add("Rows selected: 1");
+    }
+
+    /// <summary>A string literal keeps its delimiters through evaluation; a bound value has none to remove.</summary>
+    private static object? ProjectedConstant(object? value, ExpressionNode? expression) =>
+        expression is LiteralNode and not BoundValueLiteralNode && value is string text
+            ? SqlLiteralText.Unquote(text)
+            : value;
 
     /// <summary>
     /// Starts the statement's read-lock set. Rows are read-locked only once the statement knows which

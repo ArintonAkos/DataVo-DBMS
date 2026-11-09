@@ -56,6 +56,14 @@ public class TransactionContext
     /// </summary>
     /// <param name="tableName">The target table name.</param>
     /// <param name="row">The row data as a column-value dictionary.</param>
+    /// <summary>Gets whether this transaction has uncommitted writes to a table.</summary>
+    /// <param name="tableName">The table name.</param>
+    /// <returns><see langword="true"/> when a buffered insert, update or delete exists.</returns>
+    public bool HasBufferedWrites(string tableName) =>
+        (InsertedRows.TryGetValue(tableName, out var inserted) && inserted.Count > 0)
+        || (DeletedRowIds.TryGetValue(tableName, out var deleted) && deleted.Count > 0)
+        || (UpdatedRows.TryGetValue(tableName, out var updated) && updated.Count > 0);
+
     public void BufferInsert(string tableName, Dictionary<string, object?> row)
     {
         if (!InsertedRows.ContainsKey(tableName))

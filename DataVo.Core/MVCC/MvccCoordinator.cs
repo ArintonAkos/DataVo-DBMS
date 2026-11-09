@@ -206,7 +206,8 @@ public static class MvccCoordinator
     /// </example>
     public static bool SnapshotRequiresScan(DataVoEngine engine, string databaseName, string tableName) =>
         MvccExecutionScope.CurrentSnapshot is not null
-        && engine.VersionStorageManager.HasRetainedImages(databaseName, tableName);
+        && (engine.VersionStorageManager.HasRetainedImages(databaseName, tableName)
+            || MvccExecutionScope.CurrentTransaction?.HasBufferedWrites(tableName) == true);
 
     /// <summary>Drops retained images no open snapshot can read. Call when a transaction ends.</summary>
     /// <param name="engine">The owning engine.</param>
