@@ -23,7 +23,7 @@ public class DataVoEfSchemaTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS Posts", script, StringComparison.Ordinal);
         Assert.Contains("BlogId INT REFERENCES Blogs(Id)", script, StringComparison.Ordinal);
         Assert.Contains("PublishedOn DATE", script, StringComparison.Ordinal);
-        Assert.Contains("Rating FLOAT DEFAULT 0", script, StringComparison.Ordinal);
+        Assert.Contains("Rating DOUBLE DEFAULT 0", script, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -249,21 +249,28 @@ public static class DataVoDbContextExtensions
             return "DATE";
         }
 
-        if (clrType == typeof(float) || clrType == typeof(double) || clrType == typeof(decimal))
+        if (clrType == typeof(float))
         {
             return "FLOAT";
+        }
+
+        if (clrType == typeof(double) || clrType == typeof(decimal))
+        {
+            return "DOUBLE";
         }
 
         if (clrType == typeof(byte) ||
             clrType == typeof(sbyte) ||
             clrType == typeof(short) ||
             clrType == typeof(ushort) ||
-            clrType == typeof(int) ||
-            clrType == typeof(uint) ||
-            clrType == typeof(long) ||
-            clrType == typeof(ulong))
+            clrType == typeof(int))
         {
             return "INT";
+        }
+
+        if (clrType == typeof(uint) || clrType == typeof(long) || clrType == typeof(ulong))
+        {
+            return "BIGINT";
         }
 
         throw new NotSupportedException($"The CLR type '{property.ClrType.Name}' on '{property.DeclaringType.DisplayName()}.{property.Name}' is not yet supported by DataVo EF schema generation.");
