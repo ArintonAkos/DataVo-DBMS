@@ -217,18 +217,34 @@ public class Lexer
         var quoteLoc = GetLineColumn(quotePosition);
 
         _position++;
-        int start = _position;
+        var content = new System.Text.StringBuilder();
 
-        while (_position < _input.Length && _input[_position] != quoteChar)
+        while (true)
         {
+            if (_position >= _input.Length)
+                throw new LexerException($"Lexer Error: Unterminated string literal at line {quoteLoc.line}, column {quoteLoc.column}.");
+
+            char current = _input[_position];
+            if (current != quoteChar)
+            {
+                content.Append(current);
+                _position++;
+                continue;
+            }
+
+            // A doubled quote is one quote of data; a single one ends the literal.
+            if (_position + 1 < _input.Length && _input[_position + 1] == quoteChar)
+            {
+                content.Append(quoteChar);
+                _position += 2;
+                continue;
+            }
+
             _position++;
+            break;
         }
 
-        if (_position >= _input.Length)
-            throw new LexerException($"Lexer Error: Unterminated string literal at line {quoteLoc.line}, column {quoteLoc.column}.");
-
-        string value = _input.Substring(start, _position - start);
-        _position++;
+        string value = content.ToString();
 
         return new Token(TokenType.StringLiteral, $"'{value}'", quotePosition, quoteLoc.line, quoteLoc.column);
     }

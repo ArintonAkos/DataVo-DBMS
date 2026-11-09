@@ -259,6 +259,6 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             }
         }
 
-        return rawText.Replace("'", "");
+        return Utils.SqlLiteralText.Unquote(rawText);
     }
 }

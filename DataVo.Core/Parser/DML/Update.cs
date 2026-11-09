@@ -331,7 +331,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
             if (setExpr.Value is not BoundValueLiteralNode && newValue is string s && s.StartsWith("'") && s.EndsWith("'"))
             {
-                newValue = s.Trim('\'');
+                newValue = Utils.SqlLiteralText.Unquote(s);
             }
 
             newRow[colName] = newValue!;
