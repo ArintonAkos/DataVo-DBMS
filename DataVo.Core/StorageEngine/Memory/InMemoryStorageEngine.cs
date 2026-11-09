@@ -8,7 +8,7 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// <summary>
 /// In-memory storage engine used for fast, non-persistent row operations.
 /// </summary>
-public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider
+public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IPagedRowScan
 {
     // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> rows. A value-tuple key
     // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs
@@ -42,6 +42,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     {
         public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.NoRecursion);
         public readonly List<InMemoryRow?> Rows = [];
+
+        /// <summary>Advances when compaction renumbers rows, which invalidates a saved scan position.</summary>
+        public long LayoutGeneration;
     }
 
     private readonly ConcurrentDictionary<(string DatabaseName, string TableName), TableStore> _databases = new();
@@ -174,6 +177,36 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     /// <param name="databaseName">The owning database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <returns>All surviving row IDs and payloads.</returns>
+    /// <inheritdoc />
+    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows)
+    {
+        var rows = new List<(long RowId, byte[]? Raw, StoredRow? Typed)>(maxRows);
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return new RowPage(rows, true, 0);
+        }
+
+        store.Lock.EnterReadLock();
+        try
+        {
+            // Row ids are 1-based list positions, so the id of the last row is also the next index.
+            int index = (int)(afterRowId ?? 0);
+            for (; index < store.Rows.Count && rows.Count < maxRows; index++)
+            {
+                if (store.Rows[index] is { } row && (row.Raw is not null || row.Typed is not null))
+                {
+                    rows.Add((index + 1, row.Raw, row.Typed));
+                }
+            }
+
+            return new RowPage(rows, index >= store.Rows.Count, store.LayoutGeneration);
+        }
+        finally
+        {
+            store.Lock.ExitReadLock();
+        }
+    }
+
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         var rows = new List<(long RowId, byte[] RawRow)>();
@@ -268,6 +301,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         store.Lock.EnterWriteLock();
         try
         {
+            store.LayoutGeneration++;
             var survivors = new List<InMemoryRow?>();
             for (int i = 0; i < store.Rows.Count; i++)
             {

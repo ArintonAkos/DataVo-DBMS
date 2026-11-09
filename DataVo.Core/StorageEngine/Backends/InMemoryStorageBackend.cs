@@ -3,7 +3,7 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IRowCountEstimator
+internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IRowCountEstimator
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -23,6 +23,7 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, ITypedRowStorage
         ((ITypedRowStorageEngine)_inner).ReadAllTypedRows(databaseName, tableName);
     public bool HasAnyRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).HasAnyRows(databaseName, tableName);
+    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows) => ((IPagedRowScan)_inner).ReadPage(databaseName, tableName, afterRowId, maxRows);
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, (long)rowId);
     public long EstimateRowCount(string databaseName, string tableName) => _inner.EstimateRowCount(databaseName, tableName);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);

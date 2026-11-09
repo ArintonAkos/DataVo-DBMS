@@ -10,12 +10,15 @@ namespace DataVo.Core.StorageEngine.Disk;
 /// <summary>
 /// Disk-backed storage engine that persists table rows into .dat files.
 /// </summary>
-public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
+public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
 {
     private readonly string _storageDirectory;
     private readonly bool _syncWrites;
     private readonly IoSchedulerMode _ioSchedulerMode;
     private readonly FileHandlePool? _handlePool;
+
+    // Row positions are byte offsets, so a compaction or drop makes a saved scan position meaningless.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _layoutGenerations = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, object> GlobalFileLocks = new();
 
     // 8-byte file header: [4 bytes magic "DaVo"] + [4 bytes version].
@@ -286,6 +289,44 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
     /// <param name="databaseName">The owning database name.</param>
     /// <param name="tableName">The table name.</param>
     /// <returns>All surviving row IDs and payloads.</returns>
+    /// <inheritdoc />
+    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows)
+    {
+        string filePath = GetFilePath(databaseName, tableName);
+        long generation = _layoutGenerations.GetOrAdd(filePath, 0);
+        var rows = new List<(long RowId, byte[]? Raw, StoredRow? Typed)>(maxRows);
+        if (!File.Exists(filePath))
+        {
+            return new RowPage(rows, true, generation);
+        }
+
+        lock (GetFileLock(filePath))
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new BinaryReader(stream);
+            stream.Seek(afterRowId ?? Math.Min(FileHeaderSize, stream.Length), SeekOrigin.Begin);
+            if (afterRowId is not null)
+            {
+                stream.Seek(Math.Abs(reader.ReadInt32()), SeekOrigin.Current);
+            }
+
+            while (rows.Count < maxRows && stream.Position < stream.Length)
+            {
+                long rowId = stream.Position;
+                int length = reader.ReadInt32();
+                if (length < 0)
+                {
+                    stream.Seek(-length, SeekOrigin.Current);
+                    continue;
+                }
+
+                rows.Add((rowId, reader.ReadBytes(length), null));
+            }
+
+            return new RowPage(rows, stream.Position >= stream.Length, generation);
+        }
+    }
+
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)
     {
         string filePath = GetFilePath(databaseName, tableName);
@@ -400,6 +441,7 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
     /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
+        _layoutGenerations.AddOrUpdate(GetFilePath(databaseName, tableName), 1, static (_, generation) => generation + 1);
         string filePath = GetFilePath(databaseName, tableName);
         lock (GetFileLock(filePath))
         {
@@ -450,6 +492,7 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
     /// <returns>The new RowId and payload for each surviving row.</returns>
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
+        _layoutGenerations.AddOrUpdate(GetFilePath(databaseName, tableName), 1, static (_, generation) => generation + 1);
         string filePath = GetFilePath(databaseName, tableName);
         var compacted = new List<(long, byte[])>();
 

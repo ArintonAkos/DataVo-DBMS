@@ -646,6 +646,94 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return true;
     }
 
+    /// <summary>Tracks where a paged scan has reached.</summary>
+    internal sealed class RowPageCursor
+    {
+        public RowKey? After { get; set; }
+
+        public long? Generation { get; set; }
+
+        public bool Done { get; set; }
+    }
+
+    /// <summary>
+    /// Examines up to <paramref name="maxRows"/> more rows of a table and advances the cursor. Returns false
+    /// when this backend or the current flow cannot page.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The table was rewritten since the scan started.</exception>
+    internal bool ScanRowPage<TState>(string tableName, string databaseName, RowPageCursor cursor, RowKey? lower, RowKey? upper, int maxRows, ref TState state, RawRowVisitor<TState> visit)
+    {
+        if (LsmEngine is not null)
+        {
+            return ScanLsmPage(tableName, databaseName, cursor, lower, upper, maxRows, ref state, visit);
+        }
+
+        if (_storageEngine is not IPagedRowScan paged)
+        {
+            return false;
+        }
+
+        RowPage page = paged.ReadPage(databaseName, tableName, cursor.After is { } after ? RowKeyConversions.ToRowId(after) : null, maxRows);
+        if (cursor.Generation is { } generation && generation != page.Generation)
+        {
+            throw new InvalidOperationException($"Table {tableName} was rewritten while it was being streamed.");
+        }
+
+        cursor.Generation = page.Generation;
+        foreach ((long rowId, byte[]? raw, StoredRow? typed) in page.Rows)
+        {
+            RowKey key = rowId;
+            cursor.After = key;
+            if (InRange(key, lower, upper))
+            {
+                visit(ref state, key, raw, typed);
+            }
+        }
+
+        cursor.Done = page.ReachedEnd;
+        return true;
+    }
+
+    private bool ScanLsmPage<TState>(string tableName, string databaseName, RowPageCursor cursor, RowKey? lower, RowKey? upper, int maxRows, ref TState state, RawRowVisitor<TState> visit)
+    {
+        RowKey? start = lower;
+        if (cursor.After is { } after)
+        {
+            if (after.High == ulong.MaxValue && after.Low == ulong.MaxValue)
+            {
+                cursor.Done = true;
+                return true;
+            }
+
+            start = after.Low == ulong.MaxValue ? new RowKey(after.High + 1, 0) : new RowKey(after.High, after.Low + 1);
+        }
+
+        var box = new LsmPageBox<TState>(state, visit, cursor, maxRows);
+        if (!ScanTableRows(tableName, databaseName, start, upper, ref box, static (ref LsmPageBox<TState> b, RowKey id, ReadOnlySpan<byte> bytes, StoredRow? typed) =>
+        {
+            b.Visit(ref b.State, id, bytes, typed);
+            b.Cursor.After = id;
+            b.Examined++;
+            return b.Examined < b.MaxRows;
+        }))
+        {
+            return false;
+        }
+
+        state = box.State;
+        cursor.Done = box.Examined < maxRows;
+        return true;
+    }
+
+    private struct LsmPageBox<TState>(TState state, RawRowVisitor<TState> visit, RowPageCursor cursor, int maxRows)
+    {
+        public TState State = state;
+        public readonly RawRowVisitor<TState> Visit = visit;
+        public readonly RowPageCursor Cursor = cursor;
+        public readonly int MaxRows = maxRows;
+        public int Examined;
+    }
+
     /// <summary>
     /// Visits a single live row by key without allocating key lists or intermediate row buffers.
     /// Returns <see langword="false"/> when an active MVCC snapshot or staged LSM write requires the general path.

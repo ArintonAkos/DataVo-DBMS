@@ -4,7 +4,7 @@ using DataVo.Core.StorageEngine.Disk;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class DiskStorageBackend : IStorageBackend, IDisposable
+internal sealed class DiskStorageBackend : IStorageBackend, IPagedRowScan, IDisposable
 {
     private readonly DiskStorageEngine _inner;
 
@@ -24,6 +24,7 @@ internal sealed class DiskStorageBackend : IStorageBackend, IDisposable
     public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => RowKeyConversions.ToRowKeys(_inner.InsertRows(databaseName, tableName, rowsBytes));
     public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, (long)rowId);
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.ReadAllRows(databaseName, tableName));
+    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows) => ((IPagedRowScan)_inner).ReadPage(databaseName, tableName, afterRowId, maxRows);
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, (long)rowId);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);

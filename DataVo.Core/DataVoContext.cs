@@ -218,6 +218,43 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
+    /// Runs one SELECT and returns its rows as they are read, without holding the whole result in memory.
+    /// </summary>
+    /// <param name="query">One SELECT statement, which may contain <c>@param</c> placeholders.</param>
+    /// <param name="parameters">The values for the placeholders.</param>
+    /// <returns>The rows. Each enumeration runs the scan again.</returns>
+    /// <remarks>
+    /// A plain scan of one table is read in small pages, and no lock is held between pages, so changes
+    /// committed during enumeration may or may not appear. Queries that need the whole result first
+    /// (joins, GROUP BY, ORDER BY, DISTINCT, index lookups) and reads inside a transaction are evaluated
+    /// up front and then enumerated. Errors in the query are thrown by this call.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="query"/> is not exactly one SELECT.</exception>
+    /// <exception cref="InvalidOperationException">The query failed.</exception>
+    /// <example>
+    /// <code>
+    /// foreach (DataVoRow row in context.StreamQuery("SELECT Id, Hp FROM Players WHERE Hp &gt; @min", ("min", 10)))
+    /// {
+    ///     Process(row["Id"], row["Hp"]);
+    /// }
+    /// </code>
+    /// </example>
+    public IEnumerable<DataVoRow> StreamQuery(string query, params DataVoQueryParameter[] parameters) =>
+        QueryStream.Open(Engine, query, parameters, SessionId);
+
+    /// <summary>Runs one SELECT under an explicit session and returns its rows as they are read.</summary>
+    /// <param name="query">One SELECT statement.</param>
+    /// <param name="sessionId">The session whose database and transaction apply.</param>
+    /// <returns>The rows. Each enumeration runs the scan again.</returns>
+    /// <example>
+    /// <code>
+    /// IEnumerable&lt;DataVoRow&gt; rows = context.StreamQuery("SELECT Id FROM Players", sessionId);
+    /// </code>
+    /// </example>
+    public IEnumerable<DataVoRow> StreamQuery(string query, Guid sessionId) =>
+        QueryStream.Open(Engine, query, [], sessionId);
+
+    /// <summary>
     /// Pre-parses and compiles a parameterized SQL statement for repeated execution under the current <see cref="SessionId"/>.
     /// </summary>
     /// <param name="sql">The SQL statement text, which may contain <c>@param</c> placeholders.</param>
