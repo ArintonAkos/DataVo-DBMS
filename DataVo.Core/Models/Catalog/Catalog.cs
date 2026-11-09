@@ -15,7 +15,7 @@ public static class Catalog
     private const string DIR_NAME = "databases";
     private const string FILE_NAME = "Catalog.xml";
     private static XDocument _doc = new();
-    private static readonly ConcurrentDictionary<string, int> _tableSchemaVersions = new();
+    private static readonly ConcurrentDictionary<(string Database, string Table), int> _tableSchemaVersions = new(DataVo.Core.Runtime.TableSchemaKeyComparer.Instance);
 
     static Catalog()
     {
@@ -172,8 +172,7 @@ public static class Catalog
     /// </example>
     public static int GetTableSchemaVersion(string tableName, string databaseName)
     {
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        return _tableSchemaVersions.GetOrAdd(tableKey, 0);
+        return _tableSchemaVersions.GetOrAdd((databaseName, tableName), 0);
     }
 
     /// <summary>
@@ -707,28 +706,21 @@ public static class Catalog
         return null;
     }
 
-    private static string GetTableSchemaVersionKey(string databaseName, string tableName)
-    {
-        return $"{databaseName}::{tableName}";
-    }
-
     /// <summary>
     /// Increments the schema version counter for the specified table.
     /// </summary>
     private static void BumpTableSchemaVersion(string databaseName, string tableName)
     {
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
+        _tableSchemaVersions.AddOrUpdate((databaseName, tableName), 1, static (_, currentVersion) => currentVersion + 1);
     }
 
     private static void InvalidateDatabaseSchemaVersions(string databaseName)
     {
-        string prefix = $"{databaseName}::";
-        foreach (string key in _tableSchemaVersions.Keys)
+        foreach ((string Database, string Table) key in _tableSchemaVersions.Keys)
         {
-            if (key.StartsWith(prefix, StringComparison.Ordinal))
+            if (string.Equals(key.Database, databaseName, StringComparison.OrdinalIgnoreCase))
             {
-                _tableSchemaVersions.AddOrUpdate(key, 1, (_, currentVersion) => currentVersion + 1);
+                _tableSchemaVersions.AddOrUpdate(key, 1, static (_, currentVersion) => currentVersion + 1);
             }
         }
     }

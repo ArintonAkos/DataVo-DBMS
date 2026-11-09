@@ -12,7 +12,7 @@ namespace DataVo.Core.Runtime;
 internal sealed class CatalogStore
 {
     private readonly object _syncRoot = new();
-    private readonly ConcurrentDictionary<string, int> _tableSchemaVersions = new();
+    private readonly ConcurrentDictionary<(string Database, string Table), int> _tableSchemaVersions = new(TableSchemaKeyComparer.Instance);
     private readonly bool _persistToDisk;
     private readonly string? _catalogDirectory;
     private readonly string? _catalogFilePath;
@@ -187,8 +187,7 @@ internal sealed class CatalogStore
 
     public int GetTableSchemaVersion(string tableName, string databaseName)
     {
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        return _tableSchemaVersions.GetOrAdd(tableKey, 0);
+        return _tableSchemaVersions.GetOrAdd((databaseName, tableName), 0);
     }
 
     public void CreateIndex(IndexFile indexFile, string tableName, string databaseName)
@@ -756,11 +755,6 @@ internal sealed class CatalogStore
         AtomicFileOperations.ReplaceFromTemp(tempPath, _catalogFilePath!);
     }
 
-    private static string GetTableSchemaVersionKey(string databaseName, string tableName)
-    {
-        return $"{databaseName}::{tableName}";
-    }
-
     /// <summary>
     /// Increments the schema version counter for the specified table.
     /// This invalidates any cached schema snapshots held by the row serializer.
@@ -769,19 +763,35 @@ internal sealed class CatalogStore
     {
         _tableShapes.Clear();
         _childForeignKeys.Clear();
-        string tableKey = GetTableSchemaVersionKey(databaseName, tableName);
-        _tableSchemaVersions.AddOrUpdate(tableKey, 1, (_, currentVersion) => currentVersion + 1);
+        _tableSchemaVersions.AddOrUpdate((databaseName, tableName), 1, static (_, currentVersion) => currentVersion + 1);
     }
 
     private void InvalidateDatabaseSchemaVersions(string databaseName)
     {
-        string prefix = $"{databaseName}::";
-        foreach (string key in _tableSchemaVersions.Keys)
+        foreach ((string Database, string Table) key in _tableSchemaVersions.Keys)
         {
-            if (key.StartsWith(prefix, StringComparison.Ordinal))
+            if (string.Equals(key.Database, databaseName, StringComparison.OrdinalIgnoreCase))
             {
-                _tableSchemaVersions.AddOrUpdate(key, 1, (_, currentVersion) => currentVersion + 1);
+                _tableSchemaVersions.AddOrUpdate(key, 1, static (_, currentVersion) => currentVersion + 1);
             }
         }
     }
+}
+
+/// <summary>
+/// Compares schema-version keys the way the catalog resolves names: without regard to case, so a change
+/// spelled <c>items</c> invalidates a plan compiled for <c>Items</c>.
+/// </summary>
+internal sealed class TableSchemaKeyComparer : IEqualityComparer<(string Database, string Table)>
+{
+    public static readonly TableSchemaKeyComparer Instance = new();
+
+    public bool Equals((string Database, string Table) x, (string Database, string Table) y) =>
+        StringComparer.OrdinalIgnoreCase.Equals(x.Database, y.Database)
+        && StringComparer.OrdinalIgnoreCase.Equals(x.Table, y.Table);
+
+    public int GetHashCode((string Database, string Table) key) =>
+        HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(key.Database),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(key.Table));
 }
