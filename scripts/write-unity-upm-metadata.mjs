@@ -59,6 +59,38 @@ PluginImporter:
   assetBundleVariant:
 `;
 
+// The RoslynAnalyzer label makes Unity run the DLL at compile time; disabling every platform keeps it out of builds.
+const analyzerMeta = (guid) => `fileFormatVersion: 2
+guid: ${guid}
+labels:
+- RoslynAnalyzer
+PluginImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  iconMap: {}
+  executionOrder: {}
+  defineConstraints: []
+  isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 1
+  platformData:
+  - first:
+      Any: 
+    second:
+      enabled: 0
+      settings: {}
+  - first:
+      Editor: Editor
+    second:
+      enabled: 0
+      settings:
+        DefaultValueInitialized: true
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+
 function writeMetas(packageRoot, relativeDirectory, seen) {
   const directory = join(packageRoot, relativeDirectory);
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -76,9 +108,11 @@ function writeMetas(packageRoot, relativeDirectory, seen) {
     seen.add(guid);
     const content = entry.isDirectory()
       ? folderMeta(guid)
-      : entry.name.endsWith(".dll")
-        ? pluginMeta(guid)
-        : textMeta(guid);
+      : relativePath.startsWith("Analyzers/")
+        ? analyzerMeta(guid)
+        : entry.name.endsWith(".dll")
+          ? pluginMeta(guid)
+          : textMeta(guid);
     writeFileSync(join(packageRoot, `${relativePath}.meta`), content);
     if (entry.isDirectory()) {
       writeMetas(packageRoot, relativePath, seen);

@@ -30,9 +30,11 @@ trap 'rm -rf "$work"' EXIT HUP INT TERM
 bash "$root/scripts/prepare-unity-candidate.sh" --output "$work/candidate"
 
 package="$work/package"
-mkdir -p "$package/Runtime/Plugins/Dependencies" "$package/Documentation~" "$package/Samples~/QuickStart"
+mkdir -p "$package/Runtime/Plugins/Dependencies" "$package/Analyzers" "$package/Documentation~" "$package/Samples~/QuickStart"
 
 cp "$work/candidate/Runtime/DataVo.Core.dll" "$package/Runtime/Plugins/"
+dotnet build "$root/DataVo.Generators/DataVo.Generators.csproj" -c Release -v q --nologo >/dev/null
+cp "$root/DataVo.Generators/bin/Release/netstandard2.0/DataVo.Generators.dll" "$package/Analyzers/"
 find "$work/candidate/Runtime/Dependencies" -type f -name '*.dll' -exec cp {} "$package/Runtime/Plugins/Dependencies/" \;
 cp "$work/candidate/candidate-manifest.json" "$work/candidate/dependency-assets.json" \
   "$work/candidate/assembly-inventory.json" "$package/Documentation~/"

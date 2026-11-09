@@ -38,3 +38,23 @@ var result = lookup.Execute(("id", 1));
 ```
 
 For a per-frame loop, `ExecuteBorrowed` avoids allocating a result. The returned object is reused, so read it before the next query on that thread.
+
+## Typed models
+
+The package includes a source generator. Mark a class and Unity writes its data access when it compiles, with no reflection:
+
+```csharp
+using DataVo.Core.Annotations;
+
+[DataVoTable("inventory")]
+public sealed class InventoryItem
+{
+    [PrimaryKey] public int Id { get; set; }
+    [Indexed] public int Slot { get; set; }
+    public string Name { get; set; }
+}
+
+db.EnsureInventoryItemTable();
+db.Insert(new InventoryItem { Id = 1, Slot = 4, Name = "Sword" });
+InventoryItem item = db.GetInventoryItemById(1);
+```

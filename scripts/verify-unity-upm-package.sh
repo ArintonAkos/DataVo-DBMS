@@ -14,6 +14,9 @@ for entry in Assets Packages ProjectSettings UnityRuntimeBclManifest.json; do
 done
 rm -f "$project/Packages/packages-lock.json"
 
+# Compiles only if Unity runs the source generator shipped in the package.
+cp "$root/tests/unity/DataVo.UnitySmoke/PackageScenarios/GeneratedTableScenario.cs" "$project/Assets/DataVoSmoke/Runtime/"
+
 node - "$project/Packages/manifest.json" "$tarball" "$root" <<'NODE'
 const fs = require("node:fs");
 const [manifestPath, tarball, root] = process.argv.slice(2);

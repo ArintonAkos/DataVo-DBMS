@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace DataVo.UnitySmoke.Player
 {
-    internal static class PlayerSmokeBootstrap
+    internal static partial class PlayerSmokeBootstrap
     {
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Start()
@@ -98,11 +98,15 @@ namespace DataVo.UnitySmoke.Player
 
             AssertEquivalent(source, mapped, position);
             AssertVectorLengthFailure(context);
+            RunPackageScenarios();
             AssertSaveDataPersists(StorageMode.Lsm);
             AssertSaveDataPersists(StorageMode.Disk);
 
             return PlayerSmokeResult.Passed();
         }
+
+        // Implemented only when verify-unity-upm-package.sh installs the real package.
+        static partial void RunPackageScenarios();
 
         private static void AssertSaveDataPersists(StorageMode mode)
         {
