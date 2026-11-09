@@ -95,7 +95,7 @@ const manifest = {
   version,
   unity: "6000.0",
   description:
-    "Experimental preview of the DataVo embedded SQL engine for Unity. In-memory storage only.",
+    "Experimental preview of the DataVo embedded SQL engine for Unity.",
   license: "MIT",
   keywords: ["database", "sql", "embedded", "vector-search", "reactive"],
   samples: [

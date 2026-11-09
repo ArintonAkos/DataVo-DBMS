@@ -120,7 +120,6 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
     private static IStorageEngine ResolveStorageEngine(DataVoConfig config)
     {
-        PortableStoragePolicy.ThrowIfUnsupported(config.StorageMode);
 
         return config.StorageMode switch
         {

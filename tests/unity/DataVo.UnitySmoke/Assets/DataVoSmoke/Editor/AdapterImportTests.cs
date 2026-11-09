@@ -15,6 +15,48 @@ namespace DataVo.UnitySmoke.EditorTests
 {
     public sealed class AdapterImportTests
     {
+        [TestCase(StorageMode.Lsm)]
+        [TestCase(StorageMode.Disk)]
+        public void SaveData_Survives_Closing_And_Reopening(StorageMode mode)
+        {
+            string path = System.IO.Path.Combine(Application.temporaryCachePath, "DataVoSave_" + mode + "_" + Guid.NewGuid().ToString("N"));
+            var config = new DataVoConfig { StorageMode = mode, DiskStoragePath = path };
+
+            try
+            {
+                using (var writer = new DataVoContext(config))
+                {
+                    Run(writer, "CREATE DATABASE Save");
+                    Run(writer, "USE Save");
+                    Run(writer, "CREATE TABLE Inventory (Id INT PRIMARY KEY, Qty INT)");
+
+                    for (int id = 1; id <= 500; id++)
+                        Run(writer, "INSERT INTO Inventory (Id, Qty) VALUES (" + id + ", " + id * 2 + ")");
+
+                    Run(writer, "UPDATE Inventory SET Qty = 777 WHERE Id = 1");
+                    Run(writer, "DELETE FROM Inventory WHERE Id = 2");
+                }
+
+                using var reader = new DataVoContext(config);
+                Run(reader, "USE Save");
+
+                Assert.That(Run(reader, "SELECT Id FROM Inventory").Data.Count, Is.EqualTo(499));
+                Assert.That(Run(reader, "SELECT Qty FROM Inventory WHERE Id = 1").Data.Single()["Qty"], Is.EqualTo(777));
+            }
+            finally
+            {
+                if (System.IO.Directory.Exists(path))
+                    System.IO.Directory.Delete(path, recursive: true);
+            }
+        }
+
+        private static DataVo.Core.Contracts.Results.QueryResult Run(DataVoContext context, string sql)
+        {
+            var result = context.Execute(sql).Last();
+            Assert.That(result.IsError, Is.False, sql + " failed: " + string.Join(" | ", result.Messages));
+            return result;
+        }
+
         [Test]
         public void MathematicsFloat3_RoundTrips_XYZ()
         {

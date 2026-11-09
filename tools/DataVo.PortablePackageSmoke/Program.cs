@@ -18,11 +18,16 @@ using DataVo.Core.Transactions;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
         string candidate = RequiredEnvironment("DATAVO_PORTABLE_ASSEMBLY");
         candidate = Path.GetFullPath(candidate);
         Assembly loaded = AssemblyLoadContext.Default.LoadFromAssemblyPath(candidate);
+        if (args is ["crash-writer", ..])
+        {
+            PortableSmoke.WriteThenCrash(args);
+        }
+
         return PortableSmoke.Run(candidate, loaded);
     }
 
@@ -52,8 +57,6 @@ internal static class PortableSmoke
 
         string testRoot = RequiredEnvironment("DATAVO_PORTABLE_TEST_ROOT");
         VerifyPortableCompatibilitySeams();
-        VerifyPortableDurableSecondFences(core, testRoot);
-        VerifyPublicDurableEngineFences(testRoot);
 
         DataVoDate expectedDate = DataVoDate.FromDateTime(new DateTime(2026, 7, 19));
         CellValue dateCell = CellValue.From(expectedDate);
@@ -98,12 +101,89 @@ internal static class PortableSmoke
         Require(flat.SearchTopK([0.9f, 0.1f], 1).SequenceEqual([101L]),
             "Flat vector lookup returned the wrong nearest row.");
 
-        ExpectDurableRejection(StorageMode.Disk, Path.Combine(testRoot, "disk"));
-        ExpectDurableRejection(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
+        VerifyPersistence(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
+        VerifyPersistence(StorageMode.Disk, Path.Combine(testRoot, "disk"));
+        VerifyCommittedRowsSurviveProcessCrash(StorageMode.Lsm, Path.Combine(testRoot, "lsm-crash"));
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");
         VerifyPreparedStatementsAndNameCase();
         return 0;
+    }
+
+    private const int CrashTestRows = 500;
+
+    private static DataVoContext OpenSaveData(StorageMode mode, string path) =>
+        new(new DataVoConfig { StorageMode = mode, DiskStoragePath = path });
+
+    private static void VerifyPersistence(StorageMode mode, string path)
+    {
+        using (DataVoContext writer = OpenSaveData(mode, path))
+        {
+            ExecuteOk(writer, "CREATE DATABASE Save");
+            ExecuteOk(writer, "USE save");
+            ExecuteOk(writer, "CREATE TABLE Players (Id INT PRIMARY KEY, Hp INT, Name VARCHAR(30))");
+            ExecuteOk(writer, "CREATE INDEX ix_hp ON Players (Hp)");
+            for (int id = 1; id <= 5000; id++)
+            {
+                ExecuteOk(writer, $"INSERT INTO Players (Id, Hp, Name) VALUES ({id}, {id % 50}, 'n{id}')");
+            }
+
+            ExecuteOk(writer, "UPDATE Players SET Hp = 777 WHERE Id = 1");
+            ExecuteOk(writer, "DELETE FROM Players WHERE Id = 2");
+            ExecuteOk(writer, "BEGIN");
+            ExecuteOk(writer, "INSERT INTO Players (Id, Hp, Name) VALUES (6000, 1, 'tx')");
+            ExecuteOk(writer, "COMMIT");
+        }
+
+        using DataVoContext reader = OpenSaveData(mode, path);
+        ExecuteOk(reader, "USE Save");
+        Require(ExecuteOk(reader, "SELECT Id FROM Players")[^1].Data.Count == 5000, $"{mode}: wrong row count after reopen.");
+        Require(Equals(ExecuteOk(reader, "SELECT Hp FROM Players WHERE Id = 1")[^1].Data.Single()["Hp"], 777), $"{mode}: update lost.");
+        Require(ExecuteOk(reader, "SELECT Id FROM Players WHERE Id = 2")[^1].Data.Count == 0, $"{mode}: delete lost.");
+        Require(ExecuteOk(reader, "SELECT Id FROM Players WHERE Id = 6000")[^1].Data.Count == 1, $"{mode}: transaction lost.");
+        Require(ExecuteOk(reader, "SELECT Id FROM Players WHERE Hp = 3")[^1].Data.Count == 100, $"{mode}: index wrong after reopen.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static void WriteThenCrash(string[] args)
+    {
+        StorageMode mode = Enum.Parse<StorageMode>(args[1]);
+        string path = args[2];
+        int rows = int.Parse(args[3]);
+        DataVoContext writer = OpenSaveData(mode, path);
+        ExecuteOk(writer, "CREATE DATABASE Save");
+        ExecuteOk(writer, "USE Save");
+        ExecuteOk(writer, "CREATE TABLE Players (Id INT PRIMARY KEY, Hp INT)");
+        for (int id = 1; id <= rows; id++)
+        {
+            ExecuteOk(writer, $"INSERT INTO Players (Id, Hp) VALUES ({id}, {id * 2})");
+        }
+
+        Environment.FailFast("Simulated crash after committed writes.");
+    }
+
+    private static void VerifyCommittedRowsSurviveProcessCrash(StorageMode mode, string path)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("dotnet")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+        };
+        foreach (string argument in new[] { Assembly.GetEntryAssembly()!.Location, "crash-writer", mode.ToString(), path, CrashTestRows.ToString() })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)!;
+        process.StandardOutput.ReadToEndAsync();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Require(process.ExitCode != 0, "The crash writer was expected to crash.");
+
+        using DataVoContext reader = OpenSaveData(mode, path);
+        ExecuteOk(reader, "USE Save");
+        int rows = ExecuteOk(reader, "SELECT Id FROM Players")[^1].Data.Count;
+        Require(rows == CrashTestRows, $"{mode}: {rows} of {CrashTestRows} committed rows survived a process crash.");
     }
 
     private static void VerifyPreparedStatementsAndNameCase()
@@ -123,41 +203,6 @@ internal static class PortableSmoke
         DataVoPreparedStatement update = context.Prepare("UPDATE iTeMs SET Qty = @qty WHERE Id = @id");
         Require(!update.Execute(("qty", 11), ("id", 1)).IsError, "Prepared UPDATE failed.");
         Require(Equals(select.Execute(("id", 1)).Data.Single()["Qty"], 11), "Prepared UPDATE did not reach the row.");
-    }
-
-    private static void VerifyPublicDurableEngineFences(string testRoot)
-    {
-        ExpectPublicEngineRejection(
-            Path.Combine(testRoot, "direct-disk"),
-            path => new DiskStorageEngine(path),
-            nameof(DiskStorageEngine));
-        ExpectPublicEngineRejection(
-            Path.Combine(testRoot, "direct-lsm"),
-            path => new LsmStorageEngine(path),
-            nameof(LsmStorageEngine));
-    }
-
-    private static void ExpectPublicEngineRejection(
-        string path,
-        Func<string, IDisposable> create,
-        string engineName)
-    {
-        Require(!Directory.Exists(path), $"{engineName} test directory already exists.");
-
-        try
-        {
-            using IDisposable engine = create(path);
-            throw new InvalidOperationException($"{engineName} unexpectedly constructed on the portable target.");
-        }
-        catch (PlatformNotSupportedException error)
-        {
-            Require(error.Message.Contains("netstandard2.1", StringComparison.Ordinal),
-                $"{engineName} rejection did not identify the portable target.");
-            Require(error.Message.Contains(nameof(StorageMode.InMemory), StringComparison.Ordinal),
-                $"{engineName} rejection did not identify the supported storage mode.");
-        }
-
-        Require(!Directory.Exists(path), $"{engineName} created its storage directory before rejecting the portable target.");
     }
 
     private static void VerifyPortableCompatibilitySeams()
@@ -254,233 +299,6 @@ internal static class PortableSmoke
             "Portable priority queue returned the wrong minimum.");
         Require(queue.Dequeue() == "first" && queue.Dequeue() == "later" && queue.Count == 0,
             "Portable priority queue dequeued elements out of order.");
-    }
-
-    private static void VerifyPortableDurableSecondFences(Assembly core, string testRoot)
-    {
-        var failures = new List<string>();
-        RunFenceProbe("random access", () => VerifyPortableRandomAccessFence(core), failures);
-        RunFenceProbe("file-handle acquisition", () => VerifyPortableFileHandlePoolFence(core, testRoot), failures);
-        RunFenceProbe("LSM publication", () => VerifyPortableLsmPublicationFence(core, testRoot), failures);
-
-        Require(
-            failures.Count == 0,
-            "Portable durable second-fence failures:\n- " + string.Join("\n- ", failures));
-    }
-
-    private static void VerifyPortableRandomAccessFence(Assembly core)
-    {
-        Type facade = RequireInternalType(core, "DataVo.Core.Compat.RandomAccessCompat");
-        PortableGetLength getLength = RequireDelegate<PortableGetLength>(facade, "GetLength");
-        PortableWrite write = RequireDelegate<PortableWrite>(facade, "Write");
-        PortableRead read = RequireDelegate<PortableRead>(facade, "Read");
-        PortableSetLength setLength = RequireDelegate<PortableSetLength>(facade, "SetLength");
-        PortableFlushToDisk flushToDisk = RequireDelegate<PortableFlushToDisk>(facade, "FlushToDisk");
-        byte[] empty = [];
-
-        var probes = new (string Name, Action Invoke)[]
-        {
-            ("GetLength", () => getLength(null!)),
-            ("Write", () => write(null!, empty, 0)),
-            ("Read", () => read(null!, empty, 0)),
-            ("SetLength", () => setLength(null!, 0)),
-            ("FlushToDisk", () => flushToDisk(null!))
-        };
-
-        foreach ((string name, Action invoke) in probes)
-        {
-            PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
-                invoke,
-                $"Portable random-access {name} accepted a null handle instead of rejecting durable I/O.");
-            RequirePortableFenceMessage(error, $"random-access {name}");
-        }
-    }
-
-    private static void VerifyPortableFileHandlePoolFence(Assembly core, string testRoot)
-    {
-        string acquireDirectory = Path.Combine(testRoot, "file-handle-acquire-second-fence");
-        string acquirePath = Path.Combine(acquireDirectory, "table.dat");
-        string removeDirectory = Path.Combine(testRoot, "file-handle-remove-second-fence");
-        string removePath = Path.Combine(removeDirectory, "table.dat");
-        Require(!Directory.Exists(acquireDirectory),
-            $"Portable handle-pool acquire probe path already exists: {acquireDirectory}");
-        Require(!Directory.Exists(removeDirectory),
-            $"Portable handle-pool remove probe path already exists: {removeDirectory}");
-
-        Type poolType = RequireInternalType(core, "DataVo.Core.StorageEngine.Disk.FileHandlePool");
-        object pool = Activator.CreateInstance(
-            poolType,
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null,
-            args: [8],
-            culture: null)
-            ?? throw new InvalidOperationException("Could not construct the portable file-handle pool probe.");
-
-        try
-        {
-            MethodInfo acquire = RequireMethod(poolType, "Acquire", BindingFlags.Public | BindingFlags.Instance);
-            PlatformNotSupportedException acquireError = ExpectReflectionPlatformNotSupported(
-                () => acquire.Invoke(pool, [acquirePath]),
-                "Portable file-handle acquisition unexpectedly succeeded.");
-            RequirePortableFenceMessage(acquireError, "file-handle acquisition");
-            Require(!Directory.Exists(acquireDirectory),
-                $"Portable file-handle acquisition rejection created directory '{acquireDirectory}'.");
-            Require(!File.Exists(acquirePath),
-                $"Portable file-handle acquisition rejection created file '{acquirePath}'.");
-
-            MethodInfo flushToDisk = RequireMethod(
-                poolType,
-                "FlushToDisk",
-                BindingFlags.Public | BindingFlags.Instance);
-            PlatformNotSupportedException flushError = ExpectReflectionPlatformNotSupported(
-                () => flushToDisk.Invoke(pool, null),
-                "Portable file-handle pool flush unexpectedly succeeded.");
-            RequirePortableFenceMessage(flushError, "file-handle pool flush");
-
-            MethodInfo remove = RequireMethod(poolType, "Remove", BindingFlags.Public | BindingFlags.Instance);
-            PlatformNotSupportedException removeError = ExpectReflectionPlatformNotSupported(
-                () => remove.Invoke(pool, [removePath]),
-                "Portable file-handle removal unexpectedly succeeded.");
-            RequirePortableFenceMessage(removeError, "file-handle removal");
-            Require(!Directory.Exists(removeDirectory),
-                $"Portable file-handle removal rejection created directory '{removeDirectory}'.");
-            Require(!File.Exists(removePath),
-                $"Portable file-handle removal rejection created file '{removePath}'.");
-
-            Type leaseType = poolType.GetNestedType(
-                "FileHandleLease",
-                BindingFlags.Public | BindingFlags.NonPublic)
-                ?? throw new InvalidOperationException(
-                    $"Portable type '{poolType.FullName}' is missing nested type 'FileHandleLease'.");
-            object lease = Activator.CreateInstance(leaseType, nonPublic: true)
-                ?? throw new InvalidOperationException("Could not construct the portable file-handle lease probe.");
-            try
-            {
-                PropertyInfo handle = leaseType.GetProperty(
-                    "Handle",
-                    BindingFlags.Public | BindingFlags.Instance)
-                    ?? throw new InvalidOperationException(
-                        $"Portable type '{leaseType.FullName}' is missing property 'Handle'.");
-                PlatformNotSupportedException handleError = ExpectReflectionPlatformNotSupported(
-                    () => handle.GetValue(lease),
-                    "Portable file-handle lease exposed a handle.");
-                RequirePortableFenceMessage(handleError, "file-handle lease access");
-            }
-            finally
-            {
-                ((IDisposable)lease).Dispose();
-            }
-        }
-        finally
-        {
-            ((IDisposable)pool).Dispose();
-        }
-    }
-
-    private static void VerifyPortableLsmPublicationFence(Assembly core, string testRoot)
-    {
-        string directory = Path.Combine(testRoot, "lsm-publication-second-fence");
-        string path = Path.Combine(directory, "table.sst");
-        Require(!Directory.Exists(directory), $"Portable LSM probe path already exists: {directory}");
-
-        Type operations = RequireInternalType(core, "DataVo.Core.StorageEngine.Lsm.LsmDurableFileOperations");
-        Type crashPointType = RequireInternalType(core, "DataVo.Core.StorageEngine.Lsm.LsmCrashPoint");
-        MethodInfo publish = RequireMethod(operations, "WriteFileAtomically", BindingFlags.Public | BindingFlags.Static);
-        object crashPoint = Enum.ToObject(crashPointType, 0);
-        bool writeInvoked = false;
-        bool crashHookInvoked = false;
-        Action<Stream> write = _ => writeInvoked = true;
-        Delegate crashHook = CreateFlaggingAction(crashPointType, () => crashHookInvoked = true);
-
-        PlatformNotSupportedException error = ExpectReflectionPlatformNotSupported(
-            () => publish.Invoke(null, [path, true, write, crashHook, crashPoint, crashPoint, crashPoint]),
-            "Portable LSM publication unexpectedly succeeded.");
-        RequirePortableFenceMessage(error, "LSM publication");
-
-        Require(!writeInvoked, "Portable LSM rejection invoked the write callback.");
-        Require(!crashHookInvoked, "Portable LSM rejection invoked the crash callback.");
-        Require(!Directory.Exists(directory),
-            $"Portable LSM rejection created directory '{directory}'.");
-        Require(!File.Exists(path),
-            $"Portable LSM rejection created destination file '{path}'.");
-        Require(
-            !Directory.Exists(directory)
-            || !Directory.EnumerateFiles(directory, Path.GetFileName(path) + ".tmp-*").Any(),
-            "Portable LSM rejection created a temporary publication file.");
-    }
-
-    private static Delegate CreateFlaggingAction(Type argumentType, Action callback)
-    {
-        MethodInfo factory = typeof(PortableSmoke)
-            .GetMethod(nameof(CreateFlaggingActionCore), BindingFlags.NonPublic | BindingFlags.Static)!
-            .MakeGenericMethod(argumentType);
-        return (Delegate)factory.Invoke(null, [callback])!;
-    }
-
-    private static Delegate CreateFlaggingActionCore<T>(Action callback) =>
-        (Action<T>)(_ => callback());
-
-    private static Type RequireInternalType(Assembly assembly, string fullName) =>
-        assembly.GetType(fullName, throwOnError: false)
-        ?? throw new InvalidOperationException($"Portable assembly is missing internal type '{fullName}'.");
-
-    private static MethodInfo RequireMethod(Type type, string name, BindingFlags flags) =>
-        type.GetMethod(name, flags)
-        ?? throw new InvalidOperationException($"Portable type '{type.FullName}' is missing method '{name}'.");
-
-    private static TDelegate RequireDelegate<TDelegate>(Type type, string name)
-        where TDelegate : Delegate =>
-        (TDelegate)RequireMethod(type, name, BindingFlags.Public | BindingFlags.Static)
-            .CreateDelegate(typeof(TDelegate));
-
-    private static PlatformNotSupportedException ExpectReflectionPlatformNotSupported(
-        Action action,
-        string noExceptionMessage)
-    {
-        try
-        {
-            action();
-        }
-        catch (TargetInvocationException error) when (error.InnerException is PlatformNotSupportedException unsupported)
-        {
-            return unsupported;
-        }
-        catch (PlatformNotSupportedException unsupported)
-        {
-            return unsupported;
-        }
-        catch (Exception error)
-        {
-            Exception actual = error is TargetInvocationException invocation
-                && invocation.InnerException is Exception inner
-                ? inner
-                : error;
-            throw new InvalidOperationException(
-                $"{noExceptionMessage} It threw {actual.GetType().FullName} instead.",
-                actual);
-        }
-
-        throw new InvalidOperationException(noExceptionMessage);
-    }
-
-    private static void RequirePortableFenceMessage(PlatformNotSupportedException error, string operation)
-    {
-        Require(error.Message.Contains("netstandard2.1", StringComparison.Ordinal),
-            $"Portable {operation} rejection did not name the experimental target.");
-        Require(error.Message.Contains(nameof(StorageMode.InMemory), StringComparison.Ordinal),
-            $"Portable {operation} rejection did not name the supported storage mode.");
-    }
-
-    private static void RunFenceProbe(string name, Action probe, ICollection<string> failures)
-    {
-        try
-        {
-            probe();
-        }
-        catch (Exception error)
-        {
-            failures.Add($"{name}: {error.Message}");
-        }
     }
 
     private static void VerifyPortableHotPathFallbacks()
@@ -671,30 +489,6 @@ internal static class PortableSmoke
             throw new InvalidOperationException($"SQL failed: {sql}: {string.Join("; ", failed.Messages)}");
         }
         return results;
-    }
-
-    private static void ExpectDurableRejection(StorageMode mode, string path)
-    {
-        Require(!Directory.Exists(path), $"Test path already exists: {path}");
-        try
-        {
-            using var unexpected = new StorageContext(new DataVoConfig
-            {
-                StorageMode = mode,
-                DiskStoragePath = path
-            });
-            throw new InvalidOperationException($"Portable {mode} construction unexpectedly succeeded.");
-        }
-        catch (PlatformNotSupportedException error)
-        {
-            Require(error.Message.Contains(mode.ToString(), StringComparison.Ordinal),
-                $"{mode} rejection did not name the requested mode.");
-            Require(error.Message.Contains("netstandard2.1", StringComparison.Ordinal),
-                $"{mode} rejection did not name the experimental target.");
-            Require(error.Message.Contains(nameof(StorageMode.InMemory), StringComparison.Ordinal),
-                $"{mode} rejection did not name the supported candidate scope.");
-        }
-        Require(!Directory.Exists(path), $"Portable {mode} rejection created '{path}'.");
     }
 
     private static string RequiredEnvironment(string name) =>

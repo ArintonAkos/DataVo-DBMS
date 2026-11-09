@@ -14,7 +14,7 @@ The public `DataVo.Core` package remains `net10.0`-only. `DataVoEnablePortableTa
 | Direct Burst calls | Unsupported by design | DataVo contains managed classes, strings, collections, locks, exceptions, and storage services. |
 | Job-to-managed batch bridge | Planned proof | Jobs produce fixed-layout POD commands; managed code drains them after `JobHandle` completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
-| Disk/LSM persistence | Unsupported until separately validated | The experimental portable target rejects both modes; do not use DataVo for shipped game saves. |
+| Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 | Godot C# | Unverified | Godot is not part of the first Unity proof and requires its own final-artifact validation. |
 
 ## Candidate use cases
@@ -33,7 +33,7 @@ DataVo runs in managed code outside Burst jobs. A Burst-compatible job may write
 
 ## Verified narrow in-memory scenario
 
-The verified candidate uses `StorageMode.InMemory` only. It registers both UnityEngine and Unity.Mathematics types through `UseUnityTypes()`, performs typed model insert/map/read for all initial supported types, rejects an exact vector-length mismatch, and emits a Player JSON result. Similar APIs and the portable-asset verifier may pass under a .NET host, but that does not establish wider Unity compatibility.
+The type-binding scenario uses `StorageMode.InMemory`. It registers both UnityEngine and Unity.Mathematics types through `UseUnityTypes()`, performs typed model insert/map/read for all initial supported types, rejects an exact vector-length mismatch, and emits a Player JSON result. Similar APIs and the portable-asset verifier may pass under a .NET host, but that does not establish wider Unity compatibility.
 
 ## NPC Memory Arena evaluation demo
 

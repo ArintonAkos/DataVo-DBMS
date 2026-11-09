@@ -61,7 +61,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync,
         LsmReadMode readMode = LsmReadMode.Auto)
     {
-        PortableStoragePolicy.ThrowIfUnsupported(StorageMode.Lsm);
         ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;

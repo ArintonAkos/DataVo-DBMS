@@ -98,8 +98,52 @@ namespace DataVo.UnitySmoke.Player
 
             AssertEquivalent(source, mapped, position);
             AssertVectorLengthFailure(context);
+            AssertSaveDataPersists(StorageMode.Lsm);
+            AssertSaveDataPersists(StorageMode.Disk);
 
             return PlayerSmokeResult.Passed();
+        }
+
+        private static void AssertSaveDataPersists(StorageMode mode)
+        {
+            string path = Path.Combine(Application.persistentDataPath, "DataVoSmokeSave_" + mode + "_" + Guid.NewGuid().ToString("N"));
+            var config = new DataVoConfig { StorageMode = mode, DiskStoragePath = path };
+
+            try
+            {
+                using (var writer = new DataVoContext(config))
+                {
+                    Run(writer, "CREATE DATABASE Save");
+                    Run(writer, "USE Save");
+                    Run(writer, "CREATE TABLE Inventory (Id INT PRIMARY KEY, Qty INT, Item VARCHAR(30))");
+                    Run(writer, "CREATE INDEX ix_qty ON Inventory (Qty)");
+
+                    for (int id = 1; id <= 2000; id++)
+                        Run(writer, "INSERT INTO Inventory (Id, Qty, Item) VALUES (" + id + ", " + (id % 20) + ", 'item" + id + "')");
+
+                    Run(writer, "UPDATE Inventory SET Qty = 777 WHERE Id = 1");
+                    Run(writer, "DELETE FROM Inventory WHERE Id = 2");
+                }
+
+                using var reader = new DataVoContext(config);
+                Run(reader, "USE Save");
+                Require(Run(reader, "SELECT Id FROM Inventory").Data.Count == 1999, mode + ": wrong row count after reopen.");
+                Require(Equals(Run(reader, "SELECT Qty FROM Inventory WHERE Id = 1").Data.Single()["Qty"], 777), mode + ": update was lost.");
+                Require(Run(reader, "SELECT Id FROM Inventory WHERE Id = 2").Data.Count == 0, mode + ": delete was lost.");
+                Require(Run(reader, "SELECT Id FROM Inventory WHERE Qty = 3").Data.Count == 100, mode + ": index was wrong after reopen.");
+            }
+            finally
+            {
+                if (Directory.Exists(path))
+                    Directory.Delete(path, recursive: true);
+            }
+        }
+
+        private static DataVo.Core.Contracts.Results.QueryResult Run(DataVoContext context, string sql)
+        {
+            var result = context.Execute(sql).Last();
+            Require(!result.IsError, sql + " failed: " + string.Join(" | ", result.Messages));
+            return result;
         }
 
         private static DataVoContext CreateInMemoryContext()

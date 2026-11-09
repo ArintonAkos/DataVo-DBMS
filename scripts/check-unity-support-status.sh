@@ -32,7 +32,7 @@ readonly support_rows=(
   "| Direct Burst calls | Unsupported by design |"
   "| Job-to-managed batch bridge | Planned proof |"
   "| In-memory mode | Candidate scope |"
-  "| Disk/LSM persistence | Unsupported until separately validated |"
+  "| Disk/LSM persistence | Verified (narrow smoke) |"
 )
 
 for support_file in \

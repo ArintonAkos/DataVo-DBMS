@@ -1,4 +1,3 @@
-#if NET10_0_OR_GREATER
 using DataVo.Core.Compat;
 using Microsoft.Win32.SafeHandles;
 
@@ -41,12 +40,7 @@ internal sealed class FileHandlePool : IDisposable
             EvictIdleEntriesIfNeeded();
 
             Directory.CreateDirectory(Path.GetDirectoryName(normalizedPath) ?? ".");
-            SafeFileHandle handle = File.OpenHandle(
-                normalizedPath,
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.ReadWrite | FileShare.Delete,
-                FileOptions.RandomAccess);
+            SafeFileHandle handle = RandomAccessCompat.Open(normalizedPath);
 
             var entry = new Entry(handle)
             {
@@ -220,7 +214,7 @@ internal sealed class FileHandlePool : IDisposable
         {
         }
 
-        entry.Handle.Dispose();
+        RandomAccessCompat.Close(entry.Handle);
     }
 
     private sealed class Entry(SafeFileHandle handle)
@@ -261,4 +255,3 @@ internal sealed class FileHandlePool : IDisposable
         }
     }
 }
-#endif

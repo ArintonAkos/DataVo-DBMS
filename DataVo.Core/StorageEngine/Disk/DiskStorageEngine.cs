@@ -36,7 +36,6 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable
     /// <param name="ioSchedulerMode">The disk I/O scheduler mode used by this engine.</param>
     public DiskStorageEngine(string storageDirectory, bool syncWrites = false, IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off)
     {
-        PortableStoragePolicy.ThrowIfUnsupported(StorageMode.Disk);
         _storageDirectory = storageDirectory;
         _syncWrites = syncWrites;
         _ioSchedulerMode = ioSchedulerMode;

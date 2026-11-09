@@ -66,12 +66,17 @@ internal abstract class SsTableBlockSource : IDisposable
             return mode;
         }
 
+#if NETSTANDARD2_1
+        // Memory mapping is not available on every runtime this target serves; plain reads work everywhere.
+        return LsmReadMode.PositionalRead;
+#else
 #if NET5_0_OR_GREATER
         bool browser = OperatingSystem.IsBrowser() || OperatingSystem.IsWasi();
 #else
         bool browser = RuntimeInformation.OSDescription.IndexOf("Browser", StringComparison.OrdinalIgnoreCase) >= 0;
 #endif
         return Environment.Is64BitProcess && !browser ? LsmReadMode.MemoryMapped : LsmReadMode.PositionalRead;
+#endif
     }
 
     protected static void ThrowIfOutOfRange(long offset, int length, long fileLength)

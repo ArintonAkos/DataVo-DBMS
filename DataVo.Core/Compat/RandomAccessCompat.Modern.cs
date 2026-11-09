@@ -5,6 +5,15 @@ namespace DataVo.Core.Compat;
 
 internal static class RandomAccessCompat
 {
+    public static SafeFileHandle Open(string path) => File.OpenHandle(
+        path,
+        FileMode.OpenOrCreate,
+        FileAccess.ReadWrite,
+        FileShare.ReadWrite | FileShare.Delete,
+        FileOptions.RandomAccess);
+
+    public static void Close(SafeFileHandle handle) => handle.Dispose();
+
     public static long GetLength(SafeFileHandle handle) => RandomAccess.GetLength(handle);
 
     public static void Write(SafeFileHandle handle, ReadOnlySpan<byte> bytes, long fileOffset) =>

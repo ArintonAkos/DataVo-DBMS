@@ -4,15 +4,15 @@ DataVo is an embedded SQL engine written in pure C#. This package carries its `n
 
 ## Status
 
-This is a preview for evaluation. Do not rely on it for shipped game saves.
+This is a preview for evaluation. Test save data on every platform you ship to.
 
 | Area | Status |
 | --- | --- |
 | Unity 6000.5.4f1 Editor | The portable build has passed EditMode smoke tests |
 | macOS IL2CPP (6000.5.4f1, Medium stripping) | The portable build has passed a built Player smoke test |
 | Windows, consoles, mobile | Not verified |
-| `StorageMode.InMemory` | Supported in this package |
-| `StorageMode.Disk`, `StorageMode.Lsm` | Rejected on this build |
+| `StorageMode.InMemory` | Available |
+| `StorageMode.Disk`, `StorageMode.Lsm` | Save, close and reopen pass on macOS (Editor and IL2CPP); other platforms are unverified |
 | Burst | Not supported: DataVo is managed code. Call it from the main thread or a managed thread |
 
 ## Install

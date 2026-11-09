@@ -68,7 +68,7 @@ Unity is an evaluation target, not a supported runtime in v0.1. The public `Data
 | Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
 | Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
-| Disk/LSM persistence | Unsupported until separately validated | The experimental portable target rejects both modes with `PlatformNotSupportedException`; do not use DataVo for Unity save data. |
+| Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 
 ## v0.1 Scope Summary
 
