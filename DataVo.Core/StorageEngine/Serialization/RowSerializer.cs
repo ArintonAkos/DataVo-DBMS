@@ -206,20 +206,21 @@ public static class RowSerializer
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when a column's storage type is fixed-width (<c>INT</c>, <c>FLOAT</c>,
+    /// Returns <see langword="true"/> when a column's storage type is fixed-width (<c>INT</c>, <c>BIGINT</c>, <c>FLOAT</c>, <c>DOUBLE</c>,
     /// or <c>BIT</c>) — the types the zero-allocation update path can overwrite in place.
     /// </summary>
     public static bool IsFixedWidthType(string columnType)
     {
         StorageColumnType type = ClassifyColumnType(columnType);
-        return type is StorageColumnType.Int or StorageColumnType.Float or StorageColumnType.Bit;
+        return type is StorageColumnType.Int or StorageColumnType.BigInt or StorageColumnType.Float
+            or StorageColumnType.Double or StorageColumnType.Bit;
     }
 
-    /// <summary>Returns <see langword="true"/> when a column's storage type is the 32-bit integer type.</summary>
-    public static bool IsIntegerType(string columnType) => ClassifyColumnType(columnType) == StorageColumnType.Int;
+    /// <summary>Returns <see langword="true"/> when a column's storage type is an integer type (<c>INT</c> or <c>BIGINT</c>).</summary>
+    public static bool IsIntegerType(string columnType) => ClassifyColumnType(columnType) is StorageColumnType.Int or StorageColumnType.BigInt;
 
     /// <summary>
-    /// Overwrites a single fixed-width cell (<c>INT</c>/<c>FLOAT</c>/<c>BIT</c>) in an already-serialized row
+    /// Overwrites a single fixed-width cell (<c>INT</c>/<c>BIGINT</c>/<c>FLOAT</c>/<c>DOUBLE</c>/<c>BIT</c>) in an already-serialized row
     /// buffer, in place and without allocation. Returns <see langword="false"/> — leaving the buffer
     /// untouched up to the failure point — when the cell cannot be patched in place: the column is
     /// variable-width, the existing cell is null (no value slot), the new value is null, or the buffer is
@@ -276,6 +277,24 @@ public static class RowSerializer
                 BinaryPrimitives.WriteInt32LittleEndian(
                     rowBytes.Slice(offset, sizeof(int)),
                     BitConverter.SingleToInt32Bits(Convert.ToSingle(newValue)));
+                return true;
+            case StorageColumnType.BigInt:
+                if (offset + sizeof(long) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt64LittleEndian(rowBytes.Slice(offset, sizeof(long)), Convert.ToInt64(newValue));
+                return true;
+            case StorageColumnType.Double:
+                if (offset + sizeof(long) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    rowBytes.Slice(offset, sizeof(long)),
+                    BitConverter.DoubleToInt64Bits(Convert.ToDouble(newValue)));
                 return true;
             case StorageColumnType.Bit:
                 if (offset + sizeof(bool) > rowBytes.Length)
@@ -345,6 +364,27 @@ public static class RowSerializer
                     rowBytes.Slice(offset, sizeof(int)),
                     BitConverter.SingleToInt32Bits((float)newValue.AsDouble()));
                 return true;
+            case StorageColumnType.BigInt:
+                if (newValue.Type is not (DataVoFixedWidthValueType.Int32 or DataVoFixedWidthValueType.Int64)
+                    || offset + sizeof(long) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    rowBytes.Slice(offset, sizeof(long)),
+                    newValue.Type == DataVoFixedWidthValueType.Int32 ? newValue.AsInt32() : newValue.AsInt64());
+                return true;
+            case StorageColumnType.Double:
+                if (newValue.Type != DataVoFixedWidthValueType.Double || offset + sizeof(long) > rowBytes.Length)
+                {
+                    return false;
+                }
+
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    rowBytes.Slice(offset, sizeof(long)),
+                    BitConverter.DoubleToInt64Bits(newValue.AsDouble()));
+                return true;
             case StorageColumnType.Bit:
                 if (newValue.Type != DataVoFixedWidthValueType.Boolean || offset + sizeof(bool) > rowBytes.Length)
                 {
@@ -386,6 +426,8 @@ public static class RowSerializer
             case StorageColumnType.Bit:
                 offset += sizeof(bool);
                 break;
+            case StorageColumnType.BigInt:
+            case StorageColumnType.Double:
             case StorageColumnType.Date:
             case StorageColumnType.DateTime:
                 offset += sizeof(long);
@@ -452,11 +494,13 @@ public static class RowSerializer
     // Storage type categories, resolved without allocation. column.Type is stored in the catalog as the
     // DataTypes enum name (PascalCase, e.g. "Int"/"Varchar"), so a ToUpperInvariant() switch re-cased and
     // allocated a string per column, per row. OrdinalIgnoreCase comparison classifies in place — zero alloc.
-    private enum StorageColumnType { Int, Float, Bit, Date, DateTime, Guid, Vector, String }
+    private enum StorageColumnType { Int, BigInt, Float, Double, Bit, Date, DateTime, Guid, Vector, String }
 
     private static StorageColumnType ClassifyColumnType(string type) =>
         string.Equals(type, "INT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Int :
+        string.Equals(type, "BIGINT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.BigInt :
         string.Equals(type, "FLOAT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Float :
+        string.Equals(type, "DOUBLE", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Double :
         string.Equals(type, "BIT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Bit :
         string.Equals(type, "DATE", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Date :
         string.Equals(type, "DATETIME", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.DateTime :
@@ -472,6 +516,10 @@ public static class RowSerializer
                 return CellValue.From(reader.ReadInt32());
             case StorageColumnType.Float:
                 return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
+            case StorageColumnType.BigInt:
+                return CellValue.From(reader.ReadInt64());
+            case StorageColumnType.Double:
+                return CellValue.From(BitConverter.Int64BitsToDouble(reader.ReadInt64()));
             case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
@@ -643,6 +691,8 @@ public static class RowSerializer
             case StorageColumnType.Bit:
                 reader.Skip(sizeof(bool));
                 return;
+            case StorageColumnType.BigInt:
+            case StorageColumnType.Double:
             case StorageColumnType.Date:
                 reader.Skip(sizeof(long));
                 return;
@@ -707,6 +757,18 @@ public static class RowSerializer
             return;
         }
 
+        if (type == StorageColumnType.BigInt)
+        {
+            writer.Write(Convert.ToInt64(boxed));
+            return;
+        }
+
+        if (type == StorageColumnType.Double)
+        {
+            writer.Write(BitConverter.DoubleToInt64Bits(Convert.ToDouble(boxed)));
+            return;
+        }
+
         if (type == StorageColumnType.Bit)
         {
             writer.Write(Convert.ToBoolean(boxed));
@@ -768,6 +830,16 @@ public static class RowSerializer
             return BitConverter.Int32BitsToSingle(reader.ReadInt32());
         }
 
+        if (type == StorageColumnType.BigInt)
+        {
+            return reader.ReadInt64();
+        }
+
+        if (type == StorageColumnType.Double)
+        {
+            return BitConverter.Int64BitsToDouble(reader.ReadInt64());
+        }
+
         if (type == StorageColumnType.Bit)
         {
             return reader.ReadBoolean();
@@ -814,6 +886,12 @@ public static class RowSerializer
             case StorageColumnType.Float:
                 writer.Write(BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
                 return;
+            case StorageColumnType.BigInt:
+                writer.Write(cell.Type == CellType.Int32 ? cell.AsInt32() : cell.AsInt64());
+                return;
+            case StorageColumnType.Double:
+                writer.Write(BitConverter.DoubleToInt64Bits(cell.AsDouble()));
+                return;
             case StorageColumnType.Bit:
                 writer.Write(cell.AsBoolean());
                 return;
@@ -853,6 +931,10 @@ public static class RowSerializer
                 return CellValue.From(reader.ReadInt32());
             case StorageColumnType.Float:
                 return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
+            case StorageColumnType.BigInt:
+                return CellValue.From(reader.ReadInt64());
+            case StorageColumnType.Double:
+                return CellValue.From(BitConverter.Int64BitsToDouble(reader.ReadInt64()));
             case StorageColumnType.Bit:
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:

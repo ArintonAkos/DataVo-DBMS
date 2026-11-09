@@ -379,13 +379,7 @@ public class Parser(List<Token> tokens)
                     ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
                 };
 
-                Token typeToken = Advance();
-                string typeStr = typeToken.Value;
-                if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
-                {
-                    typeStr += "(" + Advance().Value + ")";
-                    Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
-                }
+                string typeStr = ParseColumnTypeName();
                 colDef.DataType = typeStr;
 
                 while (!IsEof() && Current.Type != TokenType.Punctuation)
@@ -636,13 +630,7 @@ public class Parser(List<Token> tokens)
                 ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
             };
 
-            Token typeToken = Advance();
-            string typeStr = typeToken.Value;
-            if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
-            {
-                typeStr += "(" + Advance().Value + ")";
-                Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
-            }
+            string typeStr = ParseColumnTypeName();
             colDef.DataType = typeStr;
 
             while (!IsEof() && Current.Type != TokenType.Punctuation && Current.Type != TokenType.EOF)
@@ -714,13 +702,7 @@ public class Parser(List<Token> tokens)
                 ColumnName = new IdentifierNode(Consume(TokenType.Identifier, "column name").Value)
             };
 
-            Token typeToken = Advance();
-            string typeStr = typeToken.Value;
-            if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
-            {
-                typeStr += "(" + Advance().Value + ")";
-                Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
-            }
+            string typeStr = ParseColumnTypeName();
             colDef.DataType = typeStr;
 
             while (!IsEof() && Current.Type != TokenType.Punctuation && Current.Type != TokenType.EOF)
@@ -2471,6 +2453,26 @@ public class Parser(List<Token> tokens)
         return parts.Length == 2
             ? new ColumnRefNode { TableOrAlias = parts[0], Column = parts[1] }
             : new ColumnRefNode { TableOrAlias = null, Column = token.Value };
+    }
+
+    private string ParseColumnTypeName()
+    {
+        string typeStr = Advance().Value;
+        if (typeStr.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Current.Value, "PRECISION", StringComparison.OrdinalIgnoreCase))
+        {
+            Advance();
+        }
+
+        // Checked here so that an unsupported type such as DECIMAL(10,2) is reported by name.
+        DDL.ColumnDefinitionParser.ParseType(typeStr);
+        if (Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
+        {
+            typeStr += "(" + Advance().Value + ")";
+            Consume(TokenType.Punctuation, SqlPunctuation.CloseParenToken);
+        }
+
+        return typeStr;
     }
 
     private static LiteralNode ParseNumericLiteral(string value)

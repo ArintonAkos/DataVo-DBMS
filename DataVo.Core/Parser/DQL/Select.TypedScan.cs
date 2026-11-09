@@ -27,15 +27,18 @@ namespace DataVo.Core.Parser.DQL;
 /// </summary>
 internal partial class Select
 {
-    private enum TypedPredicateKind { Numeric, Text, ExactText, General, IsNull, IsNotNull }
+    private enum TypedPredicateKind { Numeric, Integer, Text, ExactText, General, IsNull, IsNotNull }
 
-    private sealed class TypedPredicate(int ordinal, string op, object? literal, TypedPredicateKind kind, double number)
+    private sealed class TypedPredicate(int ordinal, string op, object? literal, TypedPredicateKind kind, double number, long integer = 0)
     {
         public int Ordinal { get; } = ordinal;
         public string Operator { get; } = op;
         public object? Literal { get; } = literal;
         public TypedPredicateKind Kind { get; } = kind;
         public double Number { get; } = number;
+
+        /// <summary>The exact value of an <see cref="TypedPredicateKind.Integer"/> predicate; a double cannot hold every BIGINT.</summary>
+        public long Integer { get; } = integer;
     }
 
     private sealed class TypedAggregate(HashAggregateOperator.AggregateSpec spec, int ordinal)
@@ -317,8 +320,16 @@ internal partial class Select
             return false;
         }
 
+        if (columns[ordinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase) && literal.Value is int or long)
+        {
+            predicates.Add(new TypedPredicate(ordinal, op, literal.Value, TypedPredicateKind.Integer, 0, Convert.ToInt64(literal.Value, System.Globalization.CultureInfo.InvariantCulture)));
+            return true;
+        }
+
         bool numericColumn = columns[ordinal].Type.Equals("INT", StringComparison.OrdinalIgnoreCase)
-            || columns[ordinal].Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase);
+            || columns[ordinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase)
+            || columns[ordinal].Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase)
+            || columns[ordinal].Type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase);
         if (numericColumn && TryLiteralAsNumber(literal.Value, out double number))
         {
             predicates.Add(new TypedPredicate(ordinal, op, literal.Value, TypedPredicateKind.Numeric, number));
@@ -389,6 +400,9 @@ internal partial class Select
         }
     }
 
+    /// <summary>2^53: every integer up to this size has its own double.</summary>
+    private const double MaxExactInteger = 9007199254740992d;
+
     /// <summary>The key range implied by integer comparisons on the clustered key; a superset of the matches.</summary>
     private static (RowKey? Lower, RowKey? Upper) KeyRangeOf(List<TypedPredicate> predicates, int keyOrdinal)
     {
@@ -396,19 +410,34 @@ internal partial class Select
         long? high = null; // exclusive
         foreach (TypedPredicate predicate in predicates)
         {
-            if (predicate.Ordinal != keyOrdinal || predicate.Kind != TypedPredicateKind.Numeric)
+            if (predicate.Ordinal != keyOrdinal || predicate.Kind is not (TypedPredicateKind.Numeric or TypedPredicateKind.Integer))
             {
                 continue;
             }
 
-            double n = predicate.Number;
-            if (double.IsNaN(n) || n < long.MinValue / 2d || n > long.MaxValue / 2d)
+            long floor;
+            long ceiling;
+            if (predicate.Kind == TypedPredicateKind.Integer)
             {
-                continue;
+                floor = ceiling = predicate.Integer;
+            }
+            else
+            {
+                double n = predicate.Number;
+                if (double.IsNaN(n) || Math.Abs(n) > MaxExactInteger)
+                {
+                    continue; // beyond this a double no longer names one integer, so it cannot bound the range
+                }
+
+                floor = (long)Math.Floor(n);
+                ceiling = (long)Math.Ceiling(n);
             }
 
-            long floor = (long)Math.Floor(n);
-            long ceiling = (long)Math.Ceiling(n);
+            if (floor == long.MaxValue && predicate.Operator is Operators.GREATER_THAN or Operators.LESS_THAN_OR_EQUAL_TO)
+            {
+                continue; // floor + 1 would wrap; the predicate itself still filters
+            }
+
             switch (predicate.Operator)
             {
                 case Operators.GREATER_THAN_OR_EQUAL_TO: Raise(ref low, ceiling); break;
@@ -727,13 +756,19 @@ internal partial class Select
             return predicate.Operator == Operators.EQUALS ? equal : !equal;
         }
 
+        if (predicate.Kind == TypedPredicateKind.Integer)
+        {
+            long exact = cell.Type == CellType.Int32 ? cell.AsInt32() : cell.AsInt64();
+            return Satisfies(predicate.Operator, exact.CompareTo(predicate.Integer));
+        }
+
         if (predicate.Kind == TypedPredicateKind.Numeric)
         {
             double value = cell.Type switch
             {
                 CellType.Int32 => cell.AsInt32(),
                 CellType.Int64 => cell.AsInt64(),
-                CellType.Double => (float)cell.AsDouble(), // FLOAT columns hold single precision
+                CellType.Double => StorageContext.FloatingValue(column, cell),
                 _ => double.NaN,
             };
 
@@ -879,7 +914,7 @@ internal partial class Select
                     {
                         case CellType.Int32: group.Totals[i].Add((long)cell.AsInt32()); break;
                         case CellType.Int64: group.Totals[i].Add(cell.AsInt64()); break;
-                        case CellType.Double: group.Totals[i].Add((double)(float)cell.AsDouble()); break;
+                        case CellType.Double: group.Totals[i].Add(StorageContext.FloatingValue(state.Columns[aggregate.Ordinal], cell)); break;
                         default: group.Totals[i].Add(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell)!); break;
                     }
 
@@ -889,7 +924,7 @@ internal partial class Select
                     {
                         CellType.Int32 => cell.AsInt32(),
                         CellType.Int64 => cell.AsInt64(),
-                        CellType.Double => (float)cell.AsDouble(),
+                        CellType.Double => StorageContext.FloatingValue(state.Columns[aggregate.Ordinal], cell),
                         _ => Convert.ToDouble(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell), CultureInfo.InvariantCulture),
                     };
                     group.Counts[i]++;

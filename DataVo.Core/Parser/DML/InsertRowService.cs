@@ -800,7 +800,12 @@ internal sealed partial class InsertRowService(
             return CellType.Int32;
         }
 
-        if (type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase))
+        if (type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase))
+        {
+            return CellType.Int64;
+        }
+
+        if (type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase) || type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase))
         {
             return CellType.Double;
         }
@@ -1185,7 +1190,9 @@ internal sealed partial class InsertRowService(
         return column.Type.ToUpperInvariant() switch
         {
             "INT" => parsedValue is int,
+            "BIGINT" => parsedValue is long,
             "FLOAT" => parsedValue is double,
+            "DOUBLE" => parsedValue is double,
             "BIT" => parsedValue is bool,
             "DATE" => parsedValue is DataVoDate,
             "GUID" => parsedValue is Guid,

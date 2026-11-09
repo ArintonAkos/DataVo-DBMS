@@ -60,12 +60,12 @@ internal static class SqlIndexLookupKey
             return false;
         }
 
-        if (column.Type.Equals("INT", StringComparison.OrdinalIgnoreCase))
+        if (column.Type.Equals("INT", StringComparison.OrdinalIgnoreCase) || column.Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase))
         {
             return TryBuildIntegerKey(literal, out key);
         }
 
-        if (column.Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase))
+        if (column.Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase) || column.Type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase))
         {
             return TryBuildFloatKey(literal, out key);
         }
@@ -117,16 +117,16 @@ internal static class SqlIndexLookupKey
                 key = ScalarKeyFormatter.FormatBracketed(intValue, CultureInfo.InvariantCulture);
                 return true;
             case long longValue:
-                // Outside the INT range no row can be equal; the bracketed long simply finds nothing.
+                // In an INT column no row can equal a value outside its range; the key simply finds nothing.
                 key = ScalarKeyFormatter.FormatBracketed(longValue, CultureInfo.InvariantCulture);
                 return true;
             case double doubleValue when doubleValue == Math.Floor(doubleValue)
-                && doubleValue >= int.MinValue && doubleValue <= int.MaxValue:
-                // 101.0 equals the INT 101.
-                key = ScalarKeyFormatter.FormatBracketed((int)doubleValue, CultureInfo.InvariantCulture);
+                && doubleValue >= -9223372036854775808d && doubleValue < 9223372036854775808d:
+                // 101.0 equals the integer 101.
+                key = ScalarKeyFormatter.FormatBracketed((long)doubleValue, CultureInfo.InvariantCulture);
                 return true;
             case double doubleValue when !double.IsNaN(doubleValue):
-                // A fractional value equals no INT; this key finds nothing, which is the right answer.
+                // A fractional value equals no integer; this key finds nothing, which is the right answer.
                 key = ScalarKeyFormatter.FormatBracketed(doubleValue, CultureInfo.InvariantCulture);
                 return true;
             default:

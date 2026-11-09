@@ -9,7 +9,7 @@ namespace DataVo.Core.StorageEngine;
 
 /// <summary>
 /// Where a clustered table's key lives in its serialized rows, and how the key becomes the row's
-/// <see cref="RowKey"/>: an INT key is the integer, a GUID key its 16 bytes.
+/// <see cref="RowKey"/>: an INT or BIGINT key is the integer, a GUID key its 16 bytes.
 /// </summary>
 /// <remarks>
 /// The key is stored once, as the row's key: the row itself holds the key cell as NULL (a primary key is
@@ -19,6 +19,7 @@ namespace DataVo.Core.StorageEngine;
 internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordinal, string primaryKeyIndexName) : IStoredRowMaterializer
 {
     private readonly bool _isGuid = string.Equals(columns[ordinal].Type, "GUID", StringComparison.OrdinalIgnoreCase);
+    private readonly bool _isBigInt = string.Equals(columns[ordinal].Type, "BIGINT", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<Column> Columns { get; } = columns;
 
@@ -92,6 +93,11 @@ internal sealed class ClusteredKeyLayout(IReadOnlyList<Column> columns, int ordi
         {
             key.AsGuid().TryWriteBytes(value); // the cell encoding RowSerializer writes
             length = 16;
+        }
+        else if (_isBigInt)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, key.AsInt64());
+            length = sizeof(long);
         }
         else
         {

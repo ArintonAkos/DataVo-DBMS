@@ -295,7 +295,8 @@ internal partial class Select
         };
     }
 
-    private static bool IsIntegerColumn(CatalogColumn column) => column.Type.Equals("INT", StringComparison.OrdinalIgnoreCase);
+    private static bool IsIntegerColumn(CatalogColumn column) =>
+        column.Type.Equals("INT", StringComparison.OrdinalIgnoreCase) || column.Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase);
 
     private static long EstimateRows(DataVoEngine engine, JoinSide side, string databaseName) =>
         engine.StorageContext.TryEstimateRowCount(side.Detail.TableName, databaseName, out long count) ? count : long.MaxValue;
@@ -516,7 +517,7 @@ internal partial class Select
                         {
                             case CellType.Int32: group.Totals[i].Add((long)cell.AsInt32()); break;
                             case CellType.Int64: group.Totals[i].Add(cell.AsInt64()); break;
-                            case CellType.Double: group.Totals[i].Add((double)(float)cell.AsDouble()); break;
+                            case CellType.Double: group.Totals[i].Add(StorageContext.FloatingValue(column, cell)); break;
                             default: group.Totals[i].Add(StorageContext.ConvertCellForLegacyDictionary(column, cell)!); break;
                         }
 
@@ -526,7 +527,7 @@ internal partial class Select
                         {
                             CellType.Int32 => cell.AsInt32(),
                             CellType.Int64 => cell.AsInt64(),
-                            CellType.Double => (float)cell.AsDouble(),
+                            CellType.Double => StorageContext.FloatingValue(column, cell),
                             _ => Convert.ToDouble(StorageContext.ConvertCellForLegacyDictionary(column, cell), System.Globalization.CultureInfo.InvariantCulture),
                         };
                         group.Counts[i]++;

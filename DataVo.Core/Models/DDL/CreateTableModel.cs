@@ -112,17 +112,7 @@ public class CreateTableModel(string tableName, List<Field> fields)
         throw new EvaluationException($"DEFAULT expression must be a constant literal value. Actual type: {expr.GetType()}");
     }
 
-    private static DataTypes ParseType(string typeStr)
-    {
-        string t = typeStr.ToLowerInvariant();
-        if (t.Contains("guid") || t.Contains("uuid") || t.Contains("uniqueidentifier")) return DataTypes.Guid;
-        if (t.Contains("int")) return DataTypes.Int;
-        if (t.Contains("float")) return DataTypes.Float;
-        if (t.Contains("bit")) return DataTypes.Bit;
-        if (t.Contains("date")) return DataTypes.Date;
-        if (t.Contains("vector")) return DataTypes.Vector;
-        return DataTypes.Varchar;
-    }
+    private static DataTypes ParseType(string typeStr) => Parser.DDL.ColumnDefinitionParser.ParseType(typeStr);
 
     private static int ParseLength(string typeStr)
     {

@@ -26,4 +26,10 @@ public enum DataTypes
 
     /// <summary>Dense floating-point vector values.</summary>
     Vector,
+
+    /// <summary>A 64-bit signed integer.</summary>
+    BigInt,
+
+    /// <summary>A 64-bit floating-point number.</summary>
+    Double,
 }

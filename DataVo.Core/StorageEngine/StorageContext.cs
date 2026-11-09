@@ -1340,6 +1340,10 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return result;
     }
 
+    /// <summary>The numeric value of a floating-point cell: FLOAT columns hold single precision, DOUBLE columns double.</summary>
+    internal static double FloatingValue(Column column, CellValue cell) =>
+        column.Type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase) ? cell.AsDouble() : (float)cell.AsDouble();
+
     internal static object? ConvertCellForLegacyDictionary(Column column, CellValue cell)
     {
         if (cell.IsNull)

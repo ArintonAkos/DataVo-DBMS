@@ -284,7 +284,7 @@ public sealed partial class DataVoPreparedStatement
         // Check for single-column INT secondary index (or non-clustered INT PK) equality lookup.
         if (predicateSlots.Count == 1
             && predicateSlots[0].Operator == Operators.EQUALS
-            && colTypes[predicateSlots[0].Ordinal] == FastColumnType.Int
+            && colTypes[predicateSlots[0].Ordinal] is FastColumnType.Int or FastColumnType.BigInt
             && limitSkip == 0
             && limitTake < 0)
         {
@@ -699,12 +699,13 @@ public sealed partial class DataVoPreparedStatement
 
         if (!plan.ClusteredIsGuid)
         {
+            FastColumnType keyType = plan.ColumnTypes[plan.ClusteredOrdinal];
             switch (param.Kind)
             {
                 case DataVoQueryParameterKind.Int64:
                 {
                     long val = param.AsInt64();
-                    if (val < int.MinValue || val > int.MaxValue)
+                    if (OutsideKeyRange(keyType, val))
                     {
                         unmatched = true;
                         return true;
@@ -716,7 +717,7 @@ public sealed partial class DataVoPreparedStatement
                 case DataVoQueryParameterKind.Double:
                 {
                     double d = param.AsDouble();
-                    if (double.IsNaN(d) || d != Math.Floor(d) || d < int.MinValue || d > int.MaxValue)
+                    if (double.IsNaN(d) || d != Math.Floor(d) || OutsideKeyRange(keyType, d))
                     {
                         unmatched = true;
                         return true;
@@ -731,7 +732,7 @@ public sealed partial class DataVoPreparedStatement
                     string trimmed = UnquoteSingleQuoted(text).Trim();
                     if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedLong))
                     {
-                        if (parsedLong < int.MinValue || parsedLong > int.MaxValue)
+                        if (OutsideKeyRange(keyType, parsedLong))
                         {
                             unmatched = true;
                             return true;
@@ -743,7 +744,7 @@ public sealed partial class DataVoPreparedStatement
 
                     if (double.TryParse(trimmed, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double parsedDouble))
                     {
-                        if (parsedDouble != Math.Floor(parsedDouble) || parsedDouble < int.MinValue || parsedDouble > int.MaxValue)
+                        if (parsedDouble != Math.Floor(parsedDouble) || OutsideKeyRange(keyType, parsedDouble))
                         {
                             unmatched = true;
                             return true;
@@ -821,7 +822,9 @@ public sealed partial class DataVoPreparedStatement
         {
             decodedByOrdinal[plan.ClusteredOrdinal] = plan.ClusteredIsGuid
                 ? slot.BoxGuid(plan.ClusteredOrdinal, rowId.AsGuid())
-                : slot.BoxInt32(plan.ClusteredOrdinal, (int)rowId.AsInt64());
+                : plan.ColumnTypes[plan.ClusteredOrdinal] == FastColumnType.BigInt
+                    ? slot.BoxInt64(plan.ClusteredOrdinal, rowId.AsInt64())
+                    : slot.BoxInt32(plan.ClusteredOrdinal, (int)rowId.AsInt64());
         }
 
         (string Field, int Ordinal)[] directOutput = plan.DirectOutput;
@@ -870,6 +873,8 @@ public sealed partial class DataVoPreparedStatement
             {
                 FastColumnType.Int => slot.BoxInt32(i, reader.ReadInt32()),
                 FastColumnType.Float => slot.BoxFloat(i, BitConverter.Int32BitsToSingle(reader.ReadInt32())),
+                FastColumnType.BigInt => slot.BoxInt64(i, reader.ReadInt64()),
+                FastColumnType.Double => slot.BoxDouble(i, BitConverter.Int64BitsToDouble(reader.ReadInt64())),
                 FastColumnType.Bit => reader.ReadBoolean() ? BoxedTrue : BoxedFalse,
                 FastColumnType.Guid => slot.BoxGuid(i, reader.ReadGuid()),
                 FastColumnType.String => workspace.DecodeUtf8String(i, reader.ReadStringSpan()),
@@ -904,6 +909,8 @@ public sealed partial class DataVoPreparedStatement
             case FastColumnType.Bit:
                 reader.Skip(sizeof(bool));
                 return;
+            case FastColumnType.BigInt:
+            case FastColumnType.Double:
             case FastColumnType.Date:
             case FastColumnType.DateTime:
                 reader.Skip(sizeof(long));
@@ -1108,11 +1115,12 @@ public sealed partial class DataVoPreparedStatement
             return true;
         }
 
+        FastColumnType keyType = plan.ColumnTypes[slot.Ordinal];
         switch (param.Kind)
         {
             case DataVoQueryParameterKind.Int64:
                 key = param.AsInt64();
-                if (key < int.MinValue || key > int.MaxValue)
+                if (OutsideKeyRange(keyType, key))
                 {
                     unmatched = true;
                 }
@@ -1121,7 +1129,7 @@ public sealed partial class DataVoPreparedStatement
             case DataVoQueryParameterKind.Double:
             {
                 double d = param.AsDouble();
-                if (double.IsNaN(d) || d != Math.Floor(d) || d < int.MinValue || d > int.MaxValue)
+                if (double.IsNaN(d) || d != Math.Floor(d) || OutsideKeyRange(keyType, d))
                 {
                     unmatched = true;
                     return true;
@@ -1136,7 +1144,7 @@ public sealed partial class DataVoPreparedStatement
                 string trimmed = UnquoteSingleQuoted(text).Trim();
                 if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedLong))
                 {
-                    if (parsedLong < int.MinValue || parsedLong > int.MaxValue)
+                    if (OutsideKeyRange(keyType, parsedLong))
                     {
                         unmatched = true;
                     }
@@ -1159,6 +1167,14 @@ public sealed partial class DataVoPreparedStatement
                 return false;
         }
     }
+
+    private static bool OutsideKeyRange(FastColumnType keyType, long value) =>
+        keyType != FastColumnType.BigInt && (value < int.MinValue || value > int.MaxValue);
+
+    private static bool OutsideKeyRange(FastColumnType keyType, double value) =>
+        keyType == FastColumnType.BigInt
+            ? value < -9223372036854775808d || value >= 9223372036854775808d
+            : value < int.MinValue || value > int.MaxValue;
 
     private static bool TryBindScanPredicate(
         CompiledSelectPlan plan,
@@ -1190,7 +1206,13 @@ public sealed partial class DataVoPreparedStatement
         }
 
         FastColumnType colType = plan.ColumnTypes[slot.Ordinal];
-        if (colType is FastColumnType.Int or FastColumnType.Float)
+        if (colType == FastColumnType.BigInt && TryGetExactInt64(param, out long exactInteger))
+        {
+            bound = new BoundScanPredicate(slot.Ordinal, slot.Operator, BoundPredicateKind.Integer, 0, null, exactInteger);
+            return true;
+        }
+
+        if (colType is FastColumnType.Int or FastColumnType.BigInt or FastColumnType.Float or FastColumnType.Double)
         {
             double number;
             switch (param.Kind)
@@ -1243,6 +1265,21 @@ public sealed partial class DataVoPreparedStatement
         return true;
     }
 
+    private static bool TryGetExactInt64(DataVoQueryParameter param, out long value)
+    {
+        switch (param.Kind)
+        {
+            case DataVoQueryParameterKind.Int64:
+                value = param.AsInt64();
+                return true;
+            case DataVoQueryParameterKind.String:
+                return long.TryParse(UnquoteSingleQuoted(param.AsString()!).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+            default:
+                value = 0;
+                return false;
+        }
+    }
+
     private static (RowKey? Lower, RowKey? Upper) ComputeClusteredKeyRange(
         ReadOnlySpan<BoundScanPredicate> predicates,
         int keyOrdinal)
@@ -1252,19 +1289,34 @@ public sealed partial class DataVoPreparedStatement
         for (int i = 0; i < predicates.Length; i++)
         {
             BoundScanPredicate predicate = predicates[i];
-            if (predicate.Ordinal != keyOrdinal || predicate.Kind != BoundPredicateKind.Numeric)
+            if (predicate.Ordinal != keyOrdinal || predicate.Kind is not (BoundPredicateKind.Numeric or BoundPredicateKind.Integer))
             {
                 continue;
             }
 
-            double n = predicate.Number;
-            if (double.IsNaN(n) || n < long.MinValue / 2d || n > long.MaxValue / 2d)
+            long floor;
+            long ceiling;
+            if (predicate.Kind == BoundPredicateKind.Integer)
             {
-                continue;
+                floor = ceiling = predicate.Integer;
+            }
+            else
+            {
+                double n = predicate.Number;
+                if (double.IsNaN(n) || Math.Abs(n) > 9007199254740992d)
+                {
+                    continue; // beyond 2^53 a double no longer names one integer, so it cannot bound the range
+                }
+
+                floor = (long)Math.Floor(n);
+                ceiling = (long)Math.Ceiling(n);
             }
 
-            long floor = (long)Math.Floor(n);
-            long ceiling = (long)Math.Ceiling(n);
+            if (floor == long.MaxValue && predicate.Operator is Operators.GREATER_THAN or Operators.LESS_THAN_OR_EQUAL_TO)
+            {
+                continue; // floor + 1 would wrap; the predicate itself still filters
+            }
+
             switch (predicate.Operator)
             {
                 case Operators.GREATER_THAN_OR_EQUAL_TO:
@@ -1362,7 +1414,9 @@ public sealed partial class DataVoPreparedStatement
         {
             cells[key] = plan.ClusteredIsGuid
                 ? CellValue.From(rowId.AsGuid())
-                : CellValue.From(checked((int)rowId.AsInt64()));
+                : plan.ColumnTypes[key] == FastColumnType.BigInt
+                    ? CellValue.From(rowId.AsInt64())
+                    : CellValue.From(checked((int)rowId.AsInt64()));
         }
     }
 
@@ -1405,13 +1459,19 @@ public sealed partial class DataVoPreparedStatement
             return predicate.Operator == Operators.EQUALS ? equal : !equal;
         }
 
+        if (predicate.Kind == BoundPredicateKind.Integer)
+        {
+            long exact = cell.Type == CellType.Int32 ? cell.AsInt32() : cell.AsInt64();
+            return SatisfiesComparison(predicate.Operator, exact.CompareTo(predicate.Integer));
+        }
+
         if (predicate.Kind == BoundPredicateKind.Numeric)
         {
             double value = cell.Type switch
             {
                 CellType.Int32 => cell.AsInt32(),
                 CellType.Int64 => cell.AsInt64(),
-                CellType.Double => (float)cell.AsDouble(),
+                CellType.Double => StorageContext.FloatingValue(column, cell),
                 _ => double.NaN,
             };
 
@@ -1529,7 +1589,7 @@ public sealed partial class DataVoPreparedStatement
                 throw new BindingException($"Bind Error: Parameter '@{candidate.WhereParameterName}' was not provided.");
             }
 
-            if (!TryToFixedWidthValue(pkParam, FastColumnType.Int, out pkValue))
+            if (!TryToFixedWidthValue(pkParam, plan.PrimaryKeyType, out pkValue))
             {
                 return false;
             }
@@ -1639,6 +1699,7 @@ public sealed partial class DataVoPreparedStatement
             Eligible = true,
             CompiledPlan = compiledPlan,
             AssignColumnTypes = assignColTypes,
+            PrimaryKeyType = ClassifyColumnType(columns[pkOrdinal].Type),
         };
     }
 
@@ -1667,7 +1728,16 @@ public sealed partial class DataVoPreparedStatement
                 }
 
                 return false;
+            case FastColumnType.BigInt:
+                if (param.Kind == DataVoQueryParameterKind.Int64)
+                {
+                    value = DataVoFixedWidthValue.From(param.AsInt64());
+                    return true;
+                }
+
+                return false;
             case FastColumnType.Float:
+            case FastColumnType.Double:
                 if (param.Kind == DataVoQueryParameterKind.Double)
                 {
                     value = DataVoFixedWidthValue.From(param.AsDouble());
@@ -1772,7 +1842,7 @@ public sealed partial class DataVoPreparedStatement
             }
 
             pk = param.AsInt64();
-            if (pk < int.MinValue || pk > int.MaxValue)
+            if (OutsideKeyRange(plan.PrimaryKeyType, pk))
             {
                 result = Affected0Result;
                 return true;
@@ -1782,7 +1852,7 @@ public sealed partial class DataVoPreparedStatement
         {
             pk = constInt;
         }
-        else if (candidate.WhereConstant is long constLong && constLong is >= int.MinValue and <= int.MaxValue)
+        else if (candidate.WhereConstant is long constLong && !OutsideKeyRange(plan.PrimaryKeyType, constLong))
         {
             pk = constLong;
         }
@@ -1907,6 +1977,7 @@ public sealed partial class DataVoPreparedStatement
 
         return new CompiledDeletePlan
         {
+            PrimaryKeyType = ClassifyColumnType(columns[pkOrdinal].Type),
             DatabaseName = databaseName,
             TableName = storedTable,
             SchemaVersion = schemaVersion,
@@ -1984,7 +2055,9 @@ public sealed partial class DataVoPreparedStatement
 
     private static FastColumnType ClassifyColumnType(string type) =>
         string.Equals(type, "INT", StringComparison.OrdinalIgnoreCase) ? FastColumnType.Int :
+        string.Equals(type, "BIGINT", StringComparison.OrdinalIgnoreCase) ? FastColumnType.BigInt :
         string.Equals(type, "FLOAT", StringComparison.OrdinalIgnoreCase) ? FastColumnType.Float :
+        string.Equals(type, "DOUBLE", StringComparison.OrdinalIgnoreCase) ? FastColumnType.Double :
         string.Equals(type, "BIT", StringComparison.OrdinalIgnoreCase) ? FastColumnType.Bit :
         string.Equals(type, "DATE", StringComparison.OrdinalIgnoreCase) ? FastColumnType.Date :
         string.Equals(type, "DATETIME", StringComparison.OrdinalIgnoreCase) ? FastColumnType.DateTime :
@@ -2002,6 +2075,8 @@ public sealed partial class DataVoPreparedStatement
         Guid,
         Vector,
         String,
+        BigInt,
+        Double,
     }
 
     private enum SelectAccessKind : byte
@@ -2018,6 +2093,7 @@ public sealed partial class DataVoPreparedStatement
         Text = 1,
         ExactText = 2,
         General = 3,
+        Integer = 4,
     }
 
     private readonly record struct CompiledPredicateSlot(
@@ -2031,7 +2107,8 @@ public sealed partial class DataVoPreparedStatement
         string Operator,
         BoundPredicateKind Kind,
         double Number,
-        object? Literal);
+        object? Literal,
+        long Integer = 0);
 
     private struct ClusteredPointVisitState
     {
@@ -2174,6 +2251,8 @@ public sealed partial class DataVoPreparedStatement
         public readonly QueryResult HitResult;
         private readonly object[] _boxedInts;
         private readonly object[] _boxedFloats;
+        private readonly object[] _boxedLongs;
+        private readonly object[] _boxedDoubles;
         private readonly object[] _boxedGuids;
 
         public RowResultSlot(CompiledSelectPlan plan)
@@ -2194,12 +2273,16 @@ public sealed partial class DataVoPreparedStatement
 
             _boxedInts = new object[colCount];
             _boxedFloats = new object[colCount];
+            _boxedLongs = new object[colCount];
+            _boxedDoubles = new object[colCount];
             _boxedGuids = new object[colCount];
 
             for (int i = 0; i < colCount; i++)
             {
                 _boxedInts[i] = BoxFreshInt(int.MinValue + i);
                 _boxedFloats[i] = BoxFreshFloat(float.NaN);
+                _boxedLongs[i] = long.MinValue + i;
+                _boxedDoubles[i] = double.NaN;
                 _boxedGuids[i] = BoxFreshGuid(Guid.Empty);
             }
         }
@@ -2214,6 +2297,22 @@ public sealed partial class DataVoPreparedStatement
 
             object box = _boxedInts[ordinal];
             Unsafe.Unbox<int>(box) = value;
+            return box;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public object BoxInt64(int ordinal, long value)
+        {
+            object box = _boxedLongs[ordinal];
+            Unsafe.Unbox<long>(box) = value;
+            return box;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public object BoxDouble(int ordinal, double value)
+        {
+            object box = _boxedDoubles[ordinal];
+            Unsafe.Unbox<double>(box) = value;
             return box;
         }
 
@@ -2261,6 +2360,7 @@ public sealed partial class DataVoPreparedStatement
         public required bool Eligible { get; init; }
         public DataVoCompiledQueryPlan? CompiledPlan { get; init; }
         public FastColumnType[] AssignColumnTypes { get; init; } = [];
+        public FastColumnType PrimaryKeyType { get; init; }
     }
 
     private sealed class DeleteCandidate
@@ -2273,6 +2373,8 @@ public sealed partial class DataVoPreparedStatement
 
     private sealed class CompiledDeletePlan
     {
+        public FastColumnType PrimaryKeyType { get; init; }
+
         public required string DatabaseName { get; init; }
         public required string TableName { get; init; }
         public required int SchemaVersion { get; init; }

@@ -178,7 +178,7 @@ internal static class SelectBinder
         }
 
         string? type = tableService.TryGetColumnType(column.TableName, column.Column);
-        if (type is not ("INT" or "FLOAT"))
+        if (type is not ("INT" or "BIGINT" or "FLOAT" or "DOUBLE"))
         {
             return;
         }

@@ -1804,7 +1804,9 @@ public static class DataVoCompiledQuery
         return column.Type.ToUpperInvariant() switch
         {
             "INT" => parsedValue is int,
+            "BIGINT" => parsedValue is long,
             "FLOAT" => parsedValue is double,
+            "DOUBLE" => parsedValue is double,
             "BIT" => parsedValue is bool,
             "DATE" => parsedValue is DataVoDate,
             "VECTOR" => parsedValue is float[] vector && (column.Length <= 0 || vector.Length == column.Length),

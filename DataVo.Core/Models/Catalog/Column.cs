@@ -74,7 +74,9 @@ public class Column : IColumn
             "GUID" => Guid.TryParse(rawValue, out Guid parsedGuid) ? parsedGuid : rawValue,
             "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,
             "INT" => int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) ? parsedInt : rawValue,
+            "BIGINT" => long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedBigInt) ? parsedBigInt : rawValue,
             "FLOAT" => TryParseFloatingPoint(rawValue, out double parsedFloat) ? parsedFloat : rawValue,
+            "DOUBLE" => TryParseFloatingPoint(rawValue, out double parsedDouble) ? parsedDouble : rawValue,
             "VECTOR" => VectorParser.TryParseVector(rawValue, out float[] parsedVector) ? parsedVector : rawValue,
             _ => rawValue,
         };

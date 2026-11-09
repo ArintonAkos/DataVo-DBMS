@@ -90,7 +90,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
         }
 
         Field? key = table.Fields.Find(field => string.Equals(field.Name, table.PrimaryKeys[0], StringComparison.OrdinalIgnoreCase));
-        return key is { Type: Enums.DataTypes.Int or Enums.DataTypes.Guid };
+        return key is { Type: Enums.DataTypes.Int or Enums.DataTypes.BigInt or Enums.DataTypes.Guid };
     }
 
     /// <summary>
