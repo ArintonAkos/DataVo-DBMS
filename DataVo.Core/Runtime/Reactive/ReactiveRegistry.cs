@@ -317,10 +317,17 @@ public sealed class ReactiveRegistry
         // the RECURSIVE keyword nor a UNION ALL CTE body, so RecursiveCteParser slices and validates it.
         if (RecursiveCteParser.LooksRecursive(sql))
         {
-            return new RecursiveCteReactiveQuery(RecursiveCteParser.Parse(sql), _engine, databaseName);
+            RecursiveCteShape shape = RecursiveCteParser.Parse(sql);
+            shape = shape with
+            {
+                BaseTable = _engine.Catalog.FindTableName(shape.BaseTable, databaseName) ?? shape.BaseTable,
+                RecursiveBaseTable = _engine.Catalog.FindTableName(shape.RecursiveBaseTable, databaseName) ?? shape.RecursiveBaseTable,
+            };
+            return new RecursiveCteReactiveQuery(shape, _engine, databaseName);
         }
 
         Parser.AST.SqlStatement statement = ReactiveQueryParser.ParseSingleStatement(sql);
+        Parser.Binding.SqlNameResolver.Resolve(statement, _engine, databaseName);
         return CreateQuery(statement, databaseName, sql);
     }
 

@@ -13,6 +13,7 @@ internal sealed class CatalogStore
 {
     private readonly object _syncRoot = new();
     private readonly ConcurrentDictionary<(string Database, string Table), int> _tableSchemaVersions = new(TableSchemaKeyComparer.Instance);
+    private readonly ConcurrentDictionary<(string Database, string Table), string> _storedNames = new(TableSchemaKeyComparer.Instance);
     private readonly bool _persistToDisk;
     private readonly string? _catalogDirectory;
     private readonly string? _catalogFilePath;
@@ -26,6 +27,7 @@ internal sealed class CatalogStore
         _persistToDisk = _catalogDirectory is not null;
         _catalogFilePath = _persistToDisk ? Path.Combine(_catalogDirectory!, "Catalog.xml") : null;
         _doc = new XDocument(new XElement("Databases"));
+        _storedNames.Clear();
 
         _tableShapes.Clear();
         _childForeignKeys.Clear();
@@ -46,6 +48,59 @@ internal sealed class CatalogStore
         lock (_syncRoot)
         {
             return GetTableElement(databaseName, tableName) != null;
+        }
+    }
+
+    /// <summary>
+    /// Finds the spelling a database was created with, or <see langword="null"/> when it does not exist.
+    /// Names match without regard to case; every storage layer keys on the spelling returned here.
+    /// </summary>
+    /// <param name="databaseName">The database name as written by the caller.</param>
+    /// <returns>The stored spelling, or <see langword="null"/>.</returns>
+    /// <example>
+    /// <code>
+    /// string stored = catalog.FindDatabaseName("SHOP") ?? "SHOP"; // "Shop"
+    /// </code>
+    /// </example>
+    public string? FindDatabaseName(string databaseName) =>
+        FindStoredName((databaseName, string.Empty), static (store, key) =>
+            store.GetDatabaseElement(key.Database)?.Attribute("DatabaseName")?.Value);
+
+    /// <summary>
+    /// Finds the spelling a table was created with, or <see langword="null"/> when it does not exist.
+    /// </summary>
+    /// <param name="tableName">The table name as written by the caller.</param>
+    /// <param name="databaseName">The database that owns the table.</param>
+    /// <returns>The stored spelling, or <see langword="null"/>.</returns>
+    /// <example>
+    /// <code>
+    /// string stored = catalog.FindTableName("items", "Shop") ?? "items"; // "Items"
+    /// </code>
+    /// </example>
+    public string? FindTableName(string tableName, string databaseName) =>
+        FindStoredName((databaseName, tableName), static (store, key) =>
+            store.GetTableElement(key.Database, key.Table)?.Attribute("TableName")?.Value);
+
+    private string? FindStoredName(
+        (string Database, string Table) key,
+        Func<CatalogStore, (string Database, string Table), string?> lookUp)
+    {
+        if (_storedNames.TryGetValue(key, out string? cached))
+        {
+            return cached;
+        }
+
+        // Filled under the catalog lock, the same lock DDL clears it under, so an entry can never outlive
+        // the table it describes.
+        lock (_syncRoot)
+        {
+            string? stored = lookUp(this, key);
+            if (stored is not null)
+            {
+                _storedNames[key] = stored;
+            }
+
+            return stored;
         }
     }
 
@@ -552,6 +607,7 @@ internal sealed class CatalogStore
             if (string.IsNullOrWhiteSpace(xml))
             {
                 _doc = new XDocument(new XElement("Databases"));
+                _storedNames.Clear();
 
                 _tableShapes.Clear();
         _childForeignKeys.Clear();
@@ -567,6 +623,8 @@ internal sealed class CatalogStore
 
             _doc = loaded;
 
+            _storedNames.Clear();
+
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
@@ -579,6 +637,7 @@ internal sealed class CatalogStore
         if (!_persistToDisk)
         {
             _doc = new XDocument(new XElement("Databases"));
+            _storedNames.Clear();
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
@@ -590,6 +649,7 @@ internal sealed class CatalogStore
         if (!File.Exists(_catalogFilePath))
         {
             _doc = new XDocument(new XElement("Databases"));
+            _storedNames.Clear();
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
@@ -599,6 +659,8 @@ internal sealed class CatalogStore
         }
 
         _doc = XDocument.Load(_catalogFilePath!);
+
+        _storedNames.Clear();
     }
 
     private XElement? GetDatabaseElement(string databaseName)
@@ -707,6 +769,7 @@ internal sealed class CatalogStore
     private void RemoveFromXml(XNode element)
     {
         element.Remove();
+        _storedNames.Clear();
         SaveDocument();
     }
 

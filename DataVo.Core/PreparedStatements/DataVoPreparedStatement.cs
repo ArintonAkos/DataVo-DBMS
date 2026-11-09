@@ -361,6 +361,7 @@ public sealed partial class DataVoPreparedStatement
         try
         {
             List<SqlStatement> boundStatements = SqlParameterBinder.BindStatements(_statements, parameters);
+            DataVo.Core.Parser.Binding.SqlNameResolver.Resolve(boundStatements, _engine, sessionId);
             var evaluator = new Evaluator(boundStatements, _engine);
             runnables = evaluator.ToRunnables();
         }

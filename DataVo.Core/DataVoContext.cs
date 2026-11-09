@@ -136,6 +136,7 @@ public sealed class DataVoContext : IDisposable
 
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entity);
         string databaseName = ResolveCurrentDatabase();
+        tableName = StoredTableName(tableName);
         int schemaVersion = Engine.Catalog.GetTableSchemaVersion(tableName, databaseName);
         IReadOnlyList<Column> columns = Engine.Catalog.GetTableColumns(tableName, databaseName);
         DataVoModelBinding.WriteBinding binding = _modelBindings.GetWriteBinding(
@@ -273,6 +274,7 @@ public sealed class DataVoContext : IDisposable
         IEnumerable<IReadOnlyDictionary<string, object?>> rows)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rows);
+        tableName = StoredTableName(tableName);
 
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         List<IReadOnlyDictionary<string, object?>> materializedRows = rows
@@ -368,6 +370,7 @@ public sealed class DataVoContext : IDisposable
                 nameof(row));
         }
 
+        tableName = StoredTableName(tableName);
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
 
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
@@ -461,6 +464,7 @@ public sealed class DataVoContext : IDisposable
             return [];
         }
 
+        tableName = StoredTableName(tableName);
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
 
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
@@ -530,6 +534,12 @@ public sealed class DataVoContext : IDisposable
         {
             Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
         }
+    }
+
+    private string StoredTableName(string tableName)
+    {
+        string? databaseName = Engine.Sessions.Get(SessionId);
+        return databaseName is null ? tableName : Engine.Catalog.FindTableName(tableName, databaseName) ?? tableName;
     }
 
     private string GetRetainedWriteLockKey(string databaseName, string tableName)
@@ -604,6 +614,7 @@ public sealed class DataVoContext : IDisposable
 
     private List<Dictionary<string, object?>> SearchNearestCore(string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK)
     {
+        tableName = StoredTableName(tableName);
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;
         if (Engine.Diagnostics.Enabled)

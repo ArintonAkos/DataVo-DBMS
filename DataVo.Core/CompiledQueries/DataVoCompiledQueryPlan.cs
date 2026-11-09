@@ -34,11 +34,42 @@ public sealed class DataVoCompiledQueryPlan
         ResolvedIndexName = resolvedIndexName;
     }
 
+    /// <summary>
+    /// Returns this plan with its table named as the catalog stores it, so a plan declared as
+    /// <c>users</c> reaches the same locks and files as SQL against <c>Users</c>.
+    /// </summary>
+    /// <param name="storedTableName">The table spelling held by the catalog.</param>
+    /// <returns>This plan when the spelling already matches; otherwise a cached copy.</returns>
+    /// <example>
+    /// <code>
+    /// plan = plan.ForStoredTable(catalog.FindTableName(plan.TableName, database) ?? plan.TableName);
+    /// </code>
+    /// </example>
+    internal DataVoCompiledQueryPlan ForStoredTable(string storedTableName)
+    {
+        if (string.Equals(TableName, storedTableName, StringComparison.Ordinal))
+        {
+            return this;
+        }
+
+        if (_storedTablePlan is { } cached && string.Equals(cached.TableName, storedTableName, StringComparison.Ordinal))
+        {
+            return cached;
+        }
+
+        var plan = (DataVoCompiledQueryPlan)MemberwiseClone();
+        plan.TableName = storedTableName;
+        _storedTablePlan = plan;
+        return plan;
+    }
+
+    private DataVoCompiledQueryPlan? _storedTablePlan;
+
     /// <summary>Gets the compiled-query execution kind.</summary>
     public DataVoCompiledQueryKind Kind { get; }
 
     /// <summary>Gets the target table name.</summary>
-    public string TableName { get; }
+    public string TableName { get; private set; }
 
     /// <summary>Gets the columns projected by a select plan.</summary>
     public IReadOnlyList<string> ProjectedColumns { get; }

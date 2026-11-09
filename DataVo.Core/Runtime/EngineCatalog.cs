@@ -25,6 +25,27 @@ public sealed class EngineCatalog
     /// Initializes a new engine-scoped catalog facade.
     /// </summary>
     /// <param name="config">The engine configuration that determines catalog persistence behavior.</param>
+    /// <summary>Finds the spelling a database was created with, or <see langword="null"/> when it does not exist.</summary>
+    /// <param name="databaseName">The database name as written by the caller.</param>
+    /// <returns>The stored spelling, or <see langword="null"/>.</returns>
+    /// <example>
+    /// <code>
+    /// string stored = catalog.FindDatabaseName("SHOP") ?? "SHOP";
+    /// </code>
+    /// </example>
+    public string? FindDatabaseName(string databaseName) => _store.FindDatabaseName(databaseName);
+
+    /// <summary>Finds the spelling a table was created with, or <see langword="null"/> when it does not exist.</summary>
+    /// <param name="tableName">The table name as written by the caller.</param>
+    /// <param name="databaseName">The database that owns the table.</param>
+    /// <returns>The stored spelling, or <see langword="null"/>.</returns>
+    /// <example>
+    /// <code>
+    /// string stored = catalog.FindTableName("items", "Shop") ?? "items";
+    /// </code>
+    /// </example>
+    public string? FindTableName(string tableName, string databaseName) => _store.FindTableName(tableName, databaseName);
+
     public EngineCatalog(DataVoConfig config)
     {
         _store = new CatalogStore(config);

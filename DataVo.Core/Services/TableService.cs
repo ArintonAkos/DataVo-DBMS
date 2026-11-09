@@ -17,7 +17,7 @@ namespace DataVo.Core.Services
         /// <summary>
         /// Gets the known table details by table name or alias in use.
         /// </summary>
-        public Dictionary<string, TableDetail> TableDetails { get; private set; } = [];
+        public Dictionary<string, TableDetail> TableDetails { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Initializes a new table service bound to a database.

@@ -140,6 +140,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         PreparedProjection projection = BuildPreparedProjection(context, plan, databaseName);
         string? indexName = ResolvePreparedIndexName(context, plan, databaseName);
         return new DataVoPreparedSelectSingle<T>(context, plan, databaseName, indexName, projection, mapper);
@@ -163,6 +165,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         PreparedProjection projection = BuildPreparedProjection(context, plan, databaseName);
         string? indexName = ResolvePreparedIndexName(context, plan, databaseName);
         return new DataVoPreparedSelectMany<T>(context, plan, databaseName, indexName, projection, mapper);
@@ -175,6 +179,7 @@ public static class DataVoCompiledQuery
         CompiledRowMapper<T> mapper)
     {
         string databaseName = ResolveCurrentDatabase(context);
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
@@ -384,6 +389,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
@@ -575,6 +582,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: true);
         int assignmentWidth = schema.AssignOrdinals.Length;
         if (!schema.Eligible
@@ -640,6 +649,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
         if (!schema.Eligible
             || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName))
@@ -744,6 +755,8 @@ public static class DataVoCompiledQuery
         }
 
         string databaseName = ResolveCurrentDatabase(context);
+
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: false);
         if (!schema.Eligible
             || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName))
@@ -867,6 +880,7 @@ public static class DataVoCompiledQuery
         out int affected)
     {
         affected = 0;
+        plan = StoredTablePlan(engine, plan, databaseName);
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
@@ -1242,6 +1256,7 @@ public static class DataVoCompiledQuery
         Func<Dictionary<string, object?>, TResult> mapper)
     {
         string databaseName = ResolveCurrentDatabase(context);
+        plan = StoredTablePlan(context.Engine, plan, databaseName);
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
         object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
         string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
@@ -1610,6 +1625,9 @@ public static class DataVoCompiledQuery
 
         return value;
     }
+
+    private static DataVoCompiledQueryPlan StoredTablePlan(DataVoEngine engine, DataVoCompiledQueryPlan plan, string databaseName) =>
+        plan.ForStoredTable(engine.Catalog.FindTableName(plan.TableName, databaseName) ?? plan.TableName);
 
     private static string ResolveCurrentDatabase(DataVoContext context)
     {

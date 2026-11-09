@@ -4,6 +4,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Logging;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
+using DataVo.Core.Parser.Binding;
 
 namespace DataVo.Core.Parser;
 
@@ -92,6 +93,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 return response;
             }
 
+            SqlNameResolver.Resolve(statements, _engine, session);
             var evaluator = new Evaluator(statements, _engine);
             runnables = evaluator.ToRunnables();
         }

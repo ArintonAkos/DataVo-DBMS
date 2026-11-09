@@ -143,7 +143,7 @@ public sealed partial class DataVoPreparedStatement
             || plan.SchemaVersion != schemaVersion
             || !string.Equals(plan.DatabaseName, databaseName, StringComparison.Ordinal))
         {
-            plan = BuildCompiledSelectPlan(select, tableName, databaseName, schemaVersion);
+            plan = BuildCompiledSelectPlan(select, StoredTableName(tableName, databaseName), databaseName, schemaVersion);
             _cachedSelectPlan = plan;
         }
 
@@ -359,6 +359,9 @@ public sealed partial class DataVoPreparedStatement
 
         return Ineligible();
     }
+
+    private string StoredTableName(string tableName, string databaseName) =>
+        _engine.Catalog.FindTableName(tableName, databaseName) ?? tableName;
 
     private string? TryResolveSingleColumnIntBTreeIndex(string tableName, string databaseName, string columnName)
     {
@@ -1582,6 +1585,7 @@ public sealed partial class DataVoPreparedStatement
         string databaseName,
         int schemaVersion)
     {
+        string storedTable = StoredTableName(candidate.TableName, databaseName);
         CompiledUpdatePlan Ineligible() => new()
         {
             DatabaseName = databaseName,
@@ -1589,13 +1593,13 @@ public sealed partial class DataVoPreparedStatement
             Eligible = false,
         };
 
-        if (!_engine.Catalog.TableExists(candidate.TableName, databaseName))
+        if (!_engine.Catalog.TableExists(storedTable, databaseName))
         {
             return Ineligible();
         }
 
-        IReadOnlyList<Column> columns = _engine.Catalog.GetTableColumns(candidate.TableName, databaseName);
-        List<string> primaryKeys = _engine.Catalog.GetTablePrimaryKeys(candidate.TableName, databaseName);
+        IReadOnlyList<Column> columns = _engine.Catalog.GetTableColumns(storedTable, databaseName);
+        List<string> primaryKeys = _engine.Catalog.GetTablePrimaryKeys(storedTable, databaseName);
         if (primaryKeys.Count != 1
             || !string.Equals(primaryKeys[0], candidate.WhereColumn, StringComparison.OrdinalIgnoreCase))
         {
@@ -1623,7 +1627,7 @@ public sealed partial class DataVoPreparedStatement
         }
 
         var compiledPlan = DataVoCompiledQueryPlan.Update(
-            candidate.TableName,
+            storedTable,
             assignments,
             columns[pkOrdinal].Name,
             candidate.WhereParameterName ?? "__pk_const");
@@ -1853,24 +1857,25 @@ public sealed partial class DataVoPreparedStatement
         string databaseName,
         int schemaVersion)
     {
+        string storedTable = StoredTableName(candidate.TableName, databaseName);
         CompiledDeletePlan Ineligible() => new()
         {
             DatabaseName = databaseName,
-            TableName = candidate.TableName,
+            TableName = storedTable,
             SchemaVersion = schemaVersion,
             Eligible = false,
         };
 
         if (_engine.Config.StorageMode != StorageMode.Lsm
-            || !_engine.Catalog.TableExists(candidate.TableName, databaseName)
-            || !_engine.Catalog.IsTableClustered(candidate.TableName, databaseName)
-            || _engine.Catalog.GetChildForeignKeys(candidate.TableName, databaseName).Count > 0)
+            || !_engine.Catalog.TableExists(storedTable, databaseName)
+            || !_engine.Catalog.IsTableClustered(storedTable, databaseName)
+            || _engine.Catalog.GetChildForeignKeys(storedTable, databaseName).Count > 0)
         {
             return Ineligible();
         }
 
-        IReadOnlyList<Column> columns = _engine.Catalog.GetTableColumns(candidate.TableName, databaseName);
-        List<string> primaryKeys = _engine.Catalog.GetTablePrimaryKeys(candidate.TableName, databaseName);
+        IReadOnlyList<Column> columns = _engine.Catalog.GetTableColumns(storedTable, databaseName);
+        List<string> primaryKeys = _engine.Catalog.GetTablePrimaryKeys(storedTable, databaseName);
         if (primaryKeys.Count != 1
             || !string.Equals(primaryKeys[0], candidate.WhereColumn, StringComparison.OrdinalIgnoreCase))
         {
@@ -1883,9 +1888,9 @@ public sealed partial class DataVoPreparedStatement
             return Ineligible();
         }
 
-        string pkIndexName = $"_PK_{candidate.TableName}";
+        string pkIndexName = $"_PK_{storedTable}";
         var secondary = new List<IndexFile>();
-        foreach (IndexFile index in _engine.Catalog.GetTableIndexesReadOnly(candidate.TableName, databaseName))
+        foreach (IndexFile index in _engine.Catalog.GetTableIndexesReadOnly(storedTable, databaseName))
         {
             if (string.Equals(index.IndexFileName, pkIndexName, StringComparison.OrdinalIgnoreCase))
             {
@@ -1903,7 +1908,7 @@ public sealed partial class DataVoPreparedStatement
         return new CompiledDeletePlan
         {
             DatabaseName = databaseName,
-            TableName = candidate.TableName,
+            TableName = storedTable,
             SchemaVersion = schemaVersion,
             Eligible = true,
             SecondaryIndexes = [.. secondary],
