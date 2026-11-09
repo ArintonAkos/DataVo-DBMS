@@ -271,9 +271,16 @@ public class IdentifierCaseTests : IDisposable
 
     private string ShopDirectory(StorageMode mode)
     {
-        string[] matches = Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories)
-            .Where(path => string.Equals(Path.GetFileName(path), "Shop", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        // Disk mode's lower-cased index folder is a separate directory on case-sensitive filesystems.
+        string[] matches = mode == StorageMode.Disk
+            ? Directory.GetFiles(_directory, "*.dat", SearchOption.AllDirectories)
+                .Where(path => IsItemsEntry(Path.GetFileNameWithoutExtension(path)))
+                .Select(path => Path.GetDirectoryName(path)!)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+            : Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories)
+                .Where(path => string.Equals(Path.GetFileName(path), "Shop", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
         Assert.True(matches.Length == 1, $"Expected one database directory in {mode}, found: {string.Join(", ", matches)}");
         Assert.Equal("Shop", Path.GetFileName(matches[0]));
         return matches[0];
