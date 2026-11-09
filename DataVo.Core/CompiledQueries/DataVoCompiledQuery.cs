@@ -439,6 +439,13 @@ public static class DataVoCompiledQuery
                 .Select(rowId => existingRows[rowId])
                 .ToList();
             ChangeRecorder? recorder = ChangeRecorder.TryCreate(context.Engine, databaseName);
+            if (recorder is { WantsAnnouncements: true })
+            {
+                for (int i = 0; i < newRows.Count; i++)
+                {
+                    recorder.AnnounceUpdate(plan.TableName, orderedRowIds[i], oldRows[i], newRows[i]);
+                }
+            }
 
             // Each row is deleted and re-inserted together with its index entries: one atomic write unit,
             // like a SQL statement, so a crash cannot keep a row without its index entries.

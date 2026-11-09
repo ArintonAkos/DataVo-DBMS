@@ -23,9 +23,10 @@ public sealed class ChangeCapture
     public event Action<ChangeSet>? Captured;
 
     /// <summary>
-    /// Raised as each row change is recorded, before its commit is durable, so a subscriber can log the change
-    /// first. The statement may still fail or roll back, so a subscriber must treat this as intent only;
-    /// <see cref="Captured"/> reports what actually committed. Runs synchronously on the writing thread.
+    /// Raised for each row change before any of it reaches storage or a log, in every storage mode, so a
+    /// subscriber can log the change first. The statement may still fail, so a subscriber must treat this as
+    /// intent only; <see cref="Captured"/> reports what actually committed. An insert has no storage key yet,
+    /// so its <see cref="RowChange.RowId"/> is the default value. Runs synchronously on the writing thread.
     /// </summary>
     /// <example>
     /// <code>
@@ -35,7 +36,10 @@ public sealed class ChangeCapture
     /// </example>
     public event Action<string, RowChange>? Recording;
 
-    /// <summary>Reports a row change that is about to be committed.</summary>
+    /// <summary>Gets whether anything is listening to <see cref="Recording"/>, so callers can skip building row images.</summary>
+    internal bool HasRecordingSubscribers => Recording is not null;
+
+    /// <summary>Reports a row change that is about to be written.</summary>
     /// <param name="databaseName">The owning database.</param>
     /// <param name="change">The recorded change.</param>
     internal void PublishRecording(string databaseName, RowChange change) => Recording?.Invoke(databaseName, change);

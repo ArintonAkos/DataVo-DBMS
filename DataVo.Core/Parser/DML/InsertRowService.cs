@@ -321,6 +321,14 @@ internal sealed partial class InsertRowService(
             return new InsertRowsResult([], acceptedRows.Count, messages);
         }
 
+        if (recorder is not null)
+        {
+            foreach (Dictionary<string, object?> row in acceptedRows)
+            {
+                recorder.AnnounceInsert(tableName, row);
+            }
+        }
+
         List<RowKey> rowIds = context.InsertIntoTable(acceptedRows, tableName, databaseName);
 
         for (int i = 0; i < acceptedRows.Count; i++)
@@ -425,6 +433,7 @@ internal sealed partial class InsertRowService(
 
         // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
         // later uses in this method must remain read-only after handing ownership to StoredRow.
+        recorder?.AnnounceTypedInsert(tableName, TypedRow.FromOwnedCells(columns, normalizedCells));
         var storedRow = StoredRow.FromOwnedCells(columns, normalizedCells);
         RowKey rowId = context.InsertTypedRow(storedRow, tableColumns, tableName, databaseName);
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
@@ -605,6 +614,14 @@ internal sealed partial class InsertRowService(
             }
 
             ownedRows = copies;
+        }
+
+        if (recorder is { WantsAnnouncements: true })
+        {
+            for (int i = 0; i < ownedRows.Count; i++)
+            {
+                recorder.AnnounceTypedInsert(tableName, TypedRow.FromOwnedCells(columns, ownedRows[i]));
+            }
         }
 
         IReadOnlyList<RowKey> rowIds;

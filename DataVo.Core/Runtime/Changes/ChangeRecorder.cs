@@ -39,6 +39,47 @@ internal sealed class ChangeRecorder
     public bool IsEnabled => _capture.Enabled;
 
     /// <summary>Records an inserted row image.</summary>
+    /// <summary>Gets whether a subscriber wants changes announced before they are written.</summary>
+    public bool WantsAnnouncements => _capture.HasRecordingSubscribers;
+
+    /// <summary>Announces an insert before it is written. Call ahead of any storage or log write.</summary>
+    public void AnnounceInsert(string table, IReadOnlyDictionary<string, object?> after)
+    {
+        if (WantsAnnouncements)
+        {
+            Announce(new RowChange(table, default, ChangeKind.Insert, before: null, after: Clone(after)));
+        }
+    }
+
+    /// <summary>Announces a typed insert before it is written. Call ahead of any storage or log write.</summary>
+    public void AnnounceTypedInsert(string table, TypedRow typedAfter)
+    {
+        if (WantsAnnouncements)
+        {
+            Announce(new RowChange(table, default, typedAfter));
+        }
+    }
+
+    /// <summary>Announces an update before it is written. Call ahead of any storage or log write.</summary>
+    public void AnnounceUpdate(string table, RowKey rowId, IReadOnlyDictionary<string, object?> before, IReadOnlyDictionary<string, object?> after)
+    {
+        if (WantsAnnouncements)
+        {
+            Announce(new RowChange(table, rowId, ChangeKind.Update, Clone(before), Clone(after)));
+        }
+    }
+
+    /// <summary>Announces a delete before it is written. Call ahead of any storage or log write.</summary>
+    public void AnnounceDelete(string table, RowKey rowId, IReadOnlyDictionary<string, object?> before)
+    {
+        if (WantsAnnouncements)
+        {
+            Announce(new RowChange(table, rowId, ChangeKind.Delete, Clone(before), after: null));
+        }
+    }
+
+    private void Announce(RowChange change) => _capture.PublishRecording(_databaseName, change);
+
     public void RecordInsert(string table, RowKey rowId, IReadOnlyDictionary<string, object?> after)
         => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: Clone(after)));
 
@@ -64,7 +105,6 @@ internal sealed class ChangeRecorder
     {
         _changes ??= [];
         _changes.Add(change);
-        _capture.PublishRecording(_databaseName, change);
     }
 
     /// <summary>

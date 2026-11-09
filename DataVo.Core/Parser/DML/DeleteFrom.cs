@@ -217,6 +217,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             {
                 if (deletedRows.TryGetValue(rowId, out var oldRow))
                 {
+                    recorder.AnnounceDelete(tableName, rowId, oldRow);
                     recorder.RecordDelete(tableName, rowId, oldRow);
                 }
             }

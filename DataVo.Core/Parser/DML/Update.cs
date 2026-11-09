@@ -424,6 +424,17 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         IReadOnlyList<IndexFile> indexFiles = Catalog.GetTableIndexesReadOnly(_model.TableName, databaseName);
 
+        if (recorder is { WantsAnnouncements: true })
+        {
+            for (int i = 0; i < oldRowIds.Count; i++)
+            {
+                if (oldRowsById.TryGetValue(oldRowIds[i], out var oldRow))
+                {
+                    recorder.AnnounceUpdate(_model.TableName, oldRowIds[i], oldRow, newRows[i]);
+                }
+            }
+        }
+
         // Delete old records from storage & indexes
         Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
         foreach (var index in indexFiles)

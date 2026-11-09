@@ -50,6 +50,8 @@ internal class Commit : BaseDbAction
                     validator.ValidatePendingInserts(databaseName, tableName, rows, checkForeignKeys: false, owner: context);
                 }
 
+                AnnounceBufferedChanges(context, databaseName);
+
                 if (walWriter != null && walEntry != null)
                 {
                     walWriter.Append(walEntry);
@@ -74,6 +76,49 @@ internal class Commit : BaseDbAction
         {
             Logger.Error(ex.Message);
             AddError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Announces every buffered change before the transaction reaches the WAL or storage, so a subscriber's
+    /// own log is always ahead of the commit. Crash recovery replays through the flush and announces nothing.
+    /// </summary>
+    private void AnnounceBufferedChanges(TransactionContext context, string databaseName)
+    {
+        if (ChangeRecorder.TryCreate(Engine, databaseName) is not { WantsAnnouncements: true } recorder)
+        {
+            return;
+        }
+
+        foreach (var (tableName, rows) in context.InsertedRows)
+        {
+            rows.ForEach(row => recorder.AnnounceInsert(tableName, row));
+        }
+
+        foreach (var (tableName, updates) in context.UpdatedRows)
+        {
+            var existing = Context.GetTableContents(updates.Select(update => update.RowId).Distinct().ToList(), tableName, databaseName);
+            foreach (var (rowId, updatedColumns) in updates)
+            {
+                if (existing.TryGetValue(rowId, out var oldRow))
+                {
+                    var newRow = new Dictionary<string, object?>(oldRow, oldRow.Comparer);
+                    foreach (var (column, value) in updatedColumns)
+                    {
+                        newRow[column] = value;
+                    }
+
+                    recorder.AnnounceUpdate(tableName, rowId, oldRow, newRow);
+                }
+            }
+        }
+
+        foreach (var (tableName, rowIds) in context.DeletedRowIds)
+        {
+            foreach (var (rowId, oldRow) in Context.GetTableContents(rowIds.ToList(), tableName, databaseName))
+            {
+                recorder.AnnounceDelete(tableName, rowId, oldRow);
+            }
         }
     }
 
