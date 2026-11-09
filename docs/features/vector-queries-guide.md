@@ -25,7 +25,7 @@ CREATE TABLE Embeddings (
     Id INT PRIMARY KEY,
     Content VARCHAR(500),
     Vector VECTOR(3),
-    CreatedAt DATETIME,
+    CreatedAt DATE,
     Status VARCHAR(20)
 );
 ```
@@ -425,7 +425,7 @@ using (var connection = new DataVoConnection("StorageMode=Disk;DataSource=Vector
             Id INT PRIMARY KEY,
             Name VARCHAR(100),
             Vector VECTOR(3),
-            CreatedAt DATETIME
+            CreatedAt DATE
         )";
     create.ExecuteNonQuery();
 

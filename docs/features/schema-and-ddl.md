@@ -148,18 +148,18 @@ ALTER TABLE Users MODIFY COLUMN Score FLOAT DEFAULT 0;
 
 ### Scalar types
 
-| Type       | Example                 | Notes                  |
-| :--------- | :---------------------- | :--------------------- |
-| `INT`      | `123`                   | 32-bit integer         |
-| `BIGINT`   | `9223372036854775807`   | 64-bit integer         |
-| `FLOAT`    | `3.14`, `2.71e-1`       | 32-bit floating-point  |
-| `DOUBLE`   | `3.141592653589793`     | 64-bit floating-point  |
-| `DECIMAL`  | `123.45`                | Fixed-point decimal    |
-| `VARCHAR`  | `'hello'`               | Variable-length string |
-| `CHAR`     | `'A'`                   | Fixed-length character |
-| `DATETIME` | `'2026-03-24T10:30:00'` | ISO 8601 timestamp     |
-| `BOOLEAN`  | `true`, `false`         | Boolean value          |
-| `BINARY`   | Binary data             | Uninterpreted bytes    |
+| Type      | Also accepted as                     | Example                     | Notes                  |
+| :-------- | :----------------------------------- | :-------------------------- | :--------------------- |
+| `INT`     | `INTEGER`, `SMALLINT`, `TINYINT`, `MEDIUMINT` | `123`              | 32-bit integer         |
+| `BIGINT`  |                                      | `9223372036854775807`       | 64-bit integer         |
+| `FLOAT`   | `REAL`                               | `3.14`, `2.71e-1`           | 32-bit floating-point  |
+| `DOUBLE`  | `DOUBLE PRECISION`                   | `3.141592653589793`, `1e300` | 64-bit floating-point |
+| `VARCHAR` | `NVARCHAR`, `CHAR`, `NCHAR`, `TEXT`, `STRING` | `'hello'`          | Variable-length string |
+| `BIT`     | `BOOL`, `BOOLEAN`                    | `true`, `false`             | Boolean value          |
+| `DATE`    |                                      | `'2026-03-24'`              | Date without a time    |
+| `GUID`    | `UUID`, `UNIQUEIDENTIFIER`           | `'3f2504e0-4f89-11d3-9a0c-0305e82c3301'` | 128-bit identifier |
+
+Any other type name is an error. `DECIMAL`, `DATETIME` and `BINARY` are not supported: use `DOUBLE` or `VARCHAR` for a decimal value, and a `BIGINT` holding a Unix time for a point in time.
 
 ### Vector type
 
