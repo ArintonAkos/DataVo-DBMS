@@ -9,7 +9,7 @@
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
-    <Version>0.1.0-preview.2</Version>
+    <Version>0.2.0-rc.1</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and disk-backed storage, and embeddable .NET workflows.</Description>
@@ -30,19 +30,19 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>preview.2 makes DataVo.Core.DataVoDate the SQL DATE value returned by preview row APIs and preserves existing persisted DATE bytes. Modern .NET DateOnly APIs remain explicit adapters. The public Core package still ships net10.0 only; DataVoEnablePortableTarget=true creates an experimental local netstandard2.1 candidate, not verified Unity support.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.0-rc.1 adds prepared statements, streaming queries with StreamQuery, transactions that read their own writes, constant SELECT lists, case-insensitive table and database names, and Disk and LSM storage on netstandard2.1.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
     <PackageId>DataVo.Data</PackageId>
     <Title>DataVo Data</Title>
     <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
-    <PackageReleaseNotes>DataVo data-access package. preview.2 refreshes the package README and packaging.</PackageReleaseNotes>
+    <PackageReleaseNotes>DataVo data-access package. 0.2.0-rc.1 sends ADO.NET parameters to the engine as bound values.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
     <IsPackable>true</IsPackable>
-    <Version>0.1.0-preview.2</Version>
+    <Version>0.2.0-rc.1</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageId>DataVo.EntityFrameworkCore</PackageId>
@@ -60,7 +60,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. preview.2 refreshes the package README and packaging.</PackageReleaseNotes>
+    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.2.0-rc.1 aligns with the DataVo.Core release candidate.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
