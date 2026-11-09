@@ -157,6 +157,11 @@ internal static class ReactiveQueryParser
             throw new NotSupportedException($"Reactive subscription SQL could not be parsed: {ex.Message}", ex);
         }
 
+        if (statements is [SelectStatement { FromTable: null }])
+        {
+            throw new NotSupportedException("Reactive subscriptions require a table to watch.");
+        }
+
         if (statements.Count != 1)
         {
             throw new NotSupportedException("Reactive subscriptions support exactly one SELECT statement.");

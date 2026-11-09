@@ -197,7 +197,7 @@ internal partial class Select
                 string currentFieldName = fieldsList[fieldIndex++];
                 if (expressionColumn.Expression != null)
                 {
-                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
+                    data[currentFieldName] = ProjectedConstant(ResolveNodeValue(expressionColumn.Expression, row), expressionColumn.Expression);
                 }
             }
 
@@ -224,7 +224,7 @@ internal partial class Select
                 string currentFieldName = fieldsList[fieldIndex++];
                 if (expressionColumn.Expression != null)
                 {
-                    data[currentFieldName] = ResolveNodeValue(expressionColumn.Expression, row);
+                    data[currentFieldName] = ProjectedConstant(ResolveNodeValue(expressionColumn.Expression, row), expressionColumn.Expression);
                 }
             }
 

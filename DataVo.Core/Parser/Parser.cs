@@ -1235,6 +1235,13 @@ public class Parser(List<Token> tokens)
         throw new ParserException($"Parser Error: Expected {expectedLabel} but found {Current}.");
     }
 
+    private static bool IsConstantExpression(ExpressionNode? expression) => expression switch
+    {
+        LiteralNode or ParameterNode => true,
+        BinaryExpressionNode binary => IsConstantExpression(binary.Left) && IsConstantExpression(binary.Right),
+        _ => false,
+    };
+
     private SelectStatement ParseSingleSelectStatement(bool parseTailClauses)
     {
         var selectStmt = new SelectStatement();
@@ -1247,6 +1254,12 @@ public class Parser(List<Token> tokens)
 
         // 1. Parse Columns (SELECT already matched)
         selectStmt.Columns = ParseColumnList();
+
+        // A list of constants needs no table, and the statement ends there.
+        if (IsEof() && selectStmt.Columns.All(column => IsConstantExpression(column.Expression)))
+        {
+            return selectStmt;
+        }
 
         // 2. Parse FROM
         Consume(TokenType.Keyword, SqlKeywords.FROM);
@@ -1685,7 +1698,7 @@ public class Parser(List<Token> tokens)
             // Consume comma if present, otherwise assume end of column list
             if (Match(TokenType.Punctuation, SqlPunctuation.CommaToken))
             {
-                if (IsEof() || Current.Type == TokenType.Keyword)
+                if (IsEof() || (Current.Type == TokenType.Keyword && !ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.NULL)))
                 {
                     throw new ParserException("Parser Error: trailing comma in SELECT column list.");
                 }

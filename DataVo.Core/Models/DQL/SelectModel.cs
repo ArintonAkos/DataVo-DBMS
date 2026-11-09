@@ -119,8 +119,8 @@ internal class SelectModel
             AggregateExpressionNode => false,
             ColumnRefNode => false,
             ResolvedColumnRefNode => false,
-            NullLiteralNode => false,
-            LiteralNode => false,
+            LiteralNode => true,
+            ParameterNode => true,
             ScalarFunctionExpressionNode => true,
             BinaryExpressionNode binary => IsArithmeticBinary(binary),
             _ => false
