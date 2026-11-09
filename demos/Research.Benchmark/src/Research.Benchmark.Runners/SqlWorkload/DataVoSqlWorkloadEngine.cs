@@ -7,17 +7,27 @@ namespace Research.Benchmark.Runners.SqlWorkload;
 
 /// <summary>
 /// DataVo in durable LSM mode. Rows are loaded through the typed batch API (the bulk path an
-/// application would use); every query goes through SQL text, so parsing is included in each timing.
+/// application would use); every query is prepared once and executed with bound parameters.
 /// </summary>
 public sealed class DataVoSqlWorkloadEngine : ISqlWorkloadEngine
 {
     private const int BatchSize = 65_536;
     private DataVoContext? _context;
     private string? _directory;
+    private DataVoPreparedStatement? _pointSelect;
+    private DataVoPreparedStatement? _guidPointSelect;
+    private DataVoPreparedStatement? _secondaryLookup;
+    private DataVoPreparedStatement? _rangeScan;
+    private DataVoPreparedStatement? _filteredCount;
+    private DataVoPreparedStatement? _groupByStatus;
+    private DataVoPreparedStatement? _joinByRegion;
+    private DataVoPreparedStatement? _topTen;
+    private DataVoPreparedStatement? _updateAmount;
+    private DataVoPreparedStatement? _delete;
 
     public string Name => DataVoBenchmarkName.Format("DataVo (LSM)");
 
-    public string Notes => "LSM mode, commit log without fsync per commit; queries as SQL text (parsed on every call), bulk load via InsertTypedBatch.";
+    public string Notes => "LSM mode, commit log without fsync per commit; prepared statements with bound parameters, bulk load via InsertTypedBatch.";
 
     public void Create(string directory)
     {
@@ -64,41 +74,79 @@ public sealed class DataVoSqlWorkloadEngine : ISqlWorkloadEngine
 
     public long PointSelect(int id)
     {
-        QueryResult result = Query($"SELECT Id, CustomerId, Status, Amount, Qty FROM Orders WHERE Id = {id}");
-        return result.Data.Count == 0 ? -1 : Convert.ToInt64(result.Data[0]["Qty"]);
+        DataVoPreparedStatement stmt = _pointSelect ??= Ctx.Prepare("SELECT Id, CustomerId, Status, Amount, Qty FROM Orders WHERE Id = @id");
+        QueryResult result = Check(stmt.ExecuteBorrowed(("id", id)));
+        return result.Data.Count == 0 ? -1 : (int)result.Data[0]["Qty"]!;
     }
 
-    public long GuidPointSelect(Guid key) => Query($"SELECT Name, Value FROM GuidItems WHERE Id = '{key}'").Data.Count;
+    public long GuidPointSelect(Guid key)
+    {
+        DataVoPreparedStatement stmt = _guidPointSelect ??= Ctx.Prepare("SELECT Name, Value FROM GuidItems WHERE Id = @id");
+        return Check(stmt.ExecuteBorrowed(("id", key))).Data.Count;
+    }
 
-    public long SecondaryLookup(int customerId) => Query($"SELECT Id, Amount FROM Orders WHERE CustomerId = {customerId}").Data.Count;
+    public long SecondaryLookup(int customerId)
+    {
+        DataVoPreparedStatement stmt = _secondaryLookup ??= Ctx.Prepare("SELECT Id, Amount FROM Orders WHERE CustomerId = @customerId");
+        return Check(stmt.Execute(("customerId", customerId))).Data.Count;
+    }
 
-    public long RangeScan(int fromId, int width) =>
-        Query($"SELECT Id, Amount FROM Orders WHERE Id >= {fromId} AND Id < {fromId + width}").Data.Count;
+    public long RangeScan(int fromId, int width)
+    {
+        DataVoPreparedStatement stmt = _rangeScan ??= Ctx.Prepare("SELECT Id, Amount FROM Orders WHERE Id >= @fromId AND Id < @toId");
+        return Check(stmt.Execute(("fromId", fromId), ("toId", fromId + width))).Data.Count;
+    }
 
     public long FilteredCount()
     {
-        QueryResult result = Query("SELECT COUNT(*) AS N FROM Orders WHERE Status = 'paid'");
+        DataVoPreparedStatement stmt = _filteredCount ??= Ctx.Prepare("SELECT COUNT(*) AS N FROM Orders WHERE Status = 'paid'");
+        QueryResult result = Check(stmt.Execute());
         return Convert.ToInt64(result.Data[0].Values.First());
     }
 
     public long GroupByStatus()
     {
-        QueryResult result = Query("SELECT Status, COUNT(*) AS N, AVG(Amount) AS A FROM Orders GROUP BY Status");
+        DataVoPreparedStatement stmt = _groupByStatus ??= Ctx.Prepare("SELECT Status, COUNT(*) AS N, AVG(Amount) AS A FROM Orders GROUP BY Status");
+        QueryResult result = Check(stmt.Execute());
         return result.Data.Sum(static row => Convert.ToInt64(row["N"]));
     }
 
-    public long JoinByRegion() =>
-        Query("SELECT c.Region, SUM(o.Amount) AS Total FROM Orders o JOIN Customers c ON o.CustomerId = c.Id GROUP BY c.Region").Data.Count;
+    public long JoinByRegion()
+    {
+        DataVoPreparedStatement stmt = _joinByRegion ??= Ctx.Prepare("SELECT c.Region, SUM(o.Amount) AS Total FROM Orders o JOIN Customers c ON o.CustomerId = c.Id GROUP BY c.Region");
+        return Check(stmt.Execute()).Data.Count;
+    }
 
-    public long TopTen() => Query("SELECT Id, Amount FROM Orders ORDER BY Amount DESC LIMIT 10").Data.Count;
+    public long TopTen()
+    {
+        DataVoPreparedStatement stmt = _topTen ??= Ctx.Prepare("SELECT Id, Amount FROM Orders ORDER BY Amount DESC LIMIT 10");
+        return Check(stmt.Execute()).Data.Count;
+    }
 
-    public void UpdateAmount(int id, double amount) =>
-        Query($"UPDATE Orders SET Amount = {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)} WHERE Id = {id}");
+    public void UpdateAmount(int id, double amount)
+    {
+        DataVoPreparedStatement stmt = _updateAmount ??= Ctx.Prepare("UPDATE Orders SET Amount = @amount WHERE Id = @id");
+        Check(stmt.Execute(("amount", amount), ("id", id)));
+    }
 
-    public void Delete(int id) => Query($"DELETE FROM Orders WHERE Id = {id}");
+    public void Delete(int id)
+    {
+        DataVoPreparedStatement stmt = _delete ??= Ctx.Prepare("DELETE FROM Orders WHERE Id = @id");
+        Check(stmt.Execute(("id", id)));
+    }
 
     public void Close()
     {
+        _pointSelect = null;
+        _guidPointSelect = null;
+        _secondaryLookup = null;
+        _rangeScan = null;
+        _filteredCount = null;
+        _groupByStatus = null;
+        _joinByRegion = null;
+        _topTen = null;
+        _updateAmount = null;
+        _delete = null;
         _context?.Dispose();
         _context = null;
     }
@@ -153,12 +201,13 @@ public sealed class DataVoSqlWorkloadEngine : ISqlWorkloadEngine
 
     private void Ok(string sql) => Query(sql);
 
-    private QueryResult Query(string sql)
+    private QueryResult Query(string sql) => Check(Ctx.Execute(sql).Last());
+
+    private static QueryResult Check(QueryResult result)
     {
-        QueryResult result = Ctx.Execute(sql).Last();
         if (result.IsError)
         {
-            throw new InvalidOperationException($"DataVo failed '{sql}': {string.Join("; ", result.Messages)}");
+            throw new InvalidOperationException($"DataVo failed: {string.Join("; ", result.Messages)}");
         }
 
         return result;
