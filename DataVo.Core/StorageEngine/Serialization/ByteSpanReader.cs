@@ -50,6 +50,14 @@ internal ref struct ByteSpanReader
         return value;
     }
 
+    public ReadOnlySpan<byte> ReadStringSpan()
+    {
+        int length = Read7BitEncodedInt();
+        ReadOnlySpan<byte> span = _data.Slice(_position, length);
+        _position += length;
+        return span;
+    }
+
     public void SkipString()
     {
         // Two statements, not `_position += Read7BitEncodedInt()`: the compound assignment would read _position

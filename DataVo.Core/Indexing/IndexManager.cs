@@ -2572,6 +2572,35 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Performs a point lookup against a single-column integer index without string formatting or parsing.
+    /// </summary>
+    public IReadOnlyList<RowKey> FilterUsingIntegerIndex(long integerKey, string indexName, string tableName, string databaseName)
+    {
+        if (_lsmStore is { } store)
+        {
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            return store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(integerKey))
+                ?? throw MissingIndex(indexName, tableName);
+        }
+
+        if (TryLookupIntegerPrimaryKey(integerKey, indexName, tableName, databaseName, out RowKey rowId))
+        {
+            return [rowId];
+        }
+
+        if (TryLookupIntegerIndex(integerKey, indexName, tableName, databaseName, out IReadOnlyList<RowKey> rowIds)
+            && rowIds.Count > 0)
+        {
+            return rowIds;
+        }
+
+        string formatted = ScalarKeyFormatter.FormatBracketed(integerKey, System.Globalization.CultureInfo.InvariantCulture);
+        IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return index.SearchReadOnly(formatted);
+    }
+
+    /// <summary>
     /// Checks whether a scalar index contains a specific key.
     /// </summary>
     public bool IndexContainsKey(string key, string indexName, string tableName, string databaseName)

@@ -648,6 +648,69 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Visits a single live row by key without allocating key lists or intermediate row buffers.
+    /// Returns <see langword="false"/> when an active MVCC snapshot or staged LSM write requires the general path.
+    /// </summary>
+    internal bool TryVisitRowByKey<TState>(
+        string tableName,
+        string databaseName,
+        RowKey rowId,
+        ref TState state,
+        RawRowVisitor<TState> visit,
+        out bool visited)
+    {
+        visited = false;
+        if (MvccExecutionScope.CurrentSnapshot is not null)
+        {
+            return false;
+        }
+
+        if (LsmEngine is { } lsm)
+        {
+            if (lsm.HasStagedWrites(databaseName, tableName))
+            {
+                return false;
+            }
+
+            var box = (State: state, Visit: visit);
+            visited = lsm.TryVisitStoredRowByKey(
+                databaseName,
+                tableName,
+                rowId,
+                ref box,
+                static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey id, ReadOnlySpan<byte> bytes) =>
+                    b.Visit(ref b.State, id, bytes, null));
+            state = box.State;
+            if (visited)
+            {
+                RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
+            }
+
+            return true;
+        }
+
+        if (_storageEngine is ITypedRowStorageEngine typedStorage
+            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
+            && typedRow is not null)
+        {
+            visited = true;
+            RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
+            visit(ref state, rowId, default, typedRow);
+            return true;
+        }
+
+        byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
+        if (bytes is not null)
+        {
+            visited = true;
+            RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
+            visit(ref state, rowId, bytes, null);
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Visits the given rows (missing or deleted ones are skipped) in the order given, as serialized bytes
     /// or typed rows. Returns false when this read must take the general path (an active snapshot).
     /// </summary>

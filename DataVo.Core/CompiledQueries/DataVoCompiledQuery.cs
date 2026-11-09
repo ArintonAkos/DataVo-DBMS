@@ -757,6 +757,25 @@ public static class DataVoCompiledQuery
             return false;
         }
 
+        if (engine.Config.StorageMode == StorageMode.Lsm && schema.IsClusteredPk)
+        {
+            RowKey clusteredRowId = RowKey.FromInt64(primaryKey);
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, clusteredRowId, null, "UPDATE");
+            if (TryPatchLsmFixedWidthRow(context, plan, schema, databaseName, clusteredRowId, parameters))
+            {
+                affected = 1;
+                return true;
+            }
+
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out _))
+            {
+                affected = 0;
+                return true;
+            }
+
+            return false;
+        }
+
         if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
         {
             affected = 0;
@@ -830,8 +849,24 @@ public static class DataVoCompiledQuery
         ReadOnlySpan<DataVoFixedWidthValue> assignmentValues,
         out int affected)
     {
+        return TryUpdateFixedWidthByPrimaryKeyFastPath(
+            context.Engine,
+            ResolveCurrentDatabase(context),
+            plan,
+            primaryKeyValue,
+            assignmentValues,
+            out affected);
+    }
+
+    internal static bool TryUpdateFixedWidthByPrimaryKeyFastPath(
+        DataVoEngine engine,
+        string databaseName,
+        DataVoCompiledQueryPlan plan,
+        DataVoFixedWidthValue primaryKeyValue,
+        ReadOnlySpan<DataVoFixedWidthValue> assignmentValues,
+        out int affected)
+    {
         affected = 0;
-        DataVoEngine engine = context.Engine;
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
@@ -840,13 +875,37 @@ public static class DataVoCompiledQuery
             return false;
         }
 
-        string databaseName = ResolveCurrentDatabase(context);
         UpdateFastPathSchema schema = ResolveUpdateFastPathSchema(engine, plan, databaseName, trustCachedSchema: true);
         if (!schema.Eligible
             || schema.AssignOrdinals.Length != assignmentValues.Length
             || !HasPrimaryKeyLookup(engine, schema.PkIndexName, plan.TableName, databaseName)
             || !TryConvertToInt64(primaryKeyValue, out long primaryKey))
         {
+            return false;
+        }
+
+        if (engine.Config.StorageMode == StorageMode.Lsm && schema.IsClusteredPk)
+        {
+            RowKey clusteredRowId = RowKey.FromInt64(primaryKey);
+            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, clusteredRowId, null, "UPDATE");
+            if (engine.StorageContext.TryPatchFixedWidthRow(
+                plan.TableName,
+                databaseName,
+                clusteredRowId,
+                schema.Columns,
+                schema.AssignOrdinals,
+                assignmentValues))
+            {
+                affected = 1;
+                return true;
+            }
+
+            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out _))
+            {
+                affected = 0;
+                return true;
+            }
+
             return false;
         }
 
@@ -859,7 +918,7 @@ public static class DataVoCompiledQuery
         if (engine.Config.StorageMode == StorageMode.Lsm)
         {
             MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-            if (!context.Engine.StorageContext.TryPatchFixedWidthRow(
+            if (!engine.StorageContext.TryPatchFixedWidthRow(
                 plan.TableName,
                 databaseName,
                 rowId,
@@ -1036,12 +1095,19 @@ public static class DataVoCompiledQuery
             return Ineligible();
         }
 
-        // Only the primary-key index may exist: a secondary index would need key maintenance across the
-        // out-of-place row move that the fast path does not perform.
+        // Only the primary-key index may exist on out-of-place backends: a secondary index would need key
+        // maintenance across the out-of-place row move that the fast path does not perform. In LSM mode,
+        // the patch is in-place (same rowId), so secondary indexes on non-assigned columns are unaffected.
         string primaryKeyIndexName = $"_PK_{plan.TableName}";
+        bool isLsm = engine.Config.StorageMode == StorageMode.Lsm;
         foreach (IndexFile index in engine.Catalog.GetTableIndexes(plan.TableName, databaseName))
         {
-            if (!string.Equals(index.IndexFileName, primaryKeyIndexName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(index.IndexFileName, primaryKeyIndexName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!isLsm || index.AttributeNames.Any(attr => plan.Assignments.ContainsKey(attr)))
             {
                 return Ineligible();
             }
@@ -1077,6 +1143,7 @@ public static class DataVoCompiledQuery
         {
             SchemaVersion = schemaVersion,
             Eligible = true,
+            IsClusteredPk = isLsm && engine.Catalog.IsTableClustered(plan.TableName, databaseName),
             PkIndexName = primaryKeyIndexName,
             Columns = columns,
             AssignOrdinals = ordinals,
@@ -1156,6 +1223,8 @@ public static class DataVoCompiledQuery
         public required int SchemaVersion { get; init; }
 
         public required bool Eligible { get; init; }
+
+        public bool IsClusteredPk { get; init; }
 
         public string PkIndexName { get; init; } = string.Empty;
 

@@ -102,6 +102,11 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public RowVersion? GetVersion(string databaseName, string tableName, RowKey rowId)
     {
+        if (_versionMetadata.IsEmpty)
+        {
+            return null;
+        }
+
         var key = (databaseName, tableName, rowId);
 
         _versionLock.EnterReadLock();

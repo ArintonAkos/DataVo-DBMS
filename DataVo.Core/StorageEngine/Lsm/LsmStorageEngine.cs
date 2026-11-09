@@ -571,11 +571,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         bool patched = false;
         lock (state.SyncRoot)
         {
-            if (Lookup(pending, state, rowId, out byte[] latest) == LatestRowLookup.Live)
+            (byte[]? latest, bool owned) = ResolveRow(pending, state, rowId);
+            if (latest is not null && !ReferenceEquals(latest, DeletedMarker))
             {
                 // Copy-on-write: published row buffers are immutable so lock-free readers can never
                 // observe a half-applied patch; the new version becomes visible in one reference publish.
-                byte[] rowBytes = latest.ToArray();
+                byte[] rowBytes = owned ? latest : latest.ToArray();
                 patched = true;
                 for (int i = 0; i < ordinals.Length; i++)
                 {
@@ -768,8 +769,8 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw();
         }
 
-        _indexTables.Clear();
         _tables.Clear();
+        _indexTables.Clear();
 
         // Every applied frame is now in SSTables, so a clean shutdown leaves an empty commit log.
         _commitLog.PruneThrough(Volatile.Read(ref _appliedLsn));
@@ -1809,6 +1810,101 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         state = box.State;
     }
 
+    [ThreadStatic]
+    private static byte[]? _singleRowScratch;
+
+    private readonly record struct SstableScratchHit(bool Found, ulong Sequence, int Length);
+
+    /// <summary>
+    /// Visits a single live row by key in stored form without allocating intermediate arrays or row copies.
+    /// Returns <see langword="true"/> when a live row was found and visited; otherwise <see langword="false"/>.
+    /// </summary>
+    internal bool TryVisitStoredRowByKey<TState>(
+        string databaseName,
+        string tableName,
+        RowKey key,
+        ref TState state,
+        StoredRowScanVisitor<TState> visit)
+    {
+        TableState table = GetOrCreateTable(databaseName, tableName);
+        switch (table.LatestRows.TryGet(key, out byte[] overlay))
+        {
+            case LatestRowLookup.Live:
+                visit(ref state, key, overlay);
+                return true;
+            case LatestRowLookup.Tombstone:
+                return false;
+        }
+
+        int length;
+        TableVersion version = table.AcquireVersion();
+        try
+        {
+            length = ReadFromVersionToScratch(version, key);
+        }
+        finally
+        {
+            version.Release();
+        }
+
+        if (length < 0)
+        {
+            return false;
+        }
+
+        visit(ref state, key, _singleRowScratch.AsSpan(0, length));
+        return true;
+    }
+
+    private int ReadFromVersionToScratch(TableVersion version, RowKey rowId)
+    {
+        SstableScratchHit best = default;
+        int bestLevel = -1;
+        foreach (LsmSstableHandle file in version.Files)
+        {
+            int level = file.Metadata.Level;
+            if (bestLevel >= 0 && level != bestLevel)
+            {
+                break;
+            }
+
+            SstableScratchHit hit = file.GetV2Reader(_readMode).Lookup(
+                rowId,
+                ulong.MaxValue,
+                best.Found ? best.Sequence : 0UL,
+                static (type, sequence, value, minSequence) =>
+                {
+                    if (minSequence != 0 && sequence <= minSequence)
+                    {
+                        return new SstableScratchHit(false, 0, -1);
+                    }
+
+                    if (type != LsmValueType.Put)
+                    {
+                        return new SstableScratchHit(true, sequence, -1);
+                    }
+
+                    byte[]? scratch = _singleRowScratch;
+                    if (scratch is null || scratch.Length < value.Length)
+                    {
+                        scratch = new byte[Math.Max(value.Length, 256)];
+                        _singleRowScratch = scratch;
+                    }
+
+                    value.CopyTo(scratch);
+                    return new SstableScratchHit(true, sequence, value.Length);
+                },
+                default(SstableScratchHit));
+            if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
+            {
+                best = hit;
+                bestLevel = level;
+            }
+        }
+
+        return best.Found ? best.Length : -1;
+    }
+
     /// <summary>
     /// Reads several rows by key in one pass, visiting the live ones in the order given, in stored form (a
     /// clustered table's key cell is NULL). Every key's overlay probe happens before the file set is pinned,
@@ -1817,6 +1913,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// </summary>
     internal void ReadStoredRowsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> keys, ref TState state, StoredRowScanVisitor<TState> visit)
     {
+        if (keys.Count == 1)
+        {
+            TryVisitStoredRowByKey(databaseName, tableName, keys[0], ref state, visit);
+            return;
+        }
+
         TableState table = GetOrCreateTable(databaseName, tableName);
         var found = new byte[]?[keys.Count];
         var inFiles = new List<int>();

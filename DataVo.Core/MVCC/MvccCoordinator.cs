@@ -49,6 +49,17 @@ public static class MvccCoordinator
         TransactionSnapshot? snapshot,
         string operationName)
     {
+        if (snapshot is null && !engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            RowVersion? existing = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId);
+            if (existing.HasValue && existing.Value.Xmax != 0)
+            {
+                throw new InvalidOperationException($"MVCC conflict: row {rowId} in {tableName} was already modified/deleted.");
+            }
+
+            return;
+        }
+
         RowVersion version = EnsureRowVersionExists(engine, databaseName, tableName, rowId);
 
         if (version.Xmax != 0)
