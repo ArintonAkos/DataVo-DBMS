@@ -281,7 +281,34 @@ public class Lexer
             _position++;
         }
 
+        ConsumeExponent();
+
         return new Token(TokenType.NumberLiteral, _input.Substring(start, _position - start), start, startLoc.line, startLoc.column);
+    }
+
+    private void ConsumeExponent()
+    {
+        if (_position >= _input.Length || _input[_position] is not ('e' or 'E'))
+        {
+            return;
+        }
+
+        int digits = _position + 1;
+        if (digits < _input.Length && _input[digits] is '+' or '-')
+        {
+            digits++;
+        }
+
+        if (digits >= _input.Length || !char.IsDigit(_input[digits]))
+        {
+            return; // "1e" is the number 1 followed by an identifier
+        }
+
+        _position = digits;
+        while (_position < _input.Length && char.IsDigit(_input[_position]))
+        {
+            _position++;
+        }
     }
 
     /// <summary>
