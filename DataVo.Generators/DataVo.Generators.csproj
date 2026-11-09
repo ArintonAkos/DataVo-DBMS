@@ -1,5 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<!-- An application published with -p:PublishAot=true passes that to this analyzer too, and a
+     netstandard2.0 library cannot be compiled ahead of time. -->
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot">
   <PropertyGroup>
+    <PublishAot>false</PublishAot>
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
