@@ -20,6 +20,11 @@ public abstract class ExpressionEvaluatorCore<TResult>
     /// <returns>The evaluated result.</returns>
     public TResult Evaluate(ExpressionNode root)
     {
+        if (root is ParameterNode unresolvedParam)
+        {
+            throw new BindingException($"Bind Error: Parameter '@{unresolvedParam.Name}' was not provided.");
+        }
+
         if (root is LiteralNode literalNode)
         {
             return IsAlwaysTrueLiteral(literalNode)
@@ -30,6 +35,16 @@ public abstract class ExpressionEvaluatorCore<TResult>
         if (root is not BinaryExpressionNode binaryNode)
         {
             throw new EvaluationException("Invalid expression tree node type: expected BinaryExpressionNode or LiteralNode.");
+        }
+
+        if (binaryNode.Left is ParameterNode leftParam)
+        {
+            throw new BindingException($"Bind Error: Parameter '@{leftParam.Name}' was not provided.");
+        }
+
+        if (binaryNode.Right is ParameterNode rightParam)
+        {
+            throw new BindingException($"Bind Error: Parameter '@{rightParam.Name}' was not provided.");
         }
 
         bool isLogical = binaryNode.Operator == Operators.AND || binaryNode.Operator == Operators.OR;

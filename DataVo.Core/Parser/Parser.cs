@@ -1064,6 +1064,10 @@ public class Parser(List<Token> tokens)
                     {
                         valuesList.Add(new NullLiteralNode());
                     }
+                    else if (valToken.Type == TokenType.Parameter)
+                    {
+                        valuesList.Add(new ParameterNode(valToken.Value));
+                    }
                     else if (valToken.Type == TokenType.StringLiteral || valToken.Type == TokenType.NumberLiteral)
                     {
                         valuesList.Add(new LiteralNode { Value = valToken.Value });
@@ -1328,6 +1332,8 @@ public class Parser(List<Token> tokens)
     {
         int? take = null;
         int skip = 0;
+        string? takeParameter = null;
+        string? skipParameter = null;
         bool parsedAny = false;
 
         while (!IsEof() && (IsLimitKeyword() || IsOffsetKeyword()))
@@ -1335,15 +1341,14 @@ public class Parser(List<Token> tokens)
             if (IsLimitKeyword())
             {
                 Consume(TokenType.Keyword, SqlKeywords.LIMIT);
-                var limitToken = Consume(TokenType.NumberLiteral, "limit value");
-                take = int.Parse(limitToken.Value);
+                (int limitValue, takeParameter) = ParseLimitOperand("limit value");
+                take = limitValue;
                 parsedAny = true;
                 continue;
             }
 
             Consume(TokenType.Keyword, SqlKeywords.OFFSET);
-            var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
-            skip = int.Parse(offsetToken.Value);
+            (skip, skipParameter) = ParseLimitOperand("offset value");
             parsedAny = true;
         }
 
@@ -1355,8 +1360,17 @@ public class Parser(List<Token> tokens)
         return new LimitNode
         {
             TakeTarget = take ?? int.MaxValue,
-            SkipTarget = skip
+            SkipTarget = skip,
+            TakeParameter = takeParameter,
+            SkipParameter = skipParameter,
         };
+    }
+
+    private (int Value, string? Parameter) ParseLimitOperand(string description)
+    {
+        return Current.Type == TokenType.Parameter
+            ? (0, Consume(TokenType.Parameter, description).Value)
+            : (int.Parse(Consume(TokenType.NumberLiteral, description).Value), null);
     }
 
     private LimitNode ParseLimit()
@@ -1833,6 +1847,10 @@ public class Parser(List<Token> tokens)
             {
                 values.Push(new LiteralNode { Value = token.Value });
             }
+            else if (token.Type == TokenType.Parameter)
+            {
+                values.Push(new ParameterNode(token.Value));
+            }
             else if (token.Type == TokenType.NumberLiteral)
             {
                 object numValue = token.Value;
@@ -2145,6 +2163,7 @@ public class Parser(List<Token> tokens)
     private static bool CanEndExpression(Token token)
     {
         return token.Type == TokenType.Identifier
+            || token.Type == TokenType.Parameter
             || token.Type == TokenType.StringLiteral
             || token.Type == TokenType.NumberLiteral
             || (token.Type == TokenType.Keyword && token.Value == SqlKeywords.NULL)
@@ -2154,6 +2173,7 @@ public class Parser(List<Token> tokens)
     private static bool CanStartExpression(Token token)
     {
         return token.Type == TokenType.Identifier
+            || token.Type == TokenType.Parameter
             || token.Type == TokenType.StringLiteral
             || token.Type == TokenType.NumberLiteral
             || (token.Type == TokenType.Keyword && (token.Value == SqlKeywords.NULL || token.Value == SqlKeywords.EXISTS || token.Value == SqlKeywords.NOT_KEYWORD || token.Value == SqlKeywords.SELECT))
@@ -2391,6 +2411,7 @@ public class Parser(List<Token> tokens)
         return token.Type switch
         {
             TokenType.Identifier => ParseIdentifierExpression(token),
+            TokenType.Parameter => new ParameterNode(token.Value),
             TokenType.StringLiteral => new LiteralNode { Value = token.Value },
             TokenType.NumberLiteral => ParseNumericLiteral(token.Value),
             TokenType.Keyword when token.Value == SqlKeywords.NULL => new NullLiteralNode(),
@@ -2428,7 +2449,9 @@ public class Parser(List<Token> tokens)
                 Right = CloneExpression(binary.Right)
             },
             NullLiteralNode => new NullLiteralNode(),
+            BoundValueLiteralNode bound => new BoundValueLiteralNode(bound.Value),
             LiteralNode literal => new LiteralNode { Value = literal.Value },
+            ParameterNode parameter => new ParameterNode(parameter.Name),
             ColumnRefNode column => new ColumnRefNode { TableOrAlias = column.TableOrAlias, Column = column.Column },
             ResolvedColumnRefNode resolved => new ResolvedColumnRefNode { TableName = resolved.TableName, Column = resolved.Column },
             ExistsSubqueryExpressionNode exists => new ExistsSubqueryExpressionNode { IsNegated = exists.IsNegated, Subquery = exists.Subquery },

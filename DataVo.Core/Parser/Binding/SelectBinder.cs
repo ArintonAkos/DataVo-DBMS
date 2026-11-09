@@ -158,16 +158,25 @@ internal static class SelectBinder
             _ => (null, null),
         };
 
-        if (column is null
-            || literal?.Value is not string text
-            || text.Length < 2
-            || text[0] != '\''
-            || text[^1] != '\'')
+        if (column is null || literal?.Value is not string text)
         {
             return;
         }
 
-        string value = text[1..^1];
+        string value;
+        if (literal is BoundValueLiteralNode)
+        {
+            value = text;
+        }
+        else if (text.Length >= 2 && text[0] == '\'' && text[^1] == '\'')
+        {
+            value = text[1..^1];
+        }
+        else
+        {
+            return;
+        }
+
         string? type = tableService.TryGetColumnType(column.TableName, column.Column);
         if (type is not ("INT" or "FLOAT"))
         {
@@ -188,6 +197,11 @@ internal static class SelectBinder
     public static ExpressionNode? BindWhere(ExpressionNode? node, TableService tableService)
     {
         if (node == null) return null;
+
+        if (node is ParameterNode parameter)
+        {
+            throw new BindingException($"Bind Error: Parameter '@{parameter.Name}' was not provided.");
+        }
 
         if (node is BinaryExpressionNode binary)
         {

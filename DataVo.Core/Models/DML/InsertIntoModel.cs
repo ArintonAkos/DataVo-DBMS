@@ -5,11 +5,12 @@ using DataVo.Core.Parser.AST;
 
 namespace DataVo.Core.Models.DML;
 
-internal class InsertIntoModel(string tableName, List<List<string>> rawRows, List<string> columns)
+internal class InsertIntoModel(string tableName, List<List<string>> rawRows, List<string> columns, List<List<SqlNode>>? valueNodes = null)
 {
     public string TableName { get; set; } = tableName;
     public List<List<string>> RawRows { get; set; } = rawRows;
     public List<string> Columns { get; set; } = columns;
+    public List<List<SqlNode>> ValueNodes { get; } = valueNodes ?? [];
 
 
 
@@ -29,7 +30,11 @@ internal class InsertIntoModel(string tableName, List<List<string>> rawRows, Lis
             List<string> rowList = [];
             for (int i = 0; i < rowAst.Count; ++i)
             {
-                if (rowAst[i] is IdentifierNode idNode)
+                if (rowAst[i] is ParameterNode paramNode)
+                {
+                    throw new BindingException($"Bind Error: Parameter '@{paramNode.Name}' was not provided.");
+                }
+                else if (rowAst[i] is IdentifierNode idNode)
                 {
                     rowList.Add(idNode.Name);
                 }
@@ -41,6 +46,6 @@ internal class InsertIntoModel(string tableName, List<List<string>> rawRows, Lis
             rows.Add(rowList);
         }
 
-        return new InsertIntoModel(ast.TableName.Name, rows, columns);
+        return new InsertIntoModel(ast.TableName.Name, rows, columns, ast.ValuesLists);
     }
 }

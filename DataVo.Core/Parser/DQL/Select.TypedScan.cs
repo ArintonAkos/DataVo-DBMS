@@ -27,7 +27,7 @@ namespace DataVo.Core.Parser.DQL;
 /// </summary>
 internal partial class Select
 {
-    private enum TypedPredicateKind { Numeric, Text, General, IsNull, IsNotNull }
+    private enum TypedPredicateKind { Numeric, Text, ExactText, General, IsNull, IsNotNull }
 
     private sealed class TypedPredicate(int ordinal, string op, object? literal, TypedPredicateKind kind, double number)
     {
@@ -184,7 +184,7 @@ internal partial class Select
                 continue;
             }
 
-            if (!SqlIndexLookupKey.TryBuildAuthoritative(_model.FromTable, column, indexName, predicate.Literal, out string key))
+            if (!SqlIndexLookupKey.TryBuildAuthoritative(_model.FromTable, column, indexName, predicate.Literal, out string key, isBoundValue: predicate.Kind == TypedPredicateKind.ExactText))
             {
                 return null;
             }
@@ -329,11 +329,14 @@ internal partial class Select
         // ordinal comparison of the unquoted strings (its numeric fallback needs both sides to be numbers).
         if ((op == Operators.EQUALS || op == Operators.NOT_EQUALS)
             && literal.Value is string quoted
-            && IsTextColumn(columns[ordinal])
-            && !double.TryParse(quoted.Trim('\''), NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            && IsTextColumn(columns[ordinal]))
         {
-            predicates.Add(new TypedPredicate(ordinal, op, quoted.Trim('\''), TypedPredicateKind.Text, 0));
-            return true;
+            string unquoted = literal is BoundValueLiteralNode ? quoted : UnquoteSingleQuoted(quoted);
+            if (!double.TryParse(unquoted, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            {
+                predicates.Add(new TypedPredicate(ordinal, op, unquoted, literal is BoundValueLiteralNode ? TypedPredicateKind.ExactText : TypedPredicateKind.Text, 0));
+                return true;
+            }
         }
 
         predicates.Add(new TypedPredicate(ordinal, op, literal.Value, TypedPredicateKind.General, 0));
@@ -355,6 +358,9 @@ internal partial class Select
         || column.Type.Equals("CHAR", StringComparison.OrdinalIgnoreCase)
         || column.Type.Equals("TEXT", StringComparison.OrdinalIgnoreCase)
         || column.Type.Equals("NVARCHAR", StringComparison.OrdinalIgnoreCase);
+
+    private static string UnquoteSingleQuoted(string value) =>
+        value.Length >= 2 && value[0] == '\'' && value[^1] == '\'' ? value[1..^1] : value;
 
     private static int OrdinalOf(IReadOnlyList<Column> columns, string name)
     {
@@ -714,9 +720,10 @@ internal partial class Select
             return false;
         }
 
-        if (predicate.Kind == TypedPredicateKind.Text && cell.Type == CellType.String)
+        if (predicate.Kind is TypedPredicateKind.Text or TypedPredicateKind.ExactText && cell.Type == CellType.String)
         {
-            bool equal = string.Equals(cell.AsString()!.Trim('\''), (string)predicate.Literal!, StringComparison.Ordinal);
+            string stored = predicate.Kind == TypedPredicateKind.Text ? UnquoteSingleQuoted(cell.AsString()!) : cell.AsString()!;
+            bool equal = string.Equals(stored, (string)predicate.Literal!, StringComparison.Ordinal);
             return predicate.Operator == Operators.EQUALS ? equal : !equal;
         }
 
@@ -967,7 +974,7 @@ internal partial class Select
     /// </summary>
     private (string Field, int Ordinal)[]? DirectOutputOf(IReadOnlyList<Column> columns)
     {
-        if (_model.TableColumnsInUse is null || _model.GetHavingExpression() is not null)
+        if (_model.GetHavingExpression() is not null)
         {
             return null;
         }

@@ -40,6 +40,11 @@ public enum TokenType
     Punctuation,
 
     /// <summary>
+    /// Parameter placeholder tokens such as <c>@id</c>, <c>$id</c> or <c>:id</c>.
+    /// </summary>
+    Parameter,
+
+    /// <summary>
     /// End-of-input marker appended after tokenization completes.
     /// </summary>
     EOF
@@ -166,6 +171,12 @@ public class Lexer
                 continue;
             }
 
+            if (current is '@' or '$' or ':' && _position + 1 < _input.Length && (char.IsLetterOrDigit(_input[_position + 1]) || _input[_position + 1] == '_'))
+            {
+                tokens.Add(ReadParameter());
+                continue;
+            }
+
             if (TryReadMultiCharOperator(out Token? opToken))
             {
                 if (opToken != null) tokens.Add(opToken);
@@ -272,6 +283,25 @@ public class Lexer
         }
 
         return new Token(TokenType.Identifier, value, start, startLoc.line, startLoc.column);
+    }
+
+    /// <summary>
+    /// Reads a parameter placeholder token prefixed with <c>@</c>, <c>$</c> or <c>:</c> and emits the parameter name without the prefix.
+    /// </summary>
+    private Token ReadParameter()
+    {
+        int start = _position;
+        var startLoc = GetLineColumn(start);
+        _position++;
+        int nameStart = _position;
+
+        while (_position < _input.Length && (char.IsLetterOrDigit(_input[_position]) || _input[_position] == '_'))
+        {
+            _position++;
+        }
+
+        string name = _input.Substring(nameStart, _position - nameStart);
+        return new Token(TokenType.Parameter, name, start, startLoc.line, startLoc.column);
     }
 
     /// <summary>

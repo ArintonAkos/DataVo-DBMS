@@ -113,9 +113,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
 
         var inputRows = new List<IReadOnlyDictionary<string, object?>>(_model.RawRows.Count);
-        foreach (List<string> rawRow in _model.RawRows)
+        for (int rowIndex = 0; rowIndex < _model.RawRows.Count; rowIndex++)
         {
-            inputRows.Add(BuildInputRow(rawRow, tableColumns, hasColumns));
+            inputRows.Add(BuildInputRow(rowIndex, _model.RawRows[rowIndex], tableColumns, hasColumns));
         }
 
         InsertRowsResult result = service.InsertRows(databaseName, _model.TableName, inputRows, txContext, statementTxId, recorder);
@@ -155,13 +155,14 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         }
 
         var built = new List<CellValue[]>(_model.RawRows.Count);
-        foreach (List<string> rawRow in _model.RawRows)
+        for (int rowIndex = 0; rowIndex < _model.RawRows.Count; rowIndex++)
         {
+            List<string> rawRow = _model.RawRows[rowIndex];
             var cells = new CellValue[tableColumns.Count];
             for (int i = 0; i < tableColumns.Count; i++)
             {
                 Column column = tableColumns[i];
-                object? raw = source[i] >= 0 ? rawRow[source[i]].Replace("'", "") : column.DefaultValue;
+                object? raw = source[i] >= 0 ? ResolveRawCellValue(rowIndex, source[i], rawRow[source[i]]) : column.DefaultValue;
                 if (!InsertRowService.TryNormalizeSqlValue(column, raw, out object? value))
                 {
                     return false;
@@ -216,6 +217,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
     }
 
     private Dictionary<string, object?> BuildInputRow(
+        int rowIndex,
         List<string> rawRow,
         List<Column> tableColumns,
         bool hasColumns)
@@ -227,7 +229,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         {
             for (int i = 0; i < tableColumns.Count; i++)
             {
-                inputRow[tableColumns[i].Name] = rawRow[i].Replace("'", "");
+                inputRow[tableColumns[i].Name] = ResolveRawCellValue(rowIndex, i, rawRow[i]);
             }
 
             return inputRow;
@@ -235,9 +237,28 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
 
         for (int i = 0; i < _model.Columns.Count; i++)
         {
-            inputRow[_model.Columns[i]] = rawRow[i].Replace("'", "");
+            inputRow[_model.Columns[i]] = ResolveRawCellValue(rowIndex, i, rawRow[i]);
         }
 
         return inputRow;
+    }
+
+    private object? ResolveRawCellValue(int rowIndex, int valueIndex, string rawText)
+    {
+        if (rowIndex < _model.ValueNodes.Count && valueIndex < _model.ValueNodes[rowIndex].Count)
+        {
+            SqlNode node = _model.ValueNodes[rowIndex][valueIndex];
+            if (node is NullLiteralNode)
+            {
+                return null;
+            }
+
+            if (node is BoundValueLiteralNode boundNode)
+            {
+                return boundNode.Value;
+            }
+        }
+
+        return rawText.Replace("'", "");
     }
 }

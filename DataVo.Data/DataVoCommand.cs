@@ -1,25 +1,25 @@
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Text;
-using System.Text.RegularExpressions;
+using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
+using DataVo.Core.Runtime;
 
 namespace DataVo.Data;
 
 /// <summary>
 /// Represents a SQL command to be executed against a DataVo database.
 /// <para>
-/// Supports parameterized queries via <see cref="Parameters"/> and executes
-/// through the DataVo <see cref="QueryEngine"/> pipeline.
+/// Supports parameterized queries via <see cref="Parameters"/> and pre-parsed execution via
+/// <see cref="Prepare"/> and <see cref="DataVoPreparedStatement"/>.
 /// </para>
 /// </summary>
 /// <example>
 /// <code>
 /// using var cmd = connection.CreateCommand();
 /// cmd.CommandText = "SELECT * FROM Users WHERE Id = @id;";
+/// cmd.Prepare();
 /// cmd.Parameters.AddWithValue("@id", 42);
 /// using var reader = cmd.ExecuteReader();
 /// </code>
@@ -29,10 +29,26 @@ public class DataVoCommand : DbCommand
     private DataVoConnection? _connection;
     private DataVoTransaction? _transaction;
     private readonly DataVoParameterCollection _parameters = new();
+    private string _commandText = string.Empty;
+    private DataVoPreparedStatement? _preparedStatement;
+    private DataVoEngine? _preparedEngine;
+    private DataVoQueryParameter[] _parameterBuffer = [];
 
     /// <inheritdoc />
     [AllowNull]
-    public override string CommandText { get; set; } = string.Empty;
+    public override string CommandText
+    {
+        get => _commandText;
+        set
+        {
+            string normalized = value ?? string.Empty;
+            if (!string.Equals(_commandText, normalized, StringComparison.Ordinal))
+            {
+                _commandText = normalized;
+                _preparedStatement = null;
+            }
+        }
+    }
 
     /// <inheritdoc />
     public override int CommandTimeout { get; set; } = 30;
@@ -50,7 +66,14 @@ public class DataVoCommand : DbCommand
     protected override DbConnection? DbConnection
     {
         get => _connection;
-        set => _connection = (DataVoConnection?)value;
+        set
+        {
+            if (!ReferenceEquals(_connection, value))
+            {
+                _connection = (DataVoConnection?)value;
+                _preparedStatement = null;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -86,13 +109,15 @@ public class DataVoCommand : DbCommand
         var results = ExecuteEngine();
         int totalAffected = 0;
 
-        foreach (var result in results)
+        for (int i = 0; i < results.Count; i++)
         {
-            foreach (string msg in result.Messages)
+            List<string> messages = results[i].Messages;
+            for (int j = 0; j < messages.Count; j++)
             {
-                var match = Regex.Match(msg, @"Rows affected:\s*(\d+)");
-                if (match.Success)
-                    totalAffected += int.Parse(match.Groups[1].Value);
+                if (TryParseRowsAffected(messages[j], out int affected))
+                {
+                    totalAffected += affected;
+                }
             }
         }
 
@@ -106,37 +131,80 @@ public class DataVoCommand : DbCommand
     public override object? ExecuteScalar()
     {
         var results = ExecuteEngine();
-        var firstWithData = results.FirstOrDefault(r => r.Data.Count > 0);
-        if (firstWithData == null || firstWithData.Fields.Count == 0) return null;
+        for (int i = 0; i < results.Count; i++)
+        {
+            QueryResult candidate = results[i];
+            if (candidate.Data.Count > 0)
+            {
+                if (candidate.Fields.Count == 0)
+                {
+                    return null;
+                }
 
-        string firstField = firstWithData.Fields[0];
-        return firstWithData.Data[0].GetValueOrDefault(firstField);
+                string firstField = candidate.Fields[0];
+                return candidate.Data[0].GetValueOrDefault(firstField);
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
     public override void Cancel() { }
 
-    /// <inheritdoc />
-    public override void Prepare() { }
+    /// <summary>
+    /// Pre-parses and compiles the current <see cref="CommandText"/> into a reusable <see cref="DataVoPreparedStatement"/>
+    /// bound to the active <see cref="DataVoConnection"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the connection is not set or not open.</exception>
+    public override void Prepare()
+    {
+        if (_connection?.Engine == null)
+        {
+            throw new InvalidOperationException("Connection is not set or not open.");
+        }
+
+        BindPreparedStatement(_connection.Engine, _connection.Session);
+    }
+
+    private DataVoPreparedStatement BindPreparedStatement(DataVoEngine engine, Guid session)
+    {
+        _preparedEngine = engine;
+        return _preparedStatement = new DataVoPreparedStatement(engine, _commandText, session);
+    }
 
     /// <inheritdoc />
     protected override DbParameter CreateDbParameter() => new DataVoParameter();
 
     /// <summary>
-    /// Substitutes named parameters into the SQL text and runs it through the QueryEngine.
+    /// Executes the command via either the compiled <see cref="DataVoPreparedStatement"/> pipeline
+    /// (when prepared or parameterized) or the standard <see cref="QueryEngine"/> pipeline.
     /// </summary>
     private List<QueryResult> ExecuteEngine()
     {
-        if (_connection == null)
-            throw new InvalidOperationException("Connection is not set.");
-
-        string sql = SubstituteParameters(CommandText);
-
-        var engine = new QueryEngine(sql, _connection.Session, _connection.Engine);
-        var results = engine.Parse();
-
-        foreach (var result in results)
+        if (_connection?.Engine == null)
         {
+            throw new InvalidOperationException("Connection is not set.");
+        }
+
+        List<QueryResult> results;
+        if (_preparedStatement != null || _parameters.Count > 0)
+        {
+            DataVoPreparedStatement statement = _preparedStatement is not null && ReferenceEquals(_preparedEngine, _connection.Engine)
+                ? _preparedStatement
+                : BindPreparedStatement(_connection.Engine, _connection.Session);
+            ReadOnlySpan<DataVoQueryParameter> boundParameters = BuildBoundParameterSpan();
+            results = statement.ExecuteAll(boundParameters, _connection.Session);
+        }
+        else
+        {
+            var engine = new QueryEngine(_commandText, _connection.Session, _connection.Engine);
+            results = engine.Parse();
+        }
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            QueryResult result = results[i];
             if (result.IsError)
             {
                 // Carry the error contract to ADO.NET callers: they branch on ErrorCode, not message text.
@@ -152,164 +220,52 @@ public class DataVoCommand : DbCommand
         return results;
     }
 
-    /// <summary>
-    /// Replaces <c>@paramName</c> placeholders with their literal values.
-    /// Strings are single-quoted, nulls become <c>NULL</c>, numbers remain unquoted.
-    /// </summary>
-    private string SubstituteParameters(string sql)
+    private ReadOnlySpan<DataVoQueryParameter> BuildBoundParameterSpan()
     {
-        var parameters = _parameters.AllParameters
-            .Where(p => !string.IsNullOrEmpty(p.ParameterName))
-            .OrderByDescending(p => p.ParameterName.Length)
-            .ToArray();
-
-        if (parameters.Length == 0)
+        IReadOnlyList<DataVoParameter> source = _parameters.AllParameters;
+        int count = source.Count;
+        if (count == 0)
         {
-            return sql;
+            return ReadOnlySpan<DataVoQueryParameter>.Empty;
         }
 
-        var builder = new StringBuilder(sql.Length);
-        char? activeQuote = null;
-        bool inLineComment = false;
-        bool inBlockComment = false;
-
-        for (int i = 0; i < sql.Length;)
+        if (_parameterBuffer.Length < count)
         {
-            char current = sql[i];
-            char next = i + 1 < sql.Length ? sql[i + 1] : '\0';
-
-            if (inLineComment)
-            {
-                builder.Append(current);
-                if (current is '\r' or '\n')
-                {
-                    inLineComment = false;
-                }
-
-                i++;
-                continue;
-            }
-
-            if (inBlockComment)
-            {
-                builder.Append(current);
-                if (current == '*' && next == '/')
-                {
-                    builder.Append(next);
-                    inBlockComment = false;
-                    i += 2;
-                    continue;
-                }
-
-                i++;
-                continue;
-            }
-
-            if (activeQuote == null && current == '-' && next == '-')
-            {
-                builder.Append(current);
-                builder.Append(next);
-                inLineComment = true;
-                i += 2;
-                continue;
-            }
-
-            if (activeQuote == null && current == '/' && next == '*')
-            {
-                builder.Append(current);
-                builder.Append(next);
-                inBlockComment = true;
-                i += 2;
-                continue;
-            }
-
-            if (current is '\'' or '"')
-            {
-                builder.Append(current);
-
-                if (activeQuote == '\'' && current == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
-                {
-                    builder.Append(sql[i + 1]);
-                    i += 2;
-                    continue;
-                }
-
-                if (activeQuote == current)
-                {
-                    activeQuote = null;
-                }
-                else if (activeQuote == null)
-                {
-                    activeQuote = current;
-                }
-
-                i++;
-                continue;
-            }
-
-            if (activeQuote == null)
-            {
-                DataVoParameter? matchedParameter = parameters.FirstOrDefault(p => IsParameterMatch(sql, i, p.ParameterName));
-                if (matchedParameter != null)
-                {
-                    builder.Append(FormatLiteral(matchedParameter.Value));
-                    i += matchedParameter.ParameterName.Length;
-                    continue;
-                }
-            }
-
-            builder.Append(current);
-            i++;
+            _parameterBuffer = new DataVoQueryParameter[count];
         }
 
-        return builder.ToString();
+        int written = 0;
+        for (int i = 0; i < count; i++)
+        {
+            DataVoParameter parameter = source[i];
+            if (string.IsNullOrEmpty(parameter.ParameterName))
+            {
+                continue;
+            }
+
+            _parameterBuffer[written++] = DataVoQueryParameter.FromObject(parameter.ParameterName, parameter.Value);
+        }
+
+        return _parameterBuffer.AsSpan(0, written);
     }
 
-    private static bool IsParameterMatch(string sql, int index, string parameterName)
+    private static bool TryParseRowsAffected(string message, out int count)
     {
-        if (!sql.AsSpan(index).StartsWith(parameterName, StringComparison.Ordinal))
+        const string prefix = "Rows affected:";
+        count = 0;
+        int idx = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
         {
             return false;
         }
 
-        int nextIndex = index + parameterName.Length;
-        if (nextIndex >= sql.Length)
+        ReadOnlySpan<char> slice = message.AsSpan(idx + prefix.Length).Trim();
+        int end = 0;
+        while (end < slice.Length && char.IsDigit(slice[end]))
         {
-            return true;
+            end++;
         }
 
-        return !IsParameterNameCharacter(sql[nextIndex]);
-    }
-
-    private static bool IsParameterNameCharacter(char value)
-    {
-        return char.IsLetterOrDigit(value) || value == '_';
-    }
-
-    /// <summary>
-    /// Formats a CLR value as a SQL literal (e.g. <c>'hello'</c>, <c>42</c>, <c>NULL</c>).
-    /// </summary>
-    private static string FormatLiteral(object? value)
-    {
-        if (value == null || value == DBNull.Value) return "NULL";
-
-        return value switch
-        {
-            float[] values => FormatVectorLiteral(values),
-            double[] values => FormatVectorLiteral(values),
-            decimal[] values => FormatVectorLiteral(values),
-            IEnumerable<float> values => FormatVectorLiteral(values),
-            IEnumerable<double> values => FormatVectorLiteral(values),
-            IEnumerable<decimal> values => FormatVectorLiteral(values),
-            int or long or float or double or decimal => Convert.ToString(value, CultureInfo.InvariantCulture)!,
-            bool b => b ? "true" : "false",
-            string s => $"'{s.Replace("'", "''")}'",
-            _ => $"'{value}'"
-        };
-    }
-
-    private static string FormatVectorLiteral<T>(IEnumerable<T> values) where T : IFormattable
-    {
-        return $"'[{string.Join(", ", values.Select(value => value.ToString(null, CultureInfo.InvariantCulture)))}]'";
+        return end > 0 && int.TryParse(slice[..end], out count);
     }
 }

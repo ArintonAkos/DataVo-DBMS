@@ -217,6 +217,39 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
+    /// Pre-parses and compiles a parameterized SQL statement for repeated execution under the current <see cref="SessionId"/>.
+    /// </summary>
+    /// <param name="sql">The SQL statement text, which may contain <c>@param</c> placeholders.</param>
+    /// <returns>A thread-safe <see cref="DataVoPreparedStatement"/> that can be executed repeatedly with bound parameters.</returns>
+    /// <example>
+    /// <code>
+    /// DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Name FROM Users WHERE Id = @id");
+    /// QueryResult result = lookup.Execute(("id", 5));
+    /// </code>
+    /// </example>
+    public DataVoPreparedStatement Prepare(string sql)
+    {
+        return Prepare(sql, SessionId);
+    }
+
+    /// <summary>
+    /// Pre-parses and compiles a parameterized SQL statement for repeated execution under an explicit session identifier.
+    /// </summary>
+    /// <param name="sql">The SQL statement text, which may contain <c>@param</c> placeholders.</param>
+    /// <param name="sessionId">The default session identifier used when executing the prepared statement.</param>
+    /// <returns>A thread-safe <see cref="DataVoPreparedStatement"/> that can be executed repeatedly with bound parameters.</returns>
+    /// <example>
+    /// <code>
+    /// DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Name FROM Users WHERE Id = @id", sessionId);
+    /// QueryResult result = lookup.Execute(("id", 5));
+    /// </code>
+    /// </example>
+    public DataVoPreparedStatement Prepare(string sql, Guid sessionId)
+    {
+        return new DataVoPreparedStatement(this, sql, sessionId);
+    }
+
+    /// <summary>
     /// Creates an in-memory snapshot of the current engine state for the current <see cref="SessionId"/>.
     /// </summary>
     public DataVoSnapshot CreateSnapshot()

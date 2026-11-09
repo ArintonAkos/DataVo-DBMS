@@ -31,7 +31,8 @@ internal static class SqlIndexLookupKey
     /// <param name="indexName">The index that would answer the lookup.</param>
     /// <param name="literal">The literal as parsed: int, long, double, or a quoted string.</param>
     /// <param name="key">The canonical index key.</param>
-    public static bool TryBuildAuthoritative(TableDetail table, string columnName, string indexName, object? literal, out string key)
+    /// <param name="isBoundValue">Whether <paramref name="literal"/> is a bound parameter value, whose quotes are data.</param>
+    public static bool TryBuildAuthoritative(TableDetail table, string columnName, string indexName, object? literal, out string key, bool isBoundValue = false)
     {
         key = string.Empty;
         if (literal is null || table.DatabaseName is null)
@@ -71,7 +72,7 @@ internal static class SqlIndexLookupKey
 
         if (column.Type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase))
         {
-            return TryBuildStringKey(literal, out key);
+            return TryBuildStringKey(literal, isBoundValue, out key);
         }
 
         if (column.Type.Equals("GUID", StringComparison.OrdinalIgnoreCase))
@@ -157,15 +158,17 @@ internal static class SqlIndexLookupKey
         return true;
     }
 
-    private static bool TryBuildStringKey(object literal, out string key)
+    private static bool TryBuildStringKey(object literal, bool isBoundValue, out string key)
     {
         key = string.Empty;
-        if (literal is not string text || text.Length < 2 || text[0] != '\'' || text[^1] != '\'')
+        if (literal is not string text)
         {
             return false;
         }
 
-        string inner = text[1..^1];
+        string inner = !isBoundValue && text.Length >= 2 && text[0] == '\'' && text[^1] == '\''
+            ? text[1..^1]
+            : text;
 
         // Keep the scan for values whose comparison is not plain ordinal equality: the scan also
         // compares numeric-looking text as numbers ('7' = '007'), writers store vector-looking text as

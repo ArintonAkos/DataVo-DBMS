@@ -87,16 +87,16 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         string leftValue = leftCol.Column;
         string rightValue = rightLit.Value?.ToString() ?? string.Empty;
 
-        if (rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
+        if (rightLit is not BoundValueLiteralNode && rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
         {
-            rightValue = rightValue.Trim('\'');
+            rightValue = rightValue[1..^1];
         }
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
         if (table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
         {
-            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, indexFile, rightLit.Value, out string secondaryKey))
+            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, indexFile, rightLit.Value, out string secondaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
             {
                 return EvaluateUsingSecondaryIndex(table, secondaryKey, indexFile);
             }
@@ -113,7 +113,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         int columnIndex = table.PrimaryKeys!.IndexOf(leftValue);
         if (columnIndex > -1)
         {
-            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, $"_PK_{table.TableName}", rightLit.Value, out string primaryKey))
+            if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, $"_PK_{table.TableName}", rightLit.Value, out string primaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
             {
                 return EvaluateUsingPrimaryKey(table, primaryKey);
             }

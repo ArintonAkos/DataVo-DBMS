@@ -167,6 +167,54 @@ public class NullLiteralNode : LiteralNode
 }
 
 /// <summary>
+/// Represents a SQL parameter placeholder such as <c>@id</c>.
+/// </summary>
+/// <example>
+/// <code>
+/// var param = new ParameterNode("id");
+/// </code>
+/// </example>
+public class ParameterNode : ExpressionNode
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ParameterNode"/> class.
+    /// </summary>
+    public ParameterNode()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ParameterNode"/> class with the specified parameter name.
+    /// </summary>
+    /// <param name="name">The parameter name without the leading <c>@</c> prefix.</param>
+    public ParameterNode(string name)
+    {
+        Name = name;
+    }
+
+    /// <summary>
+    /// Gets or sets the parameter name without the leading <c>@</c> prefix.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents a literal value produced by binding a SQL parameter placeholder.
+/// Preserves the raw bound value without SQL string literal quote trimming.
+/// </summary>
+public sealed class BoundValueLiteralNode : LiteralNode
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BoundValueLiteralNode"/> class.
+    /// </summary>
+    /// <param name="value">The bound parameter value.</param>
+    public BoundValueLiteralNode(object? value)
+    {
+        Value = value;
+    }
+}
+
+/// <summary>
 /// Represents a possibly-qualified column reference.
 /// </summary>
 public class ColumnRefNode : ExpressionNode
@@ -340,6 +388,33 @@ public class LimitNode : SqlNode
     /// Gets or sets the row count to skip.
     /// </summary>
     public int SkipTarget { get; set; }
+
+    /// <summary>
+    /// Gets or sets the parameter supplying the row count, or <see langword="null"/> when <see cref="TakeTarget"/> is a literal.
+    /// </summary>
+    public string? TakeParameter { get; set; }
+
+    /// <summary>
+    /// Gets or sets the parameter supplying the skip count, or <see langword="null"/> when <see cref="SkipTarget"/> is a literal.
+    /// </summary>
+    public string? SkipParameter { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the clause still names a parameter that has not been bound.
+    /// </summary>
+    public bool HasParameters => TakeParameter is not null || SkipParameter is not null;
+
+    /// <summary>
+    /// Throws when the clause still names a parameter, so an unbound <c>LIMIT @n</c> can never run as <c>LIMIT 0</c>.
+    /// </summary>
+    /// <exception cref="Exceptions.BindingException">A parameter was not bound.</exception>
+    public void EnsureBound()
+    {
+        if (HasParameters)
+        {
+            throw new Exceptions.BindingException($"Bind Error: Parameter '@{TakeParameter ?? SkipParameter}' was not provided.");
+        }
+    }
 }
 
 /// <summary>

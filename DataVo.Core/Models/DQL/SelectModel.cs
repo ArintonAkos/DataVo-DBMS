@@ -56,6 +56,8 @@ internal class SelectModel
             whereStatement = new Where(new LiteralNode { Value = SqlLiterals.TrueExpression }, fromTable);
         }
 
+        ast.LimitExpression?.EnsureBound();
+
         return new SelectModel
         {
             WhereStatement = whereStatement,

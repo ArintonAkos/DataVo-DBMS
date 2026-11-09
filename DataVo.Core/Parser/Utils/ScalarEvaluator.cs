@@ -9,6 +9,11 @@ internal static class ScalarEvaluator
 {
     public static object? Evaluate(ExpressionNode expression, Dictionary<string, object?> row)
     {
+        if (expression is ParameterNode param)
+        {
+            throw new BindingException($"Bind Error: Parameter '@{param.Name}' was not provided.");
+        }
+
         if (expression is LiteralNode literal)
         {
             return literal.Value;

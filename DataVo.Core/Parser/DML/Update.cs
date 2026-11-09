@@ -329,7 +329,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             string colName = setExpr.Key;
             object? newValue = ScalarEvaluator.Evaluate(setExpr.Value, oldRow);
 
-            if (newValue is string s && s.StartsWith("'") && s.EndsWith("'"))
+            if (setExpr.Value is not BoundValueLiteralNode && newValue is string s && s.StartsWith("'") && s.EndsWith("'"))
             {
                 newValue = s.Trim('\'');
             }

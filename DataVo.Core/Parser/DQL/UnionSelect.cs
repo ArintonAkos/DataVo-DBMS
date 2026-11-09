@@ -225,6 +225,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
             return rows;
         }
 
+        limit.EnsureBound();
         IEnumerable<Dictionary<string, object?>> query = rows;
 
         if (limit.SkipTarget > 0)

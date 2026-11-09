@@ -76,17 +76,22 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             var leftCol = (ResolvedColumnRefNode)root.Left;
             var rightLit = (LiteralNode)root.Right;
 
+            if (rightLit.Value == null)
+            {
+                return [];
+            }
+
             string leftValue = leftCol.Column;
             string rightValue = rightLit.Value?.ToString() ?? string.Empty;
 
-            if (rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
+            if (rightLit is not BoundValueLiteralNode && rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
             {
-                rightValue = rightValue.Trim('\'');
+                rightValue = rightValue[1..^1];
             }
 
             if (_table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
             {
-                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, indexFile, rightLit.Value, out string secondaryKey))
+                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, indexFile, rightLit.Value, out string secondaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
                 {
                     return EvaluateUsingSecondaryIndex(secondaryKey, indexFile);
                 }
@@ -100,7 +105,7 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue);
             if (columnIndex > -1)
             {
-                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, $"_PK_{_table.TableName}", rightLit.Value, out string primaryKey))
+                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, $"_PK_{_table.TableName}", rightLit.Value, out string primaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
                 {
                     return EvaluateUsingPrimaryKey(primaryKey);
                 }

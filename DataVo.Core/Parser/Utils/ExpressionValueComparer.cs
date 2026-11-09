@@ -31,8 +31,8 @@ internal static class ExpressionValueComparer
     {
         if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
         {
-            leftValue = leftString.Trim('\'');
-            rightValue = rightString.Trim('\'');
+            leftValue = UnquoteSingleQuoted(leftString);
+            rightValue = UnquoteSingleQuoted(rightString);
         }
 
         if (leftValue == null && rightValue == null) return true;
@@ -80,8 +80,8 @@ internal static class ExpressionValueComparer
     {
         if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
         {
-            leftValue = leftString.Trim('\'');
-            rightValue = rightString.Trim('\'');
+            leftValue = UnquoteSingleQuoted(leftString);
+            rightValue = UnquoteSingleQuoted(rightString);
         }
 
         if (leftValue == null && rightValue == null) return 0;
@@ -165,8 +165,8 @@ internal static class ExpressionValueComparer
 
         if (trimQuotedStrings)
         {
-            input = input.Trim('\'');
-            pattern = pattern.Trim('\'');
+            input = UnquoteSingleQuoted(input);
+            pattern = UnquoteSingleQuoted(pattern);
         }
 
         string regexPattern = "^" + Regex.Escape(pattern)
@@ -175,6 +175,9 @@ internal static class ExpressionValueComparer
 
         return Regex.IsMatch(input, regexPattern, RegexOptions.Singleline);
     }
+
+    private static string UnquoteSingleQuoted(string value)
+        => value.Length >= 2 && value[0] == '\'' && value[^1] == '\'' ? value[1..^1] : value;
 
     private static bool TryConvertToDouble(object value, out double number)
     {

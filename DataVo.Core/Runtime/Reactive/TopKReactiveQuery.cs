@@ -70,6 +70,7 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             _sortKeys.Add(new SortKey(StripQualifier(column.Column.Name), column.IsAscending));
         }
 
+        select.LimitExpression!.EnsureBound();
         _skip = Math.Max(0, select.LimitExpression!.SkipTarget);
         _take = Math.Max(0, select.LimitExpression!.TakeTarget);
 
