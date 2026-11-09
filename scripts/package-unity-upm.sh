@@ -5,7 +5,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 output=""
-version="0.2.0-rc.1"
+version="0.2.0-rc.2"
 
 usage() {
   echo "Usage: $0 --output <new-directory> [--version <semver>]" >&2

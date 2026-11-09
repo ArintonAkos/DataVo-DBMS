@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-rc.2
 
 - The source generator is included: mark a model with `[DataVoTable]` and Unity writes its data access when it compiles.
 - New `BIGINT` and `DOUBLE` columns hold real 64-bit values.
