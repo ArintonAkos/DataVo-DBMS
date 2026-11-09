@@ -612,6 +612,7 @@ public static class DataVoCompiledQuery
             operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
         }
 
+        RetainImagesBeforeBatchPatch(engine, databaseName, plan.TableName, operations);
         return engine.StorageContext.TryPatchFixedWidthRows(
             plan.TableName,
             databaseName,
@@ -643,7 +644,8 @@ public static class DataVoCompiledQuery
         // Reactive change capture needs after-image materialization the byte-patch path deliberately skips.
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
-            || engine.Changes.Enabled)
+            || engine.Changes.Enabled
+            || engine.TransactionManager.HasAnyActiveTransaction())
         {
             return false;
         }
@@ -749,7 +751,8 @@ public static class DataVoCompiledQuery
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
-            || engine.Changes.Enabled)
+            || engine.Changes.Enabled
+            || engine.TransactionManager.HasAnyActiveTransaction())
         {
             return false;
         }
@@ -884,7 +887,8 @@ public static class DataVoCompiledQuery
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
-            || engine.Changes.Enabled)
+            || engine.Changes.Enabled
+            || engine.TransactionManager.HasAnyActiveTransaction())
         {
             return false;
         }
@@ -1629,6 +1633,26 @@ public static class DataVoCompiledQuery
     private static DataVoCompiledQueryPlan StoredTablePlan(DataVoEngine engine, DataVoCompiledQueryPlan plan, string databaseName) =>
         plan.ForStoredTable(engine.Catalog.FindTableName(plan.TableName, databaseName) ?? plan.TableName);
 
+    /// <summary>A byte patch overwrites rows in place, so an open snapshot needs their images saved first.</summary>
+    private static void RetainImagesBeforeBatchPatch(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        List<FixedWidthPatchOperation> operations)
+    {
+        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        {
+            return;
+        }
+
+        long transactionId = engine.TransactionIdAllocator.AllocateTransactionId();
+        List<RowKey> rowIds = [.. operations.Select(operation => operation.RowId)];
+        foreach (KeyValuePair<RowKey, Dictionary<string, object?>> row in engine.StorageContext.GetTableContents(rowIds, tableName, databaseName))
+        {
+            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, row.Key, row.Key, transactionId, row.Value);
+        }
+    }
+
     private static string ResolveCurrentDatabase(DataVoContext context)
     {
         string? databaseName = context.Engine.Sessions.Get(context.SessionId);
@@ -1994,7 +2018,7 @@ public static class DataVoCompiledQuery
         {
             RowKey assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRows[i], tableName, databaseName);
             newRowIds[i] = assignedRowId;
-            MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], assignedRowId, statementTxId);
+            MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], assignedRowId, statementTxId, oldRows[i]);
         }
 
         foreach (IndexFile index in indexFiles)

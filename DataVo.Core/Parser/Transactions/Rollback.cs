@@ -20,6 +20,7 @@ internal class Rollback : BaseDbAction
         try
         {
             Transactions.Rollback(session);
+            MVCC.MvccCoordinator.PruneRetainedImages(Engine);
             Messages.Add("Transaction rolled back.");
         }
         catch (Exception ex)

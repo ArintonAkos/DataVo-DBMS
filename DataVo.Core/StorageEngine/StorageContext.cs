@@ -461,7 +461,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             ? ReadRowsById(rowIds, tableName, databaseName, selectedColumns)
             : ReadAllRows(tableName, databaseName, selectedColumns);
 
-        return ApplyMvccVisibilityFilter(rows, tableName, databaseName);
+        return ApplyMvccVisibilityFilter(rows, tableName, databaseName, rowIds, selectedColumns);
     }
 
     /// <summary>
@@ -592,7 +592,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             ? ReadTypedRowsById(rowIds, tableName, databaseName)
             : ReadAllTypedRows(tableName, databaseName);
 
-        return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName);
+        return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName, rowIds);
     }
 
     /// <summary>Visits one row of <see cref="ScanTableRows{TState}"/>: serialized bytes, or a typed row for typed backends.</summary>
@@ -761,10 +761,12 @@ public class StorageContext(DataVoConfig config) : IDisposable
     private static Dictionary<RowKey, Dictionary<string, object?>> ApplyMvccVisibilityFilter(
         Dictionary<RowKey, Dictionary<string, object?>> rows,
         string tableName,
-        string databaseName)
+        string databaseName,
+        List<RowKey>? requestedIds,
+        HashSet<string>? selectedColumns)
     {
         TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
-        if (snapshot == null || rows.Count == 0)
+        if (snapshot == null)
         {
             return rows;
         }
@@ -781,26 +783,67 @@ public class StorageContext(DataVoConfig config) : IDisposable
             }
         }
 
-        if (toRemove.Count == 0)
-        {
-            return rows;
-        }
-
         foreach (RowKey rowId in toRemove)
         {
             rows.Remove(rowId);
+        }
+
+        foreach (RetainedRowImage image in VisibleImages(engine, tableName, databaseName, snapshot, requestedIds))
+        {
+            rows[image.RowId] = ProjectImage(image.Row, selectedColumns);
         }
 
         return rows;
     }
 
+    private static IEnumerable<RetainedRowImage> VisibleImages(
+        DataVoEngine engine,
+        string tableName,
+        string databaseName,
+        TransactionSnapshot snapshot,
+        List<RowKey>? requestedIds)
+    {
+        List<RetainedRowImage> images = engine.VersionStorageManager.GetVisibleImages(databaseName, tableName, snapshot);
+        if (requestedIds is null || images.Count == 0)
+        {
+            return images;
+        }
+
+        var requested = new HashSet<RowKey>(requestedIds);
+        return images.Where(image => requested.Contains(image.RowId));
+    }
+
+    private static Dictionary<string, object?> ProjectImage(
+        IReadOnlyDictionary<string, object?> image,
+        HashSet<string>? selectedColumns)
+    {
+        var row = new Dictionary<string, object?>(image.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, object?> column in image)
+        {
+            if (selectedColumns is null || selectedColumns.Contains(column.Key))
+            {
+                row[column.Key] = column.Value;
+            }
+        }
+
+        return row;
+    }
+
+    private static StoredRow ToStoredRow(IReadOnlyDictionary<string, object?> image)
+    {
+        var schema = new ReactiveRowSchema([.. image.Keys]);
+        CellValue[] cells = [.. image.Values.Select(CellValue.From)];
+        return new StoredRow(schema, cells);
+    }
+
     private static Dictionary<RowKey, StoredRow> ApplyTypedMvccVisibilityFilter(
         Dictionary<RowKey, StoredRow> rows,
         string tableName,
-        string databaseName)
+        string databaseName,
+        List<RowKey>? requestedIds)
     {
         TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
-        if (snapshot == null || rows.Count == 0)
+        if (snapshot == null)
         {
             return rows;
         }
@@ -817,14 +860,14 @@ public class StorageContext(DataVoConfig config) : IDisposable
             }
         }
 
-        if (toRemove.Count == 0)
-        {
-            return rows;
-        }
-
         foreach (RowKey rowId in toRemove)
         {
             rows.Remove(rowId);
+        }
+
+        foreach (RetainedRowImage image in VisibleImages(engine, tableName, databaseName, snapshot, requestedIds))
+        {
+            rows[image.RowId] = ToStoredRow(image.Row);
         }
 
         return rows;

@@ -20,6 +20,9 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     private readonly ReaderWriterLockSlim _versionLock = new();
 
+    // Storage keeps one version of each row, so the images an open snapshot may still need live here.
+    private readonly ConcurrentDictionary<(string Database, string Table), List<RetainedRowImage>> _retainedImages = new();
+
     /// <summary>
     /// Allocates a new row version with the given xmin (creator transaction).
     /// Creates the initial version metadata for a newly inserted/updated row.
@@ -203,6 +206,7 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public void ClearTableVersions(string databaseName, string tableName)
     {
+        _retainedImages.TryRemove((databaseName, tableName), out _);
         _versionLock.EnterWriteLock();
         try
         {
@@ -226,6 +230,7 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public void Clear()
     {
+        _retainedImages.Clear();
         _versionLock.EnterWriteLock();
         try
         {
@@ -234,6 +239,68 @@ public class VersionStorageManager : IDisposable
         finally
         {
             _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>Keeps a row's previous image for snapshots that began before it was replaced or deleted.</summary>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The owning table.</param>
+    /// <param name="rowId">The row key the image was stored under.</param>
+    /// <param name="image">The complete previous row.</param>
+    /// <param name="xmin">The transaction that created this image.</param>
+    /// <param name="xmax">The transaction that replaced or deleted it.</param>
+    /// <example>
+    /// <code>
+    /// versions.RetainImage("Shop", "Items", rowId, oldRow, xmin: 0, xmax: updatingTransactionId);
+    /// </code>
+    /// </example>
+    public void RetainImage(string databaseName, string tableName, RowKey rowId, IReadOnlyDictionary<string, object?> image, long xmin, long xmax)
+    {
+        List<RetainedRowImage> images = _retainedImages.GetOrAdd((databaseName, tableName), static _ => []);
+        lock (images)
+        {
+            images.Add(new RetainedRowImage(rowId, image, new RowVersion(xmin, xmax)));
+        }
+    }
+
+    /// <summary>Gets whether any row of a table has been replaced while a transaction was open.</summary>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The owning table.</param>
+    /// <returns><see langword="true"/> when retained images exist for the table.</returns>
+    public bool HasRetainedImages(string databaseName, string tableName) =>
+        !_retainedImages.IsEmpty
+        && _retainedImages.TryGetValue((databaseName, tableName), out List<RetainedRowImage>? images)
+        && Volatile.Read(ref images) is { Count: > 0 };
+
+    /// <summary>Returns the retained images a snapshot should read.</summary>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The owning table.</param>
+    /// <param name="snapshot">The reading snapshot.</param>
+    /// <returns>The visible images; empty when there are none.</returns>
+    internal List<RetainedRowImage> GetVisibleImages(string databaseName, string tableName, TransactionSnapshot snapshot)
+    {
+        var visible = new List<RetainedRowImage>();
+        if (_retainedImages.TryGetValue((databaseName, tableName), out List<RetainedRowImage>? images))
+        {
+            lock (images)
+            {
+                visible.AddRange(images.Where(image => image.Version.IsVisibleTo(snapshot)));
+            }
+        }
+
+        return visible;
+    }
+
+    /// <summary>Drops images no open snapshot can read.</summary>
+    /// <param name="oldestSnapshot">The oldest open snapshot, or <see langword="null"/> when no transaction is open.</param>
+    public void PruneImages(long? oldestSnapshot)
+    {
+        foreach (KeyValuePair<(string Database, string Table), List<RetainedRowImage>> table in _retainedImages)
+        {
+            lock (table.Value)
+            {
+                table.Value.RemoveAll(image => oldestSnapshot is null || image.Version.Xmax <= oldestSnapshot);
+            }
         }
     }
 
@@ -299,3 +366,9 @@ public class VersionStorageManager : IDisposable
         _versionLock?.Dispose();
     }
 }
+
+/// <summary>A row's earlier state, kept for snapshots that started before the row changed.</summary>
+/// <param name="RowId">The row key the image was stored under.</param>
+/// <param name="Row">The complete earlier row.</param>
+/// <param name="Version">The lifetime of this image.</param>
+internal readonly record struct RetainedRowImage(RowKey RowId, IReadOnlyDictionary<string, object?> Row, RowVersion Version);

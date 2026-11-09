@@ -198,18 +198,18 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
         }
 
-        foreach (RowKey rowId in toBeDeleted)
-        {
-            MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId);
-        }
-
         // Old row images: reactive subscriptions need them as Before, and indexes use their keys to remove
         // exact entries instead of scanning every key for the row ids.
         List<Models.Catalog.IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
         Dictionary<RowKey, Dictionary<string, object?>>? deletedRows =
-            recorder is { IsEnabled: true } || indexFiles.Count > 0
+            recorder is { IsEnabled: true } || indexFiles.Count > 0 || Engine.TransactionManager.HasAnyActiveTransaction()
                 ? Context.GetTableContents(toBeDeleted, tableName, databaseName)
                 : null;
+
+        foreach (RowKey rowId in toBeDeleted)
+        {
+            MvccCoordinator.RegisterDeleteVersion(Engine, databaseName, tableName, rowId, statementTxId, deletedRows?.GetValueOrDefault(rowId));
+        }
 
         if (recorder is { IsEnabled: true } && deletedRows is not null)
         {

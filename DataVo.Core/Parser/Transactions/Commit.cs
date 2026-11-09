@@ -65,6 +65,7 @@ internal class Commit : BaseDbAction
             finally
             {
                 ReleaseWriteLocks(databaseName, lockedResources);
+                MvccCoordinator.PruneRetainedImages(Engine);
             }
 
             Messages.Add("Transaction committed.");
@@ -211,16 +212,20 @@ internal class Commit : BaseDbAction
             foreach (RowKey rowId in rowIdList)
             {
                 MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, context.Snapshot, "DELETE");
-                MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId);
             }
 
             var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
 
             // Old rows give the exact index keys to remove; without them every index entry is visited.
             Dictionary<RowKey, Dictionary<string, object?>>? oldRows =
-                recorder is { IsEnabled: true } || indexFiles.Count > 0
+                recorder is { IsEnabled: true } || indexFiles.Count > 0 || engine.TransactionManager.HasAnyActiveTransaction()
                     ? engine.StorageContext.GetTableContents(rowIdList, tableName, databaseName)
                     : null;
+
+            foreach (RowKey rowId in rowIdList)
+            {
+                MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId, oldRows?.GetValueOrDefault(rowId));
+            }
 
             if (recorder is { IsEnabled: true })
             {
@@ -276,7 +281,7 @@ internal class Commit : BaseDbAction
                 }
 
                 RowKey newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
-                MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, rowId, newRowId, txId);
+                MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, rowId, newRowId, txId, oldRow);
                 recorder?.RecordUpdate(tableName, newRowId, oldRow, newRow);
                 foreach (var index in indexFiles)
                 {

@@ -89,6 +89,11 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 rightValue = rightValue[1..^1];
             }
 
+            if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), _table.DatabaseName!, _table.TableName))
+            {
+                return EvaluateUsingFullScan(leftValue, rightLit.Value);
+            }
+
             if (_table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
             {
                 if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, indexFile, rightLit.Value, out string secondaryKey, isBoundValue: rightLit is BoundValueLiteralNode))

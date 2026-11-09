@@ -29,7 +29,7 @@ public class TransactionAutocommitRaceTests
         Assert.True(rows.Count == 1, $"concurrent error={concurrent.IsError} ({string.Join(" | ", concurrent.Messages)}), commit error={commit.IsError} ({string.Join(" | ", commit.Messages)}), rows={rows.Count}");
     }
 
-    [Fact(Skip = "Known engine bug: a row replaced by an autocommit update after BEGIN vanishes from the open transaction's snapshot.")]
+    [Fact]
     public void RowReplacedAfterBegin_StaysVisibleAndCannotBeInsertedAgain()
     {
         using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });

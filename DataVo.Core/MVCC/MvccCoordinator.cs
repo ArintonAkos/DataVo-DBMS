@@ -135,10 +135,11 @@ public static class MvccCoordinator
         string tableName,
         RowKey oldRowId,
         RowKey newRowId,
-        long transactionId)
+        long transactionId,
+        IReadOnlyDictionary<string, object?>? oldImage = null)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
-        if (DeferredPublication.TryDefer(() => RegisterUpdateVersion(engine, databaseName, tableName, oldRowId, newRowId, transactionId)))
+        if (DeferredPublication.TryDefer(() => RegisterUpdateVersion(engine, databaseName, tableName, oldRowId, newRowId, transactionId, oldImage)))
         {
             return;
         }
@@ -150,6 +151,8 @@ public static class MvccCoordinator
             engine.VersionStorageManager.RemoveVersion(databaseName, tableName, newRowId);
             return;
         }
+
+        RetainImage(engine, databaseName, tableName, oldRowId, oldImage, transactionId);
 
         if (oldRowId == newRowId)
         {
@@ -167,10 +170,10 @@ public static class MvccCoordinator
     /// <summary>
     /// Registers version metadata for a delete operation.
     /// </summary>
-    public static void RegisterDeleteVersion(DataVoEngine engine, string databaseName, string tableName, RowKey rowId, long transactionId)
+    public static void RegisterDeleteVersion(DataVoEngine engine, string databaseName, string tableName, RowKey rowId, long transactionId, IReadOnlyDictionary<string, object?>? oldImage = null)
     {
         // Version metadata becomes visible with the statement, after its commit record is durable.
-        if (DeferredPublication.TryDefer(() => RegisterDeleteVersion(engine, databaseName, tableName, rowId, transactionId)))
+        if (DeferredPublication.TryDefer(() => RegisterDeleteVersion(engine, databaseName, tableName, rowId, transactionId, oldImage)))
         {
             return;
         }
@@ -183,7 +186,53 @@ public static class MvccCoordinator
             return;
         }
 
+        RetainImage(engine, databaseName, tableName, rowId, oldImage, transactionId);
         EnsureRowVersionExists(engine, databaseName, tableName, rowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, rowId, transactionId);
+    }
+
+    /// <summary>
+    /// Gets whether a read must scan the table instead of using an index. Indexes describe only current rows,
+    /// so once a table holds retained images, an index cannot answer for an older snapshot.
+    /// </summary>
+    /// <param name="engine">The owning engine.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The table being read.</param>
+    /// <returns><see langword="true"/> when the current snapshot needs a table scan.</returns>
+    /// <example>
+    /// <code>
+    /// if (MvccCoordinator.SnapshotRequiresScan(engine, database, table)) { /* scan */ }
+    /// </code>
+    /// </example>
+    public static bool SnapshotRequiresScan(DataVoEngine engine, string databaseName, string tableName) =>
+        MvccExecutionScope.CurrentSnapshot is not null
+        && engine.VersionStorageManager.HasRetainedImages(databaseName, tableName);
+
+    /// <summary>Drops retained images no open snapshot can read. Call when a transaction ends.</summary>
+    /// <param name="engine">The owning engine.</param>
+    public static void PruneRetainedImages(DataVoEngine engine) =>
+        engine.VersionStorageManager.PruneImages(engine.TransactionManager.OldestActiveSnapshot());
+
+    private static void RetainImage(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        RowKey rowId,
+        IReadOnlyDictionary<string, object?>? image,
+        long transactionId)
+    {
+        if (image is null)
+        {
+            return;
+        }
+
+        long xmin = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId)?.Xmin ?? LegacyBootstrapXmin;
+        var copy = new Dictionary<string, object?>(image.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, object?> column in image)
+        {
+            copy[column.Key] = column.Value;
+        }
+
+        engine.VersionStorageManager.RetainImage(databaseName, tableName, rowId, copy, xmin, transactionId);
     }
 }

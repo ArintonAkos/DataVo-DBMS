@@ -149,6 +149,20 @@ public sealed class TransactionManager
         return !_activeTransactions.IsEmpty;
     }
 
+    /// <summary>Gets the oldest open snapshot, or <see langword="null"/> when no transaction is open.</summary>
+    /// <returns>The smallest open snapshot timestamp.</returns>
+    public long? OldestActiveSnapshot()
+    {
+        long? oldest = null;
+        foreach (TransactionContext context in _activeTransactions.Values)
+        {
+            long timestamp = context.Snapshot?.SnapshotTimestamp ?? context.TransactionId;
+            oldest = oldest is null ? timestamp : Math.Min(oldest.Value, timestamp);
+        }
+
+        return oldest;
+    }
+
     /// <summary>
     /// Retrieves the active <see cref="TransactionContext"/> for the session without removing it.
     /// Returns <c>null</c> if no explicit transaction is active (auto-commit mode).

@@ -94,6 +94,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
+        if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), table.DatabaseName!, table.TableName))
+        {
+            return EvaluateUsingFullScan(table, leftValue, rightValue);
+        }
+
         if (table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
         {
             if (SqlIndexLookupKey.TryBuildAuthoritative(table, leftValue, indexFile, rightLit.Value, out string secondaryKey, isBoundValue: rightLit is BoundValueLiteralNode))

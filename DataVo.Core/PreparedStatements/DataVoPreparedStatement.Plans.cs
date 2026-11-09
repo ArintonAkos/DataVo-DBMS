@@ -1500,7 +1500,7 @@ public sealed partial class DataVoPreparedStatement
         out QueryResult? result)
     {
         result = null;
-        if (_engine.Changes.Enabled)
+        if (_engine.Changes.Enabled || _engine.TransactionManager.HasAnyActiveTransaction())
         {
             return false;
         }
@@ -1726,7 +1726,7 @@ public sealed partial class DataVoPreparedStatement
         out QueryResult? result)
     {
         result = null;
-        if (_engine.Changes.Enabled)
+        if (_engine.Changes.Enabled || _engine.TransactionManager.HasAnyActiveTransaction())
         {
             return false;
         }

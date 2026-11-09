@@ -465,7 +465,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             var newRow = newRows[i];
             RowKey oldRowId = oldRowIds[i];
             RowKey assignedRowId = assignedRowIds[i];
-            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId);
+            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId, oldRowsById.GetValueOrDefault(oldRowId));
 
             if (recorder is { IsEnabled: true } && oldRowsById.TryGetValue(oldRowId, out var oldRow))
             {
