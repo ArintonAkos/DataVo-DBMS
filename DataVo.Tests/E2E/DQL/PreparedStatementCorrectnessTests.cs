@@ -279,7 +279,8 @@ public class PreparedStatementCorrectnessTests : IDisposable
                 Assert.False(context.Execute("BEGIN", session)[^1].IsError);
                 context.Execute($"UPDATE Accounts SET Balance = {500 - amount} WHERE Id = 1", session);
                 context.Execute($"UPDATE Accounts SET Balance = {500 + amount} WHERE Id = 2", session);
-                Assert.False(context.Execute("COMMIT", session)[^1].IsError);
+                QueryResult commit = context.Execute("COMMIT", session)[^1];
+                Assert.False(commit.IsError, string.Join(" | ", commit.Messages));
             }
         });
 

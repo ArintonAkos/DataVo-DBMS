@@ -61,6 +61,10 @@ public sealed class LockManager
     private readonly int _lockAcquireTimeoutMs;
     private readonly Dictionary<int, HashSet<int>> _waitForGraph = [];
     private readonly Dictionary<int, string> _waitingScopes = [];
+    private readonly Dictionary<int, (object Entry, bool Write)> _waitTargets = [];
+
+    /// <summary>Called after a thread is recorded as waiting and before it blocks. Lets tests hold it at that point.</summary>
+    internal Action? WaitRegisteredForTesting { get; set; }
     private int _activeRowWriteLocks;
     private long _rowWriteLockEpoch;
 
@@ -157,7 +161,7 @@ public sealed class LockManager
 
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(rowKey, "row read", GetRowBlockingThreads(rowLock, threadId, write: false), threadId);
+            waitRegistration = RegisterWaitIfBlocked(rowKey, "row read", GetRowBlockingThreads(rowLock, threadId, write: false), threadId, rowLock, write: false);
 
             if (!rowLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
             {
@@ -201,7 +205,7 @@ public sealed class LockManager
 
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(rowKey, "row write", GetRowBlockingThreads(rowLock, threadId, write: true), threadId);
+            waitRegistration = RegisterWaitIfBlocked(rowKey, "row write", GetRowBlockingThreads(rowLock, threadId, write: true), threadId, rowLock, write: true);
 
             if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
             {
@@ -411,7 +415,7 @@ public sealed class LockManager
 
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(tableKey, write ? "table write" : "table read", GetTableBlockingThreads(tableLock, threadId, write), threadId);
+            waitRegistration = RegisterWaitIfBlocked(tableKey, write ? "table write" : "table read", GetTableBlockingThreads(tableLock, threadId, write), threadId, tableLock, write);
 
             if (write)
             {
@@ -688,7 +692,9 @@ public sealed class LockManager
         string lockKey,
         string lockScope,
         IReadOnlyCollection<int> blockingThreadIds,
-        int waitingThreadId)
+        int waitingThreadId,
+        object lockEntry,
+        bool write)
     {
         if (blockingThreadIds.Count == 0)
         {
@@ -714,8 +720,11 @@ public sealed class LockManager
             }
 
             _waitingScopes[waitingThreadId] = $"{lockScope} lock '{lockKey}'";
+            _waitTargets[waitingThreadId] = (lockEntry, write);
 
-            if (TryBuildWaitCycle(waitingThreadId, out List<int>? cycleThreadIds))
+            if (TryBuildWaitCycle(waitingThreadId, out _)
+                && DropReleasedWaitEdges()
+                && TryBuildWaitCycle(waitingThreadId, out List<int>? cycleThreadIds))
             {
                 string diagnostic = BuildDeadlockDiagnostic(lockScope, lockKey, waitingThreadId, edges, cycleThreadIds!);
                 RemoveWaitNode(waitingThreadId);
@@ -728,8 +737,39 @@ public sealed class LockManager
                     diagnostic);
             }
 
-            return new WaitRegistration(waitingThreadId, true);
+            if (edges.Count == 0)
+            {
+                RemoveWaitNode(waitingThreadId);
+                return WaitRegistration.None;
+            }
         }
+
+        WaitRegisteredForTesting?.Invoke();
+        return new WaitRegistration(waitingThreadId, true);
+    }
+
+    /// <summary>
+    /// Removes edges to threads that no longer own what the waiter wants. An edge is recorded when a wait
+    /// begins, so a waiter that has not been scheduled since its blocker released still points at that
+    /// blocker, which would otherwise look like a deadlock. Returns <see langword="true"/> for use in a
+    /// condition chain.
+    /// </summary>
+    private bool DropReleasedWaitEdges()
+    {
+        foreach (KeyValuePair<int, HashSet<int>> waiter in _waitForGraph)
+        {
+            if (_waitTargets.TryGetValue(waiter.Key, out (object Entry, bool Write) target))
+            {
+                waiter.Value.IntersectWith(target.Entry switch
+                {
+                    RowLockEntry row => GetRowBlockingThreads(row, waiter.Key, target.Write),
+                    TableLockEntry table => GetTableBlockingThreads(table, waiter.Key, target.Write),
+                    _ => [],
+                });
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -836,6 +876,7 @@ public sealed class LockManager
     {
         _waitForGraph.Remove(waitingThreadId);
         _waitingScopes.Remove(waitingThreadId);
+        _waitTargets.Remove(waitingThreadId);
     }
 
     private string BuildDeadlockDiagnostic(
