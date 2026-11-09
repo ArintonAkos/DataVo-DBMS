@@ -114,5 +114,7 @@ using (var connection = new DataVoConnection("StorageMode=InMemory;DataSource=Sm
     connection.Close();
 }
 
+DataVo.AotSmoke.GeneratedTableSmoke.Run();
+
 Console.WriteLine("ALL SMOKE CHECKS PASSED");
 return 0;
