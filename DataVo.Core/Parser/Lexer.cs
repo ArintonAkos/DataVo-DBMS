@@ -122,6 +122,8 @@ public class Token
 /// </example>
 public class Lexer
 {
+    private const char StatementSeparator = ';';
+
     private readonly string _input;
     private int _position;
 
@@ -139,6 +141,7 @@ public class Lexer
     /// Converts the SQL input into a token list terminated by an EOF token.
     /// </summary>
     /// <returns>The token stream for the current input.</returns>
+    /// <remarks>A semicolon is returned as a punctuation token; <see cref="Parser"/> splits statements on it.</remarks>
     public List<Token> Tokenize()
     {
         var tokens = new List<Token>();
@@ -147,8 +150,16 @@ public class Lexer
         {
             char current = _input[_position];
 
-            if (char.IsWhiteSpace(current) || current == ';')
+            if (char.IsWhiteSpace(current))
             {
+                _position++;
+                continue;
+            }
+
+            if (current == StatementSeparator)
+            {
+                var location = GetLineColumn(_position);
+                tokens.Add(new Token(TokenType.Punctuation, StatementSeparator.ToString(), _position, location.line, location.column));
                 _position++;
                 continue;
             }

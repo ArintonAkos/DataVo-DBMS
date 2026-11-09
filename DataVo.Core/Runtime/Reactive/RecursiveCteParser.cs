@@ -51,6 +51,9 @@ internal sealed record RecursiveCteShape(
 /// </summary>
 internal static class RecursiveCteParser
 {
+    private static List<SqlToken> TokenizeWithoutSeparators(string sql) =>
+        new SqlLexer(sql).Tokenize().FindAll(token => !(token.Type == SqlTokenType.Punctuation && token.Value == ";"));
+
     /// <summary>
     /// Cheap, allocation-light pre-check: returns <c>true</c> when the SQL begins with
     /// <c>WITH RECURSIVE</c>. Used to route to <see cref="Parse"/> before the engine's primary parser
@@ -62,7 +65,7 @@ internal static class RecursiveCteParser
         List<SqlToken> tokens;
         try
         {
-            tokens = new SqlLexer(sql).Tokenize();
+            tokens = TokenizeWithoutSeparators(sql);
         }
         catch
         {
@@ -90,7 +93,7 @@ internal static class RecursiveCteParser
     /// <exception cref="NotSupportedException">Thrown for any shape outside the supported linear closure form (missing/duplicate <c>UNION ALL</c>, <c>UNION</c>-distinct recursion, non-linear or mutual recursion, a non-equi recursive join, and so on).</exception>
     public static RecursiveCteShape Parse(string sql)
     {
-        List<SqlToken> tokens = new SqlLexer(sql).Tokenize();
+        List<SqlToken> tokens = TokenizeWithoutSeparators(sql);
 
         int i = 0;
         Expect(tokens, ref i, "WITH");

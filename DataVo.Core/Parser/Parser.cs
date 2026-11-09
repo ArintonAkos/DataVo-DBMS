@@ -92,6 +92,38 @@ public class Parser(List<Token> tokens)
     /// <returns>The parsed statements in input order.</returns>
     public List<SqlStatement> Parse()
     {
+        if (!tokens.Exists(IsStatementSeparator))
+        {
+            return ParseStatements();
+        }
+
+        // Each statement's clause parsers read up to end of input, so every statement gets its own input.
+        var statements = new List<SqlStatement>();
+        var statementTokens = new List<Token>();
+        foreach (Token token in tokens)
+        {
+            if (!IsStatementSeparator(token) && token.Type != TokenType.EOF)
+            {
+                statementTokens.Add(token);
+                continue;
+            }
+
+            if (statementTokens.Count > 0)
+            {
+                statementTokens.Add(new Token(TokenType.EOF, string.Empty, token.Position, token.Line, token.Column));
+                statements.AddRange(new Parser(statementTokens).ParseStatements());
+                statementTokens = [];
+            }
+        }
+
+        return statements;
+    }
+
+    private static bool IsStatementSeparator(Token token) =>
+        token.Type == TokenType.Punctuation && token.Value == ";";
+
+    private List<SqlStatement> ParseStatements()
+    {
         var statements = new List<SqlStatement>();
 
         while (!IsEof())
