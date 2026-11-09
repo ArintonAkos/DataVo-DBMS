@@ -3,7 +3,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 editor="/Applications/Unity/Hub/Editor/6000.5.4f1/Unity.app/Contents/MacOS/Unity"
-project="$root/tests/unity/DataVo.UnitySmoke"
+# DATAVO_UNITY_SMOKE_PROJECT points these checks at a prepared copy that installs the real package.
+project="${DATAVO_UNITY_SMOKE_PROJECT:-$root/tests/unity/DataVo.UnitySmoke}"
+uses_tracked_project=$([[ -z "${DATAVO_UNITY_SMOKE_PROJECT:-}" ]] && echo true || echo false)
 settings_file="$project/ProjectSettings/ProjectSettings.asset"
 output_root="$(mktemp -d /private/tmp/datavo-unity-il2cpp.XXXXXX)"
 app="$output_root/DataVoUnitySmoke.app"
@@ -60,8 +62,10 @@ on_exit() {
 trap on_exit EXIT
 
 bash "$root/scripts/check-unity-runtime-bcl.sh"
-bash "$root/scripts/prepare-unity-smoke-candidate.sh"
-bash "$root/scripts/check-unity-smoke-project.sh" --require-candidate
+if [[ "$uses_tracked_project" == true ]]; then
+  bash "$root/scripts/prepare-unity-smoke-candidate.sh"
+  bash "$root/scripts/check-unity-smoke-project.sh" --require-candidate
+fi
 
 set +e
 "$editor" \

@@ -102,7 +102,27 @@ internal static class PortableSmoke
         ExpectDurableRejection(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");
+        VerifyPreparedStatementsAndNameCase();
         return 0;
+    }
+
+    private static void VerifyPreparedStatementsAndNameCase()
+    {
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        context.Execute("CREATE DATABASE PreparedSmoke");
+        context.Execute("USE preparedsmoke");
+        context.Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Qty INT)");
+        context.Execute("INSERT INTO ITEMS (Id, Qty) VALUES (1, 10)");
+
+        DataVoPreparedStatement select = context.Prepare("SELECT Qty FROM items WHERE Id = @id");
+        Require(Equals(select.Execute(("id", 1)).Data.Single()["Qty"], 10), "Prepared SELECT returned the wrong row.");
+
+        QueryResult borrowed = select.ExecuteBorrowed(new DataVoQueryParameter("id", 1));
+        Require(!borrowed.IsError && borrowed.Data.Count == 1, "ExecuteBorrowed returned the wrong row.");
+
+        DataVoPreparedStatement update = context.Prepare("UPDATE iTeMs SET Qty = @qty WHERE Id = @id");
+        Require(!update.Execute(("qty", 11), ("id", 1)).IsError, "Prepared UPDATE failed.");
+        Require(Equals(select.Execute(("id", 1)).Data.Single()["Qty"], 11), "Prepared UPDATE did not reach the row.");
     }
 
     private static void VerifyPublicDurableEngineFences(string testRoot)
@@ -585,7 +605,7 @@ internal static class PortableSmoke
         ExecuteOk(db, "CREATE TABLE Levels (Id INT PRIMARY KEY, Level INT, Name VARCHAR(20))");
 
         var schema = new ReactiveRowSchema("Id", "Level", "Name");
-        IReadOnlyList<long> rowIds = db.InsertTypedBatch(
+        IReadOnlyList<RowKey> rowIds = db.InsertTypedBatch(
             "Levels",
             schema,
             [

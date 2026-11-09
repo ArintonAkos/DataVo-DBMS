@@ -3,7 +3,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 editor="/Applications/Unity/Hub/Editor/6000.5.4f1/Unity.app/Contents/MacOS/Unity"
-project="$root/tests/unity/DataVo.UnitySmoke"
+# DATAVO_UNITY_SMOKE_PROJECT points these checks at a prepared copy that installs the real package.
+project="${DATAVO_UNITY_SMOKE_PROJECT:-$root/tests/unity/DataVo.UnitySmoke}"
+uses_tracked_project=$([[ -z "${DATAVO_UNITY_SMOKE_PROJECT:-}" ]] && echo true || echo false)
 lock_file="$project/Packages/packages-lock.json"
 
 if [[ ! -x "$editor" ]]; then
@@ -22,7 +24,9 @@ results="$output_root/editmode-results.xml"
 log="$output_root/editor.log"
 
 bash "$root/scripts/check-unity-runtime-bcl.sh"
-bash "$root/scripts/prepare-unity-smoke-candidate.sh"
+if [[ "$uses_tracked_project" == true ]]; then
+  bash "$root/scripts/prepare-unity-smoke-candidate.sh"
+fi
 
 set +e
 "$editor" \
@@ -73,12 +77,14 @@ if (!Number.isInteger(passed) || passed < 1) {
 }
 NODE
 
-bash "$root/scripts/check-unity-smoke-project.sh" --require-candidate
+if [[ "$uses_tracked_project" == true ]]; then
+  bash "$root/scripts/check-unity-smoke-project.sh" --require-candidate
 
-lock_after="$(shasum -a 256 "$lock_file" | awk '{print $1}')"
-if [[ "$lock_before" != "$lock_after" ]]; then
-  echo "Unity EditMode run changed the tracked package lock: $lock_file" >&2
-  exit 1
+  lock_after="$(shasum -a 256 "$lock_file" | awk '{print $1}')"
+  if [[ "$lock_before" != "$lock_after" ]]; then
+    echo "Unity EditMode run changed the tracked package lock: $lock_file" >&2
+    exit 1
+  fi
 fi
 
 echo "Unity EditMode tests passed. Results: $results"
