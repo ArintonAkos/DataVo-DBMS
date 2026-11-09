@@ -237,6 +237,13 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
+        // One row is read atomically, so with no writer active it needs no lock. Several rows must stay
+        // locked: a transaction committing between two of the reads would otherwise be seen half applied.
+        if (rowIds is IReadOnlyCollection<RowKey> { Count: <= 1 } && !Locks.HasActiveRowWriteLocks)
+        {
+            return;
+        }
+
         List<RowKey> acquired = Locks.AcquireRowReadLocks(databaseName, tableName, rowIds);
         if (resources.RowReadLocksByTable.TryGetValue(tableName, out List<RowKey>? existing))
         {

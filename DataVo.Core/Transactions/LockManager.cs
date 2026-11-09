@@ -61,6 +61,19 @@ public sealed class LockManager
     private readonly int _lockAcquireTimeoutMs;
     private readonly Dictionary<int, HashSet<int>> _waitForGraph = [];
     private readonly Dictionary<int, string> _waitingScopes = [];
+    private int _activeRowWriteLocks;
+    private long _rowWriteLockEpoch;
+
+    /// <summary>
+    /// Gets a value indicating whether any row-level write lock is currently held or being acquired.
+    /// </summary>
+    internal bool HasActiveRowWriteLocks => Volatile.Read(ref _activeRowWriteLocks) > 0;
+
+    /// <summary>
+    /// Gets a counter that advances whenever a row write lock is requested. A multi-row reader that saw no
+    /// active write locks can compare this before and after its read to detect a writer that started meanwhile.
+    /// </summary>
+    internal long RowWriteLockEpoch => Volatile.Read(ref _rowWriteLockEpoch);
 
     /// <summary>
     /// Gets the process-wide singleton lock manager instance.
@@ -181,6 +194,8 @@ public sealed class LockManager
         }
 
         RowLockEntry rowLock = RetainRowLock(rowKey);
+        Interlocked.Increment(ref _activeRowWriteLocks);
+        Interlocked.Increment(ref _rowWriteLockEpoch);
         int threadId = Environment.CurrentManagedThreadId;
         WaitRegistration waitRegistration = WaitRegistration.None;
 
@@ -199,6 +214,7 @@ public sealed class LockManager
         }
         catch
         {
+            Interlocked.Decrement(ref _activeRowWriteLocks);
             ReleaseRowLock(rowKey, rowLock);
             throw;
         }
@@ -261,6 +277,7 @@ public sealed class LockManager
         UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
         rowLock.Lock.ExitWriteLock();
         ReleaseRowLock(rowKey, rowLock);
+        Interlocked.Decrement(ref _activeRowWriteLocks);
     }
 
     /// <summary>
