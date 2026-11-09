@@ -64,6 +64,7 @@ internal sealed class ChangeRecorder
     {
         _changes ??= [];
         _changes.Add(change);
+        _capture.PublishRecording(_databaseName, change);
     }
 
     /// <summary>
