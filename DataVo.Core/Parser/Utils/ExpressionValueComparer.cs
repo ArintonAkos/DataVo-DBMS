@@ -43,6 +43,11 @@ internal static class ExpressionValueComparer
             return leftGuid == rightGuid;
         }
 
+        if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
+        {
+            return leftInteger == rightInteger; // a double cannot tell large integers apart
+        }
+
         if (string.Equals(
             Convert.ToString(leftValue, CultureInfo.InvariantCulture),
             Convert.ToString(rightValue, CultureInfo.InvariantCulture),
@@ -91,6 +96,11 @@ internal static class ExpressionValueComparer
         if (TryAsGuidPair(leftValue, rightValue, out Guid leftGuid, out Guid rightGuid))
         {
             return leftGuid.CompareTo(rightGuid);
+        }
+
+        if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
+        {
+            return leftInteger.CompareTo(rightInteger);
         }
 
         if (TryConvertToDouble(leftValue, out double leftNumber) &&
@@ -178,6 +188,24 @@ internal static class ExpressionValueComparer
 
     private static string UnquoteSingleQuoted(string value)
         => value.Length >= 2 && value[0] == '\'' && value[^1] == '\'' ? value[1..^1] : value;
+
+    private static bool TryConvertToInt64(object value, out long number)
+    {
+        switch (value)
+        {
+            case int typed:
+                number = typed;
+                return true;
+            case long typed:
+                number = typed;
+                return true;
+            case string text:
+                return long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out number);
+            default:
+                number = 0;
+                return false;
+        }
+    }
 
     private static bool TryConvertToDouble(object value, out double number)
     {
