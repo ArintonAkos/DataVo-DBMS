@@ -24,7 +24,7 @@ manifest.dependencies["com.datavo.unity.mathematics"] = `file:${root}/integratio
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 NODE
 
-touch "$project/Packages/packages-lock.json"
+printf '{"dependencies":{}}\n' > "$project/Packages/packages-lock.json"
 export DATAVO_UNITY_SMOKE_PROJECT="$project"
 bash "$root/scripts/run-unity-editor-tests.sh"
 bash "$root/scripts/run-unity-macos-il2cpp-player-smoke.sh"
