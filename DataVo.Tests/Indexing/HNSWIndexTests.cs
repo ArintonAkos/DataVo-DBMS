@@ -281,6 +281,46 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
+    public void Persistence_RowsInsertedAfterLoad_AreFoundBySearch()
+    {
+        // Loading used to leave the per-node locks unset. Every reverse edge write needs its node's
+        // lock and was skipped without one, so a row inserted after loading had no inbound edges.
+        var random = new Random(17);
+        var vectors = new List<float[]>();
+        for (int i = 0; i < 400; i++)
+        {
+            vectors.Add([(float)random.NextDouble(), (float)random.NextDouble(), (float)random.NextDouble()]);
+        }
+
+        var index = new HNSWIndex { Metric = "euclidean" };
+        for (int i = 0; i < 200; i++)
+        {
+            index.Insert(i + 1, vectors[i]);
+        }
+
+        var persistence = new HNSWIndexPersistence();
+        string filePath = Path.Combine(_tempDir, "reload.vector.json");
+        persistence.SaveIndex(index, filePath);
+        var loaded = (HNSWIndex)persistence.LoadIndex(filePath);
+
+        for (int i = 200; i < 400; i++)
+        {
+            loaded.Insert(i + 1, vectors[i]);
+        }
+
+        var missing = new List<int>();
+        for (int i = 0; i < 400; i++)
+        {
+            if (loaded.SearchTopK(vectors[i], 1).Single() != i + 1)
+            {
+                missing.Add(i + 1);
+            }
+        }
+
+        Assert.True(missing.Count == 0, $"{missing.Count} rows could not be found: {string.Join(", ", missing.Take(10))}");
+    }
+
+    [Fact]
     public void Delete_RemovesNodeAndKeepsNearestNeighborQueriesStable()
     {
         var index = new HNSWIndex

@@ -844,6 +844,15 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         _levelOffsets = state.LevelOffsets ?? [];
         _nodeGraphStride = _levelStrides.Sum();
 
+        // Every edge write takes its node's lock and is skipped when the node has none, so without
+        // this an index loaded here dropped every reverse edge a later insert tried to add, and the
+        // rows inserted after loading could not be found by a search.
+        _nodeLocks = new object[Math.Max(_ordinalCapacity, _nextOrdinal)];
+        for (int i = 0; i < _nodeLocks.Length; i++)
+        {
+            _nodeLocks[i] = new object();
+        }
+
         // Geometry depends on dimension + stride; rebuild paged stores from the flat persisted arrays.
         ComputePageGeometry();
         RebuildVectorPagesFromFlat(state.VectorData ?? []);
