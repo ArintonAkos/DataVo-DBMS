@@ -21,6 +21,10 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _layoutGenerations = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, object> GlobalFileLocks = new();
 
+    // Each table's file path and lock, looked up once: a paged scan resolves them for every page, and building
+    // the path and its full form each time allocated. Dropping a table or database forgets its entries.
+    private readonly ConcurrentDictionary<(string Database, string Table), (string Path, object Lock)> _pagedTargets = new();
+
     // 8-byte file header: [4 bytes magic "DaVo"] + [4 bytes version].
     // This ensures the first row's byte offset is >= 8, never 0.
     // Row ID 0 is reserved as the B+Tree empty-slot sentinel.
@@ -299,8 +303,15 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
         ref TState state,
         PagedRowVisitor<TState> visit)
     {
-        string filePath = GetFilePath(databaseName, tableName);
-        lock (GetFileLock(filePath))
+        (string filePath, object fileLock) = _pagedTargets.GetOrAdd(
+            (databaseName, tableName),
+            static (key, engine) =>
+            {
+                string path = engine.GetFilePath(key.Database, key.Table);
+                return (path, engine.GetFileLock(path));
+            },
+            this);
+        lock (fileLock)
         {
             long generation = _layoutGenerations.GetOrAdd(filePath, 0);
             if (expectedGeneration is { } expected && expected != generation)
@@ -530,6 +541,7 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
     /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
+        _pagedTargets.TryRemove((databaseName, tableName), out _);
         _layoutGenerations.AddOrUpdate(GetFilePath(databaseName, tableName), 1, static (_, generation) => generation + 1);
         string filePath = GetFilePath(databaseName, tableName);
         lock (GetFileLock(filePath))
@@ -551,6 +563,13 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
     public void DropDatabase(string databaseName)
     {
         string dbPath = Path.Combine(_storageDirectory, databaseName);
+        foreach ((string Database, string Table) key in _pagedTargets.Keys)
+        {
+            if (string.Equals(key.Database, databaseName, StringComparison.Ordinal))
+            {
+                _pagedTargets.TryRemove(key, out _);
+            }
+        }
 
         string[] tableFiles = Directory.Exists(dbPath)
             ? Directory.GetFiles(dbPath, "*.dat", SearchOption.TopDirectoryOnly)

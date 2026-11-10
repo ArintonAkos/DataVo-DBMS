@@ -378,8 +378,10 @@ public sealed class RowRefStreamTests : IDisposable
         Assert.Equal(Checksum(Rows), checksum);
         if (mode == StorageMode.Disk)
         {
-            // The legacy disk engine allocates ~640 bytes per page to open a FileStream (~33 KB over 50,000 rows).
-            Assert.True(allocated < 40_000, $"Disk engine allocated {allocated} bytes across {Rows} rows.");
+            // The legacy disk engine opens a FileStream for each page (~160 bytes; ~8 KB over 50,000 rows). Its
+            // writers open the file with FileShare.None, so a handle kept open between pages would block them on
+            // Windows. Rows themselves cost nothing: the bound is per page, not per row.
+            Assert.True(allocated < 12_000, $"Disk engine allocated {allocated} bytes across {Rows} rows.");
         }
         else
         {
