@@ -174,11 +174,7 @@ internal sealed class LsmLatestRowStore
         List<KeyValuePair<RowKey, SparseVersion>>? sparse = null;
         if (_sparse.Count > 0)
         {
-            sparse = _sparse.Snapshot();
-            if (lower is not null || upper is not null)
-            {
-                sparse.RemoveAll(entry => !InRange(entry.Key, lower, upper));
-            }
+            sparse = SparseInRange(_sparse.Snapshot(), lower, upper);
 
             sparse.Sort(static (x, y) => x.Key.CompareTo(y.Key));
         }
@@ -252,6 +248,18 @@ internal sealed class LsmLatestRowStore
         }
 
         return false;
+    }
+
+    // Its own method: a lambda capturing the bounds in ForEachVersion would allocate its closure on every call,
+    // sparse keys or not.
+    private static List<KeyValuePair<RowKey, SparseVersion>> SparseInRange(List<KeyValuePair<RowKey, SparseVersion>> sparse, RowKey? lower, RowKey? upper)
+    {
+        if (lower is not null || upper is not null)
+        {
+            sparse.RemoveAll(entry => !InRange(entry.Key, lower, upper));
+        }
+
+        return sparse;
     }
 
     private static bool InRange(RowKey key, RowKey? lower, RowKey? upper) =>

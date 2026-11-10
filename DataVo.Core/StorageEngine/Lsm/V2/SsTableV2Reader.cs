@@ -208,6 +208,24 @@ internal sealed class SsTableV2Reader : IDisposable
     public SsTableV2Cursor OpenCursor() => new(this);
 
     /// <summary>The bytes of block <paramref name="block"/>, CRC-verified on first use.</summary>
+    /// <summary>
+    /// The verified bytes of a block as an address into the mapped file, when the file is mapped; otherwise
+    /// false, and <see cref="GetVerifiedBlock"/> returns a copy.
+    /// </summary>
+    internal unsafe bool TryGetVerifiedBlockAddress(int block, out IntPtr address, out int length)
+    {
+        SsTableV2BlockInfo info = GetBlockInfo(block);
+        if (!_source.TryGetRegionAddress(info.Offset, info.Length, out address))
+        {
+            length = 0;
+            return false;
+        }
+
+        length = info.Length;
+        VerifyOnce(block, new ReadOnlySpan<byte>((void*)address, length));
+        return true;
+    }
+
     internal ReadOnlyMemory<byte> GetVerifiedBlock(int block)
     {
         SsTableV2BlockInfo info = GetBlockInfo(block);
@@ -706,10 +724,14 @@ internal sealed class SsTableV2Reader : IDisposable
 }
 
 /// <summary>Sequential cursor over all entries of a row-keyed SSTable, block by block.</summary>
-internal sealed class SsTableV2Cursor
+internal sealed unsafe class SsTableV2Cursor
 {
-    private readonly SsTableV2Reader _reader;
+    private SsTableV2Reader _reader;
     private ReadOnlyMemory<byte> _block;
+
+    // A mapped block is read through its address: wrapping it in a Memory would allocate per block.
+    private IntPtr _blockAddress;
+    private int _blockLength;
     private int _blockIndex = -1;
     private int _entry;
     private int _entryCount;
@@ -723,6 +745,28 @@ internal sealed class SsTableV2Cursor
         _reader = reader;
     }
 
+    /// <summary>Points this cursor at the start of a file, so one cursor object serves many scans.</summary>
+    internal SsTableV2Cursor Reset(SsTableV2Reader reader)
+    {
+        _reader = reader;
+        _block = default;
+        _blockAddress = IntPtr.Zero;
+        _blockIndex = -1;
+        _entry = 0;
+        _entryCount = 0;
+        _compact = false;
+        _wide = false;
+        return this;
+    }
+
+    /// <summary>Drops the file this cursor read, so a pooled cursor keeps no reader or block alive.</summary>
+    internal void Release()
+    {
+        _reader = null!;
+        _block = default;
+        _blockAddress = IntPtr.Zero;
+    }
+
     public RowKey Key { get; private set; }
 
     public ulong Sequence { get; private set; }
@@ -733,7 +777,10 @@ internal sealed class SsTableV2Cursor
     private int _valueLength;
 
     /// <summary>The current entry's value; valid until the next <see cref="MoveNext"/>.</summary>
-    public ReadOnlySpan<byte> Value => _block.Span.Slice(_valueOffset, _valueLength);
+    public ReadOnlySpan<byte> Value => BlockSpan.Slice(_valueOffset, _valueLength);
+
+    private ReadOnlySpan<byte> BlockSpan =>
+        _blockAddress != IntPtr.Zero ? new ReadOnlySpan<byte>((void*)_blockAddress, _blockLength) : _block.Span;
 
     /// <summary>
     /// Moves to the first entry whose key is at or after <paramref name="key"/>; returns false when there
@@ -765,24 +812,32 @@ internal sealed class SsTableV2Cursor
                 return false;
             }
 
-            _block = _reader.GetVerifiedBlock(_blockIndex);
-            _entryCount = BinaryPrimitives.ReadInt32LittleEndian(_block.Span[4..]);
+            if (_reader.TryGetVerifiedBlockAddress(_blockIndex, out _blockAddress, out _blockLength))
+            {
+                _block = default;
+            }
+            else
+            {
+                _block = _reader.GetVerifiedBlock(_blockIndex);
+                _blockAddress = IntPtr.Zero;
+            }
+            _entryCount = BinaryPrimitives.ReadInt32LittleEndian(BlockSpan[4..]);
             _entry = 0;
-            _wide = SsTableWideRowBlock.IsWide(_block.Span);
-            _compact = !_wide && SsTableCompactRowBlock.IsCompact(_block.Span);
+            _wide = SsTableWideRowBlock.IsWide(BlockSpan);
+            _compact = !_wide && SsTableCompactRowBlock.IsCompact(BlockSpan);
             if (_wide)
             {
-                _wideEntries.Seek(_block.Span, 0);
+                _wideEntries.Seek(BlockSpan, 0);
             }
             else if (_compact)
             {
-                _compactEntries.Seek(_block.Span, 0);
+                _compactEntries.Seek(BlockSpan, 0);
             }
         }
 
         if (_wide)
         {
-            _wideEntries.MoveNext(_block.Span);
+            _wideEntries.MoveNext(BlockSpan);
             Key = _wideEntries.Key;
             Sequence = SsTableV2Format.SequenceOf(_wideEntries.Tag);
             Type = SsTableV2Format.TypeOf(_wideEntries.Tag);
@@ -794,7 +849,7 @@ internal sealed class SsTableV2Cursor
 
         if (_compact)
         {
-            _compactEntries.MoveNext(_block.Span);
+            _compactEntries.MoveNext(BlockSpan);
             Key = _compactEntries.RowId;
             Sequence = SsTableV2Format.SequenceOf(_compactEntries.Tag);
             Type = SsTableV2Format.TypeOf(_compactEntries.Tag);
@@ -804,7 +859,7 @@ internal sealed class SsTableV2Cursor
             return true;
         }
 
-        ReadOnlySpan<byte> entry = _block.Span.Slice(SsTableV2Format.BlockHeaderSize + (_entry * SsTableV2Format.EntrySize), SsTableV2Format.EntrySize);
+        ReadOnlySpan<byte> entry = BlockSpan.Slice(SsTableV2Format.BlockHeaderSize + (_entry * SsTableV2Format.EntrySize), SsTableV2Format.EntrySize);
         Key = BinaryPrimitives.ReadInt64LittleEndian(entry);
         ulong tag = BinaryPrimitives.ReadUInt64LittleEndian(entry[8..]);
         Sequence = SsTableV2Format.SequenceOf(tag);

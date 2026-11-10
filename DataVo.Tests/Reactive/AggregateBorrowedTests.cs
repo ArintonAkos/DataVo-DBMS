@@ -1,3 +1,4 @@
+using RowRef = DataVo.Core.Runtime.Reactive.RowRef;
 using System.Globalization;
 using DataVo.Core;
 using DataVo.Core.Parser.AST;

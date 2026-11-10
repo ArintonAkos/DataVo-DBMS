@@ -19,7 +19,7 @@ namespace DataVo.Core.StorageEngine.Serialization;
 /// The serializer is schema-aware. Column order, null handling, and primitive encodings are driven by
 /// catalog metadata rather than by the order of values in the supplied dictionary.
 /// </remarks>
-public static class RowSerializer
+public static partial class RowSerializer
 {
     /// <summary>
     /// Caches schema snapshots per engine/database/table combination.
@@ -494,9 +494,9 @@ public static class RowSerializer
     // Storage type categories, resolved without allocation. column.Type is stored in the catalog as the
     // DataTypes enum name (PascalCase, e.g. "Int"/"Varchar"), so a ToUpperInvariant() switch re-cased and
     // allocated a string per column, per row. OrdinalIgnoreCase comparison classifies in place — zero alloc.
-    private enum StorageColumnType { Int, BigInt, Float, Double, Bit, Date, DateTime, Guid, Vector, String }
+    internal enum StorageColumnType : byte { Int, BigInt, Float, Double, Bit, Date, DateTime, Guid, Vector, String }
 
-    private static StorageColumnType ClassifyColumnType(string type) =>
+    internal static StorageColumnType ClassifyColumnType(string type) =>
         string.Equals(type, "INT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Int :
         string.Equals(type, "BIGINT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.BigInt :
         string.Equals(type, "FLOAT", StringComparison.OrdinalIgnoreCase) ? StorageColumnType.Float :

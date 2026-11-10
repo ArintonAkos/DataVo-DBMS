@@ -178,28 +178,41 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     /// <param name="tableName">The table name.</param>
     /// <returns>All surviving row IDs and payloads.</returns>
     /// <inheritdoc />
-    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows)
+    PageScan IPagedRowScan.VisitPage<TState>(
+        string databaseName,
+        string tableName,
+        long? afterRowId,
+        long? expectedGeneration,
+        int maxRows,
+        ref TState state,
+        PagedRowVisitor<TState> visit)
     {
-        var rows = new List<(long RowId, byte[]? Raw, StoredRow? Typed)>(maxRows);
         if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
         {
-            return new RowPage(rows, true, 0);
+            return new PageScan(true, 0);
         }
 
         store.Lock.EnterReadLock();
         try
         {
+            if (expectedGeneration is { } generation && generation != store.LayoutGeneration)
+            {
+                throw PagedRowScanErrors.Rewritten(tableName);
+            }
+
             // Row ids are 1-based list positions, so the id of the last row is also the next index.
             int index = (int)(afterRowId ?? 0);
-            for (; index < store.Rows.Count && rows.Count < maxRows; index++)
+            int visited = 0;
+            for (; index < store.Rows.Count && visited < maxRows; index++)
             {
                 if (store.Rows[index] is { } row && (row.Raw is not null || row.Typed is not null))
                 {
-                    rows.Add((index + 1, row.Raw, row.Typed));
+                    visit(ref state, index + 1, row.Raw, row.Typed);
+                    visited++;
                 }
             }
 
-            return new RowPage(rows, index >= store.Rows.Count, store.LayoutGeneration);
+            return new PageScan(index >= store.Rows.Count, store.LayoutGeneration);
         }
         finally
         {

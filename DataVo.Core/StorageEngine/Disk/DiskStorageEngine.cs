@@ -290,41 +290,130 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
     /// <param name="tableName">The table name.</param>
     /// <returns>All surviving row IDs and payloads.</returns>
     /// <inheritdoc />
-    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows)
+    PageScan IPagedRowScan.VisitPage<TState>(
+        string databaseName,
+        string tableName,
+        long? afterRowId,
+        long? expectedGeneration,
+        int maxRows,
+        ref TState state,
+        PagedRowVisitor<TState> visit)
     {
         string filePath = GetFilePath(databaseName, tableName);
-        long generation = _layoutGenerations.GetOrAdd(filePath, 0);
-        var rows = new List<(long RowId, byte[]? Raw, StoredRow? Typed)>(maxRows);
-        if (!File.Exists(filePath))
-        {
-            return new RowPage(rows, true, generation);
-        }
-
         lock (GetFileLock(filePath))
         {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new BinaryReader(stream);
-            stream.Seek(afterRowId ?? Math.Min(FileHeaderSize, stream.Length), SeekOrigin.Begin);
-            if (afterRowId is not null)
+            long generation = _layoutGenerations.GetOrAdd(filePath, 0);
+            if (expectedGeneration is { } expected && expected != generation)
             {
-                stream.Seek(Math.Abs(reader.ReadInt32()), SeekOrigin.Current);
+                throw PagedRowScanErrors.Rewritten(tableName);
             }
 
-            while (rows.Count < maxRows && stream.Position < stream.Length)
+            if (!File.Exists(filePath))
             {
-                long rowId = stream.Position;
-                int length = reader.ReadInt32();
-                if (length < 0)
+                return new PageScan(true, generation);
+            }
+
+            // Rows are parsed out of one reused buffer, so a page costs no per-row arrays. The buffer is taken
+            // off the thread while in use, so a visitor that reads another table gets a buffer of its own.
+            byte[] buffer = t_pageBuffer ?? new byte[PageBufferSize];
+            t_pageBuffer = null;
+            byte[] kept = buffer;
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 1);
+                var window = new PageWindow(stream, buffer);
+                long fileLength = stream.Length;
+                long offset = Math.Min(FileHeaderSize, fileLength);
+                if (afterRowId is { } after)
                 {
-                    stream.Seek(-length, SeekOrigin.Current);
-                    continue;
+                    offset = after + sizeof(int) + Math.Abs(window.ReadInt32(after));
                 }
 
-                rows.Add((rowId, reader.ReadBytes(length), null));
+                int visited = 0;
+                while (visited < maxRows && offset + sizeof(int) <= fileLength)
+                {
+                    long rowId = offset;
+                    int length = window.ReadInt32(offset);
+                    offset += sizeof(int);
+                    if (length < 0)
+                    {
+                        offset += -length; // tombstone: the length is negated, the bytes remain
+                        continue;
+                    }
+
+                    visit(ref state, rowId, window.Read(offset, length), null);
+                    offset += length;
+                    visited++;
+                }
+
+                kept = window.Buffer;
+                return new PageScan(offset + sizeof(int) > fileLength, generation);
+            }
+            finally
+            {
+                // A buffer grown for an unusually wide row is not kept for the thread.
+                t_pageBuffer = kept.Length <= RetainedPageBuffer ? kept : null;
+            }
+        }
+    }
+
+    private const int PageBufferSize = 64 * 1024;
+
+    [ThreadStatic]
+    private static byte[]? t_pageBuffer;
+
+    private const int RetainedPageBuffer = 4 * 1024 * 1024;
+
+    /// <summary>A sliding window of a table file, refilled with one read whenever a row falls outside it.</summary>
+    private struct PageWindow(FileStream stream, byte[] buffer)
+    {
+        private byte[] _buffer = buffer;
+        private long _start;
+        private int _count;
+
+        public int ReadInt32(long offset) => BinaryPrimitives.ReadInt32LittleEndian(Read(offset, sizeof(int)));
+
+        public ReadOnlySpan<byte> Read(long offset, int length)
+        {
+            if (offset < _start || offset + length > _start + _count)
+            {
+                Fill(offset, length);
             }
 
-            return new RowPage(rows, stream.Position >= stream.Length, generation);
+            return new ReadOnlySpan<byte>(_buffer, (int)(offset - _start), length);
         }
+
+        private void Fill(long offset, int length)
+        {
+            if (length > _buffer.Length)
+            {
+                _buffer = new byte[Math.Max(length, _buffer.Length * 2)];
+            }
+
+            stream.Position = offset;
+            int count = 0;
+            int wanted = (int)Math.Min(_buffer.Length, stream.Length - offset);
+            while (count < wanted)
+            {
+                int read = stream.Read(_buffer, count, wanted - count);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                count += read;
+            }
+
+            if (count < length)
+            {
+                throw new EndOfStreamException("Unexpected end of disk table file.");
+            }
+
+            _start = offset;
+            _count = count;
+        }
+
+        public readonly byte[] Buffer => _buffer;
     }
 
     public IEnumerable<(long RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName)

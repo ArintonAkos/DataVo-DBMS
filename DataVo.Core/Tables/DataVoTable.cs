@@ -191,6 +191,27 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
+    /// <summary>
+    /// Streams the table's rows as <see cref="RowRef"/> values read straight from storage, without building
+    /// models. Once a thread has streamed this table, a full pass allocates nothing on the managed heap.
+    /// </summary>
+    /// <returns>A stream that reads the table each time it is enumerated.</returns>
+    /// <remarks>
+    /// Column positions follow the model's property order; <see cref="RowRefStream.GetOrdinal"/> looks one up by
+    /// name. A row is valid only inside the loop iteration that produced it. See <see cref="RowRefStream"/> for
+    /// how the pass interacts with writers and transactions.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// foreach (RowRef row in db.Table&lt;Player&gt;().StreamRef())
+    /// {
+    ///     int id = row.GetInt32(0);
+    ///     float health = row.GetFloat(1);
+    /// }
+    /// </code>
+    /// </example>
+    public RowRefStream StreamRef() => new(Context.Engine, Context.SessionId, _info.TableName);
+
     internal static InvalidOperationException MoreThanOne() => new("Sequence contains more than one matching element");
 
     internal T Read(Dictionary<string, object?> row) => _info.ReadRow(row);

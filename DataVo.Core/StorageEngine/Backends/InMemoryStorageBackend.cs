@@ -23,7 +23,8 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
         ((ITypedRowStorageEngine)_inner).ReadAllTypedRows(databaseName, tableName);
     public bool HasAnyRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).HasAnyRows(databaseName, tableName);
-    RowPage IPagedRowScan.ReadPage(string databaseName, string tableName, long? afterRowId, int maxRows) => ((IPagedRowScan)_inner).ReadPage(databaseName, tableName, afterRowId, maxRows);
+    PageScan IPagedRowScan.VisitPage<TState>(string databaseName, string tableName, long? afterRowId, long? expectedGeneration, int maxRows, ref TState state, PagedRowVisitor<TState> visit) =>
+        ((IPagedRowScan)_inner).VisitPage(databaseName, tableName, afterRowId, expectedGeneration, maxRows, ref state, visit);
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, (long)rowId);
     public long EstimateRowCount(string databaseName, string tableName) => _inner.EstimateRowCount(databaseName, tableName);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);

@@ -673,25 +673,38 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return false;
         }
 
-        RowPage page = paged.ReadPage(databaseName, tableName, cursor.After is { } after ? RowKeyConversions.ToRowId(after) : null, maxRows);
-        if (cursor.Generation is { } generation && generation != page.Generation)
-        {
-            throw new InvalidOperationException($"Table {tableName} was rewritten while it was being streamed.");
-        }
-
-        cursor.Generation = page.Generation;
-        foreach ((long rowId, byte[]? raw, StoredRow? typed) in page.Rows)
-        {
-            RowKey key = rowId;
-            cursor.After = key;
-            if (InRange(key, lower, upper))
+        var box = new PagedBox<TState>(state, visit, cursor, lower, upper);
+        long? after = cursor.After is { } last ? RowKeyConversions.ToRowId(last) : null;
+        PageScan scan = paged.VisitPage(
+            databaseName,
+            tableName,
+            after,
+            cursor.Generation,
+            maxRows,
+            ref box,
+            static (ref PagedBox<TState> b, long rowId, ReadOnlySpan<byte> raw, StoredRow? typed) =>
             {
-                visit(ref state, key, raw, typed);
-            }
-        }
+                RowKey key = rowId;
+                b.Cursor.After = key;
+                if (InRange(key, b.Lower, b.Upper))
+                {
+                    b.Visit(ref b.State, key, raw, typed);
+                }
+            });
 
-        cursor.Done = page.ReachedEnd;
+        state = box.State;
+        cursor.Generation = scan.Generation;
+        cursor.Done = scan.ReachedEnd;
         return true;
+    }
+
+    private struct PagedBox<TState>(TState state, RawRowVisitor<TState> visit, RowPageCursor cursor, RowKey? lower, RowKey? upper)
+    {
+        public TState State = state;
+        public readonly RawRowVisitor<TState> Visit = visit;
+        public readonly RowPageCursor Cursor = cursor;
+        public readonly RowKey? Lower = lower;
+        public readonly RowKey? Upper = upper;
     }
 
     private bool ScanLsmPage<TState>(string tableName, string databaseName, RowPageCursor cursor, RowKey? lower, RowKey? upper, int maxRows, ref TState state, RawRowVisitor<TState> visit)

@@ -58,13 +58,13 @@ public readonly struct TypedRow
         : _cells;
 
     /// <summary>Gets a borrowed row view over the owned cells.</summary>
-    public RowRef AsRowRef()
+    public Reactive.RowRef AsRowRef()
     {
         if (_cells is null)
         {
             throw new InvalidOperationException("TypedRow has not been initialized.");
         }
 
-        return new RowRef(Schema, _cells);
+        return new Reactive.RowRef(Schema, _cells);
     }
 }

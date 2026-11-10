@@ -61,6 +61,36 @@ db.Execute("USE App");
 
 `LsmStrictFsync = true` is the conservative durability setting. It waits for the LSM write-ahead log to reach stable storage before acknowledging writes. Use relaxed LSM only for caches, rebuildable data, or benchmark runs where recent-write loss is acceptable.
 
+## Zero-Copy Table Streaming (`StreamRef` and `RowRef`)
+
+For performance-critical loops (such as 60/120 FPS game simulation loops, real-time physics, or high-throughput batch pipelines), allocating C# heap objects per row creates GC pressure. DataVo provides `StreamRef()` on both `DataVoTable<T>` and `DataVoContext`:
+
+```csharp
+// Using a typed table
+foreach (RowRef row in db.Table<Player>().StreamRef())
+{
+    int id = row.GetInt32(0);
+    float health = row.GetFloat(1);
+    ReadOnlySpan<char> name = row.GetStringSpan(2);
+    // Zero bytes allocated on the managed heap!
+}
+
+// Or dynamically by table name
+RowRefStream stream = db.StreamRef("Players");
+int healthCol = stream.GetOrdinal("Health");
+foreach (RowRef row in stream)
+{
+    float health = row.GetFloat(healthCol);
+}
+```
+
+### Key Invariants of `RowRef`:
+- **Zero Allocations:** On LSM and InMemory storage engines, a full table pass allocates 0 bytes on the managed heap (`GC.GetAllocatedBytesForCurrentThread() == 0`).
+- **Direct Span Access:** Decodes primitive and string values directly in-place from storage memory spans (`ReadOnlySpan<byte>`).
+- **Typed Accessors:** `GetInt32`, `GetInt64`, `GetFloat`, `GetDouble`, `GetBoolean`, `GetGuid`, `GetStringSpan`, `GetStringUtf8`, `GetVector3`, `GetVectorBytes`, `IsNull`, and `ColumnCount`.
+- **Bounded Page Concurrency:** Reads rows in 1,024-row bounded pages, holding locks only during page block copies so concurrent writers and transactions are never stalled by reader loops.
+- **Lifetime Safety:** `RowRef` is a `ref struct` scoped strictly to each loop iteration. To retain data across iterations, copy the values out of the span.
+
 ## Using Entity Framework Core
 
 DataVo also includes an early Entity Framework Core bridge. In v0.1 Alpha, this is not a full standalone EF provider. It attaches DataVo behavior to an EF context while a host EF provider supplies EF's normal infrastructure services.

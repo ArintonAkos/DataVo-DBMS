@@ -276,6 +276,39 @@ public sealed class DataVoContext : IDisposable
     public DataVoTable<T> Table<T>() => DataVoTableInfo<T>.Registered.For(this);
 
     /// <summary>
+    /// Streams a table of the current database as <see cref="RowRef"/> values read straight from storage. Once a
+    /// thread has streamed this table, a full pass allocates nothing on the managed heap.
+    /// </summary>
+    /// <param name="tableName">The table to read.</param>
+    /// <returns>A stream that reads the table each time it is enumerated.</returns>
+    /// <exception cref="ArgumentException"><paramref name="tableName"/> is null or empty.</exception>
+    /// <remarks>
+    /// Column positions follow the table's column order; <see cref="RowRefStream.GetOrdinal"/> looks one up by name.
+    /// The table and database are checked when the stream is enumerated. See <see cref="RowRefStream"/> for how a
+    /// pass interacts with writers and transactions.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// foreach (RowRef row in context.StreamRef("Players"))
+    /// {
+    ///     if (!row.IsNull(2))
+    ///     {
+    ///         Process(row.GetInt32(0), row.GetStringSpan(2));
+    ///     }
+    /// }
+    /// </code>
+    /// </example>
+    public RowRefStream StreamRef(string tableName)
+    {
+        if (string.IsNullOrEmpty(tableName))
+        {
+            throw new ArgumentException("A table name is required.", nameof(tableName));
+        }
+
+        return new RowRefStream(Engine, SessionId, tableName);
+    }
+
+    /// <summary>
     /// Pre-parses and compiles a parameterized SQL statement for repeated execution under the current <see cref="SessionId"/>.
     /// </summary>
     /// <param name="sql">The SQL statement text, which may contain <c>@param</c> placeholders.</param>

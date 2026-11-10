@@ -36,6 +36,16 @@ internal abstract class SsTableBlockSource : IDisposable
     /// <summary>A region that stays readable until the source is disposed.</summary>
     public abstract ReadOnlyMemory<byte> GetRegion(long offset, int length);
 
+    /// <summary>
+    /// The address of [offset, offset + length) when the source is a memory mapping, so a reader can take a span
+    /// without wrapping the region in an object. Valid while the source is open.
+    /// </summary>
+    public virtual bool TryGetRegionAddress(long offset, int length, out IntPtr address)
+    {
+        address = IntPtr.Zero;
+        return false;
+    }
+
     /// <summary>Invokes <paramref name="func"/> with the bytes of [offset, offset + length).</summary>
     public abstract TResult Read<TState, TResult>(long offset, int length, TState state, SpanFunc<TState, TResult> func);
 
@@ -146,6 +156,13 @@ internal sealed unsafe class MappedBlockSource : SsTableBlockSource
     {
         ThrowIfOutOfRange(offset, length, _length);
         return new UnmanagedRegion(_base + offset, length).Memory;
+    }
+
+    public override bool TryGetRegionAddress(long offset, int length, out IntPtr address)
+    {
+        ThrowIfOutOfRange(offset, length, _length);
+        address = (IntPtr)(_base + offset);
+        return true;
     }
 
     public override TResult Read<TState, TResult>(long offset, int length, TState state, SpanFunc<TState, TResult> func)
