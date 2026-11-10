@@ -1,3 +1,4 @@
+using System.Numerics;
 using DataVo.Core;
 using DataVo.Core.Annotations;
 using DataVo.Core.StorageEngine.Config;
@@ -12,6 +13,14 @@ public sealed class InventoryItem
     [Indexed] public int Slot { get; set; }
 
     public string? Name { get; set; }
+}
+
+[DataVoTable("probes")]
+public sealed class Probe
+{
+    [PrimaryKey] public int Id { get; set; }
+
+    [SpatialIndex] public Vector3 Position { get; set; }
 }
 
 /// <summary>Proves generated table access runs in a native binary, with no reflection or runtime code generation.</summary>
@@ -49,6 +58,20 @@ internal static class GeneratedTableSmoke
         Require(inSlot.IsCompiled, "The query was not compiled at build time.");
         Require(inSlot.Count() == 3, "An intercepted conjunction returned the wrong rows.");
         Require(items.Where(item => item.Name == null).Count() == 10, "A null comparison returned the wrong rows.");
+
+        // Spatial queries over a Vector3 column, with the HNSW index and with the exact scan.
+        second.EnsureProbeTable();
+        for (int cell = 0; cell < 64; cell++)
+        {
+            second.Insert(new Probe { Id = cell + 1, Position = new Vector3(cell % 4, cell / 4 % 4, cell / 16) }); // a 4x4x4 grid
+        }
+
+        DataVoTable<Probe> probes = second.Table<Probe>();
+        Require(second.GetProbeById(7)!.Position == new Vector3(2, 1, 0), "A Vector3 column did not round-trip.");
+        Require(probes.WithinRadius(new Vector3(0, 0, 0), 1f).Count() == 4, "WithinRadius returned the wrong rows.");
+        Require(probes.WithinBoundingBox(Vector3.Zero, new Vector3(1, 1, 1)).Count() == 8, "WithinBoundingBox returned the wrong rows.");
+        Require(probes.NearestNeighbors(new Vector3(3, 3, 3), 1)[0].Position == new Vector3(3, 3, 3), "The HNSW nearest neighbor was wrong.");
+        Require(probes.NearestNeighbors(new Vector3(3, 3, 3), 1, exact: true)[0].Position == new Vector3(3, 3, 3), "The exact nearest neighbor was wrong.");
     }
 
     private static void Require(bool condition, string message)

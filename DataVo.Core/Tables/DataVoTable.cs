@@ -29,7 +29,7 @@ namespace DataVo.Core;
 /// }
 /// </code>
 /// </example>
-public sealed class DataVoTable<T> : IEnumerable<T>
+public sealed partial class DataVoTable<T> : IEnumerable<T>
 {
     /// <summary>Adapts a predicate without state to the stateful shape. Used by generated code.</summary>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
