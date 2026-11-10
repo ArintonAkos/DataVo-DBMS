@@ -803,6 +803,11 @@ public class CreateIndexStatement : SqlStatement
     /// Gets or sets an optional index method name.
     /// </summary>
     public IdentifierNode? UsingMethod { get; set; }
+
+    /// <summary>
+    /// Gets the options given in <c>WITH (name = value, ...)</c>, keyed case-insensitively.
+    /// </summary>
+    public Dictionary<string, string> Options { get; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>

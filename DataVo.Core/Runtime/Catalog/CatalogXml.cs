@@ -90,6 +90,11 @@ internal static class CatalogXml
             element.SetAttributeValue("IndexKind", indexFile.IndexKind);
         }
 
+        if (indexFile.Metric is not null)
+        {
+            element.SetAttributeValue("Metric", indexFile.Metric);
+        }
+
         element.Add(new XElement("IndexAttributes",
             (indexFile.AttributeNames ?? []).Select(name => new XElement("IAttribute", name))));
         return element;
@@ -113,6 +118,7 @@ internal static class CatalogXml
     {
         IndexFileName = element.Attribute("IndexName")!.Value,
         IndexKind = element.Attribute("IndexKind")?.Value ?? "BTREE",
+        Metric = IndexFile.NormalizeMetric(element.Attribute("Metric")?.Value),
         AttributeNames = element.Element("IndexAttributes")?.Elements("IAttribute")
             .Select(item => item.Value).ToList() ?? [],
     };

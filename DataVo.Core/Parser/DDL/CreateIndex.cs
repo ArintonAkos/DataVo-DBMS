@@ -58,6 +58,10 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         try
         {
             string databaseName = GetDatabaseName(session);
+            if (_model.Metric is not null && !Indexes.SupportsVectorIndexType(_model.IndexKind))
+            {
+                throw new BindingException($"Index option metric applies only to vector indexes; {_model.IndexKind} has no distance metric.");
+            }
 
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
@@ -90,7 +94,13 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                     }
                 }
 
-                Indexes.CreateVectorIndex(vectors, _model.IndexName, _model.TableName, databaseName, indexType: _model.IndexKind);
+                Indexes.CreateVectorIndex(
+                    vectors,
+                    _model.IndexName,
+                    _model.TableName,
+                    databaseName,
+                    metric: _model.Metric ?? Models.Catalog.IndexFile.CosineMetric,
+                    indexType: _model.IndexKind);
             }
             else
             {

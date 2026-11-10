@@ -33,17 +33,38 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
     /// </summary>
     public string IndexKind { get; set; } = indexKind;
 
+    /// <summary>
+    /// Gets or sets the distance metric of a vector index (<c>cosine</c> or <c>euclidean</c>), or
+    /// <see langword="null"/> for the default, cosine.
+    /// </summary>
+    public string? Metric { get; set; }
 
     /// <summary>
     /// Builds a model from CREATE INDEX AST.
     /// </summary>
     /// <param name="ast">The parsed CREATE INDEX statement.</param>
     /// <returns>The normalized create-index model.</returns>
-    public static CreateIndexModel FromAst(CreateIndexStatement ast) => new(
-        ast.IndexName.Name,
-        ast.TableName.Name,
-        ast.ColumnNames.Select(c => c.Name).ToList(),
-        ast.UsingMethod?.Name.ToUpperInvariant() ?? "BTREE");
+    public static CreateIndexModel FromAst(CreateIndexStatement ast)
+    {
+        var model = new CreateIndexModel(
+            ast.IndexName.Name,
+            ast.TableName.Name,
+            ast.ColumnNames.Select(c => c.Name).ToList(),
+            ast.UsingMethod?.Name.ToUpperInvariant() ?? "BTREE");
+
+        foreach ((string name, string value) in ast.Options)
+        {
+            if (!name.Equals("metric", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exceptions.ParserException($"Unknown index option '{name}'. The supported option is metric.");
+            }
+
+            model.Metric = IndexFile.NormalizeMetric(value)
+                ?? throw new Exceptions.ParserException($"Unknown vector metric '{value}'. Use cosine, euclidean or l2.");
+        }
+
+        return model;
+    }
 
     /// <summary>
     /// Converts the model into catalog index metadata.
@@ -55,5 +76,6 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
             IndexFileName = IndexName,
             AttributeNames = Attributes,
             IndexKind = IndexKind,
+            Metric = Metric,
         };
 }

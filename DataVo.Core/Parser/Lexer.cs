@@ -424,7 +424,9 @@ public class Lexer
         return c == SqlPunctuation.OpenParen
             || c == SqlPunctuation.CloseParen
             || c == SqlPunctuation.Comma
-            || c == SqlPunctuation.Star;
+            || c == SqlPunctuation.Star
+            || c == '['
+            || c == ']';
     }
 
     /// <summary>

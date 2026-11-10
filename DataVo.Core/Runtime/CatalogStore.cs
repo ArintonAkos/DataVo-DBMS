@@ -437,6 +437,7 @@ internal sealed class CatalogStore
                     IndexFileName = index.IndexFileName,
                     AttributeNames = [.. index.AttributeNames],
                     IndexKind = index.IndexKind,
+                    Metric = index.Metric,
                 });
             }
 

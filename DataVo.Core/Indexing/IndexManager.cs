@@ -2902,7 +2902,7 @@ public partial class IndexManager : IDisposable
                 vectors.Add((row.Key, cell.AsVector()));
             }
 
-            CreateVectorIndex(vectors, indexName, tableName, databaseName, indexType: catalogIndex.IndexKind);
+            CreateVectorIndex(vectors, indexName, tableName, databaseName, metric: catalogIndex.EffectiveMetric, indexType: catalogIndex.IndexKind);
 
             var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             if (_cache.TryGetValue(cacheKey, out IIndexBase? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)

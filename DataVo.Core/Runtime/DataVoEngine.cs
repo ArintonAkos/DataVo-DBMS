@@ -522,7 +522,7 @@ public sealed partial class DataVoEngine : IDisposable
             indexName,
             tableName,
             databaseName,
-            metric: "cosine",
+            metric: index.EffectiveMetric,
             indexType: index.IndexKind);
     }
 

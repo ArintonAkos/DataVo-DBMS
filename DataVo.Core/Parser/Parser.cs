@@ -473,6 +473,11 @@ public class Parser(List<Token> tokens)
                 stmt.UsingMethod = new IdentifierNode(usingMethodToken.Value);
             }
 
+            if (MatchKeywordOrIdentifierValue("WITH"))
+            {
+                ParseIndexOptions(stmt);
+            }
+
             return stmt;
         }
         else if (MatchKeywordOrIdentifierValue(SqlKeywords.USER))
@@ -2455,6 +2460,47 @@ public class Parser(List<Token> tokens)
             : new ColumnRefNode { TableOrAlias = null, Column = token.Value };
     }
 
+    /// <summary>Parses <c>WITH (name = value, ...)</c> after CREATE INDEX.</summary>
+    private void ParseIndexOptions(CreateIndexStatement stmt)
+    {
+        if (!Match(TokenType.Punctuation, SqlPunctuation.OpenParenToken))
+        {
+            throw new ParserException($"Parser Error: Expected '(' after WITH but found {Current}.");
+        }
+
+        do
+        {
+            string name = ConsumeIdentifierOrKeyword("index option name").Value;
+            if (!(Current.Type == TokenType.Operator && Current.Value == "="))
+            {
+                throw new ParserException($"Parser Error: Expected '=' after index option {name} but found {Current}.");
+            }
+
+            Advance();
+            Token value = Advance();
+            if (value.Type is not (TokenType.StringLiteral or TokenType.Identifier or TokenType.Keyword or TokenType.NumberLiteral))
+            {
+                throw new ParserException($"Parser Error: Expected a value for index option {name} but found {value}.");
+            }
+
+            string text = value.Type == TokenType.StringLiteral && value.Value.Length >= 2 && value.Value[0] is '\'' or '"'
+                ? value.Value[1..^1]
+                : value.Value;
+            if (!stmt.Options.TryAdd(name, text))
+            {
+                throw new ParserException($"Parser Error: Index option {name} is given more than once.");
+            }
+        }
+        while (Match(TokenType.Punctuation, SqlPunctuation.CommaToken));
+
+        if (!(Current.Type == TokenType.Punctuation && Current.Value == SqlPunctuation.CloseParenToken))
+        {
+            throw new ParserException($"Parser Error: Expected ')' after index options but found {Current}.");
+        }
+
+        Advance();
+    }
+
     private string ParseColumnTypeName()
     {
         string typeStr = Advance().Value;
@@ -2462,6 +2508,35 @@ public class Parser(List<Token> tokens)
             && string.Equals(Current.Value, "PRECISION", StringComparison.OrdinalIgnoreCase))
         {
             Advance();
+        }
+
+        // VEC2, VEC3 and VEC4 name fixed-size coordinate vectors.
+        if (typeStr.Length == 4
+            && typeStr.StartsWith("VEC", StringComparison.OrdinalIgnoreCase)
+            && typeStr[3] is >= '2' and <= '4')
+        {
+            return $"VECTOR({typeStr[3]})";
+        }
+
+        // FLOAT[n] / REAL[n] is a fixed-size array of floats, which DataVo stores as VECTOR(n).
+        if ((typeStr.Equals("FLOAT", StringComparison.OrdinalIgnoreCase) || typeStr.Equals("REAL", StringComparison.OrdinalIgnoreCase))
+            && Current.Type == TokenType.Punctuation
+            && Current.Value == "[")
+        {
+            Advance();
+            Token size = Consume(TokenType.NumberLiteral, "an array length after '['");
+            if (!int.TryParse(size.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int length) || length <= 0)
+            {
+                throw new ParserException($"Parser Error: {typeStr}[{size.Value}] needs a positive whole-number length.");
+            }
+
+            if (!(Current.Type == TokenType.Punctuation && Current.Value == "]"))
+            {
+                throw new ParserException($"Parser Error: Expected ']' after {typeStr}[{size.Value} but found {Current}.");
+            }
+
+            Advance();
+            return $"VECTOR({length})";
         }
 
         // Checked here so that an unsupported type such as DECIMAL(10,2) is reported by name.
