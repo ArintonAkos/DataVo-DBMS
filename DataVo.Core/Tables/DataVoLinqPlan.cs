@@ -42,6 +42,11 @@ public abstract class DataVoLinqPlan<T, TState>
     /// <returns>The statement's result.</returns>
     protected abstract QueryResult Run(DataVoPreparedStatement statement, TState state, bool borrowed);
 
+    /// <summary>Binds the state to a new parameter array, for a streamed scan.</summary>
+    /// <param name="state">The value passed to the query.</param>
+    /// <returns>The statement's parameters, in order.</returns>
+    protected abstract DataVoQueryParameter[] Parameters(TState state);
+
     /// <summary>Returns the first matching row, or the default value when none matches.</summary>
     /// <param name="table">The table to read.</param>
     /// <param name="state">The value passed to the query.</param>
@@ -88,9 +93,31 @@ public abstract class DataVoLinqPlan<T, TState>
     public DataVoQuery<T, TState> Where(DataVoTable<T> table, TState state, Func<T, TState, bool> predicate) =>
         new(table, state, predicate, this);
 
-    /// <summary>Reads the matching rows, or returns null when the state cannot be bound and the caller must scan.</summary>
-    internal List<Dictionary<string, object?>>? Rows(DataVoTable<T> table, TState state, bool firstOnly) =>
-        CanBind(state) ? Execute(table, state, firstOnly && !_unique ? First : All, borrowed: false).Data : null;
+    /// <summary>Whether at most one row can match, so a point lookup answers an enumeration.</summary>
+    internal bool IsUnique => _unique;
+
+    internal bool Binds(TState state) => CanBind(state);
+
+    /// <summary>Reads the one row a unique plan can match.</summary>
+    internal bool TryFirst(DataVoTable<T> table, TState state, bool borrowed, out T item)
+    {
+        QueryResult result = Execute(table, state, _unique ? All : First, borrowed);
+        if (result.Data.Count == 0)
+        {
+            item = default!;
+            return false;
+        }
+
+        item = table.Read(result.Data[0]);
+        return true;
+    }
+
+    /// <summary>Gets whether any row matches, reading at most one.</summary>
+    internal bool Any(DataVoTable<T> table, TState state) =>
+        Execute(table, state, _unique ? All : First, borrowed: true).Data.Count > 0;
+
+    /// <summary>Opens a paged scan of the matching rows.</summary>
+    internal IEnumerable<DataVoRow> Stream(DataVoTable<T> table, TState state) => table.Stream(_where, Parameters(state));
 
     private QueryResult Execute(DataVoTable<T> table, TState state, int kind, bool borrowed)
     {

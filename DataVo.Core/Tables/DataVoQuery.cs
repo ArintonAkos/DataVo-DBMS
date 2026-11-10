@@ -4,7 +4,8 @@ namespace DataVo.Core;
 
 /// <summary>
 /// The rows of a <see cref="DataVoTable{T}"/> that match a predicate. Nothing is read until the query is
-/// enumerated or one of its methods is called, and it reads again each time.
+/// enumerated or one of its methods is called, and it reads again each time. Enumeration streams: rows are read a
+/// page at a time, never all at once.
 /// </summary>
 /// <typeparam name="T">The model type.</typeparam>
 /// <typeparam name="TState">The type of the value the predicate receives.</typeparam>
@@ -53,22 +54,21 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns><see langword="true"/> when at least one row matches.</returns>
     public bool Any()
     {
-        Enumerator rows = Open(firstOnly: true);
+        if (_plan is not null && _plan.Binds(_state))
+        {
+            return _plan.Any(Table, _state);
+        }
+
+        using Enumerator rows = GetEnumerator();
         return rows.MoveNext();
     }
 
-    /// <summary>Counts the matching rows.</summary>
+    /// <summary>Counts the matching rows without keeping them.</summary>
     /// <returns>The number of matching rows.</returns>
     public int Count()
     {
-        int count = 0;
-        Enumerator rows = Open(firstOnly: false);
-        while (rows.MoveNext())
-        {
-            count++;
-        }
-
-        return count;
+        using Enumerator rows = GetEnumerator();
+        return rows.CountRemaining();
     }
 
     /// <summary>Reads the matching rows into a list.</summary>
@@ -76,7 +76,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     public List<T> ToList()
     {
         var items = new List<T>();
-        Enumerator rows = Open(firstOnly: false);
+        using Enumerator rows = GetEnumerator();
         while (rows.MoveNext())
         {
             items.Add(rows.Current);
@@ -85,44 +85,70 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
         return items;
     }
 
-    /// <summary>Runs the query and enumerates the matching rows, building each one as it is reached.</summary>
+    /// <summary>
+    /// Runs the query and enumerates the matching rows. Rows are read a page at a time and each is built as it
+    /// is reached, so memory stays flat however many rows match.
+    /// </summary>
     /// <returns>An enumerator over the matching rows.</returns>
-    public Enumerator GetEnumerator() => Open(firstOnly: false);
+    /// <remarks>
+    /// No lock is held between pages, so changes committed during enumeration may or may not appear. A query that
+    /// pins the primary key reads its one row directly. Inside a transaction, for an equality on an indexed column,
+    /// and for conditions the paged scan cannot apply (<c>||</c>, a null test, or <c>!=</c> on a nullable column),
+    /// the matching rows are read first and then enumerated.
+    /// </remarks>
+    public Enumerator GetEnumerator()
+    {
+        DataVoTable<T> table = Table;
+        if (_plan is null || !_plan.Binds(_state))
+        {
+            // Rows from an unfiltered scan still need the predicate.
+            return new Enumerator(table, table.Scan().GetEnumerator(), _state, _predicate);
+        }
+
+        if (_plan.IsUnique)
+        {
+            return _plan.TryFirst(table, _state, borrowed: false, out T item) ? new Enumerator(item) : default;
+        }
+
+        return new Enumerator(table, _plan.Stream(table, _state).GetEnumerator(), _state, null);
+    }
 
     IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    private Enumerator Open(bool firstOnly)
-    {
-        if (_table is null)
-        {
-            throw new InvalidOperationException("This query was not created by a DataVoTable.");
-        }
-
-        // Rows a plan returns already match; rows from a scan still need the predicate.
-        return _plan?.Rows(_table, _state, firstOnly) is { } planned
-            ? new Enumerator(_table, planned, _state, null)
-            : new Enumerator(_table, _table.ScanRows(), _state, _predicate);
-    }
+    private DataVoTable<T> Table => _table ?? throw new InvalidOperationException("This query was not created by a DataVoTable.");
 
     /// <summary>Enumerates a query's rows.</summary>
     public struct Enumerator : IEnumerator<T>
     {
-        private readonly DataVoTable<T> _table;
-        private readonly List<Dictionary<string, object?>> _rows;
+        private readonly DataVoTable<T>? _table;
+        private readonly IEnumerator<DataVoRow>? _rows;
         private readonly TState _state;
         private readonly Func<T, TState, bool>? _filter;
-        private int _index;
+        private bool _pendingSingle;
+        private T _single;
         private T _current;
 
-        internal Enumerator(DataVoTable<T> table, List<Dictionary<string, object?>> rows, TState state, Func<T, TState, bool>? filter)
+        internal Enumerator(DataVoTable<T> table, IEnumerator<DataVoRow> rows, TState state, Func<T, TState, bool>? filter)
         {
             _table = table;
             _rows = rows;
             _state = state;
             _filter = filter;
-            _index = 0;
+            _pendingSingle = false;
+            _single = default!;
+            _current = default!;
+        }
+
+        internal Enumerator(T single)
+        {
+            _table = null;
+            _rows = null;
+            _state = default!;
+            _filter = null;
+            _pendingSingle = true;
+            _single = single;
             _current = default!;
         }
 
@@ -135,9 +161,17 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
         /// <returns><see langword="true"/> when there is another row.</returns>
         public bool MoveNext()
         {
-            while (_index < _rows.Count)
+            if (_pendingSingle)
             {
-                T item = _table.Read(_rows[_index++]);
+                _pendingSingle = false;
+                _current = _single;
+                _single = default!;
+                return true;
+            }
+
+            while (_rows is not null && _rows.MoveNext())
+            {
+                T item = _table!.Read(_rows.Current);
                 if (_filter is null || _filter(item, _state))
                 {
                     _current = item;
@@ -149,16 +183,33 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
             return false;
         }
 
-        /// <summary>Returns to before the first row.</summary>
-        public void Reset()
-        {
-            _index = 0;
-            _current = default!;
-        }
+        /// <summary>Not supported; enumerate the query again instead.</summary>
+        /// <exception cref="NotSupportedException">Always.</exception>
+        public readonly void Reset() => throw new NotSupportedException();
 
-        /// <summary>Releases nothing; the rows are already in memory.</summary>
-        public readonly void Dispose()
+        /// <summary>Ends the scan.</summary>
+        public readonly void Dispose() => _rows?.Dispose();
+
+        /// <summary>Counts the rows left, building a model only when the predicate has to see it.</summary>
+        internal int CountRemaining()
         {
+            int count = 0;
+            if (_filter is not null || _rows is null)
+            {
+                while (MoveNext())
+                {
+                    count++;
+                }
+
+                return count;
+            }
+
+            while (_rows.MoveNext())
+            {
+                count++;
+            }
+
+            return count;
         }
     }
 }

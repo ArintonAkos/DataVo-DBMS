@@ -19,12 +19,18 @@ public sealed class DataVoTableInfo<T>
     /// <summary>Describes a model's table.</summary>
     /// <param name="tableName">The table the model is stored in.</param>
     /// <param name="columnList">The model's columns as a comma-separated SELECT list.</param>
-    /// <param name="readRow">Builds a model from one result row.</param>
-    public DataVoTableInfo(string tableName, string columnList, Func<Dictionary<string, object?>, T> readRow)
+    /// <param name="readRow">Builds a model from one row of a statement's result.</param>
+    /// <param name="readStreamedRow">Builds a model from one row of a streamed scan.</param>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow)
     {
         TableName = tableName ?? throw new ArgumentNullException(nameof(tableName));
         ColumnList = columnList ?? throw new ArgumentNullException(nameof(columnList));
         ReadRow = readRow ?? throw new ArgumentNullException(nameof(readRow));
+        ReadStreamedRow = readStreamedRow ?? throw new ArgumentNullException(nameof(readStreamedRow));
     }
 
     /// <summary>Gets the table the model is stored in.</summary>
@@ -33,6 +39,8 @@ public sealed class DataVoTableInfo<T>
     internal string ColumnList { get; }
 
     internal Func<Dictionary<string, object?>, T> ReadRow { get; }
+
+    internal Func<DataVoRow, T> ReadStreamedRow { get; }
 
     /// <summary>Gets the model's description, which its generated code registered.</summary>
     internal static DataVoTableInfo<T> Registered => s_registered ?? throw new InvalidOperationException(

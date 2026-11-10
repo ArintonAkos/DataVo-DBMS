@@ -97,15 +97,23 @@ internal static class DataVoTableEmitter
             .Where(static column => column.IsSettable && !column.IsConstructorParameter)
             .Select(static column => $"{column.PropertyName} = {ReadExpression(column)}")];
 
-        code.AppendLine("        private static readonly global::System.Func<global::System.Collections.Generic.Dictionary<string, object?>, " + model.FullTypeName + "> ReadRow = static row =>");
-        code.Append("            new ").Append(model.FullTypeName).Append('(').Append(string.Join(", ", constructorArguments)).AppendLine(")");
-        code.AppendLine("            {");
-        foreach (string initializer in initializers)
+        // A statement's row and a streamed row are both indexed by column name, so one body reads either.
+        foreach ((string name, string rowType) in new[]
+                 {
+                     ("ReadRow", "global::System.Collections.Generic.Dictionary<string, object?>"),
+                     ("ReadStreamedRow", Core + "DataVoRow"),
+                 })
         {
-            code.Append("                ").Append(initializer).AppendLine(",");
-        }
+            code.AppendLine($"        private static readonly global::System.Func<{rowType}, {model.FullTypeName}> {name} = static row =>");
+            code.Append("            new ").Append(model.FullTypeName).Append('(').Append(string.Join(", ", constructorArguments)).AppendLine(")");
+            code.AppendLine("            {");
+            foreach (string initializer in initializers)
+            {
+                code.Append("                ").Append(initializer).AppendLine(",");
+            }
 
-        code.AppendLine("            };").AppendLine();
+            code.AppendLine("            };").AppendLine();
+        }
     }
 
     private static void EmitTable(StringBuilder code, TableModel model, string nameList, bool moduleInitializer)
@@ -114,7 +122,7 @@ internal static class DataVoTableEmitter
         code.AppendLine($$"""
                     /// <summary>Describes the {{model.TableName}} table to DataVo. Used by generated code.</summary>
                     [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
-                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow);
+                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow, ReadStreamedRow);
 
                     // An explicit static constructor runs before the first call into this class, so using any
                     // generated method makes the model available to DataVoContext.Table<T>().

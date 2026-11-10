@@ -1,6 +1,5 @@
 using System.Collections;
-using DataVo.Core.Annotations;
-using DataVo.Core.Contracts.Results;
+using DataVo.Core.Parser;
 
 namespace DataVo.Core;
 
@@ -15,8 +14,8 @@ namespace DataVo.Core;
 /// become an index or filtered read. Nothing is reflected over or compiled at run time.
 /// </para>
 /// <para>
-/// A call that is not rewritten still returns the right rows; it reads the whole table and filters it with the
-/// delegate. Pass values as <c>state</c> with a <see langword="static"/> lambda so the call can be rewritten and
+/// A call that is not rewritten still returns the right rows; it scans the table and filters it with the
+/// delegate. Scans are read a page at a time, so memory stays flat however large the table is. Pass values as <c>state</c> with a <see langword="static"/> lambda so the call can be rewritten and
 /// allocates no closure.
 /// </para>
 /// </remarks>
@@ -39,7 +38,7 @@ public sealed class DataVoTable<T> : IEnumerable<T>
     private readonly DataVoTableInfo<T> _info;
     private readonly object _gate = new();
     private DataVoPreparedStatement?[] _statements = [];
-    private DataVoPreparedStatement? _scan;
+    private string? _scanSql;
 
     internal DataVoTable(DataVoContext context, DataVoTableInfo<T> info)
     {
@@ -81,7 +80,7 @@ public sealed class DataVoTable<T> : IEnumerable<T>
             throw new ArgumentNullException(nameof(predicate));
         }
 
-        foreach (Dictionary<string, object?> row in ScanRows())
+        foreach (DataVoRow row in Scan())
         {
             T item = Read(row);
             if (predicate(item, state))
@@ -120,7 +119,7 @@ public sealed class DataVoTable<T> : IEnumerable<T>
 
         T? found = default;
         bool any = false;
-        foreach (Dictionary<string, object?> row in ScanRows())
+        foreach (DataVoRow row in Scan())
         {
             T item = Read(row);
             if (!predicate(item, state))
@@ -167,13 +166,12 @@ public sealed class DataVoTable<T> : IEnumerable<T>
     public DataVoQuery<T, TState> Where<TState>(TState state, Func<T, TState, bool> predicate) =>
         new(this, state, predicate ?? throw new ArgumentNullException(nameof(predicate)), null);
 
-    /// <summary>Reads every row of the table.</summary>
+    /// <summary>Reads every row of the table into a list.</summary>
     /// <returns>All rows.</returns>
     public List<T> ToList()
     {
-        List<Dictionary<string, object?>> rows = ScanRows();
-        var items = new List<T>(rows.Count);
-        foreach (Dictionary<string, object?> row in rows)
+        var items = new List<T>();
+        foreach (DataVoRow row in Scan())
         {
             items.Add(Read(row));
         }
@@ -181,11 +179,15 @@ public sealed class DataVoTable<T> : IEnumerable<T>
         return items;
     }
 
-    /// <summary>Enumerates every row of the table.</summary>
+    /// <summary>Enumerates every row of the table, reading a page at a time.</summary>
     /// <returns>An enumerator over all rows.</returns>
-    public List<T>.Enumerator GetEnumerator() => ToList().GetEnumerator();
-
-    IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
+    public IEnumerator<T> GetEnumerator()
+    {
+        foreach (DataVoRow row in Scan())
+        {
+            yield return Read(row);
+        }
+    }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
@@ -193,12 +195,18 @@ public sealed class DataVoTable<T> : IEnumerable<T>
 
     internal T Read(Dictionary<string, object?> row) => _info.ReadRow(row);
 
-    internal List<Dictionary<string, object?>> ScanRows()
+    internal T Read(DataVoRow row) => _info.ReadStreamedRow(row);
+
+    /// <summary>Streams every row of the table.</summary>
+    internal IEnumerable<DataVoRow> Scan() => Stream(null, []);
+
+    /// <summary>Streams the rows meeting a condition, or all rows when there is none.</summary>
+    internal IEnumerable<DataVoRow> Stream(string? where, DataVoQueryParameter[] parameters)
     {
-        DataVoPreparedStatement scan = _scan ??= Context.Prepare($"SELECT {_info.ColumnList} FROM {_info.TableName}");
-        QueryResult result = scan.Execute();
-        DataVoGeneratedTableSupport.ThrowIfError(result, scan.Sql);
-        return result.Data;
+        string sql = where is null
+            ? _scanSql ??= $"SELECT {_info.ColumnList} FROM {_info.TableName}"
+            : $"SELECT {_info.ColumnList} FROM {_info.TableName} WHERE {where}";
+        return QueryStream.Open(Context.Engine, sql, parameters, Context.SessionId);
     }
 
     /// <summary>Gets the statement held in a slot, preparing it on first use.</summary>

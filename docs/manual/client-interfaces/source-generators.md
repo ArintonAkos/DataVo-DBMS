@@ -93,6 +93,8 @@ List<Player> veterans = players.Where(p => p.Level >= 50 && p.IsActive).ToList()
 
 A primary-key equality on an LSM database reads one row and allocates only that row. A miss allocates nothing.
 
+Enumerating a query streams. Rows are read in pages of 1,024 and each model is built as the loop reaches it, so a `foreach` over 100,000 matching rows keeps about one page alive, not the result. `ToList()` is the way to ask for everything at once. Scans that were not compiled stream the same way. Some queries read their matches before enumerating, as `StreamQuery` does: a query inside a transaction, a condition with an equality on an indexed column (few rows, read through the index), and a condition the paged scan cannot apply, which today means `||`, a null test, or `!=` on a nullable column.
+
 ### What Is Compiled
 
 | Lambda | Becomes |

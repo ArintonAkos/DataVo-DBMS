@@ -116,6 +116,25 @@ internal static class DataVoLinqEmitter
             code.AppendLine($"                return borrowed ? statement.ExecuteBorrowed(new global::System.ReadOnlySpan<{Parameter}>(parameters)) : statement.Execute(parameters);");
         }
 
+        code.AppendLine("            }").AppendLine();
+        code.AppendLine($"            protected override {Parameter}[] Parameters({state} state)");
+        code.AppendLine("            {");
+        if (parameters.Length == 0)
+        {
+            code.AppendLine($"                return global::System.Array.Empty<{Parameter}>();");
+        }
+        else
+        {
+            code.AppendLine($"                return new {Parameter}[]");
+            code.AppendLine("                {");
+            for (int index = 0; index < parameters.Length; index++)
+            {
+                code.AppendLine($"                    {Bind(parameters[index], names[index])},");
+            }
+
+            code.AppendLine("                };");
+        }
+
         code.AppendLine("            }");
         code.AppendLine("        }").AppendLine();
 
