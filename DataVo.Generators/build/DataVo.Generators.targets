@@ -1,0 +1,6 @@
+<Project>
+  <!-- Lets the compiler accept the interceptors DataVo.Generators emits for DataVoTable<T> queries. -->
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+</Project>

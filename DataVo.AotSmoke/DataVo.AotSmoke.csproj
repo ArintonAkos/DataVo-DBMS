@@ -11,6 +11,7 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <IsPackable>false</IsPackable>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Surface cross-assembly trim/AOT issues during ordinary build of this app too. -->
     <IsAotCompatible>true</IsAotCompatible>

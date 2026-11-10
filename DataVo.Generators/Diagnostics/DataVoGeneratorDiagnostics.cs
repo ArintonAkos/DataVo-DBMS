@@ -41,6 +41,24 @@ internal static class DataVoGeneratorDiagnostics
     public static readonly DiagnosticDescriptor InvalidTableName = Table(
         "DATAVOT007", "Invalid DataVo table name", "'{0}' is not a valid table or column name");
 
+    public static readonly DiagnosticDescriptor LinqCapturedVariable = Linq(
+        "DATAVOL001",
+        "DataVo query captures a variable",
+        "This predicate captures {0}, so it cannot be compiled ahead of time and reads the whole table. Pass the value as state with a static lambda, for example Where(value, static (row, v) => row.Column == v), to get a prepared lookup with no closure.");
+
+    public static readonly DiagnosticDescriptor LinqNotTranslated = Linq(
+        "DATAVOL002",
+        "DataVo query is not compiled",
+        "This predicate reads the whole table because it cannot be compiled ahead of time: {0}");
+
+    public static readonly DiagnosticDescriptor LinqInterceptorsDisabled = Linq(
+        "DATAVOL003",
+        "DataVo query interceptors are disabled",
+        "DataVoTable queries read the whole table because interceptors are not enabled for this project. Add <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces> to the project file.");
+
+    private static DiagnosticDescriptor Linq(string id, string title, string message) =>
+        new(id, title, message, "DataVo.Linq", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
     private static DiagnosticDescriptor Table(string id, string title, string message) =>
         new(id, title, message, "DataVo.Tables", DiagnosticSeverity.Error, isEnabledByDefault: true);
 }
