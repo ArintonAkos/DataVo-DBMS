@@ -196,7 +196,13 @@ For large datasets, use HNSW (Hierarchical Navigable Small World) indexing for f
 CREATE INDEX IX_Embeddings_Vector ON Embeddings (Vector) USING HNSW;
 ```
 
-The current public SQL surface uses `CREATE INDEX ... USING HNSW`; index tuning options are part of ongoing hardening work.
+The index ranks by cosine distance by default. Choose straight-line (L2) distance with a metric option; it is saved with the index:
+
+```sql
+CREATE INDEX IX_Embeddings_L2 ON Embeddings (Vector) USING HNSW WITH (metric = 'euclidean');
+```
+
+`metric` accepts `cosine`, `euclidean` and `l2`. Other tuning options are part of ongoing hardening work. For 3D positions, the typed `NearestNeighbors` query on `DataVoTable<T>` uses a Euclidean HNSW index automatically; see [Spatial Queries](/manual/client-interfaces/source-generators#spatial-queries).
 
 ### ANN query syntax
 

@@ -131,10 +131,51 @@ The `DataVo.Generators` NuGet package enables interceptors for you. A project th
 
 Interceptors need the C# 12 compiler or newer. On an older compiler, such as Unity's, the same code compiles and returns the same rows but every query is a scan; use the generated `Get…ById` method or a prepared statement on hot paths there. Unity's compiler also has no module initializers, so call the model's `Ensure…Table` method before `Table<T>()`.
 
+## Spatial Queries
+
+A `System.Numerics.Vector3` property is stored as a `VECTOR(3)` column. `DataVoTable<T>` can then find rows by position:
+
+```csharp
+using System.Numerics;
+
+[DataVoTable("ships")]
+public sealed class Ship
+{
+    [PrimaryKey] public int Id { get; set; }
+    public string Name { get; set; } = "";
+    [SpatialIndex] public Vector3 Position { get; set; }
+}
+
+DataVoTable<Ship> ships = db.Table<Ship>();
+
+// Rows within 50 units of a point, the sphere's surface included.
+foreach (Ship ship in ships.WithinRadius(station, radius: 50f)) { }
+
+// Rows inside an axis-aligned box. The corners may come in either order.
+List<Ship> docked = ships.WithinBoundingBox(minCorner, maxCorner).ToList();
+
+// The five closest rows, nearest first.
+IReadOnlyList<Ship> closest = ships.NearestNeighbors(player, k: 5);
+```
+
+| Method | How it runs |
+| --- | --- |
+| `WithinRadius(center, radius)` | Streams the table a page at a time. Each row's stored coordinates are tested before the model is built, so rows outside the sphere cost no model and the test allocates nothing. Distances are compared in double precision, so a point exactly on the surface is included even far from the origin. |
+| `WithinBoundingBox(min, max)` | Streams like `WithinRadius`. A `BoundingBox3` overload is also available. The box's surface is inside. |
+| `NearestNeighbors(target, k)` | Uses the column's Euclidean HNSW index when it has one: it fetches twice `k` candidates and ranks them by exact distance. Without an index, inside an explicit transaction, or with `exact: true`, it streams the table once and keeps the best `k`, so the answer is exact. Ties keep storage order. |
+
+`[SpatialIndex]` (or `[Indexed]` on a `Vector3`) makes `Ensure…Table` create a Euclidean HNSW index named `sx_<table>_<column>`. HNSW is an approximate search: it can, rarely, miss a true neighbor. Pass `exact: true` when every answer must be exact. `WithinRadius` and `WithinBoundingBox` always read the whole table, because an HNSW index answers nearest-neighbor questions, not range ones.
+
+When a model has more than one `Vector3` property, name the column: `ships.WithinRadius(center, 10f, column: "Spawn")`. A nullable `Vector3?` is supported, and a row whose position is null never matches.
+
+`Spatial3` and `BoundingBox3` expose the same math for your own code: `Distance`, `DistanceSquared`, `DistanceSquaredPrecise`, `IsWithinRadius`, `Contains`, `Intersects`, `ClosestPoint`. None of them allocate. They use `System.Numerics`, which the .NET JIT compiles to SIMD instructions and which Unity's Mono and IL2CPP run as plain scalar code. In Unity, convert at the boundary: `new System.Numerics.Vector3(v.x, v.y, v.z)`.
+
+A lambda that compares a `Vector3` column, such as `Where(p, static (s, p) => s.Position == p)`, is not compiled to SQL (`DATAVOL002`); it scans and still returns the right rows.
+
 ## SQL DATE Projections
 
 The cross-target projection type for SQL `DATE` is `DataVo.Core.DataVoDate`. Generated `DataVoDate` and `DataVoDate?` properties call `GetDate` and `GetDateOrNull`. On modern .NET only, generated `System.DateOnly` and `System.DateOnly?` properties are explicit adapters and call `GetDateOnly` and `GetDateOnlyOrNull`.
 
 ## Source Generator Support Summary
 
-The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It does **not** generate `DELETE`, joins, aggregates, or vector search, and its typed table queries cover single-table filters only, not a full LINQ provider — use runtime SQL for those shapes.
+The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It supports `System.Numerics.Vector3` columns with `WithinRadius`, `WithinBoundingBox` and `NearestNeighbors` on typed tables. It does **not** generate `DELETE`, joins, aggregates, or general vector search, and its typed table queries cover single-table filters only, not a full LINQ provider — use runtime SQL for those shapes.
