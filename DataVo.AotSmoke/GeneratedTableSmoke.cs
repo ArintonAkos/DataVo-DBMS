@@ -72,6 +72,36 @@ internal static class GeneratedTableSmoke
         Require(probes.WithinBoundingBox(Vector3.Zero, new Vector3(1, 1, 1)).Count() == 8, "WithinBoundingBox returned the wrong rows.");
         Require(probes.NearestNeighbors(new Vector3(3, 3, 3), 1)[0].Position == new Vector3(3, 3, 3), "The HNSW nearest neighbor was wrong.");
         Require(probes.NearestNeighbors(new Vector3(3, 3, 3), 1, exact: true)[0].Position == new Vector3(3, 3, 3), "The exact nearest neighbor was wrong.");
+
+        // Rows read straight from storage as RowRef values, no models built.
+        RowRefStream inventory = items.StreamRef();
+        int name = inventory.GetOrdinal("Name");
+        int streamed = 0;
+        int named = 0;
+        long idSum = 0;
+        foreach (RowRef row in inventory)
+        {
+            idSum += row.GetInt32(0);
+            if (!row.IsNull(name) && row.GetStringSpan(name).SequenceEqual("even".AsSpan()))
+            {
+                named++;
+            }
+
+            streamed++;
+        }
+
+        Require(streamed == 20 && named == 10 && idSum == 210, "StreamRef read the wrong rows.");
+
+        Vector3 corner = default;
+        foreach (RowRef row in probes.StreamRef())
+        {
+            if (row.GetInt32(0) == 64)
+            {
+                corner = row.GetVector3(1);
+            }
+        }
+
+        Require(corner == new Vector3(3, 3, 3), "StreamRef read the wrong Vector3.");
     }
 
     private static void Require(bool condition, string message)
