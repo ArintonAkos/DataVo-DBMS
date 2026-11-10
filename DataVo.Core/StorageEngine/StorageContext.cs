@@ -708,20 +708,45 @@ public class StorageContext(DataVoConfig config) : IDisposable
             start = after.Low == ulong.MaxValue ? new RowKey(after.High + 1, 0) : new RowKey(after.High, after.Low + 1);
         }
 
-        var box = new LsmPageBox<TState>(state, visit, cursor, maxRows);
-        if (!ScanTableRows(tableName, databaseName, start, upper, ref box, static (ref LsmPageBox<TState> b, RowKey id, ReadOnlySpan<byte> bytes, StoredRow? typed) =>
-        {
-            b.Visit(ref b.State, id, bytes, typed);
-            b.Cursor.After = id;
-            b.Examined++;
-            return b.Examined < b.MaxRows;
-        }))
+        LsmStorageEngine lsm = LsmEngine!;
+        if (MvccExecutionScope.CurrentSnapshot is not null || lsm.HasStagedWrites(databaseName, tableName))
         {
             return false;
         }
 
+        // Capturing one page of unflushed rows keeps a page's cost independent of how much of the table follows it.
+        var box = new LsmPageBox<TState>(state, visit, cursor, maxRows);
+        lsm.ScanStoredRows(
+            databaseName,
+            tableName,
+            start,
+            upper,
+            ref box,
+            static (ref LsmPageBox<TState> b, RowKey id, ReadOnlySpan<byte> bytes) =>
+            {
+                b.Visit(ref b.State, id, bytes, null);
+                b.Cursor.After = id;
+                b.Examined++;
+                return b.Examined < b.MaxRows;
+            },
+            maxRows,
+            out RowKey? coveredThrough);
+
         state = box.State;
-        cursor.Done = box.Examined < maxRows;
+        if (box.Examined >= maxRows)
+        {
+            cursor.Done = false; // the visitor stopped the page; it resumes after the last row it saw
+        }
+        else if (coveredThrough is { } covered)
+        {
+            cursor.After = covered; // every key up to here is accounted for, including deleted ones
+            cursor.Done = false;
+        }
+        else
+        {
+            cursor.Done = true;
+        }
+
         return true;
     }
 

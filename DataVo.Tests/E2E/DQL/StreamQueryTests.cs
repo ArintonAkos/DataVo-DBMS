@@ -77,6 +77,70 @@ public sealed class StreamQueryTests : IDisposable
         AssertMatchesSelect(db, "SELECT Id FROM Items", expectedRows: null);
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void DeletedRun_LongerThanSeveralPages_IsSkipped(StorageMode mode)
+    {
+        // A page that finds only deleted rows must still move the scan forward.
+        using DataVoContext db = Seed(mode, RowCount);
+        Ok(db, "DELETE FROM Items WHERE Id >= 1500 AND Id < 7000");
+
+        AssertMatchesSelect(db, "SELECT Id FROM Items", RowCount - 5_500);
+        AssertMatchesSelect(db, "SELECT Id FROM Items WHERE Id >= 1000 AND Id < 9000", 2_500);
+    }
+
+    [Fact]
+    public void EverythingDeleted_StreamsNothing()
+    {
+        using DataVoContext db = Seed(StorageMode.Lsm, RowCount);
+        Ok(db, "DELETE FROM Items WHERE Id >= 1");
+
+        AssertMatchesSelect(db, "SELECT Id FROM Items", 0);
+    }
+
+    [Fact]
+    public void FlushedRowsUnderUnflushedChanges_MatchSelect()
+    {
+        // After a reopen the seeded rows are in files; the changes below sit in the unflushed overlay above them.
+        Seed(StorageMode.Lsm, RowCount).Dispose();
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _directory });
+        Ok(db, "USE S");
+        Ok(db, "DELETE FROM Items WHERE Id >= 2000 AND Id < 5200");
+        Ok(db, "UPDATE Items SET Grp = 77 WHERE Id >= 6000 AND Id < 9100");
+        Ok(db, "DELETE FROM Items WHERE Grp = 4");
+        for (int id = RowCount + 1; id <= RowCount + 2_500; id += 500)
+        {
+            Ok(db, $"INSERT INTO Items (Id, Grp, Note) VALUES {string.Join(", ", Enumerable.Range(id, 500).Select(static n => $"({n}, {n % 10}, 'late')"))}");
+        }
+
+        AssertMatchesSelect(db, "SELECT * FROM Items", expectedRows: null);
+        AssertMatchesSelect(db, "SELECT Id, Grp FROM Items WHERE Grp = 77", expectedRows: null);
+        AssertMatchesSelect(db, "SELECT Id FROM Items WHERE Id >= 1900 AND Id < 12600", expectedRows: null);
+    }
+
+    [Fact]
+    public void Lsm_ScanCostGrowsWithRowsRead_NotWithRowsRemaining()
+    {
+        // Each page used to copy every unflushed version after it, so reading a table cost its size squared.
+        using DataVoContext small = Seed(StorageMode.Lsm, 6_000);
+        long perRowSmall = AllocatedPerRow(small, 6_000);
+        small.Dispose();
+        Directory.Delete(_directory, recursive: true);
+
+        using DataVoContext large = Seed(StorageMode.Lsm, 48_000);
+        long perRowLarge = AllocatedPerRow(large, 48_000);
+
+        Assert.True(perRowLarge < perRowSmall * 1.5, $"{perRowSmall} B/row at 6,000 rows became {perRowLarge} B/row at 48,000");
+
+        static long AllocatedPerRow(DataVoContext db, int rows)
+        {
+            Assert.Equal(rows, db.StreamQuery("SELECT Id, Grp FROM Items").Count());
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Assert.Equal(rows, db.StreamQuery("SELECT Id, Grp FROM Items").Count());
+            return (GC.GetAllocatedBytesForCurrentThread() - before) / rows;
+        }
+    }
+
     [Fact]
     public void Parameters_AreBound()
     {

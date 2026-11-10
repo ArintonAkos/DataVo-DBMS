@@ -1802,10 +1802,28 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// copying them. Rows are passed in their stored form: a clustered table's key cell is NULL and the
     /// row key carries the value. Only valid outside a write flow (staged writes are not merged).
     /// </summary>
-    internal void ScanStoredRows<TState>(string databaseName, string tableName, RowKey? lower, RowKey? upper, ref TState state, StoredRowScanVisitor<TState> visit)
+    internal void ScanStoredRows<TState>(string databaseName, string tableName, RowKey? lower, RowKey? upper, ref TState state, StoredRowScanVisitor<TState> visit) =>
+        ScanStoredRows(databaseName, tableName, lower, upper, ref state, visit, int.MaxValue, out _);
+
+    /// <summary>
+    /// <see cref="ScanStoredRows{TState}(string, string, RowKey?, RowKey?, ref TState, StoredRowScanVisitor{TState})"/>
+    /// for one page of a longer scan: at most <paramref name="overlayLimit"/> unflushed versions are captured, so
+    /// the cost of a page does not grow with the rows that follow it. When the capture was cut short,
+    /// <paramref name="coveredThrough"/> is the last key the scan accounted for and the caller resumes after it;
+    /// otherwise it is null and the range was scanned to its end, unless the visitor stopped it.
+    /// </summary>
+    internal void ScanStoredRows<TState>(
+        string databaseName,
+        string tableName,
+        RowKey? lower,
+        RowKey? upper,
+        ref TState state,
+        StoredRowScanVisitor<TState> visit,
+        int overlayLimit,
+        out RowKey? coveredThrough)
     {
         var box = new ScanBox<TState>(state, visit);
-        MergeLiveRows(GetOrCreateTable(databaseName, tableName), box, static (b, rowId, _, value) => b.Visit(b, rowId, value), lower, upper);
+        coveredThrough = MergeLiveRows(GetOrCreateTable(databaseName, tableName), box, static (b, rowId, _, value) => b.Visit(b, rowId, value), lower, upper, overlayLimit);
         state = box.State;
     }
 
@@ -2010,11 +2028,32 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
     /// for the same reason as in <see cref="ResolveRow"/>. The value span is only valid during the call.
     /// </summary>
-    private void MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit, RowKey? lower = null, RowKey? upper = null)
+    /// <remarks>
+    /// With an <paramref name="overlayLimit"/>, only that many overlay versions are captured. The merge then stops
+    /// after the last captured key, because later overlay versions are unknown, and returns that key so the caller
+    /// can resume after it. It returns null when the overlay was captured to the end of the range.
+    /// </remarks>
+    private RowKey? MergeLiveRows<TState>(TableState state, TState visitorState, LiveRowVisitor<TState> visit, RowKey? lower = null, RowKey? upper = null, int overlayLimit = int.MaxValue)
     {
         bool bounded = lower is not null || upper is not null;
-        var overlay = new List<(RowKey RowId, ulong Sequence, byte[]? Value)>(bounded ? 16 : (int)Math.Min(state.LatestRows.Count, int.MaxValue));
-        state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)), lower, upper);
+        int capacity = bounded ? 16 : (int)Math.Min(state.LatestRows.Count, int.MaxValue);
+        var overlay = new List<(RowKey RowId, ulong Sequence, byte[]? Value)>(Math.Min(capacity, overlayLimit));
+        bool truncated = state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)), lower, upper, overlayLimit);
+
+        RowKey? coveredThrough = null;
+        if (truncated && overlay.Count > 0)
+        {
+            RowKey last = overlay[^1].RowId;
+            if (last.High != ulong.MaxValue || last.Low != ulong.MaxValue)
+            {
+                RowKey afterLast = last.Low == ulong.MaxValue ? new RowKey(last.High + 1, 0) : new RowKey(last.High, last.Low + 1);
+                if (upper is not { } bound || afterLast < bound)
+                {
+                    upper = afterLast;
+                    coveredThrough = last;
+                }
+            }
+        }
 
         TableVersion version = state.AcquireVersion();
         try
@@ -2063,7 +2102,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                     (_, ulong sequence, byte[]? value) = overlay[overlayIndex];
                     if (value is not null && !visit(visitorState, next, sequence, value))
                     {
-                        return;
+                        return null;
                     }
 
                     decided = true;
@@ -2084,7 +2123,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 if (winner >= 0 && cursors[winner].Type == LsmValueType.Put
                     && !visit(visitorState, next, cursors[winner].Sequence, cursors[winner].Value))
                 {
-                    return;
+                    return null;
                 }
 
                 for (int i = 0; i < cursors.Length; i++)
@@ -2106,6 +2145,8 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         {
             version.Release();
         }
+
+        return coveredThrough;
     }
 
     private static List<SstableEntry> ReadSstableEntries(byte[] bytes)

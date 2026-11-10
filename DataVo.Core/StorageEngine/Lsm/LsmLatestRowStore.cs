@@ -159,8 +159,17 @@ internal sealed class LsmLatestRowStore
     /// <see cref="ForEachVersion{TState}(TState, Action{TState, RowKey, ulong, byte[]})"/> limited to keys in
     /// <c>[lower, upper)</c>; a null bound is open. Dense pages outside the range are never touched.
     /// </summary>
-    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, RowKey? lower, RowKey? upper)
+    public void ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, RowKey? lower, RowKey? upper) =>
+        ForEachVersion(state, visit, lower, upper, int.MaxValue);
+
+    /// <summary>
+    /// The ranged <see cref="ForEachVersion{TState}(TState, Action{TState, RowKey, ulong, byte[]}, RowKey?, RowKey?)"/>,
+    /// stopping after <paramref name="limit"/> versions. Returns true when it stopped at the limit, in which case
+    /// later keys were not visited.
+    /// </summary>
+    public bool ForEachVersion<TState>(TState state, Action<TState, RowKey, ulong, byte[]?> visit, RowKey? lower, RowKey? upper, int limit)
     {
+        int visited = 0;
         // Sparse keys sort around the dense ones: negative integers before, large integers and GUIDs after.
         List<KeyValuePair<RowKey, SparseVersion>>? sparse = null;
         if (_sparse.Count > 0)
@@ -218,9 +227,17 @@ internal sealed class LsmLatestRowStore
                     while (sparse is not null && next < sparse.Count && sparse[next].Key < key)
                     {
                         VisitSparse(state, visit, sparse[next++]);
+                        if (++visited >= limit)
+                        {
+                            return true;
+                        }
                     }
 
                     visit(state, key, sequence, ReferenceEquals(value, TombstoneSentinel) ? null : value);
+                    if (++visited >= limit)
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -228,7 +245,13 @@ internal sealed class LsmLatestRowStore
         while (sparse is not null && next < sparse.Count)
         {
             VisitSparse(state, visit, sparse[next++]);
+            if (++visited >= limit)
+            {
+                return true;
+            }
         }
+
+        return false;
     }
 
     private static bool InRange(RowKey key, RowKey? lower, RowKey? upper) =>
