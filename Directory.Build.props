@@ -9,7 +9,7 @@
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
-    <Version>0.2.0-rc.2</Version>
+    <Version>0.2.0-rc.3</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and disk-backed storage, and embeddable .NET workflows.</Description>
@@ -30,19 +30,19 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>0.2.0-rc.2 adds real 64-bit BIGINT and DOUBLE columns and exponent notation in SQL, and compares large integers exactly. Breaking: CREATE TABLE and ALTER TABLE now reject types DataVo cannot store, such as DECIMAL, DATETIME and LONG, which used to become text or lose data.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.0-rc.3 adds zero-copy RowRef and StreamRef for 0-byte table iteration in 60/120 FPS loops, compile-time LINQ interceptors with 174 ns point lookups, spatial 3D queries (WithinRadius, WithinBoundingBox, NearestNeighbors), and thread-safe parallel HNSW vector index construction with 100% reachability.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
     <PackageId>DataVo.Data</PackageId>
     <Title>DataVo Data</Title>
     <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
-    <PackageReleaseNotes>DataVo data-access package. 0.2.0-rc.2 aligns with the DataVo.Core release candidate.</PackageReleaseNotes>
+    <PackageReleaseNotes>DataVo data-access package. 0.2.0-rc.3 aligns with the DataVo.Core release candidate.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
     <IsPackable>true</IsPackable>
-    <Version>0.2.0-rc.2</Version>
+    <Version>0.2.0-rc.3</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageId>DataVo.EntityFrameworkCore</PackageId>
@@ -60,7 +60,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.2.0-rc.2 maps long to BIGINT, and double and decimal to DOUBLE.</PackageReleaseNotes>
+    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.2.0-rc.3 aligns with the DataVo.Core release candidate.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
