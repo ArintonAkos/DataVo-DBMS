@@ -45,6 +45,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     private readonly Dictionary<RowKey, int> _rowIdToOrdinal = [];
     private readonly Stack<int> _freeOrdinals = [];
     private readonly object _stateGate = new();
+    private readonly object _levelPromotionGate = new();
 
     [ThreadStatic] private static SearchWorkspace? _threadSearchWorkspace;
     [ThreadStatic] private static SelectionWorkspace? _threadSelectionWorkspace;
@@ -445,6 +446,8 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             int offset = i * vectorDimension;
             InsertCore(rowIds[i], vectors.AsSpan(offset, vectorDimension));
         });
+
+        RepairConnectivity();
     }
 
     /// <summary>
@@ -525,6 +528,30 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             }
         }
 
+        bool raisesTopLevel;
+        lock (_stateGate)
+        {
+            raisesTopLevel = sampledLevel > MaxLevel;
+        }
+
+        if (!raisesTopLevel)
+        {
+            LinkNewNode(rowId, ordinal, sampledLevel, vector, vectorInvNorm);
+            return;
+        }
+
+        // A node that rises above the current top level becomes the new entry point. Two of them
+        // linked at once would each see only the old top level, so the one that loses the entry
+        // point race would have no links on the levels above it. Insert them one at a time (the
+        // hnswlib approach); they are rare (about 1 in e^MaxLevel) so this costs nothing.
+        lock (_levelPromotionGate)
+        {
+            LinkNewNode(rowId, ordinal, sampledLevel, vector, vectorInvNorm);
+        }
+    }
+
+    private void LinkNewNode(RowKey rowId, int ordinal, int sampledLevel, ReadOnlySpan<float> vector, float vectorInvNorm)
+    {
         int entryOrdinal = TryGetEntryOrdinal();
         if (entryOrdinal < 0)
         {
@@ -546,33 +573,59 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         var selectWorkspace = GetSelectionWorkspace();
         int maxStride = ResolveNeighborLimit(0);
         selectWorkspace.EnsureCandidateCapacity(Math.Max(64, maxStride * 4));
-        Span<int> destinationBuffer = stackalloc int[128];
+        int linkTopLevel = Math.Min(targetLevel, topLevel);
 
-        for (int level = Math.Min(targetLevel, topLevel); level >= 0; level--)
+        // Phase 1 (top-down): choose the new node's neighbors on every level and write them into
+        // its own lists. Nothing points at the node yet, so no other thread can reach it and these
+        // writes need no coordination. The searches only use the node's vector, never its edges.
+        for (int level = linkTopLevel; level >= 0; level--)
         {
             int ef = ResolveEffectiveEfConstruction(level);
             var searchWorkspace = GetSearchWorkspace();
             int candidateCount = SearchLayer(vector, vectorInvNorm, entryOrdinal, ef, level, searchWorkspace);
-
-            int neighborLimit = ResolveNeighborLimit(level);
-            if (neighborLimit > destinationBuffer.Length)
-            {
-                int[] temp = new int[neighborLimit];
-                SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), temp.AsSpan(0, neighborLimit));
-                int selected = CountSelected(temp);
-                ConnectBidirectional(ordinal, temp.AsSpan(0, selected), level);
-            }
-            else
-            {
-                Span<int> destination = destinationBuffer.Slice(0, neighborLimit);
-                SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), destination.Slice(0, neighborLimit));
-                int selected = CountSelected(destination);
-                ConnectBidirectional(ordinal, destination.Slice(0, selected), level);
-            }
+            SelectNeighbors(level, ordinal, searchWorkspace.ResultOrdinals.AsSpan(0, candidateCount), GetNeighborSpan(ordinal, level));
 
             if (candidateCount > 0)
             {
                 entryOrdinal = searchWorkspace.ResultOrdinals[0];
+            }
+        }
+
+        // Phase 2 (bottom-up): add the reverse edges that make the node reachable, level 0 first.
+        // A search reaches a node on level L only through an edge on level L, so by the time any
+        // thread can land on this node at level L, its lists on L and every level below are
+        // complete. Publishing top-down instead let a concurrent insert descend into this node
+        // while its level-0 list was still empty, link to it alone, and later lose that one edge
+        // to pruning - leaving a node no search could reach.
+        Span<int> neighborBuffer = stackalloc int[128];
+        for (int level = 0; level <= linkTopLevel; level++)
+        {
+            int neighborLimit = ResolveNeighborLimit(level);
+            Span<int> snapshot = neighborLimit <= neighborBuffer.Length
+                ? neighborBuffer.Slice(0, neighborLimit)
+                : new int[neighborLimit];
+
+            // Until this level is published only this thread writes the node's level-L list, but
+            // lower levels are already reachable; copy under the node lock to read a stable list.
+            object? ownLock = TryGetNodeLock(ordinal);
+            if (ownLock == null)
+            {
+                break;
+            }
+
+            lock (ownLock)
+            {
+                GetNeighborSpan(ordinal, level).CopyTo(snapshot);
+            }
+
+            int selected = CountSelected(snapshot);
+            for (int i = 0; i < selected; i++)
+            {
+                int neighbor = snapshot[i];
+                if (neighbor != ordinal)
+                {
+                    AddEdgeOneWay(neighbor, ordinal, level);
+                }
             }
         }
 
@@ -1332,21 +1385,6 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         return idx;
     }
 
-    private void ConnectBidirectional(int source, ReadOnlySpan<int> neighbors, int level)
-    {
-        for (int i = 0; i < neighbors.Length; i++)
-        {
-            int neighbor = neighbors[i];
-            if (neighbor < 0 || neighbor == source)
-            {
-                continue;
-            }
-
-            AddEdgeOneWay(source, neighbor, level);
-            AddEdgeOneWay(neighbor, source, level);
-        }
-    }
-
     private void AddEdgeOneWay(int source, int target, int level)
     {
         if (!_isActive[source] || !_isActive[target] || _nodeLevels[source] < level || _nodeLevels[target] < level)
@@ -1378,7 +1416,9 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
                 if (neighbors[i] < 0)
                 {
-                    neighbors[i] = target;
+                    // Release store: a search that reads this edge without the lock must also
+                    // see the target's own neighbor lists, which were written before it.
+                    Volatile.Write(ref neighbors[i], target);
                     DiagIncrement(ref _diagEdgeAppends);
                     return;
                 }
@@ -1413,8 +1453,29 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
             workspace.ExistingNeighbors[candidateCount++] = target;
 
-            SelectNeighbors(level, source, workspace.ExistingNeighbors.AsSpan(0, candidateCount), neighbors);
+            // Select into scratch, then overwrite in place. Searches read neighbor lists without
+            // the node lock; selecting straight into the live list first fills it with -1, and a
+            // search reading it at that moment sees a node with no neighbors at all.
+            Span<int> selection = neighbors.Length <= 128 ? stackalloc int[neighbors.Length] : new int[neighbors.Length];
+            SelectNeighbors(level, source, workspace.ExistingNeighbors.AsSpan(0, candidateCount), selection);
+            PublishNeighborList(neighbors, selection);
             MarkDiversityPruned(source, level);
+        }
+    }
+
+    // Overwrites a live neighbor list with a new selection without ever making it look empty to
+    // a lock-free reader: the selected entries go in first, then the leftover slots are cleared.
+    private static void PublishNeighborList(Span<int> neighbors, ReadOnlySpan<int> selection)
+    {
+        int selected = CountSelected(selection);
+        for (int i = 0; i < selected; i++)
+        {
+            Volatile.Write(ref neighbors[i], selection[i]);
+        }
+
+        for (int i = selected; i < neighbors.Length; i++)
+        {
+            Volatile.Write(ref neighbors[i], -1);
         }
     }
 
@@ -1460,7 +1521,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
         if (insertAt >= neighbors.Length)
         {
-            sortedNeighbors.CopyTo(neighbors);
+            PublishNeighborList(neighbors, sortedNeighbors);
             DiagIncrement(ref _diagIncrementalDiversityPrunes);
             return true;
         }
@@ -1472,7 +1533,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             if (targetToExisting < targetDistance)
             {
                 DiagIncrement(ref _diagDiversityOcclusions);
-                sortedNeighbors.CopyTo(neighbors);
+                PublishNeighborList(neighbors, sortedNeighbors);
                 DiagIncrement(ref _diagIncrementalDiversityPrunes);
                 return true;
             }
@@ -1510,15 +1571,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             selected[selectedCount++] = omitted[i];
         }
 
-        for (int i = 0; i < selectedCount; i++)
-        {
-            neighbors[i] = selected[i];
-        }
-
-        for (int i = selectedCount; i < neighbors.Length; i++)
-        {
-            neighbors[i] = -1;
-        }
+        PublishNeighborList(neighbors, selected.Slice(0, selectedCount));
 
         DiagIncrement(ref _diagIncrementalDiversityPrunes);
         return true;
@@ -1548,7 +1601,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
 
         if (worstIndex >= 0 && targetDistance < worstDistance)
         {
-            neighbors[worstIndex] = target;
+            Volatile.Write(ref neighbors[worstIndex], target);
             DiagIncrement(ref _diagNonDiverseReplacements);
         }
     }
