@@ -26,11 +26,28 @@ public sealed class DataVoTableInfo<T>
         string columnList,
         Func<Dictionary<string, object?>, T> readRow,
         Func<DataVoRow, T> readStreamedRow)
+        : this(tableName, columnList, readRow, readStreamedRow, [])
+    {
+    }
+
+    /// <summary>Describes a model's table, including the columns that hold 3D positions.</summary>
+    /// <param name="tableName">The table the model is stored in.</param>
+    /// <param name="columnList">The model's columns as a comma-separated SELECT list.</param>
+    /// <param name="readRow">Builds a model from one row of a statement's result.</param>
+    /// <param name="readStreamedRow">Builds a model from one row of a streamed scan.</param>
+    /// <param name="spatialColumns">The model's 3D position columns, used by the spatial queries.</param>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow,
+        DataVoSpatialColumn[] spatialColumns)
     {
         TableName = tableName ?? throw new ArgumentNullException(nameof(tableName));
         ColumnList = columnList ?? throw new ArgumentNullException(nameof(columnList));
         ReadRow = readRow ?? throw new ArgumentNullException(nameof(readRow));
         ReadStreamedRow = readStreamedRow ?? throw new ArgumentNullException(nameof(readStreamedRow));
+        SpatialColumns = spatialColumns ?? throw new ArgumentNullException(nameof(spatialColumns));
     }
 
     /// <summary>Gets the table the model is stored in.</summary>
@@ -41,6 +58,8 @@ public sealed class DataVoTableInfo<T>
     internal Func<Dictionary<string, object?>, T> ReadRow { get; }
 
     internal Func<DataVoRow, T> ReadStreamedRow { get; }
+
+    internal DataVoSpatialColumn[] SpatialColumns { get; }
 
     /// <summary>Gets the model's description, which its generated code registered.</summary>
     internal static DataVoTableInfo<T> Registered => s_registered ?? throw new InvalidOperationException(
@@ -71,4 +90,27 @@ public sealed class DataVoTableInfo<T>
         _tables.AddOrUpdate(context, table);
         return table;
     }
+}
+
+/// <summary>
+/// A model column that holds a 3D position (<see cref="System.Numerics.Vector3"/>, stored as <c>VECTOR(3)</c>).
+/// Generated code describes one per position property.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public sealed class DataVoSpatialColumn
+{
+    /// <summary>Describes a position column.</summary>
+    /// <param name="column">The column name.</param>
+    /// <param name="indexName">The Euclidean HNSW index on the column, or <see langword="null"/> when it has none.</param>
+    public DataVoSpatialColumn(string column, string? indexName)
+    {
+        Column = column ?? throw new ArgumentNullException(nameof(column));
+        IndexName = indexName;
+    }
+
+    /// <summary>Gets the column name.</summary>
+    public string Column { get; }
+
+    /// <summary>Gets the Euclidean HNSW index on the column, or <see langword="null"/> when it has none.</summary>
+    public string? IndexName { get; }
 }

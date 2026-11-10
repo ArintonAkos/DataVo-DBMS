@@ -33,7 +33,7 @@ internal static class DataVoTableEmitter
         code.AppendLine("    {");
         EmitStatements(code, model, columns, values, key, nameList);
         EmitReader(code, model, columns);
-        EmitTable(code, model, nameList, moduleInitializer);
+        EmitTable(code, model, columns, nameList, moduleInitializer);
         EmitEnsure(code, model, columns, key);
         EmitGet(code, model, key, nullableResult);
         EmitInsert(code, model, columns);
@@ -116,13 +116,20 @@ internal static class DataVoTableEmitter
         }
     }
 
-    private static void EmitTable(StringBuilder code, TableModel model, string nameList, bool moduleInitializer)
+    /// <summary>The name of the HNSW index a <c>[SpatialIndex]</c> column gets.</summary>
+    private static string SpatialIndexName(TableModel model, ColumnModel column) => $"sx_{model.TableName}_{column.PropertyName}";
+
+    private static void EmitTable(StringBuilder code, TableModel model, ColumnModel[] columns, string nameList, bool moduleInitializer)
     {
         string type = $"{Core}DataVoTableInfo<{model.FullTypeName}>";
+        ColumnModel[] positions = [.. columns.Where(static column => column.Type.IsVector3)];
+        string spatial = positions.Length == 0
+            ? string.Empty
+            : $", new {Core}DataVoSpatialColumn[] {{ {string.Join(", ", positions.Select(column => $"new {Core}DataVoSpatialColumn(\"{column.PropertyName}\", {(column.IsSpatialIndexed ? $"\"{SpatialIndexName(model, column)}\"" : "null")})"))} }}";
         code.AppendLine($$"""
                     /// <summary>Describes the {{model.TableName}} table to DataVo. Used by generated code.</summary>
                     [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
-                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow, ReadStreamedRow);
+                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow, ReadStreamedRow{{spatial}});
 
                     // An explicit static constructor runs before the first call into this class, so using any
                     // generated method makes the model available to DataVoContext.Table<T>().
@@ -156,6 +163,10 @@ internal static class DataVoTableEmitter
             : $"{column.PropertyName} {column.Type.SqlType}{(column.IsNullable ? string.Empty : " NOT NULL")}"));
         string typeList = string.Join(", ", columns.Select(static column => $"(\"{column.PropertyName}\", \"{column.Type.SqlType}\")"));
         string indexList = string.Join(", ", columns.Where(static column => column.IsIndexed && !column.IsPrimaryKey).Select(static column => $"\"{column.PropertyName}\""));
+        ColumnModel[] spatial = [.. columns.Where(static column => column.IsSpatialIndexed)];
+        string spatialList = spatial.Length == 0
+            ? string.Empty
+            : $",\n                new (string, string)[] {{ {string.Join(", ", spatial.Select(column => $"(\"{column.PropertyName}\", \"{SpatialIndexName(model, column)}\")"))} }}";
         code.AppendLine($$"""
                     /// <summary>Creates the {{model.TableName}} table and its indexes if missing, and verifies an existing table matches the model.</summary>
                     public static void Ensure{{model.ModelName}}Table(this {{Context}} context)
@@ -165,7 +176,7 @@ internal static class DataVoTableEmitter
                             "{{model.TableName}}",
                             "CREATE TABLE {{model.TableName}} ({{definitions}})",
                             new (string, string)[] { {{typeList}} },
-                            new string[] { {{indexList}} });
+                            new string[] { {{indexList}} }{{spatialList}});
                     }
 
             """);
@@ -221,6 +232,11 @@ internal static class DataVoTableEmitter
 
     private static string ParameterExpression(ColumnModel column, string name, string value)
     {
+        if (column.Type.IsVector3)
+        {
+            return $"{Support}.Vector3Parameter(\"{name}\", {value})";
+        }
+
         if (column.Type.UsesObjectParameter)
         {
             return $"{Parameter}.FromObject(\"{name}\", {value})";

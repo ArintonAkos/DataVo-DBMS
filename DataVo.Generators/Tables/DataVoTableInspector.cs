@@ -178,6 +178,21 @@ internal static class DataVoTableInspector
                 continue;
             }
 
+            bool indexed = HasAttribute(property, parameter, "IndexedAttribute");
+            bool spatialIndexed = HasAttribute(property, parameter, "SpatialIndexAttribute");
+            if (spatialIndexed && !column.Type.IsVector3)
+            {
+                report(DataVoGeneratorDiagnostics.SpatialIndexNeedsVector3, property, [property.Name, property.Type.ToDisplayString()]);
+                continue;
+            }
+
+            // A B-tree cannot order points, so [Indexed] on a position means the index that can: a spatial one.
+            if (column.Type.IsVector3)
+            {
+                spatialIndexed |= indexed;
+                indexed = false;
+            }
+
             columns.Add(new ColumnModel(
                 property.Name,
                 property.Type.ToDisplayString(TypeNameFormat),
@@ -185,7 +200,8 @@ internal static class DataVoTableInspector
                 column.IsNullable,
                 column.IsExplicitlyNullable,
                 HasAttribute(property, parameter, "PrimaryKeyAttribute"),
-                HasAttribute(property, parameter, "IndexedAttribute"),
+                indexed,
+                spatialIndexed,
                 parameter is not null,
                 settable));
         }
@@ -242,6 +258,7 @@ internal static class DataVoTableInspector
                 "System.Guid" => new ColumnType("GUID", prefix + "Guid", string.Empty, true, false),
                 "DataVo.Core.DataVoDate" => new ColumnType("DATE", prefix + "Date", string.Empty, true, true),
                 "System.DateOnly" => new ColumnType("DATE", prefix + "Date", nullable ? "?.ToDateOnly()" : ".ToDateOnly()", true, true),
+                "System.Numerics.Vector3" => new ColumnType("VECTOR(3)", prefix + "Vector3", string.Empty, true, false, IsVector3: true),
                 _ => null,
             },
         };

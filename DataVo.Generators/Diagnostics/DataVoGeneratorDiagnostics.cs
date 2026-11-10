@@ -27,7 +27,7 @@ internal static class DataVoGeneratorDiagnostics
         "DATAVOT002", "DataVo table has several primary keys", "Model '{0}' marks several properties [PrimaryKey]; composite keys are not supported");
 
     public static readonly DiagnosticDescriptor UnsupportedPropertyType = Table(
-        "DATAVOT003", "Unsupported DataVo column type", "Property '{0}' has type '{1}', which DataVo cannot store without losing data. Supported types are int, long, float, double, bool, string, Guid, DataVoDate and DateOnly, and their nullable forms.");
+        "DATAVOT003", "Unsupported DataVo column type", "Property '{0}' has type '{1}', which DataVo cannot store without losing data. Supported types are int, long, float, double, bool, string, Guid, DataVoDate, DateOnly and System.Numerics.Vector3, and their nullable forms.");
 
     public static readonly DiagnosticDescriptor NullablePrimaryKey = Table(
         "DATAVOT004", "DataVo primary key is nullable", "Primary key '{0}' cannot be nullable");
@@ -40,6 +40,9 @@ internal static class DataVoGeneratorDiagnostics
 
     public static readonly DiagnosticDescriptor InvalidTableName = Table(
         "DATAVOT007", "Invalid DataVo table name", "'{0}' is not a valid table or column name");
+
+    public static readonly DiagnosticDescriptor SpatialIndexNeedsVector3 = Table(
+        "DATAVOT008", "[SpatialIndex] needs a 3D position", "Property '{0}' is marked [SpatialIndex] but has type '{1}'; only a System.Numerics.Vector3 property can have a spatial index");
 
     public static readonly DiagnosticDescriptor LinqCapturedVariable = Linq(
         "DATAVOL001",

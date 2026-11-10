@@ -22,6 +22,7 @@ public sealed class DataVoTableGenerator : IIncrementalGenerator
         DataVoGeneratorDiagnostics.NoUsableConstructor,
         DataVoGeneratorDiagnostics.UnsupportedModelShape,
         DataVoGeneratorDiagnostics.InvalidTableName,
+        DataVoGeneratorDiagnostics.SpatialIndexNeedsVector3,
     ];
 
     /// <inheritdoc />

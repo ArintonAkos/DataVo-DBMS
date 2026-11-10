@@ -44,3 +44,15 @@ public sealed class PrimaryKeyAttribute : Attribute;
 /// </example>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
 public sealed class IndexedAttribute : Attribute;
+
+/// <summary>
+/// Creates a Euclidean HNSW index on a <see cref="System.Numerics.Vector3"/> position property when the table is
+/// ensured, so <c>DataVoTable&lt;T&gt;.NearestNeighbors</c> is answered from the index instead of a scan.
+/// </summary>
+/// <example>
+/// <code>
+/// [SpatialIndex] public Vector3 Position { get; set; }
+/// </code>
+/// </example>
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+public sealed class SpatialIndexAttribute : Attribute;

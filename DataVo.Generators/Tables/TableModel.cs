@@ -36,7 +36,8 @@ namespace DataVo.Generators.Tables
     /// <param name="SqlType">The SQL type.</param>
     /// <param name="ReaderMethod">The support method that reads the value.</param>
     /// <param name="ReadSuffix">Code appended to the read to convert it to the property's type.</param>
-    internal sealed record ColumnType(string SqlType, string ReaderMethod, string ReadSuffix, bool IsValueType, bool UsesObjectParameter);
+    /// <param name="IsVector3">Whether the column is a 3D position (<c>System.Numerics.Vector3</c> stored as VECTOR(3)).</param>
+    internal sealed record ColumnType(string SqlType, string ReaderMethod, string ReadSuffix, bool IsValueType, bool UsesObjectParameter, bool IsVector3 = false);
 
     /// <summary>One model property stored as a column.</summary>
     internal sealed record ColumnModel(
@@ -47,6 +48,7 @@ namespace DataVo.Generators.Tables
         bool IsExplicitlyNullable,
         bool IsPrimaryKey,
         bool IsIndexed,
+        bool IsSpatialIndexed,
         bool IsConstructorParameter,
         bool IsSettable);
 

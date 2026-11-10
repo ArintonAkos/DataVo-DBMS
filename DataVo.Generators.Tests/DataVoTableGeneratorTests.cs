@@ -119,6 +119,71 @@ public class DataVoTableGeneratorTests
         Assert.Contains("Big", source.Split('\n')[position.StartLinePosition.Line]);
     }
 
+    private const string SpatialModel = Header + """
+        [DataVoTable("ships")]
+        public sealed class Ship
+        {
+            [PrimaryKey] public int Id { get; set; }
+            [SpatialIndex] public System.Numerics.Vector3 Position { get; set; }
+            [Indexed] public System.Numerics.Vector3 Spawn { get; set; }
+            public System.Numerics.Vector3? Target { get; set; }
+        }
+        """;
+
+    [Fact]
+    public void Vector3_IsAThreeComponentVectorColumn()
+    {
+        string generated = GeneratedText(SpatialModel);
+
+        Assert.Contains("Position VECTOR(3) NOT NULL", generated);
+        Assert.Contains("Target VECTOR(3)", generated);
+        Assert.DoesNotContain("Target VECTOR(3) NOT NULL", generated);
+        Assert.Contains("ReadVector3(row[\"Position\"], \"Position\")", generated);
+        Assert.Contains("ReadNullableVector3(row[\"Target\"], \"Target\")", generated);
+        Assert.Contains("Vector3Parameter(\"p1\", entity.Position)", generated);
+    }
+
+    [Fact]
+    public void Vector3_IsDescribedAsAPositionColumn_AndIndexedSpatially()
+    {
+        string generated = GeneratedText(SpatialModel);
+
+        Assert.Contains("new global::DataVo.Core.DataVoSpatialColumn(\"Position\", \"sx_ships_Position\")", generated);
+        Assert.Contains("new global::DataVo.Core.DataVoSpatialColumn(\"Spawn\", \"sx_ships_Spawn\")", generated);
+        Assert.Contains("new global::DataVo.Core.DataVoSpatialColumn(\"Target\", null)", generated);
+        Assert.Contains("(\"Position\", \"sx_ships_Position\"), (\"Spawn\", \"sx_ships_Spawn\")", generated);
+
+        // [Indexed] on a position asks for the spatial index, never a B-tree over vectors.
+        Assert.Contains("new string[] {  }", generated);
+    }
+
+    [Fact]
+    public void SpatialModel_CompilesAsCSharp9WithNoErrors()
+    {
+        (Compilation output, _) = Run(SpatialModel, LanguageVersion.CSharp9);
+
+        Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void ModelWithoutPositions_HasNoSpatialColumns()
+    {
+        string generated = GeneratedText(ValidModel);
+
+        Assert.DoesNotContain("DataVoSpatialColumn", generated);
+        Assert.Contains("new global::DataVo.Core.DataVoTableInfo<global::App.Player>(\"players\", \"Id, Level, Name\", ReadRow, ReadStreamedRow);", generated);
+    }
+
+    [Fact]
+    public void SpatialIndex_OnANonPosition_ReportsAnError()
+    {
+        string source = ValidModel.Replace("[Indexed] public int Level", "[SpatialIndex] public int Level");
+
+        Diagnostic diagnostic = Assert.Single(Run(source).Diagnostics);
+        Assert.Equal("DATAVOT008", diagnostic.Id);
+        Assert.Contains("Level", diagnostic.GetMessage());
+    }
+
     [Fact]
     public void UnrelatedEdit_DoesNotRegenerate()
     {

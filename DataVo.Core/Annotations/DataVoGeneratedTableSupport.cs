@@ -23,7 +23,24 @@ public static class DataVoGeneratedTableSupport
         string tableName,
         string createTableSql,
         (string Name, string SqlType)[] columns,
-        string[] indexedColumns)
+        string[] indexedColumns) =>
+        EnsureTable(context, tableName, createTableSql, columns, indexedColumns, []);
+
+    /// <summary>Creates a model's table and indexes when missing, and verifies an existing table matches the model.</summary>
+    /// <param name="context">The context whose current database owns the table.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="createTableSql">The statement that creates the table.</param>
+    /// <param name="columns">Each model column and its SQL type.</param>
+    /// <param name="indexedColumns">The columns that need a secondary index.</param>
+    /// <param name="spatialIndexes">The position columns that need a Euclidean HNSW index, and each index's name.</param>
+    /// <exception cref="InvalidOperationException">No database is selected, a statement failed, or the table does not match.</exception>
+    public static void EnsureTable(
+        DataVoContext context,
+        string tableName,
+        string createTableSql,
+        (string Name, string SqlType)[] columns,
+        string[] indexedColumns,
+        (string Column, string IndexName)[] spatialIndexes)
     {
         string databaseName = context.Engine.Sessions.Get(context.SessionId)
             ?? throw new InvalidOperationException($"Select a database before ensuring table {tableName}.");
@@ -37,6 +54,11 @@ public static class DataVoGeneratedTableSupport
         foreach (string column in indexedColumns)
         {
             EnsureIndex(context, tableName, databaseName, column);
+        }
+
+        foreach ((string column, string indexName) in spatialIndexes)
+        {
+            EnsureSpatialIndex(context, tableName, databaseName, column, indexName);
         }
     }
 
@@ -152,12 +174,76 @@ public static class DataVoGeneratedTableSupport
                 throw new InvalidOperationException($"Table {tableName} has no column {name}, which the model requires.");
             }
 
-            if (!match.Type.Equals(sqlType, StringComparison.OrdinalIgnoreCase))
+            if (!SameType(match, sqlType))
             {
                 throw new InvalidOperationException($"Column {tableName}.{name} is {match.Type}, but the model requires {sqlType}.");
             }
         }
     }
+
+    // A declared VECTOR(3) is stored as type VECTOR with length 3.
+    private static bool SameType(Column column, string sqlType)
+    {
+        int parenthesis = sqlType.IndexOf('(');
+        if (parenthesis < 0)
+        {
+            return column.Type.Equals(sqlType, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return column.Type.Equals(sqlType[..parenthesis], StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(sqlType[(parenthesis + 1)..^1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int length)
+            && column.Length == length;
+    }
+
+    private static void EnsureSpatialIndex(DataVoContext context, string tableName, string databaseName, string column, string indexName)
+    {
+        IndexFile? existing = context.Engine.Catalog.GetTableIndexes(tableName, databaseName)
+            .FirstOrDefault(index => index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            bool matches = existing.IndexKind.Equals("HNSW", StringComparison.OrdinalIgnoreCase)
+                && existing.EffectiveMetric == IndexFile.EuclideanMetric
+                && existing.AttributeNames.Count == 1
+                && existing.AttributeNames[0].Equals(column, StringComparison.OrdinalIgnoreCase);
+            if (!matches)
+            {
+                throw new InvalidOperationException(
+                    $"Index {indexName} on {tableName} exists but is not a Euclidean HNSW index on {column}, which [SpatialIndex] requires. Drop it and ensure the table again.");
+            }
+
+            return;
+        }
+
+        string sql = $"CREATE INDEX {indexName} ON {tableName} ({column}) USING HNSW WITH (metric = 'euclidean')";
+        ThrowIfError(context.Execute(sql)[^1], sql);
+    }
+
+    /// <summary>Reads a required VECTOR(3) column as a 3D point.</summary>
+    public static System.Numerics.Vector3 ReadVector3(object? value, string column) => value switch
+    {
+        float[] { Length: 3 } xyz => new System.Numerics.Vector3(xyz[0], xyz[1], xyz[2]),
+        null => throw NullColumn(column),
+        float[] other => throw new InvalidOperationException($"Column {column} holds {other.Length} values, but a 3D position needs 3."),
+        _ => throw new InvalidOperationException($"Column {column} does not hold a 3D position."),
+    };
+
+    /// <summary>Reads a nullable VECTOR(3) column as a 3D point.</summary>
+    public static System.Numerics.Vector3? ReadNullableVector3(object? value, string column) =>
+        value is null ? null : ReadVector3(value, column);
+
+    /// <summary>Binds a 3D point to a VECTOR(3) parameter.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The point.</param>
+    /// <returns>The parameter.</returns>
+    public static DataVoQueryParameter Vector3Parameter(string name, System.Numerics.Vector3 value) =>
+        DataVoQueryParameter.FromObject(name, new[] { value.X, value.Y, value.Z });
+
+    /// <summary>Binds a nullable 3D point to a VECTOR(3) parameter.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The point, or null.</param>
+    /// <returns>The parameter.</returns>
+    public static DataVoQueryParameter Vector3Parameter(string name, System.Numerics.Vector3? value) =>
+        value is { } point ? Vector3Parameter(name, point) : DataVoQueryParameter.Null(name);
 
     private static void EnsureIndex(DataVoContext context, string tableName, string databaseName, string column)
     {

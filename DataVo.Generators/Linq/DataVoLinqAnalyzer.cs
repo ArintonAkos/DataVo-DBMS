@@ -236,6 +236,11 @@ internal static class DataVoLinqAnalyzer
             }
 
             (ColumnModel column, IPropertySymbol property) = (left ?? right)!.Value;
+            if (column.Type.IsVector3)
+            {
+                return Fail($"column {column.PropertyName} is a 3D position, which SQL cannot compare; use WithinRadius, WithinBoundingBox or NearestNeighbors");
+            }
+
             ExpressionSyntax columnSide = left is null ? binary.Right : binary.Left;
             ExpressionSyntax valueSide = left is null ? binary.Left : binary.Right;
             if (left is null)
