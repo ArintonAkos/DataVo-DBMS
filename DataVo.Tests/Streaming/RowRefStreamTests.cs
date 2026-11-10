@@ -370,12 +370,20 @@ public sealed class RowRefStreamTests : IDisposable
         Assert.Equal(Checksum(Rows), Pass(table, out int warmCount)); // warm the page buffers, the JIT and the plan
         Assert.Equal(Rows, warmCount);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        long checksum = Pass(table, out int count);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Anything the stream itself allocates, per row or per page, shows up in every pass. The runtime can also
+        // charge a one-off allocation of its own to this thread while the rest of the suite runs beside it (seen
+        // once on a CI runner: 4,184 bytes in one pass), so the quietest of several passes is the one asserted.
+        long allocated = long.MaxValue;
+        for (int pass = 0; pass < 5; pass++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            long checksum = Pass(table, out int count);
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
 
-        Assert.Equal(Rows, count);
-        Assert.Equal(Checksum(Rows), checksum);
+            Assert.Equal(Rows, count);
+            Assert.Equal(Checksum(Rows), checksum);
+        }
+
         if (mode == StorageMode.Disk)
         {
             // The legacy disk engine opens a FileStream for each page (~160 bytes; ~8 KB over 50,000 rows). Its
