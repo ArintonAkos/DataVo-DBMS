@@ -195,6 +195,60 @@ public sealed partial class DataVoPreparedStatement
         => ExecuteBorrowed(SpanOf(in p0), _defaultSessionId);
 
     /// <summary>
+    /// Executes the prepared statement with no parameters without allocating a result when a fast path answers it.
+    /// </summary>
+    /// <returns>A result to read immediately. See <see cref="ExecuteBorrowed(ReadOnlySpan{DataVoQueryParameter}, Guid)"/>.</returns>
+    public QueryResult ExecuteBorrowed()
+        => ExecuteBorrowed(ReadOnlySpan<DataVoQueryParameter>.Empty, _defaultSessionId);
+
+    /// <summary>
+    /// Executes the prepared statement with two parameters without allocating a result when a fast path answers it.
+    /// </summary>
+    /// <param name="p0">The first parameter binding.</param>
+    /// <param name="p1">The second parameter binding.</param>
+    /// <returns>A result to read immediately. See <see cref="ExecuteBorrowed(ReadOnlySpan{DataVoQueryParameter}, Guid)"/>.</returns>
+    public QueryResult ExecuteBorrowed(DataVoQueryParameter p0, DataVoQueryParameter p1)
+    {
+        TwoParams buffer = new(p0, p1);
+        return ExecuteBorrowed(buffer.AsSpan(), _defaultSessionId);
+    }
+
+    /// <summary>
+    /// Executes the prepared statement with three parameters without allocating a result when a fast path answers it.
+    /// </summary>
+    /// <param name="p0">The first parameter binding.</param>
+    /// <param name="p1">The second parameter binding.</param>
+    /// <param name="p2">The third parameter binding.</param>
+    /// <returns>A result to read immediately. See <see cref="ExecuteBorrowed(ReadOnlySpan{DataVoQueryParameter}, Guid)"/>.</returns>
+    public QueryResult ExecuteBorrowed(DataVoQueryParameter p0, DataVoQueryParameter p1, DataVoQueryParameter p2)
+    {
+        ThreeParams buffer = new(p0, p1, p2);
+        return ExecuteBorrowed(buffer.AsSpan(), _defaultSessionId);
+    }
+
+    /// <summary>
+    /// Executes the prepared statement with four parameters without allocating a result when a fast path answers it.
+    /// </summary>
+    /// <param name="p0">The first parameter binding.</param>
+    /// <param name="p1">The second parameter binding.</param>
+    /// <param name="p2">The third parameter binding.</param>
+    /// <param name="p3">The fourth parameter binding.</param>
+    /// <returns>A result to read immediately. See <see cref="ExecuteBorrowed(ReadOnlySpan{DataVoQueryParameter}, Guid)"/>.</returns>
+    public QueryResult ExecuteBorrowed(DataVoQueryParameter p0, DataVoQueryParameter p1, DataVoQueryParameter p2, DataVoQueryParameter p3)
+    {
+        FourParams buffer = new(p0, p1, p2, p3);
+        return ExecuteBorrowed(buffer.AsSpan(), _defaultSessionId);
+    }
+
+    /// <summary>
+    /// Executes the prepared statement with a span of parameters without allocating a result when a fast path answers it.
+    /// </summary>
+    /// <param name="parameters">The parameter bindings.</param>
+    /// <returns>A result to read immediately. See <see cref="ExecuteBorrowed(ReadOnlySpan{DataVoQueryParameter}, Guid)"/>.</returns>
+    public QueryResult ExecuteBorrowed(ReadOnlySpan<DataVoQueryParameter> parameters)
+        => ExecuteBorrowed(parameters, _defaultSessionId);
+
+    /// <summary>
     /// Executes the prepared statement against an explicit session without allocating a result when a fast path answers it.
     /// </summary>
     /// <param name="parameters">The parameter bindings.</param>
