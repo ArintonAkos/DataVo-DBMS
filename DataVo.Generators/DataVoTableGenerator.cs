@@ -1,6 +1,7 @@
 using DataVo.Generators.Diagnostics;
 using DataVo.Generators.Tables;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
@@ -33,8 +34,14 @@ public sealed class DataVoTableGenerator : IIncrementalGenerator
                 (INamedTypeSymbol)attributeContext.TargetSymbol,
                 attributeContext.Attributes[0].ConstructorArguments.FirstOrDefault().Value as string));
 
-        context.RegisterSourceOutput(models, static (output, inspection) =>
+        // Module initializers need C# 9 and the attribute, which Unity's profile lacks; there a model registers on first use.
+        IncrementalValueProvider<bool> moduleInitializers = context.CompilationProvider.Select(static (compilation, _) =>
+            compilation is CSharpCompilation { LanguageVersion: >= LanguageVersion.CSharp9 }
+            && compilation.GetTypeByMetadataName("System.Runtime.CompilerServices.ModuleInitializerAttribute") is { DeclaredAccessibility: Accessibility.Public });
+
+        context.RegisterSourceOutput(models.Combine(moduleInitializers), static (output, pair) =>
         {
+            TableInspection inspection = pair.Left;
             foreach (DiagnosticInfo info in inspection.Diagnostics)
             {
                 output.ReportDiagnostic(ToDiagnostic(info));
@@ -42,7 +49,7 @@ public sealed class DataVoTableGenerator : IIncrementalGenerator
 
             if (inspection.Model is { } model)
             {
-                output.AddSource(model.HintName, SourceText.From(DataVoTableEmitter.Emit(model), System.Text.Encoding.UTF8));
+                output.AddSource(model.HintName, SourceText.From(DataVoTableEmitter.Emit(model, pair.Right), System.Text.Encoding.UTF8));
             }
         });
     }

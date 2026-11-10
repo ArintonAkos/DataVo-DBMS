@@ -11,7 +11,7 @@ internal static class DataVoTableEmitter
     private const string Statement = Core + "DataVoPreparedStatement";
     private const string Context = Core + "DataVoContext";
 
-    public static string Emit(TableModel model)
+    public static string Emit(TableModel model, bool moduleInitializer)
     {
         ColumnModel[] columns = [.. model.Columns];
         ColumnModel key = columns.Single(static column => column.IsPrimaryKey);
@@ -33,6 +33,7 @@ internal static class DataVoTableEmitter
         code.AppendLine("    {");
         EmitStatements(code, model, columns, values, key, nameList);
         EmitReader(code, model, columns);
+        EmitTable(code, model, nameList, moduleInitializer);
         EmitEnsure(code, model, columns, key);
         EmitGet(code, model, key, nullableResult);
         EmitInsert(code, model, columns);
@@ -105,6 +106,36 @@ internal static class DataVoTableEmitter
         }
 
         code.AppendLine("            };").AppendLine();
+    }
+
+    private static void EmitTable(StringBuilder code, TableModel model, string nameList, bool moduleInitializer)
+    {
+        string type = $"{Core}DataVoTableInfo<{model.FullTypeName}>";
+        code.AppendLine($$"""
+                    /// <summary>Describes the {{model.TableName}} table to DataVo. Used by generated code.</summary>
+                    [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow);
+
+                    // An explicit static constructor runs before the first call into this class, so using any
+                    // generated method makes the model available to DataVoContext.Table<T>().
+                    static {{model.ModelName}}DataVoExtensions()
+                    {
+                        {{type}}.Register({{model.ModelName}}TableInfo);
+                    }
+
+            """);
+        if (moduleInitializer)
+        {
+            code.AppendLine($$"""
+                        /// <summary>Registers the model when the program starts.</summary>
+                        [global::System.Runtime.CompilerServices.ModuleInitializer]
+                        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+                        internal static void Register{{model.ModelName}}Table()
+                        {
+                        }
+
+                """);
+        }
     }
 
     private static string ReadExpression(ColumnModel column) =>

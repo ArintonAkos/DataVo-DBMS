@@ -255,6 +255,27 @@ public sealed class DataVoContext : IDisposable
         QueryStream.Open(Engine, query, [], sessionId);
 
     /// <summary>
+    /// Gets the typed, queryable table of a <c>[DataVoTable]</c> model.
+    /// </summary>
+    /// <typeparam name="T">A model marked <c>[DataVoTable]</c>, for which <c>DataVo.Generators</c> has emitted data access.</typeparam>
+    /// <returns>The model's table. The same instance is returned until <see cref="SessionId"/> changes.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="T"/> has no generated data access, or its generated code has not run yet. Models register
+    /// themselves when the program starts; on a compiler without module initializers, such as Unity's, a model
+    /// registers the first time one of its generated methods is called, so call its <c>Ensure…Table</c> method first.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// Player? player = context.Table&lt;Player&gt;().FirstOrDefault(id, static (p, key) => p.Id == key);
+    /// foreach (Player p in context.Table&lt;Player&gt;().Where(minLevel, static (p, min) => p.Level >= min))
+    /// {
+    ///     Console.WriteLine(p.Name);
+    /// }
+    /// </code>
+    /// </example>
+    public DataVoTable<T> Table<T>() => DataVoTableInfo<T>.Registered.For(this);
+
+    /// <summary>
     /// Pre-parses and compiles a parameterized SQL statement for repeated execution under the current <see cref="SessionId"/>.
     /// </summary>
     /// <param name="sql">The SQL statement text, which may contain <c>@param</c> placeholders.</param>

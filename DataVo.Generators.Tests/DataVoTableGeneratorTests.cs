@@ -32,6 +32,16 @@ public class DataVoTableGeneratorTests
     }
 
     [Fact]
+    public void Model_RegistersItselfForContextTable()
+    {
+        string generated = GeneratedText(ValidModel);
+
+        Assert.Contains("global::DataVo.Core.DataVoTableInfo<global::App.Player>.Register(PlayerTableInfo);", generated);
+        Assert.Contains("static PlayerDataVoExtensions()", generated);
+        Assert.Contains("[global::System.Runtime.CompilerServices.ModuleInitializer]", generated);
+    }
+
+    [Fact]
     public void Output_CompilesAsCSharp9WithNoErrors()
     {
         (Compilation output, _) = Run(ValidModel, LanguageVersion.CSharp9);
