@@ -879,6 +879,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             Examined = 0;
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public bool Visit(RowKey rowId, ulong sequence, ReadOnlySpan<byte> value)
         {
             Inner.Visit(rowId, value, null);
@@ -901,6 +902,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             Any = false;
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed)
         {
             Last = rowId;

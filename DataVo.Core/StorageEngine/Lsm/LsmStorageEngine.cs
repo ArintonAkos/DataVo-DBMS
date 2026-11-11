@@ -2145,6 +2145,10 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         }
     }
 
+    // Compiled fully optimized on first use, with the visitor inlined. Left to tiered compilation, the per-row
+    // code of some instantiations (there is one per compiled query) was never promoted past its first,
+    // unoptimized version, and those queries ran 3 to 4 times slower than the rest.
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private RowKey? MergeLiveRows<TVisitor>(TableState state, ref TVisitor visitor, RowKey? lower, RowKey? upper, int overlayLimit, MergeScratch scratch)
         where TVisitor : struct, ILiveRowVisitor
     {

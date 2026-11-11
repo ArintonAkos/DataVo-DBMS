@@ -225,6 +225,8 @@ public readonly struct RowRefStream
 
         public readonly bool Full => _limit > 0 && Totals.Count >= _limit;
 
+        // Inlined into the storage engine's row loop; the general reader, which few rows need, stays a call.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed)
         {
             if (Full)
@@ -258,6 +260,13 @@ public readonly struct RowRefStream
                 }
             }
 
+            VisitThroughRowRef(rowId, stored, typed);
+        }
+
+        /// <summary>Tests a row the direct readers cannot take: one that is not laid out as the scan expects.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void VisitThroughRowRef(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed)
+        {
             RowRef row = typed is null
                 ? _page.InPlace(rowId, stored, _columns)
                 : _page.InPlace(rowId, typed, _columns, _needed);
