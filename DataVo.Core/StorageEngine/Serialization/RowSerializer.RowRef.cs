@@ -29,7 +29,22 @@ public static partial class RowSerializer
 
             flagOffsets[i] = offset;
             bool isNull = row[offset++] != 0;
-            if (!isNull && !TryAdvancePastValue(row, kinds[i], ref offset))
+            if (isNull)
+            {
+                continue;
+            }
+
+            // Most cells have a fixed width, which is added without a call.
+            int width = FixedWidths[(int)kinds[i]];
+            if (width != 0)
+            {
+                offset += width;
+                if (offset > row.Length)
+                {
+                    return false;
+                }
+            }
+            else if (!TryAdvancePastValue(row, kinds[i], ref offset))
             {
                 return false;
             }
@@ -37,6 +52,9 @@ public static partial class RowSerializer
 
         return true;
     }
+
+    // The stored width of each StorageColumnType's value, in enum order; 0 for the variable-width kinds.
+    private static ReadOnlySpan<byte> FixedWidths => [4, 8, 4, 8, 1, 8, 8, 16, 0, 0];
 
     private static bool TryAdvancePastValue(ReadOnlySpan<byte> row, StorageColumnType kind, ref int offset)
     {

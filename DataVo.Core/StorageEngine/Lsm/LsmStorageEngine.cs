@@ -2074,6 +2074,16 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     private delegate bool LiveRowVisitor<TState>(ref TState state, RowKey rowId, ulong sequence, ReadOnlySpan<byte> value);
 
     /// <summary>
+    /// Receives the live rows of a merge. Implementations are structs, and the merge is generic over the struct,
+    /// so the visitor's code is compiled into the merge loop. Return false to stop the merge.
+    /// </summary>
+    internal interface ILiveRowVisitor
+    {
+        /// <summary>Receives the newest version of one live row, in stored form.</summary>
+        bool Visit(RowKey rowId, ulong sequence, ReadOnlySpan<byte> value);
+    }
+
+    /// <summary>
     /// Every live row in key order: a k-way merge of the unflushed overlay and the SSTable cursors
     /// (newest source wins per row id, deletions suppress). The overlay is captured before the file set
     /// for the same reason as in <see cref="ResolveRow"/>. The value span is only valid during the call.
@@ -2085,10 +2095,49 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// </remarks>
     private RowKey? MergeLiveRows<TState>(TableState state, ref TState visitorState, LiveRowVisitor<TState> visit, RowKey? lower = null, RowKey? upper = null, int overlayLimit = int.MaxValue)
     {
+        var visitor = new DelegateLiveRowVisitor<TState>(visitorState, visit);
+        try
+        {
+            return MergeLiveRows(state, ref visitor, lower, upper, overlayLimit);
+        }
+        finally
+        {
+            visitorState = visitor.State;
+        }
+    }
+
+    /// <summary>Runs a <see cref="LiveRowVisitor{TState}"/> delegate as a struct visitor.</summary>
+    private struct DelegateLiveRowVisitor<TState> : ILiveRowVisitor
+    {
+        private readonly LiveRowVisitor<TState> _visit;
+
+        public TState State;
+
+        public DelegateLiveRowVisitor(TState state, LiveRowVisitor<TState> visit)
+        {
+            State = state;
+            _visit = visit;
+        }
+
+        public bool Visit(RowKey rowId, ulong sequence, ReadOnlySpan<byte> value) => _visit(ref State, rowId, sequence, value);
+    }
+
+    /// <summary>
+    /// Scans the live rows of a table in key order with a struct visitor, which is compiled into the merge loop:
+    /// no delegate is called per row. See <see cref="ScanStoredRows{TState}(string, string, RowKey?, RowKey?, ref TState, StoredRowScanVisitor{TState}, int, out RowKey?)"/>
+    /// for <paramref name="overlayLimit"/> and <paramref name="coveredThrough"/>.
+    /// </summary>
+    internal void ScanLiveRows<TVisitor>(string databaseName, string tableName, RowKey? lower, RowKey? upper, ref TVisitor visitor, int overlayLimit, out RowKey? coveredThrough)
+        where TVisitor : struct, ILiveRowVisitor =>
+        coveredThrough = MergeLiveRows(GetOrCreateTable(databaseName, tableName), ref visitor, lower, upper, overlayLimit);
+
+    private RowKey? MergeLiveRows<TVisitor>(TableState state, ref TVisitor visitor, RowKey? lower, RowKey? upper, int overlayLimit)
+        where TVisitor : struct, ILiveRowVisitor
+    {
         MergeScratch scratch = MergeScratch.Rent();
         try
         {
-            return MergeLiveRows(state, ref visitorState, visit, lower, upper, overlayLimit, scratch);
+            return MergeLiveRows(state, ref visitor, lower, upper, overlayLimit, scratch);
         }
         finally
         {
@@ -2096,7 +2145,8 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         }
     }
 
-    private RowKey? MergeLiveRows<TState>(TableState state, ref TState visitorState, LiveRowVisitor<TState> visit, RowKey? lower, RowKey? upper, int overlayLimit, MergeScratch scratch)
+    private RowKey? MergeLiveRows<TVisitor>(TableState state, ref TVisitor visitor, RowKey? lower, RowKey? upper, int overlayLimit, MergeScratch scratch)
+        where TVisitor : struct, ILiveRowVisitor
     {
         List<(RowKey RowId, ulong Sequence, byte[]? Value)> overlay = scratch.Overlay;
         bool truncated = state.LatestRows.ForEachVersion(overlay, static (list, rowId, sequence, value) => list.Add((rowId, sequence, value)), lower, upper, overlayLimit);
@@ -2164,7 +2214,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 if (overlayIndex < overlay.Count && overlay[overlayIndex].RowId == next)
                 {
                     (_, ulong sequence, byte[]? value) = overlay[overlayIndex];
-                    if (value is not null && !visit(ref visitorState, next, sequence, value))
+                    if (value is not null && !visitor.Visit(next, sequence, value))
                     {
                         return null;
                     }
@@ -2185,7 +2235,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 }
 
                 if (winner >= 0 && cursors[winner]!.Type == LsmValueType.Put
-                    && !visit(ref visitorState, next, cursors[winner]!.Sequence, cursors[winner]!.Value))
+                    && !visitor.Visit(next, cursors[winner]!.Sequence, cursors[winner]!.Value))
                 {
                     return null;
                 }

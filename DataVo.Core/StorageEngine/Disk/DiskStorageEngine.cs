@@ -303,6 +303,26 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
         ref TState state,
         PagedRowVisitor<TState> visit)
     {
+        var visitor = new DelegatePagedRowVisitor<TState>(state, visit);
+        try
+        {
+            return ((IPagedRowScan)this).ScanPage(databaseName, tableName, afterRowId, expectedGeneration, maxRows, ref visitor);
+        }
+        finally
+        {
+            state = visitor.State;
+        }
+    }
+
+    /// <inheritdoc />
+    PageScan IPagedRowScan.ScanPage<TVisitor>(
+        string databaseName,
+        string tableName,
+        long? afterRowId,
+        long? expectedGeneration,
+        int maxRows,
+        ref TVisitor visitor)
+    {
         (string filePath, object fileLock) = _pagedTargets.GetOrAdd(
             (databaseName, tableName),
             static (key, engine) =>
@@ -352,7 +372,7 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
                         continue;
                     }
 
-                    visit(ref state, rowId, window.Read(offset, length), null);
+                    visitor.Visit(rowId, window.Read(offset, length), null);
                     offset += length;
                     visited++;
                 }

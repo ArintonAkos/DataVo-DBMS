@@ -763,6 +763,152 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Receives the rows of <see cref="ScanRowBlock{TVisitor}"/>. Implementations are structs, and the scan is
+    /// generic over the struct all the way into the storage engine, so the visitor's code is compiled into the
+    /// engine's own row loop: no delegate is called per row.
+    /// </summary>
+    internal interface IStoredRowVisitor
+    {
+        /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
+        void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed);
+    }
+
+    /// <summary>
+    /// Examines up to <paramref name="maxRows"/> more rows of a table with a struct visitor and advances the
+    /// cursor, like <see cref="ScanRowPage{TState}"/> without key bounds. Returns false when this backend or the
+    /// current flow cannot scan this way (an active snapshot or staged writes).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The table was rewritten since the scan started.</exception>
+    internal bool ScanRowBlock<TVisitor>(string tableName, string databaseName, RowPageCursor cursor, int maxRows, ref TVisitor visitor)
+        where TVisitor : struct, IStoredRowVisitor
+    {
+        if (LsmEngine is { } lsm)
+        {
+            RowKey? start = null;
+            if (cursor.After is { } after)
+            {
+                if (after.High == ulong.MaxValue && after.Low == ulong.MaxValue)
+                {
+                    cursor.Done = true;
+                    return true;
+                }
+
+                start = after.Low == ulong.MaxValue ? new RowKey(after.High + 1, 0) : new RowKey(after.High, after.Low + 1);
+            }
+
+            if (MvccExecutionScope.CurrentSnapshot is not null || lsm.HasStagedWrites(databaseName, tableName))
+            {
+                return false;
+            }
+
+            var live = new LsmBlockVisitor<TVisitor>(visitor, maxRows);
+            RowKey? coveredThrough;
+            try
+            {
+                lsm.ScanLiveRows(databaseName, tableName, start, null, ref live, maxRows, out coveredThrough);
+            }
+            finally
+            {
+                visitor = live.Inner;
+            }
+
+            if (live.Examined > 0)
+            {
+                cursor.After = live.Last;
+            }
+
+            if (live.Examined >= maxRows)
+            {
+                cursor.Done = false; // the visitor stopped the block; the scan resumes after the last row it saw
+            }
+            else if (coveredThrough is { } covered)
+            {
+                cursor.After = covered; // every key up to here is accounted for, including deleted ones
+                cursor.Done = false;
+            }
+            else
+            {
+                cursor.Done = true;
+            }
+
+            return true;
+        }
+
+        if (_storageEngine is not IPagedRowScan paged)
+        {
+            return false;
+        }
+
+        var block = new PagedBlockVisitor<TVisitor>(visitor);
+        long? afterId = cursor.After is { } last ? RowKeyConversions.ToRowId(last) : null;
+        PageScan scan;
+        try
+        {
+            scan = paged.ScanPage(databaseName, tableName, afterId, cursor.Generation, maxRows, ref block);
+        }
+        finally
+        {
+            visitor = block.Inner;
+        }
+
+        if (block.Any)
+        {
+            cursor.After = (RowKey)block.Last;
+        }
+
+        cursor.Generation = scan.Generation;
+        cursor.Done = scan.ReachedEnd;
+        return true;
+    }
+
+    private struct LsmBlockVisitor<TVisitor> : LsmStorageEngine.ILiveRowVisitor
+        where TVisitor : struct, IStoredRowVisitor
+    {
+        private readonly int _maxRows;
+
+        public TVisitor Inner;
+        public RowKey Last;
+        public int Examined;
+
+        public LsmBlockVisitor(TVisitor inner, int maxRows)
+        {
+            Inner = inner;
+            _maxRows = maxRows;
+            Last = default;
+            Examined = 0;
+        }
+
+        public bool Visit(RowKey rowId, ulong sequence, ReadOnlySpan<byte> value)
+        {
+            Inner.Visit(rowId, value, null);
+            Last = rowId;
+            return ++Examined < _maxRows;
+        }
+    }
+
+    private struct PagedBlockVisitor<TVisitor> : IPagedRowVisitor
+        where TVisitor : struct, IStoredRowVisitor
+    {
+        public TVisitor Inner;
+        public long Last;
+        public bool Any;
+
+        public PagedBlockVisitor(TVisitor inner)
+        {
+            Inner = inner;
+            Last = 0;
+            Any = false;
+        }
+
+        public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed)
+        {
+            Last = rowId;
+            Any = true;
+            Inner.Visit(rowId, raw, typed);
+        }
+    }
+
     private struct LsmPageBox<TState>(TState state, RawRowVisitor<TState> visit, RowPageCursor cursor, int maxRows)
     {
         public TState State = state;

@@ -187,6 +187,26 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         ref TState state,
         PagedRowVisitor<TState> visit)
     {
+        var visitor = new DelegatePagedRowVisitor<TState>(state, visit);
+        try
+        {
+            return ((IPagedRowScan)this).ScanPage(databaseName, tableName, afterRowId, expectedGeneration, maxRows, ref visitor);
+        }
+        finally
+        {
+            state = visitor.State;
+        }
+    }
+
+    /// <inheritdoc />
+    PageScan IPagedRowScan.ScanPage<TVisitor>(
+        string databaseName,
+        string tableName,
+        long? afterRowId,
+        long? expectedGeneration,
+        int maxRows,
+        ref TVisitor visitor)
+    {
         if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
         {
             return new PageScan(true, 0);
@@ -207,7 +227,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             {
                 if (store.Rows[index] is { } row && (row.Raw is not null || row.Typed is not null))
                 {
-                    visit(ref state, index + 1, row.Raw, row.Typed);
+                    visitor.Visit(index + 1, row.Raw, row.Typed);
                     visited++;
                 }
             }

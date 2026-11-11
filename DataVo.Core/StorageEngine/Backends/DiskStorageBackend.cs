@@ -26,6 +26,8 @@ internal sealed class DiskStorageBackend : IStorageBackend, IPagedRowScan, IDisp
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.ReadAllRows(databaseName, tableName));
     PageScan IPagedRowScan.VisitPage<TState>(string databaseName, string tableName, long? afterRowId, long? expectedGeneration, int maxRows, ref TState state, PagedRowVisitor<TState> visit) =>
         ((IPagedRowScan)_inner).VisitPage(databaseName, tableName, afterRowId, expectedGeneration, maxRows, ref state, visit);
+    PageScan IPagedRowScan.ScanPage<TVisitor>(string databaseName, string tableName, long? afterRowId, long? expectedGeneration, int maxRows, ref TVisitor visitor) =>
+        ((IPagedRowScan)_inner).ScanPage(databaseName, tableName, afterRowId, expectedGeneration, maxRows, ref visitor);
     public void DeleteRow(string databaseName, string tableName, RowKey rowId) => _inner.DeleteRow(databaseName, tableName, (long)rowId);
     public void DropTable(string databaseName, string tableName) => _inner.DropTable(databaseName, tableName);
     public void DropDatabase(string databaseName) => _inner.DropDatabase(databaseName);

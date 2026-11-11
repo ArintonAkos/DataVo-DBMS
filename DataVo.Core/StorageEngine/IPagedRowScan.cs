@@ -13,8 +13,49 @@ internal readonly record struct PageScan(bool ReachedEnd, long Generation);
 /// Reads a table in bounded pages. Locks are held only while one page is read, so a slow reader never blocks
 /// writers between pages.
 /// </summary>
+/// <summary>
+/// Receives the rows of <see cref="IPagedRowScan.ScanPage{TVisitor}"/>. Implementations are structs, and the scan
+/// is generic over the struct, so the visitor's code is compiled into the engine's row loop: no delegate is
+/// called per row.
+/// </summary>
+internal interface IPagedRowVisitor
+{
+    /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
+    void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed);
+}
+
+/// <summary>Runs a <see cref="PagedRowVisitor{TState}"/> delegate as a struct visitor.</summary>
+internal struct DelegatePagedRowVisitor<TState> : IPagedRowVisitor
+{
+    private readonly PagedRowVisitor<TState> _visit;
+
+    public TState State;
+
+    public DelegatePagedRowVisitor(TState state, PagedRowVisitor<TState> visit)
+    {
+        State = state;
+        _visit = visit;
+    }
+
+    public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed) => _visit(ref State, rowId, raw, typed);
+}
+
 internal interface IPagedRowScan
 {
+    /// <summary>
+    /// Visits up to <paramref name="maxRows"/> live rows after <paramref name="afterRowId"/>, like
+    /// <see cref="VisitPage{TState}"/>, with the visitor compiled into the scan loop.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The table was rewritten since <paramref name="expectedGeneration"/>.</exception>
+    PageScan ScanPage<TVisitor>(
+        string databaseName,
+        string tableName,
+        long? afterRowId,
+        long? expectedGeneration,
+        int maxRows,
+        ref TVisitor visitor)
+        where TVisitor : struct, IPagedRowVisitor;
+
     /// <summary>Visits up to <paramref name="maxRows"/> live rows after a position, in row id order, without copying them.</summary>
     /// <param name="databaseName">The owning database.</param>
     /// <param name="tableName">The table to read.</param>
