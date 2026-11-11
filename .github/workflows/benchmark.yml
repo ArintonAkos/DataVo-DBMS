@@ -146,3 +146,31 @@ jobs:
             ${{ runner.temp }}/sqlite-vec/sqlite-vec-0.1.9-loadable-*.tar.gz
             ${{ runner.temp }}/sqlite-vec/checksums.txt
           if-no-files-found: error
+
+  benchmarkdotnet:
+    name: BenchmarkDotNet suite (DataVo, SQLite, DuckDB) on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run the suite
+        run: dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarkdotnet-${{ matrix.runner }}
+          path: BenchmarkDotNet.Artifacts/results
+          if-no-files-found: error
