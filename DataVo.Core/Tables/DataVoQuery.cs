@@ -76,6 +76,124 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
         return rows.CountRemaining();
     }
 
+    /// <summary>Adds up an <see cref="int"/> value of each matching row.</summary>
+    /// <param name="selector">Picks the value to add.</param>
+    /// <returns>The sum; 0 when no row matches.</returns>
+    /// <exception cref="OverflowException">The sum does not fit in an <see cref="int"/>.</exception>
+    /// <remarks>
+    /// When the query is compiled and <paramref name="selector"/> is a plain numeric column
+    /// (<c>p =&gt; p.Gold</c>), the generator sums that column inside the scan and builds no rows.
+    /// </remarks>
+    public int Sum(Func<T, int> selector)
+    {
+        ThrowIfNull(selector);
+        long sum = 0;
+        foreach (T item in this)
+        {
+            sum = checked(sum + selector(item));
+        }
+
+        return checked((int)sum);
+    }
+
+    /// <summary>Adds up a <see cref="long"/> value of each matching row.</summary>
+    /// <param name="selector">Picks the value to add.</param>
+    /// <returns>The sum; 0 when no row matches.</returns>
+    /// <exception cref="OverflowException">The sum does not fit in a <see cref="long"/>.</exception>
+    public long Sum(Func<T, long> selector)
+    {
+        ThrowIfNull(selector);
+        long sum = 0;
+        foreach (T item in this)
+        {
+            sum = checked(sum + selector(item));
+        }
+
+        return sum;
+    }
+
+    /// <summary>Adds up a <see cref="float"/> value of each matching row. The total is kept as a double and rounded once.</summary>
+    /// <param name="selector">Picks the value to add.</param>
+    /// <returns>The sum; 0 when no row matches.</returns>
+    public float Sum(Func<T, float> selector)
+    {
+        ThrowIfNull(selector);
+        double sum = 0;
+        foreach (T item in this)
+        {
+            sum += selector(item);
+        }
+
+        return (float)sum;
+    }
+
+    /// <summary>Adds up a <see cref="double"/> value of each matching row.</summary>
+    /// <param name="selector">Picks the value to add.</param>
+    /// <returns>The sum; 0 when no row matches.</returns>
+    public double Sum(Func<T, double> selector)
+    {
+        ThrowIfNull(selector);
+        double sum = 0;
+        foreach (T item in this)
+        {
+            sum += selector(item);
+        }
+
+        return sum;
+    }
+
+    /// <summary>Sums an <c>INT</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
+    /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
+    /// <param name="selector">The original selector.</param>
+    /// <returns>The sum.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public int SumInt32Column(string[] column, Func<T, int> selector) =>
+        TrySumColumn(column, floating: false, out long whole, out _) ? checked((int)whole) : Sum(selector);
+
+    /// <summary>Sums a <c>BIGINT</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
+    /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
+    /// <param name="selector">The original selector.</param>
+    /// <returns>The sum.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public long SumInt64Column(string[] column, Func<T, long> selector) =>
+        TrySumColumn(column, floating: false, out long whole, out _) ? whole : Sum(selector);
+
+    /// <summary>Sums a <c>FLOAT</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
+    /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
+    /// <param name="selector">The original selector.</param>
+    /// <returns>The sum.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public float SumSingleColumn(string[] column, Func<T, float> selector) =>
+        TrySumColumn(column, floating: true, out _, out double real) ? (float)real : Sum(selector);
+
+    /// <summary>Sums a <c>DOUBLE</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
+    /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
+    /// <param name="selector">The original selector.</param>
+    /// <returns>The sum.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public double SumDoubleColumn(string[] column, Func<T, double> selector) =>
+        TrySumColumn(column, floating: true, out _, out double real) ? real : Sum(selector);
+
+    private bool TrySumColumn(string[] column, bool floating, out long whole, out double real)
+    {
+        if (_plan is not null && _plan.Binds(_state))
+        {
+            return _plan.TrySumMatching(Table, _state, column, floating, out whole, out real);
+        }
+
+        whole = 0;
+        real = 0;
+        return false;
+    }
+
+    private static void ThrowIfNull(object? selector)
+    {
+        if (selector is null)
+        {
+            throw new ArgumentNullException(nameof(selector));
+        }
+    }
+
     /// <summary>Reads the matching rows into a list.</summary>
     /// <returns>The matching rows.</returns>
     public List<T> ToList()

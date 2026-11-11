@@ -48,6 +48,7 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
         }
 
         var sites = new List<LinqSite>();
+        var sums = new List<LinqSumSite>();
         foreach (LinqInspection call in calls)
         {
             if (call.Diagnostic is { } info)
@@ -60,11 +61,16 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
             {
                 sites.Add(site);
             }
+
+            if (call.Sum is { } sum)
+            {
+                sums.Add(sum);
+            }
         }
 
-        if (sites.Count > 0)
+        if (sites.Count > 0 || sums.Count > 0)
         {
-            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, options.FileLocalTypes), System.Text.Encoding.UTF8));
+            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, sums, options.FileLocalTypes), System.Text.Encoding.UTF8));
         }
     }
 

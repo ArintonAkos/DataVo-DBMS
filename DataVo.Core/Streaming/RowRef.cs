@@ -420,6 +420,9 @@ public readonly ref struct RowRef
         return _row.Slice(_cells[columnIndex] + 1);
     }
 
+    /// <summary>The stored type of a column.</summary>
+    internal StorageKind KindOfColumn(int columnIndex) => KindOf(columnIndex);
+
     private StorageKind KindOf(int columnIndex)
     {
         CheckIndex(columnIndex);

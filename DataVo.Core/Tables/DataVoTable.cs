@@ -233,9 +233,9 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         RowRefStream rows = StreamRef();
         int[] ordinals = FusedOrdinals(columns, rows);
         filter.Bind(ordinals);
-        if (rows.TryCountInPlace(ordinals, ref filter, limit, out int inPlace))
+        if (rows.TryScanInPlace(ordinals, ref filter, limit, 0, floating: false, summed: false, out RowAggregate inPlace))
         {
-            return inPlace;
+            return inPlace.Count;
         }
 
         int count = 0;
@@ -248,6 +248,57 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Sums one column over the rows a compiled condition accepts, without building them. Used by generated code.
+    /// </summary>
+    /// <remarks>
+    /// Each row is tested, and its value added, inside the storage scan, where the row is stored. Inside a
+    /// transaction the rows are streamed instead, so the sum includes the transaction's own writes. A NULL cell
+    /// adds nothing.
+    /// </remarks>
+    /// <typeparam name="TFilter">The compiled condition.</typeparam>
+    /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="filter">The condition, with its values already set.</param>
+    /// <param name="sumColumn">The column to sum. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="floating">Whether the sum is over a <c>FLOAT</c> or <c>DOUBLE</c> column, rather than <c>INT</c> or <c>BIGINT</c>.</param>
+    /// <param name="whole">The sum, when <paramref name="floating"/> is false.</param>
+    /// <param name="real">The sum, when <paramref name="floating"/> is true.</param>
+    /// <returns><see langword="false"/> when the column's stored type does not fit the sum; the caller then reads rows.</returns>
+    /// <exception cref="InvalidOperationException">The table lacks one of the columns.</exception>
+    /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public bool SumMatching<TFilter>(string[] columns, ref TFilter filter, string[] sumColumn, bool floating, out long whole, out double real)
+        where TFilter : struct, IRowRefFilter
+    {
+        RowRefStream rows = StreamRef();
+        int[] ordinals = FusedOrdinals(columns, rows);
+        int sumOrdinal = FusedOrdinals(sumColumn, rows)[0];
+        filter.Bind(ordinals);
+        if (!rows.TryScanInPlace(ordinals, ref filter, 0, sumOrdinal, floating, summed: true, out RowAggregate totals))
+        {
+            totals = default;
+            RowSumKind kind = RowSumKind.None;
+            foreach (RowRef row in rows)
+            {
+                if (kind == RowSumKind.None && (kind = RowAggregate.KindFor(row.KindOfColumn(sumOrdinal), floating)) == RowSumKind.None)
+                {
+                    whole = 0;
+                    real = 0;
+                    return false;
+                }
+
+                if (filter.Matches(in row))
+                {
+                    totals.Add(in row, kind, sumOrdinal);
+                }
+            }
+        }
+
+        whole = totals.Whole;
+        real = totals.Real;
+        return true;
     }
 
     /// <summary>Finds where a compiled condition's columns sit in the table, once per schema version.</summary>

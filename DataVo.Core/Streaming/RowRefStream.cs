@@ -79,25 +79,32 @@ public readonly struct RowRefStream
     }
 
     /// <summary>
-    /// Counts the rows a compiled condition accepts by testing each row inside the storage scan, where it is
-    /// stored: no row is copied out, and only the cells up to the last column the condition reads are located.
+    /// Counts the rows a compiled condition accepts, and optionally sums one of their columns, by testing each
+    /// row inside the storage scan, where it is stored: no row is copied out, and only the cells up to the last
+    /// column the scan reads are located.
     /// </summary>
     /// <param name="ordinals">The table positions of the columns the condition reads.</param>
     /// <param name="filter">The condition, already bound to <paramref name="ordinals"/>.</param>
-    /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
-    /// <param name="count">The number of matching rows, up to <paramref name="limit"/>.</param>
+    /// <param name="limit">Stop after this many matches, or 0 to visit them all.</param>
+    /// <param name="sumOrdinal">The table position of the column to sum; ignored when nothing is summed.</param>
+    /// <param name="floating">Whether the sum is a floating-point one.</param>
+    /// <param name="summed">Whether a column is summed at all.</param>
+    /// <param name="result">The totals over the matching rows.</param>
     /// <returns>
     /// <see langword="false"/> when the rows cannot be read in place (inside a transaction, or while storage holds
-    /// uncommitted writes for this flow); the caller then counts through <see cref="GetEnumerator"/>.
+    /// uncommitted writes for this flow) or the summed column's type does not fit the sum; the caller then takes
+    /// another path. <paramref name="result"/> is meaningless in that case.
     /// </returns>
     /// <remarks>
-    /// The read lock is held for one batch of rows at a time, as it is for a streamed pass, so writers run between
-    /// batches and the same consistency holds: a row that existed for the whole count is counted exactly once.
+    /// The scan is generic over the condition from here into the storage engine's own row loop, so the condition
+    /// and the totals are compiled into that loop: no delegate is called per row. The read lock is held for one
+    /// block of rows at a time, as it is for a streamed pass, so writers run between blocks and the same
+    /// consistency holds: a row that existed for the whole scan is visited exactly once.
     /// </remarks>
-    internal bool TryCountInPlace<TFilter>(int[] ordinals, ref TFilter filter, int limit, out int count)
+    internal bool TryScanInPlace<TFilter>(int[] ordinals, ref TFilter filter, int limit, int sumOrdinal, bool floating, bool summed, out RowAggregate result)
         where TFilter : struct, IRowRefFilter
     {
-        count = 0;
+        result = default;
         DataVoEngine engine = _engine ?? throw Uninitialized();
         string database = DatabaseOf(engine, _session);
         if (engine.TransactionManager.HasActiveTransaction(_session) || MvccExecutionScope.CurrentSnapshot is not null)
@@ -105,8 +112,8 @@ public readonly struct RowRefStream
             return false;
         }
 
-        int columns = 0;
-        ulong needed = 0;
+        int columns = summed ? sumOrdinal + 1 : 0;
+        ulong needed = summed && sumOrdinal < 64 ? 1UL << sumOrdinal : 0;
         foreach (int ordinal in ordinals)
         {
             columns = Math.Max(columns, ordinal + 1);
@@ -129,27 +136,33 @@ public readonly struct RowRefStream
                 return false;
             }
 
-            var scan = new InPlaceCount<TFilter>(filter, page, columns, needed, limit);
+            RowSumKind kind = RowSumKind.None;
+            if (summed && (kind = RowAggregate.KindFor(page.KindAt(sumOrdinal), floating)) == RowSumKind.None)
+            {
+                return false;
+            }
 
-            // A limited count (Any) starts with a small batch so a match near the start costs little.
-            int batch = limit > 0 ? 64 : InPlaceBatchRows;
+            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, sumOrdinal);
+
+            // A limited scan (Any) starts with a small block so a match near the start costs little.
+            int block = limit > 0 ? 64 : InPlaceBlockRows;
             while (!page.Cursor.Done && !scan.Full)
             {
                 using SnapshotLockScope readScope = engine.EnterRuntimeReadScope();
                 if (engine.Catalog.GetTableSchemaVersion(_table!, database) != page.SchemaVersion)
                 {
-                    throw new InvalidOperationException($"Table {_table} changed shape while it was being counted.");
+                    throw new InvalidOperationException($"Table {_table} changed shape while it was being scanned.");
                 }
 
-                if (!engine.StorageContext.ScanRowPage(_table!, database, page.Cursor, null, null, batch, ref scan, InPlaceCount<TFilter>.Visit))
+                if (!engine.StorageContext.ScanRowBlock(_table!, database, page.Cursor, block, ref scan))
                 {
                     return false;
                 }
 
-                batch = InPlaceBatchRows;
+                block = InPlaceBlockRows;
             }
 
-            count = scan.Count;
+            result = scan.Totals;
             return true;
         }
         finally
@@ -159,40 +172,54 @@ public readonly struct RowRefStream
     }
 
     // Rows examined per hold of the read lock. Larger than a streamed page: nothing is copied while it is held.
-    private const int InPlaceBatchRows = 4096;
+    private const int InPlaceBlockRows = 4096;
 
-    /// <summary>The state of an in-place count: the condition, and the page whose layout locates each row's cells.</summary>
-    private struct InPlaceCount<TFilter>(TFilter filter, RowRefPage page, int columns, ulong needed, int limit)
+    /// <summary>
+    /// The visitor of an in-place scan: the condition, the totals, and the page whose layout locates each row's
+    /// cells. A struct, so the storage engine's row loop is compiled around it.
+    /// </summary>
+    private struct InPlaceScan<TFilter> : StorageContext.IStoredRowVisitor
         where TFilter : struct, IRowRefFilter
     {
-        public static readonly StorageContext.RawRowVisitor<InPlaceCount<TFilter>> Visit =
-            static (ref InPlaceCount<TFilter> scan, RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed) =>
+        private TFilter _filter;
+        private readonly RowRefPage _page;
+        private readonly int _columns;
+        private readonly ulong _needed;
+        private readonly int _limit;
+        private readonly RowSumKind _sum;
+        private readonly int _sumOrdinal;
+
+        public RowAggregate Totals;
+
+        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowSumKind sum, int sumOrdinal)
+        {
+            _filter = filter;
+            _page = page;
+            _columns = columns;
+            _needed = needed;
+            _limit = limit;
+            _sum = sum;
+            _sumOrdinal = sumOrdinal;
+            Totals = default;
+        }
+
+        public readonly bool Full => _limit > 0 && Totals.Count >= _limit;
+
+        public void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed)
+        {
+            if (Full)
             {
-                if (scan.Full)
-                {
-                    return false;
-                }
+                return;
+            }
 
-                RowRef row = typed is null
-                    ? scan._page.InPlace(rowId, stored, scan._columns)
-                    : scan._page.InPlace(rowId, typed, scan._columns, scan._needed);
-                if (scan._filter.Matches(in row))
-                {
-                    scan.Count++;
-                }
-
-                return !scan.Full;
-            };
-
-        private TFilter _filter = filter;
-        private readonly RowRefPage _page = page;
-        private readonly int _columns = columns;
-        private readonly ulong _needed = needed;
-        private readonly int _limit = limit;
-
-        public int Count;
-
-        public readonly bool Full => _limit > 0 && Count >= _limit;
+            RowRef row = typed is null
+                ? _page.InPlace(rowId, stored, _columns)
+                : _page.InPlace(rowId, typed, _columns, _needed);
+            if (_filter.Matches(in row))
+            {
+                Totals.Add(in row, _sum, _sumOrdinal);
+            }
+        }
     }
 
     /// <summary>Starts a pass over the table.</summary>

@@ -32,12 +32,23 @@ internal static class DataVoLinqAnalyzer
         {
             Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Where" or "FirstOrDefault" or "SingleOrDefault" },
             ArgumentList.Arguments.Count: 1 or 2,
+        }
+        or InvocationExpressionSyntax
+        {
+            Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Sum" },
+            ArgumentList.Arguments.Count: 1,
         };
 
     public static LinqInspection? Inspect(GeneratorSyntaxContext context, CancellationToken cancellation)
     {
         var invocation = (InvocationExpressionSyntax)context.Node;
         SemanticModel semantics = context.SemanticModel;
+        if (semantics.GetSymbolInfo(invocation, cancellation).Symbol is IMethodSymbol { Name: "Sum", ContainingType: { Name: "DataVoQuery", Arity: 2 } queryType } sum
+            && queryType.ContainingNamespace.ToDisplayString() == "DataVo.Core")
+        {
+            return InspectSum(semantics, invocation, sum, queryType, cancellation);
+        }
+
         if (semantics.GetSymbolInfo(invocation, cancellation).Symbol is not IMethodSymbol method
             || method.ContainingType is not { Name: "DataVoTable", Arity: 1 } tableType
             || tableType.ContainingNamespace.ToDisplayString() != "DataVo.Core"
@@ -107,6 +118,68 @@ internal static class DataVoLinqAnalyzer
                 new EquatableArray<LinqParameter>([.. translator.Parameters]),
                 translator.Unique ? null : translator.Kernel(body)),
             null);
+    }
+
+    /// <summary>
+    /// Translates <c>query.Sum(p =&gt; p.Column)</c> over an <c>int</c>, <c>long</c>, <c>float</c> or <c>double</c>
+    /// column. Any other selector is left alone, silently: it is ordinary code that sums what it computes.
+    /// </summary>
+    private static LinqInspection? InspectSum(SemanticModel semantics, InvocationExpressionSyntax invocation, IMethodSymbol method, INamedTypeSymbol queryType, CancellationToken cancellation)
+    {
+        if (invocation.ArgumentList.Arguments[0].Expression is not LambdaExpressionSyntax { ExpressionBody: { } body } lambda
+            || semantics.GetSymbolInfo(lambda, cancellation).Symbol is not IMethodSymbol { Parameters.Length: 1 } lambdaSymbol
+            || queryType.TypeArguments[0] is not INamedTypeSymbol modelType
+            || !IsNameable(queryType.TypeArguments[1], semantics.Compilation))
+        {
+            return null;
+        }
+
+        while (body is ParenthesizedExpressionSyntax parenthesized)
+        {
+            body = parenthesized.Expression;
+        }
+
+        if (body is not MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax receiver } access
+            || !SymbolEqualityComparer.Default.Equals(semantics.GetSymbolInfo(receiver, cancellation).Symbol, lambdaSymbol.Parameters[0])
+            || semantics.GetSymbolInfo(access, cancellation).Symbol is not IPropertySymbol property)
+        {
+            return null;
+        }
+
+        AttributeData? attribute = modelType.GetAttributes().FirstOrDefault(static data => data.AttributeClass?.ToDisplayString() == TableAttribute);
+        if (attribute is null
+            || DataVoTableInspector.Inspect(modelType, attribute.ConstructorArguments.FirstOrDefault().Value as string).Model is not { } model
+            || model.Columns.FirstOrDefault(candidate => candidate.PropertyName == property.Name) is not { IsNullable: false } column)
+        {
+            return null;
+        }
+
+        // The selector's value must be the column's own type: a widening selector sums something else.
+        (string Value, string Method)? shape = (column.Type.SqlType, method.ReturnType.SpecialType) switch
+        {
+            ("INT", SpecialType.System_Int32) => ("int", "SumInt32Column"),
+            ("BIGINT", SpecialType.System_Int64) => ("long", "SumInt64Column"),
+            ("FLOAT", SpecialType.System_Single) => ("float", "SumSingleColumn"),
+            ("DOUBLE", SpecialType.System_Double) => ("double", "SumDoubleColumn"),
+            _ => null,
+        };
+        if (shape is null || LocationOf(semantics, invocation, cancellation) is not { } location)
+        {
+            return null;
+        }
+
+        return new LinqInspection(
+            null,
+            null,
+            lambda.SyntaxTree,
+            lambda.GetLocation().SourceSpan,
+            new LinqSumSite(
+                location,
+                modelType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                queryType.TypeArguments[1].ToDisplayString(TypeFormat),
+                shape.Value.Value,
+                shape.Value.Method,
+                column.PropertyName));
     }
 
     private static LinqLocation? LocationOf(SemanticModel semantics, InvocationExpressionSyntax invocation, CancellationToken cancellation)

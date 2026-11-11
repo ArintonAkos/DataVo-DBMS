@@ -61,6 +61,37 @@ public abstract class DataVoLinqPlan<T, TState>
         return false;
     }
 
+    /// <summary>
+    /// Sums one column over the matching rows with a condition compiled into the scan, when the generator
+    /// produced one.
+    /// </summary>
+    /// <param name="table">The table to read.</param>
+    /// <param name="state">The value passed to the query.</param>
+    /// <param name="column">The column to sum, as a one-element array that is the same instance on every call.</param>
+    /// <param name="floating">Whether the sum is over a <c>FLOAT</c> or <c>DOUBLE</c> column.</param>
+    /// <param name="whole">The sum, when <paramref name="floating"/> is false.</param>
+    /// <param name="real">The sum, when <paramref name="floating"/> is true.</param>
+    /// <returns><see langword="false"/> when this plan cannot sum in the scan, so the caller reads rows instead.</returns>
+    protected virtual bool TrySum(DataVoTable<T> table, TState state, string[] column, bool floating, out long whole, out double real)
+    {
+        whole = 0;
+        real = 0;
+        return false;
+    }
+
+    /// <summary>Sums a column over the matching rows without building them, when the plan has a compiled condition.</summary>
+    internal bool TrySumMatching(DataVoTable<T> table, TState state, string[] column, bool floating, out long whole, out double real)
+    {
+        if (_unique)
+        {
+            whole = 0;
+            real = 0;
+            return false;
+        }
+
+        return TrySum(table, state, column, floating, out whole, out real);
+    }
+
     /// <summary>Returns the first matching row, or the default value when none matches.</summary>
     /// <param name="table">The table to read.</param>
     /// <param name="state">The value passed to the query.</param>

@@ -236,20 +236,58 @@ internal sealed class RowRefPage
         }
 
         Span<byte> destination = _bytes;
+        ReadOnlySpan<CellValue> cells = typed.Cells;
         int offset = 0;
         for (int i = 0; i < columns; i++)
         {
             _cells[i] = offset;
-            CellValue cell = i < typed.Count ? typed[i] : CellValue.Null;
+            if (i >= cells.Length)
+            {
+                destination[offset++] = 1;
+                continue;
+            }
+
+            ref readonly CellValue cell = ref cells[i];
             StorageKind kind = _kinds[i];
-            bool fixedWidth = kind != StorageKind.String && kind != StorageKind.Vector;
-            if (cell.IsNull || !fixedWidth || (i < 64 && ((needed >> i) & 1) == 0))
+            if (cell.IsNull || kind == StorageKind.String || kind == StorageKind.Vector || (i < 64 && ((needed >> i) & 1) == 0))
             {
                 destination[offset++] = cell.IsNull ? (byte)1 : (byte)0;
                 continue;
             }
 
-            offset += RowSerializer.WriteCell(kind, cell, destination.Slice(offset));
+            // The usual pairings of column kind and cell type are written here; anything else converts.
+            Span<byte> value = destination.Slice(offset + 1);
+            switch (kind)
+            {
+                case StorageKind.Int when cell.Type == CellType.Int32:
+                    destination[offset] = 0;
+                    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, cell.AsInt32());
+                    offset += 1 + sizeof(int);
+                    break;
+                case StorageKind.BigInt when cell.Type == CellType.Int64:
+                    destination[offset] = 0;
+                    System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, cell.AsInt64());
+                    offset += 1 + sizeof(long);
+                    break;
+                case StorageKind.Double when cell.Type == CellType.Double:
+                    destination[offset] = 0;
+                    System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, BitConverter.DoubleToInt64Bits(cell.AsDouble()));
+                    offset += 1 + sizeof(long);
+                    break;
+                case StorageKind.Float when cell.Type == CellType.Double:
+                    destination[offset] = 0;
+                    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
+                    offset += 1 + sizeof(int);
+                    break;
+                case StorageKind.Bit when cell.Type == CellType.Boolean:
+                    destination[offset] = 0;
+                    value[0] = cell.AsBoolean() ? (byte)1 : (byte)0;
+                    offset += 1 + sizeof(bool);
+                    break;
+                default:
+                    offset += RowSerializer.WriteCell(kind, cell, destination.Slice(offset));
+                    break;
+            }
         }
 
         return new RowRef(destination.Slice(0, offset), new ReadOnlySpan<int>(_cells, 0, _kinds.Length), _kinds, default, key, _keyOrdinal, _keyIsGuid);

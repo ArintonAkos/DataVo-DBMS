@@ -34,10 +34,17 @@ internal sealed record LinqSite(
     EquatableArray<LinqParameter> Parameters,
     LinqKernel? Kernel = null);
 
+/// <summary>A <c>Sum</c> over a query whose selector is one numeric column, summed inside the scan when the query's plan can.</summary>
+/// <param name="ValueType">The C# type summed: <c>int</c>, <c>long</c>, <c>float</c> or <c>double</c>.</param>
+/// <param name="RuntimeMethod">The <c>DataVoQuery</c> method that sums a column of that type.</param>
+/// <param name="Column">The summed column.</param>
+internal sealed record LinqSumSite(LinqLocation Location, string ModelType, string StateType, string ValueType, string RuntimeMethod, string Column);
+
 /// <summary>The outcome of inspecting one call: a translated site, or a diagnostic explaining why it runs as a scan.</summary>
 /// <param name="Tree">The file the call is in. Kept so a diagnostic lands in source, where <c>#pragma warning</c> can reach it.</param>
 /// <param name="Span">The lambda's position in <paramref name="Tree"/>.</param>
-internal sealed record LinqInspection(LinqSite? Site, DiagnosticInfo? Diagnostic, SyntaxTree Tree, TextSpan Span);
+/// <param name="Sum">A translated <c>Sum</c> call, when the call is one.</param>
+internal sealed record LinqInspection(LinqSite? Site, DiagnosticInfo? Diagnostic, SyntaxTree Tree, TextSpan Span, LinqSumSite? Sum = null);
 
 /// <summary>Whether the compilation can take interceptors, and which syntax the output may use.</summary>
 internal sealed record LinqOptions(LinqMode Mode, bool FileLocalTypes);
