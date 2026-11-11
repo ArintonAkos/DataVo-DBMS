@@ -95,6 +95,16 @@ A primary-key equality on an LSM database reads one row and allocates only that 
 
 Enumerating a query streams. Rows are read in pages of 1,024 and each model is built as the loop reaches it, so a `foreach` over 100,000 matching rows keeps about one page alive, not the result. `ToList()` is the way to ask for everything at once. Scans that were not compiled stream the same way. Some queries read their matches before enumerating, as `StreamQuery` does: a query inside a transaction, a condition with an equality on an indexed column (few rows, read through the index), and a condition the paged scan cannot apply, which today means `||`, a null test, or `!=` on a nullable column.
 
+### Counting Without Building Rows
+
+`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the scan loop is compiled around it. Once warm, such a count allocates nothing, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 3 to 4 times faster.
+
+```csharp
+int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).Count(); // 0 B
+```
+
+A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
+
 ### What Is Compiled
 
 | Lambda | Becomes |
