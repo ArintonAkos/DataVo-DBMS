@@ -97,7 +97,7 @@ Enumerating a query streams. Rows are read in pages of 1,024 and each model is b
 
 ### Counting And Summing Without Building Rows
 
-`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 4 to 8 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
+`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 6 to 20 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
 
 ```csharp
 int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).Count(); // 0 B
@@ -109,7 +109,11 @@ int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).C
 long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold); // 0 B
 ```
 
-The scan is generic over the compiled condition all the way into the storage engine's row loop, so no delegate is called per row. On 200,000 rows with 100,000 matches a warm count or sum takes about 1.4 ms in memory, 2.5 ms on the disk engine and 2.9 ms on LSM.
+The scan is generic over the compiled condition all the way into the storage engine's row loop, so no delegate is called per row.
+
+When every column up to the last one the query reads has a fixed width (`int`, `long`, `float`, `double`, `bool`, `Guid`, dates), values sit at the same byte offset in every row whose leading cells are all present. The condition is then also compiled in a form that reads stored bytes at those offsets, worked out once per scan, with no row view built and no branch between its tests. Each row is first checked against that layout by its leading null flags. A row that differs, such as one holding a NULL in a leading column, is tested the general way, so results are identical. In-memory tables are read the same way from their typed cells. Put fixed-width columns before text columns in a model to get this path; a condition on a column that follows a `string` still runs in the scan, through the general reader.
+
+On 200,000 rows with 100,000 matches a warm count or sum takes about 0.6 ms in memory, 1.7 ms on the disk engine and 2.0 ms on LSM (2.4 ms once flushed to an SSTable). Most of what remains on disk and LSM is the storage iteration itself.
 
 A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
 
