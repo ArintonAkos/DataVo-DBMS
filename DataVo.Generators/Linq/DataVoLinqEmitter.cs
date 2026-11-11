@@ -136,6 +136,11 @@ internal static class DataVoLinqEmitter
         }
 
         code.AppendLine("            }");
+        if (site.Kernel is { } kernel)
+        {
+            EmitKernel(code, site, kernel, parameters, table, state);
+        }
+
         code.AppendLine("        }").AppendLine();
 
         code.AppendLine($"        [global::System.Runtime.CompilerServices.InterceptsLocation({location})]");
@@ -153,6 +158,58 @@ internal static class DataVoLinqEmitter
         }
 
         code.AppendLine("        }").AppendLine();
+    }
+
+    /// <summary>
+    /// Writes the condition as a struct over <c>RowRef</c> and the override that counts with it. The scan is
+    /// generic over the struct, so the condition is compiled into the loop: no row objects, no delegate calls.
+    /// </summary>
+    private static void EmitKernel(StringBuilder code, LinqSite site, LinqKernel kernel, LinqParameter[] parameters, string table, string state)
+    {
+        string[] columns = [.. kernel.Columns];
+        code.AppendLine();
+        code.AppendLine($"            private static readonly string[] Columns = new string[] {{ {string.Join(", ", columns.Select(static column => SymbolDisplay.FormatLiteral(column, quote: true)))} }};");
+        code.AppendLine();
+        code.AppendLine($"            private struct Kernel : {Core}IRowRefFilter");
+        code.AppendLine("            {");
+        for (int index = 0; index < columns.Length; index++)
+        {
+            code.AppendLine($"                private int c{index.ToString(CultureInfo.InvariantCulture)};");
+        }
+
+        for (int index = 0; index < parameters.Length; index++)
+        {
+            code.AppendLine($"                public {parameters[index].KernelType} p{index.ToString(CultureInfo.InvariantCulture)};");
+        }
+
+        code.AppendLine();
+        code.AppendLine("                public void Bind(global::System.ReadOnlySpan<int> ordinals)");
+        code.AppendLine("                {");
+        for (int index = 0; index < columns.Length; index++)
+        {
+            string number = index.ToString(CultureInfo.InvariantCulture);
+            code.AppendLine($"                    c{number} = ordinals[{number}];");
+        }
+
+        code.AppendLine("                }");
+        code.AppendLine();
+        code.AppendLine($"                public bool Matches(in {Core}RowRef row)");
+        code.AppendLine("                {");
+        code.AppendLine($"                    return {kernel.Expression};");
+        code.AppendLine("                }");
+        code.AppendLine("            }");
+        code.AppendLine();
+        code.AppendLine($"            protected override bool TryCount({table} table, {state} state, int limit, out int count)");
+        code.AppendLine("            {");
+        code.AppendLine("                Kernel kernel = default(Kernel);");
+        for (int index = 0; index < parameters.Length; index++)
+        {
+            code.AppendLine($"                kernel.p{index.ToString(CultureInfo.InvariantCulture)} = {parameters[index].Value};");
+        }
+
+        code.AppendLine("                count = table.CountMatching(Columns, ref kernel, limit);");
+        code.AppendLine("                return true;");
+        code.AppendLine("            }");
     }
 
     private static string Bind(LinqParameter parameter, string name) => parameter.UsesObjectParameter

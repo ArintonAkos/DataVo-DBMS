@@ -39,6 +39,7 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     private readonly object _gate = new();
     private DataVoPreparedStatement?[] _statements = [];
     private string? _scanSql;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string[], FusedColumns> _fusedColumns = new();
 
     internal DataVoTable(DataVoContext context, DataVoTableInfo<T> info)
     {
@@ -211,6 +212,66 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// </code>
     /// </example>
     public RowRefStream StreamRef() => new(Context.Engine, Context.SessionId, _info.TableName);
+
+    /// <summary>
+    /// Counts the rows a compiled condition accepts, reading each row where it is stored. Used by generated code.
+    /// </summary>
+    /// <typeparam name="TFilter">The compiled condition.</typeparam>
+    /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="filter">The condition, with its values already set.</param>
+    /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
+    /// <returns>The number of matching rows, up to <paramref name="limit"/>.</returns>
+    /// <exception cref="InvalidOperationException">The table lacks one of <paramref name="columns"/>.</exception>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public int CountMatching<TFilter>(string[] columns, ref TFilter filter, int limit)
+        where TFilter : struct, IRowRefFilter
+    {
+        RowRefStream rows = StreamRef();
+        filter.Bind(FusedOrdinals(columns, rows));
+        int count = 0;
+        foreach (RowRef row in rows)
+        {
+            if (filter.Matches(in row) && ++count == limit)
+            {
+                break;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>Finds where a compiled condition's columns sit in the table, once per schema version.</summary>
+    private int[] FusedOrdinals(string[] columns, RowRefStream rows)
+    {
+        int version = rows.SchemaVersion;
+        if (_fusedColumns.TryGetValue(columns, out FusedColumns? known) && known.SchemaVersion == version)
+        {
+            return known.Ordinals;
+        }
+
+        int[] ordinals = new int[columns.Length];
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            try
+            {
+                ordinals[i] = rows.GetOrdinal(columns[i]);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidOperationException(exception.Message, exception);
+            }
+        }
+
+        _fusedColumns[columns] = new FusedColumns(version, ordinals);
+        return ordinals;
+    }
+
+    private sealed class FusedColumns(int schemaVersion, int[] ordinals)
+    {
+        public int SchemaVersion { get; } = schemaVersion;
+
+        public int[] Ordinals { get; } = ordinals;
+    }
 
     internal static InvalidOperationException MoreThanOne() => new("Sequence contains more than one matching element");
 

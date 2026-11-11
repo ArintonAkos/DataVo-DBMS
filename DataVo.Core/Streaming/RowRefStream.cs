@@ -68,6 +68,16 @@ public readonly struct RowRefStream
             : throw new ArgumentException($"Table {_table} has no column {columnName}.", nameof(columnName));
     }
 
+    /// <summary>Gets the table's current schema version, which changes whenever its columns do.</summary>
+    internal int SchemaVersion
+    {
+        get
+        {
+            DataVoEngine engine = _engine ?? throw Uninitialized();
+            return engine.Catalog.GetTableSchemaVersion(_table!, DatabaseOf(engine, _session));
+        }
+    }
+
     /// <summary>Starts a pass over the table.</summary>
     /// <returns>An enumerator positioned before the first row.</returns>
     public RowRefEnumerator GetEnumerator()

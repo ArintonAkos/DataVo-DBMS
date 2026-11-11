@@ -104,7 +104,8 @@ internal static class DataVoLinqAnalyzer
                 stateType.ToDisplayString(TypeFormat),
                 where,
                 translator.Unique,
-                new EquatableArray<LinqParameter>([.. translator.Parameters])),
+                new EquatableArray<LinqParameter>([.. translator.Parameters]),
+                translator.Unique ? null : translator.Kernel(body)),
             null);
     }
 
@@ -170,6 +171,107 @@ internal static class DataVoLinqAnalyzer
         /// <summary>Whether the condition requires the primary key to equal one value.</summary>
         public bool Unique { get; private set; }
 
+        // Each leaf of the condition (a comparison, a null test, a bare bool column) as C# over a RowRef, when
+        // its column can be read directly. A leaf without an entry keeps the whole query on the SQL path.
+        private readonly Dictionary<SyntaxNode, string> _kernelLeaves = [];
+        private readonly List<string> _kernelColumns = [];
+
+        /// <summary>
+        /// Builds the condition as C# over a <c>RowRef</c>. Call after <see cref="Condition"/> succeeded. Returns
+        /// null when a column is indexed (the SQL path can seek) or has a type without a direct reader.
+        /// </summary>
+        public LinqKernel? Kernel(ExpressionSyntax body) =>
+            KernelText(body) is { } text
+                ? new LinqKernel(text, new EquatableArray<string>([.. _kernelColumns]))
+                : null;
+
+        private string? KernelText(ExpressionSyntax expression)
+        {
+            if (_kernelLeaves.TryGetValue(expression, out string? leaf))
+            {
+                return leaf;
+            }
+
+            switch (expression)
+            {
+                case ParenthesizedExpressionSyntax parenthesized:
+                    return KernelText(parenthesized.Expression) is { } inner ? $"({inner})" : null;
+
+                case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.LogicalAndExpression) || binary.IsKind(SyntaxKind.LogicalOrExpression):
+                {
+                    string? left = KernelText(binary.Left);
+                    string? right = KernelText(binary.Right);
+                    return left is null || right is null
+                        ? null
+                        : $"{left} {(binary.IsKind(SyntaxKind.LogicalAndExpression) ? "&&" : "||")} {right}"; // leaves are self-contained; source parentheses are kept
+                }
+
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>The <c>RowRef</c> accessor for a column's type, or null when the type has none.</summary>
+        private static string? KernelReader(ColumnModel column) => column.Type.SqlType switch
+        {
+            "INT" => "GetInt32",
+            "BIGINT" => "GetInt64",
+            "FLOAT" => "GetFloat",
+            "DOUBLE" => "GetDouble",
+            "BIT" => "GetBoolean",
+            "GUID" => "GetGuid",
+            _ => null,
+        };
+
+        /// <summary>The <c>c</c> name of a column in the compiled condition, or null when the SQL path serves it better.</summary>
+        private string? KernelColumn(ColumnModel column)
+        {
+            if (column.IsPrimaryKey || column.IsIndexed || column.IsSpatialIndexed)
+            {
+                return null;
+            }
+
+            int index = _kernelColumns.IndexOf(column.PropertyName);
+            if (index < 0)
+            {
+                index = _kernelColumns.Count;
+                _kernelColumns.Add(column.PropertyName);
+            }
+
+            return "c" + index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private void KernelNullTest(SyntaxNode node, ColumnModel column, bool isNull)
+        {
+            if (KernelColumn(column) is { } name)
+            {
+                _kernelLeaves[node] = $"{(isNull ? string.Empty : "!")}row.IsNull({name})";
+            }
+        }
+
+        /// <summary>Records a comparison between a column and parameter <paramref name="parameter"/>, in C#'s null rules.</summary>
+        private void KernelComparison(SyntaxNode node, ColumnModel column, string comparison, int parameter)
+        {
+            string? reader = KernelReader(column);
+            bool ordered = comparison is "<" or "<=" or ">" or ">=";
+            if (reader is null
+                || Parameters[parameter].KernelType is null
+                || (ordered && reader is "GetBoolean" or "GetGuid")
+                || KernelColumn(column) is not { } name)
+            {
+                return;
+            }
+
+            string value = "p" + parameter.ToString(CultureInfo.InvariantCulture);
+            _kernelLeaves[node] = comparison switch
+            {
+                // A stored NULL differs from every value, and is neither equal to nor ordered against one.
+                "<>" => $"(row.IsNull({name}) || row.{reader}({name}) != {value})",
+                "=" => $"(!row.IsNull({name}) && row.{reader}({name}) == {value})",
+                _ => $"(!row.IsNull({name}) && row.{reader}({name}) {comparison} {value})",
+            };
+        }
+
         public string? Condition(ExpressionSyntax expression, bool topLevel)
         {
             switch (expression)
@@ -189,19 +291,21 @@ internal static class DataVoLinqAnalyzer
                     return Comparison(binary, comparison, topLevel);
 
                 case PrefixUnaryExpressionSyntax not when not.IsKind(SyntaxKind.LogicalNotExpression) && AsColumn(not.Operand) is { } negated:
-                    return BooleanColumn(negated.Column, negated.Property, "false");
+                    return BooleanColumn(not, negated.Column, negated.Property, "false");
 
                 case IsPatternExpressionSyntax { Pattern: ConstantPatternSyntax { Expression: LiteralExpressionSyntax literal } } isNull
                     when literal.IsKind(SyntaxKind.NullLiteralExpression) && AsColumn(isNull.Expression) is { } tested:
+                    KernelNullTest(isNull, tested.Column, isNull: true);
                     return $"{tested.Column.PropertyName} IS NULL";
 
                 case IsPatternExpressionSyntax { Pattern: UnaryPatternSyntax { Pattern: ConstantPatternSyntax { Expression: LiteralExpressionSyntax literal } } } isNotNull
                     when literal.IsKind(SyntaxKind.NullLiteralExpression) && AsColumn(isNotNull.Expression) is { } tested:
+                    KernelNullTest(isNotNull, tested.Column, isNull: false);
                     return $"{tested.Column.PropertyName} IS NOT NULL";
 
                 default:
                     return AsColumn(expression) is { } column
-                        ? BooleanColumn(column.Column, column.Property, "true")
+                        ? BooleanColumn(expression, column.Column, column.Property, "true")
                         : Fail($"'{Shorten(expression)}' is not a comparison between a column and a value");
             }
         }
@@ -263,6 +367,11 @@ internal static class DataVoLinqAnalyzer
             string name = column.PropertyName;
             if (parameter == NullLiteral)
             {
+                if (comparison is "=" or "<>")
+                {
+                    KernelNullTest(binary, column, isNull: comparison == "=");
+                }
+
                 return comparison switch
                 {
                     "=" => $"{name} IS NULL",
@@ -270,6 +379,8 @@ internal static class DataVoLinqAnalyzer
                     _ => Fail($"'{Shorten(binary)}' orders a column against null"),
                 };
             }
+
+            KernelComparison(binary, column, comparison, Parameters.Count - 1);
 
             if (comparison == "=" && column.IsPrimaryKey && topLevel)
             {
@@ -282,14 +393,16 @@ internal static class DataVoLinqAnalyzer
                 : $"{name} {comparison} {parameter}";
         }
 
-        private string? BooleanColumn(ColumnModel column, IPropertySymbol property, string literal)
+        private string? BooleanColumn(SyntaxNode node, ColumnModel column, IPropertySymbol property, string literal)
         {
             if (property.Type.SpecialType != SpecialType.System_Boolean)
             {
                 return Fail($"column {column.PropertyName} is not a bool, so it needs a comparison");
             }
 
-            return $"{column.PropertyName} = {Add(new LinqParameter(literal, null, false))}";
+            string parameter = Add(new LinqParameter(literal, null, false, "bool"));
+            KernelComparison(node, column, "=", Parameters.Count - 1);
+            return $"{column.PropertyName} = {parameter}";
         }
 
         private (ColumnModel Column, IPropertySymbol Property)? AsColumn(ExpressionSyntax expression)
@@ -327,6 +440,7 @@ internal static class DataVoLinqAnalyzer
             }
 
             string cast = columnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string? kernelType = KernelReader(column) is null ? null : cast;
             Optional<object?> constant = semantics.GetConstantValue(expression, cancellation);
             if (constant.HasValue)
             {
@@ -336,7 +450,7 @@ internal static class DataVoLinqAnalyzer
                 }
 
                 return Literal(constant.Value, columnType) is { } literal
-                    ? Add(new LinqParameter(literal, null, column.Type.UsesObjectParameter))
+                    ? Add(new LinqParameter(literal, null, column.Type.UsesObjectParameter, kernelType))
                     : Fail($"the constant '{Shorten(expression)}' cannot be written as a {columnType.ToDisplayString()}");
             }
 
@@ -355,12 +469,12 @@ internal static class DataVoLinqAnalyzer
             bool nullableValue = type.Type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
             if (nullableValue)
             {
-                return Add(new LinqParameter($"({cast})({text}).GetValueOrDefault()", $"({text}).HasValue", column.Type.UsesObjectParameter));
+                return Add(new LinqParameter($"({cast})({text}).GetValueOrDefault()", $"({text}).HasValue", column.Type.UsesObjectParameter, kernelType));
             }
 
             return type.Type is { IsReferenceType: true }
-                ? Add(new LinqParameter($"({cast})({text})", $"({text}) != null", column.Type.UsesObjectParameter))
-                : Add(new LinqParameter($"({cast})({text})", null, column.Type.UsesObjectParameter));
+                ? Add(new LinqParameter($"({cast})({text})", $"({text}) != null", column.Type.UsesObjectParameter, kernelType))
+                : Add(new LinqParameter($"({cast})({text})", null, column.Type.UsesObjectParameter, kernelType));
         }
 
         /// <summary>Rewrites a value expression so it can run inside the interceptor, where only <c>state</c> and statics exist.</summary>

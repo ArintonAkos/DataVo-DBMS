@@ -47,6 +47,20 @@ public abstract class DataVoLinqPlan<T, TState>
     /// <returns>The statement's parameters, in order.</returns>
     protected abstract DataVoQueryParameter[] Parameters(TState state);
 
+    /// <summary>
+    /// Counts the matching rows with a condition compiled into the scan, when the generator produced one.
+    /// </summary>
+    /// <param name="table">The table to read.</param>
+    /// <param name="state">The value passed to the query.</param>
+    /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
+    /// <param name="count">The number of matching rows, up to <paramref name="limit"/>.</param>
+    /// <returns><see langword="false"/> when this plan has no compiled condition, so the caller reads rows instead.</returns>
+    protected virtual bool TryCount(DataVoTable<T> table, TState state, int limit, out int count)
+    {
+        count = 0;
+        return false;
+    }
+
     /// <summary>Returns the first matching row, or the default value when none matches.</summary>
     /// <param name="table">The table to read.</param>
     /// <param name="state">The value passed to the query.</param>
@@ -114,7 +128,21 @@ public abstract class DataVoLinqPlan<T, TState>
 
     /// <summary>Gets whether any row matches, reading at most one.</summary>
     internal bool Any(DataVoTable<T> table, TState state) =>
-        Execute(table, state, _unique ? All : First, borrowed: true).Data.Count > 0;
+        !_unique && TryCount(table, state, 1, out int found)
+            ? found > 0
+            : Execute(table, state, _unique ? All : First, borrowed: true).Data.Count > 0;
+
+    /// <summary>Counts the matching rows without building them, when the plan has a compiled condition.</summary>
+    internal bool TryCountMatching(DataVoTable<T> table, TState state, out int count)
+    {
+        if (_unique)
+        {
+            count = 0;
+            return false;
+        }
+
+        return TryCount(table, state, 0, out count);
+    }
 
     /// <summary>Opens a paged scan of the matching rows.</summary>
     internal IEnumerable<DataVoRow> Stream(DataVoTable<T> table, TState state) => table.Stream(_where, Parameters(state));

@@ -8,7 +8,13 @@ namespace DataVo.Generators.Linq;
 /// <param name="Value">The expression that produces the value.</param>
 /// <param name="Guard">An expression that is true when the value is not null, or null when it never is.</param>
 /// <param name="UsesObjectParameter">Whether the value is bound through <c>DataVoQueryParameter.FromObject</c>.</param>
-internal sealed record LinqParameter(string Value, string? Guard, bool UsesObjectParameter);
+/// <param name="KernelType">The C# type a compiled condition holds the value as, or null when the type has no direct reader.</param>
+internal sealed record LinqParameter(string Value, string? Guard, bool UsesObjectParameter, string? KernelType = null);
+
+/// <summary>A condition as C# over a <c>RowRef</c>, compiled into the scan loop for queries that only count or test rows.</summary>
+/// <param name="Expression">The condition; columns appear as <c>c0</c>, <c>c1</c>... and values as <c>p0</c>, <c>p1</c>...</param>
+/// <param name="Columns">The columns the condition reads, in <c>c</c> order.</param>
+internal sealed record LinqKernel(string Expression, EquatableArray<string> Columns);
 
 /// <summary>Where a call is, in both forms the compiler accepts for <c>[InterceptsLocation]</c>.</summary>
 /// <param name="Version">The encoding version, or 0 when only the path form is available.</param>
@@ -25,7 +31,8 @@ internal sealed record LinqSite(
     string StateType,
     string Where,
     bool Unique,
-    EquatableArray<LinqParameter> Parameters);
+    EquatableArray<LinqParameter> Parameters,
+    LinqKernel? Kernel = null);
 
 /// <summary>The outcome of inspecting one call: a translated site, or a diagnostic explaining why it runs as a scan.</summary>
 /// <param name="Tree">The file the call is in. Kept so a diagnostic lands in source, where <c>#pragma warning</c> can reach it.</param>

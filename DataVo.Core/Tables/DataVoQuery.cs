@@ -67,6 +67,11 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns>The number of matching rows.</returns>
     public int Count()
     {
+        if (_plan is not null && _plan.Binds(_state) && _plan.TryCountMatching(Table, _state, out int matching))
+        {
+            return matching;
+        }
+
         using Enumerator rows = GetEnumerator();
         return rows.CountRemaining();
     }
