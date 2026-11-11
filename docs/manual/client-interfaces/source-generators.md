@@ -89,13 +89,13 @@ Player? admin = players.FirstOrDefault(p => p.Id == 1);
 List<Player> veterans = players.Where(p => p.Level >= 50 && p.IsActive).ToList();
 ```
 
-`FirstOrDefault`, `SingleOrDefault` and `Where` are available with and without state. `Where` returns a `DataVoQuery` that runs when it is enumerated and offers `FirstOrDefault()`, `SingleOrDefault()`, `Any()`, `Count()` and `ToList()`. Its `IsCompiled` property tells you whether the generator compiled it.
+`FirstOrDefault`, `SingleOrDefault` and `Where` are available with and without state. `Where` returns a `DataVoQuery` that runs when it is enumerated and offers `FirstOrDefault()`, `SingleOrDefault()`, `Any()`, `Count()`, `Sum()`, `Min()`, `Max()` and `ToList()`. Its `IsCompiled` property tells you whether the generator compiled it.
 
 A primary-key equality on an LSM database reads one row and allocates only that row. A miss allocates nothing.
 
 Enumerating a query streams. Rows are read in pages of 1,024 and each model is built as the loop reaches it, so a `foreach` over 100,000 matching rows keeps about one page alive, not the result. `ToList()` is the way to ask for everything at once. Scans that were not compiled stream the same way. Some queries read their matches before enumerating, as `StreamQuery` does: a query inside a transaction, a condition with an equality on an indexed column (few rows, read through the index), and a condition the paged scan cannot apply, which today means `||`, a null test, or `!=` on a nullable column.
 
-### Counting And Summing Without Building Rows
+### Counting, Summing And Finding Extremes Without Building Rows
 
 `Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 6 to 20 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
 
@@ -108,6 +108,23 @@ int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).C
 ```csharp
 long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold); // 0 B
 ```
+
+`Min` and `Max` are found in the same scan. `DataVoQuery` has `Min(selector)` and `Max(selector)` for any value type, with the semantics of `Enumerable.Min` and `Enumerable.Max`:
+
+- Null values are skipped.
+- When no row matches, or every value is null, the call throws `InvalidOperationException` for a type that cannot be null (`int`) and returns `null` for one that can (`int?`, `string`).
+- A floating-point `NaN` orders below every number, so `Min` returns `NaN` if any value is `NaN`, and `Max` returns `NaN` only when every value is.
+
+When the query's condition is compiled into the scan and the selector is one `int`, `long`, `float`, `double`, `DataVoDate` or `DateOnly` column of its own type, nullable or not, the generator keeps the smallest or largest value in the scan's own variables: no row is built and, once warm, nothing is allocated on the LSM and in-memory engines. Any other selector (`p => p.Gold * 2`, a cast, a `string` column) runs as written over the rows. Inside a transaction the rows are streamed instead of read in place, so the result includes the transaction's own writes.
+
+```csharp
+var active = db.Table<Player>().Where(static p => p.IsActive);
+long poorest = active.Min(static p => p.Gold);          // 0 B; throws when no player is active
+int? bestBonus = active.Max(static p => p.Bonus);       // 0 B; null when no active player has a bonus
+DataVoDate first = active.Min(static p => p.JoinedOn);  // 0 B
+```
+
+DataVo has no `DATETIME` column: a `DateTime` property is not mapped, and a point in time is stored as a `long` (ticks or Unix time), which `Min` and `Max` read as any other `long` column.
 
 The scan is generic over the compiled condition all the way into the storage engine's row loop, so no delegate is called per row.
 
