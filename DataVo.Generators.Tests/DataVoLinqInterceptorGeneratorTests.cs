@@ -90,7 +90,29 @@ public class DataVoLinqInterceptorGeneratorTests
         Assert.Contains($"return {condition};", generated);
         Assert.Contains(detail, generated);
         Assert.Contains("struct Kernel : global::DataVo.Core.IRowRefFilter", generated);
-        Assert.Contains("count = table.CountMatching(Columns, ref kernel, limit);", generated);
+        Assert.Contains("count = table.CountMatching(Columns, Kinds, ref kernel, limit);", generated);
+    }
+
+    [Theory]
+    [InlineData("players.Where(target, static (p, min) => p.Gold >= min)", "l", "(global::DataVo.Core.RowBytes.Int64(row, o0) >= p0)", "(cells[c0].AsInt64() >= p0)")]
+    [InlineData("players.Where(p => !p.IsActive && p.Speed < 2.5f)", "bf",
+        "(global::DataVo.Core.RowBytes.Boolean(row, o0) == p0) & (global::DataVo.Core.RowBytes.Single(row, o1) < p1)",
+        "(cells[c0].AsBoolean() == p0) & ((float)cells[c1].AsDouble() < p1)")]
+    [InlineData("players.Where(p => p.Score != 7)", "i", "(global::DataVo.Core.RowBytes.Int32(row, o0) != p0)", "(cells[c0].AsInt32() != p0)")]
+    [InlineData("players.Where(p => p.Score == null || p.Gold > 5)", "nl", "false | (global::DataVo.Core.RowBytes.Int64(row, o1) > p0)", "false | (cells[c1].AsInt64() > p0)")]
+    [InlineData("players.Where(p => p.Guild != null && (p.Gold < 1 || p.Gold > 9))", "nl",
+        "true & ((global::DataVo.Core.RowBytes.Int64(row, o1) < p0) | (global::DataVo.Core.RowBytes.Int64(row, o1) > p1))",
+        "true & ((cells[c1].AsInt64() < p0) | (cells[c1].AsInt64() > p1))")]
+    [InlineData("players.Where(p => p.Score != null && p.Score > 3)", "i", "true & (global::DataVo.Core.RowBytes.Int32(row, o0) > p0)", "true & (cells[c0].AsInt32() > p0)")]
+    public void CompiledCondition_AlsoReadsStoredBytesAndCellsDirectly_WithoutBranchesBetweenTests(string call, string kinds, string bytes, string cells)
+    {
+        string generated = Generate(call).Generated;
+
+        Assert.Contains($"private const string Kinds = \"{kinds}\";", generated);
+        Assert.Contains($"public bool MatchesBytes(global::System.ReadOnlySpan<byte> row)", generated);
+        Assert.Contains($"return {bytes};", generated);
+        Assert.Contains($"return {cells};", generated);
+        Assert.Contains("public void BindOffsets(global::System.ReadOnlySpan<int> offsets)", generated);
     }
 
     [Theory]
@@ -125,7 +147,7 @@ public class DataVoLinqInterceptorGeneratorTests
         string generated = Generate("players.Where(p => p.IsActive)").Generated;
 
         Assert.Contains("protected override bool TrySum(", generated);
-        Assert.Contains("return table.SumMatching(Columns, ref kernel, column, floating, out whole, out real);", generated);
+        Assert.Contains("return table.SumMatching(Columns, Kinds, ref kernel, column, floating, out whole, out real);", generated);
     }
 
     [Theory]

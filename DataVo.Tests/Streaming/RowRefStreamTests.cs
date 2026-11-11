@@ -30,6 +30,24 @@ public sealed class RefUnit
     public int? Bonus { get; set; }
 }
 
+[DataVoTable("ref_gauges")]
+public sealed class RefGauge
+{
+    [PrimaryKey] public int Id { get; set; }
+
+    public int? Low { get; set; }
+
+    public long High { get; set; }
+
+    public float? Trim { get; set; }
+
+    public bool Armed { get; set; }
+
+    public double Strain { get; set; }
+
+    public Guid Mark { get; set; }
+}
+
 [DataVoTable("ref_tokens")]
 public sealed class RefToken
 {
@@ -150,11 +168,14 @@ public sealed class RowRefStreamTests : IDisposable
         // More than two blocks of the in-place scan; the legacy disk engine writes one row per file open, so it gets fewer.
         int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
         var units = new List<RefUnit>();
+        Run(db, "BEGIN"); // one commit for the load: a commit per row costs milliseconds on LSM
         for (int i = 1; i <= Count; i++)
         {
             units.Add(Unit(i));
             db.Insert(units[^1]);
         }
+
+        Run(db, "COMMIT");
 
         if (flushed)
         {
@@ -191,11 +212,14 @@ public sealed class RowRefStreamTests : IDisposable
         db.EnsureRefUnitTable();
         int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
         var units = new List<RefUnit>();
+        Run(db, "BEGIN"); // one commit for the load: a commit per row costs milliseconds on LSM
         for (int i = 1; i <= Count; i++)
         {
             units.Add(Unit(i));
             db.Insert(units[^1]);
         }
+
+        Run(db, "COMMIT");
 
         if (flushed)
         {
@@ -234,16 +258,90 @@ public sealed class RowRefStreamTests : IDisposable
     }
 
     [Theory]
+    [InlineData(StorageMode.Lsm, false)]
+    [InlineData(StorageMode.Lsm, true)]
+    [InlineData(StorageMode.InMemory, false)]
+    [InlineData(StorageMode.Disk, false)]
+    public void FixedWidthTable_IsReadAtFixedOffsets_AndRowsWithNullsStillCountCorrectly(StorageMode mode, bool flushed)
+    {
+        // Every column has a fixed width, so the scan reads values at offsets fixed for the table. A NULL in Low
+        // or Trim shifts everything after it in that row; such rows must take the checked path and agree.
+        using DataVoContext db = Open(mode);
+        db.EnsureRefGaugeTable();
+        int count = mode == StorageMode.Disk ? 1_500 : 6_000;
+        var gauges = new List<RefGauge>();
+        Run(db, "BEGIN");
+        for (int i = 1; i <= count; i++)
+        {
+            gauges.Add(new RefGauge
+            {
+                Id = i,
+                Low = i % 4 == 0 ? null : i % 50,
+                High = i * 1_000L,
+                Trim = i % 6 == 0 ? null : (i % 9) - 4.5f,
+                Armed = i % 3 == 0,
+                Strain = i / 7.0,
+                Mark = i == 77 ? new Guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") : new Guid(i, 1, 2, [1, 2, 3, 4, 5, 6, 7, 8]),
+            });
+            db.Insert(gauges[^1]);
+        }
+
+        Run(db, "COMMIT");
+
+        if (flushed)
+        {
+            db.Engine.StorageContext.LsmEngine!.FlushTableForTesting(db.Engine.Sessions.Get(db.SessionId)!, "ref_gauges");
+        }
+
+        DataVoTable<RefGauge> table = db.Table<RefGauge>();
+        Guid mark = new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+        Assert.Equal(gauges.Count(static g => g.High > 3_000_000), table.Where(static g => g.High > 3_000_000).Count());
+        Assert.Equal(gauges.Count(static g => g.Low > 25), table.Where(static g => g.Low > 25).Count());
+        Assert.Equal(gauges.Count(static g => g.Low != 25), table.Where(static g => g.Low != 25).Count());
+        Assert.Equal(gauges.Count(static g => g.Low == null), table.Where(static g => g.Low == null).Count());
+        Assert.Equal(gauges.Count(static g => g.Low != null && g.Armed), table.Where(static g => g.Low != null && g.Armed).Count());
+        Assert.Equal(gauges.Count(static g => g.Low == null || g.Trim == null), table.Where(static g => g.Low == null || g.Trim == null).Count());
+        Assert.Equal(gauges.Count(static g => g.Trim < 0f && g.Strain >= 100.0), table.Where(static g => g.Trim < 0f && g.Strain >= 100.0).Count());
+        Assert.Equal(gauges.Count(static g => g.Trim != 1.5f || !g.Armed), table.Where(static g => g.Trim != 1.5f || !g.Armed).Count());
+        Assert.Equal(gauges.Count(static g => (g.Low < 5 || g.Low > 45) && g.Strain < 500.0), table.Where(static g => (g.Low < 5 || g.Low > 45) && g.Strain < 500.0).Count());
+        Assert.Equal(1, table.Where(mark, static (g, m) => g.Mark == m).Count());
+        Assert.Equal(count - 1, table.Where(mark, static (g, m) => g.Mark != m).Count());
+        Assert.True(table.Where(static g => g.Low == null && g.Armed).Any());
+        Assert.False(table.Where(static g => g.High < 0).Any());
+
+        Assert.Equal(gauges.Where(static g => g.Armed).Sum(static g => g.High), table.Where(static g => g.Armed).Sum(static g => g.High));
+        Assert.Equal(gauges.Where(static g => g.Low > 25).Sum(static g => g.Strain), table.Where(static g => g.Low > 25).Sum(static g => g.Strain));
+        Assert.Equal(gauges.Where(static g => g.Trim == null).Sum(static g => g.High), table.Where(static g => g.Trim == null).Sum(static g => g.High));
+        Assert.Equal(gauges.Where(static g => g.Strain < 300.0).Sum(static g => g.Id), table.Where(static g => g.Strain < 300.0).Sum(static g => g.Id));
+
+        // An update that turns a value into NULL, and a delete, are seen by the next scan.
+        Run(db, "UPDATE ref_gauges SET Low = NULL WHERE Id = 1");
+        Run(db, "DELETE FROM ref_gauges WHERE Id = 2");
+        gauges[0].Low = null;
+        gauges.RemoveAt(1);
+        Assert.Equal(gauges.Count(static g => g.Low == null), table.Where(static g => g.Low == null).Count());
+        Assert.Equal(gauges.Where(static g => g.Low != null).Sum(static g => g.High), table.Where(static g => g.Low != null).Sum(static g => g.High));
+
+        Run(db, "UPDATE ref_gauges SET High = 9223372036854775000 WHERE Id = 3");
+        Run(db, "UPDATE ref_gauges SET High = 9223372036854775000 WHERE Id = 6");
+        Assert.Throws<OverflowException>(() => table.Where(static g => g.Armed).Sum(static g => g.High));
+    }
+
+    [Theory]
     [InlineData(StorageMode.Lsm)]
     [InlineData(StorageMode.InMemory)]
     public void CompiledSum_AllocatesNothingOnceWarm(StorageMode mode)
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefUnitTable();
+        Run(db, "BEGIN");
         for (int i = 1; i <= 6_000; i++)
         {
             db.Insert(Unit(i));
         }
+
+        Run(db, "COMMIT");
 
         DataVoTable<RefUnit> table = db.Table<RefUnit>();
         long expected = Enumerable.Range(1, 6_000).Where(static i => i % 3 != 0).Sum(static i => Unit(i).Score);
