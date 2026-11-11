@@ -78,6 +78,123 @@ public readonly struct RowRefStream
         }
     }
 
+    /// <summary>
+    /// Counts the rows a compiled condition accepts by testing each row inside the storage scan, where it is
+    /// stored: no row is copied out, and only the cells up to the last column the condition reads are located.
+    /// </summary>
+    /// <param name="ordinals">The table positions of the columns the condition reads.</param>
+    /// <param name="filter">The condition, already bound to <paramref name="ordinals"/>.</param>
+    /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
+    /// <param name="count">The number of matching rows, up to <paramref name="limit"/>.</param>
+    /// <returns>
+    /// <see langword="false"/> when the rows cannot be read in place (inside a transaction, or while storage holds
+    /// uncommitted writes for this flow); the caller then counts through <see cref="GetEnumerator"/>.
+    /// </returns>
+    /// <remarks>
+    /// The read lock is held for one batch of rows at a time, as it is for a streamed pass, so writers run between
+    /// batches and the same consistency holds: a row that existed for the whole count is counted exactly once.
+    /// </remarks>
+    internal bool TryCountInPlace<TFilter>(int[] ordinals, ref TFilter filter, int limit, out int count)
+        where TFilter : struct, IRowRefFilter
+    {
+        count = 0;
+        DataVoEngine engine = _engine ?? throw Uninitialized();
+        string database = DatabaseOf(engine, _session);
+        if (engine.TransactionManager.HasActiveTransaction(_session) || MvccExecutionScope.CurrentSnapshot is not null)
+        {
+            return false;
+        }
+
+        int columns = 0;
+        ulong needed = 0;
+        foreach (int ordinal in ordinals)
+        {
+            columns = Math.Max(columns, ordinal + 1);
+            if (ordinal < 64)
+            {
+                needed |= 1UL << ordinal;
+            }
+        }
+
+        RowRefPage page = RowRefPage.Rent();
+        try
+        {
+            using (engine.EnterRuntimeReadScope())
+            {
+                page.Open(engine, database, _table!);
+            }
+
+            if (columns > page.ColumnCount)
+            {
+                return false;
+            }
+
+            var scan = new InPlaceCount<TFilter>(filter, page, columns, needed, limit);
+
+            // A limited count (Any) starts with a small batch so a match near the start costs little.
+            int batch = limit > 0 ? 64 : InPlaceBatchRows;
+            while (!page.Cursor.Done && !scan.Full)
+            {
+                using SnapshotLockScope readScope = engine.EnterRuntimeReadScope();
+                if (engine.Catalog.GetTableSchemaVersion(_table!, database) != page.SchemaVersion)
+                {
+                    throw new InvalidOperationException($"Table {_table} changed shape while it was being counted.");
+                }
+
+                if (!engine.StorageContext.ScanRowPage(_table!, database, page.Cursor, null, null, batch, ref scan, InPlaceCount<TFilter>.Visit))
+                {
+                    return false;
+                }
+
+                batch = InPlaceBatchRows;
+            }
+
+            count = scan.Count;
+            return true;
+        }
+        finally
+        {
+            RowRefPage.Return(page);
+        }
+    }
+
+    // Rows examined per hold of the read lock. Larger than a streamed page: nothing is copied while it is held.
+    private const int InPlaceBatchRows = 4096;
+
+    /// <summary>The state of an in-place count: the condition, and the page whose layout locates each row's cells.</summary>
+    private struct InPlaceCount<TFilter>(TFilter filter, RowRefPage page, int columns, ulong needed, int limit)
+        where TFilter : struct, IRowRefFilter
+    {
+        public static readonly StorageContext.RawRowVisitor<InPlaceCount<TFilter>> Visit =
+            static (ref InPlaceCount<TFilter> scan, RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed) =>
+            {
+                if (scan.Full)
+                {
+                    return false;
+                }
+
+                RowRef row = typed is null
+                    ? scan._page.InPlace(rowId, stored, scan._columns)
+                    : scan._page.InPlace(rowId, typed, scan._columns, scan._needed);
+                if (scan._filter.Matches(in row))
+                {
+                    scan.Count++;
+                }
+
+                return !scan.Full;
+            };
+
+        private TFilter _filter = filter;
+        private readonly RowRefPage _page = page;
+        private readonly int _columns = columns;
+        private readonly ulong _needed = needed;
+        private readonly int _limit = limit;
+
+        public int Count;
+
+        public readonly bool Full => _limit > 0 && Count >= _limit;
+    }
+
     /// <summary>Starts a pass over the table.</summary>
     /// <returns>An enumerator positioned before the first row.</returns>
     public RowRefEnumerator GetEnumerator()

@@ -214,8 +214,12 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     public RowRefStream StreamRef() => new(Context.Engine, Context.SessionId, _info.TableName);
 
     /// <summary>
-    /// Counts the rows a compiled condition accepts, reading each row where it is stored. Used by generated code.
+    /// Counts the rows a compiled condition accepts. Used by generated code.
     /// </summary>
+    /// <remarks>
+    /// Each row is tested inside the storage scan, where it is stored, so no row is copied out. Inside a
+    /// transaction the rows are streamed instead, so the count includes the transaction's own writes.
+    /// </remarks>
     /// <typeparam name="TFilter">The compiled condition.</typeparam>
     /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
     /// <param name="filter">The condition, with its values already set.</param>
@@ -227,7 +231,13 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         where TFilter : struct, IRowRefFilter
     {
         RowRefStream rows = StreamRef();
-        filter.Bind(FusedOrdinals(columns, rows));
+        int[] ordinals = FusedOrdinals(columns, rows);
+        filter.Bind(ordinals);
+        if (rows.TryCountInPlace(ordinals, ref filter, limit, out int inPlace))
+        {
+            return inPlace;
+        }
+
         int count = 0;
         foreach (RowRef row in rows)
         {

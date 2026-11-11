@@ -111,6 +111,166 @@ public readonly ref struct RowRef
         return kind == StorageKind.Int ? BinaryPrimitives.ReadInt32LittleEndian(value) : BinaryPrimitives.ReadInt64LittleEndian(value);
     }
 
+    /// <summary>Reads an <c>INT</c> column unless it is NULL. Used by generated code, which tests and reads in one call.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetInt32(int columnIndex, out int value)
+    {
+        if (TryFixed(columnIndex, StorageKind.Int, out ReadOnlySpan<byte> cell))
+        {
+            value = cell.IsEmpty ? 0 : BinaryPrimitives.ReadInt32LittleEndian(cell);
+            return !cell.IsEmpty;
+        }
+
+        return TryGetInt32Checked(columnIndex, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetInt32Checked(int columnIndex, out int value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present ? GetInt32(columnIndex) : 0;
+        return present;
+    }
+
+    /// <summary>Reads a <c>BIGINT</c> or <c>INT</c> column unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetInt64(int columnIndex, out long value)
+    {
+        if (TryFixed(columnIndex, StorageKind.BigInt, out ReadOnlySpan<byte> cell))
+        {
+            value = cell.IsEmpty ? 0 : BinaryPrimitives.ReadInt64LittleEndian(cell);
+            return !cell.IsEmpty;
+        }
+
+        return TryGetInt64Checked(columnIndex, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetInt64Checked(int columnIndex, out long value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present ? GetInt64(columnIndex) : 0;
+        return present;
+    }
+
+    /// <summary>Reads a <c>FLOAT</c> column unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetFloat(int columnIndex, out float value)
+    {
+        if (TryFixed(columnIndex, StorageKind.Float, out ReadOnlySpan<byte> cell))
+        {
+            value = cell.IsEmpty ? 0 : BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(cell));
+            return !cell.IsEmpty;
+        }
+
+        return TryGetFloatChecked(columnIndex, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetFloatChecked(int columnIndex, out float value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present ? GetFloat(columnIndex) : 0;
+        return present;
+    }
+
+    /// <summary>Reads a <c>DOUBLE</c> or <c>FLOAT</c> column unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetDouble(int columnIndex, out double value)
+    {
+        if (TryFixed(columnIndex, StorageKind.Double, out ReadOnlySpan<byte> cell))
+        {
+            value = cell.IsEmpty ? 0 : BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(cell));
+            return !cell.IsEmpty;
+        }
+
+        return TryGetDoubleChecked(columnIndex, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetDoubleChecked(int columnIndex, out double value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present ? GetDouble(columnIndex) : 0;
+        return present;
+    }
+
+    /// <summary>Reads a <c>BIT</c> column unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or <see langword="false"/> when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetBoolean(int columnIndex, out bool value)
+    {
+        if (TryFixed(columnIndex, StorageKind.Bit, out ReadOnlySpan<byte> cell))
+        {
+            value = !cell.IsEmpty && cell[0] != 0;
+            return !cell.IsEmpty;
+        }
+
+        return TryGetBooleanChecked(columnIndex, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetBooleanChecked(int columnIndex, out bool value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present && GetBoolean(columnIndex);
+        return present;
+    }
+
+    /// <summary>Reads a <c>GUID</c> column unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="value">The value, or the empty GUID when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public bool TryGetGuid(int columnIndex, out Guid value)
+    {
+        bool present = !IsNull(columnIndex);
+        value = present ? GetGuid(columnIndex) : default;
+        return present;
+    }
+
+    /// <summary>
+    /// The common case of the <c>TryGet</c> readers: a column of exactly this kind that is not the clustered key.
+    /// <paramref name="cell"/> is the value's bytes, or empty when the cell is NULL. Returns false for every other
+    /// case (the key column, a widening read, a wrong type, a bad index), which the checked accessors handle.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryFixed(int columnIndex, StorageKind kind, out ReadOnlySpan<byte> cell)
+    {
+        cell = default;
+        if ((uint)columnIndex >= (uint)_kinds.Length || _kinds[columnIndex] != kind || columnIndex == _keyOrdinal)
+        {
+            return false;
+        }
+
+        int flag = _cells[columnIndex];
+        if (flag != RowSerializer.AbsentCell && _row[flag] == 0)
+        {
+            cell = _row.Slice(flag + 1);
+        }
+
+        return true;
+    }
+
     /// <summary>Reads a <c>FLOAT</c> column.</summary>
     /// <param name="columnIndex">The column's position in the table.</param>
     /// <returns>The value.</returns>

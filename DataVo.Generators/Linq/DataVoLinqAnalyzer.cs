@@ -262,13 +262,16 @@ internal static class DataVoLinqAnalyzer
                 return;
             }
 
+            // One call tests for NULL and reads the value. A stored NULL differs from every value, and is neither
+            // equal to nor ordered against one.
             string value = "p" + parameter.ToString(CultureInfo.InvariantCulture);
+            string local = "v" + _kernelLeaves.Count.ToString(CultureInfo.InvariantCulture);
+            string read = $"row.Try{reader}({name}, out {Parameters[parameter].KernelType} {local})";
             _kernelLeaves[node] = comparison switch
             {
-                // A stored NULL differs from every value, and is neither equal to nor ordered against one.
-                "<>" => $"(row.IsNull({name}) || row.{reader}({name}) != {value})",
-                "=" => $"(!row.IsNull({name}) && row.{reader}({name}) == {value})",
-                _ => $"(!row.IsNull({name}) && row.{reader}({name}) {comparison} {value})",
+                "<>" => $"(!{read} || {local} != {value})",
+                "=" => $"({read} && {local} == {value})",
+                _ => $"({read} && {local} {comparison} {value})",
             };
         }
 

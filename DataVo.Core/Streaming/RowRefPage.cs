@@ -203,6 +203,58 @@ internal sealed class RowRefPage
             _keyIsGuid);
     }
 
+    /// <summary>
+    /// A stored row read where it lies, for a condition that is evaluated during the storage scan. Only the first
+    /// <paramref name="columns"/> cells are located; the row must not be asked for a later one, and is valid only
+    /// until the scan moves on.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The row's bytes do not match the table's columns.</exception>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public RowRef InPlace(RowKey key, ReadOnlySpan<byte> stored, int columns)
+    {
+        if (!RowSerializer.TryLocateCells(stored, new ReadOnlySpan<StorageKind>(_kinds, 0, columns), new Span<int>(_cells, 0, columns)))
+        {
+            throw new InvalidDataException($"A stored row of {_table} does not match the table's columns.");
+        }
+
+        return new RowRef(stored, new ReadOnlySpan<int>(_cells, 0, _kinds.Length), _kinds, default, key, _keyOrdinal, _keyIsGuid);
+    }
+
+    /// <summary>
+    /// A typed row of an in-memory table, encoded into this page's buffer so a condition can read it. Fixed-width
+    /// cells marked in <paramref name="needed"/> (bit <c>n</c> for column <c>n</c>; columns past 63 always) are
+    /// encoded in full. Every other cell keeps only its null flag, which is all a condition asks of text. The row
+    /// is valid only until the scan moves on.
+    /// </summary>
+    public RowRef InPlace(RowKey key, StoredRow typed, int columns, ulong needed)
+    {
+        // A flag and at most a GUID per cell.
+        int capacity = columns * 17;
+        if (_bytes.Length < capacity)
+        {
+            _bytes = new byte[Math.Max(capacity, InitialBytes)];
+        }
+
+        Span<byte> destination = _bytes;
+        int offset = 0;
+        for (int i = 0; i < columns; i++)
+        {
+            _cells[i] = offset;
+            CellValue cell = i < typed.Count ? typed[i] : CellValue.Null;
+            StorageKind kind = _kinds[i];
+            bool fixedWidth = kind != StorageKind.String && kind != StorageKind.Vector;
+            if (cell.IsNull || !fixedWidth || (i < 64 && ((needed >> i) & 1) == 0))
+            {
+                destination[offset++] = cell.IsNull ? (byte)1 : (byte)0;
+                continue;
+            }
+
+            offset += RowSerializer.WriteCell(kind, cell, destination.Slice(offset));
+        }
+
+        return new RowRef(destination.Slice(0, offset), new ReadOnlySpan<int>(_cells, 0, _kinds.Length), _kinds, default, key, _keyOrdinal, _keyIsGuid);
+    }
+
     private int Measure(StoredRow row)
     {
         int length = 0;
