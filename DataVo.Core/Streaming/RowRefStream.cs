@@ -80,7 +80,8 @@ public readonly struct RowRefStream
     }
 
     /// <summary>
-    /// Counts the rows a compiled condition accepts, and optionally sums one of their columns, by testing each
+    /// Counts the rows a compiled condition accepts, and optionally folds one of their columns (its sum, its
+    /// smallest or its largest value), by testing each
     /// row inside the storage scan, where it is stored: no row is copied out, and only the cells up to the last
     /// column the scan reads are located.
     /// </summary>
@@ -88,13 +89,13 @@ public readonly struct RowRefStream
     /// <param name="kinds">One letter per column, saying how the condition reads it; see <see cref="RowRefPage.PlanDirect"/>.</param>
     /// <param name="filter">The condition, already bound to <paramref name="ordinals"/>.</param>
     /// <param name="limit">Stop after this many matches, or 0 to visit them all.</param>
-    /// <param name="sumOrdinal">The table position of the column to sum; ignored when nothing is summed.</param>
-    /// <param name="floating">Whether the sum is a floating-point one.</param>
-    /// <param name="summed">Whether a column is summed at all.</param>
+    /// <param name="foldOrdinal">The table position of the column to fold, or -1 to only count.</param>
+    /// <param name="fold">What to do with that column's values.</param>
+    /// <param name="foldKind">The type the caller reads the column as; see <see cref="RowAggregate.KindFor"/>.</param>
     /// <param name="result">The totals over the matching rows.</param>
     /// <returns>
     /// <see langword="false"/> when the rows cannot be read in place (inside a transaction, or while storage holds
-    /// uncommitted writes for this flow) or the summed column's type does not fit the sum; the caller then takes
+    /// uncommitted writes for this flow) or the folded column is not stored as that type; the caller then takes
     /// another path. <paramref name="result"/> is meaningless in that case.
     /// </returns>
     /// <remarks>
@@ -110,7 +111,7 @@ public readonly struct RowRefStream
     /// <see cref="RowRef"/> instead, so the result is the same either way.
     /// </para>
     /// </remarks>
-    internal bool TryScanInPlace<TFilter>(int[] ordinals, string kinds, ref TFilter filter, int limit, int sumOrdinal, bool floating, bool summed, out RowAggregate result)
+    internal bool TryScanInPlace<TFilter>(int[] ordinals, string kinds, ref TFilter filter, int limit, int foldOrdinal, RowFold fold, char foldKind, out RowAggregate result)
         where TFilter : struct, IRowRefFilter
     {
         result = default;
@@ -121,8 +122,9 @@ public readonly struct RowRefStream
             return false;
         }
 
-        int columns = summed ? sumOrdinal + 1 : 0;
-        ulong needed = summed && sumOrdinal < 64 ? 1UL << sumOrdinal : 0;
+        bool folded = foldOrdinal >= 0;
+        int columns = folded ? foldOrdinal + 1 : 0;
+        ulong needed = folded && foldOrdinal < 64 ? 1UL << foldOrdinal : 0;
         foreach (int ordinal in ordinals)
         {
             columns = Math.Max(columns, ordinal + 1);
@@ -145,19 +147,19 @@ public readonly struct RowRefStream
                 return false;
             }
 
-            RowSumKind kind = RowSumKind.None;
-            if (summed && (kind = RowAggregate.KindFor(page.KindAt(sumOrdinal), floating)) == RowSumKind.None)
+            RowFoldKind kind = RowFoldKind.None;
+            if (folded && (kind = RowAggregate.KindFor(page.KindAt(foldOrdinal), fold, foldKind)) == RowFoldKind.None)
             {
                 return false;
             }
 
-            RowRefPage.DirectLayout layout = page.PlanDirect(ordinals, kinds, columns, summed ? sumOrdinal : -1);
+            RowRefPage.DirectLayout layout = page.PlanDirect(ordinals, kinds, columns, foldOrdinal);
             if (layout.Bytes)
             {
                 filter.BindOffsets(new ReadOnlySpan<int>(layout.ValueOffsets, 0, ordinals.Length));
             }
 
-            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, sumOrdinal, layout);
+            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, foldOrdinal, layout);
 
             // A limited scan (Any) starts with a small block so a match near the start costs little.
             int block = limit > 0 ? 64 : InPlaceBlockRows;
@@ -201,14 +203,14 @@ public readonly struct RowRefStream
         private readonly int _columns;
         private readonly ulong _needed;
         private readonly int _limit;
-        private readonly RowSumKind _sum;
+        private readonly RowFoldKind _sum;
         private readonly int _sumOrdinal;
 
         public RowAggregate Totals;
 
         private readonly RowRefPage.DirectLayout _direct;
 
-        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowSumKind sum, int sumOrdinal, RowRefPage.DirectLayout direct)
+        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowFoldKind sum, int sumOrdinal, RowRefPage.DirectLayout direct)
         {
             _direct = direct;
             _filter = filter;

@@ -148,7 +148,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns>The sum.</returns>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public int SumInt32Column(string[] column, Func<T, int> selector) =>
-        TrySumColumn(column, floating: false, out long whole, out _) ? checked((int)whole) : Sum(selector);
+        TryFoldColumn(column, RowFold.Sum, 'i', out RowFoldTotals totals) ? checked((int)totals.Whole) : Sum(selector);
 
     /// <summary>Sums a <c>BIGINT</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
     /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
@@ -156,7 +156,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns>The sum.</returns>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public long SumInt64Column(string[] column, Func<T, long> selector) =>
-        TrySumColumn(column, floating: false, out long whole, out _) ? whole : Sum(selector);
+        TryFoldColumn(column, RowFold.Sum, 'l', out RowFoldTotals totals) ? totals.Whole : Sum(selector);
 
     /// <summary>Sums a <c>FLOAT</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
     /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
@@ -164,7 +164,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns>The sum.</returns>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public float SumSingleColumn(string[] column, Func<T, float> selector) =>
-        TrySumColumn(column, floating: true, out _, out double real) ? (float)real : Sum(selector);
+        TryFoldColumn(column, RowFold.Sum, 'f', out RowFoldTotals totals) ? (float)totals.Real : Sum(selector);
 
     /// <summary>Sums a <c>DOUBLE</c> column in the scan when the plan can, else through <paramref name="selector"/>. Used by generated code.</summary>
     /// <param name="column">The column <paramref name="selector"/> reads, as a one-element array reused on every call.</param>
@@ -172,17 +172,102 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
     /// <returns>The sum.</returns>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public double SumDoubleColumn(string[] column, Func<T, double> selector) =>
-        TrySumColumn(column, floating: true, out _, out double real) ? real : Sum(selector);
+        TryFoldColumn(column, RowFold.Sum, 'd', out RowFoldTotals totals) ? totals.Real : Sum(selector);
 
-    private bool TrySumColumn(string[] column, bool floating, out long whole, out double real)
+    /// <summary>
+    /// Returns the smallest value among the matching rows. Null values are skipped.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the value compared.</typeparam>
+    /// <param name="selector">Picks the value to compare.</param>
+    /// <returns>
+    /// The smallest value. When no row matches, or every value is null, the result is null if
+    /// <typeparamref name="TResult"/> can be null.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">No row matches and <typeparamref name="TResult"/> cannot be null.</exception>
+    /// <remarks>
+    /// Values are ordered by <see cref="Comparer{T}.Default"/>, as <c>Enumerable.Min</c> orders them, so a
+    /// floating-point <c>NaN</c> is smaller than every number.
+    /// <para>
+    /// When the query is compiled and <paramref name="selector"/> is a plain <c>int</c>, <c>long</c>,
+    /// <c>float</c>, <c>double</c> or date column, nullable or not (<c>p =&gt; p.Gold</c>), the generator finds
+    /// the value inside the scan and builds no rows.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// int lowest = db.Table&lt;Player&gt;().Where(minLevel, static (p, min) => p.Level >= min).Min(static p => p.Gold);
+    /// </code>
+    /// </example>
+    public TResult? Min<TResult>(Func<T, TResult> selector) => Extreme(selector, smallest: true);
+
+    /// <summary>
+    /// Returns the largest value among the matching rows. Null values are skipped.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the value compared.</typeparam>
+    /// <param name="selector">Picks the value to compare.</param>
+    /// <returns>
+    /// The largest value. When no row matches, or every value is null, the result is null if
+    /// <typeparamref name="TResult"/> can be null.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">No row matches and <typeparamref name="TResult"/> cannot be null.</exception>
+    /// <remarks>
+    /// Values are ordered by <see cref="Comparer{T}.Default"/>, as <c>Enumerable.Max</c> orders them, so a
+    /// floating-point <c>NaN</c> is the result only when every value is <c>NaN</c>.
+    /// <para>
+    /// When the query is compiled and <paramref name="selector"/> is a plain <c>int</c>, <c>long</c>,
+    /// <c>float</c>, <c>double</c> or date column, nullable or not, the generator finds the value inside the scan
+    /// and builds no rows.
+    /// </para>
+    /// </remarks>
+    public TResult? Max<TResult>(Func<T, TResult> selector) => Extreme(selector, smallest: false);
+
+    private TResult? Extreme<TResult>(Func<T, TResult> selector, bool smallest)
+    {
+        ThrowIfNull(selector);
+        Comparer<TResult> order = Comparer<TResult>.Default;
+        TResult? best = default;
+        bool found = false;
+        foreach (T item in this)
+        {
+            TResult value = selector(item);
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (!found || (smallest ? order.Compare(value, best!) < 0 : order.Compare(value, best!) > 0))
+            {
+                best = value;
+                found = true;
+            }
+        }
+
+        if (!found && default(TResult) is not null)
+        {
+            throw new InvalidOperationException("Sequence contains no elements");
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Folds one column over the matching rows (its sum, its smallest or its largest value) inside the scan, when
+    /// the query's plan can. Used by generated code.
+    /// </summary>
+    /// <param name="column">The column, as a one-element array reused on every call.</param>
+    /// <param name="fold">What to do with the column's values.</param>
+    /// <param name="kind">The type the caller reads the column as: <c>i l f d</c> for <c>INT</c>, <c>BIGINT</c>, <c>FLOAT</c> and <c>DOUBLE</c>, or <c>t</c> for <c>DATE</c>.</param>
+    /// <param name="totals">The result.</param>
+    /// <returns><see langword="false"/> when the scan cannot do it; the caller then reads rows.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public bool TryFoldColumn(string[] column, RowFold fold, char kind, out RowFoldTotals totals)
     {
         if (_plan is not null && _plan.Binds(_state))
         {
-            return _plan.TrySumMatching(Table, _state, column, floating, out whole, out real);
+            return _plan.TryFoldMatching(Table, _state, column, fold, kind, out totals);
         }
 
-        whole = 0;
-        real = 0;
+        totals = default;
         return false;
     }
 

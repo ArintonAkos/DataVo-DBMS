@@ -43,11 +43,24 @@ internal sealed record LinqSite(
 /// <param name="Column">The summed column.</param>
 internal sealed record LinqSumSite(LinqLocation Location, string ModelType, string StateType, string ValueType, string RuntimeMethod, string Column);
 
+/// <summary>
+/// A <c>Min</c> or <c>Max</c> over a query whose selector is one numeric or date column, found inside the scan when
+/// the query's plan can.
+/// </summary>
+/// <param name="Largest">Whether the call is <c>Max</c> rather than <c>Min</c>.</param>
+/// <param name="ValueType">The C# type compared, with its <c>?</c> when the column is nullable.</param>
+/// <param name="Nullable">Whether the column is nullable, so an empty result is null rather than an exception.</param>
+/// <param name="Kind">How the scan reads the column: <c>i l f d</c>, or <c>t</c> for a date.</param>
+/// <param name="Result">The C# expression that turns the scan's <c>totals</c> into the value.</param>
+/// <param name="Column">The column.</param>
+internal sealed record LinqExtremeSite(LinqLocation Location, bool Largest, string ModelType, string StateType, string ValueType, bool Nullable, char Kind, string Result, string Column);
+
 /// <summary>The outcome of inspecting one call: a translated site, or a diagnostic explaining why it runs as a scan.</summary>
 /// <param name="Tree">The file the call is in. Kept so a diagnostic lands in source, where <c>#pragma warning</c> can reach it.</param>
 /// <param name="Span">The lambda's position in <paramref name="Tree"/>.</param>
 /// <param name="Sum">A translated <c>Sum</c> call, when the call is one.</param>
-internal sealed record LinqInspection(LinqSite? Site, DiagnosticInfo? Diagnostic, SyntaxTree Tree, TextSpan Span, LinqSumSite? Sum = null);
+/// <param name="Extreme">A translated <c>Min</c> or <c>Max</c> call, when the call is one.</param>
+internal sealed record LinqInspection(LinqSite? Site, DiagnosticInfo? Diagnostic, SyntaxTree Tree, TextSpan Span, LinqSumSite? Sum = null, LinqExtremeSite? Extreme = null);
 
 /// <summary>Whether the compilation can take interceptors, and which syntax the output may use.</summary>
 internal sealed record LinqOptions(LinqMode Mode, bool FileLocalTypes);

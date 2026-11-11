@@ -236,6 +236,22 @@ public readonly ref struct RowRef
         return present;
     }
 
+    /// <summary>Reads a <c>DATE</c> column as its day number unless it is NULL.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="dayNumber">The number of days since January 1, 0001, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    internal bool TryGetDayNumber(int columnIndex, out int dayNumber)
+    {
+        if (!TryFixed(columnIndex, StorageKind.Date, out ReadOnlySpan<byte> cell))
+        {
+            CheckIndex(columnIndex);
+            throw Mismatch(columnIndex, "a date");
+        }
+
+        dayNumber = cell.IsEmpty ? 0 : RowBytes.DayNumber(cell, 0);
+        return !cell.IsEmpty;
+    }
+
     /// <summary>Reads a <c>GUID</c> column unless it is NULL. Used by generated code.</summary>
     /// <param name="columnIndex">The column's position in the table.</param>
     /// <param name="value">The value, or the empty GUID when the cell is NULL.</param>

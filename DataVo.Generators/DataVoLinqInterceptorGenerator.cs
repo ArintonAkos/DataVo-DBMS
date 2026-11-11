@@ -49,6 +49,7 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
 
         var sites = new List<LinqSite>();
         var sums = new List<LinqSumSite>();
+        var extremes = new List<LinqExtremeSite>();
         foreach (LinqInspection call in calls)
         {
             if (call.Diagnostic is { } info)
@@ -66,11 +67,16 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
             {
                 sums.Add(sum);
             }
+
+            if (call.Extreme is { } extreme)
+            {
+                extremes.Add(extreme);
+            }
         }
 
-        if (sites.Count > 0 || sums.Count > 0)
+        if (sites.Count > 0 || sums.Count > 0 || extremes.Count > 0)
         {
-            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, sums, options.FileLocalTypes), System.Text.Encoding.UTF8));
+            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, sums, extremes, options.FileLocalTypes), System.Text.Encoding.UTF8));
         }
     }
 

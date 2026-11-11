@@ -41,6 +41,14 @@ public static class RowBytes
     public static double Double(ReadOnlySpan<byte> row, int offset) =>
         BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(row.Slice(offset)));
 
+    /// <summary>Reads a <c>DATE</c> value as its day number.</summary>
+    /// <param name="row">The stored row.</param>
+    /// <param name="offset">The offset of the value's first byte.</param>
+    /// <returns>The number of days since January 1, 0001.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int DayNumber(ReadOnlySpan<byte> row, int offset) =>
+        (int)(DateTime.FromBinary(BinaryPrimitives.ReadInt64LittleEndian(row.Slice(offset))).Ticks / TimeSpan.TicksPerDay);
+
     /// <summary>Reads a <c>BIT</c> value.</summary>
     /// <param name="row">The stored row.</param>
     /// <param name="offset">The offset of the value's byte.</param>

@@ -62,34 +62,32 @@ public abstract class DataVoLinqPlan<T, TState>
     }
 
     /// <summary>
-    /// Sums one column over the matching rows with a condition compiled into the scan, when the generator
-    /// produced one.
+    /// Folds one column over the matching rows (its sum, its smallest or its largest value) with a condition
+    /// compiled into the scan, when the generator produced one.
     /// </summary>
     /// <param name="table">The table to read.</param>
     /// <param name="state">The value passed to the query.</param>
-    /// <param name="column">The column to sum, as a one-element array that is the same instance on every call.</param>
-    /// <param name="floating">Whether the sum is over a <c>FLOAT</c> or <c>DOUBLE</c> column.</param>
-    /// <param name="whole">The sum, when <paramref name="floating"/> is false.</param>
-    /// <param name="real">The sum, when <paramref name="floating"/> is true.</param>
-    /// <returns><see langword="false"/> when this plan cannot sum in the scan, so the caller reads rows instead.</returns>
-    protected virtual bool TrySum(DataVoTable<T> table, TState state, string[] column, bool floating, out long whole, out double real)
+    /// <param name="column">The column to fold, as a one-element array that is the same instance on every call.</param>
+    /// <param name="fold">What to do with the column's values.</param>
+    /// <param name="kind">The type the caller reads the column as: <c>i l f d</c> for <c>INT</c>, <c>BIGINT</c>, <c>FLOAT</c> and <c>DOUBLE</c>, or <c>t</c> for <c>DATE</c>.</param>
+    /// <param name="totals">The result.</param>
+    /// <returns><see langword="false"/> when this plan cannot fold in the scan, so the caller reads rows instead.</returns>
+    protected virtual bool TryFold(DataVoTable<T> table, TState state, string[] column, RowFold fold, char kind, out RowFoldTotals totals)
     {
-        whole = 0;
-        real = 0;
+        totals = default;
         return false;
     }
 
-    /// <summary>Sums a column over the matching rows without building them, when the plan has a compiled condition.</summary>
-    internal bool TrySumMatching(DataVoTable<T> table, TState state, string[] column, bool floating, out long whole, out double real)
+    /// <summary>Folds a column over the matching rows without building them, when the plan has a compiled condition.</summary>
+    internal bool TryFoldMatching(DataVoTable<T> table, TState state, string[] column, RowFold fold, char kind, out RowFoldTotals totals)
     {
         if (_unique)
         {
-            whole = 0;
-            real = 0;
+            totals = default;
             return false;
         }
 
-        return TrySum(table, state, column, floating, out whole, out real);
+        return TryFold(table, state, column, fold, kind, out totals);
     }
 
     /// <summary>Returns the first matching row, or the default value when none matches.</summary>

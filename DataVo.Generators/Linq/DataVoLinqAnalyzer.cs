@@ -35,7 +35,7 @@ internal static class DataVoLinqAnalyzer
         }
         or InvocationExpressionSyntax
         {
-            Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Sum" },
+            Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Sum" or "Min" or "Max" },
             ArgumentList.Arguments.Count: 1,
         };
 
@@ -47,6 +47,12 @@ internal static class DataVoLinqAnalyzer
             && queryType.ContainingNamespace.ToDisplayString() == "DataVo.Core")
         {
             return InspectSum(semantics, invocation, sum, queryType, cancellation);
+        }
+
+        if (semantics.GetSymbolInfo(invocation, cancellation).Symbol is IMethodSymbol { Name: "Min" or "Max", Arity: 1, ContainingType: { Name: "DataVoQuery", Arity: 2 } foldedType } extreme
+            && foldedType.ContainingNamespace.ToDisplayString() == "DataVo.Core")
+        {
+            return InspectExtreme(semantics, invocation, extreme, foldedType, cancellation);
         }
 
         if (semantics.GetSymbolInfo(invocation, cancellation).Symbol is not IMethodSymbol method
@@ -126,33 +132,14 @@ internal static class DataVoLinqAnalyzer
     /// </summary>
     private static LinqInspection? InspectSum(SemanticModel semantics, InvocationExpressionSyntax invocation, IMethodSymbol method, INamedTypeSymbol queryType, CancellationToken cancellation)
     {
-        if (invocation.ArgumentList.Arguments[0].Expression is not LambdaExpressionSyntax { ExpressionBody: { } body } lambda
-            || semantics.GetSymbolInfo(lambda, cancellation).Symbol is not IMethodSymbol { Parameters.Length: 1 } lambdaSymbol
-            || queryType.TypeArguments[0] is not INamedTypeSymbol modelType
-            || !IsNameable(queryType.TypeArguments[1], semantics.Compilation))
+        if (SelectedColumn(semantics, invocation, queryType, cancellation) is not { Column.IsNullable: false } selected)
         {
             return null;
         }
 
-        while (body is ParenthesizedExpressionSyntax parenthesized)
-        {
-            body = parenthesized.Expression;
-        }
-
-        if (body is not MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax receiver } access
-            || !SymbolEqualityComparer.Default.Equals(semantics.GetSymbolInfo(receiver, cancellation).Symbol, lambdaSymbol.Parameters[0])
-            || semantics.GetSymbolInfo(access, cancellation).Symbol is not IPropertySymbol property)
-        {
-            return null;
-        }
-
-        AttributeData? attribute = modelType.GetAttributes().FirstOrDefault(static data => data.AttributeClass?.ToDisplayString() == TableAttribute);
-        if (attribute is null
-            || DataVoTableInspector.Inspect(modelType, attribute.ConstructorArguments.FirstOrDefault().Value as string).Model is not { } model
-            || model.Columns.FirstOrDefault(candidate => candidate.PropertyName == property.Name) is not { IsNullable: false } column)
-        {
-            return null;
-        }
+        ColumnModel column = selected.Column;
+        LambdaExpressionSyntax lambda = selected.Lambda;
+        INamedTypeSymbol modelType = selected.Model;
 
         // The selector's value must be the column's own type: a widening selector sums something else.
         (string Value, string Method)? shape = (column.Type.SqlType, method.ReturnType.SpecialType) switch
@@ -180,6 +167,102 @@ internal static class DataVoLinqAnalyzer
                 shape.Value.Value,
                 shape.Value.Method,
                 column.PropertyName));
+    }
+
+    /// <summary>
+    /// Translates <c>query.Min(p =&gt; p.Column)</c> and <c>query.Max(p =&gt; p.Column)</c> over an <c>int</c>,
+    /// <c>long</c>, <c>float</c>, <c>double</c> or date column, nullable or not. Any other selector is left alone,
+    /// silently: it is ordinary code that compares what it computes.
+    /// </summary>
+    private static LinqInspection? InspectExtreme(SemanticModel semantics, InvocationExpressionSyntax invocation, IMethodSymbol method, INamedTypeSymbol queryType, CancellationToken cancellation)
+    {
+        if (SelectedColumn(semantics, invocation, queryType, cancellation) is not { } selected)
+        {
+            return null;
+        }
+
+        // The value compared must be the column's own type: a widening call compares something else.
+        ITypeSymbol value = method.TypeArguments[0];
+        if (!SymbolEqualityComparer.Default.Equals(value, selected.Property.Type))
+        {
+            return null;
+        }
+
+        bool nullable = value is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
+        ITypeSymbol core = nullable ? ((INamedTypeSymbol)value).TypeArguments[0] : value;
+        if (nullable != selected.Column.IsNullable)
+        {
+            return null;
+        }
+
+        (char Kind, string Result)? shape = (selected.Column.Type.SqlType, core.SpecialType, core.ToDisplayString()) switch
+        {
+            ("INT", SpecialType.System_Int32, _) => ('i', "(int)totals.Whole"),
+            ("BIGINT", SpecialType.System_Int64, _) => ('l', "totals.Whole"),
+            ("FLOAT", SpecialType.System_Single, _) => ('f', "(float)totals.Real"),
+            ("DOUBLE", SpecialType.System_Double, _) => ('d', "totals.Real"),
+            ("DATE", _, "DataVo.Core.DataVoDate") => ('t', "global::DataVo.Core.DataVoDate.FromDayNumber((int)totals.Whole)"),
+            ("DATE", _, "System.DateOnly") => ('t', "global::System.DateOnly.FromDayNumber((int)totals.Whole)"),
+            _ => null,
+        };
+        if (shape is null || LocationOf(semantics, invocation, cancellation) is not { } location)
+        {
+            return null;
+        }
+
+        return new LinqInspection(
+            null,
+            null,
+            selected.Lambda.SyntaxTree,
+            selected.Lambda.GetLocation().SourceSpan,
+            Extreme: new LinqExtremeSite(
+                location,
+                method.Name == "Max",
+                selected.Model.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                queryType.TypeArguments[1].ToDisplayString(TypeFormat),
+                core.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + (nullable ? "?" : string.Empty),
+                nullable,
+                shape.Value.Kind,
+                shape.Value.Result,
+                selected.Column.PropertyName));
+    }
+
+    /// <summary>
+    /// The column an aggregate's selector reads, when the selector is exactly one mapped property of the row
+    /// (<c>p =&gt; p.Gold</c>) and generated code can name the query's types.
+    /// </summary>
+    private static (LambdaExpressionSyntax Lambda, INamedTypeSymbol Model, IPropertySymbol Property, ColumnModel Column)? SelectedColumn(
+        SemanticModel semantics, InvocationExpressionSyntax invocation, INamedTypeSymbol queryType, CancellationToken cancellation)
+    {
+        if (invocation.ArgumentList.Arguments[0].Expression is not LambdaExpressionSyntax { ExpressionBody: { } body } lambda
+            || semantics.GetSymbolInfo(lambda, cancellation).Symbol is not IMethodSymbol { Parameters.Length: 1 } lambdaSymbol
+            || queryType.TypeArguments[0] is not INamedTypeSymbol modelType
+            || !IsNameable(queryType.TypeArguments[1], semantics.Compilation))
+        {
+            return null;
+        }
+
+        while (body is ParenthesizedExpressionSyntax parenthesized)
+        {
+            body = parenthesized.Expression;
+        }
+
+        if (body is not MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax receiver } access
+            || !SymbolEqualityComparer.Default.Equals(semantics.GetSymbolInfo(receiver, cancellation).Symbol, lambdaSymbol.Parameters[0])
+            || semantics.GetSymbolInfo(access, cancellation).Symbol is not IPropertySymbol property)
+        {
+            return null;
+        }
+
+        AttributeData? attribute = modelType.GetAttributes().FirstOrDefault(static data => data.AttributeClass?.ToDisplayString() == TableAttribute);
+        if (attribute is null
+            || DataVoTableInspector.Inspect(modelType, attribute.ConstructorArguments.FirstOrDefault().Value as string).Model is not { } model
+            || model.Columns.FirstOrDefault(candidate => candidate.PropertyName == property.Name) is not { } column)
+        {
+            return null;
+        }
+
+        return (lambda, modelType, property, column);
     }
 
     private static LinqLocation? LocationOf(SemanticModel semantics, InvocationExpressionSyntax invocation, CancellationToken cancellation)
