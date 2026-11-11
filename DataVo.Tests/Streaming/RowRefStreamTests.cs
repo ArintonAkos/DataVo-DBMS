@@ -110,10 +110,73 @@ public sealed class RowRefStreamTests : IDisposable
                 Assert.Equal(bonus, row.GetInt64(Bonus));
             }
 
+            // The single-call readers agree with IsNull and the checked accessors, on the key column too.
+            Assert.True(row.TryGetInt32(Id, out int keyValue));
+            Assert.Equal(id, keyValue);
+            Assert.True(row.TryGetInt64(Id, out long wideKey));
+            Assert.Equal(id, wideKey);
+            Assert.True(row.TryGetFloat(Health, out float health));
+            Assert.Equal(row.GetFloat(Health), health);
+            Assert.True(row.TryGetDouble(Health, out double wideHealth));
+            Assert.Equal(row.GetDouble(Health), wideHealth);
+            Assert.True(row.TryGetInt64(Score, out long score));
+            Assert.Equal(unit.Score, score);
+            Assert.True(row.TryGetDouble(Ratio, out double ratio));
+            Assert.Equal(unit.Ratio, ratio);
+            Assert.True(row.TryGetBoolean(Alive, out bool alive));
+            Assert.Equal(unit.Alive, alive);
+            Assert.True(row.TryGetGuid(Tag, out Guid tag));
+            Assert.Equal(unit.Tag, tag);
+            Assert.Equal(unit.Bonus is not null, row.TryGetInt32(Bonus, out int bonusValue));
+            Assert.Equal(unit.Bonus ?? 0, bonusValue);
+            Assert.Equal(unit.Bonus is not null, row.TryGetInt64(Bonus, out long wideBonus));
+            Assert.Equal(unit.Bonus ?? 0, wideBonus);
+
             seen++;
         }
 
         Assert.Equal(Count, seen);
+    }
+
+    [Theory]
+    [InlineData(StorageMode.Lsm, false)]
+    [InlineData(StorageMode.Lsm, true)]
+    [InlineData(StorageMode.InMemory, false)]
+    [InlineData(StorageMode.Disk, false)]
+    public void CompiledCount_TestsRowsWhereTheyAreStored_AcrossSeveralBatches(StorageMode mode, bool flushed)
+    {
+        using DataVoContext db = Open(mode);
+        db.EnsureRefUnitTable();
+        const int Count = 9_500; // more than two batches of the in-place scan
+        var units = new List<RefUnit>();
+        for (int i = 1; i <= Count; i++)
+        {
+            units.Add(Unit(i));
+            db.Insert(units[^1]);
+        }
+
+        if (flushed)
+        {
+            db.Engine.StorageContext.LsmEngine!.FlushTableForTesting(db.Engine.Sessions.Get(db.SessionId)!, "ref_units");
+
+            // Rows written after the flush are merged with the flushed file during the scan.
+            Run(db, "UPDATE ref_units SET Score = -1 WHERE Id = 10");
+            Run(db, "DELETE FROM ref_units WHERE Id = 11");
+            units[9].Score = -1;
+            units.RemoveAt(10);
+        }
+
+        DataVoTable<RefUnit> table = db.Table<RefUnit>();
+        long median = units[units.Count / 2].Score;
+
+        Assert.Equal(units.Count(u => u.Score > median), table.Where(median, static (u, score) => u.Score > score).Count());
+        Assert.Equal(units.Count(static u => u.Alive && u.Bonus != null), table.Where(static u => u.Alive && u.Bonus != null).Count());
+        Assert.Equal(units.Count(static u => u.Nickname == null || u.Ratio < 0.5), table.Where(static u => u.Nickname == null || u.Ratio < 0.5).Count());
+        Assert.Equal(units.Count(static u => u.Bonus != 3), table.Where(static u => u.Bonus != 3).Count());
+        Assert.Equal(units.Count(static u => u.Health >= 50f), table.Where(static u => u.Health >= 50f).Count());
+        Assert.True(table.Where(static u => u.Score == -1 || u.Health >= 0f).Any());
+        Assert.False(table.Where(long.MaxValue, static (u, score) => u.Score == score).Any());
+        Assert.True(table.Where(median, static (u, score) => u.Score > score).IsCompiled);
     }
 
     [Theory]

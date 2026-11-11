@@ -77,12 +77,12 @@ public class DataVoLinqInterceptorGeneratorTests
     }
 
     [Theory]
-    [InlineData("players.Where(target, static (p, min) => p.Gold >= min)", "(!row.IsNull(c0) && row.GetInt64(c0) >= p0)", "kernel.p0 = (long)(state);")]
-    [InlineData("players.Where(p => p.IsActive)", "(!row.IsNull(c0) && row.GetBoolean(c0) == p0)", "kernel.p0 = true;")]
-    [InlineData("players.Where(p => !p.IsActive && p.Speed < 2.5f)", "(!row.IsNull(c0) && row.GetBoolean(c0) == p0) && (!row.IsNull(c1) && row.GetFloat(c1) < p1)", "kernel.p1 = 2.5F;")]
-    [InlineData("players.Where(p => p.Score != 7)", "(row.IsNull(c0) || row.GetInt32(c0) != p0)", "public int p0;")]
-    [InlineData("players.Where(p => p.Score == null || p.Gold > 5)", "row.IsNull(c0) || (!row.IsNull(c1) && row.GetInt64(c1) > p0)", "new string[] { \"Score\", \"Gold\" }")]
-    [InlineData("players.Where(p => p.Guild != null && (p.Gold < 1 || p.Gold > 9))", "!row.IsNull(c0) && ((!row.IsNull(c1) && row.GetInt64(c1) < p0) || (!row.IsNull(c1) && row.GetInt64(c1) > p1))", "new string[] { \"Guild\", \"Gold\" }")]
+    [InlineData("players.Where(target, static (p, min) => p.Gold >= min)", "(row.TryGetInt64(c0, out long v0) && v0 >= p0)", "kernel.p0 = (long)(state);")]
+    [InlineData("players.Where(p => p.IsActive)", "(row.TryGetBoolean(c0, out bool v0) && v0 == p0)", "kernel.p0 = true;")]
+    [InlineData("players.Where(p => !p.IsActive && p.Speed < 2.5f)", "(row.TryGetBoolean(c0, out bool v0) && v0 == p0) && (row.TryGetFloat(c1, out float v1) && v1 < p1)", "kernel.p1 = 2.5F;")]
+    [InlineData("players.Where(p => p.Score != 7)", "(!row.TryGetInt32(c0, out int v0) || v0 != p0)", "public int p0;")]
+    [InlineData("players.Where(p => p.Score == null || p.Gold > 5)", "row.IsNull(c0) || (row.TryGetInt64(c1, out long v1) && v1 > p0)", "new string[] { \"Score\", \"Gold\" }")]
+    [InlineData("players.Where(p => p.Guild != null && (p.Gold < 1 || p.Gold > 9))", "!row.IsNull(c0) && ((row.TryGetInt64(c1, out long v1) && v1 < p0) || (row.TryGetInt64(c1, out long v2) && v2 > p1))", "new string[] { \"Guild\", \"Gold\" }")]
     public void ConditionOverUnindexedColumns_IsAlsoCompiledIntoTheScan(string call, string condition, string detail)
     {
         string generated = Generate(call).Generated;
