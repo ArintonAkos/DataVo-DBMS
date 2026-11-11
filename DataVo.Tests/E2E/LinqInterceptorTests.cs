@@ -417,6 +417,60 @@ public sealed class LinqInterceptorTests : IDisposable
         Assert.True(Measure(Captured) > Measure(WithState) * 10);
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void ScanKernel_CountsAndTestsWhatTheLambdaAccepts(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        DataVoTable<Hero> heroes = db.Table<Hero>();
+
+        // None of these columns is indexed, so each condition is compiled into the scan for Count and Any.
+        Check(heroes.Where(h => h.IsActive), static h => h.IsActive);
+        Check(heroes.Where(h => !h.IsActive), static h => !h.IsActive);
+        Check(heroes.Where(2_500L, static (h, gold) => h.Gold > gold), static h => h.Gold > 2_500L);
+        Check(heroes.Where(2_500L, static (h, gold) => gold >= h.Gold), static h => 2_500L >= h.Gold);
+        Check(heroes.Where(h => h.Speed <= 1.5f), static h => h.Speed <= 1.5f);
+        Check(heroes.Where(h => h.Speed != 1.5f), static h => h.Speed != 1.5f);
+        Check(heroes.Where(KnownTag, static (h, tag) => h.Tag == tag), static h => h.Tag == KnownTag);
+        Check(heroes.Where(KnownTag, static (h, tag) => h.Tag != tag), static h => h.Tag != KnownTag);
+        Check(heroes.Where(h => h.Score == 30), static h => h.Score == 30);
+        Check(heroes.Where(h => h.Score != 30), static h => h.Score != 30);
+        Check(heroes.Where(h => h.Score > 30), static h => h.Score > 30);
+        Check(heroes.Where(h => h.Score == null), static h => h.Score == null);
+        Check(heroes.Where(h => h.Score != null && h.Gold < 1_000), static h => h.Score != null && h.Gold < 1_000);
+        Check(heroes.Where(h => h.Guild == null || h.Speed > 3f), static h => h.Guild == null || h.Speed > 3f);
+        Check(heroes.Where(h => h.Guild is not null && (h.Gold < 500 || h.Gold > 4_500) && !h.IsActive),
+            static h => h.Guild is not null && (h.Gold < 500 || h.Gold > 4_500) && !h.IsActive);
+        Check(heroes.Where(h => h.Gold > 1_000_000), static _ => false);
+
+        int? missing = null;
+        Check(heroes.Where(missing, static (h, score) => h.Score == score), static h => h.Score == null, compiled: true);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void ScanKernel_SeesWritesAsTheyHappen(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        DataVoTable<Hero> heroes = db.Table<Hero>();
+        int Rich() => heroes.Where(4_000L, static (h, gold) => h.Gold > gold).Count();
+
+        Assert.Equal(10, Rich());
+
+        db.Execute("UPDATE heroes SET Gold = 9000 WHERE Id = 1");
+        Assert.Equal(11, Rich());
+
+        db.Execute("DELETE FROM heroes WHERE Id = 50");
+        Assert.Equal(10, Rich());
+
+        db.Execute("BEGIN");
+        db.Execute("UPDATE heroes SET Gold = 9000 WHERE Id = 2");
+        Assert.Equal(11, Rich()); // a transaction counts its own uncommitted change
+        Assert.True(heroes.Where(8_999L, static (h, gold) => h.Gold > gold).Any());
+        db.Execute("ROLLBACK");
+        Assert.Equal(10, Rich());
+    }
+
     private static long Measure(Action action)
     {
         long before = GC.GetAllocatedBytesForCurrentThread();

@@ -77,6 +77,37 @@ public class DataVoLinqInterceptorGeneratorTests
     }
 
     [Theory]
+    [InlineData("players.Where(target, static (p, min) => p.Gold >= min)", "(!row.IsNull(c0) && row.GetInt64(c0) >= p0)", "kernel.p0 = (long)(state);")]
+    [InlineData("players.Where(p => p.IsActive)", "(!row.IsNull(c0) && row.GetBoolean(c0) == p0)", "kernel.p0 = true;")]
+    [InlineData("players.Where(p => !p.IsActive && p.Speed < 2.5f)", "(!row.IsNull(c0) && row.GetBoolean(c0) == p0) && (!row.IsNull(c1) && row.GetFloat(c1) < p1)", "kernel.p1 = 2.5F;")]
+    [InlineData("players.Where(p => p.Score != 7)", "(row.IsNull(c0) || row.GetInt32(c0) != p0)", "public int p0;")]
+    [InlineData("players.Where(p => p.Score == null || p.Gold > 5)", "row.IsNull(c0) || (!row.IsNull(c1) && row.GetInt64(c1) > p0)", "new string[] { \"Score\", \"Gold\" }")]
+    [InlineData("players.Where(p => p.Guild != null && (p.Gold < 1 || p.Gold > 9))", "!row.IsNull(c0) && ((!row.IsNull(c1) && row.GetInt64(c1) < p0) || (!row.IsNull(c1) && row.GetInt64(c1) > p1))", "new string[] { \"Guild\", \"Gold\" }")]
+    public void ConditionOverUnindexedColumns_IsAlsoCompiledIntoTheScan(string call, string condition, string detail)
+    {
+        string generated = Generate(call).Generated;
+
+        Assert.Contains($"return {condition};", generated);
+        Assert.Contains(detail, generated);
+        Assert.Contains("struct Kernel : global::DataVo.Core.IRowRefFilter", generated);
+        Assert.Contains("count = table.CountMatching(Columns, ref kernel, limit);", generated);
+    }
+
+    [Theory]
+    [InlineData("players.Where(target, static (p, min) => p.Level >= min)")] // an index can seek
+    [InlineData("players.Where(p => p.Id > 3 && p.IsActive)")] // the primary key can seek
+    [InlineData("players.FirstOrDefault(p => p.Id == 42)")] // one row, read directly
+    [InlineData("players.Where(p => p.Guild == \"red\")")] // text is compared by the SQL engine
+    [InlineData("players.Where(p => p.IsActive && p.Guild == \"red\")")]
+    public void ConditionTheSqlPathServesBetter_GetsNoScanKernel(string call)
+    {
+        string generated = Generate(call).Generated;
+
+        Assert.Contains("InterceptsLocation", generated);
+        Assert.DoesNotContain("IRowRefFilter", generated);
+    }
+
+    [Theory]
     [InlineData("players.FirstOrDefault(target, static (p, id) => p.Id == id)", true)]
     [InlineData("players.FirstOrDefault(target, static (p, id) => p.Id == id && p.IsActive)", true)]
     [InlineData("players.FirstOrDefault(target, static (p, id) => p.Id == id || p.IsActive)", false)]

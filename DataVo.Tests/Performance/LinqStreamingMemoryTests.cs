@@ -75,11 +75,46 @@ public sealed class LinqStreamingMemoryTests : IDisposable
 
         long firstTen = GC.GetAllocatedBytesForCurrentThread() - before;
         before = GC.GetAllocatedBytesForCurrentThread();
-        Assert.Equal(Rows, query.Count());
+        int total = 0;
+        foreach (Reading _ in query)
+        {
+            total++; // Count() no longer builds rows, so walk them to measure a full enumeration
+        }
+
         long all = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(Rows, total);
 
         // Ten rows cost one page, not the table.
         Assert.True(firstTen * 5 < all, $"first ten rows allocated {firstTen} B, the whole scan {all} B");
+    }
+
+    [Theory]
+    [InlineData(StorageMode.Lsm)]
+    [InlineData(StorageMode.InMemory)]
+    public void CompiledCountAndAny_AllocateNothingOnceWarm(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        DataVoTable<Reading> readings = db.Table<Reading>();
+        int expected = Enumerable.Range(1, Rows).Count(static id => id % 16 >= 4);
+
+        // The quietest of several passes: a background GC or tiering can charge a stray allocation to one of them.
+        long quietest = long.MaxValue;
+        for (int pass = 0; pass < 6; pass++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            int count = readings.Where(4, static (r, min) => r.Sensor >= min).Count();
+            bool any = readings.Where(99, static (r, min) => r.Sensor >= min).Any();
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(expected, count);
+            Assert.False(any);
+            if (pass > 0)
+            {
+                quietest = Math.Min(quietest, allocated);
+            }
+        }
+
+        Assert.Equal(0, quietest);
     }
 
     private static void AssertFlat<TState>(DataVoQuery<Reading, TState> query)
