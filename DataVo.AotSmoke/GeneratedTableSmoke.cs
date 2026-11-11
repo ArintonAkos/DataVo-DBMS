@@ -58,6 +58,8 @@ internal static class GeneratedTableSmoke
         Require(inSlot.IsCompiled, "The query was not compiled at build time.");
         Require(inSlot.Count() == 3, "An intercepted conjunction returned the wrong rows.");
         Require(items.Where(item => item.Name == null).Count() == 10, "A null comparison returned the wrong rows.");
+        Require(items.Where(item => item.Name == null).Sum(item => item.Slot) == 20, "A sum compiled into the scan returned the wrong total.");
+        Require(inSlot.Sum(item => item.Id) == 8 + 13 + 18, "A sum over an indexed condition returned the wrong total.");
 
         // Spatial queries over a Vector3 column, with the HNSW index and with the exact scan.
         second.EnsureProbeTable();

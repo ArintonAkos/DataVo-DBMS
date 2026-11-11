@@ -147,7 +147,8 @@ public sealed class RowRefStreamTests : IDisposable
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefUnitTable();
-        const int Count = 9_500; // more than two batches of the in-place scan
+        // More than two blocks of the in-place scan; the legacy disk engine writes one row per file open, so it gets fewer.
+        int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
         var units = new List<RefUnit>();
         for (int i = 1; i <= Count; i++)
         {
@@ -177,6 +178,93 @@ public sealed class RowRefStreamTests : IDisposable
         Assert.True(table.Where(static u => u.Score == -1 || u.Health >= 0f).Any());
         Assert.False(table.Where(long.MaxValue, static (u, score) => u.Score == score).Any());
         Assert.True(table.Where(median, static (u, score) => u.Score > score).IsCompiled);
+    }
+
+    [Theory]
+    [InlineData(StorageMode.Lsm, false)]
+    [InlineData(StorageMode.Lsm, true)]
+    [InlineData(StorageMode.InMemory, false)]
+    [InlineData(StorageMode.Disk, false)]
+    public void CompiledSum_AddsAColumnInsideTheScan_AndMatchesTheRowsInMemory(StorageMode mode, bool flushed)
+    {
+        using DataVoContext db = Open(mode);
+        db.EnsureRefUnitTable();
+        int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
+        var units = new List<RefUnit>();
+        for (int i = 1; i <= Count; i++)
+        {
+            units.Add(Unit(i));
+            db.Insert(units[^1]);
+        }
+
+        if (flushed)
+        {
+            db.Engine.StorageContext.LsmEngine!.FlushTableForTesting(db.Engine.Sessions.Get(db.SessionId)!, "ref_units");
+            Run(db, "UPDATE ref_units SET Score = -1 WHERE Id = 10");
+            Run(db, "DELETE FROM ref_units WHERE Id = 11");
+            units[9].Score = -1;
+            units.RemoveAt(10);
+        }
+
+        DataVoTable<RefUnit> table = db.Table<RefUnit>();
+        IEnumerable<RefUnit> alive = units.Where(static u => u.Alive);
+
+        Assert.Equal(alive.Sum(static u => u.Score), table.Where(static u => u.Alive).Sum(static u => u.Score));
+        Assert.Equal(alive.Sum(static u => u.Id), table.Where(static u => u.Alive).Sum(static u => u.Id));
+        Assert.Equal(alive.Sum(static u => u.Health), table.Where(static u => u.Alive).Sum(static u => u.Health));
+        Assert.Equal(alive.Sum(static u => u.Ratio), table.Where(static u => u.Alive).Sum(static u => u.Ratio));
+
+        var some = table.Where(0.5, static (u, ratio) => u.Ratio > ratio && u.Bonus != null);
+        Assert.Equal(units.Where(static u => u.Ratio > 0.5 && u.Bonus != null).Sum(static u => u.Score), some.Sum(static u => u.Score));
+        Assert.Equal(0L, table.Where(static u => u.Ratio < 0).Sum(static u => u.Score));
+
+        // A computed selector, a condition the scan cannot compile (text), and a pinned key sum through the rows.
+        Assert.Equal(alive.Sum(static u => u.Score * 2), table.Where(static u => u.Alive).Sum(static u => u.Score * 2));
+        Assert.Equal(units.Where(static u => u.Name == "unit-7").Sum(static u => u.Score), table.Where(static u => u.Name == "unit-7").Sum(static u => u.Score));
+        Assert.Equal(units[4].Score, table.Where(static u => u.Id == 5).Sum(static u => u.Score));
+
+        // Inside a transaction the sum includes the transaction's own writes.
+        Run(db, "BEGIN");
+        Run(db, "UPDATE ref_units SET Score = Score + 1000 WHERE Id = 1");
+        Assert.Equal(alive.Sum(static u => u.Score) + 1000, table.Where(static u => u.Alive).Sum(static u => u.Score));
+        Run(db, "ROLLBACK");
+        Assert.Equal(alive.Sum(static u => u.Score), table.Where(static u => u.Alive).Sum(static u => u.Score));
+
+        Assert.Throws<OverflowException>(() => table.Where(static u => u.Alive).Sum(static u => u.Id + int.MaxValue - 100));
+    }
+
+    [Theory]
+    [InlineData(StorageMode.Lsm)]
+    [InlineData(StorageMode.InMemory)]
+    public void CompiledSum_AllocatesNothingOnceWarm(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        db.EnsureRefUnitTable();
+        for (int i = 1; i <= 6_000; i++)
+        {
+            db.Insert(Unit(i));
+        }
+
+        DataVoTable<RefUnit> table = db.Table<RefUnit>();
+        long expected = Enumerable.Range(1, 6_000).Where(static i => i % 3 != 0).Sum(static i => Unit(i).Score);
+
+        long quietest = long.MaxValue;
+        for (int pass = 0; pass < 6; pass++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            long sum = table.Where(static u => u.Alive).Sum(static u => u.Score);
+            double ratio = table.Where(static u => u.Alive).Sum(static u => u.Ratio);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(expected, sum);
+            Assert.True(ratio > 0);
+            if (pass > 0)
+            {
+                quietest = Math.Min(quietest, allocated);
+            }
+        }
+
+        Assert.Equal(0, quietest);
     }
 
     [Theory]

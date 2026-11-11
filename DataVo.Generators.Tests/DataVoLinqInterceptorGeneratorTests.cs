@@ -94,6 +94,41 @@ public class DataVoLinqInterceptorGeneratorTests
     }
 
     [Theory]
+    [InlineData("players.Where(p => p.IsActive).Sum(p => p.Gold)", "long", "SumInt64Column", "Gold")]
+    [InlineData("players.Where(target, static (p, min) => p.Gold > min).Sum(static p => p.Speed)", "float", "SumSingleColumn", "Speed")]
+    [InlineData("players.Where(p => p.IsActive).Sum(p => (p.Level))", "int", "SumInt32Column", "Level")]
+    [InlineData("players.Where(p => p.Level > 3).Sum(p => p.Id)", "int", "SumInt32Column", "Id")]
+    public void SumOfOneNumericColumn_IsRoutedToTheScan(string call, string type, string method, string column)
+    {
+        string generated = Generate(call).Generated;
+
+        Assert.Contains($"public static {type} Sum0(this in global::DataVo.Core.DataVoQuery<global::App.Player, ", generated);
+        Assert.Contains($"return query.{method}(SumColumn0, selector);", generated);
+        Assert.Contains($"SumColumn0 = new string[] {{ \"{column}\" }};", generated);
+    }
+
+    [Theory]
+    [InlineData("players.Where(p => p.IsActive).Sum(p => p.Gold * 2)")] // computed
+    [InlineData("players.Where(p => p.IsActive).Sum(p => p.Score ?? 0)")] // nullable column
+    [InlineData("players.Where(p => p.IsActive).Sum(p => (long)p.Level)")] // widened: not the column's own type
+    public void OtherSumSelectors_AreLeftToRunAsWritten(string call)
+    {
+        (string generated, Diagnostic[] diagnostics) = Generate(call);
+
+        Assert.DoesNotContain("SumColumn", generated);
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void CompiledCondition_CanAlsoSum()
+    {
+        string generated = Generate("players.Where(p => p.IsActive)").Generated;
+
+        Assert.Contains("protected override bool TrySum(", generated);
+        Assert.Contains("return table.SumMatching(Columns, ref kernel, column, floating, out whole, out real);", generated);
+    }
+
+    [Theory]
     [InlineData("players.Where(target, static (p, min) => p.Level >= min)")] // an index can seek
     [InlineData("players.Where(p => p.Id > 3 && p.IsActive)")] // the primary key can seek
     [InlineData("players.FirstOrDefault(p => p.Id == 42)")] // one row, read directly
