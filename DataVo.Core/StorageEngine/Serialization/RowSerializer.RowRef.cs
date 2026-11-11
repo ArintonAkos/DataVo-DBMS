@@ -56,6 +56,9 @@ public static partial class RowSerializer
     // The stored width of each StorageColumnType's value, in enum order; 0 for the variable-width kinds.
     private static ReadOnlySpan<byte> FixedWidths => [4, 8, 4, 8, 1, 8, 8, 16, 0, 0];
 
+    /// <summary>The stored width of a value of this kind, or 0 when the width varies from row to row.</summary>
+    internal static int FixedWidth(StorageColumnType kind) => FixedWidths[(int)kind];
+
     private static bool TryAdvancePastValue(ReadOnlySpan<byte> row, StorageColumnType kind, ref int offset)
     {
         switch (kind)

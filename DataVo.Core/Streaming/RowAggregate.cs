@@ -87,4 +87,50 @@ internal struct RowAggregate
                 break;
         }
     }
+
+    /// <summary>Counts one matching row and adds its summed column, read from the stored bytes at a checked offset.</summary>
+    /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public void AddBytes(ReadOnlySpan<byte> row, RowSumKind kind, int offset)
+    {
+        Count++;
+        switch (kind)
+        {
+            case RowSumKind.Int32:
+                Whole = checked(Whole + RowBytes.Int32(row, offset));
+                break;
+            case RowSumKind.Int64:
+                Whole = checked(Whole + RowBytes.Int64(row, offset));
+                break;
+            case RowSumKind.Float:
+                Real += RowBytes.Single(row, offset);
+                break;
+            case RowSumKind.Double:
+                Real += RowBytes.Double(row, offset);
+                break;
+        }
+    }
+
+    /// <summary>Counts one matching row and adds its summed column, read from a typed cell of a checked type.</summary>
+    /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public void AddCells(ReadOnlySpan<Runtime.Reactive.CellValue> cells, RowSumKind kind, int ordinal)
+    {
+        Count++;
+        switch (kind)
+        {
+            case RowSumKind.Int32:
+                Whole = checked(Whole + cells[ordinal].AsInt32());
+                break;
+            case RowSumKind.Int64:
+                Whole = checked(Whole + cells[ordinal].AsInt64());
+                break;
+            case RowSumKind.Float:
+                Real += (float)cells[ordinal].AsDouble(); // a FLOAT column holds a float, widened in the cell
+                break;
+            case RowSumKind.Double:
+                Real += cells[ordinal].AsDouble();
+                break;
+        }
+    }
 }

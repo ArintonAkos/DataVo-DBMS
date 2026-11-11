@@ -1,6 +1,7 @@
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.MVCC;
 
@@ -84,6 +85,7 @@ public readonly struct RowRefStream
     /// column the scan reads are located.
     /// </summary>
     /// <param name="ordinals">The table positions of the columns the condition reads.</param>
+    /// <param name="kinds">One letter per column, saying how the condition reads it; see <see cref="RowRefPage.PlanDirect"/>.</param>
     /// <param name="filter">The condition, already bound to <paramref name="ordinals"/>.</param>
     /// <param name="limit">Stop after this many matches, or 0 to visit them all.</param>
     /// <param name="sumOrdinal">The table position of the column to sum; ignored when nothing is summed.</param>
@@ -100,8 +102,15 @@ public readonly struct RowRefStream
     /// and the totals are compiled into that loop: no delegate is called per row. The read lock is held for one
     /// block of rows at a time, as it is for a streamed pass, so writers run between blocks and the same
     /// consistency holds: a row that existed for the whole scan is visited exactly once.
+    /// <para>
+    /// Where the table's layout allows, a row is tested without building a <see cref="RowRef"/>: stored bytes are
+    /// read at offsets fixed for the whole scan, and in-memory rows from their cells. Each row is first checked
+    /// against that layout (its leading null flags, or its cells' types); a row that differs, such as one with a
+    /// NULL among the leading columns or one written before a column was added, is tested through a
+    /// <see cref="RowRef"/> instead, so the result is the same either way.
+    /// </para>
     /// </remarks>
-    internal bool TryScanInPlace<TFilter>(int[] ordinals, ref TFilter filter, int limit, int sumOrdinal, bool floating, bool summed, out RowAggregate result)
+    internal bool TryScanInPlace<TFilter>(int[] ordinals, string kinds, ref TFilter filter, int limit, int sumOrdinal, bool floating, bool summed, out RowAggregate result)
         where TFilter : struct, IRowRefFilter
     {
         result = default;
@@ -142,7 +151,13 @@ public readonly struct RowRefStream
                 return false;
             }
 
-            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, sumOrdinal);
+            RowRefPage.DirectLayout layout = page.PlanDirect(ordinals, kinds, columns, summed ? sumOrdinal : -1);
+            if (layout.Bytes)
+            {
+                filter.BindOffsets(new ReadOnlySpan<int>(layout.ValueOffsets, 0, ordinals.Length));
+            }
+
+            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, sumOrdinal, layout);
 
             // A limited scan (Any) starts with a small block so a match near the start costs little.
             int block = limit > 0 ? 64 : InPlaceBlockRows;
@@ -191,8 +206,11 @@ public readonly struct RowRefStream
 
         public RowAggregate Totals;
 
-        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowSumKind sum, int sumOrdinal)
+        private readonly RowRefPage.DirectLayout _direct;
+
+        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowSumKind sum, int sumOrdinal, RowRefPage.DirectLayout direct)
         {
+            _direct = direct;
             _filter = filter;
             _page = page;
             _columns = columns;
@@ -212,6 +230,32 @@ public readonly struct RowRefStream
                 return;
             }
 
+            if (typed is null)
+            {
+                if (_direct.Bytes && LaidOutAsExpected(stored))
+                {
+                    if (_filter.MatchesBytes(stored))
+                    {
+                        Totals.AddBytes(stored, _sum, _direct.SumOffset);
+                    }
+
+                    return;
+                }
+            }
+            else if (_direct.Cells)
+            {
+                ReadOnlySpan<CellValue> cells = typed.Cells;
+                if (HoldsExpectedCells(cells))
+                {
+                    if (_filter.MatchesCells(cells))
+                    {
+                        Totals.AddCells(cells, _sum, _sumOrdinal);
+                    }
+
+                    return;
+                }
+            }
+
             RowRef row = typed is null
                 ? _page.InPlace(rowId, stored, _columns)
                 : _page.InPlace(rowId, typed, _columns, _needed);
@@ -219,6 +263,49 @@ public readonly struct RowRefStream
             {
                 Totals.Add(in row, _sum, _sumOrdinal);
             }
+        }
+
+        /// <summary>
+        /// Whether a stored row's leading cells are all present, so each value is at its fixed offset. Checking
+        /// the flags in order is enough: a flag found where it is expected means the cell before it was present.
+        /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private readonly bool LaidOutAsExpected(ReadOnlySpan<byte> stored)
+        {
+            if (stored.Length < _direct.MinLength)
+            {
+                return false;
+            }
+
+            int[] offsets = _direct.FlagOffsets;
+            byte[] expected = _direct.FlagExpected;
+            for (int i = 0; i < _direct.FlagCount; i++)
+            {
+                if (stored[offsets[i]] != expected[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether a typed row holds, for every column read, a cell of the column's own type (so not NULL).</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private readonly bool HoldsExpectedCells(ReadOnlySpan<CellValue> cells)
+        {
+            int[] ordinals = _direct.CellOrdinals;
+            byte[] types = _direct.CellTypes;
+            for (int i = 0; i < _direct.CellCount; i++)
+            {
+                int ordinal = ordinals[i];
+                if ((uint)ordinal >= (uint)cells.Length || (byte)cells[ordinal].Type != types[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 

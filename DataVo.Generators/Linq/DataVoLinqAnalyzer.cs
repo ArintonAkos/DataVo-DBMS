@@ -244,39 +244,45 @@ internal static class DataVoLinqAnalyzer
         /// <summary>Whether the condition requires the primary key to equal one value.</summary>
         public bool Unique { get; private set; }
 
-        // Each leaf of the condition (a comparison, a null test, a bare bool column) as C# over a RowRef, when
+        // Each leaf of the condition (a comparison, a null test, a bare bool column) as C# in three forms, when
         // its column can be read directly. A leaf without an entry keeps the whole query on the SQL path.
-        private readonly Dictionary<SyntaxNode, string> _kernelLeaves = [];
+        private readonly Dictionary<SyntaxNode, (string Row, string Bytes, string Cells)> _kernelLeaves = [];
         private readonly List<string> _kernelColumns = [];
+        private readonly List<char> _kernelKinds = [];
 
         /// <summary>
-        /// Builds the condition as C# over a <c>RowRef</c>. Call after <see cref="Condition"/> succeeded. Returns
-        /// null when a column is indexed (the SQL path can seek) or has a type without a direct reader.
+        /// Builds the condition as C# for the scan. Call after <see cref="Condition"/> succeeded. Returns null
+        /// when a column is indexed (the SQL path can seek) or has a type without a direct reader.
         /// </summary>
         public LinqKernel? Kernel(ExpressionSyntax body) =>
-            KernelText(body) is { } text
-                ? new LinqKernel(text, new EquatableArray<string>([.. _kernelColumns]))
+            KernelText(body, 0) is { } row && KernelText(body, 1) is { } bytes && KernelText(body, 2) is { } cells
+                ? new LinqKernel(row, bytes, cells, new EquatableArray<string>([.. _kernelColumns]), new string([.. _kernelKinds]))
                 : null;
 
-        private string? KernelText(ExpressionSyntax expression)
+        /// <summary>The condition in one form: 0 over a RowRef, 1 over a row's bytes, 2 over a typed row's cells.</summary>
+        private string? KernelText(ExpressionSyntax expression, int form)
         {
-            if (_kernelLeaves.TryGetValue(expression, out string? leaf))
+            if (_kernelLeaves.TryGetValue(expression, out (string Row, string Bytes, string Cells) leaf))
             {
-                return leaf;
+                return form switch { 0 => leaf.Row, 1 => leaf.Bytes, _ => leaf.Cells };
             }
 
             switch (expression)
             {
                 case ParenthesizedExpressionSyntax parenthesized:
-                    return KernelText(parenthesized.Expression) is { } inner ? $"({inner})" : null;
+                    return KernelText(parenthesized.Expression, form) is { } inner ? $"({inner})" : null;
 
                 case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.LogicalAndExpression) || binary.IsKind(SyntaxKind.LogicalOrExpression):
                 {
-                    string? left = KernelText(binary.Left);
-                    string? right = KernelText(binary.Right);
-                    return left is null || right is null
-                        ? null
-                        : $"{left} {(binary.IsKind(SyntaxKind.LogicalAndExpression) ? "&&" : "||")} {right}"; // leaves are self-contained; source parentheses are kept
+                    string? left = KernelText(binary.Left, form);
+                    string? right = KernelText(binary.Right, form);
+                    bool and = binary.IsKind(SyntaxKind.LogicalAndExpression);
+
+                    // Leaves are self-contained and source parentheses are kept. Over a RowRef the operators
+                    // short-circuit, as each leaf is a call. The direct forms read cells that are already known
+                    // to be present, so both sides are always evaluated and no branch is needed between them.
+                    string op = form == 0 ? (and ? "&&" : "||") : (and ? "&" : "|");
+                    return left is null || right is null ? null : $"{left} {op} {right}";
                 }
 
                 default:
@@ -284,24 +290,25 @@ internal static class DataVoLinqAnalyzer
             }
         }
 
-        /// <summary>The <c>RowRef</c> accessor for a column's type, or null when the type has none.</summary>
-        private static string? KernelReader(ColumnModel column) => column.Type.SqlType switch
+        /// <summary>How a column's type is read in each form, or null when the type has no direct reader.</summary>
+        private static (string RowRef, char Kind, string Bytes, string Cells)? KernelReader(ColumnModel column) => column.Type.SqlType switch
         {
-            "INT" => "GetInt32",
-            "BIGINT" => "GetInt64",
-            "FLOAT" => "GetFloat",
-            "DOUBLE" => "GetDouble",
-            "BIT" => "GetBoolean",
-            "GUID" => "GetGuid",
+            "INT" => ("GetInt32", 'i', "Int32", "{0}.AsInt32()"),
+            "BIGINT" => ("GetInt64", 'l', "Int64", "{0}.AsInt64()"),
+            "FLOAT" => ("GetFloat", 'f', "Single", "(float){0}.AsDouble()"),
+            "DOUBLE" => ("GetDouble", 'd', "Double", "{0}.AsDouble()"),
+            "BIT" => ("GetBoolean", 'b', "Boolean", "{0}.AsBoolean()"),
+            "GUID" => ("GetGuid", 'g', "Guid", "{0}.AsGuid()"),
             _ => null,
         };
 
-        /// <summary>The <c>c</c> name of a column in the compiled condition, or null when the SQL path serves it better.</summary>
-        private string? KernelColumn(ColumnModel column)
+        /// <summary>The index of a column in the compiled condition, or -1 when the SQL path serves it better.</summary>
+        /// <param name="kind">How the condition reads the column; <c>n</c> when it only tests it for NULL.</param>
+        private int KernelColumn(ColumnModel column, char kind)
         {
             if (column.IsPrimaryKey || column.IsIndexed || column.IsSpatialIndexed)
             {
-                return null;
+                return -1;
             }
 
             int index = _kernelColumns.IndexOf(column.PropertyName);
@@ -309,43 +316,57 @@ internal static class DataVoLinqAnalyzer
             {
                 index = _kernelColumns.Count;
                 _kernelColumns.Add(column.PropertyName);
+                _kernelKinds.Add(kind);
+            }
+            else if (kind != 'n')
+            {
+                _kernelKinds[index] = kind;
             }
 
-            return "c" + index.ToString(CultureInfo.InvariantCulture);
+            return index;
         }
 
         private void KernelNullTest(SyntaxNode node, ColumnModel column, bool isNull)
         {
-            if (KernelColumn(column) is { } name)
+            int index = KernelColumn(column, 'n');
+            if (index >= 0)
             {
-                _kernelLeaves[node] = $"{(isNull ? string.Empty : "!")}row.IsNull({name})";
+                // The direct forms only see rows whose cells are all present, so the test is a constant there.
+                string constant = isNull ? "false" : "true";
+                _kernelLeaves[node] = ($"{(isNull ? string.Empty : "!")}row.IsNull(c{index.ToString(CultureInfo.InvariantCulture)})", constant, constant);
             }
         }
 
         /// <summary>Records a comparison between a column and parameter <paramref name="parameter"/>, in C#'s null rules.</summary>
         private void KernelComparison(SyntaxNode node, ColumnModel column, string comparison, int parameter)
         {
-            string? reader = KernelReader(column);
             bool ordered = comparison is "<" or "<=" or ">" or ">=";
-            if (reader is null
+            if (KernelReader(column) is not { } reader
                 || Parameters[parameter].KernelType is null
-                || (ordered && reader is "GetBoolean" or "GetGuid")
-                || KernelColumn(column) is not { } name)
+                || (ordered && reader.Kind is 'b' or 'g'))
             {
                 return;
             }
 
-            // One call tests for NULL and reads the value. A stored NULL differs from every value, and is neither
-            // equal to nor ordered against one.
+            int index = KernelColumn(column, reader.Kind);
+            if (index < 0)
+            {
+                return;
+            }
+
+            // Over a RowRef one call tests for NULL and reads the value. A stored NULL differs from every value,
+            // and is neither equal to nor ordered against one.
+            string number = index.ToString(CultureInfo.InvariantCulture);
             string value = "p" + parameter.ToString(CultureInfo.InvariantCulture);
             string local = "v" + _kernelLeaves.Count.ToString(CultureInfo.InvariantCulture);
-            string read = $"row.Try{reader}({name}, out {Parameters[parameter].KernelType} {local})";
-            _kernelLeaves[node] = comparison switch
-            {
-                "<>" => $"(!{read} || {local} != {value})",
-                "=" => $"({read} && {local} == {value})",
-                _ => $"({read} && {local} {comparison} {value})",
-            };
+            string read = $"row.Try{reader.RowRef}(c{number}, out {Parameters[parameter].KernelType} {local})";
+            string op = comparison switch { "=" => "==", "<>" => "!=", _ => comparison };
+            string bytes = $"global::DataVo.Core.RowBytes.{reader.Bytes}(row, o{number})";
+            string cells = string.Format(CultureInfo.InvariantCulture, reader.Cells, $"cells[c{number}]");
+            _kernelLeaves[node] = (
+                comparison == "<>" ? $"(!{read} || {local} != {value})" : $"({read} && {local} {op} {value})",
+                $"({bytes} {op} {value})",
+                $"({cells} {op} {value})");
         }
 
         public string? Condition(ExpressionSyntax expression, bool topLevel)

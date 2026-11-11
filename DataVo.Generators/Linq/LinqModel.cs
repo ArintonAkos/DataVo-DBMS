@@ -13,8 +13,11 @@ internal sealed record LinqParameter(string Value, string? Guard, bool UsesObjec
 
 /// <summary>A condition as C# over a <c>RowRef</c>, compiled into the scan loop for queries that only count or test rows.</summary>
 /// <param name="Expression">The condition; columns appear as <c>c0</c>, <c>c1</c>... and values as <c>p0</c>, <c>p1</c>...</param>
+/// <param name="BytesExpression">The condition over a row's stored bytes, with each column's value at offset <c>o0</c>, <c>o1</c>...</param>
+/// <param name="CellsExpression">The condition over a typed row's cells, indexed by <c>c0</c>, <c>c1</c>...</param>
 /// <param name="Columns">The columns the condition reads, in <c>c</c> order.</param>
-internal sealed record LinqKernel(string Expression, EquatableArray<string> Columns);
+/// <param name="Kinds">One letter per column: how the condition reads it (<c>i l f d b g</c>), or <c>n</c> for a null test only.</param>
+internal sealed record LinqKernel(string Expression, string BytesExpression, string CellsExpression, EquatableArray<string> Columns, string Kinds);
 
 /// <summary>Where a call is, in both forms the compiler accepts for <c>[InterceptsLocation]</c>.</summary>
 /// <param name="Version">The encoding version, or 0 when only the path form is available.</param>

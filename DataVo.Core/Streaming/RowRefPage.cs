@@ -293,6 +293,172 @@ internal sealed class RowRefPage
         return new RowRef(destination.Slice(0, offset), new ReadOnlySpan<int>(_cells, 0, _kinds.Length), _kinds, default, key, _keyOrdinal, _keyIsGuid);
     }
 
+    // The layout a direct scan checks each row against; rebuilt per scan in arrays the page keeps.
+    private int[] _directFlagOffsets = [];
+    private byte[] _directFlagExpected = [];
+    private int[] _directValueOffsets = [];
+    private int[] _directCellOrdinals = [];
+    private byte[] _directCellTypes = [];
+
+    /// <summary>What <see cref="PlanDirect"/> found: how a scan can read rows without building a <see cref="RowRef"/>.</summary>
+    internal struct DirectLayout
+    {
+        /// <summary>Whether stored bytes can be read at fixed offsets.</summary>
+        public bool Bytes;
+
+        /// <summary>Whether typed rows can be read from their cells.</summary>
+        public bool Cells;
+
+        /// <summary>For each of the first <see cref="FlagCount"/> columns, where its null flag is when every cell before it is present.</summary>
+        public int[] FlagOffsets;
+
+        /// <summary>For each of those columns, the flag a row must hold: 0, or 1 for a clustered key, which is stored as NULL.</summary>
+        public byte[] FlagExpected;
+
+        /// <summary>How many leading columns the layout covers.</summary>
+        public int FlagCount;
+
+        /// <summary>The length of a row whose leading cells are all present.</summary>
+        public int MinLength;
+
+        /// <summary>For each column the condition names, the offset of its value.</summary>
+        public int[] ValueOffsets;
+
+        /// <summary>The offset of the summed column's value.</summary>
+        public int SumOffset;
+
+        /// <summary>The columns whose cells a typed row must hold, with <see cref="CellTypes"/>.</summary>
+        public int[] CellOrdinals;
+
+        /// <summary>The <see cref="CellType"/> each of those cells must have.</summary>
+        public byte[] CellTypes;
+
+        /// <summary>How many columns <see cref="CellOrdinals"/> lists.</summary>
+        public int CellCount;
+    }
+
+    /// <summary>
+    /// Works out whether rows of this table can be tested without a <see cref="RowRef"/>. Stored bytes qualify when
+    /// every column up to the last one read has a fixed width: then, in any row whose leading cells are all
+    /// present, each value sits at the same offset, and a row is checked by looking at its leading null flags.
+    /// Typed rows qualify when each column read has a cell type of its own. Neither qualifies when the table's
+    /// columns are not of the kinds the condition was compiled for.
+    /// </summary>
+    /// <param name="ordinals">The columns the condition reads.</param>
+    /// <param name="kinds">One letter per column: <c>i l f d b g</c> for the type the condition reads, <c>n</c> for a null test only.</param>
+    /// <param name="columns">One more than the last column read, summed column included.</param>
+    /// <param name="sumOrdinal">The summed column, or -1.</param>
+    public DirectLayout PlanDirect(int[] ordinals, string kinds, int columns, int sumOrdinal)
+    {
+        DirectLayout layout = default;
+        if (kinds.Length != ordinals.Length)
+        {
+            return layout;
+        }
+
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            StorageKind actual = _kinds[ordinals[i]];
+            bool fits = kinds[i] switch
+            {
+                'i' => actual == StorageKind.Int,
+                'l' => actual == StorageKind.BigInt,
+                'f' => actual == StorageKind.Float,
+                'd' => actual == StorageKind.Double,
+                'b' => actual == StorageKind.Bit,
+                'g' => actual == StorageKind.Guid,
+                'n' => true,
+                _ => false,
+            };
+            if (!fits)
+            {
+                return layout;
+            }
+        }
+
+        if (_directFlagOffsets.Length < columns)
+        {
+            _directFlagOffsets = new int[columns];
+            _directFlagExpected = new byte[columns];
+        }
+
+        int read = ordinals.Length + 1;
+        if (_directValueOffsets.Length < read)
+        {
+            _directValueOffsets = new int[read];
+            _directCellOrdinals = new int[read];
+            _directCellTypes = new byte[read];
+        }
+
+        // Stored bytes: walk the leading columns as they lie when none is NULL.
+        layout.Bytes = true;
+        int offset = 0;
+        for (int i = 0; i < columns; i++)
+        {
+            int width = RowSerializer.FixedWidth(_kinds[i]);
+            _directFlagOffsets[i] = offset;
+            if (i == _keyOrdinal)
+            {
+                _directFlagExpected[i] = 1; // a clustered key lives in the row key; its cell is stored as NULL
+                offset += 1;
+            }
+            else if (width == 0)
+            {
+                layout.Bytes = false;
+                break;
+            }
+            else
+            {
+                _directFlagExpected[i] = 0;
+                offset += 1 + width;
+            }
+        }
+
+        layout.Cells = true;
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            layout.Bytes &= ordinals[i] != _keyOrdinal;
+            _directValueOffsets[i] = _directFlagOffsets[ordinals[i]] + 1;
+            layout.Cells &= TryCellType(_kinds[ordinals[i]], out _directCellTypes[i]);
+            _directCellOrdinals[i] = ordinals[i];
+        }
+
+        layout.CellCount = ordinals.Length;
+        if (sumOrdinal >= 0)
+        {
+            layout.Bytes &= sumOrdinal != _keyOrdinal;
+            layout.SumOffset = _directFlagOffsets[sumOrdinal] + 1;
+            layout.Cells &= TryCellType(_kinds[sumOrdinal], out _directCellTypes[layout.CellCount]);
+            _directCellOrdinals[layout.CellCount++] = sumOrdinal;
+        }
+
+        layout.FlagOffsets = _directFlagOffsets;
+        layout.FlagExpected = _directFlagExpected;
+        layout.FlagCount = columns;
+        layout.MinLength = offset;
+        layout.ValueOffsets = _directValueOffsets;
+        layout.CellOrdinals = _directCellOrdinals;
+        layout.CellTypes = _directCellTypes;
+        return layout;
+    }
+
+    /// <summary>The cell type a typed row holds for a column of this kind, when there is exactly one.</summary>
+    private static bool TryCellType(StorageKind kind, out byte type)
+    {
+        CellType? cell = kind switch
+        {
+            StorageKind.Int => CellType.Int32,
+            StorageKind.BigInt => CellType.Int64,
+            StorageKind.Float or StorageKind.Double => CellType.Double,
+            StorageKind.Bit => CellType.Boolean,
+            StorageKind.Guid => CellType.Guid,
+            StorageKind.String => CellType.String,
+            _ => null,
+        };
+        type = (byte)(cell ?? CellType.Null);
+        return cell is not null;
+    }
+
     private int Measure(StoredRow row)
     {
         int length = 0;

@@ -222,18 +222,19 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// </remarks>
     /// <typeparam name="TFilter">The compiled condition.</typeparam>
     /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="kinds">One letter per column, saying how the condition reads it: <c>i l f d b g</c> for <c>INT</c>, <c>BIGINT</c>, <c>FLOAT</c>, <c>DOUBLE</c>, <c>BIT</c> and <c>GUID</c>, or <c>n</c> for a null test only.</param>
     /// <param name="filter">The condition, with its values already set.</param>
     /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
     /// <returns>The number of matching rows, up to <paramref name="limit"/>.</returns>
     /// <exception cref="InvalidOperationException">The table lacks one of <paramref name="columns"/>.</exception>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-    public int CountMatching<TFilter>(string[] columns, ref TFilter filter, int limit)
+    public int CountMatching<TFilter>(string[] columns, string kinds, ref TFilter filter, int limit)
         where TFilter : struct, IRowRefFilter
     {
         RowRefStream rows = StreamRef();
         int[] ordinals = FusedOrdinals(columns, rows);
         filter.Bind(ordinals);
-        if (rows.TryScanInPlace(ordinals, ref filter, limit, 0, floating: false, summed: false, out RowAggregate inPlace))
+        if (rows.TryScanInPlace(ordinals, kinds, ref filter, limit, 0, floating: false, summed: false, out RowAggregate inPlace))
         {
             return inPlace.Count;
         }
@@ -260,6 +261,7 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// </remarks>
     /// <typeparam name="TFilter">The compiled condition.</typeparam>
     /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="kinds">One letter per column, saying how the condition reads it: <c>i l f d b g</c> for <c>INT</c>, <c>BIGINT</c>, <c>FLOAT</c>, <c>DOUBLE</c>, <c>BIT</c> and <c>GUID</c>, or <c>n</c> for a null test only.</param>
     /// <param name="filter">The condition, with its values already set.</param>
     /// <param name="sumColumn">The column to sum. Pass the same array on every call; it is the cache key.</param>
     /// <param name="floating">Whether the sum is over a <c>FLOAT</c> or <c>DOUBLE</c> column, rather than <c>INT</c> or <c>BIGINT</c>.</param>
@@ -269,14 +271,14 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// <exception cref="InvalidOperationException">The table lacks one of the columns.</exception>
     /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-    public bool SumMatching<TFilter>(string[] columns, ref TFilter filter, string[] sumColumn, bool floating, out long whole, out double real)
+    public bool SumMatching<TFilter>(string[] columns, string kinds, ref TFilter filter, string[] sumColumn, bool floating, out long whole, out double real)
         where TFilter : struct, IRowRefFilter
     {
         RowRefStream rows = StreamRef();
         int[] ordinals = FusedOrdinals(columns, rows);
         int sumOrdinal = FusedOrdinals(sumColumn, rows)[0];
         filter.Bind(ordinals);
-        if (!rows.TryScanInPlace(ordinals, ref filter, 0, sumOrdinal, floating, summed: true, out RowAggregate totals))
+        if (!rows.TryScanInPlace(ordinals, kinds, ref filter, 0, sumOrdinal, floating, summed: true, out RowAggregate totals))
         {
             totals = default;
             RowSumKind kind = RowSumKind.None;

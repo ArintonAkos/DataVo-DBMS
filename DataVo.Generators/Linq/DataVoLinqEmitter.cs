@@ -192,12 +192,14 @@ internal static class DataVoLinqEmitter
         string[] columns = [.. kernel.Columns];
         code.AppendLine();
         code.AppendLine($"            private static readonly string[] Columns = new string[] {{ {string.Join(", ", columns.Select(static column => SymbolDisplay.FormatLiteral(column, quote: true)))} }};");
+        code.AppendLine($"            private const string Kinds = {SymbolDisplay.FormatLiteral(kernel.Kinds, quote: true)};");
         code.AppendLine();
         code.AppendLine($"            private struct Kernel : {Core}IRowRefFilter");
         code.AppendLine("            {");
         for (int index = 0; index < columns.Length; index++)
         {
             code.AppendLine($"                private int c{index.ToString(CultureInfo.InvariantCulture)};");
+            code.AppendLine($"                private int o{index.ToString(CultureInfo.InvariantCulture)};");
         }
 
         for (int index = 0; index < parameters.Length; index++)
@@ -216,9 +218,29 @@ internal static class DataVoLinqEmitter
 
         code.AppendLine("                }");
         code.AppendLine();
+        code.AppendLine("                public void BindOffsets(global::System.ReadOnlySpan<int> offsets)");
+        code.AppendLine("                {");
+        for (int index = 0; index < columns.Length; index++)
+        {
+            string number = index.ToString(CultureInfo.InvariantCulture);
+            code.AppendLine($"                    o{number} = offsets[{number}];");
+        }
+
+        code.AppendLine("                }");
+        code.AppendLine();
         code.AppendLine($"                public bool Matches(in {Core}RowRef row)");
         code.AppendLine("                {");
         code.AppendLine($"                    return {kernel.Expression};");
+        code.AppendLine("                }");
+        code.AppendLine();
+        code.AppendLine("                public bool MatchesBytes(global::System.ReadOnlySpan<byte> row)");
+        code.AppendLine("                {");
+        code.AppendLine($"                    return {kernel.BytesExpression};");
+        code.AppendLine("                }");
+        code.AppendLine();
+        code.AppendLine($"                public bool MatchesCells(global::System.ReadOnlySpan<{Core}Runtime.Reactive.CellValue> cells)");
+        code.AppendLine("                {");
+        code.AppendLine($"                    return {kernel.CellsExpression};");
         code.AppendLine("                }");
         code.AppendLine("            }");
         code.AppendLine();
@@ -230,7 +252,7 @@ internal static class DataVoLinqEmitter
             code.AppendLine($"                kernel.p{index.ToString(CultureInfo.InvariantCulture)} = {parameters[index].Value};");
         }
 
-        code.AppendLine("                count = table.CountMatching(Columns, ref kernel, limit);");
+        code.AppendLine("                count = table.CountMatching(Columns, Kinds, ref kernel, limit);");
         code.AppendLine("                return true;");
         code.AppendLine("            }");
         code.AppendLine();
@@ -242,7 +264,7 @@ internal static class DataVoLinqEmitter
             code.AppendLine($"                kernel.p{index.ToString(CultureInfo.InvariantCulture)} = {parameters[index].Value};");
         }
 
-        code.AppendLine("                return table.SumMatching(Columns, ref kernel, column, floating, out whole, out real);");
+        code.AppendLine("                return table.SumMatching(Columns, Kinds, ref kernel, column, floating, out whole, out real);");
         code.AppendLine("            }");
     }
 
