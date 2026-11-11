@@ -95,13 +95,21 @@ A primary-key equality on an LSM database reads one row and allocates only that 
 
 Enumerating a query streams. Rows are read in pages of 1,024 and each model is built as the loop reaches it, so a `foreach` over 100,000 matching rows keeps about one page alive, not the result. `ToList()` is the way to ask for everything at once. Scans that were not compiled stream the same way. Some queries read their matches before enumerating, as `StreamQuery` does: a query inside a transaction, a condition with an equality on an indexed column (few rows, read through the index), and a condition the paged scan cannot apply, which today means `||`, a null test, or `!=` on a nullable column.
 
-### Counting Without Building Rows
+### Counting And Summing Without Building Rows
 
-`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 4 to 6 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
+`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 4 to 8 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
 
 ```csharp
 int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).Count(); // 0 B
 ```
+
+`Sum` works the same way. `DataVoQuery` has `Sum` for `int`, `long`, `float` and `double` selectors. When the query's condition is compiled into the scan and the selector is one non-nullable column of its own type (`p => p.Gold`), the generator adds that column up inside the same scan; the total stays in the scan's own variables and no row is built. Any other selector (`p => p.Gold * 2`, a nullable column, a widening cast) runs as written over the rows. An integer sum that leaves its type's range throws `OverflowException`; a `float` sum is accumulated as a `double` and rounded once, as LINQ does.
+
+```csharp
+long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold); // 0 B
+```
+
+The scan is generic over the compiled condition all the way into the storage engine's row loop, so no delegate is called per row. On 200,000 rows with 100,000 matches a warm count or sum takes about 1.4 ms in memory, 2.5 ms on the disk engine and 2.9 ms on LSM.
 
 A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
 
