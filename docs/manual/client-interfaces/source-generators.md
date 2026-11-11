@@ -97,7 +97,7 @@ Enumerating a query streams. Rows are read in pages of 1,024 and each model is b
 
 ### Counting Without Building Rows
 
-`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the scan loop is compiled around it. Once warm, such a count allocates nothing, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 3 to 4 times faster.
+`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 4 to 6 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
 
 ```csharp
 int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).Count(); // 0 B
