@@ -26,6 +26,9 @@ public class DataVoLinqInterceptorGeneratorTests
                 public bool IsActive { get; set; }
                 public float Speed { get; set; }
                 public long Gold { get; set; }
+                public double? Rating { get; set; }
+                public DataVoDate Joined { get; set; }
+                public DateOnly? Seen { get; set; }
             }
 
             public static class Limits
@@ -142,12 +145,55 @@ public class DataVoLinqInterceptorGeneratorTests
     }
 
     [Fact]
-    public void CompiledCondition_CanAlsoSum()
+    public void CompiledCondition_CanAlsoFoldAColumn()
     {
         string generated = Generate("players.Where(p => p.IsActive)").Generated;
 
-        Assert.Contains("protected override bool TrySum(", generated);
-        Assert.Contains("return table.SumMatching(Columns, Kinds, ref kernel, column, floating, out whole, out real);", generated);
+        Assert.Contains("protected override bool TryFold(", generated);
+        Assert.Contains("return table.FoldMatching(Columns, Kinds, ref kernel, column, fold, kind, out totals);", generated);
+    }
+
+    [Theory]
+    [InlineData("players.Where(p => p.IsActive).Min(p => p.Gold)", "Min", "long", 'l', "return totals.Whole;", "Gold")]
+    [InlineData("players.Where(p => p.IsActive).Max(p => p.Gold)", "Max", "long", 'l', "return totals.Whole;", "Gold")]
+    [InlineData("players.Where(target, static (p, min) => p.Gold > min).Max(static p => p.Speed)", "Max", "float", 'f', "return (float)totals.Real;", "Speed")]
+    [InlineData("players.Where(p => p.IsActive).Min(p => (p.Level))", "Min", "int", 'i', "return (int)totals.Whole;", "Level")]
+    [InlineData("players.Where(p => p.Level > 3).Max(p => p.Id)", "Max", "int", 'i', "return (int)totals.Whole;", "Id")]
+    [InlineData("players.Where(p => p.IsActive).Min(p => p.Score)", "Min", "int?", 'i', "return (int)totals.Whole;", "Score")]
+    [InlineData("players.Where(p => p.IsActive).Max(p => p.Rating)", "Max", "double?", 'd', "return totals.Real;", "Rating")]
+    [InlineData("players.Where(p => p.IsActive).Min(p => p.Joined)", "Min", "global::DataVo.Core.DataVoDate", 't', "return global::DataVo.Core.DataVoDate.FromDayNumber((int)totals.Whole);", "Joined")]
+    [InlineData("players.Where(p => p.IsActive).Max(p => p.Seen)", "Max", "global::System.DateOnly?", 't', "return global::System.DateOnly.FromDayNumber((int)totals.Whole);", "Seen")]
+    public void MinOrMaxOfOneColumn_IsRoutedToTheScan(string call, string method, string type, char kind, string result, string column)
+    {
+        (string generated, Diagnostic[] diagnostics) = Generate(call);
+
+        Assert.Empty(diagnostics);
+        Assert.Contains($"public static {type} {method}0(this in global::DataVo.Core.DataVoQuery<global::App.Player, ", generated);
+        Assert.Contains($"global::System.Func<global::App.Player, {type}> selector)", generated);
+        Assert.Contains($"{method}Column0 = new string[] {{ \"{column}\" }};", generated);
+        Assert.Contains($"if (!query.TryFoldColumn({method}Column0, global::DataVo.Core.RowFold.{method}, '{kind}', out totals))", generated);
+        Assert.Contains($"return query.{method}(selector);", generated);
+        Assert.Contains(result, generated);
+
+        // Nothing matched: null for a nullable column, the exception Enumerable throws otherwise.
+        Assert.Equal(type.EndsWith('?'), generated.Contains("return null;"));
+        Assert.Equal(!type.EndsWith('?'), generated.Contains("throw new global::System.InvalidOperationException(\"Sequence contains no elements\");"));
+    }
+
+    [Theory]
+    [InlineData("players.Where(p => p.IsActive).Min(p => p.Gold * 2)")] // computed
+    [InlineData("players.Where(p => p.IsActive).Max(p => p.Score ?? 0)")] // computed from a nullable column
+    [InlineData("players.Where(p => p.IsActive).Min(p => (long)p.Level)")] // cast: not the column's own type
+    [InlineData("players.Where(p => p.IsActive).Max<long>(p => p.Level)")] // widened by the call
+    [InlineData("players.Where(p => p.IsActive).Min<int?>(p => p.Level)")] // lifted by the call
+    [InlineData("players.Where(p => p.IsActive).Max(p => p.Name)")] // text
+    [InlineData("players.Where(p => p.IsActive).Min(p => p.IsActive)")] // not a number or a date
+    public void OtherMinAndMaxSelectors_AreLeftToRunAsWritten(string call)
+    {
+        (string generated, Diagnostic[] diagnostics) = Generate(call);
+
+        Assert.DoesNotContain("TryFoldColumn", generated);
+        Assert.Empty(diagnostics);
     }
 
     [Theory]

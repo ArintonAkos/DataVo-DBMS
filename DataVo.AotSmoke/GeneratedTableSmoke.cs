@@ -60,6 +60,20 @@ internal static class GeneratedTableSmoke
         Require(items.Where(item => item.Name == null).Count() == 10, "A null comparison returned the wrong rows.");
         Require(items.Where(item => item.Name == null).Sum(item => item.Slot) == 20, "A sum compiled into the scan returned the wrong total.");
         Require(inSlot.Sum(item => item.Id) == 8 + 13 + 18, "A sum over an indexed condition returned the wrong total.");
+        Require(inSlot.Min(item => item.Id) == 8 && inSlot.Max(item => item.Id) == 18, "A minimum or maximum compiled into the scan returned the wrong row's value.");
+        Require(items.Where(item => item.Name == null).Max(item => item.Slot) == 4, "A maximum over a null test returned the wrong value.");
+        Require(items.Where(item => item.Slot > 100).Min(item => item.Name) == null, "A minimum through the rows did not return null for an empty result.");
+        bool threw = false;
+        try
+        {
+            items.Where(item => item.Slot > 100).Min(item => item.Slot);
+        }
+        catch (InvalidOperationException)
+        {
+            threw = true;
+        }
+
+        Require(threw, "A minimum over no rows did not throw.");
 
         // Spatial queries over a Vector3 column, with the HNSW index and with the exact scan.
         second.EnsureProbeTable();
