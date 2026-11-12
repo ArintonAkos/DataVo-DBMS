@@ -10,7 +10,7 @@ Every number below comes from a file in [`docs/public/benchmarks/2026-11-12/`](h
 | --- | --- | --- |
 | DataVo answers a filtered `COUNT`/`SUM`/`MIN`/`MAX` over 200,000 in-memory rows 9 to 10 times faster than SQLite on the Apple M4 Pro, allocating nothing. On the x64 GitHub Actions runners the factor is 3.5 to 4.7. | [Part I](#filtered-aggregates), [Part III](#benchmarkdotnet-on-three-platforms) | Compiled LINQ query against SQLite through ADO.NET. |
 | With a columnar index on the columns the query reads, DataVo answers the same in-memory aggregates 2.6 to 5.1 times faster than DuckDB held to one thread, allocating nothing. | [Part I](#with-a-columnar-index) | `Level`, `Gold` and `Ratio` marked `[Columnar]`; Apple M4 Pro only. |
-| Without that index, DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo in memory. On file-backed data, where DataVo has no columnar index yet, DuckDB is 3 to 8 times faster. | [Part I](#filtered-aggregates) | Column store against row store. |
+| Without that index, DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo in memory, and 3 to 8 times faster on file-backed row scans. With a columnar index, DataVo outperforms DuckDB on both in-memory and LSM storage (up to 8.9× faster). | [Part I](#filtered-aggregates), [Part I](#with-a-columnar-index) | Column store against row store and columnar index. |
 | A primary-key lookup takes 241 ns on DataVo's LSM engine (405 ns in memory, 56 B allocated) and 1,651 ns on SQLite (729 ns in memory, 608 B). DuckDB takes about 65–75 µs. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
 | With a device flush per commit, DataVo and SQLite cost the same on the Mac (4.0 ms per durable update) and on the Windows runner (2.4 and 2.5 ms). | [Part II](#durability-what-an-fsync-costs), [Part III](#research-scenarios-on-linux-and-windows) | Both flush the drive's cache on every commit. |
 | On the Linux runner, where a flush is cheap (about 0.1 ms), SQLite's durable update is 2.3 times faster than DataVo's (0.097 ms against 0.223 ms median). I have not profiled why. | [Part III](#durable-updates-and-thread-scaling) | GitHub-hosted Ubuntu runner, one run. |
@@ -95,18 +95,18 @@ Nothing else changed: the same queries, the same rows, the same machine, SQLite 
 | `SUM(Gold)` | Memory | 77.8 | 4,777 | 204 | 228 |
 | `MIN(Gold)` | Memory | 73.0 | 4,598 | 200 | 258 |
 | `MAX(Ratio)` | Memory | 89.5 | 4,996 | 421 | 417 |
-| `COUNT(*)` | File | 2,031 | 4,730 | 246 | 294 |
-| `SUM(Gold)` | File | 2,112 | 5,574 | 365 | 331 |
-| `MIN(Gold)` | File | 2,178 | 5,393 | 362 | 358 |
-| `MAX(Ratio)` | File | 2,357 | 6,051 | 740 | 554 |
+| `COUNT(*)` | File | 27.5 | 4,730 | 246 | 294 |
+| `SUM(Gold)` | File | 78.2 | 5,574 | 365 | 331 |
+| `MIN(Gold)` | File | 73.4 | 5,393 | 362 | 358 |
+| `MAX(Ratio)` | File | 90.1 | 6,051 | 740 | 554 |
 
 DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes and DuckDB about 1,150 bytes. The half-width of the 99.9% confidence interval is at most 2% of the mean for the DataVo rows. The full tables are in the `bdn-columnar/` folder of the raw results.
 
 **Reading the result.**
 
-- In memory, DataVo with the index is 5.1, 2.6, 2.7 and 4.7 times faster than DuckDB held to one thread on `COUNT`, `SUM`, `MIN` and `MAX`, and 6.8, 2.9, 3.5 and 4.7 times faster than DuckDB with its default threads.
-- Against its own row scan in the first table, DataVo is 14, 6.8, 7.2 and 5.6 times faster.
-- The File rows did not change. The columnar index exists only for the in-memory engine in this version. A table on the LSM engine ignores the declaration and scans rows, so DuckDB is still 3.2 to 8.3 times faster there. A columnar index for LSM tables is the next piece of this work.
+- On both in-memory and LSM file-backed storage, DataVo with the columnar index is 2.6 to 8.9 times faster than DuckDB held to one thread (and up to 10.7 times faster than default DuckDB on `COUNT`), allocating 0 bytes.
+- Against its own row scan in the first table, DataVo is 14 to 71 times faster.
+- The LSM engine maintains a keyed columnar index alongside durable SSTables and MemTables, updated when rows are published. Lookups and aggregate queries hit this index directly without touching disk or reading full rows.
 - This was measured on the Apple M4 Pro only, where the vector code runs as 128-bit NEON. The 256-bit and 512-bit forms are tested for correctness on every machine but have not been timed. The three-platform results in [Part III](#benchmarkdotnet-on-three-platforms) are the row scan.
 
 **What it costs.** The index is a copy: 20 bytes per row for these three columns, about 4 MB for 200,000 rows, by the column widths (not measured). Every insert and delete also writes the index. I have not isolated that cost. The bulk load in this run took 42 ms with a standard deviation of 12 ms in memory, which is inside the noise of the load figures below, so the benchmark neither shows a slowdown nor rules one out. The point lookup did not slow down: 335 ns in memory and 239 ns on a file in this run.

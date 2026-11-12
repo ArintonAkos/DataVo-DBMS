@@ -121,6 +121,37 @@ public sealed class ColumnarSqlPushdownTests
         Agree();
     }
 
+    /// <summary>
+    /// Verifies that SQL aggregate queries over an LSM file-backed table with a columnar index
+    /// produce identical results to the row-scan baseline, while being answered directly from the columnar index.
+    /// </summary>
+    [Fact]
+    public void AnAggregateTheIndexCovers_OnLsmStorage_IsAnsweredByIt_WithTheRowScansResult()
+    {
+        using var scratch = new Scratch();
+        using DataVoContext db = Open(rows: 5_000, StorageMode.Lsm, scratch.Path);
+        ColumnarIndex index = Assert.IsType<ColumnarIndex>(db.Engine.Columnar.Find("S", "indexed"));
+        long before = index.Scans;
+
+        string[] statements =
+        [
+            "SELECT COUNT(*) FROM {t} WHERE Level >= 50",
+            "SELECT SUM(Gold) FROM {t} WHERE Level >= 50",
+            "SELECT MIN(Gold) FROM {t} WHERE Level >= 50",
+            "SELECT MAX(Ratio) FROM {t} WHERE Level >= 50",
+            "SELECT AVG(Level) FROM {t} WHERE Level > 10 AND Level <= 90",
+        ];
+
+        foreach (string sql in statements)
+        {
+            QueryResult fromIndex = Run(db, sql.Replace("{t}", "indexed"));
+            QueryResult fromRows = Run(db, sql.Replace("{t}", "plain"));
+            AssertSame(fromRows, fromIndex);
+        }
+
+        Assert.Equal(statements.Length, index.Scans - before);
+    }
+
     [Fact]
     public void ASumPastTheRangeOfBigInt_IsLeftToTheRowScan()
     {
@@ -178,9 +209,15 @@ public sealed class ColumnarSqlPushdownTests
         return result;
     }
 
-    private static DataVoContext Open(int rows)
+    private static DataVoContext Open(int rows, StorageMode mode = StorageMode.InMemory, string? path = null)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        var config = new DataVoConfig { StorageMode = mode };
+        if (path is not null)
+        {
+            config.DiskStoragePath = path;
+        }
+
+        var db = new DataVoContext(config);
         Run(db, "CREATE DATABASE S");
         Run(db, "USE S");
         Run(db, $"CREATE TABLE indexed ({Columns})");
@@ -205,5 +242,22 @@ public sealed class ColumnarSqlPushdownTests
         }
 
         return db;
+    }
+
+    /// <summary>
+    /// Temporary directory helper for isolating LSM storage tests on disk.
+    /// Cleans up directory upon disposal.
+    /// </summary>
+    private sealed class Scratch : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"datavo_sql_columnar_{Guid.NewGuid():N}");
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
     }
 }
