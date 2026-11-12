@@ -1,7 +1,7 @@
 const publicManualPages = [
   { title: "What Is DataVo?", source: "manual/preface/what-is-datavo.md" },
   { title: "Project Status & Scope", source: "manual/preface/project-status.md" },
-  { title: "v0.1 Alpha Scope", source: "manual/preface/alpha-scope.md" },
+  { title: "Release Scope & Boundaries", source: "manual/preface/alpha-scope.md" },
   { title: "Roadmap", source: "manual/preface/roadmap.md" },
 
   { title: "Installation & Packages", source: "manual/getting-started/installation.md" },

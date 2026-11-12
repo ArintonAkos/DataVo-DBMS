@@ -77,7 +77,7 @@ The exact Unity 6000.5.4f1 macOS Editor and macOS IL2CPP Medium-stripping gates 
 
 ## Related pages
 
-- [v0.1 Alpha Scope](../manual/preface/alpha-scope.md)
+- [Release Scope & Boundaries](../manual/preface/alpha-scope.md)
 - [Setup and Packaging](./setup-and-packaging.md)
 - [Runtime Observability](./runtime-observability.md)
 - [Reactive Queries](./reactive-queries.md)

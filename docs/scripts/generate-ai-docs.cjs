@@ -117,7 +117,7 @@ function main() {
     [
       "# DataVo Documentation",
       "",
-      "DataVo is a C#-native embedded database engine. This file exposes only the curated public v0.1 Alpha manual.",
+      "DataVo is a C#-native embedded database engine. This file exposes the curated public v0.2.0-rc.3 Release Candidate manual.",
       "",
       "## Manual Pages",
       ...pages.map((page) => `- [${page.title}](${page.aiPath})`),
@@ -145,7 +145,7 @@ function main() {
     `${JSON.stringify(
       {
         name: "datavo-docs",
-        description: "Local MCP server configuration for the curated DataVo v0.1 Alpha manual.",
+        description: "Local MCP server configuration for the curated DataVo v0.2.0-rc.3 manual.",
         docsBaseUrl: "/",
         aiIndex: "/ai/index.json",
         llms: "/llms.txt",
@@ -169,7 +169,7 @@ function main() {
     `${JSON.stringify(
       {
         name: "DataVo public documentation",
-        description: "HTTP-retrievable AI documentation surface for the curated DataVo v0.1 Alpha manual.",
+        description: "HTTP-retrievable AI documentation surface for the curated DataVo v0.2.0-rc.3 manual.",
         publicScope: "Curated manual pages only.",
         entrypoints: {
           llms: "/llms.txt",

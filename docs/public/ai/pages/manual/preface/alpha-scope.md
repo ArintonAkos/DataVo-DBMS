@@ -1,11 +1,11 @@
-# v0.1 Alpha Scope
+# Release Scope & Boundaries (v0.2 Release Candidate)
 
 > Source route: /manual/preface/alpha-scope
 > Source file: manual/preface/alpha-scope.md
 
-DataVo v0.1 Alpha is a public engine preview. It is meant to show the architecture, performance direction, and core developer experience before the project claims production database maturity.
+DataVo v0.2 Release Candidate (v0.2.0-rc.3) defines the feature-complete verification boundary for the 0.2 release line, backed by 2,358 passing tests across the engine, storage, and client suites. It establishes a clear contract between release-candidate core subsystems and explicit engine boundaries.
 
-The supported path starts with direct embedding. Create a context, choose a storage mode, and execute SQL from your application.
+The supported path starts with direct embedding. Create a context, choose a storage mode, and execute SQL or typed queries from your .NET 10 application. In-memory mode includes a zero-allocation primary-key point lookup fast path (`56 B` ADO.NET reader wrapper, ~`405 ns`).
 
 ```csharp
 using DataVo.Core;
@@ -16,24 +16,24 @@ using var db = new DataVoContext(new DataVoConfig
     StorageMode = StorageMode.InMemory
 });
 
-db.Execute("CREATE DATABASE AlphaDemo");
-db.Execute("USE AlphaDemo");
+db.Execute("CREATE DATABASE RcDemo");
+db.Execute("USE RcDemo");
 db.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Name VARCHAR(80))");
 db.Execute("INSERT INTO Events (Id, Name) VALUES (1, 'created')");
 ```
 
-The alpha also includes persisted storage modes. For durability-sensitive experiments, use LSM strict mode so acknowledged writes wait for WAL durability. Disk mode is legacy and receives no further durability work. Both modes currently share one known crash limitation for `UPDATE`, described in [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations).
+For persisted workloads, `StorageMode.Lsm` with `LsmStrictFsync = true` is the release-candidate storage engine, using WAL-backed MemTables, SSTables, and clustered primary keys so acknowledged writes wait for WAL durability. Disk paged mode (`StorageMode.Disk`) is legacy and receives no further durability work. See [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations) for durability notes and legacy disk mode limitations.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./alpha_data",
+    DiskStoragePath = "./rc_data",
     LsmStrictFsync = true
 });
 ```
 
-The SQL surface is intentionally documented as a subset. You can create tables, insert rows, update rows, delete rows, query rows, build indexes, and use vector search.
+The SQL surface is documented as a verified subset. You can create tables, insert rows, update rows, delete rows, query rows, build scalar and vector indexes, and run SIMD-accelerated vector search (`HNSW` and `FLAT` with cosine `<=>` and L2 `<->` distance). Native AOT (`DataVo.Core` + `DataVo.Data`) is locked with trim and AOT analyzers enforced as build errors.
 
 ```sql
 CREATE TABLE Products (
@@ -53,7 +53,14 @@ ORDER BY Price DESC
 LIMIT 10;
 ```
 
-What makes this an alpha is the boundary around the edges. Package polish, storage-format stability, EF provider completeness, migrations, server tooling, and PostgreSQL compatibility are not finished. The documentation calls those limits out directly so early users can make a practical decision.
+## Explicit Boundaries
+
+DataVo v0.2 Release Candidate (v0.2.0-rc.3) enforces strict architectural boundaries so adopters can evaluate the engine with accurate expectations:
+
+- **No arbitrary multi-row serializable MVCC:** Transactions provide session-bound `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK`, row-level write coordination, and MVCC snapshot visibility, but do not guarantee serializable isolation or phantom-read prevention across arbitrary multi-row predicates.
+- **EF Core migrations unsupported:** `DataVo.EntityFrameworkCore` operates as an integration bridge over a host EF provider for bounded `DbSet` and `QueryFromDataVo` workflows, not a standalone EF Core provider with migration scaffolding.
+- **Disk paged mode is legacy:** `StorageMode.Disk` is retained only for compatibility and receives no further durability engineering. All persistent workloads should use `StorageMode.Lsm`.
+- **WebAssembly is an experimental playground lane:** `DataVo.Browser` powers the interactive documentation playground (`docs/src/DataVoClient.ts`), but is **not** a production-ready target and is **not** published on npm.
 
 ## Preview SQL DATE Contract
 
@@ -61,7 +68,7 @@ SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `Ce
 
 ## Unity Evaluation Status
 
-Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+Unity is an evaluation target, not a supported runtime in DataVo v0.2 Release Candidate (v0.2.0-rc.3). The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
 
 | Environment or boundary | Status | Meaning |
 | --- | --- | --- |
@@ -73,16 +80,19 @@ Unity is an evaluation target, not a supported runtime in v0.1. The public `Data
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
 | Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 
-## v0.1 Scope Summary
+## v0.2 Release Candidate Scope Summary
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| In-process embedded deployment | Supported | The core product shape is library-first, not server-first. |
-| Public curated manual | Supported | The manual is the public documentation boundary for v0.1. |
-| SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
-| Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
-| Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Supported | The public Core package remains `net10.0`-only; the opt-in portable target is an experimental local candidate, not a published or supported Unity asset. |
-| Stable storage format | Planned | Alpha storage files may change before a stable release. |
-| Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
-| Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |
+| Core embedded API (`DataVoContext`) | Release Candidate | Primary in-process embedded interface (`net10.0`). |
+| LSM storage with strict fsync | Release Candidate | WAL-backed MemTables, SSTables, and clustered primary keys (`LsmStrictFsync = true`). |
+| Zero-alloc in-memory point lookup | Release Candidate | Direct PK fast path (`56 B` reader allocation, ~`405 ns` lookup). |
+| SIMD vector search (`HNSW` & `FLAT`) | Release Candidate | `VECTOR(n)` columns with cosine (`<=>`) and Euclidean/L2 (`<->`) operators. |
+| Native AOT (`DataVo.Core` + `DataVo.Data`) | Locked & Passing | Trim and AOT analyzers (`IL2026`/`IL3050`) enforced as build errors. |
+| ADO.NET & Dapper (`DataVo.Data`) | Release Candidate | Standard `DbConnection`, `DbCommand`, `DbDataReader` provider surface. |
+| Roslyn source generators (`DataVo.Generators`) | Release Candidate | `[DataVoQuery]` compiled query plans and typed row mappers. |
+| Entity Framework Core bridge | Preview Bridge | Supports bounded `DbSet` and `QueryFromDataVo` workflows; EF migrations are unsupported. |
+| Disk paged storage (`StorageMode.Disk`) | Legacy | Retained for compatibility; receives no further durability work. |
+| Browser / WebAssembly (`DataVo.Browser`) | Experimental / Playground Lane | Powers the interactive docs playground; not a production target and not published on npm. |
+| Arbitrary multi-row serializable MVCC | Not Supported | Snapshot visibility and row-level write locks only; no predicate-range locking. |
+| Full RDBMS server features | Not Supported | No stored procedures, triggers, replication, or PostgreSQL wire server in v0.2. |

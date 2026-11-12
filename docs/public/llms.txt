@@ -1,11 +1,11 @@
 # DataVo Documentation
 
-DataVo is a C#-native embedded database engine. This file exposes only the curated public v0.1 Alpha manual.
+DataVo is a C#-native embedded database engine. This file exposes the curated public v0.2.0-rc.3 Release Candidate manual.
 
 ## Manual Pages
 - [What Is DataVo?](/ai/pages/manual/preface/what-is-datavo.md)
 - [Project Status & Stability](/ai/pages/manual/preface/project-status.md)
-- [v0.1 Alpha Scope](/ai/pages/manual/preface/alpha-scope.md)
+- [Release Scope & Boundaries (v0.2 Release Candidate)](/ai/pages/manual/preface/alpha-scope.md)
 - [Roadmap](/ai/pages/manual/preface/roadmap.md)
 - [Installation & Packages](/ai/pages/manual/getting-started/installation.md)
 - [Choosing an Interface](/ai/pages/manual/getting-started/choosing-an-interface.md)

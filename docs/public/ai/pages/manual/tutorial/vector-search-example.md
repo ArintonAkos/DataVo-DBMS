@@ -82,7 +82,7 @@ LIMIT 3;
 """)[0];
 ```
 
-For larger tables, create an HNSW index instead. HNSW is approximate, but it is designed to avoid scanning every vector. DataVo v0.1 uses built-in HNSW defaults; it does not expose tuning parameters such as `efConstruction` or `M`.
+For larger tables, create an HNSW index instead. HNSW is approximate, but it is designed to avoid scanning every vector. DataVo v0.2 uses built-in HNSW defaults (`metric = 'cosine'` or `'euclidean'`); it does not expose graph construction tuning parameters such as `efConstruction` or `M`.
 
 ```csharp
 db.Execute("CREATE INDEX idx_embeddings_hnsw ON Embeddings (Emb) USING HNSW");

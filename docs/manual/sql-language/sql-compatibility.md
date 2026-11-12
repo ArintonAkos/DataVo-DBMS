@@ -1,6 +1,6 @@
 # SQL Compatibility Matrix
 
-DataVo SQL is intentionally smaller than PostgreSQL, SQLite, or SQL Server. The point of this page is to make the v0.1 boundary explicit: examples first, then the compatibility table.
+DataVo SQL is intentionally smaller than PostgreSQL, SQLite, or SQL Server. The point of this page is to make the v0.2 boundary explicit: examples first, then the compatibility table.
 
 The core database lifecycle is supported.
 
@@ -55,7 +55,7 @@ GROUP BY d.Name
 HAVING COUNT(*) > 0;
 ```
 
-Vector SQL is part of the v0.1 feature set.
+Vector SQL is part of the v0.2 feature set.
 
 ```sql
 CREATE TABLE Embeddings (
@@ -77,7 +77,7 @@ LIMIT 5;
 The unsupported areas are just as important. Do not write application code that depends on stored procedures, triggers, PostgreSQL catalogs, or full PostgreSQL syntax compatibility.
 
 ```sql
--- Not supported in DataVo v0.1:
+-- Not supported in DataVo v0.2:
 CREATE TRIGGER users_updated
 BEFORE UPDATE ON Users
 FOR EACH ROW
@@ -99,8 +99,8 @@ EXECUTE PROCEDURE set_updated_at();
 | Aggregation | Supported | Grouped aggregate queries are supported. |
 | Subqueries | Supported | Tested `IN` and `EXISTS` style shapes. |
 | Vector distance SQL | Supported | `<=>`, `<->`, HNSW, and FLAT. |
-| Views | Planned | Reactive query work exists, but SQL `CREATE VIEW` is not a public v0.1 feature. |
-| Window functions | Not Supported | No public v0.1 support. |
+| Views | Planned | Reactive query work exists, but SQL `CREATE VIEW` is not a public v0.2 feature. |
+| Window functions | Not Supported | No public v0.2 support. |
 | Stored procedures | Not Supported | No procedural SQL layer. |
 | Triggers | Not Supported | No trigger execution layer. |
 | User-defined functions | Not Supported | No public UDF API. |

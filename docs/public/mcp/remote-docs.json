@@ -1,6 +1,6 @@
 {
   "name": "DataVo public documentation",
-  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.1 Alpha manual.",
+  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.2.0-rc.3 manual.",
   "publicScope": "Curated manual pages only.",
   "entrypoints": {
     "llms": "/llms.txt",
@@ -19,7 +19,7 @@
       "markdown": "/ai/pages/manual/preface/project-status.md"
     },
     {
-      "title": "v0.1 Alpha Scope",
+      "title": "Release Scope & Boundaries (v0.2 Release Candidate)",
       "route": "/manual/preface/alpha-scope",
       "markdown": "/ai/pages/manual/preface/alpha-scope.md"
     },

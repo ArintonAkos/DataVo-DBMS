@@ -3,7 +3,7 @@
 > Source route: /manual/sql-language/data-manipulation
 > Source file: manual/sql-language/data-manipulation.md
 
-Data manipulation statements change table contents. In v0.1, the core workflow is straightforward: insert rows, update rows by predicate, delete rows by predicate, and vacuum storage after deletes when compaction matters.
+Data manipulation statements change table contents. In v0.2, the core workflow is straightforward: insert rows, update rows by predicate, delete rows by predicate, and vacuum storage after deletes when compaction matters.
 
 Use column-targeted inserts for application code. The statement says exactly which columns receive values.
 
@@ -87,4 +87,4 @@ ROLLBACK;
 
 ## DML Support Summary
 
-Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.1. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.2. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

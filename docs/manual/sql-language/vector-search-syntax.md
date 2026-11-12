@@ -28,7 +28,7 @@ INSERT INTO Embeddings (Id, Label, Emb)
 VALUES (4, 'warm-red', '[0.9,0.1,0]');
 ```
 
-To search vectors efficiently, create a vector index on the vector column. DataVo supports two index families in v0.1 Alpha: `HNSW` and `FLAT`.
+To search vectors efficiently, create a vector index on the vector column. DataVo supports two index families in v0.2: `HNSW` and `FLAT`.
 
 Use `FLAT` when you want perfect accuracy and the dataset is small enough that scanning every vector is acceptable. A flat index is simple: compare the query vector with every stored vector and return the exact nearest rows. It is a good default for tests, small local datasets, and correctness checks.
 
@@ -38,7 +38,7 @@ ON Embeddings (Emb)
 USING FLAT;
 ```
 
-Use `HNSW` when the dataset is large and query speed matters more than exact exhaustive search. HNSW builds an approximate nearest-neighbor graph so DataVo can avoid comparing against every vector. Use it only after measuring recall, build time, and query latency on your workload. v0.1 does not currently expose HNSW tuning parameters.
+Use `HNSW` when the dataset is large and query speed matters more than exact exhaustive search. HNSW builds an approximate nearest-neighbor graph so DataVo can avoid comparing against every vector. Use it only after measuring recall, build time, and query latency on your workload. v0.2 supports metric selection (`WITH (metric = 'cosine' | 'euclidean')`) and uses built-in graph construction parameters.
 
 ```sql
 CREATE INDEX idx_embeddings_hnsw

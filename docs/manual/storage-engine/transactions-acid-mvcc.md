@@ -62,7 +62,7 @@ FROM Users
 WHERE Id = 1;
 ```
 
-Writes are more conservative. Inserts acquire a table-scoped write boundary where needed, and updates/deletes coordinate around the rows they modify. That gives DataVo a practical alpha contract: useful transaction semantics for controlled embedded workloads, without claiming the full isolation guarantees of PostgreSQL or SQL Server.
+Writes are more conservative. Inserts acquire a table-scoped write boundary where needed, and updates/deletes coordinate around the rows they modify. That gives DataVo a clear v0.2 contract: predictable transaction semantics for embedded workloads, without claiming the full serializable isolation guarantees of PostgreSQL or SQL Server.
 
 ```sql
 BEGIN TRANSACTION;
@@ -77,7 +77,7 @@ WHERE Id = 2;
 COMMIT;
 ```
 
-The important limitation is predicate-level isolation. DataVo v0.1 does not claim serializable behavior for arbitrary multi-row predicates. If one transaction reads "all active users" while another inserts a new active user, v0.1 should not be described as preventing every possible phantom-read shape.
+The important limitation is predicate-level isolation. DataVo v0.2 does not claim serializable behavior for arbitrary multi-row predicates. If one transaction reads "all active users" while another inserts a new active user, v0.2 does not prevent every possible phantom-read shape.
 
 ```sql
 BEGIN TRANSACTION;
@@ -87,7 +87,7 @@ FROM Users
 WHERE IsActive = true;
 
 -- Another session may insert a new IsActive = true row.
--- DataVo v0.1 does not claim full phantom-read prevention.
+-- DataVo v0.2 does not claim full phantom-read prevention.
 
 COMMIT;
 ```
@@ -116,4 +116,4 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## ACID & Isolation Contract
 
-Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). v0.1 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.
+Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). DataVo v0.2 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.

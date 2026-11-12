@@ -1,6 +1,6 @@
 # Entity Framework Support
 
-DataVo's Entity Framework Core integration is an alpha bridge. It helps EF users evaluate DataVo with familiar `DbContext` and `DbSet` patterns, but it does not yet replace a mature EF provider.
+DataVo's Entity Framework Core integration (`DataVo.EntityFrameworkCore`) is a preview bridge. It helps EF users integrate DataVo with familiar `DbContext` and `DbSet` patterns, but it is not a standalone migration-capable EF provider.
 
 The bridge expects a host EF provider for EF infrastructure services. In examples, the EF in-memory provider is a convenient host, and `UseDataVo` attaches DataVo-specific behavior.
 
@@ -78,8 +78,8 @@ public sealed class AppDbContext : DataVoDbContext
 }
 ```
 
-Use query capability checks before running a LINQ query that may be outside the supported alpha subset.
+Use query capability checks before running a LINQ query that may be outside the supported bridge subset.
 
 ## Entity Framework Support Summary
 
-Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.1: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.
+Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.2: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.

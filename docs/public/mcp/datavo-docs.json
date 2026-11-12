@@ -1,6 +1,6 @@
 {
   "name": "datavo-docs",
-  "description": "Local MCP server configuration for the curated DataVo v0.1 Alpha manual.",
+  "description": "Local MCP server configuration for the curated DataVo v0.2.0-rc.3 manual.",
   "docsBaseUrl": "/",
   "aiIndex": "/ai/index.json",
   "llms": "/llms.txt",

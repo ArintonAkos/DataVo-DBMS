@@ -3,7 +3,7 @@
 > Source route: /manual/tutorial/entity-framework-example
 > Source file: manual/tutorial/entity-framework-example.md
 
-DataVo's Entity Framework Core integration is an alpha bridge. It lets you keep a familiar EF model while evaluating DataVo-backed persistence and DataVo-native query paths with explicit operator limits. It is not a complete EF provider in v0.1.
+DataVo's Entity Framework Core integration (`DataVo.EntityFrameworkCore`) is a preview bridge. It lets you keep a familiar EF model while evaluating DataVo-backed persistence and DataVo-native query paths with explicit operator limits. It is not a standalone migration-capable EF provider in v0.2.
 
 Start with a mapped entity. Keep the first model simple: an integer key, a string column, and a boolean flag.
 
@@ -115,4 +115,4 @@ List<ItemEmbedding> nearest = ctx.QueryFromDataVo<ItemEmbedding>(query => query
 
 ## EF Core Example Support
 
-The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.1.
+The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.2.

@@ -93,7 +93,7 @@ foreach (RowRef row in stream)
 
 ## Using Entity Framework Core
 
-DataVo also includes an early Entity Framework Core bridge. In v0.1 Alpha, this is not a full standalone EF provider. It attaches DataVo behavior to an EF context while a host EF provider supplies EF's normal infrastructure services.
+DataVo also includes an Entity Framework Core integration bridge (`DataVo.EntityFrameworkCore`). In v0.2, this is a preview bridge rather than a standalone EF provider: it attaches DataVo storage to an EF context while a host EF provider supplies EF's infrastructure services.
 
 The example below uses EF Core's in-memory provider as that host provider, then registers DataVo with `UseDataVo`. The context derives from `DataVoDbContext`, which adds DataVo-specific loading helpers and query validation.
 
@@ -192,4 +192,4 @@ List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
 
 ## Entity Framework Core Support
 
-The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.1 — unsupported grouped operators report unsupported-pattern errors.
+The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.2 — unsupported grouped operators report unsupported-pattern errors.

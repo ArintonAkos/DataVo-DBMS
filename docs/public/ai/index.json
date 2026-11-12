@@ -1,6 +1,6 @@
 {
   "name": "DataVo Documentation",
-  "generatedAt": "2026-11-12T13:41:49.832Z",
+  "generatedAt": "2026-11-12T14:34:31.831Z",
   "pages": [
     {
       "title": "What Is DataVo?",
@@ -15,7 +15,7 @@
       "aiPath": "/ai/pages/manual/preface/project-status.md"
     },
     {
-      "title": "v0.1 Alpha Scope",
+      "title": "Release Scope & Boundaries (v0.2 Release Candidate)",
       "route": "/manual/preface/alpha-scope",
       "source": "manual/preface/alpha-scope.md",
       "aiPath": "/ai/pages/manual/preface/alpha-scope.md"
