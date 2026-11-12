@@ -794,7 +794,7 @@ public sealed partial class DataVoPreparedStatement
         ref ClusteredPointVisitState state,
         RowKey rowId,
         ReadOnlySpan<byte> rowBytes,
-        StoredRow? typedRow)
+        ReadOnlySpan<CellValue> typedCells)
     {
         CompiledSelectPlan plan = state.Plan;
         ThreadSelectWorkspace workspace = state.Workspace;
@@ -802,14 +802,14 @@ public sealed partial class DataVoPreparedStatement
         Dictionary<string, object?> row = slot.Row;
         object?[] decodedByOrdinal = workspace.DecodedValuesByOrdinal;
 
-        if (typedRow is not null)
+        if (!typedCells.IsEmpty)
         {
             bool[] decodeMask = plan.DecodeMask;
             for (int i = 0; i <= plan.LastDecodedOrdinal; i++)
             {
                 if (decodeMask[i])
                 {
-                    decodedByOrdinal[i] = StorageContext.ConvertCellForLegacyDictionary(plan.Columns[i], typedRow[i]);
+                    decodedByOrdinal[i] = BoxCellIntoSlot(plan, slot, i, in typedCells[i]);
                 }
             }
         }
@@ -836,6 +836,35 @@ public sealed partial class DataVoPreparedStatement
 
         state.Result = slot.HitResult;
         return false;
+    }
+
+    /// <summary>
+    /// The value of a typed row's cell as the row dictionary holds it, without allocating for the common
+    /// types: numbers and GUIDs go into the slot's reused boxes, booleans into the two shared ones, and a
+    /// string is the stored instance. The result equals <see cref="StorageContext.ConvertCellForLegacyDictionary"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static object? BoxCellIntoSlot(CompiledSelectPlan plan, RowResultSlot slot, int ordinal, in CellValue cell)
+    {
+        // A FLOAT column keeps its value in a double cell and hands it out in single precision.
+        if (plan.ColumnTypes[ordinal] == FastColumnType.Float)
+        {
+            return cell.Type == CellType.Double
+                ? slot.BoxFloat(ordinal, (float)cell.AsDouble())
+                : StorageContext.ConvertCellForLegacyDictionary(plan.Columns[ordinal], cell);
+        }
+
+        return cell.Type switch
+        {
+            CellType.Null => null,
+            CellType.Int32 => slot.BoxInt32(ordinal, cell.AsInt32()),
+            CellType.Int64 => slot.BoxInt64(ordinal, cell.AsInt64()),
+            CellType.Double => slot.BoxDouble(ordinal, cell.AsDouble()),
+            CellType.Boolean => cell.AsBoolean() ? BoxedTrue : BoxedFalse,
+            CellType.Guid => slot.BoxGuid(ordinal, cell.AsGuid()),
+            CellType.String => cell.AsString(),
+            _ => cell.ToObject(),
+        };
     }
 
     private static void DecodeRowBytesIntoWorkspace(
@@ -951,16 +980,44 @@ public sealed partial class DataVoPreparedStatement
             return true;
         }
 
-        IReadOnlyList<RowKey> rawIds = _engine.IndexManager.FilterUsingIntegerIndex(
-            key,
-            plan.IndexName!,
-            plan.TableName,
-            plan.DatabaseName);
-
-        if (rawIds.Count == 0)
+        // A hit in the integer primary-key map names the one matching row without building a list of ids.
+        IReadOnlyList<RowKey>? rawIds = null;
+        if (_engine.IndexManager.IsLsmBacked
+            || !_engine.IndexManager.TryLookupIntegerPrimaryKey(key, plan.IndexName!, plan.TableName, plan.DatabaseName, out RowKey singleId))
         {
-            result = plan.EmptyResult;
-            return true;
+            rawIds = _engine.IndexManager.FilterUsingIntegerIndex(
+                key,
+                plan.IndexName!,
+                plan.TableName,
+                plan.DatabaseName);
+
+            if (rawIds.Count == 0)
+            {
+                result = plan.EmptyResult;
+                return true;
+            }
+
+            singleId = rawIds[0];
+        }
+
+        // One matching row is returned in the thread's reused result slot, as a clustered point lookup is:
+        // no list, dictionary or boxed number is allocated for it. Where the storage cannot serve the row
+        // that way (staged writes, a snapshot), the row is read as part of the multi-row path below.
+        if (rawIds is null || rawIds.Count == 1)
+        {
+            var visitState = new ClusteredPointVisitState
+            {
+                Plan = plan,
+                Workspace = plan.GetThreadWorkspace(),
+            };
+
+            if (_engine.StorageContext.TryVisitRowByKey(plan.TableName, plan.DatabaseName, singleId, ref visitState, VisitClusteredPointRow, out _))
+            {
+                result = visitState.Result ?? plan.EmptyResult;
+                return true;
+            }
+
+            rawIds ??= [singleId];
         }
 
         // The index may hand back its own list, which other readers share: sort a copy.

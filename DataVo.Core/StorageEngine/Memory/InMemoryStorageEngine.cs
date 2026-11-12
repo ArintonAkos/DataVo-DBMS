@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading;
 using DataVo.Core.Exceptions;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 
 namespace DataVo.Core.StorageEngine.Memory;
@@ -13,25 +14,110 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> rows. A value-tuple key
     // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs
     // "a"+"b.c" collision); tuple equality uses ordinal string comparison, matching the previous string key.
-    private sealed class InMemoryRow
+    /// <summary>
+    /// One row slot: serialized bytes, or a typed row together with its cell array, or neither once deleted.
+    /// The cell array is kept beside the row so a point read reaches the cells from the slot in one step,
+    /// without first loading the <see cref="StoredRow"/> object that owns them.
+    /// </summary>
+    private readonly struct InMemoryRow
     {
         private InMemoryRow(byte[]? raw, StoredRow? typed)
         {
             Raw = raw;
             Typed = typed;
+            Cells = typed?.OwnedCells;
         }
 
-        public byte[]? Raw { get; }
+        public readonly byte[]? Raw;
 
-        public StoredRow? Typed { get; }
+        public readonly StoredRow? Typed;
+
+        public readonly CellValue[]? Cells;
+
+        public bool IsLive => Raw is not null || Typed is not null;
 
         public static InMemoryRow FromRaw(byte[] raw) => new(raw, typed: null);
 
         public static InMemoryRow FromTyped(StoredRow row) => new(raw: null, row);
+    }
 
-        public InMemoryRow Clone() => Raw is not null
-            ? FromRaw(Raw.ToArray())
-            : FromTyped(Typed!.Clone());
+    /// <summary>
+    /// A table's row slots in fixed pages, in row-id order. Slots are only appended or cleared, and a page never
+    /// moves once it is full, so one row can be read without the table's lock while a writer appends: the
+    /// writer fills the slot before it publishes the new count, and a reader looks only below the count it read.
+    /// Every other operation, and all writing, still happens under the table's lock.
+    /// </summary>
+    private sealed class RowList
+    {
+        private const int PageShift = 10;
+        private const int PageRows = 1 << PageShift;
+        private const int PageMask = PageRows - 1;
+        private const int FirstPageRows = 16;
+
+        private InMemoryRow[]?[] _pages = new InMemoryRow[]?[4];
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public InMemoryRow this[int index]
+        {
+            get => _pages[index >> PageShift]![index & PageMask];
+            set => _pages[index >> PageShift]![index & PageMask] = value;
+        }
+
+        /// <summary>Appends a slot. The caller holds the table's write lock.</summary>
+        public void Add(InMemoryRow row)
+        {
+            int index = _count;
+            int number = index >> PageShift;
+            int inPage = index & PageMask;
+            InMemoryRow[]?[] pages = _pages;
+            if (number == pages.Length)
+            {
+                Array.Resize(ref pages, pages.Length * 2);
+                Volatile.Write(ref _pages, pages);
+            }
+
+            InMemoryRow[]? page = pages[number];
+            if (page is null)
+            {
+                // The first page starts small, so a table of a few rows does not pay for a whole page.
+                page = new InMemoryRow[number == 0 ? FirstPageRows : PageRows];
+                Volatile.Write(ref pages[number], page);
+            }
+            else if (inPage == page.Length)
+            {
+                Array.Resize(ref page, Math.Min(PageRows, page.Length * 4));
+                Volatile.Write(ref pages[number], page);
+            }
+
+            page[inPage] = row;
+            Volatile.Write(ref _count, index + 1);
+        }
+
+        /// <summary>The cells of a live typed row, read without the table's lock; null for any other slot.</summary>
+        public CellValue[]? CellsOf(long rowId)
+        {
+            long index = rowId - 1;
+            if ((ulong)index >= (ulong)Volatile.Read(ref _count))
+            {
+                return null;
+            }
+
+            return Volatile.Read(ref _pages)[(int)index >> PageShift]![(int)index & PageMask].Cells;
+        }
+
+        /// <summary>A live typed row, read without the table's lock; null for any other slot.</summary>
+        public StoredRow? TypedRowOf(long rowId)
+        {
+            long index = rowId - 1;
+            if ((ulong)index >= (ulong)Volatile.Read(ref _count))
+            {
+                return null;
+            }
+
+            return Volatile.Read(ref _pages)[(int)index >> PageShift]![(int)index & PageMask].Typed;
+        }
     }
 
     // Each table owns its own reader/writer lock so concurrent readers proceed in parallel while writers
@@ -41,7 +127,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     private sealed class TableStore
     {
         public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.NoRecursion);
-        public readonly List<InMemoryRow?> Rows = [];
+        /// <summary>Replaced as a whole when the rows are renumbered, so a reader holds one consistent list.</summary>
+        public volatile RowList Rows = new();
 
         /// <summary>Advances when compaction renumbers rows, which invalidates a saved scan position.</summary>
         public long LayoutGeneration;
@@ -235,8 +322,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             if (index >= 0 && index < store.Rows.Count)
             {
                 var row = store.Rows[index];
-                if (row?.Raw != null) return row.Raw;
-                if (row?.Typed != null)
+                if (row.Raw != null) return row.Raw;
+                if (row.Typed != null)
                 {
                     throw new InvalidOperationException(
                         "Typed in-memory rows must be read through StorageContext's typed row path.");
@@ -346,16 +433,19 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             // Row ids are 1-based list positions, so the id of the last row is also the next index.
             int index = (int)(afterRowId ?? 0);
             int visited = 0;
-            for (; index < store.Rows.Count && visited < maxRows; index++)
+            RowList rows = store.Rows;
+            int count = rows.Count;
+            for (; index < count && visited < maxRows; index++)
             {
-                if (store.Rows[index] is { } row && (row.Raw is not null || row.Typed is not null))
+                InMemoryRow row = rows[index];
+                if (row.IsLive)
                 {
                     visitor.Visit(index + 1, row.Raw, row.Typed);
                     visited++;
                 }
             }
 
-            return new PageScan(index >= store.Rows.Count, store.LayoutGeneration);
+            return new PageScan(index >= count, store.LayoutGeneration);
         }
         finally
         {
@@ -403,11 +493,12 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             store.Image = image = new RowImage(imageBytes + 1, visitor.ImageVersion);
         }
 
-        List<InMemoryRow?> rows = store.Rows;
+        RowList rows = store.Rows;
         while (image.Covered < rows.Count)
         {
             Span<byte> record = image.Next();
-            if (rows[image.Covered] is { } row && (row.Raw is not null || row.Typed is not null))
+            InMemoryRow row = rows[image.Covered];
+            if (row.IsLive)
             {
                 visitor.EncodeImage(row.Raw, row.Typed, record.Slice(1));
                 record[0] = 1;
@@ -432,9 +523,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             {
                 for (int i = 0; i < store.Rows.Count; i++)
                 {
-                    if (store.Rows[i]?.Raw != null)
+                    if (store.Rows[i].Raw != null)
                     {
-                        rows.Add((i + 1, store.Rows[i]!.Raw!)); // 1-based RowId
+                        rows.Add((i + 1, store.Rows[i].Raw!)); // 1-based RowId
                     }
                 }
             }
@@ -467,7 +558,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             if (index >= 0 && index < store.Rows.Count)
             {
                 // "Tombstone" deletion — leave a null gap so RowIds don't shift.
-                store.Rows[index] = null;
+                store.Rows[index] = default;
                 store.Image?.Remove(index);
             }
         }
@@ -517,17 +608,17 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         try
         {
             store.LayoutGeneration++;
-            var survivors = new List<InMemoryRow?>();
+            var survivors = new RowList();
             for (int i = 0; i < store.Rows.Count; i++)
             {
-                InMemoryRow? row = store.Rows[i];
-                if (row?.Typed != null)
+                InMemoryRow row = store.Rows[i];
+                if (row.Typed != null)
                 {
                     throw new InvalidOperationException(
                         "In-memory compaction is not supported for tables containing typed rows.");
                 }
 
-                if (row?.Raw != null && row.Raw.Length > 0)
+                if (row.Raw != null && row.Raw.Length > 0)
                 {
                     survivors.Add(row);
                     long newRowId = survivors.Count; // 1-based
@@ -535,8 +626,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
                 }
             }
 
-            store.Rows.Clear();
-            store.Rows.AddRange(survivors);
+            store.Rows = survivors;
             store.Image = null; // rows were renumbered; the next scan builds it again
         }
         finally
@@ -585,30 +675,22 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         return rowIds;
     }
 
+    // The two point reads below take no lock: see RowList.
     bool ITypedRowStorageEngine.TryReadTypedRow(string databaseName, string tableName, long rowId, out StoredRow? row)
     {
-        row = null;
-        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
-        {
-            return false;
-        }
+        row = _databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store)
+            ? store.Rows.TypedRowOf(rowId)
+            : null;
+        return row is not null;
+    }
 
-        store.Lock.EnterReadLock();
-        try
-        {
-            int index = (int)(rowId - 1);
-            if (index < 0 || index >= store.Rows.Count)
-            {
-                return false;
-            }
-
-            row = store.Rows[index]?.Typed;
-            return row is not null;
-        }
-        finally
-        {
-            store.Lock.ExitReadLock();
-        }
+    bool ITypedRowStorageEngine.TryReadTypedCells(string databaseName, string tableName, long rowId, out ReadOnlySpan<CellValue> cells)
+    {
+        CellValue[]? found = _databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store)
+            ? store.Rows.CellsOf(rowId)
+            : null;
+        cells = found;
+        return found is not null;
     }
 
     IEnumerable<(long RowId, StoredRow Row)> ITypedRowStorageEngine.ReadAllTypedRows(string databaseName, string tableName)
@@ -622,7 +704,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             {
                 for (int i = 0; i < store.Rows.Count; i++)
                 {
-                    if (store.Rows[i]?.Typed is StoredRow row)
+                    if (store.Rows[i].Typed is StoredRow row)
                     {
                         rows.Add((i + 1, row));
                     }
@@ -649,7 +731,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         {
             for (int i = 0; i < store.Rows.Count; i++)
             {
-                if (store.Rows[i] is not null)
+                if (store.Rows[i].IsLive)
                 {
                     return true;
                 }
@@ -691,22 +773,24 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         foreach (var entry in snapshot.EnumerateTables())
         {
             var store = new TableStore();
-            store.Rows.AddRange(RestoreRowsFromSnapshot(entry.Value));
+            store.Rows = RestoreRowsFromSnapshot(entry.Value);
             _databases[entry.Key] = store;
         }
     }
 
-    private static List<object?> CloneRowsForSnapshot(List<InMemoryRow?> rows)
+    private static List<object?> CloneRowsForSnapshot(RowList rows)
     {
-        var clone = new List<object?>(rows.Count);
+        int count = rows.Count;
+        var clone = new List<object?>(count);
 
-        foreach (InMemoryRow? row in rows)
+        for (int i = 0; i < count; i++)
         {
-            if (row?.Raw != null)
+            InMemoryRow row = rows[i];
+            if (row.Raw != null)
             {
                 clone.Add(row.Raw.ToArray());
             }
-            else if (row?.Typed != null)
+            else if (row.Typed != null)
             {
                 clone.Add(row.Typed.Clone());
             }
@@ -719,9 +803,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         return clone;
     }
 
-    private static List<InMemoryRow?> RestoreRowsFromSnapshot(List<object?> rows)
+    private static RowList RestoreRowsFromSnapshot(List<object?> rows)
     {
-        var restored = new List<InMemoryRow?>(rows.Count);
+        var restored = new RowList();
 
         foreach (object? row in rows)
         {
@@ -729,7 +813,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             {
                 byte[] bytes => InMemoryRow.FromRaw(bytes.ToArray()),
                 StoredRow typed => InMemoryRow.FromTyped(typed.Clone()),
-                _ => null
+                _ => default
             });
         }
 

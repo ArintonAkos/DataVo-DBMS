@@ -55,6 +55,12 @@ internal sealed class StoredRow
     /// <summary>The row's cells, read in place.</summary>
     internal ReadOnlySpan<CellValue> Cells => _cells;
 
+    /// <summary>
+    /// The row's own cell array, for a store that keeps it beside the row to read cells without loading the
+    /// row object. The holder must never write to it.
+    /// </summary>
+    internal CellValue[] OwnedCells => _cells;
+
     public CellValue this[int ordinal] => _cells[ordinal];
 
     /// <summary>The cell for a column name (case-insensitive).</summary>

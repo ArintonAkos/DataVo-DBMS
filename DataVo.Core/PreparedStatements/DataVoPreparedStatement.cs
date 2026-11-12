@@ -351,7 +351,9 @@ public sealed partial class DataVoPreparedStatement
                     copy[cell.Key] = cell.Value switch
                     {
                         int value => value,
+                        long value => value,
                         float value => value,
+                        double value => value,
                         Guid value => value,
                         var other => other,
                     };

@@ -953,6 +953,12 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Receives the one row of a point read: serialized bytes, or, when <paramref name="typedCells"/> is not
+    /// empty, the cells of a typed row. Both are borrowed for the call.
+    /// </summary>
+    internal delegate bool PointRowVisitor<TState>(ref TState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells);
+
+    /// <summary>
     /// Visits a single live row by key without allocating key lists or intermediate row buffers.
     /// Returns <see langword="false"/> when an active MVCC snapshot or staged LSM write requires the general path.
     /// </summary>
@@ -961,7 +967,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         string databaseName,
         RowKey rowId,
         ref TState state,
-        RawRowVisitor<TState> visit,
+        PointRowVisitor<TState> visit,
         out bool visited)
     {
         visited = false;
@@ -983,8 +989,8 @@ public class StorageContext(DataVoConfig config) : IDisposable
                 tableName,
                 rowId,
                 ref box,
-                static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey id, ReadOnlySpan<byte> bytes) =>
-                    b.Visit(ref b.State, id, bytes, null));
+                static (ref (TState State, PointRowVisitor<TState> Visit) b, RowKey id, ReadOnlySpan<byte> bytes) =>
+                    b.Visit(ref b.State, id, bytes, default));
             state = box.State;
             if (visited)
             {
@@ -995,12 +1001,11 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
-            && typedRow is not null)
+            && typedStorage.TryReadTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out ReadOnlySpan<CellValue> typedCells))
         {
             visited = true;
             RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
-            visit(ref state, rowId, default, typedRow);
+            visit(ref state, rowId, default, typedCells);
             return true;
         }
 
@@ -1009,7 +1014,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         {
             visited = true;
             RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
-            visit(ref state, rowId, bytes, null);
+            visit(ref state, rowId, bytes, default);
         }
 
         return true;

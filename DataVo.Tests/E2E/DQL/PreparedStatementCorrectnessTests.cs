@@ -1,6 +1,7 @@
 using DataVo.Core;
 using DataVo.Core.Contracts;
 using DataVo.Core.Contracts.Results;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Data;
@@ -78,10 +79,105 @@ public class PreparedStatementCorrectnessTests : IDisposable
         Assert.Contains("Rows affected: 1", updatedAgain.Messages);
     }
 
-    [Fact]
-    public void ExecuteBorrowed_LsmPointLookup_AllocatesNothingAfterWarmUp()
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Lsm)]
+    public void Execute_ReturnedResult_KeepsItsWideNumbersAfterLaterExecutions(StorageMode mode)
     {
-        using DataVoContext context = Open(StorageMode.Lsm);
+        using DataVoContext context = Open(mode);
+        SeedWide(context, typed: mode == StorageMode.InMemory);
+        DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Big, Ratio, Flag, Name FROM Wide WHERE Id = @id");
+
+        QueryResult first = lookup.Execute(("id", 50_001));
+        object boxedBig = first.Data[0]["Big"]!;
+        object boxedRatio = first.Data[0]["Ratio"]!;
+
+        for (int id = 50_002; id < 50_050; id++)
+        {
+            lookup.Execute(("id", id));
+        }
+
+        Assert.Equal(50_001L * 100_000L, boxedBig);
+        Assert.Equal(50_001 * 0.25, boxedRatio);
+        Assert.Equal(50_001, first.Data[0]["Id"]);
+        Assert.Equal(true, first.Data[0]["Flag"]);
+        Assert.Equal("wide-50001", first.Data[0]["Name"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InMemoryPointLookup_MatchesPlainSql_ForSqlAndTypedRows(bool typed)
+    {
+        using DataVoContext context = Open(StorageMode.InMemory);
+        SeedWide(context, typed);
+        context.Execute("DELETE FROM Wide WHERE Id = 50010");
+
+        foreach (int id in new[] { 50_001, 50_009, 50_010, 50_011, 50_060, 50_061, -3 })
+        {
+            AssertSameAsPlainSql(context, "SELECT * FROM Wide WHERE Id = @id", $"SELECT * FROM Wide WHERE Id = {id}", ("id", id));
+            AssertSameAsPlainSql(context, "SELECT Name, Ratio FROM Wide WHERE Id = @id", $"SELECT Name, Ratio FROM Wide WHERE Id = {id}", ("id", id));
+        }
+
+        DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Big, Ratio, Flag, Name FROM Wide WHERE Id = @id");
+        Assert.Empty(lookup.ExecuteBorrowed(("id", 50_010)).Data);
+        Dictionary<string, object?> row = Assert.Single(lookup.ExecuteBorrowed(("id", 50_011)).Data);
+        Assert.Equal(50_011, row["Id"]);
+        Assert.Equal(50_011L * 100_000L, row["Big"]);
+        Assert.Equal(50_011 * 0.25, row["Ratio"]);
+        Assert.Equal(true, row["Flag"]);
+        Assert.Equal("wide-50011", row["Name"]);
+    }
+
+    [Fact]
+    public void InMemoryPointLookup_ReadsWhileRowsAreAppended()
+    {
+        using DataVoContext context = Open(StorageMode.InMemory);
+        SeedWide(context, typed: true);
+        DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Big, Name FROM Wide WHERE Id = @id");
+        const int last = 50_060 + 6_000;
+        using var stop = new CancellationTokenSource();
+        string? failure = null;
+
+        Task[] readers = [.. Enumerable.Range(0, 3).Select(reader => Task.Run(() =>
+        {
+            var random = new Random(reader);
+            while (!stop.IsCancellationRequested && failure is null)
+            {
+                int id = random.Next(50_001, last + 1);
+                QueryResult result = lookup.ExecuteBorrowed(("id", id));
+                if (result.IsError)
+                {
+                    failure = string.Join(" | ", result.Messages);
+                }
+                else if (result.Data.Count == 1
+                    && (!Equals(result.Data[0]["Id"], id) || !Equals(result.Data[0]["Big"], id * 100_000L) || !Equals(result.Data[0]["Name"], $"wide-{id}")))
+                {
+                    failure = $"Row {id} was read as Id={result.Data[0]["Id"]}, Big={result.Data[0]["Big"]}, Name={result.Data[0]["Name"]}.";
+                }
+            }
+        }))];
+
+        for (int id = 50_061; id <= last; id += 25)
+        {
+            InsertWide(context, id, Math.Min(last, id + 24));
+        }
+
+        stop.Cancel();
+        Task.WaitAll(readers);
+        Assert.Null(failure);
+        for (int id = 50_001; id <= last; id += 97)
+        {
+            Assert.Equal(id * 100_000L, Assert.Single(lookup.Execute(("id", id)).Data)["Big"]);
+        }
+    }
+
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Lsm)]
+    public void ExecuteBorrowed_PointLookup_AllocatesNothingAfterWarmUp(StorageMode mode)
+    {
+        using DataVoContext context = Open(mode);
         Seed(context);
         DataVoPreparedStatement lookup = context.Prepare("SELECT Id, Qty, Name FROM Items WHERE Id = @id");
         for (int i = 0; i < 2_000; i++)
@@ -181,8 +277,8 @@ public class PreparedStatementCorrectnessTests : IDisposable
         context.Execute("USE Types");
         context.Execute("CREATE TABLE T (Id INT PRIMARY KEY, I INT, F FLOAT, B BIT, D DATE, S VARCHAR(40), G GUID, V VECTOR(3), Tail INT)");
         const string guid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
-        context.Execute($"INSERT INTO T (Id, I, F, B, D, S, G, V, Tail) VALUES (1, 70000, 1.5, 1, '2024-02-29', 'alpha', '{guid}', '[1, 2, 3]', 9)");
-        context.Execute("INSERT INTO T (Id, I, F, B, D, S, G, V, Tail) VALUES (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 8)");
+        AssertInserted(context.Execute($"INSERT INTO T (Id, I, F, B, D, S, G, V, Tail) VALUES (1, 70000, 1.5, true, '2024-02-29', 'alpha', '{guid}', '[1, 2, 3]', 9)")[^1]);
+        AssertInserted(context.Execute("INSERT INTO T (Id, I, F, B, D, S, G, V, Tail) VALUES (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 8)")[^1]);
 
         foreach (int id in new[] { 1, 2, 3 })
         {
@@ -492,6 +588,52 @@ public class PreparedStatementCorrectnessTests : IDisposable
         {
             context.Execute($"INSERT INTO Items (Id, Qty, Price, Name) VALUES ({id}, {id * 2}, {(id * 0.5f).ToString(System.Globalization.CultureInfo.InvariantCulture)}, 'item-{id}')");
         }
+    }
+
+    /// <summary>Rows 50001..50060 of a table with wide numeric columns, inserted through SQL or as a typed batch.</summary>
+    private static void SeedWide(DataVoContext context, bool typed)
+    {
+        context.Execute("CREATE DATABASE WideDb");
+        context.Execute("USE WideDb");
+        context.Execute("CREATE TABLE Wide (Id INT PRIMARY KEY, Big BIGINT, Ratio DOUBLE, Flag BIT, Name VARCHAR(30))");
+        if (typed)
+        {
+            InsertWide(context, 50_001, 50_060);
+            return;
+        }
+
+        for (int id = 50_001; id <= 50_060; id++)
+        {
+            QueryResult inserted = context.Execute(
+                $"INSERT INTO Wide (Id, Big, Ratio, Flag, Name) VALUES ({id}, {id * 100_000L}, {(id * 0.25).ToString(System.Globalization.CultureInfo.InvariantCulture)}, {(id % 2 == 1 ? "true" : "false")}, 'wide-{id}')")[^1];
+            AssertInserted(inserted);
+        }
+    }
+
+    private static void InsertWide(DataVoContext context, int first, int last)
+    {
+        var rows = new List<CellValue[]>(last - first + 1);
+        for (int id = first; id <= last; id++)
+        {
+            rows.Add(
+            [
+                CellValue.From(id),
+                CellValue.From(id * 100_000L),
+                CellValue.From(id * 0.25),
+                CellValue.From(id % 2 == 1),
+                CellValue.From($"wide-{id}"),
+            ]);
+        }
+
+        context.InsertTypedBatch("Wide", WideSchema, rows);
+    }
+
+    private static readonly ReactiveRowSchema WideSchema = new("Id", "Big", "Ratio", "Flag", "Name");
+
+    private static void AssertInserted(QueryResult result)
+    {
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Contains("Rows affected: 1", result.Messages);
     }
 
     private static int Rows(QueryResult result)

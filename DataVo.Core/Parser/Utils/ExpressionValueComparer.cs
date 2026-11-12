@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DataVo.Core.Compat;
 
 namespace DataVo.Core.Parser.Utils;
 
@@ -29,10 +30,17 @@ internal static class ExpressionValueComparer
     /// <returns>True if the values are considered equal, false otherwise.</returns>
     public static bool AreEqual(object? leftValue, object? rightValue, bool trimQuotedStrings = false, bool useNumericTolerance = false, double numericTolerance = 0.0001)
     {
-        if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
+        if (trimQuotedStrings)
         {
-            leftValue = UnquoteSingleQuoted(leftString);
-            rightValue = UnquoteSingleQuoted(rightString);
+            if (leftValue is string leftString)
+            {
+                leftValue = UnquoteSingleQuoted(leftString);
+            }
+
+            if (rightValue is string rightString)
+            {
+                rightValue = UnquoteSingleQuoted(rightString);
+            }
         }
 
         if (leftValue == null && rightValue == null) return true;
@@ -41,6 +49,11 @@ internal static class ExpressionValueComparer
         if (TryAsGuidPair(leftValue, rightValue, out Guid leftGuid, out Guid rightGuid))
         {
             return leftGuid == rightGuid;
+        }
+
+        if (TryAsDatePair(leftValue, rightValue, out DataVoDate leftDate, out DataVoDate rightDate))
+        {
+            return leftDate == rightDate;
         }
 
         if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
@@ -83,10 +96,17 @@ internal static class ExpressionValueComparer
     /// <returns>-1 if leftValue is less than rightValue, 0 if they are equal, and 1 if leftValue is greater than rightValue.</returns>
     public static int Compare(object? leftValue, object? rightValue, bool trimQuotedStrings = false)
     {
-        if (trimQuotedStrings && leftValue is string leftString && rightValue is string rightString)
+        if (trimQuotedStrings)
         {
-            leftValue = UnquoteSingleQuoted(leftString);
-            rightValue = UnquoteSingleQuoted(rightString);
+            if (leftValue is string leftString)
+            {
+                leftValue = UnquoteSingleQuoted(leftString);
+            }
+
+            if (rightValue is string rightString)
+            {
+                rightValue = UnquoteSingleQuoted(rightString);
+            }
         }
 
         if (leftValue == null && rightValue == null) return 0;
@@ -96,6 +116,11 @@ internal static class ExpressionValueComparer
         if (TryAsGuidPair(leftValue, rightValue, out Guid leftGuid, out Guid rightGuid))
         {
             return leftGuid.CompareTo(rightGuid);
+        }
+
+        if (TryAsDatePair(leftValue, rightValue, out DataVoDate leftDate, out DataVoDate rightDate))
+        {
+            return leftDate.CompareTo(rightDate);
         }
 
         if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
@@ -148,6 +173,59 @@ internal static class ExpressionValueComparer
                 return Guid.TryParse(text.Trim().Trim('\''), out guid);
             default:
                 guid = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to interpret a pair of values as <see cref="DataVoDate"/> instances when at least
+    /// one operand is already a date or convertible to date representation.
+    /// </summary>
+    /// <param name="leftValue">The first operand, typically a column value or date literal.</param>
+    /// <param name="rightValue">The second operand, typically a comparison literal or parameter.</param>
+    /// <param name="left">The resolved date for the left operand when successful.</param>
+    /// <param name="right">The resolved date for the right operand when successful.</param>
+    /// <returns><see langword="true"/> if both operands were successfully converted to dates; otherwise, <see langword="false"/>.</returns>
+    private static bool TryAsDatePair(object leftValue, object rightValue, out DataVoDate left, out DataVoDate right)
+    {
+        left = default;
+        right = default;
+        if (leftValue is not DataVoDate && rightValue is not DataVoDate)
+        {
+            return false;
+        }
+
+        return TryAsDate(leftValue, out left) && TryAsDate(rightValue, out right);
+    }
+
+    /// <summary>
+    /// Converts a boxed value, string representation, or date adapter candidate into a <see cref="DataVoDate"/>.
+    /// </summary>
+    /// <param name="value">The value to convert.</param>
+    /// <param name="date">The parsed date when conversion succeeds.</param>
+    /// <returns><see langword="true"/> if the value could be converted; otherwise, <see langword="false"/>.</returns>
+    private static bool TryAsDate(object value, out DataVoDate date)
+    {
+        switch (value)
+        {
+            case DataVoDate d:
+                date = d;
+                return true;
+            case DateTime dt:
+                date = DataVoDate.FromDateTime(dt);
+                return true;
+            case string text:
+                string trimmed = text.Trim().Trim('\'');
+                return DataVoDate.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
+                    || DataVoDate.TryParse(trimmed, CultureInfo.CurrentCulture, DateTimeStyles.None, out date);
+            default:
+                if (DateObjectAdapter.TryConvert(value, out DataVoDate adapted))
+                {
+                    date = adapted;
+                    return true;
+                }
+
+                date = default;
                 return false;
         }
     }

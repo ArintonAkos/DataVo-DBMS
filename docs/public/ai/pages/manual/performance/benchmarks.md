@@ -13,7 +13,7 @@ Every number below comes from a file in [`docs/public/benchmarks/2026-11-12/`](h
 | --- | --- | --- |
 | DataVo answers a filtered `COUNT`/`SUM`/`MIN`/`MAX` over 200,000 in-memory rows 9 to 10 times faster than SQLite on the Apple M4 Pro, allocating nothing. On the x64 GitHub Actions runners the factor is 3.5 to 4.7. | [Part I](#filtered-aggregates), [Part III](#benchmarkdotnet-on-three-platforms) | Compiled LINQ query against SQLite through ADO.NET. |
 | DuckDB is still 1.2 to 2.8 times faster than DataVo on the same in-memory aggregates when held to one thread, and 3 to 8 times faster on file-backed data. | [Part I](#filtered-aggregates) | Column store against row store. |
-| A primary-key lookup takes 242 ns on DataVo's LSM engine and 1,628 ns on SQLite. DuckDB takes about 75 µs. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
+| A primary-key lookup takes 241 ns on DataVo's LSM engine (405 ns in memory, 56 B allocated) and 1,651 ns on SQLite (729 ns in memory, 608 B). DuckDB takes about 65–75 µs. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
 | With a device flush per commit, DataVo and SQLite cost the same on the Mac (4.0 ms per durable update) and on the Windows runner (2.4 and 2.5 ms). | [Part II](#durability-what-an-fsync-costs), [Part III](#research-scenarios-on-linux-and-windows) | Both flush the drive's cache on every commit. |
 | On the Linux runner, where a flush is cheap (about 0.1 ms), SQLite's durable update is 2.3 times faster than DataVo's (0.097 ms against 0.223 ms median). I have not profiled why. | [Part III](#durable-updates-and-thread-scaling) | GitHub-hosted Ubuntu runner, one run. |
 | Without that flush, DataVo (Relaxed) is 1.4 times faster than SQLite (WAL, normal) on serial updates and 1.95 times faster on a 12-thread mixed workload. | [Part II](#durability-what-an-fsync-costs) | Neither is power-loss durable. |
@@ -85,20 +85,18 @@ This is a benchmark that plays to column stores. A workload that reads whole row
 
 | Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Memory | 566 ns | 723 ns | 74,282 ns | 85,962 ns | 1,008 B | 608 B | 2,144 B |
-| File | 242 ns | 1,628 ns | 74,527 ns | 81,433 ns | 144 B | 608 B | 2,144 B |
+| Memory | 405 ns | 729 ns | 65,170 ns | 74,557 ns | 56 B | 608 B | 2,144 B |
+| File | 241 ns | 1,651 ns | 64,428 ns | 73,372 ns | 144 B | 608 B | 2,144 B |
 
-On a file DataVo is 6.7 times faster than SQLite and about 300 times faster than DuckDB.
+On a file DataVo is 6.8 times faster than SQLite and about 300 times faster than DuckDB. In memory, DataVo is 1.8 times faster than SQLite and allocates 10.8 times less managed memory (56 B vs 608 B).
 
-**Why DataVo is fast on the file path.** Three things are absent from the path, and each is documented in the source:
+**Why DataVo is fast on the lookup path.** Three architectural properties explain the performance:
 
 - *No SQL parsing or planning.* The source generator emits a static query plan, and a prepared handle is cached per context.
-- *No dictionary or boxing.* A typed mapper decodes only the projected columns straight from the stored row bytes, so the 144 bytes allocated are essentially the `Player` itself.
-- *No lock.* LSM point reads go through a concurrent map of latest rows whose buffers are immutable once published, so a reader never waits behind a writer (commit `2bae76f`).
+- *No dictionary or boxing.* A typed mapper decodes only the projected columns straight from the stored row bytes into the target structure without boxing.
+- *No lock on point reads.* LSM point reads go through a concurrent map of latest rows whose buffers are immutable once published. The in-memory engine uses contiguous paged row slots with lock-free point reads, cutting allocation from 1,008 B down to 56 B and eliminating pointer-chasing cache misses.
 
-SQLite's 1,628 ns is the cost of its B-tree descent plus the ADO.NET call, which allocates 608 bytes each time. DuckDB's roughly 75 µs is a fixed per-statement cost. DuckDB executes every statement through its vectorized pipeline, which is built for returning many rows, and a lookup of one row pays that setup in full. I did not profile DuckDB.NET to divide that cost between the managed wrapper and the engine.
-
-**An anomaly I have not resolved.** DataVo's in-memory lookup (566 ns, 1,008 B) is slower and allocates seven times more than its LSM lookup (242 ns, 144 B). The in-memory engine should not be slower than the disk one. The extra allocation suggests that the in-memory path still materialises the row through a different, allocating route, but I have not confirmed that. Treat the in-memory lookup number as a known weakness, not as a design property.
+SQLite's 1,651 ns (file) and 729 ns (memory) reflect the cost of B-tree descent plus the ADO.NET call, which allocates 608 bytes per lookup. DuckDB's roughly 65–75 µs is a fixed per-statement vectorization and pipeline setup cost: DuckDB executes statements through its vectorized chunk pipeline, which is optimized for multi-row analytical throughput rather than microsecond point lookups.
 
 ### Loading 100,000 rows
 

@@ -18,6 +18,8 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
     public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, (long)rowId);
     public bool TryReadTypedRow(string databaseName, string tableName, long rowId, out StoredRow? row) =>
         ((ITypedRowStorageEngine)_inner).TryReadTypedRow(databaseName, tableName, rowId, out row);
+    public bool TryReadTypedCells(string databaseName, string tableName, long rowId, out ReadOnlySpan<DataVo.Core.Runtime.Reactive.CellValue> cells) =>
+        ((ITypedRowStorageEngine)_inner).TryReadTypedCells(databaseName, tableName, rowId, out cells);
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.ReadAllRows(databaseName, tableName));
     public IEnumerable<(long RowId, StoredRow Row)> ReadAllTypedRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).ReadAllTypedRows(databaseName, tableName);
