@@ -77,6 +77,23 @@ public class RowLayoutTests
     }
 
     [Fact]
+    public void Record_KeptApart_IsLiveButNotPacked()
+    {
+        RowLayout layout = RowLayout.Create(PlayerColumns);
+        Span<byte> record = stackalloc byte[layout.RecordBytes];
+
+        layout.MarkLive(record);
+        Assert.False(layout.IsKeptApart(record));
+
+        layout.MarkKeptApart(record);
+        Assert.True(layout.IsLive(record));
+        Assert.True(layout.IsKeptApart(record));
+
+        layout.MarkEmpty(record);
+        Assert.False(layout.IsKeptApart(record));
+    }
+
+    [Fact]
     public void NullBits_AreIndependentPerColumn_AndLeaveValuesAndStatusAlone()
     {
         CellType[] columns = [.. Enumerable.Repeat(CellType.Int32, 19)];

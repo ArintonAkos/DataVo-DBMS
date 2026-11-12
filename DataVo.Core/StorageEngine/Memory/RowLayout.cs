@@ -61,6 +61,9 @@ internal readonly struct RowField
 internal sealed class RowLayout
 {
     private const int RecordAlignment = 8;
+    private const byte StatusEmpty = 0;
+    private const byte StatusPacked = 1;
+    private const byte StatusKeptApart = 2;
 
     private readonly RowField[] _fields;
     private readonly int _nullsOffset;
@@ -120,15 +123,28 @@ internal sealed class RowLayout
         _ => throw new ArgumentException($"'{type}' is not a column type.", nameof(type)),
     };
 
-    /// <summary>Whether a record holds a row.</summary>
+    /// <summary>Whether a record holds a row, packed or kept apart.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool IsLive(ReadOnlySpan<byte> record) => record[StatusOffset] != 0;
+    public bool IsLive(ReadOnlySpan<byte> record) => record[StatusOffset] != StatusEmpty;
 
-    /// <summary>Marks a record as holding a row. Called last, once the record's values are in place.</summary>
-    public void MarkLive(Span<byte> record) => record[StatusOffset] = 1;
+    /// <summary>
+    /// Whether a record stands for a row whose cells are kept apart from it, because one of them is not of its
+    /// column's type. Such a record holds no values.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsKeptApart(ReadOnlySpan<byte> record) => record[StatusOffset] == StatusKeptApart;
 
-    /// <summary>Marks a record as holding no row. Its values are left as they are.</summary>
-    public void MarkEmpty(Span<byte> record) => record[StatusOffset] = 0;
+    /// <summary>Marks a record as holding a packed row. Called last, once the record's values are in place.</summary>
+    public void MarkLive(Span<byte> record) => record[StatusOffset] = StatusPacked;
+
+    /// <summary>Marks a record as standing for a row whose cells are kept apart from it.</summary>
+    public void MarkKeptApart(Span<byte> record) => record[StatusOffset] = StatusKeptApart;
+
+    /// <summary>
+    /// Marks a record as holding no row. Its values are left as they are, and readers that were already
+    /// looking at the record see the change.
+    /// </summary>
+    public void MarkEmpty(Span<byte> record) => Volatile.Write(ref record[StatusOffset], StatusEmpty);
 
     /// <summary>Whether the column at <paramref name="ordinal"/> is NULL in a record.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

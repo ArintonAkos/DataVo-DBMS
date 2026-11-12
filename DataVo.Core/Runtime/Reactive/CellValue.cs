@@ -203,6 +203,13 @@ public readonly partial struct CellValue
         source.CopyTo(destination);
     }
 
+    /// <summary>
+    /// The VECTOR cell's own array, not a copy, for a store that keeps it in place of the cell. The holder must
+    /// never write to it.
+    /// </summary>
+    internal float[] AsVectorShared() =>
+        _type == CellType.Vector ? (float[])_reference! : throw Mismatch(CellType.Vector);
+
     internal ReadOnlySpan<float> AsVectorReadOnlySpan() =>
         _type == CellType.Vector ? ((float[])_reference!).AsSpan() : throw Mismatch(CellType.Vector);
 
