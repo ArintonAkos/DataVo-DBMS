@@ -62,8 +62,17 @@ internal readonly ref struct FlatRow
 /// longer there. <see cref="TryDecode"/> does this itself.
 /// </para>
 /// <para>
+/// This holds on weakly ordered processors because of how each side touches memory. The writer publishes the
+/// empty mark and then each cleared reference as volatile writes, in that order. A reader must take references
+/// through <see cref="FlatRowCodec.ReadString"/> and <see cref="FlatRowCodec.ReadVector"/>, which are volatile
+/// reads, and <see cref="IsLive"/> is one too: a reader that saw a cleared reference therefore also sees the
+/// empty mark when it checks afterwards. The fixed-width bytes of a record are never rewritten once the row is
+/// published, so reading them needs no ordering at all. A reader that took a reference with a plain load
+/// instead would need <see cref="Interlocked.MemoryBarrier"/> before its check.
+/// </para>
+/// <para>
 /// <b>Rows kept apart.</b> A row with a cell that is not of its column's type (a BIGINT cell in an INT column,
-/// say) cannot be packed. Its cells are kept as they are in a side map keyed by row number, and its record
+/// say), or without exactly one cell per column, cannot be packed. Its cells are kept as they are in a side map keyed by row number, and its record
 /// only says so. Ordinary rows pay nothing for this. The map entry lives exactly as long as the row: it is
 /// dropped by <see cref="Remove"/>, copied by <see cref="Clone"/>, and gone with the store when the table is
 /// cleared, dropped or rebuilt for another layout.
@@ -108,15 +117,17 @@ internal sealed class FlatRowStore
     public int KeptApartCount => _keptApart?.Count ?? 0;
 
     /// <summary>Adds a row. Called by the writer.</summary>
-    /// <param name="cells">The row's cells, one per column. They are copied; the caller keeps its buffer.</param>
+    /// <param name="cells">
+    /// The row's cells. They are copied; the caller keeps its buffer. A row that does not have one cell per
+    /// column is kept apart, like a row with a cell of another type.
+    /// </param>
     /// <returns>The row's number.</returns>
-    /// <exception cref="ArgumentException">The number of cells is not the number of columns.</exception>
     public int Add(ReadOnlySpan<CellValue> cells)
     {
         int index = _records.Count;
         Span<byte> record = _records.Next();
         object?[] references = ReserveReferences(index, out int referenceBase);
-        if (FlatRowCodec.TryEncode(Layout, cells, record, references, referenceBase))
+        if (cells.Length == Layout.ColumnCount && FlatRowCodec.TryEncode(Layout, cells, record, references, referenceBase))
         {
             Layout.MarkLive(record);
         }

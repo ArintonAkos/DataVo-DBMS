@@ -1,8 +1,10 @@
+using DataVo.Core.Runtime.Reactive;
+
 namespace DataVo.Core.StorageEngine;
 
 /// <summary>Visits one row of a page: its serialized bytes, or a typed row (then the bytes are empty).</summary>
 /// <remarks>The bytes are only valid during the call.</remarks>
-internal delegate void PagedRowVisitor<TState>(ref TState state, long rowId, ReadOnlySpan<byte> raw, StoredRow? typed);
+internal delegate void PagedRowVisitor<TState>(ref TState state, long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed);
 
 /// <summary>How a page read ended.</summary>
 /// <param name="ReachedEnd">Whether the scan has no more rows to examine.</param>
@@ -21,7 +23,7 @@ internal readonly record struct PageScan(bool ReachedEnd, long Generation);
 internal interface IPagedRowVisitor
 {
     /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
-    void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed);
+    void Visit(long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed);
 
     /// <summary>
     /// The length of this visitor's row image records, or 0 when it does not read images. A backend that keeps
@@ -34,7 +36,7 @@ internal interface IPagedRowVisitor
     int ImageVersion { get; }
 
     /// <summary>Writes one row as an image record of <see cref="ImageBytes"/> bytes.</summary>
-    void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record);
+    void EncodeImage(ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed, Span<byte> record);
 
     /// <summary>Receives one live row as the image record <see cref="EncodeImage"/> wrote for it.</summary>
     void VisitImage(long rowId, ReadOnlySpan<byte> record);
@@ -53,13 +55,13 @@ internal struct DelegatePagedRowVisitor<TState> : IPagedRowVisitor
         _visit = visit;
     }
 
-    public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed) => _visit(ref State, rowId, raw, typed);
+    public void Visit(long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed) => _visit(ref State, rowId, raw, typed);
 
     public readonly int ImageBytes => 0;
 
     public readonly int ImageVersion => 0;
 
-    public readonly void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record) => throw new NotSupportedException();
+    public readonly void EncodeImage(ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed, Span<byte> record) => throw new NotSupportedException();
 
     public readonly void VisitImage(long rowId, ReadOnlySpan<byte> record) => throw new NotSupportedException();
 }

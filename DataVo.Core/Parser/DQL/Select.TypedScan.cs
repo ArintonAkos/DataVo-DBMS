@@ -654,10 +654,10 @@ internal partial class Select
         };
     }
 
-    private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow)
+    private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         CellValue[] cells = state.Cells;
-        Load(state, rowId, rowBytes, typedRow, state.FilterMask);
+        Load(state, rowId, rowBytes, typedCells, state.FilterMask);
         foreach (TypedPredicate predicate in state.Predicates)
         {
             if (!Matches(predicate, cells[predicate.Ordinal], state.Columns[predicate.Ordinal]))
@@ -666,7 +666,7 @@ internal partial class Select
             }
         }
 
-        Load(state, rowId, rowBytes, typedRow, state.RestMask);
+        Load(state, rowId, rowBytes, typedCells, state.RestMask);
         state.Sequence++;
         if (state.Aggregates is not null)
         {
@@ -706,16 +706,16 @@ internal partial class Select
         return row;
     }
 
-    private static void Load(TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow, bool[] mask)
+    private static void Load(TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells, bool[] mask)
     {
         CellValue[] cells = state.Cells;
-        if (typedRow is not null)
+        if (!typedCells.IsEmpty)
         {
             for (int i = 0; i < mask.Length; i++)
             {
                 if (mask[i])
                 {
-                    cells[i] = typedRow[i];
+                    cells[i] = typedCells[i];
                 }
             }
         }

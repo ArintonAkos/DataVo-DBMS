@@ -355,15 +355,15 @@ internal partial class Select
         return ResolveJoinSideColumn(table, column, sides) is { } resolvedSide ? (resolvedSide.Side, column) : null;
     }
 
-    private static void LoadJoinCells(JoinSide side, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow, bool[] mask, CellValue[] cells)
+    private static void LoadJoinCells(JoinSide side, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells, bool[] mask, CellValue[] cells)
     {
-        if (typedRow is not null)
+        if (!typedCells.IsEmpty)
         {
             for (int i = 0; i < mask.Length; i++)
             {
                 if (mask[i])
                 {
-                    cells[i] = typedRow[i];
+                    cells[i] = typedCells[i];
                 }
             }
         }
@@ -408,11 +408,11 @@ internal partial class Select
         }
     }
 
-    private static bool VisitJoinBuildRow(ref JoinBuildState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow)
+    private static bool VisitJoinBuildRow(ref JoinBuildState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         JoinSide side = state.Side;
         CellValue[] cells = state.Cells;
-        LoadJoinCells(side, rowId, rowBytes, typedRow, side.FilterMask, cells);
+        LoadJoinCells(side, rowId, rowBytes, typedCells, side.FilterMask, cells);
         if (!PassesFilters(side, cells) || !TryJoinKey(cells[side.KeyOrdinal], out long key))
         {
             return true;
@@ -422,7 +422,7 @@ internal partial class Select
         var all = new bool[side.Columns.Count];
         Array.Fill(all, true);
         var row = new CellValue[side.Columns.Count];
-        LoadJoinCells(side, rowId, rowBytes, typedRow, all, row);
+        LoadJoinCells(side, rowId, rowBytes, typedCells, all, row);
         if (!state.Hash.TryGetValue(key, out List<CellValue[]>? bucket))
         {
             bucket = [];
@@ -433,11 +433,11 @@ internal partial class Select
         return true;
     }
 
-    private static bool VisitJoinProbeRow(ref JoinProbeState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow)
+    private static bool VisitJoinProbeRow(ref JoinProbeState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         JoinSide probe = state.Probe;
         CellValue[] cells = state.Cells;
-        LoadJoinCells(probe, rowId, rowBytes, typedRow, probe.FilterMask, cells);
+        LoadJoinCells(probe, rowId, rowBytes, typedCells, probe.FilterMask, cells);
         if (!PassesFilters(probe, cells)
             || !TryJoinKey(cells[probe.KeyOrdinal], out long key)
             || !state.Hash.TryGetValue(key, out List<CellValue[]>? matches))
@@ -445,7 +445,7 @@ internal partial class Select
             return true;
         }
 
-        LoadJoinCells(probe, rowId, rowBytes, typedRow, probe.NeededMask, cells);
+        LoadJoinCells(probe, rowId, rowBytes, typedCells, probe.NeededMask, cells);
         bool fullyLoaded = false;
         int probeIndex = 1 - state.BuildIndex;
         foreach (CellValue[] buildRow in matches)
@@ -466,7 +466,7 @@ internal partial class Select
                 {
                     var all = new bool[probe.Columns.Count];
                     Array.Fill(all, true);
-                    LoadJoinCells(probe, rowId, rowBytes, typedRow, all, cells);
+                    LoadJoinCells(probe, rowId, rowBytes, typedCells, all, cells);
                     fullyLoaded = true;
                 }
 

@@ -165,11 +165,11 @@ internal sealed class RowRefPage
 
     /// <summary>Copies one stored row into the page. Typed rows are written in the stored byte format.</summary>
     /// <exception cref="InvalidDataException">The row's bytes do not match the table's columns.</exception>
-    public void Add(RowKey key, ReadOnlySpan<byte> stored, StoredRow? typed)
+    public void Add(RowKey key, ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed)
     {
-        int length = typed is null ? stored.Length : Measure(typed);
+        int length = typed.IsEmpty ? stored.Length : Measure(typed);
         Span<byte> destination = Reserve(length);
-        if (typed is null)
+        if (typed.IsEmpty)
         {
             stored.CopyTo(destination);
         }
@@ -239,7 +239,7 @@ internal sealed class RowRefPage
     /// encoded in full. Every other cell keeps only its null flag, which is all a condition asks of text. The row
     /// is valid only until the scan moves on.
     /// </summary>
-    public RowRef InPlace(RowKey key, StoredRow typed, int columns, ulong needed)
+    public RowRef InPlace(RowKey key, ReadOnlySpan<CellValue> typed, int columns, ulong needed)
     {
         // A flag and at most a GUID per cell.
         int capacity = columns * 17;
@@ -249,7 +249,7 @@ internal sealed class RowRefPage
         }
 
         Span<byte> destination = _bytes;
-        ReadOnlySpan<CellValue> cells = typed.Cells;
+        ReadOnlySpan<CellValue> cells = typed;
         int offset = 0;
         for (int i = 0; i < columns; i++)
         {
@@ -328,13 +328,13 @@ internal sealed class RowRefPage
     /// <param name="typed">The row's cells, when it is typed.</param>
     /// <param name="record">Receives the image; <see cref="ImageBytes"/> long.</param>
     /// <exception cref="InvalidDataException">The row's bytes do not match the table's columns.</exception>
-    public void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record)
+    public void EncodeImage(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed, Span<byte> record)
     {
         StorageKind[] kinds = _kinds;
         int[] offsets = _imageOffsets;
-        if (typed is not null)
+        if (!typed.IsEmpty)
         {
-            ReadOnlySpan<CellValue> cells = typed.Cells;
+            ReadOnlySpan<CellValue> cells = typed;
             for (int i = 0; i < kinds.Length; i++)
             {
                 int at = offsets[i];
@@ -625,23 +625,23 @@ internal sealed class RowRefPage
         return cell is not null;
     }
 
-    private int Measure(StoredRow row)
+    private int Measure(ReadOnlySpan<CellValue> row)
     {
         int length = 0;
         for (int i = 0; i < _kinds.Length; i++)
         {
-            length += RowSerializer.MeasureCell(_kinds[i], i < row.Count ? row[i] : CellValue.Null);
+            length += RowSerializer.MeasureCell(_kinds[i], i < row.Length ? row[i] : CellValue.Null);
         }
 
         return length;
     }
 
-    private void Write(StoredRow row, Span<byte> destination)
+    private void Write(ReadOnlySpan<CellValue> row, Span<byte> destination)
     {
         int offset = 0;
         for (int i = 0; i < _kinds.Length; i++)
         {
-            offset += RowSerializer.WriteCell(_kinds[i], i < row.Count ? row[i] : CellValue.Null, destination[offset..]);
+            offset += RowSerializer.WriteCell(_kinds[i], i < row.Length ? row[i] : CellValue.Null, destination[offset..]);
         }
     }
 

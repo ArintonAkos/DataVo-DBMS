@@ -633,7 +633,7 @@ internal sealed partial class InsertRowService(
                 storedRows.Add(StoredRow.FromOwnedCells(columns, ownedRows[i]));
             }
 
-            rowIds = context.InsertTypedRows(storedRows, tableName, databaseName);
+            rowIds = context.InsertTypedRows(storedRows, tableColumns, tableName, databaseName);
         }
         else
         {
@@ -792,52 +792,11 @@ internal sealed partial class InsertRowService(
         }
     }
 
-    private static CellType ExpectedCellType(Column column)
-    {
-        string type = column.Type;
-        if (type.Equals("INT", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Int32;
-        }
-
-        if (type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Int64;
-        }
-
-        if (type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase) || type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Double;
-        }
-
-        if (type.Equals("BIT", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Boolean;
-        }
-
-        if (type.Equals("DATE", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Date;
-        }
-
-        if (type.Equals("GUID", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Guid;
-        }
-
-        if (type.Equals("VARCHAR", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.String;
-        }
-
-        if (type.Equals("VECTOR", StringComparison.OrdinalIgnoreCase))
-        {
-            return CellType.Vector;
-        }
-
-        throw new NotSupportedException(
-            $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.");
-    }
+    private static CellType ExpectedCellType(Column column) =>
+        ColumnCellTypes.TryGet(column.Type, out CellType type)
+            ? type
+            : throw new NotSupportedException(
+                $"Typed inserts do not support column {column.Name} of type {column.Type}; use the dictionary BulkInsert path.");
 
     private bool ValidateTypedPrimaryKeys(
         string tableName,

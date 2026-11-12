@@ -142,6 +142,19 @@ public class FlatRowStoreTests
     }
 
     [Fact]
+    public void RowWithoutOneCellPerColumn_IsKeptApartAsItIs()
+    {
+        FlatRowStore store = NewStore();
+        CellValue[] shorter = [CellValue.From(1), CellValue.From(2L)];
+        int index = store.Add(shorter);
+
+        Assert.Equal(1, store.KeptApartCount);
+        Assert.True(store.TryRead(index, out FlatRow row));
+        Assert.True(row.IsKeptApart);
+        FlatRowCodecTests.AssertSameCells(shorter, row.Cells);
+    }
+
+    [Fact]
     public void Clone_HasTheSameRowsUnderTheSameNumbers_AndThenGoesItsOwnWay()
     {
         FlatRowStore store = NewStore();

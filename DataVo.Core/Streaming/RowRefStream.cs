@@ -238,14 +238,14 @@ public readonly struct RowRefStream
 
         // Inlined into the storage engine's row loop; the general reader, which few rows need, stays a call.
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        public void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed)
+        public void Visit(RowKey rowId, ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed)
         {
             if (Full)
             {
                 return;
             }
 
-            if (typed is null)
+            if (typed.IsEmpty)
             {
                 if (_direct.Bytes && LaidOutAsExpected(stored))
                 {
@@ -259,7 +259,7 @@ public readonly struct RowRefStream
             }
             else if (_direct.Cells)
             {
-                ReadOnlySpan<CellValue> cells = typed.Cells;
+                ReadOnlySpan<CellValue> cells = typed;
                 if (HoldsExpectedCells(cells))
                 {
                     if (_filter.MatchesCells(cells))
@@ -278,7 +278,7 @@ public readonly struct RowRefStream
 
         public readonly int ImageVersion => _page.SchemaVersion;
 
-        public readonly void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record) => _page.EncodeImage(stored, typed, record);
+        public readonly void EncodeImage(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed, Span<byte> record) => _page.EncodeImage(stored, typed, record);
 
         /// <summary>
         /// Tests one row image. Its columns sit at the same offsets in every row, so only the flags of the columns
@@ -325,9 +325,9 @@ public readonly struct RowRefStream
 
         /// <summary>Tests a row the direct readers cannot take: one that is not laid out as the scan expects.</summary>
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private void VisitThroughRowRef(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed)
+        private void VisitThroughRowRef(RowKey rowId, ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed)
         {
-            RowRef row = typed is null
+            RowRef row = typed.IsEmpty
                 ? _page.InPlace(rowId, stored, _columns)
                 : _page.InPlace(rowId, typed, _columns, _needed);
             if (_filter.Matches(in row))
@@ -401,7 +401,7 @@ public readonly struct RowRefStream
 public ref struct RowRefEnumerator
 {
     private static readonly StorageContext.RawRowVisitor<RowRefPage> CopyRow =
-        static (ref RowRefPage page, RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed) =>
+        static (ref RowRefPage page, RowKey rowId, ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed) =>
         {
             page.Add(rowId, stored, typed);
             return true;
