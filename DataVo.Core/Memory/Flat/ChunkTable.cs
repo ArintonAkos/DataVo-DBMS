@@ -41,7 +41,11 @@ internal abstract class ChunkTable<TChunk>
     public int Capacity => _allocated == 0 ? 0 : ((_allocated - 1) << FlatChunk.Shift) + _firstCapacity;
 
     /// <summary>The chunk with the given number: slots <c>number * Slots</c> onward.</summary>
-    public TChunk Chunk(int number) => Volatile.Read(ref _chunks)[number]!;
+    /// <remarks>
+    /// Both the array and its element are read as published values: the array is replaced when chunks are
+    /// added, and element 0 when a small first chunk is replaced by a larger copy.
+    /// </remarks>
+    public TChunk Chunk(int number) => Volatile.Read(ref Volatile.Read(ref _chunks)[number])!;
 
     /// <summary>The chunk that holds a slot.</summary>
     public TChunk ChunkOf(int slot) => Chunk(slot >> FlatChunk.Shift);
