@@ -376,7 +376,8 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         if (engine.StorageContext.ColumnarStore is null
             || engine.TransactionManager.HasActiveTransaction(Context.SessionId)
             || MVCC.MvccExecutionScope.CurrentSnapshot is not null
-            || engine.Sessions.Get(Context.SessionId) is not { Length: > 0 } database)
+            || engine.Sessions.Get(Context.SessionId) is not { Length: > 0 } database
+            || engine.StorageContext.LsmEngine?.HasStagedWrites(database, _info.TableName) == true)
         {
             return false;
         }
@@ -403,7 +404,7 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         {
             int slot = index.SlotOf(FusedOrdinals(column, rows)[0]);
             RowFoldKind folded = slot < 0 ? RowFoldKind.None : RowAggregate.KindFor(index.KindOf(slot), fold, kind);
-            if (folded == RowFoldKind.None)
+            if (folded == RowFoldKind.None || !SameOrderAsRows(index, folded))
             {
                 return false;
             }
@@ -427,6 +428,14 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         found.Count = matched;
         return true;
     }
+
+    /// <summary>
+    /// Whether a fold over the index gives the bits a fold over the rows gives. A floating-point sum depends on
+    /// the order of its additions, and an index whose rows are found by key is in the rows' order only until
+    /// the first update or out-of-order insert.
+    /// </summary>
+    private static bool SameOrderAsRows(Indexing.Columnar.ColumnarIndex index, RowFoldKind fold) =>
+        index.InKeyOrder || fold is not (RowFoldKind.SumFloat or RowFoldKind.SumDouble);
 
     /// <summary>Finds where a compiled condition's columns sit in the table, once per schema version.</summary>
     private int[] FusedOrdinals(string[] columns, RowRefStream rows)

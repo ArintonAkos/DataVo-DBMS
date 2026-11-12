@@ -652,6 +652,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         return compacted;
     }
 
+    bool DataVo.Core.Indexing.Columnar.IColumnarRowStore.KeyedRows => false;
+
     DataVo.Core.Indexing.Columnar.ColumnarIndex? DataVo.Core.Indexing.Columnar.IColumnarRowStore.Columnar(string databaseName, string tableName) =>
         _databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store) ? store.Columnar : null;
 
@@ -660,7 +662,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         string tableName,
         DataVo.Core.StorageEngine.Serialization.RowSerializer.StorageColumnType[] tableKinds,
         int[] ordinals,
-        int schemaVersion)
+        int schemaVersion,
+        int keyOrdinal)
     {
         TableStore store = GetOrAddTable(databaseName, tableName);
         store.Lock.EnterWriteLock();

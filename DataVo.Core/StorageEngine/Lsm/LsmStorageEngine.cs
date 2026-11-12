@@ -1432,15 +1432,18 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             lock (state.SyncRoot)
             lock (state.OverlayGate)
             {
+                DataVo.Core.Indexing.Columnar.ColumnarIndex? columnar = state.Columnar;
                 foreach ((RowKey rowId, byte[]? value) in rows)
                 {
                     if (value is null)
                     {
                         state.LatestRows.SetTombstone(rowId, sequence);
+                        columnar?.Delete(rowId);
                     }
                     else
                     {
                         state.LatestRows.Set(rowId, value, sequence);
+                        columnar?.Upsert(rowId, value);
                     }
                 }
             }
@@ -2608,6 +2611,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         public string? TableName { get; set; }
 
         public object SyncRoot { get; } = new();
+
+        /// <summary>
+        /// Some of the table's columns as dense vectors, once a query has asked for them. Written where rows
+        /// are published, under <see cref="SyncRoot"/> and the overlay gate; read without a lock.
+        /// </summary>
+        public volatile DataVo.Core.Indexing.Columnar.ColumnarIndex? Columnar;
 
         public LsmReadMode ReadMode { get; } = readMode;
 

@@ -30,7 +30,8 @@ internal partial class Select
             || aggregates.Count > ColumnarScan.MaxFolds
             || state.Predicates.Count > ColumnarScan.MaxSteps / 2
             || engine.StorageContext.ColumnarStore is null
-            || MvccExecutionScope.CurrentSnapshot is not null)
+            || MvccExecutionScope.CurrentSnapshot is not null
+            || engine.StorageContext.LsmEngine?.HasStagedWrites(databaseName, tableName) == true)
         {
             return false;
         }
@@ -64,7 +65,9 @@ internal partial class Select
 
         for (int i = 0; i < aggregates.Count; i++)
         {
-            if (!TryDescribe(index, aggregates[i], out workspace.Folds[i]))
+            // A floating-point sum is the row scan's only while the index is in the rows' order.
+            if (!TryDescribe(index, aggregates[i], out workspace.Folds[i])
+                || (!index.InKeyOrder && workspace.Folds[i].Kind is RowFoldKind.SumFloat or RowFoldKind.SumDouble))
             {
                 return false;
             }

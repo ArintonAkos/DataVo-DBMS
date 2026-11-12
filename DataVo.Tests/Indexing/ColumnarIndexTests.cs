@@ -50,10 +50,13 @@ public sealed class ColumnarIndexTests
 {
     private static readonly ReactiveRowSchema Schema = new("Id", "Name", "Level", "Gold", "Ratio", "Speed", "Bonus", "Alive", "Rank");
 
-    [Fact]
-    public void Queries_MatchTheRows_AfterInsertsDeletesUpdatesAndARollback()
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Lsm)]
+    public void Queries_MatchTheRows_AfterInsertsDeletesUpdatesAndARollback(StorageMode mode)
     {
-        using DataVoContext db = Open();
+        using var scratch = new Scratch();
+        using DataVoContext db = Open(mode, scratch.Path);
         db.EnsureColumnarSampleTable();
         var expected = new Dictionary<int, ColumnarSample>();
 
@@ -202,6 +205,67 @@ public sealed class ColumnarIndexTests
     }
 
     [Fact]
+    public void OnTheLsmEngine_TheIndexSurvivesFlushes_IsRebuiltAfterReopen_AndAfterHeavyChurn()
+    {
+        using var scratch = new Scratch();
+        var expected = new Dictionary<int, ColumnarSample>();
+        using (DataVoContext db = Open(StorageMode.Lsm, scratch.Path))
+        {
+            db.EnsureColumnarSampleTable();
+            var batch = new List<CellValue[]>();
+            for (int i = 1; i <= 6_000; i++)
+            {
+                batch.Add(Cells(expected[i] = Sample(i)));
+            }
+
+            db.InsertTypedBatch("col_samples", Schema, batch);
+            Check(db, expected, columnar: true);
+            ColumnarIndex built = db.Engine.Columnar.Find("S", "col_samples")!;
+            Assert.True(built.InKeyOrder);
+
+            // Rows move from the MemTable to an SSTable; the index mirrors rows, not where they are stored.
+            db.Engine.StorageContext.LsmEngine!.FlushTableForTesting("S", "col_samples");
+            Run(db, "DELETE FROM col_samples WHERE Id = 17");
+            expected.Remove(17);
+            db.Insert(expected[7_000] = Sample(7_000));
+            Check(db, expected, columnar: true);
+            Assert.Same(built, db.Engine.Columnar.Find("S", "col_samples"));
+
+            // An insert below the highest key ends key order; floating-point sums then come from rows.
+            db.Insert(expected[6_500] = Sample(6_500));
+            Assert.False(built.InKeyOrder);
+            Check(db, expected, columnar: true);
+
+            // Rewriting most rows leaves more dead positions than live ones: the next query builds it anew.
+            for (int round = 0; round < 3; round++)
+            {
+                Run(db, "UPDATE col_samples SET Rank = Rank + 1 WHERE Id > 0");
+            }
+
+            foreach (ColumnarSample row in expected.Values)
+            {
+                row.Rank += 3;
+            }
+
+            Assert.True(built.WantsRebuild);
+            Check(db, expected, columnar: true);
+            ColumnarIndex rebuilt = db.Engine.Columnar.Find("S", "col_samples")!;
+            Assert.NotSame(built, rebuilt);
+            Assert.Equal(0, rebuilt.Dead);
+            Assert.True(rebuilt.InKeyOrder);
+        }
+
+        // Nothing of the index is on disk: after a reopen there is none until a query asks for one.
+        using (DataVoContext db = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = scratch.Path }))
+        {
+            Run(db, "USE S");
+            Assert.Null(db.Engine.StorageContext.ColumnarStore!.Columnar("S", "col_samples"));
+            Check(db, expected, columnar: true);
+            Assert.Equal(expected.Count, db.Engine.Columnar.Find("S", "col_samples")!.Count);
+        }
+    }
+
+    [Fact]
     public void DateColumns_AreFoldedFromTheIndex()
     {
         using DataVoContext db = Open();
@@ -245,10 +309,13 @@ public sealed class ColumnarIndexTests
         Assert.Empty(db.Engine.Catalog.GetColumnarIndexesReadOnly("plain", "S"));
     }
 
-    [Fact]
-    public void Queries_StayCorrect_WhileAnotherThreadWrites()
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Lsm)]
+    public void Queries_StayCorrect_WhileAnotherThreadWrites(StorageMode mode)
     {
-        using DataVoContext db = Open();
+        using var scratch = new Scratch();
+        using DataVoContext db = Open(mode, scratch.Path);
         db.EnsureColumnarSampleTable();
         for (int i = 1; i <= 6_000; i++)
         {
@@ -267,7 +334,9 @@ public sealed class ColumnarIndexTests
         {
             try
             {
-                for (int i = 100_000; i < 103_000; i++)
+                // Each commit of the LSM engine waits for the disk, so it gets fewer of them.
+                int writes = mode == StorageMode.Lsm ? 300 : 3_000;
+                for (int i = 100_000; i < 100_000 + writes; i++)
                 {
                     db.Insert(new ColumnarSample { Id = i, Name = "w", Level = 1, Gold = long.MinValue / 4, Ratio = 1, Alive = false });
                     if (i % 3 == 0)
@@ -294,10 +363,13 @@ public sealed class ColumnarIndexTests
         Assert.Equal(before, table.Where(static r => r.Alive).Count());
     }
 
-    [Fact]
-    public void Queries_AllocateNothing()
+    [Theory]
+    [InlineData(StorageMode.InMemory)]
+    [InlineData(StorageMode.Lsm)]
+    public void Queries_AllocateNothing(StorageMode mode)
     {
-        using DataVoContext db = Open();
+        using var scratch = new Scratch();
+        using DataVoContext db = Open(mode, scratch.Path);
         db.EnsureColumnarSampleTable();
         var batch = new List<CellValue[]>();
         for (int i = 1; i <= 20_000; i++)
@@ -346,6 +418,10 @@ public sealed class ColumnarIndexTests
         long scansBefore = index?.Scans ?? 0;
         int answered = 0;
 
+        // On the LSM engine an update or an out-of-order insert puts the index out of the rows' order. From
+        // then on a floating-point sum is answered from rows, so that it adds in the same order as before.
+        int floatSums = index is { InKeyOrder: false } ? 0 : 1;
+
         var query = table.Where(static r => r.Alive);
         Assert.True(query.IsCompiled);
         Assert.Equal(alive.Length, query.Count());
@@ -356,7 +432,7 @@ public sealed class ColumnarIndexTests
         Assert.Equal(alive.Sum(static r => r.Ratio), ratios, 6);
         Assert.Equal(alive.Min(static r => r.Bonus), query.Min(static r => r.Bonus));
         Assert.Equal(alive.Max(static r => r.Bonus), query.Max(static r => r.Bonus));
-        answered += 7;
+        answered += 6 + floatSums;
         if (alive.Length > 0)
         {
             Assert.Equal(alive.Min(static r => r.Level), query.Min(static r => r.Level));
@@ -416,7 +492,7 @@ public sealed class ColumnarIndexTests
             Assert.Equal(answered, index.Scans - scansBefore);
             Assert.Equal(Bits(fromRows), Bits(ratios));
             Assert.Equal(Bits(speedFromRows), Bits(query.Sum(static r => r.Speed)));
-            answered++;
+            answered += floatSums;
         }
 
         // A column outside the index, in the condition or in the fold: answered from rows, and still right.
@@ -468,9 +544,22 @@ public sealed class ColumnarIndexTests
         return result;
     }
 
-    private static DataVoContext Open()
+    private sealed class Scratch : IDisposable
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"datavo_columnar_{Guid.NewGuid():N}");
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+
+    private static DataVoContext Open(StorageMode mode = StorageMode.InMemory, string? directory = null)
+    {
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
         Run(db, "CREATE DATABASE S");
         Run(db, "USE S");
         return db;

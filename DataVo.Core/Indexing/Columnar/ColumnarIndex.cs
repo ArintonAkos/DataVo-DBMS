@@ -391,6 +391,11 @@ internal sealed class ColumnarIndex
 /// <summary>A storage engine that keeps a <see cref="ColumnarIndex"/> beside a table's rows and writes it as rows change.</summary>
 internal interface IColumnarRowStore
 {
+    /// <summary>
+    /// Whether the engine finds rows by key, and so can index a clustered table, whose key is not in its rows.
+    /// </summary>
+    bool KeyedRows { get; }
+
     /// <summary>The table's columnar index, or null when it has none. Takes no lock.</summary>
     ColumnarIndex? Columnar(string databaseName, string tableName);
 
@@ -398,7 +403,8 @@ internal interface IColumnarRowStore
     /// Replaces the table's columnar index with one built from the rows it holds now, and keeps it current from
     /// then on. Returns null when the engine's rows cannot be indexed this way.
     /// </summary>
-    ColumnarIndex? BuildColumnar(string databaseName, string tableName, StorageKind[] tableKinds, int[] ordinals, int schemaVersion);
+    /// <param name="keyOrdinal">The table position of a clustered table's key column, or -1.</param>
+    ColumnarIndex? BuildColumnar(string databaseName, string tableName, StorageKind[] tableKinds, int[] ordinals, int schemaVersion, int keyOrdinal);
 
     /// <summary>Stops keeping a columnar index for the table.</summary>
     void DropColumnar(string databaseName, string tableName);
