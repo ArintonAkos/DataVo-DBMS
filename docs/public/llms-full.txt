@@ -67,6 +67,76 @@ In v0.1, DataVo supports an embedded C# storage engine (`DataVoContext` runs in-
 
 ---
 
+# Project Status & Stability
+
+> Source route: /manual/preface/project-status
+> Source file: manual/preface/project-status.md
+
+**Current release: v0.2.0-rc.3 (Release Candidate).**
+
+DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete for its documented scope and is in release verification: benchmark runs, crash-recovery testing and package publishing checks are ongoing before a stable tag. This page is the single place that states what that means in practice.
+
+## What "Release Candidate" means here
+
+- The documented API surface and SQL dialect are the surface being verified for 0.2. Changes to it between release candidates are called out in the release notes.
+- Behavior outside the documented surface is not covered by that expectation. [Limits](/manual/reference/limits) and [Unsupported Features](/manual/reference/unsupported-features) list those boundaries.
+- Release candidates are published to nuget.org as prerelease packages. Add `--prerelease` when installing. See [Installation & Packages](/manual/getting-started/installation).
+- The on-disk storage format is not yet covered by a long-term compatibility guarantee. Keep a way to rebuild important data (an export, seed data or an import script) until a stable release states one.
+
+## Subsystem status
+
+| Subsystem | Status | Notes |
+| --- | --- | --- |
+| Embedded API (`DataVoContext`) | Release candidate | The primary interface. |
+| SQL dialect (DDL, DML, queries) | Release candidate | DataVo's own dialect, not PostgreSQL-compatible. See the [compatibility matrix](/manual/sql-language/sql-compatibility). |
+| In-Memory storage | Release candidate | Ephemeral by design. |
+| LSM-Tree storage | Release candidate | The recommended persistent engine: WAL, MemTable, SSTables, strict fsync by default. |
+| Disk storage (paged) | Legacy | Kept for existing data. It receives no further durability work. Prefer LSM. |
+| Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
+| Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Compiled LINQ](/manual/client-interfaces/source-generators). Other shapes fall back to the interpreter. |
+| Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance. See [Vector Search Syntax](/manual/sql-language/vector-search-syntax). |
+| ADO.NET provider (`DataVo.Data`) | Release candidate | Standard `System.Data.Common` types. See [ADO.NET Provider](/manual/client-interfaces/ado-net). |
+| Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
+| Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
+| Native AOT | Supported | `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers as errors. |
+| PostgreSQL replication (DataVo-Sync) | Separate product | Not part of the NuGet packages. Proprietary replication bridge to PostgreSQL. |
+| Unity | Evaluation target | See below. |
+
+## Preview contracts
+
+SQL `DATE` materializes as `DataVo.Core.DataVoDate` in the row APIs. `CellValue.AsDate()` and compiled `GetDate` return `DataVoDate`; modern .NET callers keep explicit `FromDateOnly`, `ToDateOnly`, `AsDateOnly` and `GetDateOnly` adapters. Existing persisted `DATE` bytes are unchanged.
+
+## Unity Evaluation Status
+
+Unity is an evaluation target, not a supported runtime. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+
+| Environment or boundary | Status | Meaning |
+| --- | --- | --- |
+| Unity 6000.5.4f1 Editor | Verified (narrow smoke) | The tracked project imports the generated candidate and its EditMode smoke suite passes. |
+| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) | A Medium-stripping Player builds, launches, performs the Unity type-binding scenario, writes a passing report, and exits zero. |
+| Windows x64 IL2CPP | Unverified | Windows requires its own built-and-executed Player proof. |
+| Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
+| Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
+| In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
+| Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
+
+## Scope summary
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| In-process embedded deployment | Supported | The core product shape is library-first, not server-first. |
+| Public curated manual | Supported | The manual is the public documentation boundary. |
+| SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
+| ADO.NET provider | Supported | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`; Dapper works through it. |
+| Entity Framework bridge | Supported | Basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
+| Roslyn source generators | Supported | `[DataVoQuery]` and typed table queries compile at build time. |
+| NuGet packaging | Supported | Four packages. The public Core package is `net10.0`-only; the opt-in portable target is an experimental local candidate, not a published or supported Unity asset. |
+| Stable storage format | Planned | Requires compatibility tests and migration guidance. |
+| Production support contract | Not Supported | No production support contract is offered. |
+| Stored procedures, triggers, PostgreSQL-compatible server | Not Supported | See [Unsupported Features](/manual/reference/unsupported-features). |
+
+---
+
 # v0.1 Alpha Scope
 
 > Source route: /manual/preface/alpha-scope
@@ -91,7 +161,7 @@ db.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Name VARCHAR(80))");
 db.Execute("INSERT INTO Events (Id, Name) VALUES (1, 'created')");
 ```
 
-The alpha also includes persisted storage modes. For durability-sensitive experiments, prefer LSM strict mode so acknowledged writes wait for WAL durability.
+The alpha also includes persisted storage modes. For durability-sensitive experiments, use LSM strict mode so acknowledged writes wait for WAL durability. Disk mode is legacy and receives no further durability work. Both modes currently share one known crash limitation for `UPDATE`, described in [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations).
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
@@ -130,16 +200,17 @@ SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `Ce
 
 ## Unity Evaluation Status
 
-Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
 
 | Environment or boundary | Status | Meaning |
 | --- | --- | --- |
-| Unity Editor | Unverified until Stage 3 | No tracked Unity project has imported and executed the candidate package yet. |
-| Windows x64 IL2CPP | Unverified until Stage 3 | A built and executed IL2CPP player is required; compilation alone is insufficient. |
+| Unity 6000.5.4f1 Editor | Verified (narrow smoke) | The tracked project imports the generated candidate and its EditMode smoke suite passes. |
+| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) | A Medium-stripping Player builds, launches, performs the Unity type-binding scenario, writes a passing report, and exits zero. |
+| Windows x64 IL2CPP | Unverified | Windows requires its own built-and-executed Player proof. |
 | Direct Burst calls | Unsupported by design | DataVo uses managed engine types and services and is not a Burst job payload. |
 | Job-to-managed batch bridge | Planned proof | A Burst-compatible job may produce POD commands that managed code drains after completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
-| Disk/LSM persistence | Unsupported until separately validated | The experimental portable target rejects both modes with `PlatformNotSupportedException`; do not use DataVo for Unity save data. |
+| Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 
 ## v0.1 Scope Summary
 
@@ -201,7 +272,7 @@ ORDER BY Id ASC
 LIMIT 50;
 ```
 
-Unity integration follows a separate proof-first path. The first candidate is managed, in-memory use under a pinned Unity Editor and an executed Windows x64 IL2CPP player. Direct Burst calls and unverified game-save persistence are outside that scope.
+Unity integration follows a separate proof-first path. A managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls, Windows validation, vector/reactive workloads, and game-save persistence remain outside that narrow scope.
 
 The tooling roadmap is separate. Developers will eventually want to inspect DataVo databases through DBeaver, DataGrip, or pgAdmin. That requires a `DataVo.Server` process and enough PostgreSQL-wire compatibility to connect, list tables, and run simple queries. That work is valuable, but it should not distract from stabilizing the embedded engine.
 
@@ -224,12 +295,165 @@ Future tooling process
 | Core embedded API | Supported | `DataVoContext` remains the primary interface. |
 | Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
 | NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags; the current public Core package is `net10.0` only. |
-| Unity managed integration proof | Planned | Editor and Windows x64 IL2CPP execution must pass before a portable Core asset is published. |
+| Unity managed integration proof | Partially verified | Exact Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 and broader runtime scenarios remain unverified. |
 | SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
 | Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
 | PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |
 | EF Core migrations | Not Supported | Requires provider services beyond the current bridge. |
 | Replication and high availability | Not Supported | Out of scope for the embedded v0.1 engine. |
+
+---
+
+# Installation & Packages
+
+> Source route: /manual/getting-started/installation
+> Source file: manual/getting-started/installation.md
+
+DataVo ships as four NuGet packages. Install only the ones you need: `DataVo.Core` is the engine and everything else builds on it.
+
+The current release is **v0.2.0-rc.3 (Release Candidate)**, so include `--prerelease` when you add a package. See [Project Status & Stability](/manual/preface/project-status) for what that means.
+
+## Packages
+
+| Package | Install it when you want | What it adds |
+| --- | --- | --- |
+| `DataVo.Core` | The embedded engine and SQL through `DataVoContext`. | Parser, planner, storage engines (In-Memory, LSM-Tree, legacy Disk), vector indexes, typed table API. |
+| `DataVo.Data` | An ADO.NET provider, or a micro-ORM such as Dapper. | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`, `DataVoTransaction`, `DataVoParameter`. |
+| `DataVo.EntityFrameworkCore` | An EF Core `DbContext` over DataVo. | `UseDataVo(...)`, `DataVoDbContext`, query-translation diagnostics. |
+| `DataVo.Generators` | Compiled LINQ queries and `[DataVoQuery]` methods. | A Roslyn source generator and analyzer. It is a build-time reference, not a runtime dependency. |
+
+```bash
+dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Data --prerelease
+dotnet add package DataVo.EntityFrameworkCore --prerelease
+dotnet add package DataVo.Generators --prerelease
+```
+
+## Which packages for which job
+
+| Job | Packages |
+| --- | --- |
+| Embedded SQL and the typed table API | `DataVo.Core` |
+| Compiled LINQ scans and aggregates | `DataVo.Core` and `DataVo.Generators` |
+| ADO.NET or Dapper | `DataVo.Data` (brings `DataVo.Core`) |
+| EF Core | `DataVo.EntityFrameworkCore` (brings `DataVo.Core`) |
+
+## Requirements
+
+- **.NET 10.** The published `DataVo.Core` package contains a `net10.0` asset only. Other targets, including Unity, are not supported. See [Project Status](/manual/preface/project-status#unity-evaluation-status).
+- **Native AOT** is supported by `DataVo.Core` and `DataVo.Data`. See [Native AOT Deployment](/manual/client-interfaces/native-aot).
+- **C# interceptors** are used by `DataVo.Generators`. The package's build props register the `DataVo.Generated` interceptors namespace for you, so no manual `InterceptorsNamespaces` entry is needed.
+
+## Verify the install
+
+```csharp
+using DataVo.Core;
+using DataVo.Core.StorageEngine.Config;
+
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
+db.Execute("CREATE DATABASE Smoke");
+db.Execute("USE Smoke");
+db.Execute("CREATE TABLE T (Id INT PRIMARY KEY)");
+db.Execute("INSERT INTO T (Id) VALUES (1)");
+
+Console.WriteLine(db.Execute("SELECT Id FROM T")[0].Data.Count); // 1
+```
+
+Continue with the [Quickstart](/manual/tutorial/quickstart), or pick an API in [Choosing an Interface](/manual/getting-started/choosing-an-interface). See also [Project Status & Scope](/manual/preface/project-status).
+
+---
+
+# Choosing an Interface
+
+> Source route: /manual/getting-started/choosing-an-interface
+> Source file: manual/getting-started/choosing-an-interface.md
+
+DataVo has five ways to talk to the same engine. They differ in ergonomics and in how much work happens per call, not in what the database can store. You can mix them in one application.
+
+## Decision table
+
+| Interface | Package | Best for | Per-call cost | Native AOT |
+| --- | --- | --- | --- | --- |
+| [Compiled LINQ](/manual/client-interfaces/source-generators) | `DataVo.Core` + `DataVo.Generators` | Hot paths: point lookups, filtered counts and aggregates. | Lowest. Predicates are compiled at build time; aggregates allocate nothing once warm. | Yes |
+| [Embedded API](/manual/client-interfaces/datavo-context-api) (`DataVoContext`) | `DataVo.Core` | Application code that wants SQL, DDL, vector search and full control. | Parses SQL per call unless prepared. Rows come back as dictionaries. | Yes |
+| [ADO.NET provider](/manual/client-interfaces/ado-net) | `DataVo.Data` | Code or libraries that already speak `DbConnection`. | Same engine as the embedded API, behind the standard ADO.NET types. | Yes |
+| [Dapper](/manual/client-interfaces/dapper) | `DataVo.Data` + `Dapper` | Micro-ORM mapping with plain SQL. | ADO.NET cost plus Dapper's mapping. | Per Dapper's own support |
+| [Entity Framework Core](/manual/client-interfaces/entity-framework) | `DataVo.EntityFrameworkCore` | Existing EF models and `DbContext` workflows. | Highest. EF infrastructure sits on top of the engine. | Not claimed |
+
+A short rule of thumb:
+
+- Start with the **embedded API** to learn the engine and for anything that is not performance critical.
+- Move the few queries that run constantly to **compiled LINQ**.
+- Use **ADO.NET or Dapper** when you are adapting existing code or want a familiar abstraction.
+- Use **EF Core** when the rest of your application is already modelled in EF.
+
+## How they fit together
+
+```mermaid
+flowchart TD
+  App["Your application"]
+  App --> LINQ["Compiled LINQ<br/>(DataVo.Generators)"]
+  App --> Ctx["DataVoContext<br/>(DataVo.Core)"]
+  App --> Ado["ADO.NET provider<br/>(DataVo.Data)"]
+  App --> EF["EF Core integration<br/>(DataVo.EntityFrameworkCore)"]
+  Dapper["Dapper"] --> Ado
+  LINQ --> Core["DataVo.Core engine"]
+  Ctx --> Core
+  Ado --> Core
+  EF --> Core
+  Core --> Storage["In-Memory | LSM-Tree | Disk (legacy)"]
+```
+
+Every route ends in the same parser, planner and storage engines, so storage modes, durability settings and vector indexes behave identically whichever interface you use.
+
+## The same question, five ways
+
+"How many players are level 10 or higher?" The table is `players (Id INT PRIMARY KEY, Level INT)`.
+
+**Embedded API**
+
+```csharp
+var result = db.Execute("SELECT COUNT(*) AS Total FROM players WHERE Level >= 10")[0];
+object total = result.Data[0]["Total"];
+```
+
+**ADO.NET**
+
+```csharp
+using var cmd = connection.CreateCommand();
+cmd.CommandText = "SELECT COUNT(*) FROM players WHERE Level >= @min";
+cmd.Parameters.AddWithValue("@min", 10);
+object? total = cmd.ExecuteScalar();
+```
+
+**Dapper**
+
+```csharp
+int total = connection.ExecuteScalar<int>(
+    "SELECT COUNT(*) FROM players WHERE Level >= @min", new { min = 10 });
+```
+
+**Entity Framework Core**
+
+```csharp
+List<Player> matches = context.QueryFromDataVo<Player>(query =>
+    query.Where(static p => p.Level >= 10));
+int total = matches.Count;
+```
+
+**Compiled LINQ**
+
+```csharp
+int total = db.Table<Player>().Where(10, static (p, min) => p.Level >= min).Count();
+```
+
+The compiled form reads the `Level` cell straight from the stored bytes and builds no `Player` objects. That is the mechanism behind the zero-allocation aggregates described in [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels).
+
+## Related
+
+- [Installation & Packages](/manual/getting-started/installation)
+- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
+- [Benchmark Results](/manual/performance/benchmarks), to see what each approach costs in practice.
 
 ---
 
@@ -472,6 +696,99 @@ using var lsmDb = new DataVoContext(new DataVoConfig
 ## DataVoContext API Summary
 
 `DataVoContext` supports `Execute(string query)` against the default session and `Execute(string query, Guid sessionId)` against an explicit session, session-bound transactions (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`), dictionary row results in `QueryResult.Data`, and persistent `Disk` and `Lsm` storage (with WAL and durability settings). The public examples use synchronous `Execute`; an async general SQL API is planned.
+
+---
+
+# ADO.NET & Dapper Tutorial
+
+> Source route: /manual/tutorial/ado-net-and-dapper
+> Source file: manual/tutorial/ado-net-and-dapper.md
+
+This tutorial builds a small player store through the ADO.NET provider, then reads it back with Dapper. It uses LSM storage, so the data survives a restart. Reference details live in [ADO.NET Provider](/manual/client-interfaces/ado-net) and [Dapper](/manual/client-interfaces/dapper).
+
+## 1. Create a project
+
+```bash
+dotnet new console -n PlayerStore
+cd PlayerStore
+dotnet add package DataVo.Data --prerelease
+dotnet add package Dapper
+```
+
+## 2. Open a persistent database
+
+```csharp
+using Dapper;
+using DataVo.Data;
+
+using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./player-store");
+connection.Open();
+```
+
+`StorageMode=Lsm` selects the LSM-Tree engine with strict fsync by default. `DataSource` is both the data directory and the database name. See [Configuration Reference](/manual/reference/configuration).
+
+## 3. Create the schema
+
+```csharp
+connection.Execute(
+    "CREATE TABLE IF NOT EXISTS Players (Id INT PRIMARY KEY, Name VARCHAR(40), Level INT)");
+```
+
+## 4. Insert in a transaction
+
+```csharp
+using (var transaction = connection.BeginTransaction())
+{
+    for (int id = 1; id <= 5; id++)
+    {
+        connection.Execute(
+            "INSERT INTO Players (Id, Name, Level) VALUES (@Id, @Name, @Level)",
+            new { Id = id, Name = $"player-{id}", Level = id * 3 },
+            transaction);
+    }
+
+    transaction.Commit();
+}
+```
+
+Run the program twice: the second run fails on the primary key, which is the point. The rows from the first run were persisted.
+
+## 5. Query with Dapper
+
+```csharp
+IEnumerable<Player> veterans = connection.Query<Player>(
+    "SELECT Id, Name, Level FROM Players WHERE Level >= @min ORDER BY Level DESC",
+    new { min = 9 });
+
+foreach (Player p in veterans)
+{
+    Console.WriteLine($"{p.Name}: level {p.Level}");
+}
+
+public sealed class Player
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int Level { get; set; }
+}
+```
+
+## 6. Drop to raw ADO.NET when you want to
+
+Dapper and plain ADO.NET share the connection, so you can use either per call.
+
+```csharp
+using var command = connection.CreateCommand();
+command.CommandText = "SELECT COUNT(*) FROM Players WHERE Level >= @min";
+command.Parameters.AddWithValue("@min", 9);
+Console.WriteLine(command.ExecuteScalar());
+```
+
+## Where to go next
+
+- Move a hot query to [compiled LINQ](/manual/client-interfaces/source-generators).
+- Use [vector search](/manual/tutorial/vector-search-example) for embeddings in the same database.
+- Read [WAL & Durability](/manual/storage-engine/wal-and-durability) before relying on persisted data.
 
 ---
 
@@ -889,6 +1206,16 @@ CREATE TABLE Documents (
 );
 ```
 
+For 3D positions, `VEC3` and `FLOAT[3]` are both shorthand for `VECTOR(3)`. `VEC2`, `VEC4` and `FLOAT[n]`/`REAL[n]` work the same way.
+
+```sql
+CREATE TABLE Ships (
+  Id INT PRIMARY KEY,
+  Position VEC3 NOT NULL,
+  Velocity FLOAT[3]
+);
+```
+
 Create scalar indexes after the table exists.
 
 ```sql
@@ -911,6 +1238,14 @@ ON Documents (Embedding)
 USING HNSW;
 ```
 
+An HNSW index ranks by cosine distance unless you choose another metric. Positions need straight-line distance, so index them with `metric = 'euclidean'` (or `'l2'`). The metric is saved with the index and kept when the database is reopened.
+
+```sql
+CREATE INDEX ix_ships_position
+ON Ships (Position)
+USING HNSW WITH (metric = 'euclidean');
+```
+
 Schema changes are supported but limited. Adding a column rewrites existing rows and fills the new column with a default or null.
 
 ```sql
@@ -930,7 +1265,7 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `FLOAT`, `BIT`, `DATE`, `GUID`), `VECTOR(n)`, scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1446,7 +1781,11 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+
+`StorageMode.Lsm` is the durable mode DataVo is heading toward production with. `StorageMode.Disk` is a legacy mode: it stays available, but it receives no further durability work, and it is not crash-safe for `UPDATE` (see [WAL And Durability](./wal-and-durability.md#known-limitations)). New applications should use Lsm.
+
+Disk and Lsm directories are served by one engine per process: contexts and connections opened on the same directory share it, and a `datavo.lock` file keeps other processes out while it is open. See [LSM Mode](./lsm-mode.md#opening-the-same-directory-twice).
 
 ---
 
@@ -1468,7 +1807,7 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
-Writes first go to the WAL and the active MemTable. The active MemTable is designed around arena-backed storage so steady-state write allocation stays low.
+Writes first go to the data directory's commit log (`commit.wal`, one record per statement or transaction) and then to each table's active MemTable. The active MemTable is designed around arena-backed storage so steady-state write allocation stays low.
 
 ```sql
 CREATE TABLE Events (
@@ -1481,16 +1820,16 @@ INSERT INTO Events (Id, Name, Value)
 VALUES (1, 'started', 100);
 ```
 
-When the active MemTable crosses 32 MB, DataVo freezes that generation, swaps in a new MemTable and WAL segment, and lets a background worker flush the frozen generation to SSTables.
+When the active MemTable crosses 32 MB, DataVo freezes that generation, swaps in a new MemTable, and lets a background worker flush the frozen generation to SSTables.
 
 ```text
 write
-  -> append WAL
+  -> append commit-log record (one per statement or transaction)
   -> active MemTable
   -> freeze at 32 MB
   -> background SSTable flush
   -> manifest edit
-  -> covered WAL segment can be removed
+  -> commit-log records covered by every table's SSTables are pruned
 ```
 
 Relaxed LSM mode uses the same broad storage shape, but it does not wait for synchronous WAL fsync before acknowledging writes.
@@ -1504,9 +1843,35 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
+## Reopening a Database
+
+An LSM directory keeps its schema (`Catalog.xml`), its data (SSTables plus the commit log), and its transaction-id high-water mark. Opening a new context on the same directory restores all of it.
+
+```csharp
+using (var db = new DataVoContext(config))
+{
+    db.Execute("CREATE DATABASE App");
+    db.Execute("USE App");
+    db.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Name VARCHAR(80))");
+    db.Execute("INSERT INTO Events (Id, Name) VALUES (1, 'started')");
+}
+
+using var reopened = new DataVoContext(config);
+reopened.Execute("USE App");
+reopened.Execute("SELECT * FROM Events WHERE Id = 1"); // returns the row
+```
+
+Indexes are not stored on disk in LSM mode. They are rebuilt from the durable rows when the engine opens, so they always match the data, even after a crash. The trade-off is that opening a database takes time proportional to its row count (about 0.5–0.8 s for 200,000 rows on a laptop).
+
+## Opening the Same Directory Twice
+
+Contexts and ADO.NET connections in one process that open the same directory share a single engine. The engine stays open until the last of them is disposed. They must use equivalent configuration, otherwise the second open throws `DatabaseInUseException` naming the setting that differs.
+
+A directory can be open in only one process at a time. DataVo holds a `datavo.lock` file while the engine is open, and a second process gets `DatabaseInUseException`.
+
 ## LSM Support Summary
 
-The LSM engine provides an arena-backed MemTable, a WAL segment per generation (retained until SSTable and manifest edits are durable), a 32 MB MemTable flush threshold (an internal v0.1 value, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and compaction (present, with tuning still in alpha). The on-disk format is **not** guaranteed stable — v0.1 storage files may change before a stable release.
+The LSM engine provides an arena-backed MemTable, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal v0.1 value, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and compaction (present, with tuning still in alpha). The on-disk format is **not** guaranteed stable — v0.1 storage files may change before a stable release.
 
 ---
 
@@ -1576,6 +1941,19 @@ Misleading:
 ## Durability Support Summary
 
 Supported: disk WAL (`WalEnabled`, on by default for disk mode), disk sync writes (`SyncDiskWrites = true`), LSM strict fsync (`LsmStrictFsync = true`, which waits for WAL durability before acknowledging writes), LSM relaxed OS-buffered mode (faster, but can lose recent writes on power or kernel failure), and WAL checkpoint settings. Relaxed throughput must **not** be presented as strict durability.
+
+## Crash Atomicity in Lsm Mode
+
+Every SQL statement, and every explicit transaction at `COMMIT`, is written to the data directory's commit log (`commit.wal`) as **one** checksummed record. After a crash, recovery applies each record completely or not at all, so a multi-row `UPDATE` or a transaction that touches several tables is never half-applied. In strict mode a statement returns only after its record is durable; concurrent statements share fsyncs.
+
+## Visibility and Failed Statements in Lsm Mode
+
+A statement's changes (rows, index entries, and change notifications) become visible to other sessions only after its commit record is durable, and statements publish in commit order. Write locks are held until then, so a concurrent statement on the same table never checks its keys against unpublished changes. A statement that fails is discarded entirely: it writes no commit record and leaves no visible change.
+
+## Known Limitations
+
+- **Disk mode is legacy** and not crash-safe for `UPDATE`: it writes the new row version and removes the old one as two separate durable steps, so a crash between them can lose the row. Use Lsm for new applications.
+- **In-memory and Disk transactions.** `COMMIT` re-checks primary keys and UNIQUE values for every table before applying anything. A foreign-key conflict found while applying a later table leaves the earlier tables of that `COMMIT` applied in these modes; Lsm discards the whole transaction.
 
 ---
 
@@ -1840,6 +2218,36 @@ db.Execute("USE App");
 
 `LsmStrictFsync = true` is the conservative durability setting. It waits for the LSM write-ahead log to reach stable storage before acknowledging writes. Use relaxed LSM only for caches, rebuildable data, or benchmark runs where recent-write loss is acceptable.
 
+## Zero-Copy Table Streaming (`StreamRef` and `RowRef`)
+
+For performance-critical loops (such as 60/120 FPS game simulation loops, real-time physics, or high-throughput batch pipelines), allocating C# heap objects per row creates GC pressure. DataVo provides `StreamRef()` on both `DataVoTable<T>` and `DataVoContext`:
+
+```csharp
+// Using a typed table
+foreach (RowRef row in db.Table<Player>().StreamRef())
+{
+    int id = row.GetInt32(0);
+    float health = row.GetFloat(1);
+    ReadOnlySpan<char> name = row.GetStringSpan(2);
+    // Zero bytes allocated on the managed heap!
+}
+
+// Or dynamically by table name
+RowRefStream stream = db.StreamRef("Players");
+int healthCol = stream.GetOrdinal("Health");
+foreach (RowRef row in stream)
+{
+    float health = row.GetFloat(healthCol);
+}
+```
+
+### Key Invariants of `RowRef`:
+- **Zero Allocations:** On LSM and InMemory storage engines, a full table pass allocates 0 bytes on the managed heap (`GC.GetAllocatedBytesForCurrentThread() == 0`).
+- **Direct Span Access:** Decodes primitive and string values directly in-place from storage memory spans (`ReadOnlySpan<byte>`).
+- **Typed Accessors:** `GetInt32`, `GetInt64`, `GetFloat`, `GetDouble`, `GetBoolean`, `GetGuid`, `GetStringSpan`, `GetStringUtf8`, `GetVector3`, `GetVectorBytes`, `IsNull`, and `ColumnCount`.
+- **Bounded Page Concurrency:** Reads rows in 1,024-row bounded pages, holding locks only during page block copies so concurrent writers and transactions are never stalled by reader loops.
+- **Lifetime Safety:** `RowRef` is a `ref struct` scoped strictly to each loop iteration. To retain data across iterations, copy the values out of the span.
+
 ## Using Entity Framework Core
 
 DataVo also includes an early Entity Framework Core bridge. In v0.1 Alpha, this is not a full standalone EF provider. It attaches DataVo behavior to an EF context while a host EF provider supplies EF's normal infrastructure services.
@@ -1942,6 +2350,221 @@ List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
 ## Entity Framework Core Support
 
 The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.1 — unsupported grouped operators report unsupported-pattern errors.
+
+---
+
+# ADO.NET Provider (DataVo.Data)
+
+> Source route: /manual/client-interfaces/ado-net
+> Source file: manual/client-interfaces/ado-net.md
+
+`DataVo.Data` is a standard ADO.NET provider. Its types derive from the `System.Data.Common` base classes (`DbConnection`, `DbCommand`, `DbDataReader`, `DbTransaction`, `DbParameter`), so any code or library written against those abstractions can use DataVo without DataVo-specific adapters. That includes micro-ORMs such as [Dapper](/manual/client-interfaces/dapper).
+
+```bash
+dotnet add package DataVo.Data --prerelease
+```
+
+## Types
+
+| ADO.NET base class | DataVo type | Notes |
+| --- | --- | --- |
+| `DbConnection` | `DataVoConnection` | Opens the embedded engine in-process. There is no network connection. |
+| `DbCommand` | `DataVoCommand` | Text commands. Parameters use `@name` placeholders. |
+| `DbDataReader` | `DataVoDataReader` | Forward-only reader over the command's results. |
+| `DbTransaction` | `DataVoTransaction` | `Commit`, `Rollback` and savepoints. |
+| `DbParameter` | `DataVoParameter` | `AddWithValue` is available on `DataVoParameterCollection`. |
+| none | `DataVoConnectionStringBuilder` | Parses the [connection string](/manual/reference/configuration). |
+| `Exception` | `DataVoException` | Carries `ErrorCode`, `Line` and `Column`. |
+
+## Connect, create, insert, query
+
+```csharp
+using DataVo.Data;
+
+using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./app-data");
+connection.Open();
+
+using (var create = connection.CreateCommand())
+{
+    create.CommandText = "CREATE TABLE IF NOT EXISTS Players (Id INT PRIMARY KEY, Name VARCHAR(40), Level INT)";
+    create.ExecuteNonQuery();
+}
+
+using (var insert = connection.CreateCommand())
+{
+    insert.CommandText = "INSERT INTO Players (Id, Name, Level) VALUES (@id, @name, @level)";
+    insert.Parameters.AddWithValue("@id", 1);
+    insert.Parameters.AddWithValue("@name", "Ada");
+    insert.Parameters.AddWithValue("@level", 12);
+    int affected = insert.ExecuteNonQuery(); // 1
+}
+
+using var query = connection.CreateCommand();
+query.CommandText = "SELECT Id, Name FROM Players WHERE Level >= @min";
+query.Parameters.AddWithValue("@min", 5);
+
+using var reader = query.ExecuteReader();
+while (reader.Read())
+{
+    Console.WriteLine($"{reader.GetInt32(0)}: {reader.GetString(1)}");
+}
+```
+
+`Open()` initializes the storage engine, creates the database named by `DataSource` if it does not exist, and selects it. `Close()` rolls back any open transaction and releases the engine.
+
+## Transactions
+
+A transaction is bound to the connection's session. `BeginTransaction()` starts it, and statements run on the same connection join it.
+
+```csharp
+using var transaction = connection.BeginTransaction();
+
+using var update = connection.CreateCommand();
+update.CommandText = "UPDATE Players SET Level = @level WHERE Id = @id";
+update.Parameters.AddWithValue("@level", 13);
+update.Parameters.AddWithValue("@id", 1);
+update.ExecuteNonQuery();
+
+transaction.Save("afterUpdate");   // SAVEPOINT
+// ... more work ...
+transaction.Rollback("afterUpdate"); // ROLLBACK TO SAVEPOINT
+
+transaction.Commit();
+```
+
+Savepoints (`Save`, `Rollback(name)`, `Release`) are supported. For the isolation guarantees you can rely on, read [Transactions, ACID & MVCC](/manual/storage-engine/transactions-acid-mvcc). `DataVoTransaction.IsolationLevel` is reported for ADO.NET compatibility; the engine's documented contract is the source of truth, including its limits on predicate-level isolation.
+
+## Prepared and parameterized commands
+
+A command with parameters, or one on which you call `Prepare()`, runs through the engine's prepared-statement pipeline, so repeated execution does not re-parse the SQL.
+
+```csharp
+using var lookup = connection.CreateCommand();
+lookup.CommandText = "SELECT Name FROM Players WHERE Id = @id";
+lookup.Parameters.AddWithValue("@id", 1);
+lookup.Prepare();
+
+for (int id = 1; id <= 100; id++)
+{
+    lookup.Parameters[0].Value = id;
+    object? name = lookup.ExecuteScalar();
+}
+```
+
+## Errors
+
+A failed statement throws `DataVoException`. Branch on `ErrorCode`, not on the message text. See [Error Handling](/manual/reference/error-handling).
+
+```csharp
+try
+{
+    insert.ExecuteNonQuery();
+}
+catch (DataVoException ex)
+{
+    Console.WriteLine($"{ex.ErrorCode} at line {ex.Line}, column {ex.Column}: {ex.Message}");
+}
+```
+
+## Behavior to know about
+
+- **The reader is forward-only over a materialized result.** `ExecuteReader()` runs the command and the reader walks the returned rows; it does not stream pages from storage. For zero-allocation streaming, use the typed table API, `RowRef` and compiled LINQ (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
+- **Metadata is available before `Read()`.** `GetFieldType` and `GetName` work before the first row, as ADO.NET consumers expect. Column types are taken from the first non-null value in the result, so a column that is null in every row reports `object`.
+- **Async methods run synchronously.** `ExecuteReaderAsync` and friends come from the `DbCommand` base class and complete on the calling thread; the engine is in-process.
+- **`Cancel()` is a no-op and `CommandTimeout` does not cancel a running statement.** Lock waits are bounded by `LockAcquireTimeoutMs`; see [Configuration](/manual/reference/configuration).
+- **One process owns a persisted database directory.** Connections in the same process that open the same directory share one engine and must use equivalent settings. A second process opening the directory gets `DatabaseInUseException`; see [LSM-Tree Engine](/manual/storage-engine/lsm-mode#opening-the-same-directory-twice).
+- **There is no connection pool and no server.** Opening a connection is opening the engine.
+
+## Native AOT
+
+`DataVo.Data` builds with the trim and AOT analyzers enabled and the IL warnings treated as errors, so the provider itself is AOT-clean. If you add a reflection-based mapper on top, that library's AOT support applies. See [Native AOT Deployment](/manual/client-interfaces/native-aot).
+
+## Related
+
+- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
+- [Dapper](/manual/client-interfaces/dapper)
+- [Configuration Reference](/manual/reference/configuration)
+
+---
+
+# Dapper
+
+> Source route: /manual/client-interfaces/dapper
+> Source file: manual/client-interfaces/dapper.md
+
+Dapper works with DataVo through the standard ADO.NET provider. DataVo does not ship a Dapper-specific package or extension, and it does not need one: `DataVoConnection` is a `DbConnection`, and Dapper's extension methods operate on `IDbConnection`.
+
+```bash
+dotnet add package DataVo.Data --prerelease
+dotnet add package Dapper
+```
+
+## Example
+
+```csharp
+using Dapper;
+using DataVo.Data;
+
+using var connection = new DataVoConnection("StorageMode=InMemory;DataSource=App");
+connection.Open();
+
+connection.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(40), Level INT)");
+
+connection.Execute(
+    "INSERT INTO Players (Id, Name, Level) VALUES (@Id, @Name, @Level)",
+    new { Id = 1, Name = "Ada", Level = 12 });
+connection.Execute(
+    "INSERT INTO Players (Id, Name, Level) VALUES (@Id, @Name, @Level)",
+    new { Id = 2, Name = "Linus", Level = 3 });
+
+List<Player> strong = connection
+    .Query<Player>("SELECT Id, Name, Level FROM Players WHERE Level >= @min", new { min = 5 })
+    .ToList();
+
+Player? linus = connection.QuerySingleOrDefault<Player>(
+    "SELECT Id, Name, Level FROM Players WHERE Id = @id", new { id = 2 });
+
+int total = connection.ExecuteScalar<int>("SELECT COUNT(*) FROM Players");
+
+public sealed class Player
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int Level { get; set; }
+}
+```
+
+## Verified usage
+
+The following calls have been run against `DataVoConnection` with Dapper 2.1.35 and behave as they do on other ADO.NET providers:
+
+| Dapper call | Result |
+| --- | --- |
+| `Execute` with anonymous-object parameters | Rows-affected count is correct. |
+| `Query<T>` and `QuerySingleOrDefault<T>` | Rows map to POCOs by column name. |
+| `ExecuteScalar<T>` | Returns the first column of the first row. |
+| `QueryAsync<T>` | Works; it completes synchronously because the engine is in-process (see [ADO.NET Provider](/manual/client-interfaces/ado-net#behavior-to-know-about)). |
+| `Execute` with an `IDbTransaction` | `Rollback()` discards the changes. |
+
+Anything outside that list, such as multi-mapping, `QueryMultiple` and list parameter expansion, goes through the same ADO.NET surface but is not part of the verified set. Test those against your own schema before depending on them.
+
+## Dapper or compiled LINQ?
+
+| | Dapper | [Compiled LINQ](/manual/client-interfaces/source-generators) |
+| --- | --- | --- |
+| Query language | Plain SQL strings | C# lambdas checked at compile time |
+| Mapping | Reflection-based, per Dapper | Source-generated, no reflection |
+| Allocation | One object per row, plus Dapper's own | Aggregates allocate nothing once warm |
+| Native AOT | Governed by Dapper's own AOT support | Yes |
+| Fits | Existing SQL, ad-hoc queries, joins | Hot-path lookups, filtered counts and aggregates |
+
+The two coexist on one database: use Dapper for flexibility and compiled LINQ for the handful of queries that dominate your profile.
+
+## Related
+
+- [ADO.NET Provider (DataVo.Data)](/manual/client-interfaces/ado-net)
+- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface)
 
 ---
 
@@ -2101,13 +2724,164 @@ CREATE INDEX IX_Players_Name ON Players (Name);
 
 Use generated queries for stable point reads, inserts, and narrow fixed-shape updates. Use runtime SQL for exploratory queries, joins, aggregates, vector search, and complex SQL.
 
+## Typed Table Queries
+
+A model marked `[DataVoTable]` can be queried with lambdas through `DataVoContext.Table<T>()`. The generator reads each lambda when the project builds and replaces the call with a prepared statement, using C# interceptors. No expression tree is built, nothing is reflected over, and nothing is compiled at run time, so the calls are safe under Native AOT.
+
+```csharp
+[DataVoTable("players")]
+public sealed class Player
+{
+    [PrimaryKey] public int Id { get; set; }
+    [Indexed] public int Level { get; set; }
+    public string Name { get; set; } = "";
+    public bool IsActive { get; set; }
+}
+
+DataVoTable<Player> players = db.Table<Player>();
+
+// Pass values as state and mark the lambda static: no closure, and the value goes straight to the statement.
+Player? one = players.FirstOrDefault(targetId, static (p, id) => p.Id == id);
+
+foreach (Player p in players.Where((min, max), static (p, r) => p.Level >= r.min && p.Level <= r.max))
+{
+    Console.WriteLine(p.Name);
+}
+
+// Literals and constants need no state.
+Player? admin = players.FirstOrDefault(p => p.Id == 1);
+List<Player> veterans = players.Where(p => p.Level >= 50 && p.IsActive).ToList();
+```
+
+`FirstOrDefault`, `SingleOrDefault` and `Where` are available with and without state. `Where` returns a `DataVoQuery` that runs when it is enumerated and offers `FirstOrDefault()`, `SingleOrDefault()`, `Any()`, `Count()`, `Sum()`, `Min()`, `Max()` and `ToList()`. Its `IsCompiled` property tells you whether the generator compiled it.
+
+A primary-key equality on an LSM database reads one row and allocates only that row. A miss allocates nothing.
+
+Enumerating a query streams. Rows are read in pages of 1,024 and each model is built as the loop reaches it, so a `foreach` over 100,000 matching rows keeps about one page alive, not the result. `ToList()` is the way to ask for everything at once. Scans that were not compiled stream the same way. Some queries read their matches before enumerating, as `StreamQuery` does: a query inside a transaction, a condition with an equality on an indexed column (few rows, read through the index), and a condition the paged scan cannot apply, which today means `||`, a null test, or `!=` on a nullable column.
+
+### Counting, Summing And Finding Extremes Without Building Rows
+
+`Count()` and `Any()` on a compiled query do not build model objects when the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns (comparisons, null tests, `&&`, `||`). The generator also writes the condition as a struct that reads those columns from the stored bytes, and the storage scan tests each row with it where the row is stored: nothing is copied out, and only the cells up to the last column the condition reads are located. Once warm, such a count allocates nothing on the LSM and in-memory engines, where enumerating the same 100,000 matches allocates about 22 MB, and it runs 6 to 20 times faster. The read lock is held for 4,096 rows at a time, so writers run between batches. Inside a transaction the rows are streamed instead, so the count includes the transaction's own writes.
+
+```csharp
+int rich = db.Table<Player>().Where(5_000L, static (p, gold) => p.Gold > gold).Count(); // 0 B
+```
+
+`Sum` works the same way. `DataVoQuery` has `Sum` for `int`, `long`, `float` and `double` selectors. When the query's condition is compiled into the scan and the selector is one non-nullable column of its own type (`p => p.Gold`), the generator adds that column up inside the same scan; the total stays in the scan's own variables and no row is built. Any other selector (`p => p.Gold * 2`, a nullable column, a widening cast) runs as written over the rows. An integer sum that leaves its type's range throws `OverflowException`; a `float` sum is accumulated as a `double` and rounded once, as LINQ does.
+
+```csharp
+long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold); // 0 B
+```
+
+`Min` and `Max` are found in the same scan. `DataVoQuery` has `Min(selector)` and `Max(selector)` for any value type, with the semantics of `Enumerable.Min` and `Enumerable.Max`:
+
+- Null values are skipped.
+- When no row matches, or every value is null, the call throws `InvalidOperationException` for a type that cannot be null (`int`) and returns `null` for one that can (`int?`, `string`).
+- A floating-point `NaN` orders below every number, so `Min` returns `NaN` if any value is `NaN`, and `Max` returns `NaN` only when every value is.
+
+When the query's condition is compiled into the scan and the selector is one `int`, `long`, `float`, `double`, `DataVoDate` or `DateOnly` column of its own type, nullable or not, the generator keeps the smallest or largest value in the scan's own variables: no row is built and, once warm, nothing is allocated on the LSM and in-memory engines. Any other selector (`p => p.Gold * 2`, a cast, a `string` column) runs as written over the rows. Inside a transaction the rows are streamed instead of read in place, so the result includes the transaction's own writes.
+
+```csharp
+var active = db.Table<Player>().Where(static p => p.IsActive);
+long poorest = active.Min(static p => p.Gold);          // 0 B; throws when no player is active
+int? bestBonus = active.Max(static p => p.Bonus);       // 0 B; null when no active player has a bonus
+DataVoDate first = active.Min(static p => p.JoinedOn);  // 0 B
+```
+
+DataVo has no `DATETIME` column: a `DateTime` property is not mapped, and a point in time is stored as a `long` (ticks or Unix time), which `Min` and `Max` read as any other `long` column.
+
+The scan is generic over the compiled condition all the way into the storage engine's row loop, so no delegate is called per row.
+
+When every column up to the last one the query reads has a fixed width (`int`, `long`, `float`, `double`, `bool`, `Guid`, dates), values sit at the same byte offset in every row whose leading cells are all present. The condition is then also compiled in a form that reads stored bytes at those offsets, worked out once per scan, with no row view built and no branch between its tests. Each row is first checked against that layout by its leading null flags. A row that differs, such as one holding a NULL in a leading column, is tested the general way, so results are identical. An in-memory table goes one step further. Its rows are separate objects, so the first compiled scan of a table writes each row once more as a short fixed-length record, a null flag and the value's bytes for every column, with text and vector columns keeping only their flag. The records lie side by side in large blocks, and later scans read those: memory is read in order, and every column sits at the same offset in every row, including rows with NULLs and tables with text columns ahead of the ones read. Scans keep the records up to date as rows are added and deleted. They cost a few dozen bytes per row, and only tables that are scanned this way have them. Put fixed-width columns before text columns in a model to get this path; a condition on a column that follows a `string` still runs in the scan, through the general reader.
+
+On 200,000 rows with 100,000 matches a warm count, sum, minimum or maximum takes about 0.4 to 0.5 ms in memory, 1.7 ms on the disk engine and 2.0 ms on LSM (2.4 ms once flushed to an SSTable). Most of what remains on disk and LSM is the storage iteration itself.
+
+A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
+
+### What Is Compiled
+
+| Lambda | Becomes |
+| --- | --- |
+| `p.Id == value`, `value == p.Id` | `Id = @p0`; a point lookup when `Id` is the primary key or is indexed |
+| `!=`, `<`, `<=`, `>`, `>=` | The matching SQL comparison |
+| `p.IsActive`, `!p.IsActive` | `IsActive = true`, `IsActive = false` |
+| `p.Guild == null`, `p.Guild is not null` | `IS NULL`, `IS NOT NULL` |
+| `a && b`, `a \|\| b`, parentheses | `AND`, `OR`, parentheses |
+
+A value can be a literal, a constant, the state argument, a field or property of the state (including tuple elements), or an accessible static field or property. Null follows C# rules, not SQL rules: a nullable column that holds null counts as different from a value in `!=`, and a state value that is null at run time is answered by running the lambda over the table.
+
+### What Is Not Compiled
+
+A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why:
+
+| Warning | Meaning |
+| --- | --- |
+| `DATAVOL001` | The lambda captures a local, a parameter or an instance member. Pass it as state with a `static` lambda. |
+| `DATAVOL002` | The lambda uses something that has no compiled form: a method call, arithmetic, two columns compared with each other, or a value whose type differs from the column's. |
+| `DATAVOL003` | The project has not enabled interceptors for the generated namespace, so no call is compiled. |
+
+Silence a deliberate scan with `#pragma warning disable DATAVOL001`. A delegate created elsewhere and passed in is treated as a deliberate scan and is not reported.
+
+### Enabling Interceptors
+
+The `DataVo.Generators` NuGet package enables interceptors for you. A project that references the generator another way, such as a project reference, needs this property:
+
+```xml
+<PropertyGroup>
+  <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>
+</PropertyGroup>
+```
+
+Interceptors need the C# 12 compiler or newer. On an older compiler, such as Unity's, the same code compiles and returns the same rows but every query is a scan; use the generated `Get…ById` method or a prepared statement on hot paths there. Unity's compiler also has no module initializers, so call the model's `Ensure…Table` method before `Table<T>()`.
+
+## Spatial Queries
+
+A `System.Numerics.Vector3` property is stored as a `VECTOR(3)` column. `DataVoTable<T>` can then find rows by position:
+
+```csharp
+using System.Numerics;
+
+[DataVoTable("ships")]
+public sealed class Ship
+{
+    [PrimaryKey] public int Id { get; set; }
+    public string Name { get; set; } = "";
+    [SpatialIndex] public Vector3 Position { get; set; }
+}
+
+DataVoTable<Ship> ships = db.Table<Ship>();
+
+// Rows within 50 units of a point, the sphere's surface included.
+foreach (Ship ship in ships.WithinRadius(station, radius: 50f)) { }
+
+// Rows inside an axis-aligned box. The corners may come in either order.
+List<Ship> docked = ships.WithinBoundingBox(minCorner, maxCorner).ToList();
+
+// The five closest rows, nearest first.
+IReadOnlyList<Ship> closest = ships.NearestNeighbors(player, k: 5);
+```
+
+| Method | How it runs |
+| --- | --- |
+| `WithinRadius(center, radius)` | Streams the table a page at a time. Each row's stored coordinates are tested before the model is built, so rows outside the sphere cost no model and the test allocates nothing. Distances are compared in double precision, so a point exactly on the surface is included even far from the origin. |
+| `WithinBoundingBox(min, max)` | Streams like `WithinRadius`. A `BoundingBox3` overload is also available. The box's surface is inside. |
+| `NearestNeighbors(target, k)` | Uses the column's Euclidean HNSW index when it has one: it fetches twice `k` candidates and ranks them by exact distance. Without an index, inside an explicit transaction, or with `exact: true`, it streams the table once and keeps the best `k`, so the answer is exact. Ties keep storage order. |
+
+`[SpatialIndex]` (or `[Indexed]` on a `Vector3`) makes `Ensure…Table` create a Euclidean HNSW index named `sx_<table>_<column>`. HNSW is an approximate search: it can, rarely, miss a true neighbor. Pass `exact: true` when every answer must be exact. `WithinRadius` and `WithinBoundingBox` always read the whole table, because an HNSW index answers nearest-neighbor questions, not range ones.
+
+When a model has more than one `Vector3` property, name the column: `ships.WithinRadius(center, 10f, column: "Spawn")`. A nullable `Vector3?` is supported, and a row whose position is null never matches.
+
+`Spatial3` and `BoundingBox3` expose the same math for your own code: `Distance`, `DistanceSquared`, `DistanceSquaredPrecise`, `IsWithinRadius`, `Contains`, `Intersects`, `ClosestPoint`. None of them allocate. They use `System.Numerics`, which the .NET JIT compiles to SIMD instructions and which Unity's Mono and IL2CPP run as plain scalar code. In Unity, convert at the boundary: `new System.Numerics.Vector3(v.x, v.y, v.z)`.
+
+A lambda that compares a `Vector3` column, such as `Where(p, static (s, p) => s.Position == p)`, is not compiled to SQL (`DATAVOL002`); it scans and still returns the right rows.
+
 ## SQL DATE Projections
 
 The cross-target projection type for SQL `DATE` is `DataVo.Core.DataVoDate`. Generated `DataVoDate` and `DataVoDate?` properties call `GetDate` and `GetDateOrNull`. On modern .NET only, generated `System.DateOnly` and `System.DateOnly?` properties are explicit adapters and call `GetDateOnly` and `GetDateOnlyOrNull`.
 
 ## Source Generator Support Summary
 
-The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It does **not** generate `DELETE`, joins, aggregates, or vector search, and it is not a full LINQ provider — use runtime SQL for those shapes.
+The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It supports `System.Numerics.Vector3` columns with `WithinRadius`, `WithinBoundingBox` and `NearestNeighbors` on typed tables. It does **not** generate `DELETE`, joins, aggregates, or general vector search, and its typed table queries cover single-table filters only, not a full LINQ provider — use runtime SQL for those shapes.
 
 ---
 
@@ -2165,447 +2939,164 @@ The AOT-oriented supported paths in v0.1 are the C#-native embedded core (no nat
 
 ---
 
-# Configuration Reference
+# Zero-Allocation Row Model
 
-> Source route: /manual/reference/configuration
-> Source file: manual/reference/configuration.md
+> Source route: /manual/internals/zero-allocation-rows
+> Source file: manual/internals/zero-allocation-rows.md
 
-DataVo configuration starts with `DataVoConfig`. Most applications only need to choose a storage mode, a path for persisted data, and a durability setting.
+DataVo can read rows without creating managed objects for them. The mechanism is `RowRef`, a `readonly ref struct` that points at a row's stored bytes, and `RowRefStream`, which feeds `RowRef` values to a `foreach` loop one page at a time. Once a thread has streamed a table of a given shape, a full pass allocates zero bytes on the managed heap.
 
-For tests and examples, use in-memory storage. It keeps the database inside the process and disappears when the context is disposed.
+This page explains what that means, how to use it, and where it stops applying.
+
+## The idea
+
+A conventional database API materializes each row: a dictionary, an object array or a POCO per row. With 200,000 rows that is 200,000 allocations, and the garbage collector pays for them later.
+
+`RowRef` skips that step. It wraps a `ReadOnlySpan<byte>` over the stored row and decodes a cell only when you ask for it.
+
+```mermaid
+flowchart LR
+  Storage["Stored row bytes<br/>(page buffer)"] -->|"byte span view"| RowRef["RowRef<br/>(ref struct, stack only)"]
+  RowRef -->|"GetInt32(col)"| Cell1["int"]
+  RowRef -->|"GetFloat(col)"| Cell2["float"]
+  RowRef -->|"GetStringSpan(col)"| Cell3["char span view"]
+```
+
+Because `RowRef` is a `ref struct`, the compiler guarantees it lives on the stack. It cannot be boxed, stored in a field of a class, captured by a lambda or used across an `await`. That restriction is what makes it safe to point at memory that the engine reuses for the next page.
+
+## Use it
 
 ```csharp
 using DataVo.Core;
-using DataVo.Core.StorageEngine.Config;
 
-using var db = new DataVoContext(new DataVoConfig
+RowRefStream players = db.Table<Player>().StreamRef();
+
+// Look column positions up once, before the loop: this call allocates.
+int health = players.GetOrdinal("Health");
+
+float total = 0;
+foreach (RowRef row in players)
 {
-    StorageMode = StorageMode.InMemory
-});
-```
-
-For simple persistence, use disk mode and choose a storage path. WAL is enabled by default for disk mode unless explicitly overridden.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Disk,
-    DiskStoragePath = "./datavo_data",
-    WalEnabled = true
-});
-```
-
-If a disk-mode workload needs stronger flush behavior, enable synchronous disk writes. This is slower, but it is the safer choice when the application cannot tolerate buffered writes being lost on a power failure.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Disk,
-    DiskStoragePath = "./datavo_data",
-    WalEnabled = true,
-    SyncDiskWrites = true
-});
-```
-
-For higher-throughput persisted workloads, use LSM mode. Strict fsync is the conservative durability default and the right starting point for important data.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
-    LsmStrictFsync = true
-});
-```
-
-Relaxed LSM mode is a performance setting, not the same durability contract. Use it for caches, rebuildable data, or benchmark ceilings.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_cache",
-    LsmStrictFsync = false
-});
-```
-
-Lock acquisition has a timeout. The default is 30 seconds. Use a shorter timeout in tests when you want lock contention to fail quickly.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.InMemory,
-    LockAcquireTimeoutMs = 5000
-});
-```
-
-Planner and vector knobs are available for advanced experiments. Most users should keep the defaults until they are investigating a specific query shape.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
-    EnableVectorPredicateFastPath = true,
-    VectorPredicateFastPathMinRows = 128,
-    VectorPredicateFastPathCandidateMultiplier = 3
-});
-```
-
-Volcano execution settings exist but should be treated as advanced planner controls in v0.1. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.InMemory,
-    EnableVolcanoExecution = false,
-    EnableVolcanoSpillGuardrails = true
-});
-```
-
-## Configuration Support
-
-Supported settings: `StorageMode.InMemory`, `StorageMode.Disk`, and `StorageMode.Lsm`; `DiskStoragePath`; `WalEnabled` (on by default for disk mode); `SyncDiskWrites`; `LsmStrictFsync`; `LockAcquireTimeoutMs` (default 30000 ms, with `-1` waiting indefinitely); and vector predicate fast-path knobs. Volcano planner knobs exist for limited planner experiments but are planned, not the default public execution path.
-
----
-
-# Limits
-
-> Source route: /manual/reference/limits
-> Source file: manual/reference/limits.md
-
-DataVo v0.1 Alpha is an embedded engine preview, so its limits are part of the product contract. The safest way to evaluate it is to keep the database owned by one application process, validate the exact schema and query shapes you need, and treat storage files as alpha artifacts.
-
-The intended deployment shape is in-process embedding.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./app_data",
-    LsmStrictFsync = true
-});
-```
-
-Do not point multiple independent processes at the same writable database directory. DataVo v0.1 does not document a cross-process concurrency contract.
-
-```text
-Supported:
-  one application process
-  -> one DataVoContext lifecycle
-  -> one writable database directory
-
-Not supported:
-  process A -> ./shared_data
-  process B -> ./shared_data
-```
-
-Do not treat alpha storage files as a stable long-term format. For important evaluations, keep seed data or import scripts so you can rebuild after an engine change.
-
-```sql
-CREATE TABLE SeedUsers (
-  Id INT PRIMARY KEY,
-  Name VARCHAR(80)
-);
-
-INSERT INTO SeedUsers (Id, Name) VALUES (1, 'Ada');
-INSERT INTO SeedUsers (Id, Name) VALUES (2, 'Grace');
-```
-
-Tooling is also limited. DBeaver, DataGrip, and pgAdmin expect a client/server protocol and catalog metadata. DataVo v0.1 is embedded, so those tools cannot connect directly.
-
-```text
-Future shape:
-  DBeaver/DataGrip/pgAdmin
-  -> PostgreSQL wire protocol subset
-  -> DataVo.Server
-  -> DataVo storage
-```
-
-Vector dimensions are fixed at the column level. If a table declares `VECTOR(1536)`, application code must insert vectors with that dimension.
-
-```sql
-CREATE TABLE Documents (
-  Id INT PRIMARY KEY,
-  Embedding VECTOR(1536)
-);
-```
-
-The LSM engine uses a 32 MB active MemTable flush threshold internally. That is an engine behavior in v0.1, not a public tuning knob.
-
-```text
-active MemTable grows
-  -> crosses 32 MB
-  -> generation freezes
-  -> new MemTable accepts writes
-  -> background flush writes SSTable
-```
-
-## v0.1 Limits Summary
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Embedded in-process deployment | Supported | No standalone server is required for normal use. |
-| Fixed vector dimensions | Supported | Dimension is declared with `VECTOR(n)`. |
-| Internal 32 MB LSM MemTable flush threshold | Supported | Present in the engine but not exposed as a public tuning setting. |
-| Multi-process writes to one database directory | Not Supported | Do not share one writable DataVo directory across independent processes. |
-| Stable alpha storage format | Not Supported | v0.1 files may need migration or rebuild after engine changes. |
-| PostgreSQL-wire clients | Not Supported | DBeaver, DataGrip, and pgAdmin need future `DataVo.Server` work. |
-| Cloud/server administration model | Not Supported | No server roles, replication daemon, backup daemon, or HA system. |
-| Large analytical optimizer parity | Not Supported | Planner work is early and controlled by configuration. |
-
----
-
-# Unsupported Features
-
-> Source route: /manual/reference/unsupported-features
-> Source file: manual/reference/unsupported-features.md
-
-This page exists so early users do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable in v0.1 Alpha even if related internal work exists.
-
-DataVo is not PostgreSQL-compatible in v0.1. You can write SQL, but it is DataVo's SQL dialect.
-
-```sql
--- Supported DataVo-style vector query:
-SELECT Id, Label, Emb <=> '[1,0,0]' AS distance
-FROM Embeddings
-ORDER BY distance ASC
-LIMIT 5;
-```
-
-PostgreSQL system catalogs are not present. Tools that expect `pg_class`, `pg_attribute`, or PostgreSQL authentication cannot connect directly to the embedded engine.
-
-```sql
--- Not a supported v0.1 DataVo catalog workflow:
-SELECT relname
-FROM pg_class
-WHERE relkind = 'r';
-```
-
-EF Core support is an early bridge, not a full provider. Simple mapped `DbSet` workflows are useful, but migrations and advanced provider behavior are out of scope.
-
-```csharp
-// Supported direction: simple mapped entity query.
-List<User> users = ctx.Users
-    .Where(user => user.IsActive)
-    .ToList();
-
-// Not supported as a v0.1 claim: full migration lifecycle.
-// dotnet ef migrations add InitialCreate
-// dotnet ef database update
-```
-
-DataVo has transaction primitives, but it does not claim full serializable isolation for arbitrary multi-row predicates. Design alpha evaluations around the documented isolation contract.
-
-```sql
-BEGIN TRANSACTION;
-
-SELECT Id, Name
-FROM Users
-WHERE IsActive = true;
-
--- v0.1 does not claim complete phantom-read prevention
--- for arbitrary predicate ranges.
-
-COMMIT;
-```
-
-There is no stored procedure or trigger runtime in v0.1. Keep application logic in application code.
-
-```sql
--- Not supported in v0.1:
-CREATE TRIGGER update_timestamp
-BEFORE UPDATE ON Users
-FOR EACH ROW
-EXECUTE PROCEDURE set_updated_at();
-```
-
-Replication and high availability are also out of scope. DataVo's current product shape is embedded local storage.
-
-```text
-Supported v0.1 shape:
-  application -> DataVoContext -> local storage
-
-Not supported v0.1 shape:
-  primary server -> replica server -> failover orchestration
-```
-
-## Unsupported Features Summary
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol in v0.1. |
-| PostgreSQL system catalogs | Not Supported | No `pg_class`, `pg_attribute`, or related catalog compatibility layer. |
-| EF Core migrations | Not Supported | No migration scaffolding, diffing, or apply pipeline. |
-| EF Core shadow properties | Not Supported | The bridge expects explicit mapped CLR properties. |
-| Complex EF LINQ joins | Not Supported | Broad join translation is outside the v0.1 claim. |
-| Multi-row serializability | Not Supported | DataVo does not claim serializable isolation for arbitrary multi-row predicates. |
-| Phantom-read prevention | Not Supported | No public predicate-range locking guarantee. |
-| Stored procedures | Not Supported | No procedural SQL runtime. |
-| Triggers | Not Supported | No trigger system. |
-| Replication/high availability | Not Supported | Out of scope for embedded v0.1. |
-| PostgreSQL-like role administration | Not Supported | Authorization settings exist, but no PostgreSQL role system is documented for v0.1. |
-
----
-
-# Error Handling
-
-> Source route: /manual/reference/error-handling
-> Source file: manual/reference/error-handling.md
-
-The general SQL API reports failures through `QueryResult`. A result can contain rows, messages, and an `IsError` flag. Application code should check the flag before assuming data is present.
-
-```csharp
-using DataVo.Core.Contracts.Results;
-
-List<QueryResult> results = db.Execute("SELECT * FROM MissingTable");
-
-foreach (QueryResult result in results)
-{
-    if (result.IsError)
+    if (!row.IsNull(health))
     {
-        Console.Error.WriteLine(string.Join(Environment.NewLine, result.Messages));
-        continue;
-    }
-
-    Console.WriteLine($"Rows returned: {result.Data.Count}");
-}
-```
-
-For successful statements, `Messages` often contains human-readable execution notes such as row counts or table/database messages.
-
-```csharp
-QueryResult result = db.Execute("""
-INSERT INTO Users (Id, Name)
-VALUES (1, 'Ada');
-""")[0];
-
-foreach (string message in result.Messages)
-{
-    Console.WriteLine(message);
-}
-```
-
-For SELECT queries, use `Fields` to inspect the returned column order and `Data` to read row dictionaries.
-
-```csharp
-QueryResult result = db.Execute("""
-SELECT Id, Name
-FROM Users
-ORDER BY Id ASC;
-""")[0];
-
-Console.WriteLine(string.Join(", ", result.Fields));
-
-foreach (Dictionary<string, object?> row in result.Data)
-{
-    Console.WriteLine($"{row["Id"]}: {row["Name"]}");
-}
-```
-
-When using the Entity Framework bridge, unsupported query patterns can surface as typed EF integration exceptions. Keep the query expression and exception message together in logs so unsupported operators are easy to diagnose.
-
-```csharp
-try
-{
-    List<User> users = ctx.QueryFromDataVo<User>(query => query
-        .Where(user => user.IsActive)
-        .OrderBy(user => user.Id)
-        .Take(10));
-}
-catch (Exception ex)
-{
-    logger.LogError(ex, "DataVo EF query pattern was not supported");
-    throw;
-}
-```
-
-For v0.1, do not build application logic around stable numeric error codes. Prefer checking `IsError`, logging `Messages`, and keeping the SQL statement and storage configuration with the diagnostic record.
-
-```csharp
-try
-{
-    List<QueryResult> results = db.Execute(sql);
-
-    foreach (QueryResult result in results.Where(static r => r.IsError))
-    {
-        logger.LogError("DataVo query failed: {Messages}", string.Join("; ", result.Messages));
+        total += row.GetFloat(health);
     }
 }
-catch (Exception ex)
-{
-    logger.LogError(ex, "DataVo integration call threw an exception");
-    throw;
-}
 ```
 
-## Error Handling Summary
+The same stream is available without a model type: `db.StreamRef("Players")`.
 
-Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.1.
+## Rules for `RowRef`
+
+- **A row is valid only inside the iteration that produced it.** The stream reuses its memory for the next page. Copy any value you need to keep.
+- **Spans follow the same rule.** `GetStringSpan` and `GetStringUtf8` return views into the row; copy the text out (for example `new string(span)`) if you need it after the loop body.
+- **Accessors require the column's own type**, with lossless widening (`INT` through `GetInt64`, `FLOAT` through `GetDouble`). Any other type throws `InvalidCastException`.
+- **A NULL cell throws `InvalidOperationException`.** Check `IsNull` first on nullable columns.
+- **Column indexes follow table order**, which is the order of `CREATE TABLE` or of the properties of a `[DataVoTable]` model.
+
+## How a pass behaves
+
+- Rows are read 1,024 at a time. The read lock is held only while a page is copied out of storage, so a slow loop body never blocks writers.
+- A pass sees every row that existed for the whole pass exactly once. A row written or deleted during the pass may or may not be seen.
+- A schema change to the table during a pass stops it with `InvalidOperationException`.
+- Inside an explicit transaction the stream reads through the query engine so it sees the transaction's own writes. **That path allocates.**
+
+## What "zero allocation" covers
+
+The claim is deliberately narrow, and the benchmarks are consistent with it:
+
+| Operation | Allocation |
+| --- | --- |
+| Full `RowRefStream` pass, after warm-up on that thread | 0 B |
+| Compiled `Count`, `Sum`, `Min`, `Max` over a filtered scan of 200,000 rows (see [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)) | 0 B per query, measured with BenchmarkDotNet's `MemoryDiagnoser` |
+| Point lookup into a `Player` on LSM storage | 144 B (the row itself) |
+| Point lookup into a `Player` on in-memory storage | 1,008 B, more than SQLite's 608 B |
+| A `RowRefStream` pass inside a transaction | Allocates |
+
+The numbers come from the [Benchmark Results](/manual/performance/benchmarks). Zero allocation applies to scans over `RowRef`, not to every API: building a `Player` per row allocates a `Player` per row.
+
+## Native AOT
+
+Nothing here uses reflection or code generation at run time. `DataVo.Core` builds with `IsAotCompatible` enabled and the IL trim and AOT diagnostics treated as errors, so a regression fails the build. See [Native AOT Deployment](/manual/client-interfaces/native-aot).
+
+## Related
+
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)
+- [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
+- [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators)
 
 ---
 
-# AI Access And MCP
+# Compiled Scan Kernels
 
-> Source route: /manual/reference/ai-access
-> Source file: manual/reference/ai-access.md
+> Source route: /manual/internals/compiled-scan-kernels
+> Source file: manual/internals/compiled-scan-kernels.md
 
-DataVo publishes an AI-readable version of the manual alongside the VitePress site. The export includes only curated public manual pages. It does not expose generated API pages, architecture notes, audit notes, or internal planning documents.
+A typed table query such as `db.Table<Player>().Where(...).Count()` does not build an expression tree and does not interpret a predicate per row. The DataVo source generator reads the lambda while your project builds and replaces the call with generated code. For conditions over fixed-width columns, that generated code is a scan kernel that tests stored bytes in place.
 
-When the docs site is deployed, AI tools can start with `llms.txt`.
+This page describes how that works, what shapes are compiled, and what happens when a shape is not.
 
-```text
-https://<docs-host>/llms.txt
+## Pipeline
+
+```mermaid
+flowchart LR
+  Src["C#: players.Where(min, static (p, m) => p.Level >= m).Count()"]
+  Src --> Analyzer["Roslyn incremental generator<br/>(DataVo.Generators)"]
+  Analyzer --> Emitter["Emitter"]
+  Emitter --> Intercept["Interceptor method<br/>[InterceptsLocation] at the call site"]
+  Intercept --> Kernel["Condition struct<br/>(fixed-offset byte and cell tests)"]
+  Kernel --> Scan["Storage engine row loop<br/>(In-Memory, LSM, Disk)"]
 ```
 
-For tools that need the whole public manual in one file, use `llms-full.txt`.
+1. **Analyze.** The incremental generator finds `DataVoTable<T>` calls and parses each lambda. Only the pieces that can be expressed without running code are accepted: comparisons, boolean tests, null tests, `&&`, `||` and parentheses.
+2. **Emit.** For each call site it writes an interceptor in the `DataVo.Generated` namespace, marked with `[InterceptsLocation]`, so the compiler routes that exact call to generated code. The emitted code uses members within C# 9.
+3. **Compile the condition.** When the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns, the generator also writes it as a struct. The storage scan calls that struct for each row, where the row is stored.
+4. **Run.** The scan is generic over the condition struct all the way into the storage engine's row loop, so no delegate is called per row.
 
-```text
-https://<docs-host>/llms-full.txt
+Nothing is reflected over or compiled at run time, which is why these calls are safe under Native AOT.
+
+## What the kernel does
+
+When every column up to the last one the query reads has a fixed width (`int`, `long`, `float`, `double`, `bool`, `Guid`, dates), values sit at the same byte offset in every row whose leading cells are all present. The condition is then compiled in a form that reads stored bytes at those offsets. Offsets are worked out once per scan, no row view is built, and there is no branch between the condition's tests.
+
+Each row is first checked against that layout by its leading null flags. A row that differs, such as one holding a NULL in a leading column, is tested the general way, so results are identical. In-memory tables are read the same way from their typed cells.
+
+Put fixed-width columns before text columns in a model to get this path. A condition on a column that follows a `string` still runs in the scan, through the general reader.
+
+## Aggregates
+
+| Call | Compiled scan | Notes |
+| --- | --- | --- |
+| `Count()`, `Any()` | Yes, for conditions on unindexed fixed-width columns | No model objects are built. |
+| `Sum(selector)` | Yes, when the selector is one non-nullable column of its own type | `int`, `long`, `float`, `double`. The total stays in the scan's own variables. Integer overflow throws `OverflowException`. |
+| `Min(selector)`, `Max(selector)` | Yes, when the selector is one `int`, `long`, `float`, `double`, `DataVoDate` or `DateOnly` column | Null values are skipped. `NaN` orders below every number. |
+
+Any other selector (`p => p.Gold * 2`, a cast, a text column) runs as written over the rows and allocates accordingly.
+
+```csharp
+long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold);
+long poorest = db.Table<Player>().Where(static p => p.IsActive).Min(static p => p.Gold);
 ```
 
-For tools that prefer structured discovery, use the JSON index. Each entry points to the canonical Markdown export for a public manual page.
+Inside a transaction the rows are streamed instead of read in place, so the result includes the transaction's own writes and the call allocates.
 
-```text
-https://<docs-host>/ai/index.json
-```
+## What is measured
 
-A single page is exported as Markdown under `/ai/pages/...`.
+On the [Benchmark Results](/manual/performance/benchmarks) (200,000 rows, half of them matching, one local run), the compiled aggregates allocate 0 B per query, against 504 B per query for SQLite and 1,137 to 1,169 B for DuckDB through ADO.NET. On file-backed storage DataVo's aggregates run 2.3 to 2.6 times faster than SQLite's. DuckDB, a multi-threaded column store, is faster than DataVo on these aggregates. Read the [Benchmark Results](/manual/performance/benchmarks) for the full context, including which numbers vary.
 
-```text
-https://<docs-host>/ai/pages/manual/tutorial/quickstart.md
-```
+One open item is documented honestly there: in memory, rows inserted through the typed batch API are kept as typed cells, and the time to scan them depends on which cells a query touches. The same queries over rows inserted through SQL, which are kept as stored bytes, are faster.
 
-Every manual page also has a `Copy page for AI` button. It copies the canonical Markdown export, not the rendered HTML. That makes it suitable for pasting into an assistant, an issue, or a retrieval test.
+## Not compiled
 
-For local MCP clients, clone the repository and run the stdio server from the `docs` directory.
+A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
 
-```bash
-cd docs
-npm run docs:ai
-npm run mcp
-```
+The full table of supported lambda shapes and diagnostics is in [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators#what-is-compiled).
 
-The MCP server exposes only public manual pages. If a client asks for an internal architecture file, generated API page, or audit document, the server returns an access-denied/not-found response.
+## Related
 
-```text
-get_doc("/manual/tutorial/quickstart")
-  -> public Markdown
-
-get_doc("architecture/index-manager.md")
-  -> Access Denied
-```
-
-GitHub Pages can host the static AI docs and MCP discovery files, but it cannot run the stdio MCP server process. Hosted discovery JSON is still useful because it tells tools where the public docs live and how the local MCP server is intended to be started.
-
-```text
-https://<docs-host>/mcp/datavo-docs.json
-https://<docs-host>/mcp/remote-docs.json
-```
-
-## AI Access Support
-
-Supported endpoints and actions: `/llms.txt`, `/llms-full.txt`, `/ai/index.json`, `/ai/pages/<route>.md`, the `Copy page for AI` action, a local stdio MCP server (`npm run mcp`), and generated hosted-MCP discovery JSON under `/mcp/`. Raw internal docs (architecture, audit, generated API, and source folders) are intentionally **not** exported, and a stdio MCP process **cannot** run directly on static GitHub Pages hosting.
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)
+- [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
+- [Storage Modes](/manual/storage-engine/storage-modes)
 
 ---
 
@@ -3141,6 +3632,62 @@ The charts below summarize the sqlite-vec-enabled Linux rerun: vector total time
 | SQLite (WAL,normal) | 1,779.351 | 58.405 | 0.633 | 629.039 |
 | LiteDB | 6,891.179 | 154.461 | 1.342 | 15,158.796 |
 
+## BenchmarkDotNet Suite: DataVo, SQLite And DuckDB - November 12, 2026
+
+`benchmarks/DataVo.Benchmarks` is a [BenchmarkDotNet](https://benchmarkdotnet.org) suite that runs the same `players` table and the same questions through DataVo, SQLite (`Microsoft.Data.Sqlite` 10.0.0) and DuckDB (`DuckDB.NET` 1.5.3). Its [README](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/benchmarks/DataVo.Benchmarks/README.md) lists what each benchmark does and how each engine is configured.
+
+```bash
+dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
+```
+
+The numbers below are one local run: BenchmarkDotNet 0.15.8, .NET 10.0.3, Apple M4 Pro, macOS 26.3. "Memory" is DataVo's in-memory engine, SQLite `:memory:` and DuckDB `:memory:`. "File" is DataVo's LSM engine, SQLite in WAL mode with `synchronous=NORMAL`, and a DuckDB database file. Before timing, every benchmark checks that the engines return the same answer.
+
+DuckDB appears twice. "DuckDB" uses its default of one thread per core. "DuckDB, 1 thread" is a separate database opened with `SET threads = 1`, which is how DataVo and SQLite run: one thread per query.
+
+### One Aggregate Over `WHERE Level >= @min`
+
+200,000 rows, half of them match. DataVo runs its compiled LINQ query (`Where(...).Count()`, `.Sum()`, `.Min()`, `.Max()`); SQLite and DuckDB run a statement prepared once. Mean time per query in microseconds. DataVo allocates nothing per query, SQLite 504 bytes, DuckDB about 1,150 bytes.
+
+| Query | Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `COUNT(*)` | Memory | 419 | 3,664 | 138 | 183 |
+| `SUM(Gold)` | Memory | 510 | 4,731 | 204 | 225 |
+| `MIN(Gold)` | Memory | 510 | 4,566 | 199 | 240 |
+| `MAX(Ratio)` | Memory | 507 | 4,973 | 418 | 384 |
+| `COUNT(*)` | File | 2,012 | 4,940 | 245 | 290 |
+| `SUM(Gold)` | File | 2,137 | 5,596 | 366 | 320 |
+| `MIN(Gold)` | File | 2,172 | 5,449 | 358 | 331 |
+| `MAX(Ratio)` | File | 2,429 | 5,842 | 711 | 603 |
+
+How to read it:
+
+- In memory DataVo is 9 to 10 times faster than SQLite. Held to one thread, DuckDB, a column store, is still 1.2 to 3 times faster than DataVo.
+- On file-backed storage DataVo is 2.4 to 2.6 times faster than SQLite and 3.4 to 8 times slower than DuckDB. What remains there is the LSM's row iteration, not the query.
+- At this size DuckDB gains little from its extra threads: the one-thread numbers are within about 20% of the default ones, in either direction.
+- DataVo's in-memory numbers come from row images: the first compiled scan of an in-memory table writes each row as a short fixed-length record, and scans read those in order instead of following each row's objects. Before that change the same four queries took 1.3 to 4.0 ms, depending on which columns they read.
+
+### One Row By Primary Key
+
+100,000 rows, keys looked up in shuffled order, the row read into a `Player`. Mean time per lookup in nanoseconds.
+
+| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory | 529 | 716 | 73,657 | 81,069 | 1,008 B | 608 B | 2,144 B |
+| File | 218 | 1,613 | 73,418 | 80,152 | 144 B | 608 B | 2,144 B |
+
+DataVo is 1.4 times faster than SQLite in memory and 7.4 times faster on file-backed storage. DuckDB is not built for single-row lookups. DataVo's in-memory lookup allocates more than its LSM lookup and more than SQLite's.
+
+### Loading 100,000 Rows
+
+Into an empty table, rows built inside the measurement: DataVo's typed batch insert, a prepared SQLite `INSERT` in one transaction, DuckDB's appender. Mean of 10 runs in milliseconds, with the standard deviation, which is large for this benchmark.
+
+| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory | 35.0 ± 7.4 | 63.6 ± 0.7 | 26.6 ± 6.3 | 29.5 ± 6.7 | 55 MB | 94 MB | 19 MB |
+| File | 84.3 ± 16.9 | 77.8 ± 28.0 | 28.5 ± 5.6 | 28.7 ± 5.7 | 62 MB | 94 MB | 19 MB |
+
+In memory DataVo loads 1.8 times faster than SQLite and somewhat slower than DuckDB, within the noise. On file-backed storage DataVo and SQLite are within each other's noise, and DuckDB is about 3 times faster than both.
+
 ## Responsible Interpretation
 
 DataVo's strongest current evidence is workload-specific: allocation-controlled typed rows, source-generated access paths, LSM write paths, and vector allocation behavior. The relaxed LSM results should not be presented as equivalent to strict fsync durability. SQLite and DuckDB remain mature engines with broad SQL support, sophisticated optimizers, and production hardening far beyond a v0.1 alpha embedded engine.
@@ -3283,6 +3830,47 @@ The space and recovery workload measures insert time, on-disk size, recovery tim
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario space-and-recovery --records 1000000 --format markdown
 ```
 
+## Arena Live Views cross-engine matrix
+
+The relational arena matrix measures three demanded live views after every write batch. It is separate from vector search: neither the Unity NPC-memory demo nor the desktop `vector-search` scenario belongs in this matrix. All raw JSON paths written by the commands below are part of the result.
+
+### Desktop .NET lane
+
+The desktop .NET table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Run the fixed profiles serially and choose output directories outside tracked source files:
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile gameplay --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-gameplay --format markdown
+
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-ivm-stress --format markdown
+```
+
+### Unity macOS IL2CPP lane
+
+The Unity table compares only DataVo reactive, DataVo polling, and macOS system SQLite in IL2CPP. The runner builds once, launches seven fresh Player processes for each engine/profile pair, preserves each raw JSON path, and gives every Player process a 120-second hard limit. A timeout, failed repetition, missing engine, or hash mismatch fails the command.
+
+```bash
+bash scripts/run-unity-macos-il2cpp-arena-cross-engine.sh
+```
+
+do not compare Unity IL2CPP values directly with desktop .NET values
+
+The commands are reproduction gates, not a claim that every invocation has already passed. Interpret a lane only from its completed artifacts: seven runs per engine/profile, the median total time, within-run percentiles, and identical canonical leaderboard, team-aggregate, and zone-inventory hashes for a profile.
+
+## Unity NPC Memory Arena
+
+On macOS with Unity 6000.5.4f1 and the matching `mac-il2cpp` module installed, run the Editor checks and the actual Medium-stripping IL2CPP Player proof from the repository root.
+
+```bash
+bash scripts/run-unity-arena-editor-tests.sh
+bash scripts/run-unity-macos-il2cpp-arena.sh
+```
+
+The Player script builds once, runs deterministic reactive and polling modes separately, writes their JSON reports under Unity's persistent-data directory, and requires their final leaderboard and aggregate checksums to match. The result compares DataVo incremental maintained views against full-query polling with the same DataVo data and SQL. It is not a DataVo-versus-SQLite benchmark; interpret it with its recorded seed, tick count, and Unity backend.
+
 Record the environment with every run. At minimum, capture the commit SHA, OS, CPU, .NET SDK, storage device, native SQLite extension path, storage mode, and durability setting.
 
 ```bash
@@ -3316,5 +3904,449 @@ The Linux and Windows measurements in the benchmark results come from the GitHub
 ## Reproduction Support
 
 All six scenarios above are reproducible from the documented commands: flat CRUD (in-process insert and point lookup), disk CRUD WAL (with strict/relaxed durability comparisons), vector search (10,000 vectors, 1536 dimensions, 100 queries, top-10), thread scaling (1, 2, 4, 8, 16, and 32 threads), YCSB mixed (100,000 records mixing reads and updates), and space-and-recovery (disk footprint and recovery). A long-term public CI performance gate is planned but not yet in place.
+
+---
+
+# Configuration Reference
+
+> Source route: /manual/reference/configuration
+> Source file: manual/reference/configuration.md
+
+DataVo configuration starts with `DataVoConfig`. Most applications only need to choose a storage mode, a path for persisted data, and a durability setting.
+
+For tests and examples, use in-memory storage. It keeps the database inside the process and disappears when the context is disposed.
+
+```csharp
+using DataVo.Core;
+using DataVo.Core.StorageEngine.Config;
+
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.InMemory
+});
+```
+
+For simple persistence, use disk mode and choose a storage path. WAL is enabled by default for disk mode unless explicitly overridden.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Disk,
+    DiskStoragePath = "./datavo_data",
+    WalEnabled = true
+});
+```
+
+If a disk-mode workload needs stronger flush behavior, enable synchronous disk writes. This is slower, but it is the safer choice when the application cannot tolerate buffered writes being lost on a power failure.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Disk,
+    DiskStoragePath = "./datavo_data",
+    WalEnabled = true,
+    SyncDiskWrites = true
+});
+```
+
+For higher-throughput persisted workloads, use LSM mode. Strict fsync is the conservative durability default and the right starting point for important data.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Lsm,
+    DiskStoragePath = "./datavo_lsm_data",
+    LsmStrictFsync = true
+});
+```
+
+Relaxed LSM mode is a performance setting, not the same durability contract. Use it for caches, rebuildable data, or benchmark ceilings.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Lsm,
+    DiskStoragePath = "./datavo_lsm_cache",
+    LsmStrictFsync = false
+});
+```
+
+Lock acquisition has a timeout. The default is 30 seconds. Use a shorter timeout in tests when you want lock contention to fail quickly.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.InMemory,
+    LockAcquireTimeoutMs = 5000
+});
+```
+
+Planner and vector knobs are available for advanced experiments. Most users should keep the defaults until they are investigating a specific query shape.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Lsm,
+    DiskStoragePath = "./datavo_lsm_data",
+    EnableVectorPredicateFastPath = true,
+    VectorPredicateFastPathMinRows = 128,
+    VectorPredicateFastPathCandidateMultiplier = 3
+});
+```
+
+Volcano execution settings exist but should be treated as advanced planner controls in v0.1. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.InMemory,
+    EnableVolcanoExecution = false,
+    EnableVolcanoSpillGuardrails = true
+});
+```
+
+## Configuration Support
+
+Supported settings: `StorageMode.InMemory`, `StorageMode.Disk`, and `StorageMode.Lsm`; `DiskStoragePath`; `WalEnabled` (on by default for disk mode); `SyncDiskWrites`; `LsmStrictFsync`; `LockAcquireTimeoutMs` (default 30000 ms, with `-1` waiting indefinitely); and vector predicate fast-path knobs. Volcano planner knobs exist for limited planner experiments but are planned, not the default public execution path.
+
+---
+
+# Limits
+
+> Source route: /manual/reference/limits
+> Source file: manual/reference/limits.md
+
+DataVo v0.1 Alpha is an embedded engine preview, so its limits are part of the product contract. The safest way to evaluate it is to keep the database owned by one application process, validate the exact schema and query shapes you need, and treat storage files as alpha artifacts.
+
+The intended deployment shape is in-process embedding.
+
+```csharp
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.Lsm,
+    DiskStoragePath = "./app_data",
+    LsmStrictFsync = true
+});
+```
+
+Do not point multiple independent processes at the same writable database directory. DataVo v0.1 does not document a cross-process concurrency contract.
+
+```text
+Supported:
+  one application process
+  -> one DataVoContext lifecycle
+  -> one writable database directory
+
+Not supported:
+  process A -> ./shared_data
+  process B -> ./shared_data
+```
+
+Do not treat alpha storage files as a stable long-term format. For important evaluations, keep seed data or import scripts so you can rebuild after an engine change.
+
+```sql
+CREATE TABLE SeedUsers (
+  Id INT PRIMARY KEY,
+  Name VARCHAR(80)
+);
+
+INSERT INTO SeedUsers (Id, Name) VALUES (1, 'Ada');
+INSERT INTO SeedUsers (Id, Name) VALUES (2, 'Grace');
+```
+
+Tooling is also limited. DBeaver, DataGrip, and pgAdmin expect a client/server protocol and catalog metadata. DataVo v0.1 is embedded, so those tools cannot connect directly.
+
+```text
+Future shape:
+  DBeaver/DataGrip/pgAdmin
+  -> PostgreSQL wire protocol subset
+  -> DataVo.Server
+  -> DataVo storage
+```
+
+Vector dimensions are fixed at the column level. If a table declares `VECTOR(1536)`, application code must insert vectors with that dimension.
+
+```sql
+CREATE TABLE Documents (
+  Id INT PRIMARY KEY,
+  Embedding VECTOR(1536)
+);
+```
+
+The LSM engine uses a 32 MB active MemTable flush threshold internally. That is an engine behavior in v0.1, not a public tuning knob.
+
+```text
+active MemTable grows
+  -> crosses 32 MB
+  -> generation freezes
+  -> new MemTable accepts writes
+  -> background flush writes SSTable
+```
+
+## v0.1 Limits Summary
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Embedded in-process deployment | Supported | No standalone server is required for normal use. |
+| Fixed vector dimensions | Supported | Dimension is declared with `VECTOR(n)`. |
+| Internal 32 MB LSM MemTable flush threshold | Supported | Present in the engine but not exposed as a public tuning setting. |
+| Multi-process writes to one database directory | Not Supported | Do not share one writable DataVo directory across independent processes. |
+| Stable alpha storage format | Not Supported | v0.1 files may need migration or rebuild after engine changes. |
+| PostgreSQL-wire clients | Not Supported | DBeaver, DataGrip, and pgAdmin need future `DataVo.Server` work. |
+| Cloud/server administration model | Not Supported | No server roles, replication daemon, backup daemon, or HA system. |
+| Large analytical optimizer parity | Not Supported | Planner work is early and controlled by configuration. |
+
+---
+
+# Unsupported Features
+
+> Source route: /manual/reference/unsupported-features
+> Source file: manual/reference/unsupported-features.md
+
+This page exists so early users do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable in v0.1 Alpha even if related internal work exists.
+
+DataVo is not PostgreSQL-compatible in v0.1. You can write SQL, but it is DataVo's SQL dialect.
+
+```sql
+-- Supported DataVo-style vector query:
+SELECT Id, Label, Emb <=> '[1,0,0]' AS distance
+FROM Embeddings
+ORDER BY distance ASC
+LIMIT 5;
+```
+
+PostgreSQL system catalogs are not present. Tools that expect `pg_class`, `pg_attribute`, or PostgreSQL authentication cannot connect directly to the embedded engine.
+
+```sql
+-- Not a supported v0.1 DataVo catalog workflow:
+SELECT relname
+FROM pg_class
+WHERE relkind = 'r';
+```
+
+EF Core support is an early bridge, not a full provider. Simple mapped `DbSet` workflows are useful, but migrations and advanced provider behavior are out of scope.
+
+```csharp
+// Supported direction: simple mapped entity query.
+List<User> users = ctx.Users
+    .Where(user => user.IsActive)
+    .ToList();
+
+// Not supported as a v0.1 claim: full migration lifecycle.
+// dotnet ef migrations add InitialCreate
+// dotnet ef database update
+```
+
+DataVo has transaction primitives, but it does not claim full serializable isolation for arbitrary multi-row predicates. Design alpha evaluations around the documented isolation contract.
+
+```sql
+BEGIN TRANSACTION;
+
+SELECT Id, Name
+FROM Users
+WHERE IsActive = true;
+
+-- v0.1 does not claim complete phantom-read prevention
+-- for arbitrary predicate ranges.
+
+COMMIT;
+```
+
+There is no stored procedure or trigger runtime in v0.1. Keep application logic in application code.
+
+```sql
+-- Not supported in v0.1:
+CREATE TRIGGER update_timestamp
+BEFORE UPDATE ON Users
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+```
+
+Replication and high availability are also out of scope. DataVo's current product shape is embedded local storage.
+
+```text
+Supported v0.1 shape:
+  application -> DataVoContext -> local storage
+
+Not supported v0.1 shape:
+  primary server -> replica server -> failover orchestration
+```
+
+## Unsupported Features Summary
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol in v0.1. |
+| PostgreSQL system catalogs | Not Supported | No `pg_class`, `pg_attribute`, or related catalog compatibility layer. |
+| EF Core migrations | Not Supported | No migration scaffolding, diffing, or apply pipeline. |
+| EF Core shadow properties | Not Supported | The bridge expects explicit mapped CLR properties. |
+| Complex EF LINQ joins | Not Supported | Broad join translation is outside the v0.1 claim. |
+| Multi-row serializability | Not Supported | DataVo does not claim serializable isolation for arbitrary multi-row predicates. |
+| Phantom-read prevention | Not Supported | No public predicate-range locking guarantee. |
+| Stored procedures | Not Supported | No procedural SQL runtime. |
+| Triggers | Not Supported | No trigger system. |
+| Replication/high availability | Not Supported | Out of scope for embedded v0.1. |
+| PostgreSQL-like role administration | Not Supported | Authorization settings exist, but no PostgreSQL role system is documented for v0.1. |
+
+---
+
+# Error Handling
+
+> Source route: /manual/reference/error-handling
+> Source file: manual/reference/error-handling.md
+
+The general SQL API reports failures through `QueryResult`. A result can contain rows, messages, and an `IsError` flag. Application code should check the flag before assuming data is present.
+
+```csharp
+using DataVo.Core.Contracts.Results;
+
+List<QueryResult> results = db.Execute("SELECT * FROM MissingTable");
+
+foreach (QueryResult result in results)
+{
+    if (result.IsError)
+    {
+        Console.Error.WriteLine(string.Join(Environment.NewLine, result.Messages));
+        continue;
+    }
+
+    Console.WriteLine($"Rows returned: {result.Data.Count}");
+}
+```
+
+For successful statements, `Messages` often contains human-readable execution notes such as row counts or table/database messages.
+
+```csharp
+QueryResult result = db.Execute("""
+INSERT INTO Users (Id, Name)
+VALUES (1, 'Ada');
+""")[0];
+
+foreach (string message in result.Messages)
+{
+    Console.WriteLine(message);
+}
+```
+
+For SELECT queries, use `Fields` to inspect the returned column order and `Data` to read row dictionaries.
+
+```csharp
+QueryResult result = db.Execute("""
+SELECT Id, Name
+FROM Users
+ORDER BY Id ASC;
+""")[0];
+
+Console.WriteLine(string.Join(", ", result.Fields));
+
+foreach (Dictionary<string, object?> row in result.Data)
+{
+    Console.WriteLine($"{row["Id"]}: {row["Name"]}");
+}
+```
+
+When using the Entity Framework bridge, unsupported query patterns can surface as typed EF integration exceptions. Keep the query expression and exception message together in logs so unsupported operators are easy to diagnose.
+
+```csharp
+try
+{
+    List<User> users = ctx.QueryFromDataVo<User>(query => query
+        .Where(user => user.IsActive)
+        .OrderBy(user => user.Id)
+        .Take(10));
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "DataVo EF query pattern was not supported");
+    throw;
+}
+```
+
+For v0.1, do not build application logic around stable numeric error codes. Prefer checking `IsError`, logging `Messages`, and keeping the SQL statement and storage configuration with the diagnostic record.
+
+```csharp
+try
+{
+    List<QueryResult> results = db.Execute(sql);
+
+    foreach (QueryResult result in results.Where(static r => r.IsError))
+    {
+        logger.LogError("DataVo query failed: {Messages}", string.Join("; ", result.Messages));
+    }
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "DataVo integration call threw an exception");
+    throw;
+}
+```
+
+## Error Handling Summary
+
+Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.1.
+
+---
+
+# AI Access And MCP
+
+> Source route: /manual/reference/ai-access
+> Source file: manual/reference/ai-access.md
+
+DataVo publishes an AI-readable version of the manual alongside the VitePress site. The export includes only curated public manual pages. It does not expose generated API pages, architecture notes, audit notes, or internal planning documents.
+
+When the docs site is deployed, AI tools can start with `llms.txt`.
+
+```text
+https://<docs-host>/llms.txt
+```
+
+For tools that need the whole public manual in one file, use `llms-full.txt`.
+
+```text
+https://<docs-host>/llms-full.txt
+```
+
+For tools that prefer structured discovery, use the JSON index. Each entry points to the canonical Markdown export for a public manual page.
+
+```text
+https://<docs-host>/ai/index.json
+```
+
+A single page is exported as Markdown under `/ai/pages/...`.
+
+```text
+https://<docs-host>/ai/pages/manual/tutorial/quickstart.md
+```
+
+Every manual page also has a `Copy page for AI` button. It copies the canonical Markdown export, not the rendered HTML. That makes it suitable for pasting into an assistant, an issue, or a retrieval test.
+
+For local MCP clients, clone the repository and run the stdio server from the `docs` directory.
+
+```bash
+cd docs
+npm run docs:ai
+npm run mcp
+```
+
+The MCP server exposes only public manual pages. If a client asks for an internal architecture file, generated API page, or audit document, the server returns an access-denied/not-found response.
+
+```text
+get_doc("/manual/tutorial/quickstart")
+  -> public Markdown
+
+get_doc("architecture/index-manager.md")
+  -> Access Denied
+```
+
+GitHub Pages can host the static AI docs and MCP discovery files, but it cannot run the stdio MCP server process. Hosted discovery JSON is still useful because it tells tools where the public docs live and how the local MCP server is intended to be started.
+
+```text
+https://<docs-host>/mcp/datavo-docs.json
+https://<docs-host>/mcp/remote-docs.json
+```
+
+## AI Access Support
+
+Supported endpoints and actions: `/llms.txt`, `/llms-full.txt`, `/ai/index.json`, `/ai/pages/<route>.md`, the `Copy page for AI` action, a local stdio MCP server (`npm run mcp`), and generated hosted-MCP discovery JSON under `/mcp/`. Raw internal docs (architecture, audit, generated API, and source folders) are intentionally **not** exported, and a stdio MCP process **cannot** run directly on static GitHub Pages hosting.
 
 ---

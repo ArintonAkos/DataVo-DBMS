@@ -1,12 +1,18 @@
 {
   "name": "DataVo Documentation",
-  "generatedAt": "2026-07-19T13:38:07.234Z",
+  "generatedAt": "2026-11-12T07:53:19.689Z",
   "pages": [
     {
       "title": "What Is DataVo?",
       "route": "/manual/preface/what-is-datavo",
       "source": "manual/preface/what-is-datavo.md",
       "aiPath": "/ai/pages/manual/preface/what-is-datavo.md"
+    },
+    {
+      "title": "Project Status & Stability",
+      "route": "/manual/preface/project-status",
+      "source": "manual/preface/project-status.md",
+      "aiPath": "/ai/pages/manual/preface/project-status.md"
     },
     {
       "title": "v0.1 Alpha Scope",
@@ -21,6 +27,18 @@
       "aiPath": "/ai/pages/manual/preface/roadmap.md"
     },
     {
+      "title": "Installation & Packages",
+      "route": "/manual/getting-started/installation",
+      "source": "manual/getting-started/installation.md",
+      "aiPath": "/ai/pages/manual/getting-started/installation.md"
+    },
+    {
+      "title": "Choosing an Interface",
+      "route": "/manual/getting-started/choosing-an-interface",
+      "source": "manual/getting-started/choosing-an-interface.md",
+      "aiPath": "/ai/pages/manual/getting-started/choosing-an-interface.md"
+    },
+    {
       "title": "Quickstart",
       "route": "/manual/tutorial/quickstart",
       "source": "manual/tutorial/quickstart.md",
@@ -31,6 +49,12 @@
       "route": "/manual/tutorial/datavo-context",
       "source": "manual/tutorial/datavo-context.md",
       "aiPath": "/ai/pages/manual/tutorial/datavo-context.md"
+    },
+    {
+      "title": "ADO.NET & Dapper Tutorial",
+      "route": "/manual/tutorial/ado-net-and-dapper",
+      "source": "manual/tutorial/ado-net-and-dapper.md",
+      "aiPath": "/ai/pages/manual/tutorial/ado-net-and-dapper.md"
     },
     {
       "title": "Entity Framework Example",
@@ -117,6 +141,18 @@
       "aiPath": "/ai/pages/manual/client-interfaces/datavo-context-api.md"
     },
     {
+      "title": "ADO.NET Provider (DataVo.Data)",
+      "route": "/manual/client-interfaces/ado-net",
+      "source": "manual/client-interfaces/ado-net.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/ado-net.md"
+    },
+    {
+      "title": "Dapper",
+      "route": "/manual/client-interfaces/dapper",
+      "source": "manual/client-interfaces/dapper.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/dapper.md"
+    },
+    {
       "title": "Entity Framework Support",
       "route": "/manual/client-interfaces/entity-framework",
       "source": "manual/client-interfaces/entity-framework.md",
@@ -133,6 +169,36 @@
       "route": "/manual/client-interfaces/native-aot",
       "source": "manual/client-interfaces/native-aot.md",
       "aiPath": "/ai/pages/manual/client-interfaces/native-aot.md"
+    },
+    {
+      "title": "Zero-Allocation Row Model",
+      "route": "/manual/internals/zero-allocation-rows",
+      "source": "manual/internals/zero-allocation-rows.md",
+      "aiPath": "/ai/pages/manual/internals/zero-allocation-rows.md"
+    },
+    {
+      "title": "Compiled Scan Kernels",
+      "route": "/manual/internals/compiled-scan-kernels",
+      "source": "manual/internals/compiled-scan-kernels.md",
+      "aiPath": "/ai/pages/manual/internals/compiled-scan-kernels.md"
+    },
+    {
+      "title": "Benchmark Results",
+      "route": "/manual/performance/benchmarks",
+      "source": "manual/performance/benchmarks.md",
+      "aiPath": "/ai/pages/manual/performance/benchmarks.md"
+    },
+    {
+      "title": "Benchmark Methodology",
+      "route": "/manual/performance/methodology",
+      "source": "manual/performance/methodology.md",
+      "aiPath": "/ai/pages/manual/performance/methodology.md"
+    },
+    {
+      "title": "Reproducing Benchmarks",
+      "route": "/manual/performance/reproducing-benchmarks",
+      "source": "manual/performance/reproducing-benchmarks.md",
+      "aiPath": "/ai/pages/manual/performance/reproducing-benchmarks.md"
     },
     {
       "title": "Configuration Reference",
@@ -163,24 +229,6 @@
       "route": "/manual/reference/ai-access",
       "source": "manual/reference/ai-access.md",
       "aiPath": "/ai/pages/manual/reference/ai-access.md"
-    },
-    {
-      "title": "Benchmark Results",
-      "route": "/manual/performance/benchmarks",
-      "source": "manual/performance/benchmarks.md",
-      "aiPath": "/ai/pages/manual/performance/benchmarks.md"
-    },
-    {
-      "title": "Benchmark Methodology",
-      "route": "/manual/performance/methodology",
-      "source": "manual/performance/methodology.md",
-      "aiPath": "/ai/pages/manual/performance/methodology.md"
-    },
-    {
-      "title": "Reproducing Benchmarks",
-      "route": "/manual/performance/reproducing-benchmarks",
-      "source": "manual/performance/reproducing-benchmarks.md",
-      "aiPath": "/ai/pages/manual/performance/reproducing-benchmarks.md"
     }
   ]
 }

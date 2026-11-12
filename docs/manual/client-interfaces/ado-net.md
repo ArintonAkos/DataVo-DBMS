@@ -15,7 +15,7 @@ dotnet add package DataVo.Data --prerelease
 | `DbDataReader` | `DataVoDataReader` | Forward-only reader over the command's results. |
 | `DbTransaction` | `DataVoTransaction` | `Commit`, `Rollback` and savepoints. |
 | `DbParameter` | `DataVoParameter` | `AddWithValue` is available on `DataVoParameterCollection`. |
-| none | `DataVoConnectionStringBuilder` | Parses the [connection string](/manual/reference/connection-strings). |
+| none | `DataVoConnectionStringBuilder` | Parses the [connection string](/manual/reference/configuration). |
 | `Exception` | `DataVoException` | Carries `ErrorCode`, `Line` and `Column`. |
 
 ## Connect, create, insert, query
@@ -125,4 +125,4 @@ catch (DataVoException ex)
 
 - [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
 - [Dapper](/manual/client-interfaces/dapper)
-- [Connection Strings](/manual/reference/connection-strings)
+- [Configuration Reference](/manual/reference/configuration)

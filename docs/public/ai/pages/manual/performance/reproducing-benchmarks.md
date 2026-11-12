@@ -63,6 +63,47 @@ The space and recovery workload measures insert time, on-disk size, recovery tim
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario space-and-recovery --records 1000000 --format markdown
 ```
 
+## Arena Live Views cross-engine matrix
+
+The relational arena matrix measures three demanded live views after every write batch. It is separate from vector search: neither the Unity NPC-memory demo nor the desktop `vector-search` scenario belongs in this matrix. All raw JSON paths written by the commands below are part of the result.
+
+### Desktop .NET lane
+
+The desktop .NET table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Run the fixed profiles serially and choose output directories outside tracked source files:
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile gameplay --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-gameplay --format markdown
+
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
+  --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 \
+  --output /private/tmp/datavo-arena-ivm-stress --format markdown
+```
+
+### Unity macOS IL2CPP lane
+
+The Unity table compares only DataVo reactive, DataVo polling, and macOS system SQLite in IL2CPP. The runner builds once, launches seven fresh Player processes for each engine/profile pair, preserves each raw JSON path, and gives every Player process a 120-second hard limit. A timeout, failed repetition, missing engine, or hash mismatch fails the command.
+
+```bash
+bash scripts/run-unity-macos-il2cpp-arena-cross-engine.sh
+```
+
+do not compare Unity IL2CPP values directly with desktop .NET values
+
+The commands are reproduction gates, not a claim that every invocation has already passed. Interpret a lane only from its completed artifacts: seven runs per engine/profile, the median total time, within-run percentiles, and identical canonical leaderboard, team-aggregate, and zone-inventory hashes for a profile.
+
+## Unity NPC Memory Arena
+
+On macOS with Unity 6000.5.4f1 and the matching `mac-il2cpp` module installed, run the Editor checks and the actual Medium-stripping IL2CPP Player proof from the repository root.
+
+```bash
+bash scripts/run-unity-arena-editor-tests.sh
+bash scripts/run-unity-macos-il2cpp-arena.sh
+```
+
+The Player script builds once, runs deterministic reactive and polling modes separately, writes their JSON reports under Unity's persistent-data directory, and requires their final leaderboard and aggregate checksums to match. The result compares DataVo incremental maintained views against full-query polling with the same DataVo data and SQL. It is not a DataVo-versus-SQLite benchmark; interpret it with its recorded seed, tick count, and Unity backend.
+
 Record the environment with every run. At minimum, capture the commit SHA, OS, CPU, .NET SDK, storage device, native SQLite extension path, storage mode, and durability setting.
 
 ```bash

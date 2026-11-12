@@ -21,7 +21,7 @@ using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./player
 connection.Open();
 ```
 
-`StorageMode=Lsm` selects the LSM-Tree engine with strict fsync by default. `DataSource` is both the data directory and the database name. See [Connection Strings](/manual/reference/connection-strings).
+`StorageMode=Lsm` selects the LSM-Tree engine with strict fsync by default. `DataSource` is both the data directory and the database name. See [Configuration Reference](/manual/reference/configuration).
 
 ## 3. Create the schema
 

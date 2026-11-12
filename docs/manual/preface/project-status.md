@@ -8,7 +8,7 @@ DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete
 
 - The documented API surface and SQL dialect are the surface being verified for 0.2. Changes to it between release candidates are called out in the release notes.
 - Behavior outside the documented surface is not covered by that expectation. [Limits](/manual/reference/limits) and [Unsupported Features](/manual/reference/unsupported-features) list those boundaries.
-- Release candidates are published to nuget.org as prerelease packages. Add `--prerelease` when installing. See [Packages & Versioning](/manual/reference/packages).
+- Release candidates are published to nuget.org as prerelease packages. Add `--prerelease` when installing. See [Installation & Packages](/manual/getting-started/installation).
 - The on-disk storage format is not yet covered by a long-term compatibility guarantee. Keep a way to rebuild important data (an export, seed data or an import script) until a stable release states one.
 
 ## Subsystem status
@@ -22,12 +22,12 @@ DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete
 | Disk storage (paged) | Legacy | Kept for existing data. It receives no further durability work. Prefer LSM. |
 | Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
 | Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Compiled LINQ](/manual/client-interfaces/source-generators). Other shapes fall back to the interpreter. |
-| Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance. See [HNSW & SIMD](/manual/sql-language/hnsw-and-simd). |
+| Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance. See [Vector Search Syntax](/manual/sql-language/vector-search-syntax). |
 | ADO.NET provider (`DataVo.Data`) | Release candidate | Standard `System.Data.Common` types. See [ADO.NET Provider](/manual/client-interfaces/ado-net). |
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
 | Native AOT | Supported | `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers as errors. |
-| PostgreSQL replication (DataVo-Sync) | Separate product | Not part of the NuGet packages. See [Replication & CDC Overview](/manual/replication/overview). |
+| PostgreSQL replication (DataVo-Sync) | Separate product | Not part of the NuGet packages. Proprietary replication bridge to PostgreSQL. |
 | Unity | Evaluation target | See below. |
 
 ## Preview contracts

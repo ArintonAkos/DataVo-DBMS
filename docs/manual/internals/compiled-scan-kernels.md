@@ -50,7 +50,7 @@ Inside a transaction the rows are streamed instead of read in place, so the resu
 
 ## What is measured
 
-On the [BenchmarkDotNet suite](/manual/performance/benchmarkdotnet-suite) (200,000 rows, half of them matching, one local run), the compiled aggregates allocate 0 B per query, against 504 B per query for SQLite and 1,137 to 1,169 B for DuckDB through ADO.NET. On file-backed storage DataVo's aggregates run 2.3 to 2.6 times faster than SQLite's. DuckDB, a multi-threaded column store, is 4 to 20 times faster than DataVo on these queries. Read the [overview](/manual/performance/overview) for the full context, including which numbers vary.
+On the [Benchmark Results](/manual/performance/benchmarks) (200,000 rows, half of them matching, one local run), the compiled aggregates allocate 0 B per query, against 504 B per query for SQLite and 1,137 to 1,169 B for DuckDB through ADO.NET. On file-backed storage DataVo's aggregates run 2.3 to 2.6 times faster than SQLite's. DuckDB, a multi-threaded column store, is faster than DataVo on these aggregates. Read the [Benchmark Results](/manual/performance/benchmarks) for the full context, including which numbers vary.
 
 One open item is documented honestly there: in memory, rows inserted through the typed batch API are kept as typed cells, and the time to scan them depends on which cells a query touches. The same queries over rows inserted through SQL, which are kept as stored bytes, are faster.
 
@@ -64,4 +64,4 @@ The full table of supported lambda shapes and diagnostics is in [Compiled LINQ (
 
 - [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)
 - [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
-- [Architecture Overview](/manual/internals/overview)
+- [Storage Modes](/manual/storage-engine/storage-modes)

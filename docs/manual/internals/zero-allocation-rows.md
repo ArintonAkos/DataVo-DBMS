@@ -69,7 +69,7 @@ The claim is deliberately narrow, and the benchmarks are consistent with it:
 | Point lookup into a `Player` on in-memory storage | 1,008 B, more than SQLite's 608 B |
 | A `RowRefStream` pass inside a transaction | Allocates |
 
-The numbers come from the [BenchmarkDotNet suite](/manual/performance/benchmarkdotnet-suite). Zero allocation applies to scans over `RowRef`, not to every API: building a `Player` per row allocates a `Player` per row.
+The numbers come from the [Benchmark Results](/manual/performance/benchmarks). Zero allocation applies to scans over `RowRef`, not to every API: building a `Player` per row allocates a `Player` per row.
 
 ## Native AOT
 
@@ -78,5 +78,5 @@ Nothing here uses reflection or code generation at run time. `DataVo.Core` build
 ## Related
 
 - [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)
-- [Architecture Overview](/manual/internals/overview)
+- [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
 - [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators)

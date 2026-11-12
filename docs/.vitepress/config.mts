@@ -6,7 +6,7 @@ export default withMermaid(
     title: "DataVo",
     base: "/DataVo-DBMS/",
     description:
-      "C#-native embedded database documentation for DataVo v0.1 Alpha.",
+      "C#-native embedded database documentation for DataVo v0.2.0-rc.3.",
     cleanUrls: true,
     srcExclude: [
       "superpowers/**",
@@ -30,6 +30,7 @@ export default withMermaid(
       siteTitle: "DataVo",
       nav: [
         { text: "Home", link: "/" },
+        { text: "Get Started", link: "/manual/getting-started/installation" },
         { text: "Manual", link: "/manual/preface/what-is-datavo" },
         { text: "Quickstart", link: "/manual/tutorial/quickstart" },
         { text: "SQL", link: "/manual/sql-language/supported-sql" },
@@ -42,8 +43,17 @@ export default withMermaid(
           collapsed: false,
           items: [
             { text: "What Is DataVo?", link: "/manual/preface/what-is-datavo" },
+            { text: "Project Status & Scope", link: "/manual/preface/project-status" },
             { text: "v0.1 Alpha Scope", link: "/manual/preface/alpha-scope" },
             { text: "Roadmap", link: "/manual/preface/roadmap" },
+          ],
+        },
+        {
+          text: "Getting Started",
+          collapsed: false,
+          items: [
+            { text: "Installation & Packages", link: "/manual/getting-started/installation" },
+            { text: "Choosing an Interface", link: "/manual/getting-started/choosing-an-interface" },
           ],
         },
         {
@@ -52,6 +62,7 @@ export default withMermaid(
           items: [
             { text: "Quickstart", link: "/manual/tutorial/quickstart" },
             { text: "Using DataVoContext", link: "/manual/tutorial/datavo-context" },
+            { text: "ADO.NET & Dapper", link: "/manual/tutorial/ado-net-and-dapper" },
             { text: "Entity Framework Example", link: "/manual/tutorial/entity-framework-example" },
             { text: "Vector Search Example", link: "/manual/tutorial/vector-search-example" },
           ],
@@ -84,10 +95,28 @@ export default withMermaid(
           collapsed: true,
           items: [
             { text: "Connecting to DataVo", link: "/manual/client-interfaces/datavo-context-api" },
-            { text: "Error Handling", link: "/manual/client-interfaces/error-handling" },
+            { text: "ADO.NET Provider", link: "/manual/client-interfaces/ado-net" },
+            { text: "Dapper Support", link: "/manual/client-interfaces/dapper" },
             { text: "Entity Framework Support", link: "/manual/client-interfaces/entity-framework" },
             { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
             { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },
+          ],
+        },
+        {
+          text: "Internals",
+          collapsed: true,
+          items: [
+            { text: "Zero-Allocation Rows", link: "/manual/internals/zero-allocation-rows" },
+            { text: "Compiled Scan Kernels", link: "/manual/internals/compiled-scan-kernels" },
+          ],
+        },
+        {
+          text: "Performance",
+          collapsed: true,
+          items: [
+            { text: "Benchmark Results", link: "/manual/performance/benchmarks" },
+            { text: "Benchmark Methodology", link: "/manual/performance/methodology" },
+            { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
           ],
         },
         {
@@ -99,15 +128,6 @@ export default withMermaid(
             { text: "Unsupported Features", link: "/manual/reference/unsupported-features" },
             { text: "Error Handling", link: "/manual/reference/error-handling" },
             { text: "AI Access And MCP", link: "/manual/reference/ai-access" },
-          ],
-        },
-        {
-          text: "Performance",
-          collapsed: true,
-          items: [
-            { text: "Benchmark Results", link: "/manual/performance/benchmarks" },
-            { text: "Benchmark Methodology", link: "/manual/performance/methodology" },
-            { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
           ],
         },
       ],

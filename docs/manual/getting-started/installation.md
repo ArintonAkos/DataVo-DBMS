@@ -50,4 +50,4 @@ db.Execute("INSERT INTO T (Id) VALUES (1)");
 Console.WriteLine(db.Execute("SELECT Id FROM T")[0].Data.Count); // 1
 ```
 
-Continue with the [Quickstart](/manual/tutorial/quickstart), or pick an API in [Choosing an Interface](/manual/getting-started/choosing-an-interface). The full list of package versions and publishing is in [Packages & Versioning](/manual/reference/packages).
+Continue with the [Quickstart](/manual/tutorial/quickstart), or pick an API in [Choosing an Interface](/manual/getting-started/choosing-an-interface). See also [Project Status & Scope](/manual/preface/project-status).

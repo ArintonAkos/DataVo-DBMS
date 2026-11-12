@@ -14,6 +14,11 @@
       "markdown": "/ai/pages/manual/preface/what-is-datavo.md"
     },
     {
+      "title": "Project Status & Stability",
+      "route": "/manual/preface/project-status",
+      "markdown": "/ai/pages/manual/preface/project-status.md"
+    },
+    {
       "title": "v0.1 Alpha Scope",
       "route": "/manual/preface/alpha-scope",
       "markdown": "/ai/pages/manual/preface/alpha-scope.md"
@@ -24,6 +29,16 @@
       "markdown": "/ai/pages/manual/preface/roadmap.md"
     },
     {
+      "title": "Installation & Packages",
+      "route": "/manual/getting-started/installation",
+      "markdown": "/ai/pages/manual/getting-started/installation.md"
+    },
+    {
+      "title": "Choosing an Interface",
+      "route": "/manual/getting-started/choosing-an-interface",
+      "markdown": "/ai/pages/manual/getting-started/choosing-an-interface.md"
+    },
+    {
       "title": "Quickstart",
       "route": "/manual/tutorial/quickstart",
       "markdown": "/ai/pages/manual/tutorial/quickstart.md"
@@ -32,6 +47,11 @@
       "title": "Using DataVoContext",
       "route": "/manual/tutorial/datavo-context",
       "markdown": "/ai/pages/manual/tutorial/datavo-context.md"
+    },
+    {
+      "title": "ADO.NET & Dapper Tutorial",
+      "route": "/manual/tutorial/ado-net-and-dapper",
+      "markdown": "/ai/pages/manual/tutorial/ado-net-and-dapper.md"
     },
     {
       "title": "Entity Framework Example",
@@ -104,6 +124,16 @@
       "markdown": "/ai/pages/manual/client-interfaces/datavo-context-api.md"
     },
     {
+      "title": "ADO.NET Provider (DataVo.Data)",
+      "route": "/manual/client-interfaces/ado-net",
+      "markdown": "/ai/pages/manual/client-interfaces/ado-net.md"
+    },
+    {
+      "title": "Dapper",
+      "route": "/manual/client-interfaces/dapper",
+      "markdown": "/ai/pages/manual/client-interfaces/dapper.md"
+    },
+    {
       "title": "Entity Framework Support",
       "route": "/manual/client-interfaces/entity-framework",
       "markdown": "/ai/pages/manual/client-interfaces/entity-framework.md"
@@ -117,6 +147,31 @@
       "title": "Native AOT",
       "route": "/manual/client-interfaces/native-aot",
       "markdown": "/ai/pages/manual/client-interfaces/native-aot.md"
+    },
+    {
+      "title": "Zero-Allocation Row Model",
+      "route": "/manual/internals/zero-allocation-rows",
+      "markdown": "/ai/pages/manual/internals/zero-allocation-rows.md"
+    },
+    {
+      "title": "Compiled Scan Kernels",
+      "route": "/manual/internals/compiled-scan-kernels",
+      "markdown": "/ai/pages/manual/internals/compiled-scan-kernels.md"
+    },
+    {
+      "title": "Benchmark Results",
+      "route": "/manual/performance/benchmarks",
+      "markdown": "/ai/pages/manual/performance/benchmarks.md"
+    },
+    {
+      "title": "Benchmark Methodology",
+      "route": "/manual/performance/methodology",
+      "markdown": "/ai/pages/manual/performance/methodology.md"
+    },
+    {
+      "title": "Reproducing Benchmarks",
+      "route": "/manual/performance/reproducing-benchmarks",
+      "markdown": "/ai/pages/manual/performance/reproducing-benchmarks.md"
     },
     {
       "title": "Configuration Reference",
@@ -142,21 +197,6 @@
       "title": "AI Access And MCP",
       "route": "/manual/reference/ai-access",
       "markdown": "/ai/pages/manual/reference/ai-access.md"
-    },
-    {
-      "title": "Benchmark Results",
-      "route": "/manual/performance/benchmarks",
-      "markdown": "/ai/pages/manual/performance/benchmarks.md"
-    },
-    {
-      "title": "Benchmark Methodology",
-      "route": "/manual/performance/methodology",
-      "markdown": "/ai/pages/manual/performance/methodology.md"
-    },
-    {
-      "title": "Reproducing Benchmarks",
-      "route": "/manual/performance/reproducing-benchmarks",
-      "markdown": "/ai/pages/manual/performance/reproducing-benchmarks.md"
     }
   ]
 }

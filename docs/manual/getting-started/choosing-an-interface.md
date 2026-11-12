@@ -85,4 +85,4 @@ The compiled form reads the `Level` cell straight from the stored bytes and buil
 
 - [Installation & Packages](/manual/getting-started/installation)
 - [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
-- [Benchmarks overview](/manual/performance/overview), to see what each approach costs in practice.
+- [Benchmark Results](/manual/performance/benchmarks), to see what each approach costs in practice.

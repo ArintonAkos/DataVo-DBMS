@@ -530,6 +530,62 @@ The charts below summarize the sqlite-vec-enabled Linux rerun: vector total time
 | SQLite (WAL,normal) | 1,779.351 | 58.405 | 0.633 | 629.039 |
 | LiteDB | 6,891.179 | 154.461 | 1.342 | 15,158.796 |
 
+## BenchmarkDotNet Suite: DataVo, SQLite And DuckDB - November 12, 2026
+
+`benchmarks/DataVo.Benchmarks` is a [BenchmarkDotNet](https://benchmarkdotnet.org) suite that runs the same `players` table and the same questions through DataVo, SQLite (`Microsoft.Data.Sqlite` 10.0.0) and DuckDB (`DuckDB.NET` 1.5.3). Its [README](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/benchmarks/DataVo.Benchmarks/README.md) lists what each benchmark does and how each engine is configured.
+
+```bash
+dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
+```
+
+The numbers below are one local run: BenchmarkDotNet 0.15.8, .NET 10.0.3, Apple M4 Pro, macOS 26.3. "Memory" is DataVo's in-memory engine, SQLite `:memory:` and DuckDB `:memory:`. "File" is DataVo's LSM engine, SQLite in WAL mode with `synchronous=NORMAL`, and a DuckDB database file. Before timing, every benchmark checks that the engines return the same answer.
+
+DuckDB appears twice. "DuckDB" uses its default of one thread per core. "DuckDB, 1 thread" is a separate database opened with `SET threads = 1`, which is how DataVo and SQLite run: one thread per query.
+
+### One Aggregate Over `WHERE Level >= @min`
+
+200,000 rows, half of them match. DataVo runs its compiled LINQ query (`Where(...).Count()`, `.Sum()`, `.Min()`, `.Max()`); SQLite and DuckDB run a statement prepared once. Mean time per query in microseconds. DataVo allocates nothing per query, SQLite 504 bytes, DuckDB about 1,150 bytes.
+
+| Query | Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `COUNT(*)` | Memory | 419 | 3,664 | 138 | 183 |
+| `SUM(Gold)` | Memory | 510 | 4,731 | 204 | 225 |
+| `MIN(Gold)` | Memory | 510 | 4,566 | 199 | 240 |
+| `MAX(Ratio)` | Memory | 507 | 4,973 | 418 | 384 |
+| `COUNT(*)` | File | 2,012 | 4,940 | 245 | 290 |
+| `SUM(Gold)` | File | 2,137 | 5,596 | 366 | 320 |
+| `MIN(Gold)` | File | 2,172 | 5,449 | 358 | 331 |
+| `MAX(Ratio)` | File | 2,429 | 5,842 | 711 | 603 |
+
+How to read it:
+
+- In memory DataVo is 9 to 10 times faster than SQLite. Held to one thread, DuckDB, a column store, is still 1.2 to 3 times faster than DataVo.
+- On file-backed storage DataVo is 2.4 to 2.6 times faster than SQLite and 3.4 to 8 times slower than DuckDB. What remains there is the LSM's row iteration, not the query.
+- At this size DuckDB gains little from its extra threads: the one-thread numbers are within about 20% of the default ones, in either direction.
+- DataVo's in-memory numbers come from row images: the first compiled scan of an in-memory table writes each row as a short fixed-length record, and scans read those in order instead of following each row's objects. Before that change the same four queries took 1.3 to 4.0 ms, depending on which columns they read.
+
+### One Row By Primary Key
+
+100,000 rows, keys looked up in shuffled order, the row read into a `Player`. Mean time per lookup in nanoseconds.
+
+| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory | 529 | 716 | 73,657 | 81,069 | 1,008 B | 608 B | 2,144 B |
+| File | 218 | 1,613 | 73,418 | 80,152 | 144 B | 608 B | 2,144 B |
+
+DataVo is 1.4 times faster than SQLite in memory and 7.4 times faster on file-backed storage. DuckDB is not built for single-row lookups. DataVo's in-memory lookup allocates more than its LSM lookup and more than SQLite's.
+
+### Loading 100,000 Rows
+
+Into an empty table, rows built inside the measurement: DataVo's typed batch insert, a prepared SQLite `INSERT` in one transaction, DuckDB's appender. Mean of 10 runs in milliseconds, with the standard deviation, which is large for this benchmark.
+
+| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory | 35.0 ± 7.4 | 63.6 ± 0.7 | 26.6 ± 6.3 | 29.5 ± 6.7 | 55 MB | 94 MB | 19 MB |
+| File | 84.3 ± 16.9 | 77.8 ± 28.0 | 28.5 ± 5.6 | 28.7 ± 5.7 | 62 MB | 94 MB | 19 MB |
+
+In memory DataVo loads 1.8 times faster than SQLite and somewhat slower than DuckDB, within the noise. On file-backed storage DataVo and SQLite are within each other's noise, and DuckDB is about 3 times faster than both.
+
 ## Responsible Interpretation
 
 DataVo's strongest current evidence is workload-specific: allocation-controlled typed rows, source-generated access paths, LSM write paths, and vector allocation behavior. The relaxed LSM results should not be presented as equivalent to strict fsync durability. SQLite and DuckDB remain mature engines with broad SQL support, sophisticated optimizers, and production hardening far beyond a v0.1 alpha embedded engine.

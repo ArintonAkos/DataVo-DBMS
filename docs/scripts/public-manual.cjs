@@ -1,10 +1,15 @@
 const publicManualPages = [
   { title: "What Is DataVo?", source: "manual/preface/what-is-datavo.md" },
+  { title: "Project Status & Scope", source: "manual/preface/project-status.md" },
   { title: "v0.1 Alpha Scope", source: "manual/preface/alpha-scope.md" },
   { title: "Roadmap", source: "manual/preface/roadmap.md" },
 
+  { title: "Installation & Packages", source: "manual/getting-started/installation.md" },
+  { title: "Choosing an Interface", source: "manual/getting-started/choosing-an-interface.md" },
+
   { title: "Quickstart", source: "manual/tutorial/quickstart.md" },
   { title: "Using DataVoContext", source: "manual/tutorial/datavo-context.md" },
+  { title: "ADO.NET & Dapper", source: "manual/tutorial/ado-net-and-dapper.md" },
   { title: "Entity Framework Example", source: "manual/tutorial/entity-framework-example.md" },
   { title: "Vector Search Example", source: "manual/tutorial/vector-search-example.md" },
 
@@ -22,19 +27,24 @@ const publicManualPages = [
   { title: "Query Planner And Fast Paths", source: "manual/storage-engine/query-planner-fast-paths.md" },
 
   { title: "Connecting to DataVo", source: "manual/client-interfaces/datavo-context-api.md" },
+  { title: "ADO.NET Provider", source: "manual/client-interfaces/ado-net.md" },
+  { title: "Dapper Support", source: "manual/client-interfaces/dapper.md" },
   { title: "Entity Framework Support", source: "manual/client-interfaces/entity-framework.md" },
   { title: "Roslyn Source Generators", source: "manual/client-interfaces/source-generators.md" },
   { title: "Native AOT", source: "manual/client-interfaces/native-aot.md" },
+
+  { title: "Zero-Allocation Rows", source: "manual/internals/zero-allocation-rows.md" },
+  { title: "Compiled Scan Kernels", source: "manual/internals/compiled-scan-kernels.md" },
+
+  { title: "Benchmark Results", source: "manual/performance/benchmarks.md" },
+  { title: "Benchmark Methodology", source: "manual/performance/methodology.md" },
+  { title: "Reproducing Benchmarks", source: "manual/performance/reproducing-benchmarks.md" },
 
   { title: "Configuration Reference", source: "manual/reference/configuration.md" },
   { title: "Limits", source: "manual/reference/limits.md" },
   { title: "Unsupported Features", source: "manual/reference/unsupported-features.md" },
   { title: "Error Handling", source: "manual/reference/error-handling.md" },
   { title: "AI Access And MCP", source: "manual/reference/ai-access.md" },
-
-  { title: "Benchmark Results", source: "manual/performance/benchmarks.md" },
-  { title: "Benchmark Methodology", source: "manual/performance/methodology.md" },
-  { title: "Reproducing Benchmarks", source: "manual/performance/reproducing-benchmarks.md" },
 ];
 
 function routeForPublicSource(source) {

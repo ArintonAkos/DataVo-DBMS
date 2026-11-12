@@ -58,6 +58,16 @@ CREATE TABLE Documents (
 );
 ```
 
+For 3D positions, `VEC3` and `FLOAT[3]` are both shorthand for `VECTOR(3)`. `VEC2`, `VEC4` and `FLOAT[n]`/`REAL[n]` work the same way.
+
+```sql
+CREATE TABLE Ships (
+  Id INT PRIMARY KEY,
+  Position VEC3 NOT NULL,
+  Velocity FLOAT[3]
+);
+```
+
 Create scalar indexes after the table exists.
 
 ```sql
@@ -80,6 +90,14 @@ ON Documents (Embedding)
 USING HNSW;
 ```
 
+An HNSW index ranks by cosine distance unless you choose another metric. Positions need straight-line distance, so index them with `metric = 'euclidean'` (or `'l2'`). The metric is saved with the index and kept when the database is reopened.
+
+```sql
+CREATE INDEX ix_ships_position
+ON Ships (Position)
+USING HNSW WITH (metric = 'euclidean');
+```
+
 Schema changes are supported but limited. Adding a column rewrites existing rows and fills the new column with a default or null.
 
 ```sql
@@ -99,4 +117,4 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `FLOAT`, `BIT`, `DATE`, `GUID`), `VECTOR(n)`, scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
