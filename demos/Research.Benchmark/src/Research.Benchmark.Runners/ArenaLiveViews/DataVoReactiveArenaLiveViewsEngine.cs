@@ -6,6 +6,7 @@ using DataVo.Core.Contracts.Results;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 using Research.Benchmark.Abstractions;
+using RowRef = DataVo.Core.Runtime.Reactive.RowRef;
 
 namespace Research.Benchmark.Runners.ArenaLiveViews;
 
