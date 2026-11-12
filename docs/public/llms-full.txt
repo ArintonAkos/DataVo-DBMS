@@ -5,7 +5,7 @@
 
 DataVo is an embedded database engine for .NET applications. You add it to a process, create a `DataVoContext`, and run SQL against local storage. There is no separate database service to deploy for the core engine.
 
-The simplest mental model is SQLite-style deployment with a C#-native implementation. DataVo is not trying to look like PostgreSQL in v0.1 Alpha. It is trying to make local storage fast and ergonomic for .NET workloads that benefit from in-process execution, allocation-aware hot paths, vector search, and Native AOT-friendly code.
+The simplest mental model is SQLite-style deployment with a C#-native implementation. DataVo is not trying to look like PostgreSQL in v0.2 Release Candidate (`v0.2.0-rc.3`). It is designed to make local storage fast and ergonomic for .NET 10 workloads that benefit from in-process execution, allocation-aware hot paths, vector search, and locked Native AOT compatibility.
 
 The smallest DataVo program creates an in-memory database, defines a table, inserts a row, and reads it back.
 
@@ -59,11 +59,11 @@ ON Documents (Embedding)
 USING HNSW;
 ```
 
-The project is early. DataVo v0.1 Alpha is useful for experiments, local-first applications, game tooling, simulations, vector-search prototypes, and performance research. It should not be presented as a mature RDBMS, a SQLite replacement for production data, or a PostgreSQL-compatible server.
+DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) is built for local-first .NET 10 applications, game tooling, simulations, vector-search workloads, and high-throughput embedded persistence. It should not be presented as a client/server RDBMS or a PostgreSQL-compatible server.
 
-## v0.1 Positioning
+## v0.2 Positioning
 
-In v0.1, DataVo supports an embedded C# storage engine (`DataVoContext` runs in-process), `InMemory`, `Disk`, and `Lsm` storage, its own compact SQL dialect for DDL/DML/queries, and vector columns and indexes (`VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, `<->`). Source-generated, AOT-sensitive paths avoid reflection-heavy execution where possible. DataVo is deliberately **not** a full RDBMS — it is not PostgreSQL, SQLite, or SQL Server compatible — and it has no client/server protocol yet (PostgreSQL-wire compatibility would require a future `DataVo.Server`). See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+In v0.2 (`v0.2.0-rc.3`), DataVo provides an embedded C# storage engine (`DataVoContext` and `DataVoConnection` running in-process), `InMemory` and `Lsm` storage (`Disk` paged mode is legacy), its own compact SQL dialect for DDL/DML/queries, zero-allocation in-memory point lookups (`56 B`, ~`405 ns`), and SIMD vector columns and indexes (`VECTOR(n)`, `USING HNSW`, `USING FLAT`, `<=>`, `<->`). Native AOT (`DataVo.Core` + `DataVo.Data`) is locked with trim and AOT analyzers enforced as build errors. DataVo is deliberately **not** a full client/server RDBMS — it is not PostgreSQL, SQLite, or SQL Server wire-compatible — and its client/server tooling bridge (`DataVo.Server`) is planned for the v0.3+ roadmap. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -99,6 +99,7 @@ DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
 | Native AOT | Supported | `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers as errors. |
+| Browser / WebAssembly (`DataVo.Browser`) | Experimental / Playground Lane | Interactive documentation playground (`docs/src/DataVoClient.ts`); not a production target and not published on npm. |
 | PostgreSQL replication (DataVo-Sync) | Separate product | Not part of the NuGet packages. Proprietary replication bridge to PostgreSQL. |
 | Unity | Evaluation target | See below. |
 
@@ -137,14 +138,14 @@ Unity is an evaluation target, not a supported runtime. The public `DataVo.Core`
 
 ---
 
-# v0.1 Alpha Scope
+# Release Scope & Boundaries (v0.2 Release Candidate)
 
 > Source route: /manual/preface/alpha-scope
 > Source file: manual/preface/alpha-scope.md
 
-DataVo v0.1 Alpha is a public engine preview. It is meant to show the architecture, performance direction, and core developer experience before the project claims production database maturity.
+DataVo v0.2 Release Candidate (v0.2.0-rc.3) defines the feature-complete verification boundary for the 0.2 release line, backed by 2,358 passing tests across the engine, storage, and client suites. It establishes a clear contract between release-candidate core subsystems and explicit engine boundaries.
 
-The supported path starts with direct embedding. Create a context, choose a storage mode, and execute SQL from your application.
+The supported path starts with direct embedding. Create a context, choose a storage mode, and execute SQL or typed queries from your .NET 10 application. In-memory mode includes a zero-allocation primary-key point lookup fast path (`56 B` ADO.NET reader wrapper, ~`405 ns`).
 
 ```csharp
 using DataVo.Core;
@@ -155,24 +156,24 @@ using var db = new DataVoContext(new DataVoConfig
     StorageMode = StorageMode.InMemory
 });
 
-db.Execute("CREATE DATABASE AlphaDemo");
-db.Execute("USE AlphaDemo");
+db.Execute("CREATE DATABASE RcDemo");
+db.Execute("USE RcDemo");
 db.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Name VARCHAR(80))");
 db.Execute("INSERT INTO Events (Id, Name) VALUES (1, 'created')");
 ```
 
-The alpha also includes persisted storage modes. For durability-sensitive experiments, use LSM strict mode so acknowledged writes wait for WAL durability. Disk mode is legacy and receives no further durability work. Both modes currently share one known crash limitation for `UPDATE`, described in [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations).
+For persisted workloads, `StorageMode.Lsm` with `LsmStrictFsync = true` is the release-candidate storage engine, using WAL-backed MemTables, SSTables, and clustered primary keys so acknowledged writes wait for WAL durability. Disk paged mode (`StorageMode.Disk`) is legacy and receives no further durability work. See [WAL And Durability](../storage-engine/wal-and-durability.md#known-limitations) for durability notes and legacy disk mode limitations.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./alpha_data",
+    DiskStoragePath = "./rc_data",
     LsmStrictFsync = true
 });
 ```
 
-The SQL surface is intentionally documented as a subset. You can create tables, insert rows, update rows, delete rows, query rows, build indexes, and use vector search.
+The SQL surface is documented as a verified subset. You can create tables, insert rows, update rows, delete rows, query rows, build scalar and vector indexes, and run SIMD-accelerated vector search (`HNSW` and `FLAT` with cosine `<=>` and L2 `<->` distance). Native AOT (`DataVo.Core` + `DataVo.Data`) is locked with trim and AOT analyzers enforced as build errors.
 
 ```sql
 CREATE TABLE Products (
@@ -192,7 +193,14 @@ ORDER BY Price DESC
 LIMIT 10;
 ```
 
-What makes this an alpha is the boundary around the edges. Package polish, storage-format stability, EF provider completeness, migrations, server tooling, and PostgreSQL compatibility are not finished. The documentation calls those limits out directly so early users can make a practical decision.
+## Explicit Boundaries
+
+DataVo v0.2 Release Candidate (v0.2.0-rc.3) enforces strict architectural boundaries so adopters can evaluate the engine with accurate expectations:
+
+- **No arbitrary multi-row serializable MVCC:** Transactions provide session-bound `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK`, row-level write coordination, and MVCC snapshot visibility, but do not guarantee serializable isolation or phantom-read prevention across arbitrary multi-row predicates.
+- **EF Core migrations unsupported:** `DataVo.EntityFrameworkCore` operates as an integration bridge over a host EF provider for bounded `DbSet` and `QueryFromDataVo` workflows, not a standalone EF Core provider with migration scaffolding.
+- **Disk paged mode is legacy:** `StorageMode.Disk` is retained only for compatibility and receives no further durability engineering. All persistent workloads should use `StorageMode.Lsm`.
+- **WebAssembly is an experimental playground lane:** `DataVo.Browser` powers the interactive documentation playground (`docs/src/DataVoClient.ts`), but is **not** a production-ready target and is **not** published on npm.
 
 ## Preview SQL DATE Contract
 
@@ -200,7 +208,7 @@ SQL `DATE` now materializes as `DataVo.Core.DataVoDate` in preview row APIs. `Ce
 
 ## Unity Evaluation Status
 
-Unity is an evaluation target, not a supported runtime in v0.1. The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
+Unity is an evaluation target, not a supported runtime in DataVo v0.2 Release Candidate (v0.2.0-rc.3). The public `DataVo.Core` package contains only a `net10.0` asset. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate only. A passing .NET-host verifier by itself is not Unity Editor, Mono, IL2CPP, Jobs, or Burst proof.
 
 | Environment or boundary | Status | Meaning |
 | --- | --- | --- |
@@ -212,19 +220,22 @@ Unity is an evaluation target, not a supported runtime in v0.1. The public `Data
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
 | Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 
-## v0.1 Scope Summary
+## v0.2 Release Candidate Scope Summary
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| In-process embedded deployment | Supported | The core product shape is library-first, not server-first. |
-| Public curated manual | Supported | The manual is the public documentation boundary for v0.1. |
-| SQL execution through `DataVoContext` | Supported | Core SQL commands and query forms are documented. |
-| Entity Framework bridge | Supported | Useful for basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
-| Roslyn source generators | Supported | `[DataVoQuery]` supports selected compiled SELECT, INSERT, and UPDATE shapes. |
-| NuGet launch packaging | Supported | The public Core package remains `net10.0`-only; the opt-in portable target is an experimental local candidate, not a published or supported Unity asset. |
-| Stable storage format | Planned | Alpha storage files may change before a stable release. |
-| Production support contract | Not Supported | v0.1 is early software with expected API and behavior changes. |
-| Full RDBMS feature set | Not Supported | No stored procedures, triggers, replication, or PostgreSQL-compatible server in v0.1. |
+| Core embedded API (`DataVoContext`) | Release Candidate | Primary in-process embedded interface (`net10.0`). |
+| LSM storage with strict fsync | Release Candidate | WAL-backed MemTables, SSTables, and clustered primary keys (`LsmStrictFsync = true`). |
+| Zero-alloc in-memory point lookup | Release Candidate | Direct PK fast path (`56 B` reader allocation, ~`405 ns` lookup). |
+| SIMD vector search (`HNSW` & `FLAT`) | Release Candidate | `VECTOR(n)` columns with cosine (`<=>`) and Euclidean/L2 (`<->`) operators. |
+| Native AOT (`DataVo.Core` + `DataVo.Data`) | Locked & Passing | Trim and AOT analyzers (`IL2026`/`IL3050`) enforced as build errors. |
+| ADO.NET & Dapper (`DataVo.Data`) | Release Candidate | Standard `DbConnection`, `DbCommand`, `DbDataReader` provider surface. |
+| Roslyn source generators (`DataVo.Generators`) | Release Candidate | `[DataVoQuery]` compiled query plans and typed row mappers. |
+| Entity Framework Core bridge | Preview Bridge | Supports bounded `DbSet` and `QueryFromDataVo` workflows; EF migrations are unsupported. |
+| Disk paged storage (`StorageMode.Disk`) | Legacy | Retained for compatibility; receives no further durability work. |
+| Browser / WebAssembly (`DataVo.Browser`) | Experimental / Playground Lane | Powers the interactive docs playground; not a production target and not published on npm. |
+| Arbitrary multi-row serializable MVCC | Not Supported | Snapshot visibility and row-level write locks only; no predicate-range locking. |
+| Full RDBMS server features | Not Supported | No stored procedures, triggers, replication, or PostgreSQL wire server in v0.2. |
 
 ---
 
@@ -233,9 +244,7 @@ Unity is an evaluation target, not a supported runtime in v0.1. The public `Data
 > Source route: /manual/preface/roadmap
 > Source file: manual/preface/roadmap.md
 
-The DataVo roadmap is deliberately conservative. The goal is not to promise every database feature. The near-term work is to stabilize the embedded API, storage format, NuGet packaging, and public documentation.
-
-The current foundation is the embedded API. That is where DataVo should remain strongest: predictable local storage, clear configuration, and fast hot paths for application-owned workloads.
+DataVo's roadmap separates completed **v0.2 Release Candidate (`v0.2.0-rc.3`)** milestones from active **v0.3 HTAP & Tooling** engineering. The core design principle remains unchanged: predictable in-process storage, explicit durability contracts, locked Native AOT compliance, and allocation-aware execution paths.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
@@ -246,61 +255,74 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
-The roadmap focuses on stabilizing the embedded API, storage format, and packaging. A developer should be able to install the right packages, run a quickstart, and understand which parts of the alpha are safe to evaluate.
+## Completed v0.2 Milestones (`v0.2.0-rc.3`)
+
+The v0.2 release line has completed its foundational embedded engine milestones and is backed by 2,358 passing tests:
+
+- **LSM Storage Stability & Clustered Keys:** WAL-backed arena MemTables, background SSTable flushes, strict `fsync` durability (`LsmStrictFsync = true`), and clustered `INT`/`GUID` primary keys that halve on-disk footprint.
+- **Locked Native AOT:** `DataVo.Core` and `DataVo.Data` enforce trim and AOT analyzers (`IL2026`/`IL3050`) as build errors.
+- **Zero-Allocation In-Memory Fast Path:** Primary-key point lookups bypass SQL parsing and dictionary materialization (`56 B` ADO.NET reader wrapper, ~`405 ns`), alongside zero-allocation `StreamRef()` / `RowRef` table scans.
+- **SIMD Vector Search:** Built-in `VECTOR(n)` columns (`VEC2`, `VEC3`, `VEC4` shorthands), `HNSW` and `FLAT` indexes, and SIMD-accelerated cosine (`<=>`) and Euclidean/L2 (`<->`) distance operators.
+- **NuGet Release Candidate Packaging:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`, and `DataVo.Generators` are published to nuget.org via CI Trusted Publishing (`--prerelease`).
 
 ```bash
-dotnet add package DataVo.Core
-dotnet add package DataVo.EntityFrameworkCore
-dotnet add package DataVo.Generators
+dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Data --prerelease
+dotnet add package DataVo.EntityFrameworkCore --prerelease
+dotnet add package DataVo.Generators --prerelease
 ```
 
-The SQL roadmap is about clarity before breadth. DataVo should keep adding coverage, but every new claim needs examples and tests. Unsupported SQL should fail clearly instead of looking half-supported.
+## Active v0.3 Roadmap: HTAP, Compact Rows & Wire Tooling
 
-```sql
-CREATE TABLE Tasks (
-  Id INT PRIMARY KEY,
-  Title VARCHAR(120),
-  Done BIT
-);
+Active engineering for **v0.3** focuses on closing the analytical scan gap with columnar engines while preserving DataVo's sub-microsecond OLTP point lookups:
 
-CREATE INDEX ix_tasks_done ON Tasks (Done);
+### 1. Columnar Indexes for HTAP (Hybrid Transactional/Analytical Processing)
 
-SELECT Id, Title
-FROM Tasks
-WHERE Done = false
-ORDER BY Id ASC
-LIMIT 50;
-```
+While DataVo v0.2 leads SQLite on compiled in-memory aggregates and OLTP point lookups, full analytical table scans over 1M+ rows remain faster on pure column stores like DuckDB. In v0.3, DataVo is introducing **Columnar Indexes** so tables can maintain synchronized columnar projections alongside row storage, enabling SIMD-vectorized analytical scans, filtered aggregations, and `GROUP BY` pipelines directly on contiguous column buffers.
 
-Unity integration follows a separate proof-first path. A managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls, Windows validation, vector/reactive workloads, and game-save persistence remain outside that narrow scope.
+### 2. Compact In-Memory Row Layout
 
-The tooling roadmap is separate. Developers will eventually want to inspect DataVo databases through DBeaver, DataGrip, or pgAdmin. That requires a `DataVo.Server` process and enough PostgreSQL-wire compatibility to connect, list tables, and run simple queries. That work is valuable, but it should not distract from stabilizing the embedded engine.
+v0.3 overhauls the in-memory row representation into a dense, contiguous layout that eliminates per-row object header overhead, reduces memory footprint on multi-million-row tables, and improves CPU cache-line utilization during scans and index probes.
+
+### 3. PostgreSQL-Wire Tooling Bridge (`DataVo.Server`)
+
+Developers need to inspect embedded DataVo databases from standard GUI clients such as DBeaver, DataGrip, and pgAdmin. `DataVo.Server` is planned as an optional companion host implementing a subset of the PostgreSQL wire protocol and catalog views (`pg_catalog`) over an existing DataVo storage directory.
 
 ```text
-Application process
-  -> DataVoContext
-  -> embedded storage
+Application process (OLTP + HTAP)
+  -> DataVoContext / DataVoConnection
+  -> Row store + v0.3 Columnar Indexes
+  -> Embedded LSM / In-Memory storage
 
-Future tooling process
+Future tooling process (v0.3+)
   -> DataVo.Server
   -> PostgreSQL wire protocol subset
-  -> embedded storage
+  -> Embedded LSM storage
 ```
+
+## Ecosystem & Platform Evaluation Lanes
+
+- **Unity Integration (Evaluation Target):** A narrow managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls are unsupported by design; Windows IL2CPP validation and broader game-save durability proofs remain separate evaluation gates.
+- **WebAssembly (`Experimental / Playground Lane`):** `DataVo.Browser` (`docs/src/DataVoClient.ts`) powers the interactive documentation playground, but is **not** a production target and is **not** published on npm.
 
 ## Roadmap Summary
 
-| Feature | Status | Notes |
+| Milestone / Feature | Status | Target / Notes |
 | --- | --- | --- |
-| Curated public documentation | Supported | The v0.1 manual and AI export expose only public launch docs. |
-| Core embedded API | Supported | `DataVoContext` remains the primary interface. |
-| Vector search | Supported | HNSW, FLAT, cosine distance, and L2 distance are documented. |
-| NuGet packages | Supported | Preview packages (`DataVo.Core`, `.Data`, `.EntityFrameworkCore`, `.Generators`) are published to nuget.org via CI Trusted Publishing on version tags; the current public Core package is `net10.0` only. |
-| Unity managed integration proof | Partially verified | Exact Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 and broader runtime scenarios remain unverified. |
-| SQL compatibility expansion | Planned | New SQL coverage should come with tests and explicit docs. |
-| Storage-format stability | Planned | Requires compatibility tests and migration guidance. |
-| PostgreSQL-wire tooling bridge | Planned | Future work for DBeaver/DataGrip/pgAdmin style browsing. |
-| EF Core migrations | Not Supported | Requires provider services beyond the current bridge. |
-| Replication and high availability | Not Supported | Out of scope for the embedded v0.1 engine. |
+| Core embedded API (`DataVoContext`) & ADO.NET (`DataVo.Data`) | Completed (`v0.2.0-rc.3`) | Primary in-process interfaces on .NET 10. |
+| LSM storage stability & clustered PKs | Completed (`v0.2.0-rc.3`) | Strict WAL `fsync`, SSTables, and clustered `INT`/`GUID` keys. |
+| Native AOT lock (`DataVo.Core` + `DataVo.Data`) | Completed (`v0.2.0-rc.3`) | Trim and AOT analyzers enforced as build errors. |
+| Zero-alloc in-memory point lookup & `RowRef` streaming | Completed (`v0.2.0-rc.3`) | `56 B`, ~`405 ns` PK fast path; 0 B heap allocation on `StreamRef()`. |
+| SIMD vector search (`HNSW` & `FLAT`) | Completed (`v0.2.0-rc.3`) | Cosine (`<=>`) and L2 (`<->`) distance operators. |
+| NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
+| Columnar Indexes for HTAP | Active (`v0.3`) | Hybrid transactional/analytical scans to compete with DuckDB on large aggregations. |
+| Compact in-memory row layout | Active (`v0.3`) | Dense memory representation for lower footprint and higher cache locality. |
+| PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
+| Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
+| Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |
+| Browser / WebAssembly (`DataVo.Browser`) | `Experimental / Playground Lane` | Interactive docs playground only; not production-ready and not published on npm. |
+| EF Core migrations | Not Supported | `DataVo.EntityFrameworkCore` is a query/DML bridge, not a migration provider. |
+| Multi-node replication & high availability | Not Supported | Out of scope for the embedded engine. |
 
 ---
 
@@ -797,7 +819,7 @@ Console.WriteLine(command.ExecuteScalar());
 > Source route: /manual/tutorial/entity-framework-example
 > Source file: manual/tutorial/entity-framework-example.md
 
-DataVo's Entity Framework Core integration is an alpha bridge. It lets you keep a familiar EF model while evaluating DataVo-backed persistence and DataVo-native query paths with explicit operator limits. It is not a complete EF provider in v0.1.
+DataVo's Entity Framework Core integration (`DataVo.EntityFrameworkCore`) is a preview bridge. It lets you keep a familiar EF model while evaluating DataVo-backed persistence and DataVo-native query paths with explicit operator limits. It is not a standalone migration-capable EF provider in v0.2.
 
 Start with a mapped entity. Keep the first model simple: an integer key, a string column, and a boolean flag.
 
@@ -909,7 +931,7 @@ List<ItemEmbedding> nearest = ctx.QueryFromDataVo<ItemEmbedding>(query => query
 
 ## EF Core Example Support
 
-The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.1.
+The bridge supports basic mapped `DbSet` querying, basic inserts via `Add` plus `SaveChanges`, `LoadFromDataVo` (refresh EF state before LINQ), `QueryFromDataVo` for supported LINQ query patterns, and vector function shims (`CosineDistance`, `L2Distance`) for preview translation. It does **not** support EF migrations, shadow properties, or complex provider-style LINQ joins in v0.2.
 
 ---
 
@@ -997,7 +1019,7 @@ LIMIT 3;
 """)[0];
 ```
 
-For larger tables, create an HNSW index instead. HNSW is approximate, but it is designed to avoid scanning every vector. DataVo v0.1 uses built-in HNSW defaults; it does not expose tuning parameters such as `efConstruction` or `M`.
+For larger tables, create an HNSW index instead. HNSW is approximate, but it is designed to avoid scanning every vector. DataVo v0.2 uses built-in HNSW defaults (`metric = 'cosine'` or `'euclidean'`); it does not expose graph construction tuning parameters such as `efConstruction` or `M`.
 
 ```csharp
 db.Execute("CREATE INDEX idx_embeddings_hnsw ON Embeddings (Emb) USING HNSW");
@@ -1175,7 +1197,7 @@ FROM Users
 WHERE Id = 1;
 ```
 
-Use `VARCHAR(n)` for text fields. DataVo treats unrecognized string-like declarations as variable text in the v0.1 parser, but explicit `VARCHAR(n)` keeps schemas readable.
+Use `VARCHAR(n)` for text fields. DataVo treats unrecognized string-like declarations as variable text in the v0.2 parser, but explicit `VARCHAR(n)` keeps schemas readable.
 
 ```sql
 CREATE TABLE Articles (
@@ -1274,7 +1296,7 @@ Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer prim
 > Source route: /manual/sql-language/data-manipulation
 > Source file: manual/sql-language/data-manipulation.md
 
-Data manipulation statements change table contents. In v0.1, the core workflow is straightforward: insert rows, update rows by predicate, delete rows by predicate, and vacuum storage after deletes when compaction matters.
+Data manipulation statements change table contents. In v0.2, the core workflow is straightforward: insert rows, update rows by predicate, delete rows by predicate, and vacuum storage after deletes when compaction matters.
 
 Use column-targeted inserts for application code. The statement says exactly which columns receive values.
 
@@ -1358,7 +1380,7 @@ ROLLBACK;
 
 ## DML Support Summary
 
-Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.1. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DML: column-targeted and full-row `INSERT` (the value count must match the columns), vector literal inserts (for example `'[1,0,0]'`), `UPDATE ... SET ... WHERE ...` (with a fixed-width compiled fast path for narrow source-generated single-row shapes), `DELETE ... WHERE ...`, `VACUUM table`, and session-bound transactional DML (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`). `MERGE` and the PostgreSQL `COPY` protocol are **not** supported in v0.2. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1541,7 +1563,7 @@ INSERT INTO Embeddings (Id, Label, Emb)
 VALUES (4, 'warm-red', '[0.9,0.1,0]');
 ```
 
-To search vectors efficiently, create a vector index on the vector column. DataVo supports two index families in v0.1 Alpha: `HNSW` and `FLAT`.
+To search vectors efficiently, create a vector index on the vector column. DataVo supports two index families in v0.2: `HNSW` and `FLAT`.
 
 Use `FLAT` when you want perfect accuracy and the dataset is small enough that scanning every vector is acceptable. A flat index is simple: compare the query vector with every stored vector and return the exact nearest rows. It is a good default for tests, small local datasets, and correctness checks.
 
@@ -1551,7 +1573,7 @@ ON Embeddings (Emb)
 USING FLAT;
 ```
 
-Use `HNSW` when the dataset is large and query speed matters more than exact exhaustive search. HNSW builds an approximate nearest-neighbor graph so DataVo can avoid comparing against every vector. Use it only after measuring recall, build time, and query latency on your workload. v0.1 does not currently expose HNSW tuning parameters.
+Use `HNSW` when the dataset is large and query speed matters more than exact exhaustive search. HNSW builds an approximate nearest-neighbor graph so DataVo can avoid comparing against every vector. Use it only after measuring recall, build time, and query latency on your workload. v0.2 supports metric selection (`WITH (metric = 'cosine' | 'euclidean')`) and uses built-in graph construction parameters.
 
 ```sql
 CREATE INDEX idx_embeddings_hnsw
@@ -1622,7 +1644,7 @@ Pick `FLAT` first when you are validating correctness. Move to `HNSW` when the t
 > Source route: /manual/sql-language/sql-compatibility
 > Source file: manual/sql-language/sql-compatibility.md
 
-DataVo SQL is intentionally smaller than PostgreSQL, SQLite, or SQL Server. The point of this page is to make the v0.1 boundary explicit: examples first, then the compatibility table.
+DataVo SQL is intentionally smaller than PostgreSQL, SQLite, or SQL Server. The point of this page is to make the v0.2 boundary explicit: examples first, then the compatibility table.
 
 The core database lifecycle is supported.
 
@@ -1677,7 +1699,7 @@ GROUP BY d.Name
 HAVING COUNT(*) > 0;
 ```
 
-Vector SQL is part of the v0.1 feature set.
+Vector SQL is part of the v0.2 feature set.
 
 ```sql
 CREATE TABLE Embeddings (
@@ -1699,7 +1721,7 @@ LIMIT 5;
 The unsupported areas are just as important. Do not write application code that depends on stored procedures, triggers, PostgreSQL catalogs, or full PostgreSQL syntax compatibility.
 
 ```sql
--- Not supported in DataVo v0.1:
+-- Not supported in DataVo v0.2:
 CREATE TRIGGER users_updated
 BEFORE UPDATE ON Users
 FOR EACH ROW
@@ -1721,8 +1743,8 @@ EXECUTE PROCEDURE set_updated_at();
 | Aggregation | Supported | Grouped aggregate queries are supported. |
 | Subqueries | Supported | Tested `IN` and `EXISTS` style shapes. |
 | Vector distance SQL | Supported | `<=>`, `<->`, HNSW, and FLAT. |
-| Views | Planned | Reactive query work exists, but SQL `CREATE VIEW` is not a public v0.1 feature. |
-| Window functions | Not Supported | No public v0.1 support. |
+| Views | Planned | Reactive query work exists, but SQL `CREATE VIEW` is not a public v0.2 feature. |
+| Window functions | Not Supported | No public v0.2 support. |
 | Stored procedures | Not Supported | No procedural SQL layer. |
 | Triggers | Not Supported | No trigger execution layer. |
 | User-defined functions | Not Supported | No public UDF API. |
@@ -1781,7 +1803,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+`StorageMode.InMemory` (ephemeral, with zero-alloc PK point lookups for tests, caching, and low-latency workloads), `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, clustered PKs, and compaction), and `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below) are the embedded storage modes in v0.2. `StorageMode.Wasm` (`DataVo.Browser`) is an `Experimental / Playground Lane` mode for the interactive documentation site only (not production-ready and not published on npm), and `StorageMode.Custom` provides custom storage injection.
 
 `StorageMode.Lsm` is the durable mode DataVo is heading toward production with. `StorageMode.Disk` is a legacy mode: it stays available, but it receives no further durability work, and it is not crash-safe for `UPDATE` (see [WAL And Durability](./wal-and-durability.md#known-limitations)). New applications should use Lsm.
 
@@ -1871,7 +1893,7 @@ A directory can be open in only one process at a time. DataVo holds a `datavo.lo
 
 ## LSM Support Summary
 
-The LSM engine provides an arena-backed MemTable, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal v0.1 value, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and compaction (present, with tuning still in alpha). The on-disk format is **not** guaranteed stable — v0.1 storage files may change before a stable release.
+The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal v0.2 constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and background SSTable compaction. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.
 
 ---
 
@@ -2024,7 +2046,7 @@ FROM Users
 WHERE Id = 1;
 ```
 
-Writes are more conservative. Inserts acquire a table-scoped write boundary where needed, and updates/deletes coordinate around the rows they modify. That gives DataVo a practical alpha contract: useful transaction semantics for controlled embedded workloads, without claiming the full isolation guarantees of PostgreSQL or SQL Server.
+Writes are more conservative. Inserts acquire a table-scoped write boundary where needed, and updates/deletes coordinate around the rows they modify. That gives DataVo a clear v0.2 contract: predictable transaction semantics for embedded workloads, without claiming the full serializable isolation guarantees of PostgreSQL or SQL Server.
 
 ```sql
 BEGIN TRANSACTION;
@@ -2039,7 +2061,7 @@ WHERE Id = 2;
 COMMIT;
 ```
 
-The important limitation is predicate-level isolation. DataVo v0.1 does not claim serializable behavior for arbitrary multi-row predicates. If one transaction reads "all active users" while another inserts a new active user, v0.1 should not be described as preventing every possible phantom-read shape.
+The important limitation is predicate-level isolation. DataVo v0.2 does not claim serializable behavior for arbitrary multi-row predicates. If one transaction reads "all active users" while another inserts a new active user, v0.2 does not prevent every possible phantom-read shape.
 
 ```sql
 BEGIN TRANSACTION;
@@ -2049,7 +2071,7 @@ FROM Users
 WHERE IsActive = true;
 
 -- Another session may insert a new IsActive = true row.
--- DataVo v0.1 does not claim full phantom-read prevention.
+-- DataVo v0.2 does not claim full phantom-read prevention.
 
 COMMIT;
 ```
@@ -2078,7 +2100,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## ACID & Isolation Contract
 
-Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). v0.1 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.
+Supported: session-bound `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` (DML is buffered until commit or rollback), single-row lock-free reads, per-table write locks, row-level write coordination (updates and deletes revalidate rows before mutation), MVCC snapshot visibility, strict LSM commit durability (`LsmStrictFsync = true`), and disk sync writes (`SyncDiskWrites = true`). DataVo v0.2 does **not** guarantee multi-row serializability, phantom-read prevention, or full ACID equivalence to PostgreSQL or SQLite.
 
 ---
 
@@ -2250,7 +2272,7 @@ foreach (RowRef row in stream)
 
 ## Using Entity Framework Core
 
-DataVo also includes an early Entity Framework Core bridge. In v0.1 Alpha, this is not a full standalone EF provider. It attaches DataVo behavior to an EF context while a host EF provider supplies EF's normal infrastructure services.
+DataVo also includes an Entity Framework Core integration bridge (`DataVo.EntityFrameworkCore`). In v0.2, this is a preview bridge rather than a standalone EF provider: it attaches DataVo storage to an EF context while a host EF provider supplies EF's infrastructure services.
 
 The example below uses EF Core's in-memory provider as that host provider, then registers DataVo with `UseDataVo`. The context derives from `DataVoDbContext`, which adds DataVo-specific loading helpers and query validation.
 
@@ -2349,7 +2371,7 @@ List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
 
 ## Entity Framework Core Support
 
-The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.1 — unsupported grouped operators report unsupported-pattern errors.
+The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported in v0.2 — unsupported grouped operators report unsupported-pattern errors.
 
 ---
 
@@ -2573,7 +2595,7 @@ The two coexist on one database: use Dapper for flexibility and compiled LINQ fo
 > Source route: /manual/client-interfaces/entity-framework
 > Source file: manual/client-interfaces/entity-framework.md
 
-DataVo's Entity Framework Core integration is an alpha bridge. It helps EF users evaluate DataVo with familiar `DbContext` and `DbSet` patterns, but it does not yet replace a mature EF provider.
+DataVo's Entity Framework Core integration (`DataVo.EntityFrameworkCore`) is a preview bridge. It helps EF users integrate DataVo with familiar `DbContext` and `DbSet` patterns, but it is not a standalone migration-capable EF provider.
 
 The bridge expects a host EF provider for EF infrastructure services. In examples, the EF in-memory provider is a convenient host, and `UseDataVo` attaches DataVo-specific behavior.
 
@@ -2651,11 +2673,11 @@ public sealed class AppDbContext : DataVoDbContext
 }
 ```
 
-Use query capability checks before running a LINQ query that may be outside the supported alpha subset.
+Use query capability checks before running a LINQ query that may be outside the supported bridge subset.
 
 ## Entity Framework Support Summary
 
-Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.1: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.
+Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.2: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.
 
 ---
 
@@ -2890,9 +2912,9 @@ The generator supports `static partial` methods whose first parameter is a `Data
 > Source route: /manual/client-interfaces/native-aot
 > Source file: manual/client-interfaces/native-aot.md
 
-DataVo is designed with Native AOT constraints in mind, but the v0.1 claim is specific. The core direction is C#-native, source-generated, and less dependent on reflection-heavy runtime discovery. That does not mean every integration surface is fully AOT-ready.
+DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) locks Native AOT compatibility across `DataVo.Core` and `DataVo.Data`. Both assemblies enable .NET trim and AOT analyzers and treat `IL2026` and `IL3050` diagnostics as build errors.
 
-For dynamic SQL, DataVo still has to parse a runtime string.
+For dynamic SQL, DataVo parses the runtime SQL string without reflection-based type discovery.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
@@ -2903,7 +2925,7 @@ using var db = new DataVoContext(new DataVoConfig
 db.Execute("SELECT Id, Name FROM Users WHERE Id = 1");
 ```
 
-For queries called often enough that parse and mapping overhead matters, prefer source-generated queries. The generator turns a supported SQL pattern into generated C# code that can avoid repeated parse and mapper setup.
+For queries called often enough that parse and mapping overhead matters, prefer source-generated queries (`DataVo.Generators`). The generator turns a supported SQL pattern into generated C# code that avoids repeated parse and mapper setup while remaining completely trim- and AOT-safe.
 
 ```csharp
 using DataVo.Core;
@@ -2918,13 +2940,13 @@ public static partial class PlayerQueries
 }
 ```
 
-AOT-sensitive applications should validate the final published application with the .NET toolchain rather than relying on a documentation claim.
+AOT-targeted applications can publish directly with `PublishAot=true`:
 
 ```bash
 dotnet publish -c Release -r osx-arm64 /p:PublishAot=true
 ```
 
-EF Core has its own AOT and trimming constraints. Treat DataVo's EF bridge separately from the core engine and test the complete application.
+EF Core has its own upstream AOT and trimming constraints. Treat DataVo's `DataVo.EntityFrameworkCore` bridge separately from `DataVo.Core` and `DataVo.Data` when publishing Native AOT binaries.
 
 ```csharp
 var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -2935,7 +2957,7 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
 
 ## Native AOT Support Summary
 
-The AOT-oriented supported paths in v0.1 are the C#-native embedded core (no native provider boundary), source-generated query paths (`[DataVoQuery]`), and typed row readers. A fully reflection-free catalog and runtime everywhere is planned — some runtime areas still need trimming hardening. A full EF Core AOT claim and a full dynamic-SQL AOT guarantee are **not** supported, because EF integration and runtime SQL parsing remain more dynamic than generated calls.
+In v0.2.0-rc.3, `DataVo.Core` and `DataVo.Data` are locked and passing under Native AOT (`PublishAot=true`), including the C#-native embedded core, ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`), source-generated query paths (`[DataVoQuery]`), and zero-allocation `RowRef` readers. `DataVo.EntityFrameworkCore` depends on EF Core's runtime infrastructure and is **not** covered by the Native AOT guarantee.
 
 ---
 
@@ -3962,7 +3984,7 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
-Volcano execution settings exist but should be treated as advanced planner controls in v0.1. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
+Volcano execution settings exist but should be treated as advanced planner controls in v0.2. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
@@ -3984,7 +4006,7 @@ Supported settings: `StorageMode.InMemory`, `StorageMode.Disk`, and `StorageMode
 > Source route: /manual/reference/limits
 > Source file: manual/reference/limits.md
 
-DataVo v0.1 Alpha is an embedded engine preview, so its limits are part of the product contract. The safest way to evaluate it is to keep the database owned by one application process, validate the exact schema and query shapes you need, and treat storage files as alpha artifacts.
+DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) is an embedded engine, so its architectural limits are part of the product contract. Keep the database owned by one application process, validate the exact schema and query shapes you need, and maintain seed or export workflows across prerelease upgrades.
 
 The intended deployment shape is in-process embedding.
 
@@ -3997,7 +4019,7 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
-Do not point multiple independent processes at the same writable database directory. DataVo v0.1 does not document a cross-process concurrency contract.
+Do not point multiple independent processes at the same writable database directory. DataVo v0.2 enforces single-process ownership via `datavo.lock` and does not support cross-process concurrent writers.
 
 ```text
 Supported:
@@ -4010,7 +4032,7 @@ Not supported:
   process B -> ./shared_data
 ```
 
-Do not treat alpha storage files as a stable long-term format. For important evaluations, keep seed data or import scripts so you can rebuild after an engine change.
+Do not treat prerelease storage files as a permanent long-term archival format without export/import scripts. Keep seed data or import scripts so you can rebuild if on-disk structures evolve before 1.0.
 
 ```sql
 CREATE TABLE SeedUsers (
@@ -4022,10 +4044,10 @@ INSERT INTO SeedUsers (Id, Name) VALUES (1, 'Ada');
 INSERT INTO SeedUsers (Id, Name) VALUES (2, 'Grace');
 ```
 
-Tooling is also limited. DBeaver, DataGrip, and pgAdmin expect a client/server protocol and catalog metadata. DataVo v0.1 is embedded, so those tools cannot connect directly.
+External GUI tooling is also limited today. DBeaver, DataGrip, and pgAdmin expect a client/server wire protocol and catalog metadata. DataVo v0.2 is embedded, so those tools cannot connect until the v0.3+ `DataVo.Server` bridge is introduced.
 
 ```text
-Future shape:
+Future shape (v0.3+):
   DBeaver/DataGrip/pgAdmin
   -> PostgreSQL wire protocol subset
   -> DataVo.Server
@@ -4041,7 +4063,7 @@ CREATE TABLE Documents (
 );
 ```
 
-The LSM engine uses a 32 MB active MemTable flush threshold internally. That is an engine behavior in v0.1, not a public tuning knob.
+The LSM engine uses a 32 MB active MemTable flush threshold internally. That is an internal engine constant in v0.2, not a public tuning knob.
 
 ```text
 active MemTable grows
@@ -4051,18 +4073,18 @@ active MemTable grows
   -> background flush writes SSTable
 ```
 
-## v0.1 Limits Summary
+## v0.2 Limits Summary
 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Embedded in-process deployment | Supported | No standalone server is required for normal use. |
 | Fixed vector dimensions | Supported | Dimension is declared with `VECTOR(n)`. |
 | Internal 32 MB LSM MemTable flush threshold | Supported | Present in the engine but not exposed as a public tuning setting. |
-| Multi-process writes to one database directory | Not Supported | Do not share one writable DataVo directory across independent processes. |
-| Stable alpha storage format | Not Supported | v0.1 files may need migration or rebuild after engine changes. |
-| PostgreSQL-wire clients | Not Supported | DBeaver, DataGrip, and pgAdmin need future `DataVo.Server` work. |
-| Cloud/server administration model | Not Supported | No server roles, replication daemon, backup daemon, or HA system. |
-| Large analytical optimizer parity | Not Supported | Planner work is early and controlled by configuration. |
+| Multi-process writes to one database directory | Not Supported | Guarded by `datavo.lock`; do not share one writable DataVo directory across independent processes. |
+| Long-term storage format compatibility guarantee | Planned | Prerelease files may require migration or rebuild across major storage upgrades. |
+| PostgreSQL-wire clients | Planned (`v0.3+`) | DBeaver, DataGrip, and pgAdmin require future `DataVo.Server` work. |
+| Cloud/server administration model | Not Supported | No server replication daemon, backup daemon, or HA cluster system. |
+| Columnar HTAP scan acceleration | Active (`v0.3`) | Full analytical scans over 1M+ rows are row-oriented in v0.2; Columnar Indexes are under active v0.3 development. |
 
 ---
 
@@ -4071,9 +4093,9 @@ active MemTable grows
 > Source route: /manual/reference/unsupported-features
 > Source file: manual/reference/unsupported-features.md
 
-This page exists so early users do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable in v0.1 Alpha even if related internal work exists.
+This page exists so adopters do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable in DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) even if related internal work exists.
 
-DataVo is not PostgreSQL-compatible in v0.1. You can write SQL, but it is DataVo's SQL dialect.
+DataVo is not PostgreSQL-compatible in v0.2. You can write SQL, but it is DataVo's SQL dialect.
 
 ```sql
 -- Supported DataVo-style vector query:
@@ -4086,13 +4108,13 @@ LIMIT 5;
 PostgreSQL system catalogs are not present. Tools that expect `pg_class`, `pg_attribute`, or PostgreSQL authentication cannot connect directly to the embedded engine.
 
 ```sql
--- Not a supported v0.1 DataVo catalog workflow:
+-- Not a supported v0.2 DataVo catalog workflow:
 SELECT relname
 FROM pg_class
 WHERE relkind = 'r';
 ```
 
-EF Core support is an early bridge, not a full provider. Simple mapped `DbSet` workflows are useful, but migrations and advanced provider behavior are out of scope.
+EF Core support is an integration bridge, not a full standalone provider. Simple mapped `DbSet` workflows are supported, but migrations and advanced provider behavior are out of scope.
 
 ```csharp
 // Supported direction: simple mapped entity query.
@@ -4100,12 +4122,12 @@ List<User> users = ctx.Users
     .Where(user => user.IsActive)
     .ToList();
 
-// Not supported as a v0.1 claim: full migration lifecycle.
+// Not supported as a v0.2 claim: full migration lifecycle.
 // dotnet ef migrations add InitialCreate
 // dotnet ef database update
 ```
 
-DataVo has transaction primitives, but it does not claim full serializable isolation for arbitrary multi-row predicates. Design alpha evaluations around the documented isolation contract.
+DataVo has transaction primitives, but it does not claim full serializable isolation for arbitrary multi-row predicates. Design evaluations around the documented isolation contract.
 
 ```sql
 BEGIN TRANSACTION;
@@ -4114,29 +4136,29 @@ SELECT Id, Name
 FROM Users
 WHERE IsActive = true;
 
--- v0.1 does not claim complete phantom-read prevention
+-- v0.2 does not claim complete phantom-read prevention
 -- for arbitrary predicate ranges.
 
 COMMIT;
 ```
 
-There is no stored procedure or trigger runtime in v0.1. Keep application logic in application code.
+There is no stored procedure or trigger runtime in v0.2. Keep application logic in application code.
 
 ```sql
--- Not supported in v0.1:
+-- Not supported in v0.2:
 CREATE TRIGGER update_timestamp
 BEFORE UPDATE ON Users
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 ```
 
-Replication and high availability are also out of scope. DataVo's current product shape is embedded local storage.
+Replication and high availability are also out of scope. DataVo's product shape is embedded local storage.
 
 ```text
-Supported v0.1 shape:
+Supported v0.2 shape:
   application -> DataVoContext -> local storage
 
-Not supported v0.1 shape:
+Not supported v0.2 shape:
   primary server -> replica server -> failover orchestration
 ```
 
@@ -4144,17 +4166,18 @@ Not supported v0.1 shape:
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol in v0.1. |
+| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol in v0.2. |
 | PostgreSQL system catalogs | Not Supported | No `pg_class`, `pg_attribute`, or related catalog compatibility layer. |
 | EF Core migrations | Not Supported | No migration scaffolding, diffing, or apply pipeline. |
 | EF Core shadow properties | Not Supported | The bridge expects explicit mapped CLR properties. |
-| Complex EF LINQ joins | Not Supported | Broad join translation is outside the v0.1 claim. |
+| Complex EF LINQ joins | Not Supported | Broad join translation is outside the v0.2 claim. |
 | Multi-row serializability | Not Supported | DataVo does not claim serializable isolation for arbitrary multi-row predicates. |
 | Phantom-read prevention | Not Supported | No public predicate-range locking guarantee. |
 | Stored procedures | Not Supported | No procedural SQL runtime. |
 | Triggers | Not Supported | No trigger system. |
-| Replication/high availability | Not Supported | Out of scope for embedded v0.1. |
-| PostgreSQL-like role administration | Not Supported | Authorization settings exist, but no PostgreSQL role system is documented for v0.1. |
+| Replication/high availability | Not Supported | Out of scope for embedded v0.2. |
+| PostgreSQL-like role administration | Not Supported | Principal/grant commands exist, but no PostgreSQL role catalog is documented for v0.2. |
+| Production WebAssembly / npm package | Not Supported | `DataVo.Browser` is an `Experimental / Playground Lane` runtime for docs only; not published on npm. |
 
 ---
 
@@ -4230,7 +4253,7 @@ catch (Exception ex)
 }
 ```
 
-For v0.1, do not build application logic around stable numeric error codes. Prefer checking `IsError`, logging `Messages`, and keeping the SQL statement and storage configuration with the diagnostic record.
+For v0.2, do not build application logic around stable numeric error codes. Prefer checking `IsError`, logging `Messages`, and keeping the SQL statement and storage configuration with the diagnostic record.
 
 ```csharp
 try
@@ -4251,7 +4274,7 @@ catch (Exception ex)
 
 ## Error Handling Summary
 
-Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.1.
+Supported signals: `QueryResult.IsError` (the primary failure signal for general SQL execution), `QueryResult.Messages` (row counts, validation notes, and error messages), `QueryResult.Fields` and `Data` (successful tabular results), parser/lexer/binding diagnostics (surfaced through messages or exceptions depending on the call path), and EF query-validation exceptions for unsupported bridge patterns. A stable public catalog of numeric error codes is planned but not part of v0.2.
 
 ---
 

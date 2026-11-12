@@ -49,7 +49,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Storage Mode Support Summary
 
-`StorageMode.InMemory` (ephemeral, for tests, demos, and isolated engine benchmarks), `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below), and `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, and compaction) are the public launch modes. `StorageMode.Wasm` (browser/WASM) and `StorageMode.Custom` (custom storage injection) exist but are planned rather than primary v0.1 paths.
+`StorageMode.InMemory` (ephemeral, with zero-alloc PK point lookups for tests, caching, and low-latency workloads), `StorageMode.Lsm` (WAL-covered MemTables, SSTables, manifests, clustered PKs, and compaction), and `StorageMode.Disk` (file-backed local tables with WAL options; **legacy**, see below) are the embedded storage modes in v0.2. `StorageMode.Wasm` (`DataVo.Browser`) is an `Experimental / Playground Lane` mode for the interactive documentation site only (not production-ready and not published on npm), and `StorageMode.Custom` provides custom storage injection.
 
 `StorageMode.Lsm` is the durable mode DataVo is heading toward production with. `StorageMode.Disk` is a legacy mode: it stays available, but it receives no further durability work, and it is not crash-safe for `UPDATE` (see [WAL And Durability](./wal-and-durability.md#known-limitations)). New applications should use Lsm.
 

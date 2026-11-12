@@ -30,6 +30,7 @@ DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
 | Native AOT | Supported | `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers as errors. |
+| Browser / WebAssembly (`DataVo.Browser`) | Experimental / Playground Lane | Interactive documentation playground (`docs/src/DataVoClient.ts`); not a production target and not published on npm. |
 | PostgreSQL replication (DataVo-Sync) | Separate product | Not part of the NuGet packages. Proprietary replication bridge to PostgreSQL. |
 | Unity | Evaluation target | See below. |
 

@@ -27,7 +27,7 @@ features:
     details: Create and search vector columns with distance metrics, HNSW indexing, and hybrid queries.
     link: /features/vector-queries-guide
   - title: WebAssembly and npm
-    details: Learn browser runtime support today and customer-ready npm package integration planning.
+    details: Review the experimental browser playground runtime (DataVo.Browser) and why it is not published on npm.
     link: /features/wasm-and-npm
   - title: Unity and Godot evaluation
     details: Review the support matrix, managed boundary, and proof plan for future Unity and Godot integration.
@@ -92,11 +92,10 @@ It is separate from the DataVo.Core module reference on purpose:
 
 This section is written for:
 
-- developers embedding `DataVo` in applications
-- product teams planning NuGet and npm rollout
+- developers embedding `DataVo` in .NET 10 applications
 - teams evaluating future Unity or Godot integrations
 - teams evaluating Entity Framework integration paths
-- contributors extending SQL support
+- contributors extending SQL support and the experimental docs WASM playground
 - maintainers reviewing feature behavior and current limitations
 
 ## Current scope
@@ -113,10 +112,10 @@ The docs below reflect the currently implemented feature set in the engine, incl
 - principal and grant commands (`CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`)
 - auth session commands (`LOGIN`, `LOGOUT`)
 - introspection commands (`SHOW USERS`, `SHOW ROLES`, `SHOW GRANTS`, `SHOW GRANTS FOR USER`, `SHOW GRANTS FOR ROLE`)
-- browser WebAssembly runtime deployment flow
+- experimental browser WebAssembly playground deployment flow (`DataVo.Browser`)
 - runtime diagnostics for SQL, direct context operations, indexes, vectors, and errors
 - source-generated compiled queries for fixed SELECT, INSERT, and UPDATE shapes
-- customer-facing NuGet and npm publication guidance
+- NuGet prerelease packaging (`v0.2.0-rc.3`)
 
 ## Fast paths
 
@@ -140,7 +139,7 @@ Read:
 4. [Source-Generated Compiled Queries](./compiled-queries.md)
 5. [Security and Authentication](./security-and-authentication.md)
 
-### I want browser and npm adoption guidance
+### I want to understand the WebAssembly playground status
 
 Read:
 
@@ -175,15 +174,14 @@ Each feature page aims to answer four practical questions:
 
 ## Current packaging status
 
-Today, DataVo is packaged locally from the repository and public feed publication is in progress.
-
-Current local packages:
+DataVo `v0.2.0-rc.3` (Release Candidate) is published to NuGet (`--prerelease`) and can be packed locally from the repository:
 
 - `DataVo.Core`
 - `DataVo.Data`
+- `DataVo.EntityFrameworkCore`
 - `DataVo.Generators`
 
-NuGet and npm publication are part of the active packaging and distribution rollout.
+WebAssembly (`DataVo.Browser`) is an `Experimental / Playground Lane` runtime for the documentation site only and is not published on npm.
 
 ## Read this together with
 

@@ -82,7 +82,7 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
-Volcano execution settings exist but should be treated as advanced planner controls in v0.1. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
+Volcano execution settings exist but should be treated as advanced planner controls in v0.2. Leave `EnableVolcanoExecution` off unless you are deliberately testing planner behavior.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig

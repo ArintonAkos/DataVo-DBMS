@@ -44,7 +44,7 @@ export default withMermaid(
           items: [
             { text: "What Is DataVo?", link: "/manual/preface/what-is-datavo" },
             { text: "Project Status & Scope", link: "/manual/preface/project-status" },
-            { text: "v0.1 Alpha Scope", link: "/manual/preface/alpha-scope" },
+            { text: "Release Scope & Boundaries", link: "/manual/preface/alpha-scope" },
             { text: "Roadmap", link: "/manual/preface/roadmap" },
           ],
         },

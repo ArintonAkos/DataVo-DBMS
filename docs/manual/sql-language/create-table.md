@@ -24,7 +24,7 @@ FROM Users
 WHERE Id = 1;
 ```
 
-Use `VARCHAR(n)` for text fields. DataVo treats unrecognized string-like declarations as variable text in the v0.1 parser, but explicit `VARCHAR(n)` keeps schemas readable.
+Use `VARCHAR(n)` for text fields. DataVo treats unrecognized string-like declarations as variable text in the v0.2 parser, but explicit `VARCHAR(n)` keeps schemas readable.
 
 ```sql
 CREATE TABLE Articles (

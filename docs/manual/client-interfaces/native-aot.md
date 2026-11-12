@@ -1,8 +1,8 @@
 # Native AOT
 
-DataVo is designed with Native AOT constraints in mind, but the v0.1 claim is specific. The core direction is C#-native, source-generated, and less dependent on reflection-heavy runtime discovery. That does not mean every integration surface is fully AOT-ready.
+DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) locks Native AOT compatibility across `DataVo.Core` and `DataVo.Data`. Both assemblies enable .NET trim and AOT analyzers and treat `IL2026` and `IL3050` diagnostics as build errors.
 
-For dynamic SQL, DataVo still has to parse a runtime string.
+For dynamic SQL, DataVo parses the runtime SQL string without reflection-based type discovery.
 
 ```csharp
 using var db = new DataVoContext(new DataVoConfig
@@ -13,7 +13,7 @@ using var db = new DataVoContext(new DataVoConfig
 db.Execute("SELECT Id, Name FROM Users WHERE Id = 1");
 ```
 
-For queries called often enough that parse and mapping overhead matters, prefer source-generated queries. The generator turns a supported SQL pattern into generated C# code that can avoid repeated parse and mapper setup.
+For queries called often enough that parse and mapping overhead matters, prefer source-generated queries (`DataVo.Generators`). The generator turns a supported SQL pattern into generated C# code that avoids repeated parse and mapper setup while remaining completely trim- and AOT-safe.
 
 ```csharp
 using DataVo.Core;
@@ -28,13 +28,13 @@ public static partial class PlayerQueries
 }
 ```
 
-AOT-sensitive applications should validate the final published application with the .NET toolchain rather than relying on a documentation claim.
+AOT-targeted applications can publish directly with `PublishAot=true`:
 
 ```bash
 dotnet publish -c Release -r osx-arm64 /p:PublishAot=true
 ```
 
-EF Core has its own AOT and trimming constraints. Treat DataVo's EF bridge separately from the core engine and test the complete application.
+EF Core has its own upstream AOT and trimming constraints. Treat DataVo's `DataVo.EntityFrameworkCore` bridge separately from `DataVo.Core` and `DataVo.Data` when publishing Native AOT binaries.
 
 ```csharp
 var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -45,4 +45,4 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
 
 ## Native AOT Support Summary
 
-The AOT-oriented supported paths in v0.1 are the C#-native embedded core (no native provider boundary), source-generated query paths (`[DataVoQuery]`), and typed row readers. A fully reflection-free catalog and runtime everywhere is planned — some runtime areas still need trimming hardening. A full EF Core AOT claim and a full dynamic-SQL AOT guarantee are **not** supported, because EF integration and runtime SQL parsing remain more dynamic than generated calls.
+In v0.2.0-rc.3, `DataVo.Core` and `DataVo.Data` are locked and passing under Native AOT (`PublishAot=true`), including the C#-native embedded core, ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`), source-generated query paths (`[DataVoQuery]`), and zero-allocation `RowRef` readers. `DataVo.EntityFrameworkCore` depends on EF Core's runtime infrastructure and is **not** covered by the Native AOT guarantee.
