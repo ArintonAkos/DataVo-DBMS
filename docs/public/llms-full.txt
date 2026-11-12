@@ -3422,9 +3422,9 @@ All numbers on this page are CoreCLR .NET 10 on macOS arm64. Nothing here was me
 | Smoke report | `status: passed`, 3 scenarios (`unity-il2cpp-smoke-result.json`) |
 | Managed stripping | UnityLinker ran with `--rule-set=Aggressive` |
 | Build warnings | Two, both from Xcode's `strip` about invalidating a code signature. No linker or AOT warnings. |
-| Persistence | `Lsm` and `Disk` stores were written, closed, reopened, updated and deleted from inside the player, with index queries returning correct rows after reopen |
+| Persistence | `Lsm` and the legacy `Disk` stores were written, closed, reopened, updated and deleted from inside the player, with index queries returning correct rows after reopen |
 
-What the player exercises: an in-memory table storing Unity `Vector2`, `Vector3`, `Vector4`, `Quaternion` and `Unity.Mathematics` values, read back through `SELECT` and the typed `Get<T>` accessor; a failing `VECTOR(2)` to `Vector3` conversion; the package scenarios; and persistence in the two disk modes.
+What the player exercises: an in-memory table storing Unity `Vector2`, `Vector3`, `Vector4`, `Quaternion` and `Unity.Mathematics` values, read back through `SELECT` and the typed `Get<T>` accessor; a failing `VECTOR(2)` to `Vector3` conversion; the package scenarios; and persistence in `Lsm` and the legacy `Disk` mode. `Disk` mode is deprecated and is not benchmarked on this page.
 
 What it does not show. This is a smoke test, not a benchmark, and no IL2CPP timing was collected. IL2CPP translates C# to C++ ahead of time, so the performance of DataVo's hot loops under it, including the SIMD fallback, is unmeasured. Direct Burst calls are unsupported by design. Windows x64 IL2CPP is unverified. The README states that Unity is an evaluation target, not a supported runtime, and that remains accurate. `scripts/run-unity-macos-il2cpp-arena-cross-engine.sh` produces IL2CPP performance numbers for a reactive-view workload. It launches many player processes, and I did not run it for this revision.
 
