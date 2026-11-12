@@ -21,6 +21,9 @@ public class PointLookupBenchmarks
     private DuckDBConnection _duck = null!;
     private DuckDBCommand _duckGet = null!;
     private DuckDBParameter _duckId = null!;
+    private DuckDBConnection _duckSingle = null!;
+    private DuckDBCommand _duckSingleGet = null!;
+    private DuckDBParameter _duckSingleId = null!;
     private int[] _keys = [];
     private int _next;
 
@@ -53,6 +56,14 @@ public class PointLookupBenchmarks
         _duckGet.Parameters.Add(_duckId);
         _duckGet.Prepare();
 
+        _duckSingle = Engines.OpenDuckDb(Storage, _scratch.Path, singleThreaded: true);
+        Engines.Load(_duckSingle, 1, Rows);
+        _duckSingleGet = _duckSingle.CreateCommand();
+        _duckSingleGet.CommandText = $"SELECT {Player.Columns} FROM players WHERE Id = $id";
+        _duckSingleId = new DuckDBParameter("id", 1);
+        _duckSingleGet.Parameters.Add(_duckSingleId);
+        _duckSingleGet.Prepare();
+
         var random = new Random(12345);
         _keys = [.. Enumerable.Range(1, Rows)];
         random.Shuffle(_keys);
@@ -67,7 +78,9 @@ public class PointLookupBenchmarks
             Player fromSqlite = Sqlite();
             _next = i;
             Player fromDuckDb = DuckDb();
-            foreach (Player found in new[] { fromDataVo, fromSqlite, fromDuckDb })
+            _next = i;
+            Player fromDuckDbSingle = DuckDb1Thread();
+            foreach (Player found in new[] { fromDataVo, fromSqlite, fromDuckDb, fromDuckDbSingle })
             {
                 if (found.Id != expected.Id || found.Active != expected.Active || found.Level != expected.Level
                     || found.Gold != expected.Gold || found.Ratio != expected.Ratio || found.Name != expected.Name)
@@ -85,6 +98,8 @@ public class PointLookupBenchmarks
     {
         _sqliteGet.Dispose();
         _duckGet.Dispose();
+        _duckSingleGet.Dispose();
+        _duckSingle.Dispose();
         _dataVo.Dispose();
         _sqlite.Dispose();
         _duck.Dispose();
@@ -108,6 +123,15 @@ public class PointLookupBenchmarks
     {
         _duckId.Value = NextKey();
         using var reader = _duckGet.ExecuteReader();
+        reader.Read();
+        return Engines.Read(reader);
+    }
+
+    [Benchmark]
+    public Player DuckDb1Thread()
+    {
+        _duckSingleId.Value = NextKey();
+        using var reader = _duckSingleGet.ExecuteReader();
         reader.Read();
         return Engines.Read(reader);
     }

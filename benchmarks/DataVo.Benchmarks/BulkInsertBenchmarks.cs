@@ -47,6 +47,13 @@ public class BulkInsertBenchmarks
         _duck = Engines.OpenDuckDb(Storage, _scratch.Path);
     }
 
+    [IterationSetup(Target = nameof(DuckDb1Thread))]
+    public void OpenDuckDbSingleThreaded()
+    {
+        _scratch = new ScratchDirectory();
+        _duck = Engines.OpenDuckDb(Storage, _scratch.Path, singleThreaded: true);
+    }
+
     [IterationCleanup]
     public void Close()
     {
@@ -67,4 +74,7 @@ public class BulkInsertBenchmarks
 
     [Benchmark]
     public void DuckDb() => Engines.Load(_duck!, 1, Rows);
+
+    [Benchmark]
+    public void DuckDb1Thread() => Engines.Load(_duck!, 1, Rows);
 }

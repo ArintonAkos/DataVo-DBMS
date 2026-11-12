@@ -116,18 +116,36 @@ public static class Engines
         transaction.Commit();
     }
 
-    public static DuckDBConnection OpenDuckDb(Storage storage, string directory)
+    /// <summary>
+    /// Opens a DuckDB database of its own. With <paramref name="singleThreaded"/> it runs every query on one
+    /// thread, as DataVo and SQLite do; otherwise it uses DuckDB's default, one thread per core.
+    /// </summary>
+    public static DuckDBConnection OpenDuckDb(Storage storage, string directory, bool singleThreaded = false)
     {
-        string source = storage == Storage.Memory ? ":memory:" : System.IO.Path.Combine(directory, "duck.db");
+        string source = storage == Storage.Memory
+            ? ":memory:"
+            : System.IO.Path.Combine(directory, singleThreaded ? "duck-1t.db" : "duck.db");
         var connection = new DuckDBConnection($"Data Source={source}");
         connection.Open();
-        if (Environment.GetEnvironmentVariable("DATAVO_BENCH_DUCKDB_THREADS") is { Length: > 0 } threads)
+        if (singleThreaded)
         {
-            Execute(connection, $"SET threads = {int.Parse(threads, System.Globalization.CultureInfo.InvariantCulture)}");
+            Execute(connection, "SET threads = 1");
+            if (Threads(connection) != 1)
+            {
+                throw new InvalidOperationException("DuckDB did not accept the single-thread setting.");
+            }
         }
 
         Execute(connection, Player.CreateTableSql);
         return connection;
+    }
+
+    /// <summary>The number of threads a DuckDB database runs queries on.</summary>
+    public static long Threads(DuckDBConnection connection)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT current_setting('threads')";
+        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>Inserts rows <paramref name="first"/>..<paramref name="last"/> through DuckDB's appender.</summary>

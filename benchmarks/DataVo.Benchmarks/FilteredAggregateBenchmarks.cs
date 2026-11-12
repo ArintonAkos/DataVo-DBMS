@@ -9,7 +9,8 @@ namespace DataVo.Benchmarks;
 /// <summary>
 /// One aggregate over the rows that meet a condition: <c>... FROM players WHERE Level &gt;= @min</c>, with the
 /// value bound on every call. Half of the rows match. DataVo runs its compiled LINQ query; SQLite and DuckDB run a
-/// statement prepared once.
+/// statement prepared once. DuckDB is measured twice: with its default of one thread per core, and held to one
+/// thread, which is what DataVo and SQLite use.
 /// </summary>
 [MemoryDiagnoser]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory, BenchmarkLogicalGroupRule.ByParams)]
@@ -23,8 +24,10 @@ public class FilteredAggregateBenchmarks
     private DataVoTable<Player> _players = null!;
     private SqliteConnection _sqlite = null!;
     private DuckDBConnection _duck = null!;
+    private DuckDBConnection _duckSingle = null!;
     private SqliteCommand _sqliteCount = null!, _sqliteSum = null!, _sqliteMin = null!, _sqliteMax = null!;
     private DuckDBCommand _duckCount = null!, _duckSum = null!, _duckMin = null!, _duckMax = null!;
+    private DuckDBCommand _duckSingleCount = null!, _duckSingleSum = null!, _duckSingleMin = null!, _duckSingleMax = null!;
 
     [Params(200_000)]
     public int Rows { get; set; }
@@ -54,15 +57,28 @@ public class FilteredAggregateBenchmarks
         _duckMin = Prepare(_duck, "SELECT MIN(Gold) FROM players WHERE Level >= $min");
         _duckMax = Prepare(_duck, "SELECT MAX(Ratio) FROM players WHERE Level >= $min");
 
+        _duckSingle = Engines.OpenDuckDb(Storage, _scratch.Path, singleThreaded: true);
+        Engines.Load(_duckSingle, 1, Rows);
+        _duckSingleCount = Prepare(_duckSingle, "SELECT COUNT(*) FROM players WHERE Level >= $min");
+        _duckSingleSum = Prepare(_duckSingle, "SELECT CAST(SUM(Gold) AS BIGINT) FROM players WHERE Level >= $min");
+        _duckSingleMin = Prepare(_duckSingle, "SELECT MIN(Gold) FROM players WHERE Level >= $min");
+        _duckSingleMax = Prepare(_duckSingle, "SELECT MAX(Ratio) FROM players WHERE Level >= $min");
+
+        // The two DuckDB databases must be separate, or the thread setting of one would be the other's too.
+        if (Environment.ProcessorCount > 1 && Engines.Threads(_duck) == 1)
+        {
+            throw new InvalidOperationException("The default DuckDB database is running on one thread.");
+        }
+
         // Every engine must agree before anything is timed.
         long count = DataVo_Count();
         long sum = DataVo_Sum();
         long min = DataVo_Min();
         double max = DataVo_Max();
-        if (count != Sqlite_Count() || count != DuckDb_Count()
-            || sum != Sqlite_Sum() || sum != DuckDb_Sum()
-            || min != Sqlite_Min() || min != DuckDb_Min()
-            || max != Sqlite_Max() || max != DuckDb_Max())
+        if (count != Sqlite_Count() || count != DuckDb_Count() || count != DuckDb1Thread_Count()
+            || sum != Sqlite_Sum() || sum != DuckDb_Sum() || sum != DuckDb1Thread_Sum()
+            || min != Sqlite_Min() || min != DuckDb_Min() || min != DuckDb1Thread_Min()
+            || max != Sqlite_Max() || max != DuckDb_Max() || max != DuckDb1Thread_Max())
         {
             throw new InvalidOperationException("The engines disagree on the answer.");
         }
@@ -79,9 +95,14 @@ public class FilteredAggregateBenchmarks
         _duckSum.Dispose();
         _duckMin.Dispose();
         _duckMax.Dispose();
+        _duckSingleCount.Dispose();
+        _duckSingleSum.Dispose();
+        _duckSingleMin.Dispose();
+        _duckSingleMax.Dispose();
         _dataVo.Dispose();
         _sqlite.Dispose();
         _duck.Dispose();
+        _duckSingle.Dispose();
         _scratch.Dispose();
     }
 
@@ -94,6 +115,9 @@ public class FilteredAggregateBenchmarks
     [Benchmark, BenchmarkCategory("Count")]
     public long DuckDb_Count() => (long)_duckCount.ExecuteScalar()!;
 
+    [Benchmark, BenchmarkCategory("Count")]
+    public long DuckDb1Thread_Count() => (long)_duckSingleCount.ExecuteScalar()!;
+
     [Benchmark(Baseline = true), BenchmarkCategory("Sum")]
     public long DataVo_Sum() => _players.Where(MinLevel, static (p, min) => p.Level >= min).Sum(static p => p.Gold);
 
@@ -102,6 +126,9 @@ public class FilteredAggregateBenchmarks
 
     [Benchmark, BenchmarkCategory("Sum")]
     public long DuckDb_Sum() => (long)_duckSum.ExecuteScalar()!;
+
+    [Benchmark, BenchmarkCategory("Sum")]
+    public long DuckDb1Thread_Sum() => (long)_duckSingleSum.ExecuteScalar()!;
 
     [Benchmark(Baseline = true), BenchmarkCategory("Min")]
     public long DataVo_Min() => _players.Where(MinLevel, static (p, min) => p.Level >= min).Min(static p => p.Gold);
@@ -112,6 +139,9 @@ public class FilteredAggregateBenchmarks
     [Benchmark, BenchmarkCategory("Min")]
     public long DuckDb_Min() => (long)_duckMin.ExecuteScalar()!;
 
+    [Benchmark, BenchmarkCategory("Min")]
+    public long DuckDb1Thread_Min() => (long)_duckSingleMin.ExecuteScalar()!;
+
     [Benchmark(Baseline = true), BenchmarkCategory("Max")]
     public double DataVo_Max() => _players.Where(MinLevel, static (p, min) => p.Level >= min).Max(static p => p.Ratio);
 
@@ -120,6 +150,9 @@ public class FilteredAggregateBenchmarks
 
     [Benchmark, BenchmarkCategory("Max")]
     public double DuckDb_Max() => (double)_duckMax.ExecuteScalar()!;
+
+    [Benchmark, BenchmarkCategory("Max")]
+    public double DuckDb1Thread_Max() => (double)_duckSingleMax.ExecuteScalar()!;
 
     private static SqliteCommand Prepare(SqliteConnection connection, string sql)
     {

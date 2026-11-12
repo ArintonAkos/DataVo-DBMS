@@ -41,8 +41,10 @@ Before timing, each class checks that the three engines return the same answer.
 
 Things to keep in mind when reading the numbers:
 
-- DuckDB runs a query on several threads by default; DataVo and SQLite use one. Set
-  `DATAVO_BENCH_DUCKDB_THREADS=1` to compare single-threaded.
+- DuckDB runs a query on several threads by default; DataVo and SQLite use one. Every benchmark therefore has
+  two DuckDB rows: `DuckDb`, with its default of one thread per core, and `DuckDb1Thread`, a separate database
+  opened with `SET threads = 1`. Compare DataVo with the second to see the engines on equal footing, and with
+  the first to see what a DuckDB user gets.
 - DuckDB is a column store built for scans and aggregates; SQLite and DataVo store rows. The aggregate benchmarks
   play to DuckDB's design and the point lookup to the row stores'.
 - SQLite and DuckDB are called through ADO.NET, which is how .NET programs use them. That cost is part of their
