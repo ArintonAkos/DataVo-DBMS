@@ -22,6 +22,15 @@ dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.
 
 SQLite vector search requires the `sqlite-vec` loadable `vec0` extension. The GitHub Actions benchmark workflow downloads the pinned `v0.1.9` loadable release for Linux x64 and Windows x64, verifies SHA256, exports `SQLITE_VEC_PATH`, and uploads the extension artifact with the run. For local runs, set `SQLITE_VEC_PATH` yourself before launching the vector scenario.
 
+macOS arm64:
+
+```bash
+curl -sL -o /tmp/svec.tgz \
+  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-macos-aarch64.tar.gz
+tar xzf /tmp/svec.tgz -C /tmp
+export SQLITE_VEC_PATH=/tmp/vec0.dylib
+```
+
 Linux x64:
 
 ```bash
@@ -58,6 +67,56 @@ The space and recovery workload measures insert time, on-disk size, recovery tim
 
 ```bash
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario space-and-recovery --records 1000000 --format markdown
+```
+
+The two incremental-view scenarios are named `simple-exposure` (profile A, one table) and `complex-vip` (profile B, a three-table join). The remaining scenarios from the results page are `deep-document`, `concurrent-ops` and `sql-workload`.
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario simple-exposure --format markdown
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario complex-vip --format markdown
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario deep-document --format markdown
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario concurrent-ops --format markdown
+dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario sql-workload --format markdown
+```
+
+Run scenarios one at a time. Running them in parallel changes every result, and the strict-durability ones also compete for the same drive. The `disk-crud-wal` scenario takes about three minutes because two of its engines flush the drive 20,000 times.
+
+## BenchmarkDotNet suite
+
+The microbenchmarks in `benchmarks/DataVo.Benchmarks` compare DataVo with SQLite and DuckDB on identical data. A full run takes about 15 minutes. Close other programs first.
+
+```bash
+dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
+```
+
+Results are written to `BenchmarkDotNet.Artifacts/results/` as Markdown, CSV and HTML. The benchmark project's README lists what each class measures and how each engine is configured.
+
+## HNSW recall and latency against Flat
+
+The vector scenario reports query latency but not recall, and its query vectors are members of the data set. `demos/Research.Benchmark/tools/VectorRecall` builds Flat and HNSW indexes at 1,000, 10,000 and 50,000 vectors, on uniform and on clustered data, and measures latency and recall@10 with held-out queries. It takes about a minute.
+
+```bash
+dotnet run -c Release --project demos/Research.Benchmark/tools/VectorRecall
+```
+
+## Regenerating the charts
+
+The charts on the results page are generated from the raw files in `docs/public/benchmarks/<run date>/`. Copy new scenario output into a new dated folder, set `RUN` in the script, and run it. It needs Python 3 with `matplotlib` and `numpy`.
+
+```bash
+python3 docs/scripts/generate-benchmark-plots.py
+python3 docs/scripts/generate-ivm-benchmark-plots.py   # also needs rsvg-convert
+```
+
+The two incremental-view plots read their values from the script, not from the raw files. Update those values by hand when you rerun `simple-exposure` and `complex-vip`.
+
+## Unity IL2CPP smoke
+
+These need Unity 6000.5.4f1 with the macOS IL2CPP module installed. The smoke builds a macOS IL2CPP player, runs it, and checks that it reports a passing result. It is a correctness check and produces no timings.
+
+```bash
+bash scripts/check-unity-support-status.sh
+bash scripts/run-unity-macos-il2cpp-player-smoke.sh
 ```
 
 ## Arena Live Views cross-engine matrix
@@ -133,4 +192,4 @@ The Linux and Windows measurements in the benchmark results come from the GitHub
 
 ## Reproduction Support
 
-All six scenarios above are reproducible from the documented commands: flat CRUD (in-process insert and point lookup), disk CRUD WAL (with strict/relaxed durability comparisons), vector search (10,000 vectors, 1536 dimensions, 100 queries, top-10), thread scaling (1, 2, 4, 8, 16, and 32 threads), YCSB mixed (100,000 records mixing reads and updates), and space-and-recovery (disk footprint and recovery). A long-term public CI performance gate is planned but not yet in place.
+Every table on the [results page](./benchmarks.md) comes from one of the commands above, and the raw output of the last run is checked in under `docs/public/benchmarks/2026-11-12/`. The Linux and Windows measurements are produced by the GitHub Actions workflow, and the Linux figures kept in the repository are from 4 July 2026. A long-term public CI performance gate is planned but not yet in place.

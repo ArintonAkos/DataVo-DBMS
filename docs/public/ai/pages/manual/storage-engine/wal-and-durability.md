@@ -55,10 +55,10 @@ When documenting or comparing results, include the storage mode and durability s
 
 ```text
 Good:
-  DataVo LSM Relaxed, 1-thread throughput: 1,215,413 ops/s
+  DataVo LSM Relaxed, 1-thread throughput: 1,333,227 ops/s
 
 Misleading:
-  DataVo throughput: 1,215,413 ops/s
+  DataVo throughput: 1,333,227 ops/s
 ```
 
 ## Durability Support Summary

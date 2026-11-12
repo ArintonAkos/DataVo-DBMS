@@ -24,32 +24,34 @@ Use DataVo when you want:
 
 ## Benchmarks
 
-The current benchmark suite was rerun on July 3, 2026 with `.NET 10.0.103` on macOS arm64 / Apple Silicon. Treat these as local benchmark results, not universal database rankings: storage mode, durability setting, hardware, filesystem behavior, native extensions, and workload shape all matter.
+Measured on 12 November 2026 with `.NET 10.0.3` on an Apple M4 Pro (macOS 26.3, arm64), one run per scenario. These are local results, not universal database rankings: storage mode, durability setting, hardware, filesystem behavior and workload shape all matter. The [results page](https://arintonakos.github.io/DataVo-DBMS/manual/performance/benchmarks) gives every table, the commands, and the reasoning behind each result, including where DataVo loses.
 
-An additional GitHub Actions Linux snapshot from July 4, 2026 is appended in the detailed benchmark docs; it is kept separate from the macOS headline measurements.
+The most important distinction is durability. `DataVo LSM Production` waits for the log to reach stable storage before acknowledging a write. `DataVo LSM Relaxed` acknowledges after the operating system accepts the write, so recent writes can be lost on power failure. Only compare rows with the same durability.
 
-The most important distinction is durability. `DataVo LSM Production` uses strict WAL fsync before acknowledging writes. `DataVo LSM Relaxed` is an OS-buffered throughput ceiling for caches, rebuildable data, and research workloads; it does not have the same power-loss contract as strict mode.
+BenchmarkDotNet suite against `Microsoft.Data.Sqlite` and DuckDB (`benchmarks/DataVo.Benchmarks`):
 
-Highlights from the checked-in benchmark docs:
+- Filtered `COUNT`, `SUM`, `MIN` and `MAX` over 200,000 in-memory rows: DataVo takes 386 to 526 µs and allocates nothing. That is 9 to 10 times faster than SQLite. DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo, and 3 to 8 times faster on file-backed data, because it is a column store.
+- One row by primary key on the LSM engine: 242 ns for DataVo, 1,628 ns for SQLite, about 75 µs for DuckDB.
+- Loading 100,000 rows: DataVo and DuckDB are within noise of each other in memory. On files the DataVo and SQLite results overlap.
 
-- `1,215,413 ops/s` at one thread for DataVo LSM Relaxed in the thread-scaling workload, with roughly a 1M ops/s plateau through 32 threads.
-- `626,690 ops/s` on the YCSB mixed workload, with `1.333833 ms` write P99 latency in relaxed LSM mode.
-- `501.870 ms` total time for strict-fsync DataVo LSM Production in the disk CRUD WAL workload, versus `842.914 ms` for SQLite WAL normal in the same run.
-- `10.331 MB` allocated by the DataVo-Flat vector path for 10,000 vectors x 1536 dimensions and 100 top-10 queries; DataVo HNSW allocated `157.246 MB`, SQLite/sqlite-vec allocated `63.427 MB`, and LiteDB allocated `208,915.002 MB`.
+Systems workloads (`demos/Research.Benchmark`):
 
-Linux CI sqlite-vec rerun highlights:
+- A three-table join kept up to date incrementally: 192 ms for 50,000 insert-and-read iterations, against 34 s for DuckDB and 126 s for SQLite recomputing the query each time. On a single-table aggregate DataVo is only 1.1 times faster than SQLite.
+- Durable updates: DataVo LSM Production and SQLite (WAL, `synchronous=FULL`, `fullfsync`) both take about 4.0 ms per update, because both wait for the drive.
+- Without that wait, YCSB mixed on 12 threads: `510,695 ops/s` and `0.66 ms` write P99 for DataVo LSM Relaxed, `261,618 ops/s` and `3.77 ms` for SQLite WAL normal.
+- 1,000,000 records: 27.7 MB on disk for DataVo, 29.1 MB for SQLite, 154.5 MB for LiteDB.
+- Vector search, 10,000 vectors of 1,536 dimensions: exact Flat search takes 299 ms in total, `sqlite-vec` 473 ms, HNSW 1,634 ms. On uniform random vectors HNSW finds only 64% of the true neighbours at this size; on clustered vectors it is 8 times faster than Flat at 96% recall.
+- SQL text over 1,000,000 rows: faster than SQLite on `GROUP BY` and joins, slower on `COUNT` with a filter, `ORDER BY ... LIMIT` and range scans, and 49 to 118 times slower than DuckDB on full scans.
 
-- SQLite/sqlite-vec now runs in CI with `SQLITE_VEC_PATH` set to the pinned Linux x86_64 `vec0.so` extension.
-- On the Linux vector workload, DataVo HNSW reported `2.557093 ms` query P99, DataVo-Flat reported `602.778 ms` total time, and SQLite/sqlite-vec reported `2,186.128 ms` total time with `19.589254 ms` query P99.
-- On Linux thread scaling, DataVo LSM Relaxed reported `692,373 ops/s` at two threads and stayed above `551,000 ops/s` through 32 threads.
+macOS arm64 charts:
 
-Interactive versions of every chart live on the [benchmarks page](https://arintonakos.github.io/DataVo-DBMS/manual/performance/benchmarks). macOS arm64 headline plots:
+![Filtered aggregates](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/bdn-filtered-aggregates.png)
 
 ![Thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/thread-scaling-throughput.png)
 
 ![YCSB write P99 latency](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ycsb-write-p99.png)
 
-![Vector search allocation](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/vector-search-allocation.png)
+![HNSW versus Flat vector search](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/vector-hnsw-vs-flat.png)
 
 Durable point updates (`disk-crud-wal`, both engines committing the same way): with every update its
 own power-safe commit, DataVo LSM and SQLite (WAL, `synchronous=FULL`, `fullfsync`) tie at about 4 ms per
@@ -73,7 +75,7 @@ inserts match SQLite; GUID inserts are about 20% slower. DataVo ran with relaxed
 before close) and SQLite with its default one fsync at commit, which favours DataVo slightly. Clustering
 is on by default for new tables (`DataVoConfig.ClusteredPrimaryKeys`).
 
-Linux CI sqlite-vec rerun plots:
+Linux CI plots from 4 July 2026 (v0.1 alpha engine, not re-run for the November figures above; the DataVo figures in them are out of date):
 
 ![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.png)
 

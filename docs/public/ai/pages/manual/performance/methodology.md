@@ -3,66 +3,61 @@
 > Source route: /manual/performance/methodology
 > Source file: manual/performance/methodology.md
 
-DataVo's benchmark methodology is designed to make the engine's tradeoffs visible. The harness does not try to prove that DataVo is better than mature databases in every setting. It isolates specific embedded workloads: point lookups, WAL-backed updates, LSM write behavior, vector search, reactive query maintenance, disk footprint, and recovery.
+This page describes how the measurements on the [results page](./benchmarks.md) were taken, what each benchmark controls, and where the method limits what the numbers can show. For commands, see [Reproducing Benchmarks](./reproducing-benchmarks.md).
 
-Every benchmark starts from an explicit scenario name. Run the benchmark host from the repository root and choose the scenario with `--scenario`.
+## Two kinds of benchmark
 
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario thread-scaling --format markdown
-```
+The results are split into two parts because they answer different questions and carry different statistical weight.
 
-The published results were collected on macOS arm64 / Apple Silicon with `.NET 10.0.103`. That hardware baseline matters. Storage engines are sensitive to CPU cache behavior, filesystem sync behavior, kernel buffering, and native extension performance.
+**Part I, `benchmarks/DataVo.Benchmarks`**, uses [BenchmarkDotNet](https://benchmarkdotnet.org). It runs one operation many times, discards warm-up iterations, reports the mean with a 99.9% confidence interval and standard deviation, and measures managed allocation per operation. All engines hold the same table, and every benchmark verifies that they return the same answer before timing. It answers: how fast is one well-defined operation on each engine?
 
-Durability setting is recorded with the result because it changes the meaning of the number. Strict LSM waits for WAL fsync before acknowledging a write. Relaxed LSM acknowledges after the OS-buffered append path and can lose recent writes on power or kernel failure.
+**Part II, `demos/Research.Benchmark`**, runs a scenario once and reports total time, latency percentiles and total managed allocation. A scenario is a small program: ingest orders and read a dashboard after each one, run a mixed read/update load on 12 threads, load a million rows and reopen them. It answers: how do the engines behave on something shaped like an application? It has no repeated trials by default, so it carries no confidence interval. A difference of under about 20% between two engines in Part II should not be treated as established. Where a scenario was repeated, the page says so.
 
-```csharp
-using var strict = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./strict_lsm",
-    LsmStrictFsync = true
-});
+## What is held constant
 
-using var relaxed = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./relaxed_lsm",
-    LsmStrictFsync = false
-});
-```
+- **Data.** Each benchmark generates its rows from a fixed seed, so every engine stores the same values.
+- **Machine and build.** One machine, a Release build, one .NET runtime. The environment table on the results page records the chip, OS, runtime, and commit.
+- **Result checking.** Part I compares every engine's answer to DataVo's before timing. A benchmark that returns a wrong answer fails and produces no numbers.
+- **Indexes.** The polling engines in the streamed-view scenarios get explicit indexes on the join and filter columns (see the scenario's README in `demos/Research.Benchmark`).
 
-The logical record workload uses a compact table shape so the benchmark measures storage and execution overhead instead of application complexity.
+## What is not held constant, and why
 
-```sql
-CREATE TABLE Records (
-  Id INT PRIMARY KEY,
-  Name VARCHAR(40),
-  Value INT,
-  Score FLOAT
-);
+**Durability.** This is the largest source of misleading comparisons, so every result row names its durability.
 
-SELECT Id, Name, Value, Score
-FROM Records
-WHERE Id = @id;
+| Label | What a write waits for | Survives power loss |
+| --- | --- | --- |
+| DataVo (LSM Production) | The log reaches stable storage (`LsmStrictFsync = true`). | Yes |
+| SQLite (WAL, full) | The same, with `PRAGMA fullfsync=1`. | Yes |
+| DataVo (LSM Relaxed) | The operating system accepts the write into its buffers. | No: recent writes can be lost |
+| SQLite (WAL, normal) | The same. | No: recent writes can be lost |
+| DataVo (LSM, default) in Part I | No flush per commit. | No |
 
-UPDATE Records
-SET Value = @value, Score = @score
-WHERE Id = @id;
-```
+Only rows with the same durability can be compared. A durable commit on the benchmark machine costs about 4 ms regardless of engine, because it is the time the drive needs to flush its cache. A result that shows a durable engine finishing 20,000 commits in half a second has not waited for the drive. The July revision of the results page contained exactly that comparison, and it was withdrawn. See [What changed since July](./benchmarks.md#what-changed-since-july).
 
-The vector workload uses 1536-dimensional embeddings because that shape resembles real embedding applications more than toy three-dimensional vectors.
+**API.** Each engine is driven through the API a .NET program would use. DataVo uses compiled queries and typed rows. SQLite and DuckDB use ADO.NET with a statement prepared once. That cost is part of their numbers, as DataVo's API cost is part of DataVo's. DuckDB is also given a second configuration pinned to one thread, because DataVo and SQLite use one thread per query.
 
-```sql
-CREATE TABLE Vectors (
-  Id INT PRIMARY KEY,
-  Emb VECTOR(1536)
-);
+**Design fit.** Each engine is strongest on a different workload. DuckDB is a column store built for scans and aggregates; running point lookups against it measures a design mismatch and should be read that way. DataVo's streamed-view advantage depends on its incrementally maintained views, which apply only to query shapes it supports. Each benchmark's description states these conditions.
 
-CREATE INDEX vidx ON Vectors (Emb) USING HNSW;
-```
+## Allocation figures
 
-The charts are interactive so exact values are available on hover. Log scale is used only when a linear chart would hide smaller bars, such as allocation comparisons where one engine allocates orders of magnitude more than another.
+The "GC allocated" column is the managed memory the process allocated while the scenario ran, read from `GC.GetAllocatedBytesForCurrentThread` in the single-threaded scenarios and from `GC.GetTotalAllocatedBytes(precise: true)` in concurrent ops, thread scaling, YCSB, and space and recovery. It is a useful proxy for garbage-collector pressure. It has three limits.
 
-## Methodology Summary
+- It counts the benchmark's own allocations. In the vector scenario most of the 61 MB is the input vectors copied during insert, not search overhead.
+- It does not include native memory. DuckDB's appender and SQLite's page cache allocate outside the managed heap, so their managed figures understate their memory use.
+- The two methods are not interchangeable. The multi-threaded scenarios also count allocations made by the engine's background threads, which the single-threaded ones do not.
 
-The published results were collected on an Apple Silicon macOS arm64 baseline; scenarios run through `demos/Research.Benchmark/src/Research.Benchmark.Host`; results distinguish durability labels (strict LSM, relaxed LSM, SQLite WAL normal, SQLite WAL full); the interactive charts reveal exact values on hover and use a log scale where needed; and the benchmark pages disclose representative schemas and query shapes. These are local measurements, **not** a cross-machine universal ranking — results depend on hardware, OS, storage mode, durability, indexes, and native extensions.
+## Percentiles
+
+P50 and P99 are computed over per-operation timings taken with `Stopwatch.GetTimestamp` inside the measured loop. For scenarios that run only 100 operations, such as vector search, P99 is effectively the second-slowest sample. With under about 1,000 samples, treat P99 as an indication of the tail, not an estimate of it.
+
+## Known limits of the method
+
+- **Warm cache.** Reopen and recovery timings run in the same process right after the files were written. The operating system's page cache is warm. They show that opening a database does not read its data. They do not measure a cold boot, and they do not measure crash recovery.
+- **Short runs.** Some Part II scenarios finish in around 100 ms, where JIT warm-up, thread start-up and garbage collections are a visible share. Scenarios that were run once cannot show run-to-run variance.
+- **Background load.** The machine was not isolated. IDE language servers were running during the Part II runs.
+- **No cross-machine claims.** The numbers describe one Apple M4 Pro under macOS. Other CPUs, storage devices, operating systems and runtimes will change both the absolute values and, for I/O-bound results, the ratios.
+- **Platforms not measured.** No Linux x64, Windows, or Unity IL2CPP performance was measured for this revision. The Linux figures that remain in the repository date from 4 July 2026 and describe the v0.1 alpha engine.
+
+## Reading an anomaly
+
+When a result looks wrong, the results page states what was checked and what was not. A result that was not reproduced is reported as such, with the earlier figure, and is not silently dropped. An explanation marked as inferred is a hypothesis from timing and not a profiled fact. Where the page says "I did not profile", the claim stops there.
