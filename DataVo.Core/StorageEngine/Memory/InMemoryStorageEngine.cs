@@ -45,6 +45,88 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
         /// <summary>Advances when compaction renumbers rows, which invalidates a saved scan position.</summary>
         public long LayoutGeneration;
+
+        /// <summary>The table's rows as fixed-length records for scans, once a scan has asked for them.</summary>
+        public RowImage? Image;
+    }
+
+    /// <summary>
+    /// A table's rows a second time, as fixed-length records laid side by side in large blocks, for scans that
+    /// read a few columns of every row. The rows themselves are separate objects scattered over the heap, each
+    /// several cache lines wide; walking them costs a cache miss or more per row, and how many depends on which
+    /// columns are read. A record is a few dozen bytes and the next one follows it, so a scan reads memory in
+    /// order.
+    /// </summary>
+    /// <remarks>
+    /// The image is built by the first scan that asks for one and caught up by later scans: rows are only ever
+    /// appended or tombstoned, so catching up means encoding the rows added since. A tombstone clears the
+    /// record's first byte. Everything is done under the table's lock: writing under the write lock, reading
+    /// under the read lock. The scan's visitor encodes the records, since only it knows the column types.
+    /// </remarks>
+    private sealed class RowImage(int recordBytes, int version)
+    {
+        // A block holds a power of two of records and is about this large: big enough to be allocated once and
+        // never moved, small enough that a table of a few rows does not pay for it (its one block starts small).
+        private const int BlockBytes = 128 * 1024;
+        private const int FirstBlockRows = 64;
+
+        private readonly List<byte[]> _blocks = [];
+
+        /// <summary>The length of a record: one byte that is 0 for a deleted row, then the visitor's image.</summary>
+        public readonly int RecordBytes = recordBytes;
+
+        /// <summary>The column layout the records were encoded for.</summary>
+        public readonly int Version = version;
+
+        /// <summary>Row index to block: <c>index &gt;&gt; Shift</c>.</summary>
+        public readonly int Shift = ShiftFor(recordBytes);
+
+        /// <summary>How many of the table's rows, from the first, have a record.</summary>
+        public int Covered;
+
+        public int BlockRows => 1 << Shift;
+
+        public byte[] Block(int number) => _blocks[number];
+
+        private static int ShiftFor(int recordBytes)
+        {
+            int shift = 4;
+            while (shift < 16 && (recordBytes << shift) < BlockBytes)
+            {
+                shift++;
+            }
+
+            return shift;
+        }
+
+        /// <summary>The record of the next row to cover, with room made for it.</summary>
+        public Span<byte> Next()
+        {
+            int number = Covered >> Shift;
+            int inBlock = Covered & (BlockRows - 1);
+            if (number == _blocks.Count)
+            {
+                _blocks.Add(new byte[Math.Min(BlockRows, FirstBlockRows) * RecordBytes]);
+            }
+
+            byte[] block = _blocks[number];
+            if ((inBlock + 1) * RecordBytes > block.Length)
+            {
+                Array.Resize(ref block, Math.Min(BlockRows * RecordBytes, block.Length * 4));
+                _blocks[number] = block;
+            }
+
+            return new Span<byte>(block, inBlock * RecordBytes, RecordBytes);
+        }
+
+        /// <summary>Marks a covered row deleted.</summary>
+        public void Remove(int index)
+        {
+            if (index < Covered)
+            {
+                _blocks[index >> Shift][(index & (BlockRows - 1)) * RecordBytes] = 0;
+            }
+        }
     }
 
     private readonly ConcurrentDictionary<(string DatabaseName, string TableName), TableStore> _databases = new();
@@ -216,6 +298,43 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             return new PageScan(true, 0);
         }
 
+        // A visitor that reads row images gets them when the image is whole. It is brought up to date first; a
+        // writer may slip in between that and the read, so after a few tries the rows are visited as they are.
+        int imageBytes = visitor.ImageBytes;
+        for (int attempt = 0; imageBytes > 0 && attempt < 3; attempt++)
+        {
+            store.Lock.EnterReadLock();
+            try
+            {
+                if (store.Image is { } image
+                    && image.RecordBytes == imageBytes + 1
+                    && image.Version == visitor.ImageVersion
+                    && image.Covered == store.Rows.Count)
+                {
+                    if (expectedGeneration is { } expected && expected != store.LayoutGeneration)
+                    {
+                        throw PagedRowScanErrors.Rewritten(tableName);
+                    }
+
+                    return ScanImage(store, image, (int)(afterRowId ?? 0), maxRows, ref visitor);
+                }
+            }
+            finally
+            {
+                store.Lock.ExitReadLock();
+            }
+
+            store.Lock.EnterWriteLock();
+            try
+            {
+                CoverWithImage(store, imageBytes, ref visitor);
+            }
+            finally
+            {
+                store.Lock.ExitWriteLock();
+            }
+        }
+
         store.Lock.EnterReadLock();
         try
         {
@@ -241,6 +360,64 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         finally
         {
             store.Lock.ExitReadLock();
+        }
+    }
+
+    /// <summary>Visits up to <paramref name="maxRows"/> live rows from <paramref name="index"/> on, as image records.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static PageScan ScanImage<TVisitor>(TableStore store, RowImage image, int index, int maxRows, ref TVisitor visitor)
+        where TVisitor : struct, IPagedRowVisitor
+    {
+        int count = image.Covered;
+        int recordBytes = image.RecordBytes;
+        int blockRows = image.BlockRows;
+        int visited = 0;
+        while (index < count && visited < maxRows)
+        {
+            byte[] block = image.Block(index >> image.Shift);
+            int inBlock = index & (blockRows - 1);
+            int end = Math.Min(blockRows, inBlock + (count - index));
+            for (int at = inBlock * recordBytes; inBlock < end && visited < maxRows; inBlock++, at += recordBytes, index++)
+            {
+                if (block[at] != 0)
+                {
+                    visitor.VisitImage(index + 1, new ReadOnlySpan<byte>(block, at + 1, recordBytes - 1));
+                    visited++;
+                }
+            }
+        }
+
+        return new PageScan(index >= count, store.LayoutGeneration);
+    }
+
+    /// <summary>
+    /// Gives every row of the table an image record, starting over when the records on hand were encoded for
+    /// another column layout. Called with the table's write lock held.
+    /// </summary>
+    private static void CoverWithImage<TVisitor>(TableStore store, int imageBytes, ref TVisitor visitor)
+        where TVisitor : struct, IPagedRowVisitor
+    {
+        RowImage? image = store.Image;
+        if (image is null || image.RecordBytes != imageBytes + 1 || image.Version != visitor.ImageVersion)
+        {
+            store.Image = image = new RowImage(imageBytes + 1, visitor.ImageVersion);
+        }
+
+        List<InMemoryRow?> rows = store.Rows;
+        while (image.Covered < rows.Count)
+        {
+            Span<byte> record = image.Next();
+            if (rows[image.Covered] is { } row && (row.Raw is not null || row.Typed is not null))
+            {
+                visitor.EncodeImage(row.Raw, row.Typed, record.Slice(1));
+                record[0] = 1;
+            }
+            else
+            {
+                record[0] = 0;
+            }
+
+            image.Covered++;
         }
     }
 
@@ -291,6 +468,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
             {
                 // "Tombstone" deletion — leave a null gap so RowIds don't shift.
                 store.Rows[index] = null;
+                store.Image?.Remove(index);
             }
         }
         finally
@@ -359,6 +537,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
             store.Rows.Clear();
             store.Rows.AddRange(survivors);
+            store.Image = null; // rows were renumbered; the next scan builds it again
         }
         finally
         {

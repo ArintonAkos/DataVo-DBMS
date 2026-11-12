@@ -154,12 +154,21 @@ public readonly struct RowRefStream
             }
 
             RowRefPage.DirectLayout layout = page.PlanDirect(ordinals, kinds, columns, foldOrdinal);
-            if (layout.Bytes)
+
+            // A backend that keeps row images hands the scan fixed-layout records, so the condition's offsets
+            // are the image's. A row it hands over in its own form is then read through its cells or a RowRef.
+            RowRefPage.ImageLayout image = engine.StorageContext.KeepsRowImages ? page.PlanImage(ordinals, kinds, foldOrdinal) : default;
+            if (image.Usable)
+            {
+                layout.Bytes = false;
+                filter.BindOffsets(new ReadOnlySpan<int>(image.ValueOffsets, 0, ordinals.Length));
+            }
+            else if (layout.Bytes)
             {
                 filter.BindOffsets(new ReadOnlySpan<int>(layout.ValueOffsets, 0, ordinals.Length));
             }
 
-            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, foldOrdinal, layout);
+            var scan = new InPlaceScan<TFilter>(filter, page, columns, needed, limit, kind, foldOrdinal, layout, image);
 
             // A limited scan (Any) starts with a small block so a match near the start costs little.
             int block = limit > 0 ? 64 : InPlaceBlockRows;
@@ -209,10 +218,12 @@ public readonly struct RowRefStream
         public RowAggregate Totals;
 
         private readonly RowRefPage.DirectLayout _direct;
+        private readonly RowRefPage.ImageLayout _image;
 
-        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowFoldKind sum, int sumOrdinal, RowRefPage.DirectLayout direct)
+        public InPlaceScan(TFilter filter, RowRefPage page, int columns, ulong needed, int limit, RowFoldKind sum, int sumOrdinal, RowRefPage.DirectLayout direct, RowRefPage.ImageLayout image)
         {
             _direct = direct;
+            _image = image;
             _filter = filter;
             _page = page;
             _columns = columns;
@@ -261,6 +272,55 @@ public readonly struct RowRefStream
             }
 
             VisitThroughRowRef(rowId, stored, typed);
+        }
+
+        public readonly int ImageBytes => _image.Usable ? _page.ImageBytes : 0;
+
+        public readonly int ImageVersion => _page.SchemaVersion;
+
+        public readonly void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record) => _page.EncodeImage(stored, typed, record);
+
+        /// <summary>
+        /// Tests one row image. Its columns sit at the same offsets in every row, so only the flags of the columns
+        /// the scan reads are looked at: when none is NULL, the condition and the fold read the record directly.
+        /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        public void VisitImage(RowKey rowId, ReadOnlySpan<byte> record)
+        {
+            if (Full)
+            {
+                return;
+            }
+
+            int[] flags = _image.FlagOffsets;
+            int missing = 0;
+            for (int i = 0; i < _image.FlagCount; i++)
+            {
+                missing |= record[flags[i]];
+            }
+
+            if (missing == 0)
+            {
+                if (_filter.MatchesBytes(record))
+                {
+                    Totals.AddBytes(record, _sum, _image.SumOffset);
+                }
+
+                return;
+            }
+
+            VisitImageThroughRowRef(rowId, record);
+        }
+
+        /// <summary>Tests a row image that holds a NULL in a column the scan reads.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void VisitImageThroughRowRef(RowKey rowId, ReadOnlySpan<byte> record)
+        {
+            RowRef row = _page.InImage(rowId, record);
+            if (_filter.Matches(in row))
+            {
+                Totals.Add(in row, _sum, _sumOrdinal);
+            }
         }
 
         /// <summary>Tests a row the direct readers cannot take: one that is not laid out as the scan expects.</summary>

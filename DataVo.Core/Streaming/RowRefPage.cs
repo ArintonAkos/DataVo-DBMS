@@ -38,6 +38,10 @@ internal sealed class RowRefPage
     private int _keyOrdinal = -1;
     private bool _keyIsGuid;
 
+    // Where each column's null flag sits in a row image record (see EncodeImage), and the record's length.
+    private int[] _imageOffsets = [];
+    private int _imageBytes;
+
     // Which table the cached layout describes. The engine is held by id, so a pooled page keeps no engine alive.
     private Guid _engineId;
     private string? _database;
@@ -137,6 +141,15 @@ internal sealed class RowRefPage
         _hasText = hasText;
         _keyOrdinal = clustered?.Ordinal ?? -1;
         _keyIsGuid = clustered is not null && kinds[clustered.Ordinal] == StorageKind.Guid;
+        _imageOffsets = new int[kinds.Length];
+        int imageBytes = 0;
+        for (int i = 0; i < kinds.Length; i++)
+        {
+            _imageOffsets[i] = imageBytes;
+            imageBytes += 1 + RowSerializer.FixedWidth(kinds[i]);
+        }
+
+        _imageBytes = imageBytes;
         _engineId = engine.Id;
         _database = databaseName;
         _table = tableName;
@@ -255,42 +268,214 @@ internal sealed class RowRefPage
                 continue;
             }
 
-            // The usual pairings of column kind and cell type are written here; anything else converts.
-            Span<byte> value = destination.Slice(offset + 1);
-            switch (kind)
-            {
-                case StorageKind.Int when cell.Type == CellType.Int32:
-                    destination[offset] = 0;
-                    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, cell.AsInt32());
-                    offset += 1 + sizeof(int);
-                    break;
-                case StorageKind.BigInt when cell.Type == CellType.Int64:
-                    destination[offset] = 0;
-                    System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, cell.AsInt64());
-                    offset += 1 + sizeof(long);
-                    break;
-                case StorageKind.Double when cell.Type == CellType.Double:
-                    destination[offset] = 0;
-                    System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, BitConverter.DoubleToInt64Bits(cell.AsDouble()));
-                    offset += 1 + sizeof(long);
-                    break;
-                case StorageKind.Float when cell.Type == CellType.Double:
-                    destination[offset] = 0;
-                    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
-                    offset += 1 + sizeof(int);
-                    break;
-                case StorageKind.Bit when cell.Type == CellType.Boolean:
-                    destination[offset] = 0;
-                    value[0] = cell.AsBoolean() ? (byte)1 : (byte)0;
-                    offset += 1 + sizeof(bool);
-                    break;
-                default:
-                    offset += RowSerializer.WriteCell(kind, cell, destination.Slice(offset));
-                    break;
-            }
+            offset += WriteValue(kind, in cell, destination.Slice(offset));
         }
 
         return new RowRef(destination.Slice(0, offset), new ReadOnlySpan<int>(_cells, 0, _kinds.Length), _kinds, default, key, _keyOrdinal, _keyIsGuid);
+    }
+
+    /// <summary>
+    /// Writes a cell that is not NULL as its flag and value, in the stored byte format, and returns the bytes
+    /// written. The usual pairings of column kind and cell type are written here; anything else converts.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static int WriteValue(StorageKind kind, in CellValue cell, Span<byte> destination)
+    {
+        Span<byte> value = destination.Slice(1);
+        switch (kind)
+        {
+            case StorageKind.Int when cell.Type == CellType.Int32:
+                destination[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, cell.AsInt32());
+                return 1 + sizeof(int);
+            case StorageKind.BigInt when cell.Type == CellType.Int64:
+                destination[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, cell.AsInt64());
+                return 1 + sizeof(long);
+            case StorageKind.Double when cell.Type == CellType.Double:
+                destination[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(value, BitConverter.DoubleToInt64Bits(cell.AsDouble()));
+                return 1 + sizeof(long);
+            case StorageKind.Float when cell.Type == CellType.Double:
+                destination[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits((float)cell.AsDouble()));
+                return 1 + sizeof(int);
+            case StorageKind.Bit when cell.Type == CellType.Boolean:
+                destination[0] = 0;
+                value[0] = cell.AsBoolean() ? (byte)1 : (byte)0;
+                return 1 + sizeof(bool);
+            default:
+                return RowSerializer.WriteCell(kind, cell, destination);
+        }
+    }
+
+    /// <summary>
+    /// Whether rows of this table can be kept as images: every table whose rows carry their own key cell.
+    /// A clustered table keeps its key outside the row, where an image has no place for it.
+    /// </summary>
+    public bool ImageSupported => _keyOrdinal < 0;
+
+    /// <summary>The length of a row image record of this table.</summary>
+    public int ImageBytes => _imageBytes;
+
+    /// <summary>
+    /// Writes a row as an image record: every column at a fixed offset, as a null flag followed by the value's
+    /// stored bytes. A NULL keeps its column's width, and text and vector columns keep only their flag, so the
+    /// record has the same length and layout for every row of the table. A compiled condition reads it at
+    /// offsets worked out once per scan, whatever the row holds.
+    /// </summary>
+    /// <param name="stored">The row's stored bytes, when it has no typed form.</param>
+    /// <param name="typed">The row's cells, when it is typed.</param>
+    /// <param name="record">Receives the image; <see cref="ImageBytes"/> long.</param>
+    /// <exception cref="InvalidDataException">The row's bytes do not match the table's columns.</exception>
+    public void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record)
+    {
+        StorageKind[] kinds = _kinds;
+        int[] offsets = _imageOffsets;
+        if (typed is not null)
+        {
+            ReadOnlySpan<CellValue> cells = typed.Cells;
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                int at = offsets[i];
+                if (i >= cells.Length || cells[i].IsNull)
+                {
+                    record[at] = 1;
+                }
+                else if (RowSerializer.FixedWidth(kinds[i]) == 0)
+                {
+                    record[at] = 0;
+                }
+                else
+                {
+                    WriteValue(kinds[i], in cells[i], record.Slice(at));
+                }
+            }
+
+            return;
+        }
+
+        Span<int> located = new(_cells, 0, kinds.Length);
+        if (!RowSerializer.TryLocateCells(stored, kinds, located))
+        {
+            throw new InvalidDataException($"A stored row of {_table} does not match the table's columns.");
+        }
+
+        for (int i = 0; i < kinds.Length; i++)
+        {
+            int at = offsets[i];
+            int flag = located[i];
+            if (flag == RowSerializer.AbsentCell || stored[flag] != 0)
+            {
+                record[at] = 1;
+                continue;
+            }
+
+            record[at] = 0;
+            int width = RowSerializer.FixedWidth(kinds[i]);
+            if (width != 0)
+            {
+                stored.Slice(flag + 1, width).CopyTo(record.Slice(at + 1));
+            }
+        }
+    }
+
+    /// <summary>
+    /// A row image read through a <see cref="RowRef"/>, for a row the direct readers cannot take (one with a NULL
+    /// in a column the scan reads). Text and vector cells can only be tested for NULL. Valid until the scan moves on.
+    /// </summary>
+    public RowRef InImage(RowKey key, ReadOnlySpan<byte> record) =>
+        new(record, _imageOffsets, _kinds, default, key, -1, false);
+
+    /// <summary>What <see cref="PlanImage"/> found: how a scan reads row images.</summary>
+    internal struct ImageLayout
+    {
+        /// <summary>Whether the scan can read images: the table keeps them and its columns are of the kinds the condition was compiled for.</summary>
+        public bool Usable;
+
+        /// <summary>The flag offsets of the columns the scan reads; a row is read directly when all of them are 0.</summary>
+        public int[] FlagOffsets;
+
+        /// <summary>How many columns <see cref="FlagOffsets"/> lists.</summary>
+        public int FlagCount;
+
+        /// <summary>For each column the condition names, the offset of its value.</summary>
+        public int[] ValueOffsets;
+
+        /// <summary>The offset of the folded column's value.</summary>
+        public int SumOffset;
+    }
+
+    /// <summary>Works out where a scan finds its columns in a row image.</summary>
+    /// <param name="ordinals">The columns the condition reads.</param>
+    /// <param name="kinds">One letter per column, as for <see cref="PlanDirect"/>.</param>
+    /// <param name="sumOrdinal">The folded column, or -1.</param>
+    public ImageLayout PlanImage(int[] ordinals, string kinds, int sumOrdinal)
+    {
+        ImageLayout layout = default;
+        if (!ImageSupported || !Fits(ordinals, kinds))
+        {
+            return layout;
+        }
+
+        int read = ordinals.Length + 1;
+        if (_imageFlagOffsets.Length < read)
+        {
+            _imageFlagOffsets = new int[read];
+            _imageValueOffsets = new int[read];
+        }
+
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            _imageFlagOffsets[i] = _imageOffsets[ordinals[i]];
+            _imageValueOffsets[i] = _imageOffsets[ordinals[i]] + 1;
+        }
+
+        layout.FlagCount = ordinals.Length;
+        if (sumOrdinal >= 0)
+        {
+            _imageFlagOffsets[layout.FlagCount++] = _imageOffsets[sumOrdinal];
+            layout.SumOffset = _imageOffsets[sumOrdinal] + 1;
+        }
+
+        layout.Usable = true;
+        layout.FlagOffsets = _imageFlagOffsets;
+        layout.ValueOffsets = _imageValueOffsets;
+        return layout;
+    }
+
+    private int[] _imageFlagOffsets = [];
+    private int[] _imageValueOffsets = [];
+
+    /// <summary>Whether the table's columns are of the kinds a condition was compiled to read.</summary>
+    private bool Fits(int[] ordinals, string kinds)
+    {
+        if (kinds.Length != ordinals.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            StorageKind actual = _kinds[ordinals[i]];
+            bool fits = kinds[i] switch
+            {
+                'i' => actual == StorageKind.Int,
+                'l' => actual == StorageKind.BigInt,
+                'f' => actual == StorageKind.Float,
+                'd' => actual == StorageKind.Double,
+                'b' => actual == StorageKind.Bit,
+                'g' => actual == StorageKind.Guid,
+                'n' => true,
+                _ => false,
+            };
+            if (!fits)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // The layout a direct scan checks each row against; rebuilt per scan in arrays the page keeps.
@@ -351,29 +536,9 @@ internal sealed class RowRefPage
     public DirectLayout PlanDirect(int[] ordinals, string kinds, int columns, int sumOrdinal)
     {
         DirectLayout layout = default;
-        if (kinds.Length != ordinals.Length)
+        if (!Fits(ordinals, kinds))
         {
             return layout;
-        }
-
-        for (int i = 0; i < ordinals.Length; i++)
-        {
-            StorageKind actual = _kinds[ordinals[i]];
-            bool fits = kinds[i] switch
-            {
-                'i' => actual == StorageKind.Int,
-                'l' => actual == StorageKind.BigInt,
-                'f' => actual == StorageKind.Float,
-                'd' => actual == StorageKind.Double,
-                'b' => actual == StorageKind.Bit,
-                'g' => actual == StorageKind.Guid,
-                'n' => true,
-                _ => false,
-            };
-            if (!fits)
-            {
-                return layout;
-            }
         }
 
         if (_directFlagOffsets.Length < columns)

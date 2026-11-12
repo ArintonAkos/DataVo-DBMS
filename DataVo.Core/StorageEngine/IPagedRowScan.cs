@@ -22,6 +22,22 @@ internal interface IPagedRowVisitor
 {
     /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
     void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed);
+
+    /// <summary>
+    /// The length of this visitor's row image records, or 0 when it does not read images. A backend that keeps
+    /// rows as scattered objects may keep such records side by side and hand them to <see cref="VisitImage"/>
+    /// instead of calling <see cref="Visit"/>.
+    /// </summary>
+    int ImageBytes { get; }
+
+    /// <summary>Identifies the column layout <see cref="EncodeImage"/> writes; records of another version are stale.</summary>
+    int ImageVersion { get; }
+
+    /// <summary>Writes one row as an image record of <see cref="ImageBytes"/> bytes.</summary>
+    void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record);
+
+    /// <summary>Receives one live row as the image record <see cref="EncodeImage"/> wrote for it.</summary>
+    void VisitImage(long rowId, ReadOnlySpan<byte> record);
 }
 
 /// <summary>Runs a <see cref="PagedRowVisitor{TState}"/> delegate as a struct visitor.</summary>
@@ -38,6 +54,14 @@ internal struct DelegatePagedRowVisitor<TState> : IPagedRowVisitor
     }
 
     public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed) => _visit(ref State, rowId, raw, typed);
+
+    public readonly int ImageBytes => 0;
+
+    public readonly int ImageVersion => 0;
+
+    public readonly void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record) => throw new NotSupportedException();
+
+    public readonly void VisitImage(long rowId, ReadOnlySpan<byte> record) => throw new NotSupportedException();
 }
 
 internal interface IPagedRowScan

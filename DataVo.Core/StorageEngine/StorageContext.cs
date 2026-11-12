@@ -772,7 +772,25 @@ public class StorageContext(DataVoConfig config) : IDisposable
     {
         /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
         void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed);
+
+        /// <summary>The length of this visitor's row image records, or 0 when it does not read images; see <see cref="IPagedRowVisitor.ImageBytes"/>.</summary>
+        int ImageBytes { get; }
+
+        /// <summary>Identifies the column layout <see cref="EncodeImage"/> writes.</summary>
+        int ImageVersion { get; }
+
+        /// <summary>Writes one row as an image record of <see cref="ImageBytes"/> bytes.</summary>
+        void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record);
+
+        /// <summary>Receives one live row as the image record <see cref="EncodeImage"/> wrote for it.</summary>
+        void VisitImage(RowKey rowId, ReadOnlySpan<byte> record);
     }
+
+    /// <summary>
+    /// Whether the backend keeps row images for scans (see <see cref="IPagedRowVisitor.ImageBytes"/>): the
+    /// in-memory backend, whose rows are otherwise separate objects.
+    /// </summary>
+    internal bool KeepsRowImages => _storageEngine is InMemoryStorageBackend;
 
     /// <summary>
     /// Examines up to <paramref name="maxRows"/> more rows of a table with a struct visitor and advances the
@@ -908,6 +926,20 @@ public class StorageContext(DataVoConfig config) : IDisposable
             Last = rowId;
             Any = true;
             Inner.Visit(rowId, raw, typed);
+        }
+
+        public readonly int ImageBytes => Inner.ImageBytes;
+
+        public readonly int ImageVersion => Inner.ImageVersion;
+
+        public void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record) => Inner.EncodeImage(raw, typed, record);
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        public void VisitImage(long rowId, ReadOnlySpan<byte> record)
+        {
+            Last = rowId;
+            Any = true;
+            Inner.VisitImage(rowId, record);
         }
     }
 
