@@ -23,14 +23,14 @@ internal static class ScalarEvaluator
         {
             if (row.TryGetValue(colRef.Column, out var value))
                 return value;
-            return null; // or throw "Column not found"
+            return colRef.TableOrAlias is null ? BooleanLiteral(colRef.Column) : null;
         }
 
         if (expression is ResolvedColumnRefNode resolvedCol)
         {
             if (row.TryGetValue(resolvedCol.Column, out var value))
                 return value;
-            return null;
+            return BooleanLiteral(resolvedCol.Column);
         }
 
         if (expression is BinaryExpressionNode binary)
@@ -45,6 +45,12 @@ internal static class ScalarEvaluator
 
         throw new EvaluationException($"Expression type {expression.GetType().Name} not supported in scalar evaluation");
     }
+
+    // The parser reads the words TRUE and FALSE as names. A name the row has no column for is the literal.
+    private static object? BooleanLiteral(string name) =>
+        name.Equals("true", StringComparison.OrdinalIgnoreCase) ? true
+        : name.Equals("false", StringComparison.OrdinalIgnoreCase) ? false
+        : null;
 
     /// <summary>
     /// Applies a binary arithmetic operator to two boxed operands without the DLR. Reproduces the prior
