@@ -75,13 +75,13 @@ inserts match SQLite; GUID inserts are about 20% slower. DataVo ran with relaxed
 before close) and SQLite with its default one fsync at commit, which favours DataVo slightly. Clustering
 is on by default for new tables (`DataVoConfig.ClusteredPrimaryKeys`).
 
-Linux CI plots from 4 July 2026 (v0.1 alpha engine, not re-run for the November figures above; the DataVo figures in them are out of date):
+Cross-platform results from GitHub Actions on 12 November 2026 (virtual machines with four logical cores, one run each; see [Part III](docs/manual/performance/benchmarks.md#part-iii-platforms) for what they do and do not show):
 
-![Linux vector search total time](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-time.png)
+![Durable update latency on macOS, Linux and Windows](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ci-durable-update-latency.png)
 
-![Linux vector search query P99](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-vector-search-p99.png)
+![Filtered COUNT and primary-key lookup on four machines](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ci-bdn-by-platform.png)
 
-![Linux thread scaling throughput](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/linux-thread-scaling-throughput.png)
+![Vector search total time on three platforms](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ci-vector-search-time.png)
 
 More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
 
