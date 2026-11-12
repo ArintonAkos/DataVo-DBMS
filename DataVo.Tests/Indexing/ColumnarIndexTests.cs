@@ -30,6 +30,18 @@ public sealed class ColumnarSample
     public int Rank { get; set; }
 }
 
+[DataVoTable("col_dates")]
+public sealed class ColumnarDated
+{
+    [PrimaryKey] public int Id { get; set; }
+
+    [Columnar] public int Level { get; set; }
+
+    [Columnar] public DataVoDate JoinedOn { get; set; }
+
+    [Columnar] public DataVoDate? LeftOn { get; set; }
+}
+
 /// <summary>
 /// Compiled queries over a table with a columnar index. Every answer is checked against the same rows held in a
 /// dictionary after each kind of change a table can see, and the index must be what answered.
@@ -187,6 +199,37 @@ public sealed class ColumnarIndexTests
         Run(db, "DROP INDEX cx ON plain");
         Assert.Null(db.Engine.Columnar.Find("S", "plain"));
         Assert.True(sum > 0);
+    }
+
+    [Fact]
+    public void DateColumns_AreFoldedFromTheIndex()
+    {
+        using DataVoContext db = Open();
+        db.EnsureColumnarDatedTable();
+        var rows = new List<ColumnarDated>();
+        for (int i = 1; i <= 5_000; i++)
+        {
+            var row = new ColumnarDated
+            {
+                Id = i,
+                Level = i % 100,
+                JoinedOn = DataVoDate.FromDayNumber(700_000 + ((i * 7_919) % 9_000)),
+                LeftOn = i % 4 == 0 ? null : DataVoDate.FromDayNumber(710_000 + ((i * 31) % 500)),
+            };
+            rows.Add(row);
+            db.Insert(row);
+        }
+
+        ColumnarIndex index = Assert.IsType<ColumnarIndex>(db.Engine.Columnar.Find("S", "col_dates"));
+        long before = index.Scans;
+        var query = db.Table<ColumnarDated>().Where(50, static (r, min) => r.Level >= min);
+        ColumnarDated[] expected = [.. rows.Where(static r => r.Level >= 50)];
+
+        Assert.Equal(expected.Min(static r => r.JoinedOn.DayNumber), query.Min(static r => r.JoinedOn).DayNumber);
+        Assert.Equal(expected.Max(static r => r.JoinedOn.DayNumber), query.Max(static r => r.JoinedOn).DayNumber);
+        Assert.Equal(expected.Min(static r => r.LeftOn?.DayNumber), query.Min(static r => r.LeftOn)?.DayNumber);
+        Assert.Equal(expected.Max(static r => r.LeftOn?.DayNumber), query.Max(static r => r.LeftOn)?.DayNumber);
+        Assert.Equal(4, index.Scans - before);
     }
 
     [Fact]
