@@ -241,6 +241,10 @@ internal partial class Select
                 return null;
             }
         }
+        else if (TryAggregateFromColumnarIndex(engine, databaseName, tableName, state))
+        {
+            // Answered from the table's columnar index; no row was read.
+        }
         else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
         {
             return null;

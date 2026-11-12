@@ -44,6 +44,7 @@ internal sealed class ColumnarIndex
         public readonly BitmaskDirectory? Bits = kind == StorageKind.Bit ? new BitmaskDirectory() : null;
         public readonly BitmaskDirectory Nulls = new();
         public volatile bool AnyNull;
+        public volatile bool AnyNaN;
     }
 
     /// <summary>Creates an empty index.</summary>
@@ -108,6 +109,9 @@ internal sealed class ColumnarIndex
 
     /// <summary>Whether an indexed column holds a NULL at any position.</summary>
     public bool AnyNull(int slot) => _columns[slot].AnyNull;
+
+    /// <summary>Whether a FLOAT or DOUBLE column holds a NaN at any position.</summary>
+    public bool AnyNaN(int slot) => _columns[slot].AnyNaN;
 
     /// <summary>One chunk of a column's values. <typeparamref name="T"/> must be the column's value type.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -218,9 +222,11 @@ internal sealed class ColumnarIndex
                 column.Values!.ChunkOf(at).As<long>()[inChunk] = cell.AsInt64();
                 break;
             case StorageKind.Double when cell.Type == CellType.Double:
+                column.AnyNaN |= double.IsNaN(cell.AsDouble());
                 column.Values!.ChunkOf(at).As<double>()[inChunk] = cell.AsDouble();
                 break;
             case StorageKind.Float when cell.Type == CellType.Double:
+                column.AnyNaN |= double.IsNaN(cell.AsDouble());
                 column.Values!.ChunkOf(at).As<float>()[inChunk] = (float)cell.AsDouble(); // a FLOAT is widened in its cell
                 break;
             case StorageKind.Date when cell.Type == CellType.Date:
@@ -253,11 +259,20 @@ internal sealed class ColumnarIndex
                 column.Values!.ChunkOf(at).As<long>()[inChunk] = RowBytes.Int64(stored, offset);
                 break;
             case StorageKind.Double:
-                column.Values!.ChunkOf(at).As<double>()[inChunk] = RowBytes.Double(stored, offset);
+            {
+                double value = RowBytes.Double(stored, offset);
+                column.AnyNaN |= double.IsNaN(value);
+                column.Values!.ChunkOf(at).As<double>()[inChunk] = value;
                 break;
+            }
+
             case StorageKind.Float:
-                column.Values!.ChunkOf(at).As<float>()[inChunk] = RowBytes.Single(stored, offset);
+            {
+                float value = RowBytes.Single(stored, offset);
+                column.AnyNaN |= float.IsNaN(value);
+                column.Values!.ChunkOf(at).As<float>()[inChunk] = value;
                 break;
+            }
             case StorageKind.Date:
                 column.Values!.ChunkOf(at).As<int>()[inChunk] = RowBytes.DayNumber(stored, offset);
                 break;
