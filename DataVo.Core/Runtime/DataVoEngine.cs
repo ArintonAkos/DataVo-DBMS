@@ -55,6 +55,7 @@ public sealed partial class DataVoEngine : IDisposable
         TransactionManager = new TransactionManager();
         LockManager = new LockManager(Config.LockAcquireTimeoutMs);
         IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
+        Columnar = new Indexing.Columnar.ColumnarIndexManager(this);
         if (StorageContext.LsmIndexStore is { } lsmIndexStore)
         {
             // LSM mode: scalar indexes and key lanes live in the engine's persisted index tables.
@@ -155,6 +156,9 @@ public sealed partial class DataVoEngine : IDisposable
     /// Gets the primary polymorphic index manager owned by this engine.
     /// </summary>
     public PolyIndexManager IndexManager { get; }
+
+    /// <summary>Gets the columnar indexes of this engine's tables.</summary>
+    internal Indexing.Columnar.ColumnarIndexManager Columnar { get; }
 
     /// <summary>
     /// Gets the version storage manager owned by this engine for MVCC support.

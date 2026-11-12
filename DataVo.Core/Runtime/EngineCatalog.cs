@@ -174,6 +174,10 @@ public sealed class EngineCatalog
     internal IReadOnlyList<IndexFile> GetTableIndexesReadOnly(string tableName, string databaseName) =>
         _store.GetTableIndexesReadOnly(tableName, databaseName);
 
+    /// <summary>The table's columnar indexes, which the other index lookups leave out: they hold no keys.</summary>
+    internal IReadOnlyList<IndexFile> GetColumnarIndexesReadOnly(string tableName, string databaseName) =>
+        _store.GetColumnarIndexesReadOnly(tableName, databaseName);
+
     /// <summary>
     /// Returns a single column definition.
     /// </summary>

@@ -221,6 +221,7 @@ internal static class DataVoLinqEmitter
     /// <summary>
     /// Writes the condition as a struct over <c>RowRef</c> and the override that counts with it. The scan is
     /// generic over the struct, so the condition is compiled into the loop: no row objects, no delegate calls.
+    /// The struct also describes itself step by step, which is how a table with a columnar index runs it.
     /// </summary>
     private static void EmitKernel(StringBuilder code, LinqSite site, LinqKernel kernel, LinqParameter[] parameters, string table, string state)
     {
@@ -229,7 +230,7 @@ internal static class DataVoLinqEmitter
         code.AppendLine($"            private static readonly string[] Columns = new string[] {{ {string.Join(", ", columns.Select(static column => SymbolDisplay.FormatLiteral(column, quote: true)))} }};");
         code.AppendLine($"            private const string Kinds = {SymbolDisplay.FormatLiteral(kernel.Kinds, quote: true)};");
         code.AppendLine();
-        code.AppendLine($"            private struct Kernel : {Core}IRowRefFilter");
+        code.AppendLine($"            private struct Kernel : {Core}IRowRefFilter, {Core}IColumnarFilter");
         code.AppendLine("            {");
         for (int index = 0; index < columns.Length; index++)
         {
@@ -277,6 +278,15 @@ internal static class DataVoLinqEmitter
         code.AppendLine("                {");
         code.AppendLine($"                    return {kernel.CellsExpression};");
         code.AppendLine("                }");
+        code.AppendLine();
+        code.AppendLine($"                public void Describe(ref {Core}ColumnarPredicateBuilder builder)");
+        code.AppendLine("                {");
+        foreach (string step in kernel.Describe)
+        {
+            code.AppendLine($"                    {step}");
+        }
+
+        code.AppendLine("                }");
         code.AppendLine("            }");
         code.AppendLine();
         code.AppendLine($"            protected override bool TryCount({table} table, {state} state, int limit, out int count)");
@@ -287,7 +297,7 @@ internal static class DataVoLinqEmitter
             code.AppendLine($"                kernel.p{index.ToString(CultureInfo.InvariantCulture)} = {parameters[index].Value};");
         }
 
-        code.AppendLine("                count = table.CountMatching(Columns, Kinds, ref kernel, limit);");
+        code.AppendLine("                count = table.CountMatchingColumnar(Columns, Kinds, ref kernel, limit);");
         code.AppendLine("                return true;");
         code.AppendLine("            }");
         code.AppendLine();
@@ -299,7 +309,7 @@ internal static class DataVoLinqEmitter
             code.AppendLine($"                kernel.p{index.ToString(CultureInfo.InvariantCulture)} = {parameters[index].Value};");
         }
 
-        code.AppendLine("                return table.FoldMatching(Columns, Kinds, ref kernel, column, fold, kind, out totals);");
+        code.AppendLine("                return table.FoldMatchingColumnar(Columns, Kinds, ref kernel, column, fold, kind, out totals);");
         code.AppendLine("            }");
     }
 

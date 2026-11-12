@@ -17,7 +17,8 @@ internal sealed record LinqParameter(string Value, string? Guard, bool UsesObjec
 /// <param name="CellsExpression">The condition over a typed row's cells, indexed by <c>c0</c>, <c>c1</c>...</param>
 /// <param name="Columns">The columns the condition reads, in <c>c</c> order.</param>
 /// <param name="Kinds">One letter per column: how the condition reads it (<c>i l f d b g</c>), or <c>n</c> for a null test only.</param>
-internal sealed record LinqKernel(string Expression, string BytesExpression, string CellsExpression, EquatableArray<string> Columns, string Kinds);
+/// <param name="Describe">The condition as calls on a <c>ColumnarPredicateBuilder</c> named <c>builder</c>, in postfix order, for tables with a columnar index.</param>
+internal sealed record LinqKernel(string Expression, string BytesExpression, string CellsExpression, EquatableArray<string> Columns, string Kinds, EquatableArray<string> Describe);
 
 /// <summary>Where a call is, in both forms the compiler accepts for <c>[InterceptsLocation]</c>.</summary>
 /// <param name="Version">The encoding version, or 0 when only the path form is available.</param>

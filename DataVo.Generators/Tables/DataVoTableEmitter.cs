@@ -167,6 +167,10 @@ internal static class DataVoTableEmitter
         string spatialList = spatial.Length == 0
             ? string.Empty
             : $",\n                new (string, string)[] {{ {string.Join(", ", spatial.Select(column => $"(\"{column.PropertyName}\", \"{SpatialIndexName(model, column)}\")"))} }}";
+        string columnarList = string.Join(", ", columns.Where(static column => column.IsColumnar).Select(static column => $"\"{column.PropertyName}\""));
+        string columnar = columnarList.Length == 0
+            ? string.Empty
+            : $"\n            {Support}.EnsureColumnarIndex(context, \"{model.TableName}\", new string[] {{ {columnarList} }});";
         code.AppendLine($$"""
                     /// <summary>Creates the {{model.TableName}} table and its indexes if missing, and verifies an existing table matches the model.</summary>
                     public static void Ensure{{model.ModelName}}Table(this {{Context}} context)
@@ -176,7 +180,7 @@ internal static class DataVoTableEmitter
                             "{{model.TableName}}",
                             "CREATE TABLE {{model.TableName}} ({{definitions}})",
                             new (string, string)[] { {{typeList}} },
-                            new string[] { {{indexList}} }{{spatialList}});
+                            new string[] { {{indexList}} }{{spatialList}});{{columnar}}
                     }
 
             """);

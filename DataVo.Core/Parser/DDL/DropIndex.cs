@@ -36,6 +36,9 @@ internal class DropIndex(DropIndexStatement ast) : BaseDbAction
             Catalog.DropIndex(_model.IndexName, _model.TableName, databaseName);
             Indexes.DropIndex(_model.IndexName, _model.TableName, databaseName);
 
+            // If it was a columnar index, this drops or rebuilds what storage holds for the table.
+            Engine.Columnar.Find(databaseName, _model.TableName);
+
             Logger.Info($"Index file {_model.IndexName} successfully dropped!");
             Messages.Add($"Index file {_model.IndexName} successfully dropped!");
         }

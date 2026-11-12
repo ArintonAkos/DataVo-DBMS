@@ -304,6 +304,130 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         return true;
     }
 
+    /// <summary>
+    /// Counts the rows a compiled condition accepts, from the table's columnar index when it has one that
+    /// holds every column the condition reads, and as <see cref="CountMatching"/> does otherwise. Used by
+    /// generated code.
+    /// </summary>
+    /// <typeparam name="TFilter">The compiled condition.</typeparam>
+    /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="kinds">One letter per column; see <see cref="CountMatching"/>.</param>
+    /// <param name="filter">The condition, with its values already set.</param>
+    /// <param name="limit">Stop after this many matches, or 0 to count them all.</param>
+    /// <returns>The number of matching rows, up to <paramref name="limit"/>.</returns>
+    /// <exception cref="InvalidOperationException">The table lacks one of <paramref name="columns"/>.</exception>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public int CountMatchingColumnar<TFilter>(string[] columns, string kinds, ref TFilter filter, int limit)
+        where TFilter : struct, IRowRefFilter, IColumnarFilter
+    {
+        if (TryColumnar(columns, ref filter, null, RowFold.Sum, '\0', limit, out RowAggregate found))
+        {
+            return found.Count;
+        }
+
+        return CountMatching(columns, kinds, ref filter, limit);
+    }
+
+    /// <summary>
+    /// Folds one column over the rows a compiled condition accepts, from the table's columnar index when it
+    /// has one that holds every column involved, and as <see cref="FoldMatching"/> does otherwise. Used by
+    /// generated code.
+    /// </summary>
+    /// <typeparam name="TFilter">The compiled condition.</typeparam>
+    /// <param name="columns">The columns the condition reads. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="kinds">One letter per column; see <see cref="CountMatching"/>.</param>
+    /// <param name="filter">The condition, with its values already set.</param>
+    /// <param name="column">The column to fold. Pass the same array on every call; it is the cache key.</param>
+    /// <param name="fold">What to do with the column's values.</param>
+    /// <param name="kind">The type the caller reads the column as; see <see cref="FoldMatching"/>.</param>
+    /// <param name="totals">The result.</param>
+    /// <returns><see langword="false"/> when the column is not stored as that type; the caller then reads rows.</returns>
+    /// <exception cref="InvalidOperationException">The table lacks one of the columns.</exception>
+    /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public bool FoldMatchingColumnar<TFilter>(string[] columns, string kinds, ref TFilter filter, string[] column, RowFold fold, char kind, out RowFoldTotals totals)
+        where TFilter : struct, IRowRefFilter, IColumnarFilter
+    {
+        if (!TryColumnar(columns, ref filter, column, fold, kind, 0, out RowAggregate found))
+        {
+            return FoldMatching(columns, kinds, ref filter, column, fold, kind, out totals);
+        }
+
+        totals = default;
+        totals.Values = found.Values;
+        totals.Whole = found.Whole;
+        totals.Real = found.Real;
+        return true;
+    }
+
+    /// <summary>
+    /// Answers a count or a fold from the table's columnar index. Returns false, leaving the row path to answer,
+    /// when the table has no such index or it lacks a column, inside a transaction (the index holds committed
+    /// rows only), or when the condition or the fold has no columnar form.
+    /// </summary>
+    // Kept out of line: inlined into the callers, it changed how the row scan they fall back to was compiled,
+    // and a file-backed count ran 1.8 times slower.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private bool TryColumnar<TFilter>(string[] columns, ref TFilter filter, string[]? column, RowFold fold, char kind, int limit, out RowAggregate found)
+        where TFilter : struct, IColumnarFilter
+    {
+        found = default;
+        Runtime.DataVoEngine engine = Context.Engine;
+        if (engine.StorageContext.ColumnarStore is null
+            || engine.TransactionManager.HasActiveTransaction(Context.SessionId)
+            || MVCC.MvccExecutionScope.CurrentSnapshot is not null
+            || engine.Sessions.Get(Context.SessionId) is not { Length: > 0 } database)
+        {
+            return false;
+        }
+
+        using Runtime.SnapshotLockScope readScope = engine.EnterRuntimeReadScope();
+        Indexing.Columnar.ColumnarIndex? index = engine.Columnar.Find(database, _info.TableName);
+        if (index is null)
+        {
+            return false;
+        }
+
+        RowRefStream rows = StreamRef();
+        Indexing.Columnar.ColumnarScan.Workspace workspace = Indexing.Columnar.ColumnarScan.Rent();
+        var builder = new ColumnarPredicateBuilder(workspace.Steps, FusedOrdinals(columns, rows));
+        filter.Describe(ref builder);
+        int steps = builder.Steps(out bool complete).Length;
+        if (!complete || !Indexing.Columnar.ColumnarScan.TryBind(index, workspace.Steps.AsSpan(0, steps)))
+        {
+            return false;
+        }
+
+        int folds = 0;
+        if (column is not null)
+        {
+            int slot = index.SlotOf(FusedOrdinals(column, rows)[0]);
+            RowFoldKind folded = slot < 0 ? RowFoldKind.None : RowAggregate.KindFor(index.KindOf(slot), fold, kind);
+            if (folded == RowFoldKind.None)
+            {
+                return false;
+            }
+
+            workspace.Folds[0] = new Indexing.Columnar.ColumnarFold { Slot = slot, Kind = folded };
+            folds = 1;
+        }
+
+        if (!Indexing.Columnar.ColumnarScan.TryRun(
+                index,
+                new ReadOnlySpan<ColumnarStep>(workspace.Steps, 0, steps),
+                new ReadOnlySpan<Indexing.Columnar.ColumnarFold>(workspace.Folds, 0, folds),
+                workspace.Totals,
+                limit,
+                out int matched))
+        {
+            return false;
+        }
+
+        found = folds == 0 ? default : workspace.Totals[0];
+        found.Count = matched;
+        return true;
+    }
+
     /// <summary>Finds where a compiled condition's columns sit in the table, once per schema version.</summary>
     private int[] FusedOrdinals(string[] columns, RowRefStream rows)
     {

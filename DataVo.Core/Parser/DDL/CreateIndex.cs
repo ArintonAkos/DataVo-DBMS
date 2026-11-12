@@ -63,6 +63,12 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                 throw new BindingException($"Index option metric applies only to vector indexes; {_model.IndexKind} has no distance metric.");
             }
 
+            if (string.Equals(_model.IndexKind, Models.Catalog.IndexFile.ColumnarKind, StringComparison.OrdinalIgnoreCase))
+            {
+                CreateColumnar(databaseName);
+                return;
+            }
+
             Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
             var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
@@ -127,6 +133,20 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     /// A dictionary where each key is a composite index string (column values joined by <c>"##"</c>)
     /// and each value is a list of row IDs that share that key.
     /// </returns>
+    /// <summary>
+    /// Records a columnar index and builds it from the table's rows. It holds no keys, so nothing else that
+    /// maintains or consults indexes hears of it; the storage engine keeps it current as rows change.
+    /// </summary>
+    private void CreateColumnar(string databaseName)
+    {
+        Engine.Columnar.Validate(databaseName, _model.TableName, _model.Attributes);
+        Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
+        Engine.Columnar.Find(databaseName, _model.TableName);
+
+        Logger.Info($"New columnar index {_model.IndexName} successfully created!");
+        Messages.Add($"New columnar index {_model.IndexName} successfully created!");
+    }
+
     private Dictionary<string, List<RowKey>> CreateIndexContents(Dictionary<RowKey, Dictionary<string, object?>> tableData)
     {
         Dictionary<string, List<RowKey>> indexContentDict = [];

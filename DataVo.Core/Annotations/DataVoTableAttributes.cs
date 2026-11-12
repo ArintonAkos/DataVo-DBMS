@@ -46,6 +46,25 @@ public sealed class PrimaryKeyAttribute : Attribute;
 public sealed class IndexedAttribute : Attribute;
 
 /// <summary>
+/// Adds the property's column to the table's columnar index when the table is ensured. Counts, sums, minimums
+/// and maximums whose condition and value read only such columns are then computed from dense runs of each
+/// column, many values at a time, instead of row by row. Applies to <see cref="int"/>, <see cref="long"/>,
+/// <see cref="float"/>, <see cref="double"/>, <see cref="bool"/> and date columns.
+/// </summary>
+/// <remarks>
+/// The index is a second copy of the marked columns, kept in memory and updated on every insert and delete.
+/// Mark the columns analytical queries filter and aggregate on, not every column.
+/// </remarks>
+/// <example>
+/// <code>
+/// [Columnar] public int Level { get; set; }
+/// [Columnar] public long Gold { get; set; }
+/// </code>
+/// </example>
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+public sealed class ColumnarAttribute : Attribute;
+
+/// <summary>
 /// Creates a Euclidean HNSW index on a <see cref="System.Numerics.Vector3"/> position property when the table is
 /// ensured, so <c>DataVoTable&lt;T&gt;.NearestNeighbors</c> is answered from the index instead of a scan.
 /// </summary>

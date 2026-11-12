@@ -9,7 +9,7 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// <summary>
 /// In-memory storage engine used for fast, non-persistent row operations.
 /// </summary>
-public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IPagedRowScan
+public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IPagedRowScan, DataVo.Core.Indexing.Columnar.IColumnarRowStore
 {
     // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> rows. A value-tuple key
     // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs
@@ -135,6 +135,19 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
         /// <summary>The table's rows as fixed-length records for scans, once a scan has asked for them.</summary>
         public RowImage? Image;
+
+        /// <summary>
+        /// Some of the table's columns as dense vectors, when it has a columnar index. Position <c>n</c> is the
+        /// row with id <c>n + 1</c>. Written under the table's write lock; read without a lock.
+        /// </summary>
+        public volatile DataVo.Core.Indexing.Columnar.ColumnarIndex? Columnar;
+
+        /// <summary>Appends a row slot, and its position in the columnar index. The caller holds the write lock.</summary>
+        public void Add(InMemoryRow row)
+        {
+            Rows.Add(row);
+            Columnar?.Append(row.Raw, row.Typed);
+        }
     }
 
     /// <summary>
@@ -262,7 +275,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         store.Lock.EnterWriteLock();
         try
         {
-            store.Rows.Add(InMemoryRow.FromRaw(rowBytes));
+            store.Add(InMemoryRow.FromRaw(rowBytes));
             return store.Rows.Count; // 1-based: first row = 1
         }
         finally
@@ -288,7 +301,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         {
             foreach (var rowBytes in rowsBytes)
             {
-                store.Rows.Add(InMemoryRow.FromRaw(rowBytes));
+                store.Add(InMemoryRow.FromRaw(rowBytes));
                 rowIds.Add(store.Rows.Count); // 1-based
             }
         }
@@ -560,6 +573,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
                 // "Tombstone" deletion — leave a null gap so RowIds don't shift.
                 store.Rows[index] = default;
                 store.Image?.Remove(index);
+                store.Columnar?.Remove(index);
             }
         }
         finally
@@ -628,6 +642,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
             store.Rows = survivors;
             store.Image = null; // rows were renumbered; the next scan builds it again
+            store.Columnar = null; // and so is this, by the next query that wants it
         }
         finally
         {
@@ -637,6 +652,55 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         return compacted;
     }
 
+    DataVo.Core.Indexing.Columnar.ColumnarIndex? DataVo.Core.Indexing.Columnar.IColumnarRowStore.Columnar(string databaseName, string tableName) =>
+        _databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store) ? store.Columnar : null;
+
+    DataVo.Core.Indexing.Columnar.ColumnarIndex? DataVo.Core.Indexing.Columnar.IColumnarRowStore.BuildColumnar(
+        string databaseName,
+        string tableName,
+        DataVo.Core.StorageEngine.Serialization.RowSerializer.StorageColumnType[] tableKinds,
+        int[] ordinals,
+        int schemaVersion)
+    {
+        TableStore store = GetOrAddTable(databaseName, tableName);
+        store.Lock.EnterWriteLock();
+        try
+        {
+            // Built whole before it is attached: a reader never sees a half-filled index, and from the moment
+            // it is attached every insert and delete, which also hold this lock, keeps it current.
+            var index = new DataVo.Core.Indexing.Columnar.ColumnarIndex(tableKinds, ordinals, schemaVersion);
+            RowList rows = store.Rows;
+            int count = rows.Count;
+            for (int i = 0; i < count; i++)
+            {
+                InMemoryRow row = rows[i];
+                if (row.IsLive)
+                {
+                    index.Append(row.Raw, row.Typed);
+                }
+                else
+                {
+                    index.AppendEmpty();
+                }
+            }
+
+            store.Columnar = index;
+            return index;
+        }
+        finally
+        {
+            store.Lock.ExitWriteLock();
+        }
+    }
+
+    void DataVo.Core.Indexing.Columnar.IColumnarRowStore.DropColumnar(string databaseName, string tableName)
+    {
+        if (_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            store.Columnar = null;
+        }
+    }
+
     long ITypedRowStorageEngine.InsertTypedRow(string databaseName, string tableName, StoredRow row)
     {
         TableStore store = GetOrAddTable(databaseName, tableName);
@@ -644,7 +708,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         store.Lock.EnterWriteLock();
         try
         {
-            store.Rows.Add(InMemoryRow.FromTyped(row));
+            store.Add(InMemoryRow.FromTyped(row));
             return store.Rows.Count;
         }
         finally
@@ -663,7 +727,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         {
             foreach (StoredRow row in rows)
             {
-                store.Rows.Add(InMemoryRow.FromTyped(row));
+                store.Add(InMemoryRow.FromTyped(row));
                 rowIds.Add(store.Rows.Count);
             }
         }

@@ -50,7 +50,8 @@ namespace DataVo.Generators.Tables
         bool IsIndexed,
         bool IsSpatialIndexed,
         bool IsConstructorParameter,
-        bool IsSettable);
+        bool IsSettable,
+        bool IsColumnar = false);
 
     /// <summary>Everything the emitter needs about one model; holds no compiler symbols.</summary>
     internal sealed record TableModel(
