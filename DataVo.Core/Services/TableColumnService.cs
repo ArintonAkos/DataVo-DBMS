@@ -13,14 +13,14 @@ namespace DataVo.Core.Services
         {
             string type = column.RawType().ToLower();
 
-            return (type == "int");
+            return type is "int" or "bigint";
         }
 
         public static bool IsFloat(IColumn column)
         {
             string type = column.RawType().ToLower();
 
-            return (type == "float");
+            return type is "float" or "double";
         }
 
         public static bool IsBoolean(IColumn column)

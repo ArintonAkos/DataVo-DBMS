@@ -155,6 +155,77 @@ namespace DataVo.Core.Parser.Aggregations
         }
 
         /// <summary>
+        /// The smallest or largest value that is not NULL, or null when there is none.
+        /// </summary>
+        /// <remarks>
+        /// Rows a transaction has written but not committed can hold a number in another width than the stored
+        /// rows do (an <see cref="int"/> literal assigned to a <c>BIGINT</c> column). Numbers are therefore
+        /// compared by value, and the result is given in the column's own type, as it is for committed rows.
+        /// </remarks>
+        protected object? Extreme(ListedTable rows, bool smallest)
+        {
+            object? best = null;
+            foreach (JoinedRow row in rows)
+            {
+                object? value = SelectColumn(row);
+                if (value is null)
+                {
+                    continue;
+                }
+
+                if (best is null || (smallest ? Order(value, best) < 0 : Order(value, best) > 0))
+                {
+                    best = value;
+                }
+            }
+
+            return best is null || _field is null ? best : InColumnType(best, _field.RawType());
+        }
+
+        private static int Order(object left, object right)
+        {
+            if (left.GetType() == right.GetType() || !IsNumber(left) || !IsNumber(right))
+            {
+                return Comparer<object>.Default.Compare(left, right);
+            }
+
+            if (left is decimal || right is decimal)
+            {
+                return Convert.ToDecimal(left, System.Globalization.CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToDecimal(right, System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            if (left is double or float || right is double or float)
+            {
+                return Convert.ToDouble(left, System.Globalization.CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToDouble(right, System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            return Convert.ToInt64(left, System.Globalization.CultureInfo.InvariantCulture)
+                .CompareTo(Convert.ToInt64(right, System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        private static bool IsNumber(object value) => value is int or long or short or byte or float or double or decimal;
+
+        private static object InColumnType(object value, string columnType)
+        {
+            if (!IsNumber(value))
+            {
+                return value;
+            }
+
+            System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+            return columnType.ToLowerInvariant() switch
+            {
+                "int" when value is not int => Convert.ToInt32(value, invariant),
+                "bigint" when value is not long => Convert.ToInt64(value, invariant),
+                "float" when value is not float => Convert.ToSingle(value, invariant),
+                "double" when value is not double => Convert.ToDouble(value, invariant),
+                _ => value,
+            };
+        }
+
+        /// <summary>
         /// Validates that the bound source column is numeric.
         /// </summary>
         protected void ValidateNumericColumn()

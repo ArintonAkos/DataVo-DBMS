@@ -9,7 +9,7 @@ namespace DataVo.Core.Parser.Aggregations
     {
         protected override object? Apply(ListedTable rows)
         {
-            return rows.Max(SelectColumn);
+            return Extreme(rows, smallest: false);
         }
 
         protected override void Validate()
