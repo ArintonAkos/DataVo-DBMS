@@ -128,6 +128,13 @@ internal sealed class RowLayout
     public bool IsLive(ReadOnlySpan<byte> record) => record[StatusOffset] != StatusEmpty;
 
     /// <summary>
+    /// Whether a record still holds a row, read so that a removal by another thread is seen. For a reader that
+    /// has copied values out of the record without a lock and must know they were whole.
+    /// </summary>
+    public bool IsStillLive(ReadOnlySpan<byte> record) =>
+        Volatile.Read(ref System.Runtime.InteropServices.MemoryMarshal.GetReference(record.Slice(StatusOffset, 1))) != StatusEmpty;
+
+    /// <summary>
     /// Whether a record stands for a row whose cells are kept apart from it, because one of them is not of its
     /// column's type. Such a record holds no values.
     /// </summary>

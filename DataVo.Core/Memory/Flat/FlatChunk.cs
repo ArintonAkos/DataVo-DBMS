@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace DataVo.Core.Memory.Flat;
 
 /// <summary>
-/// A fixed block of <see cref="Slots"/> equal-width slots laid end to end. With a stride of one value it is a
+/// A fixed block of equal-width slots laid end to end: <see cref="Slots"/> of them unless it was made smaller. With a stride of one value it is a
 /// column vector; with a stride of one record it is a run of packed rows. The block never moves or grows, so a
 /// reader may keep a span over it while a writer fills later slots.
 /// </summary>
@@ -30,17 +30,31 @@ internal sealed class FlatChunk
     private readonly byte[] _memory;
     private readonly int _start;
 
-    /// <summary>Allocates a zeroed chunk.</summary>
+    /// <summary>Allocates a zeroed chunk of <see cref="Slots"/> slots.</summary>
     /// <param name="stride">The width of one slot in bytes.</param>
     public FlatChunk(int stride)
+        : this(stride, Slots)
+    {
+    }
+
+    /// <summary>Allocates a zeroed chunk.</summary>
+    /// <param name="stride">The width of one slot in bytes.</param>
+    /// <param name="capacity">The number of slots, from 1 to <see cref="Slots"/>.</param>
+    public FlatChunk(int stride, int capacity)
     {
         if (stride <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(stride));
         }
 
+        if (capacity <= 0 || capacity > Slots)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
         Stride = stride;
-        int length = checked(Slots * stride);
+        Capacity = capacity;
+        int length = checked(capacity * stride);
 #if NET10_0_OR_GREATER
         _memory = GC.AllocateArray<byte>(length + Alignment - 1, pinned: true);
         _start = AlignmentGap(_memory);
@@ -53,8 +67,11 @@ internal sealed class FlatChunk
     /// <summary>The width of one slot in bytes.</summary>
     public int Stride { get; }
 
+    /// <summary>The number of slots in this chunk.</summary>
+    public int Capacity { get; }
+
     /// <summary>All slots as bytes.</summary>
-    public Span<byte> Bytes => new(_memory, _start, Slots * Stride);
+    public Span<byte> Bytes => new(_memory, _start, Capacity * Stride);
 
     /// <summary>All slots as values of <typeparamref name="T"/>, whose size must be the stride.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
