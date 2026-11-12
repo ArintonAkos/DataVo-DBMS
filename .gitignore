@@ -433,3 +433,7 @@ docs/superpowers/
 
 # matplotlib cache from benchmark plot generator
 docs/scripts/.matplotlib-cache/
+
+# macOS local Application Support directory
+/Library/
+
