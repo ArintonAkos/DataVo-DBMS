@@ -49,6 +49,25 @@ public class AdoNetTests : IDisposable
         Assert.Equal(3, count);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DataVoDataReader.GetFieldType(int)"/> can inspect column types
+    /// prior to calling <see cref="DataVoDataReader.Read()"/>, which is required by micro-ORMs like Dapper.
+    /// </summary>
+    [Fact]
+    public void GetFieldType_BeforeFirstRead_ReportsColumnTypes()
+    {
+        CreateAndSeedTable("FieldTypes");
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT Id, Name FROM FieldTypes;";
+
+        using var reader = cmd.ExecuteReader();
+
+        // Micro-ORMs such as Dapper read column metadata before the first Read().
+        Assert.Equal(typeof(int), reader.GetFieldType(0));
+        Assert.Equal(typeof(string), reader.GetFieldType(1));
+    }
+
     [Fact]
     public void ExecuteNonQuery_ReturnsAffectedRows()
     {

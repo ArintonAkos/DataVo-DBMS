@@ -178,8 +178,32 @@ public class DataVoDataReader : DbDataReader
                         "under trimming. The base DbDataReader.GetFieldType annotation is preserved on the signature.")]
     public override Type GetFieldType(int ordinal)
     {
-        object val = GetValue(ordinal);
-        return val == DBNull.Value ? typeof(object) : val.GetType();
+        // ADO.NET callers (Dapper, DataTable.Load) ask for column metadata before the first Read(),
+        // so the type is taken from the first non-null cell of the materialized result rather than
+        // from the current row.
+        object? val = CurrentRow != null ? GetValue(ordinal) : FirstNonNullValue(ordinal);
+        return val == null || val == DBNull.Value ? typeof(object) : val.GetType();
+    }
+
+    /// <summary>
+    /// Finds the first non-null value of a column in the current result set, or <c>null</c> when
+    /// the result has no rows or the column is null in every row.
+    /// </summary>
+    /// <param name="ordinal">The zero-based column ordinal.</param>
+    private object? FirstNonNullValue(int ordinal)
+    {
+        string columnName = GetName(ordinal);
+        List<Dictionary<string, object?>> rows = CurrentResult.Data;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].GetValueOrDefault(columnName) is { } value)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
