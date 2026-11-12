@@ -13,11 +13,11 @@ public sealed class Player
 
     public bool Active { get; set; }
 
-    public int Level { get; set; }
+    [Columnar] public int Level { get; set; }
 
-    public long Gold { get; set; }
+    [Columnar] public long Gold { get; set; }
 
-    public double Ratio { get; set; }
+    [Columnar] public double Ratio { get; set; }
 
     public string Name { get; set; } = "";
 

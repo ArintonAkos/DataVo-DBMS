@@ -318,10 +318,15 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// <exception cref="InvalidOperationException">The table lacks one of <paramref name="columns"/>.</exception>
     [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public int CountMatchingColumnar<TFilter>(string[] columns, string kinds, ref TFilter filter, int limit)
-        where TFilter : struct, IRowRefFilter, IColumnarFilter =>
-        TryColumnar(columns, ref filter, null, RowFold.Sum, '\0', limit, out RowAggregate found)
-            ? found.Count
-            : CountMatching(columns, kinds, ref filter, limit);
+        where TFilter : struct, IRowRefFilter, IColumnarFilter
+    {
+        if (TryColumnar(columns, ref filter, null, RowFold.Sum, '\0', limit, out RowAggregate found))
+        {
+            return found.Count;
+        }
+
+        return CountMatching(columns, kinds, ref filter, limit);
+    }
 
     /// <summary>
     /// Folds one column over the rows a compiled condition accepts, from the table's columnar index when it
@@ -360,6 +365,9 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// when the table has no such index or it lacks a column, inside a transaction (the index holds committed
     /// rows only), or when the condition or the fold has no columnar form.
     /// </summary>
+    // Kept out of line: inlined into the callers, it changed how the row scan they fall back to was compiled,
+    // and a file-backed count ran 1.8 times slower.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool TryColumnar<TFilter>(string[] columns, ref TFilter filter, string[]? column, RowFold fold, char kind, int limit, out RowAggregate found)
         where TFilter : struct, IColumnarFilter
     {
