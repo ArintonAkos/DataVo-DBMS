@@ -1,0 +1,8 @@
+Date: 2026-11-12
+Machine: Apple M4 Pro (12 cores: 8P+4E per Apple spec; BenchmarkDotNet reports 12 logical/12 physical), 48 GiB, macOS 26.3 (Darwin 25.3.0), arm64
+Runtime: .NET SDK 10.0.103, runtime 10.0.3, Arm64 RyuJIT armv8.0-a
+Commit: 7c0a931 on master (engine identical to 2d0dcb9; only the benchmark runners' RowRef alias differs)
+SQLite: Microsoft.Data.Sqlite 10.0.0; sqlite-vec 0.1.9 (vec0.dylib, arm64)
+DuckDB: DuckDB.NET.Data.Full 1.5.3
+Unity: 6000.5.4f1, macOS IL2CPP player (universal x86_64 + arm64), 3 smoke scenarios passed
+Other processes: IDE language servers were running in the background. Single run per scenario unless noted; no CPU pinning.

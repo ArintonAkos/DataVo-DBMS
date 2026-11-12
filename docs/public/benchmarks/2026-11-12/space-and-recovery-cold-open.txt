@@ -1,0 +1,4 @@
+DataVo (LSM Production) [DataVo.Core net10.0]: insert 731,8ms | size 27,72 MB | recovery 4,3ms | first read after recovery 3,6ms
+DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 473,2ms | size 27,72 MB | recovery 1,5ms | first read after recovery 0,0ms
+SQLite (WAL,normal): insert 712,5ms | size 29,08 MB | recovery 0,4ms | first read after recovery 1,2ms
+LiteDB: insert 2 987,1ms | size 154,46 MB | recovery 0,6ms | first read after recovery 9,4ms

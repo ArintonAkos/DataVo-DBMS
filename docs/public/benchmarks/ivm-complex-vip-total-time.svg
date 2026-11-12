@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
 <rect width="100%" height="100%" fill="white"/>
 <text x="600.0" y="62.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="29" font-weight="700" fill="#1F2933">IVM Complex VIP: Total Time</text>
-<text x="600.0" y="96.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="400" fill="#4B5563">50,000 JOIN + GROUP BY insert+read iterations (macOS arm64)</text>
+<text x="600.0" y="96.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="400" fill="#4B5563">50,000 JOIN + GROUP BY insert+read iterations (M4 Pro, 2026-11-12)</text>
 <line x1="150.0" y1="575.0" x2="1030.0" y2="575.0" stroke="#D7DEE8" stroke-width="1.1"/>
 <text x="132.0" y="580.0" text-anchor="end" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="400" fill="#4B5563">100</text>
 <line x1="150.0" y1="467.5" x2="1030.0" y2="467.5" stroke="#D7DEE8" stroke-width="1.1"/>
@@ -15,17 +15,17 @@
 <line x1="150.0" y1="145.0" x2="150.0" y2="575.0" stroke="#222831" stroke-width="1.4"/>
 <line x1="150.0" y1="575.0" x2="1030.0" y2="575.0" stroke="#222831" stroke-width="1.4"/>
 <text transform="rotate(-90 49 360.0)" x="49.0" y="360.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933">Total time (ms, log scale)</text>
-<rect x="257.5" y="501.2" width="150.0" height="73.8" fill="#0072B2" stroke="#111827" stroke-width="1.1"/>
+<rect x="257.5" y="544.6" width="150.0" height="30.4" fill="#0072B2" stroke="#111827" stroke-width="1.1"/>
 <text x="332.5" y="617.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" font-weight="700" fill="#1F2933">DataVo</text>
-<text x="332.5" y="483.2" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">485.5 ms</text>
-<text x="332.5" y="544.2" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">incremental</text>
-<rect x="515.0" y="291.9" width="150.0" height="283.1" fill="#DC2626" stroke="#111827" stroke-width="1.1"/>
+<text x="332.5" y="526.6" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">191.7 ms</text>
+<text x="332.5" y="587.6" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">incremental</text>
+<rect x="515.0" y="302.4" width="150.0" height="272.6" fill="#DC2626" stroke="#111827" stroke-width="1.1"/>
 <text x="590.0" y="617.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" font-weight="700" fill="#1F2933">DuckDB</text>
-<text x="590.0" y="273.9" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">42,996.2 ms</text>
-<text x="590.0" y="360.9" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">88.6x slower</text>
-<rect x="772.5" y="187.6" width="150.0" height="387.4" fill="#E69F00" stroke="#111827" stroke-width="1.1"/>
+<text x="590.0" y="284.4" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">34,339.1 ms</text>
+<text x="590.0" y="371.4" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">179.1x slower</text>
+<rect x="772.5" y="241.7" width="150.0" height="333.3" fill="#E69F00" stroke="#111827" stroke-width="1.1"/>
 <text x="847.5" y="617.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" font-weight="700" fill="#1F2933">SQLite</text>
-<text x="847.5" y="169.6" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">401,777.6 ms</text>
-<text x="847.5" y="256.6" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">827.5x slower</text>
+<text x="847.5" y="223.7" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#1F2933">126,064.4 ms</text>
+<text x="847.5" y="310.7" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">657.6x slower</text>
 <text x="600.0" y="705.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="400" fill="#4B5563">Lower is better. DataVo row uses maintained reactive state; SQLite/DuckDB rows execute the benchmark baseline path.</text>
 </svg>

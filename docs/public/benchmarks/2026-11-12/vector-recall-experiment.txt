@@ -1,0 +1,10 @@
+# Source: demos/Research.Benchmark/tools/VectorRecall (dotnet run -c Release)
+# 1536 dimensions, top-10, 100 held-out queries, HNSW with default EfSearch (64) vs exact Flat.
+# "uniform" = the benchmark generator (components uniform in [-1,1], normalised).
+# "clustered" = 50 random centroids plus +-0.02 uniform noise per component, normalised.
+N=  1000 uniform   build flat        27 ms hnsw       238 ms | query mean flat   0.243 ms hnsw   0.452 ms | HNSW recall@10 vs exact 99.9 %
+N=  1000 clustered build flat        10 ms hnsw        63 ms | query mean flat   0.237 ms hnsw   0.309 ms | HNSW recall@10 vs exact 100.0 %
+N= 10000 uniform   build flat       135 ms hnsw      1169 ms | query mean flat   2.064 ms hnsw   1.921 ms | HNSW recall@10 vs exact 63.5 %
+N= 10000 clustered build flat        34 ms hnsw       548 ms | query mean flat   2.003 ms hnsw   0.245 ms | HNSW recall@10 vs exact 95.9 %
+N= 50000 uniform   build flat       162 ms hnsw     10414 ms | query mean flat  10.103 ms hnsw   3.005 ms | HNSW recall@10 vs exact 23.8 %
+N= 50000 clustered build flat       236 ms hnsw      5658 ms | query mean flat  10.286 ms hnsw   0.678 ms | HNSW recall@10 vs exact 90.2 %
