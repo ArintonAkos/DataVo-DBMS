@@ -62,6 +62,41 @@ public static class DataVoGeneratedTableSupport
         }
     }
 
+    /// <summary>
+    /// Creates the table's columnar index over the given columns if it is missing, and replaces it when it
+    /// covers other columns than the model now marks.
+    /// </summary>
+    /// <param name="context">The context whose current database holds the table.</param>
+    /// <param name="tableName">The table.</param>
+    /// <param name="columns">The columns the model marks <c>[Columnar]</c>.</param>
+    /// <exception cref="InvalidOperationException">No database is selected, or the index could not be created.</exception>
+    public static void EnsureColumnarIndex(DataVoContext context, string tableName, string[] columns)
+    {
+        string databaseName = context.Engine.Sessions.Get(context.SessionId)
+            ?? throw new InvalidOperationException($"Select a database before ensuring table {tableName}.");
+        string indexName = $"cx_{tableName}";
+        foreach (IndexFile index in context.Engine.Catalog.GetColumnarIndexesReadOnly(tableName, databaseName))
+        {
+            if (!index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (index.AttributeNames.Count == columns.Length
+                && columns.All(column => index.AttributeNames.Contains(column, StringComparer.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            string drop = $"DROP INDEX {index.IndexFileName} ON {tableName}";
+            ThrowIfError(context.Execute(drop)[^1], drop);
+            break;
+        }
+
+        string sql = $"CREATE INDEX {indexName} ON {tableName} ({string.Join(", ", columns)}) USING COLUMNAR";
+        ThrowIfError(context.Execute(sql)[^1], sql);
+    }
+
     /// <summary>Throws when a statement failed.</summary>
     /// <param name="result">The statement's result.</param>
     /// <param name="statement">Text identifying the statement in the error.</param>

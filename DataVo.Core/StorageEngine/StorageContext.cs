@@ -792,6 +792,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// </summary>
     internal bool KeepsRowImages => _storageEngine is InMemoryStorageBackend;
 
+    /// <summary>The backend's columnar index support, or null when it keeps none.</summary>
+    internal DataVo.Core.Indexing.Columnar.IColumnarRowStore? ColumnarStore => _storageEngine as DataVo.Core.Indexing.Columnar.IColumnarRowStore;
+
     /// <summary>
     /// Examines up to <paramref name="maxRows"/> more rows of a table with a struct visitor and advances the
     /// cursor, like <see cref="ScanRowPage{TState}"/> without key bounds. Returns false when this backend or the

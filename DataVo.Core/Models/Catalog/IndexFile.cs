@@ -39,6 +39,14 @@ public class IndexFile
     [XmlIgnore]
     public string EffectiveMetric => Metric ?? CosineMetric;
 
+    /// <summary>
+    /// Gets whether this is a columnar index: a copy of the listed columns laid out for scans and aggregates.
+    /// It holds no keys, so it never serves a row lookup.
+    /// </summary>
+    [XmlIgnore]
+    public bool IsColumnar => string.Equals(IndexKind, ColumnarKind, StringComparison.OrdinalIgnoreCase);
+
+    internal const string ColumnarKind = "COLUMNAR";
     internal const string CosineMetric = "cosine";
     internal const string EuclideanMetric = "euclidean";
 

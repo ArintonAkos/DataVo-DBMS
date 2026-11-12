@@ -92,8 +92,25 @@ public class DataVoLinqInterceptorGeneratorTests
 
         Assert.Contains($"return {condition};", generated);
         Assert.Contains(detail, generated);
-        Assert.Contains("struct Kernel : global::DataVo.Core.IRowRefFilter", generated);
-        Assert.Contains("count = table.CountMatching(Columns, Kinds, ref kernel, limit);", generated);
+        Assert.Contains("struct Kernel : global::DataVo.Core.IRowRefFilter, global::DataVo.Core.IColumnarFilter", generated);
+        Assert.Contains("count = table.CountMatchingColumnar(Columns, Kinds, ref kernel, limit);", generated);
+    }
+
+    [Theory]
+    [InlineData("players.Where(target, static (p, min) => p.Gold >= min)", "builder.Compare(0, global::DataVo.Core.ColumnarTest.GreaterOrEqual, (long)p0);")]
+    [InlineData("players.Where(p => !p.IsActive && p.Speed < 2.5f)", "builder.Compare(0, global::DataVo.Core.ColumnarTest.Equal, (bool)p0); builder.Compare(1, global::DataVo.Core.ColumnarTest.Less, (float)p1); builder.And();")]
+    [InlineData("players.Where(p => p.Score != 7)", "builder.Compare(0, global::DataVo.Core.ColumnarTest.NotEqual, (int)p0);")]
+    [InlineData("players.Where(p => p.Score == null || p.Gold > 5)", "builder.IsNull(0, true); builder.Compare(1, global::DataVo.Core.ColumnarTest.Greater, (long)p0); builder.Or();")]
+    [InlineData("players.Where(p => p.Guild != null && (p.Gold < 1 || p.Gold > 9))", "builder.IsNull(0, false); builder.Compare(1, global::DataVo.Core.ColumnarTest.Less, (long)p0); builder.Compare(1, global::DataVo.Core.ColumnarTest.Greater, (long)p1); builder.Or(); builder.And();")]
+    public void CompiledCondition_AlsoDescribesItselfInPostfixOrder_ForAColumnarIndex(string call, string steps)
+    {
+        string generated = Generate(call).Generated;
+        int start = generated.IndexOf("public void Describe(ref global::DataVo.Core.ColumnarPredicateBuilder builder)", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int open = generated.IndexOf('{', start);
+        string body = generated.Substring(open + 1, generated.IndexOf('}', open) - open - 1);
+
+        Assert.Equal(steps, string.Join(" ", body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
     }
 
     [Theory]
@@ -150,7 +167,7 @@ public class DataVoLinqInterceptorGeneratorTests
         string generated = Generate("players.Where(p => p.IsActive)").Generated;
 
         Assert.Contains("protected override bool TryFold(", generated);
-        Assert.Contains("return table.FoldMatching(Columns, Kinds, ref kernel, column, fold, kind, out totals);", generated);
+        Assert.Contains("return table.FoldMatchingColumnar(Columns, Kinds, ref kernel, column, fold, kind, out totals);", generated);
     }
 
     [Theory]

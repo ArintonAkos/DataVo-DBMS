@@ -329,7 +329,8 @@ internal static class DataVoLinqAnalyzer
 
         // Each leaf of the condition (a comparison, a null test, a bare bool column) as C# in three forms, when
         // its column can be read directly. A leaf without an entry keeps the whole query on the SQL path.
-        private readonly Dictionary<SyntaxNode, (string Row, string Bytes, string Cells)> _kernelLeaves = [];
+        // The fourth form is the leaf as a call on a ColumnarPredicateBuilder, for tables with a columnar index.
+        private readonly Dictionary<SyntaxNode, (string Row, string Bytes, string Cells, string Columnar)> _kernelLeaves = [];
         private readonly List<string> _kernelColumns = [];
         private readonly List<char> _kernelKinds = [];
 
@@ -339,13 +340,37 @@ internal static class DataVoLinqAnalyzer
         /// </summary>
         public LinqKernel? Kernel(ExpressionSyntax body) =>
             KernelText(body, 0) is { } row && KernelText(body, 1) is { } bytes && KernelText(body, 2) is { } cells
-                ? new LinqKernel(row, bytes, cells, new EquatableArray<string>([.. _kernelColumns]), new string([.. _kernelKinds]))
+                ? new LinqKernel(row, bytes, cells, new EquatableArray<string>([.. _kernelColumns]), new string([.. _kernelKinds]), new EquatableArray<string>([.. KernelSteps(body, [])]))
                 : null;
+
+        /// <summary>
+        /// The condition as builder calls in postfix order: each leaf, then the AND or OR that joins the two
+        /// operands before it. Call only for a condition <see cref="KernelText"/> accepted.
+        /// </summary>
+        private List<string> KernelSteps(ExpressionSyntax expression, List<string> steps)
+        {
+            if (_kernelLeaves.TryGetValue(expression, out (string Row, string Bytes, string Cells, string Columnar) leaf))
+            {
+                steps.Add(leaf.Columnar);
+            }
+            else if (expression is ParenthesizedExpressionSyntax parenthesized)
+            {
+                KernelSteps(parenthesized.Expression, steps);
+            }
+            else if (expression is BinaryExpressionSyntax binary)
+            {
+                KernelSteps(binary.Left, steps);
+                KernelSteps(binary.Right, steps);
+                steps.Add(binary.IsKind(SyntaxKind.LogicalAndExpression) ? "builder.And();" : "builder.Or();");
+            }
+
+            return steps;
+        }
 
         /// <summary>The condition in one form: 0 over a RowRef, 1 over a row's bytes, 2 over a typed row's cells.</summary>
         private string? KernelText(ExpressionSyntax expression, int form)
         {
-            if (_kernelLeaves.TryGetValue(expression, out (string Row, string Bytes, string Cells) leaf))
+            if (_kernelLeaves.TryGetValue(expression, out (string Row, string Bytes, string Cells, string Columnar) leaf))
             {
                 return form switch { 0 => leaf.Row, 1 => leaf.Bytes, _ => leaf.Cells };
             }
@@ -416,7 +441,12 @@ internal static class DataVoLinqAnalyzer
             {
                 // The direct forms only see rows whose cells are all present, so the test is a constant there.
                 string constant = isNull ? "false" : "true";
-                _kernelLeaves[node] = ($"{(isNull ? string.Empty : "!")}row.IsNull(c{index.ToString(CultureInfo.InvariantCulture)})", constant, constant);
+                string number = index.ToString(CultureInfo.InvariantCulture);
+                _kernelLeaves[node] = (
+                    $"{(isNull ? string.Empty : "!")}row.IsNull(c{number})",
+                    constant,
+                    constant,
+                    $"builder.IsNull({number}, {(isNull ? "true" : "false")});");
             }
         }
 
@@ -446,10 +476,29 @@ internal static class DataVoLinqAnalyzer
             string op = comparison switch { "=" => "==", "<>" => "!=", _ => comparison };
             string bytes = $"global::DataVo.Core.RowBytes.{reader.Bytes}(row, o{number})";
             string cells = string.Format(CultureInfo.InvariantCulture, reader.Cells, $"cells[c{number}]");
+            string test = comparison switch
+            {
+                "=" => "Equal",
+                "<>" => "NotEqual",
+                "<" => "Less",
+                "<=" => "LessOrEqual",
+                ">" => "Greater",
+                _ => "GreaterOrEqual",
+            };
+            string valueType = reader.Kind switch
+            {
+                'i' => "int",
+                'l' => "long",
+                'f' => "float",
+                'd' => "double",
+                'b' => "bool",
+                _ => "global::System.Guid",
+            };
             _kernelLeaves[node] = (
                 comparison == "<>" ? $"(!{read} || {local} != {value})" : $"({read} && {local} {op} {value})",
                 $"({bytes} {op} {value})",
-                $"({cells} {op} {value})");
+                $"({cells} {op} {value})",
+                $"builder.Compare({number}, global::DataVo.Core.ColumnarTest.{test}, ({valueType}){value});");
         }
 
         public string? Condition(ExpressionSyntax expression, bool topLevel)

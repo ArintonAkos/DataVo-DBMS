@@ -486,8 +486,17 @@ internal sealed class CatalogStore
         }
     }
 
+    /// <summary>The table's columnar indexes, which <see cref="GetTableIndexes"/> and its relatives leave out.</summary>
+    internal IReadOnlyList<IndexFile> GetColumnarIndexesReadOnly(string tableName, string databaseName)
+    {
+        lock (_syncRoot)
+        {
+            return GetTableShapeNoLock(databaseName, tableName)?.Columnar ?? [];
+        }
+    }
+
     /// <summary>Parsed columns and indexes of one table, cached until the next catalog change.</summary>
-    private sealed record TableShape(Column[] Columns, IndexFile[] Indexes);
+    private sealed record TableShape(Column[] Columns, IndexFile[] Indexes, IndexFile[] Columnar);
 
     private readonly Dictionary<(string Database, string Table), TableShape> _tableShapes =
         new(new TableShapeKeyComparer());
@@ -529,11 +538,15 @@ internal sealed class CatalogStore
                 DefaultValue = e.Attribute("DefaultValue")?.Value,
                 IsNotNull = e.Attribute("IsNull")?.Value == "0",
             })];
-        IndexFile[] indexes = [.. table.Elements("IndexFiles")
+        IndexFile[] declared = [.. table.Elements("IndexFiles")
             .Elements("IndexFile")
             .Select(e => ConvertFromXml<IndexFile>(e)!)];
 
-        var shape = new TableShape(columns, indexes);
+        // A columnar index holds no keys, so everything that looks rows up through an index must not see it.
+        IndexFile[] indexes = [.. declared.Where(static index => !index.IsColumnar)];
+        IndexFile[] columnar = [.. declared.Where(static index => index.IsColumnar)];
+
+        var shape = new TableShape(columns, indexes, columnar);
         _tableShapes[(databaseName, tableName)] = shape;
         return shape;
     }

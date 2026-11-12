@@ -417,6 +417,7 @@ public static class Catalog
         return table.Elements("IndexFiles")
             .Elements("IndexFile")
             .Select(e => ConvertFromXml<IndexFile>(e)!)
+            .Where(static index => !index.IsColumnar)
             .ToList();
     }
 

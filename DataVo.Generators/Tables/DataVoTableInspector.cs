@@ -203,7 +203,8 @@ internal static class DataVoTableInspector
                 indexed,
                 spatialIndexed,
                 parameter is not null,
-                settable));
+                settable,
+                HasAttribute(property, parameter, "ColumnarAttribute")));
         }
 
         return columns;

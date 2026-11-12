@@ -276,6 +276,15 @@ internal sealed class SqlNameResolver
                 return;
             }
         }
+
+        foreach (var index in _catalog.GetColumnarIndexesReadOnly(dropIndex.TableName.Name, _database))
+        {
+            if (string.Equals(index.IndexFileName, dropIndex.IndexName.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                dropIndex.IndexName.Name = index.IndexFileName;
+                return;
+            }
+        }
     }
 
     private string StoredTableName(string written)
