@@ -36,8 +36,9 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
     public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.CompactTable(databaseName, tableName));
     public DataVo.Core.Indexing.Columnar.ColumnarIndex? Columnar(string databaseName, string tableName) =>
         ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).Columnar(databaseName, tableName);
-    public DataVo.Core.Indexing.Columnar.ColumnarIndex? BuildColumnar(string databaseName, string tableName, DataVo.Core.StorageEngine.Serialization.RowSerializer.StorageColumnType[] tableKinds, int[] ordinals, int schemaVersion) =>
-        ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).BuildColumnar(databaseName, tableName, tableKinds, ordinals, schemaVersion);
+    public DataVo.Core.Indexing.Columnar.ColumnarIndex? BuildColumnar(string databaseName, string tableName, DataVo.Core.StorageEngine.Serialization.RowSerializer.StorageColumnType[] tableKinds, int[] ordinals, int schemaVersion, int keyOrdinal) =>
+        ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).BuildColumnar(databaseName, tableName, tableKinds, ordinals, schemaVersion, keyOrdinal);
+    public bool KeyedRows => false;
     public void DropColumnar(string databaseName, string tableName) =>
         ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).DropColumnar(databaseName, tableName);
     public InMemoryStorageSnapshot CreateSnapshot() => ((IInMemoryStorageSnapshotProvider)_inner).CreateSnapshot();

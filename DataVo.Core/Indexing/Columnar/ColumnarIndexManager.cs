@@ -32,7 +32,7 @@ internal sealed class ColumnarIndexManager(DataVoEngine engine)
 
         ColumnarIndex? index = store.Columnar(databaseName, tableName);
         int version = engine.Catalog.GetTableSchemaVersion(tableName, databaseName);
-        if (index is null || index.SchemaVersion != version)
+        if (index is null || index.SchemaVersion != version || index.WantsRebuild)
         {
             index = Refresh(store, index, databaseName, tableName, version);
         }
@@ -68,8 +68,10 @@ internal sealed class ColumnarIndexManager(DataVoEngine engine)
             return null;
         }
 
-        // A clustered table keeps its key outside the row, where the index's row decoder does not look.
-        if (engine.StorageContext.ResolveClusteredKey(databaseName, tableName) is not null)
+        // A clustered table keeps its key outside the row. Only an engine that finds rows by key can hand
+        // the index that key with each row.
+        int keyOrdinal = engine.StorageContext.ResolveClusteredKey(databaseName, tableName)?.Ordinal ?? -1;
+        if (keyOrdinal >= 0 && !store.KeyedRows)
         {
             return null;
         }
@@ -108,9 +110,9 @@ internal sealed class ColumnarIndexManager(DataVoEngine engine)
         {
             // Another query may have built it while this one waited.
             ColumnarIndex? current = store.Columnar(databaseName, tableName);
-            return current is not null && current.SchemaVersion == version
+            return current is not null && current.SchemaVersion == version && !current.WantsRebuild
                 ? current
-                : store.BuildColumnar(databaseName, tableName, kinds, [.. ordinals], version);
+                : store.BuildColumnar(databaseName, tableName, kinds, [.. ordinals], version, keyOrdinal);
         }
     }
 }

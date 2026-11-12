@@ -6,7 +6,7 @@ using DataVo.Core.StorageEngine.Lsm;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStorageEngine, IRowExistenceProbe, IRowCountEstimator, IDisposable
+internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStorageEngine, IRowExistenceProbe, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore, IDisposable
 {
     private readonly LsmStorageEngine _inner;
 
@@ -19,6 +19,15 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
     }
 
     public string BackendKind => "Lsm";
+
+    public bool KeyedRows => true;
+
+    public DataVo.Core.Indexing.Columnar.ColumnarIndex? Columnar(string databaseName, string tableName) => _inner.Columnar(databaseName, tableName);
+
+    public DataVo.Core.Indexing.Columnar.ColumnarIndex? BuildColumnar(string databaseName, string tableName, Serialization.RowSerializer.StorageColumnType[] tableKinds, int[] ordinals, int schemaVersion, int keyOrdinal) =>
+        _inner.BuildColumnar(databaseName, tableName, tableKinds, ordinals, schemaVersion, keyOrdinal);
+
+    public void DropColumnar(string databaseName, string tableName) => _inner.DropColumnar(databaseName, tableName);
 
     /// <summary>The underlying engine (test hooks and diagnostics).</summary>
     internal LsmStorageEngine Engine => _inner;

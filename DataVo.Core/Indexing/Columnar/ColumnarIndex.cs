@@ -35,6 +35,14 @@ internal sealed class ColumnarIndex
     private long _scans;
     private volatile bool _usable = true;
 
+    // Set for an index over rows that are found by key, not by position: a table of the LSM engine.
+    private readonly RowKeyPositionMap? _keys;
+    private readonly int _keyOrdinal;
+    private RowKey _lastKey;
+    private bool _anyKey;
+    private int _dead;
+    private volatile bool _inKeyOrder = true;
+
     /// <summary>One indexed column.</summary>
     private sealed class Column(int ordinal, StorageKind kind)
     {
@@ -51,8 +59,18 @@ internal sealed class ColumnarIndex
     /// <param name="tableKinds">The stored type of every column of the table, in table order.</param>
     /// <param name="ordinals">The table positions of the columns to index, each of a type <see cref="Supports"/> accepts.</param>
     /// <param name="schemaVersion">The table's schema version these positions belong to.</param>
-    public ColumnarIndex(StorageKind[] tableKinds, ReadOnlySpan<int> ordinals, int schemaVersion)
+    /// <param name="keyed">
+    /// Whether rows are identified by key: they are then added with <see cref="Upsert"/> and removed with
+    /// <see cref="Delete"/>, and the index keeps a map from key to position.
+    /// </param>
+    /// <param name="keyOrdinal">
+    /// For a keyed index over a clustered table, the table position of the key column, whose value is the
+    /// row's key and not in the row; otherwise -1.
+    /// </param>
+    public ColumnarIndex(StorageKind[] tableKinds, ReadOnlySpan<int> ordinals, int schemaVersion, bool keyed = false, int keyOrdinal = -1)
     {
+        _keys = keyed ? new RowKeyPositionMap() : null;
+        _keyOrdinal = keyOrdinal;
         _tableKinds = tableKinds;
         _located = new int[tableKinds.Length];
         _slotOfOrdinal = new int[tableKinds.Length];
@@ -98,6 +116,18 @@ internal sealed class ColumnarIndex
     /// <summary>Records one answered scan.</summary>
     public void CountScan() => Interlocked.Increment(ref _scans);
 
+    /// <summary>
+    /// Whether positions are in key order, so a scan visits rows in the order a scan of the table does. True for
+    /// an index that is not keyed. A keyed index loses it at the first update or out-of-order insert.
+    /// </summary>
+    public bool InKeyOrder => _inKeyOrder;
+
+    /// <summary>How many positions hold a row that was since deleted or replaced.</summary>
+    public int Dead => Volatile.Read(ref _dead);
+
+    /// <summary>Whether dead positions outnumber live ones by enough that building the index again is worth it.</summary>
+    public bool WantsRebuild => Dead > FlatChunk.Slots && Dead > Count / 2;
+
     /// <summary>The number of indexed columns.</summary>
     public int ColumnCount => _columns.Length;
 
@@ -132,7 +162,53 @@ internal sealed class ColumnarIndex
     /// </summary>
     /// <param name="stored">The row's serialized bytes, when it has no typed form.</param>
     /// <param name="typed">The row's cells, when it is typed.</param>
-    public void Append(ReadOnlySpan<byte> stored, StoredRow? typed)
+    public void Append(ReadOnlySpan<byte> stored, StoredRow? typed) => AppendRow(stored, typed, default);
+
+    /// <summary>
+    /// Adds the row with a key, or replaces the row that has it. Called by the writer of a keyed index.
+    /// </summary>
+    /// <param name="key">The row's key.</param>
+    /// <param name="stored">The row's serialized bytes.</param>
+    public void Upsert(RowKey key, ReadOnlySpan<byte> stored)
+    {
+        if (_keys!.TryGet(key, out int old))
+        {
+            // The new row and the end of the old one become visible together: a scan that overlaps the change
+            // sees the version move and starts over, so it never counts the row twice or not at all.
+            Volatile.Write(ref _version, _version + 1);
+            int at = AppendRow(stored, null, key);
+            _live.Clear(old);
+            Volatile.Write(ref _version, _version + 1);
+            _keys.Set(key, at);
+            Volatile.Write(ref _dead, _dead + 1);
+            _inKeyOrder = false;
+            return;
+        }
+
+        if (_anyKey && key.CompareTo(_lastKey) <= 0)
+        {
+            _inKeyOrder = false;
+        }
+        else
+        {
+            _lastKey = key;
+            _anyKey = true;
+        }
+
+        _keys.Set(key, AppendRow(stored, null, key));
+    }
+
+    /// <summary>Removes the row with a key, if the index holds one. Called by the writer of a keyed index.</summary>
+    public void Delete(RowKey key)
+    {
+        if (_keys!.Remove(key, out int at))
+        {
+            Remove(at);
+            Volatile.Write(ref _dead, _dead + 1);
+        }
+    }
+
+    private int AppendRow(ReadOnlySpan<byte> stored, StoredRow? typed, RowKey key)
     {
         int at = Reserve();
         if (typed is not null)
@@ -154,6 +230,12 @@ internal sealed class ColumnarIndex
         {
             foreach (Column column in _columns)
             {
+                if (column.Ordinal == _keyOrdinal)
+                {
+                    WriteKey(column, at, key);
+                    continue;
+                }
+
                 int flag = _located[column.Ordinal];
                 if (flag == RowSerializer.AbsentCell || stored[flag] != 0)
                 {
@@ -172,6 +254,25 @@ internal sealed class ColumnarIndex
 
         _live.Set(at);
         Volatile.Write(ref _count, at + 1);
+        return at;
+    }
+
+    // A clustered table's key column is the row key itself. Only integer keys can be indexed.
+    private void WriteKey(Column column, int at, RowKey key)
+    {
+        if (!key.IsInt64)
+        {
+            _usable = false;
+            SetNull(column, at);
+        }
+        else if (column.Kind == StorageKind.BigInt)
+        {
+            column.Values!.ChunkOf(at).As<long>()[at & FlatChunk.SlotMask] = (long)key;
+        }
+        else
+        {
+            column.Values!.ChunkOf(at).As<int>()[at & FlatChunk.SlotMask] = (int)(long)key;
+        }
     }
 
     /// <summary>Appends a position that holds no row, so later positions keep matching their rows. Called by the writer.</summary>
@@ -290,6 +391,11 @@ internal sealed class ColumnarIndex
 /// <summary>A storage engine that keeps a <see cref="ColumnarIndex"/> beside a table's rows and writes it as rows change.</summary>
 internal interface IColumnarRowStore
 {
+    /// <summary>
+    /// Whether the engine finds rows by key, and so can index a clustered table, whose key is not in its rows.
+    /// </summary>
+    bool KeyedRows { get; }
+
     /// <summary>The table's columnar index, or null when it has none. Takes no lock.</summary>
     ColumnarIndex? Columnar(string databaseName, string tableName);
 
@@ -297,7 +403,8 @@ internal interface IColumnarRowStore
     /// Replaces the table's columnar index with one built from the rows it holds now, and keeps it current from
     /// then on. Returns null when the engine's rows cannot be indexed this way.
     /// </summary>
-    ColumnarIndex? BuildColumnar(string databaseName, string tableName, StorageKind[] tableKinds, int[] ordinals, int schemaVersion);
+    /// <param name="keyOrdinal">The table position of a clustered table's key column, or -1.</param>
+    ColumnarIndex? BuildColumnar(string databaseName, string tableName, StorageKind[] tableKinds, int[] ordinals, int schemaVersion, int keyOrdinal);
 
     /// <summary>Stops keeping a columnar index for the table.</summary>
     void DropColumnar(string databaseName, string tableName);
