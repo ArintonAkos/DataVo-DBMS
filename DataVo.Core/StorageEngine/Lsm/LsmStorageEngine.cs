@@ -2660,9 +2660,13 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// </summary>
     private sealed class TableVersion(long stamp, LsmSstableHandle[] files, LsmFileRegistry registry)
     {
+        private static long s_ids;
         private int _references = 1; // the owning TableState's reference
 
         public long Stamp { get; } = stamp;
+
+        /// <summary>A number no other version of any table has, so a cache can tell versions apart without holding on to one.</summary>
+        public long Id { get; } = Interlocked.Increment(ref s_ids);
 
         public LsmSstableHandle[] Files { get; } = files;
 

@@ -23,6 +23,14 @@ public sealed partial class LsmStorageEngine
         public readonly LsmColumnarShadows TailShadows = new();
         public readonly ulong[] Live = new ulong[Bitmask.WordsPerChunk];
         public SsTableV2Reader[] Readers = [];
+
+        // What TailShadows holds: the rows of one version's files that the first TailPositions positions and
+        // TailDeletes deletes of one tail replace. Both only grow, so the next scan of the same tail and
+        // version adds what came since. Kept by number, not by reference, so no tail or file stays reachable.
+        public long TailIdentity = -1;
+        public long VersionId = -1;
+        public int TailPositions;
+        public int TailDeletes;
     }
 
     /// <summary>What one scan reads: the tail as it was at one moment and the files that were live then.</summary>
@@ -144,7 +152,7 @@ public sealed partial class LsmStorageEngine
             return false;
         }
 
-        ShadowByTail(in snapshot, readers, scratch);
+        ShadowByTail(in snapshot, readers, snapshot.Version.Id, scratch);
 
         totals.Slice(0, folds.Length).Clear();
         Span<ulong> masks = ColumnarScan.Rent().Masks;
@@ -354,43 +362,67 @@ public sealed partial class LsmStorageEngine
         }
     }
 
-    // Marks the rows of the files whose key the tail holds, as a row it added or as a key it deleted. Costs
-    // nothing when the tail's keys lie outside every file, as they do for a table that only grows.
-    private static void ShadowByTail(in ColumnarSnapshot snapshot, ReadOnlySpan<SsTableV2Reader> readers, ColumnarScanScratch scratch)
+    // Marks the rows of the files whose key the tail holds, as a row it added or as a key it deleted. The
+    // tail only grows and the files never change, so a thread keeps what it marked for a tail and a version
+    // and marks only the keys published since its last scan of them. Costs nothing when the tail's keys lie
+    // outside every file, as they do for a table that only grows.
+    private static void ShadowByTail(in ColumnarSnapshot snapshot, ReadOnlySpan<SsTableV2Reader> readers, long versionId, ColumnarScanScratch scratch)
     {
-        scratch.TailShadows.Clear();
         ColumnarIndex tail = snapshot.Tail;
-        if ((snapshot.Count == 0 && snapshot.Deleted == 0) || !AnyFileWithin(tail, snapshot, readers))
+        if (scratch.TailIdentity != tail.Identity
+            || scratch.VersionId != versionId
+            || scratch.TailPositions > snapshot.Count
+            || scratch.TailDeletes > snapshot.Deleted)
+        {
+            scratch.TailShadows.Clear();
+            scratch.TailIdentity = tail.Identity;
+            scratch.VersionId = versionId;
+            scratch.TailPositions = 0;
+            scratch.TailDeletes = 0;
+        }
+
+        int fromPosition = scratch.TailPositions;
+        int fromDelete = scratch.TailDeletes;
+        if (fromPosition == snapshot.Count && fromDelete == snapshot.Deleted)
         {
             return;
         }
 
-        // In key order, so each file's chunks are visited front to back.
-        List<RowKey> keys = scratch.Keys;
-        keys.Clear();
-        for (int position = 0; position < snapshot.Count; position++)
+        // A key outside every file's range never replaces a file row; the range only grows, so keys skipped
+        // here stay outside the files of this version.
+        if (AnyFileWithin(tail, snapshot, readers))
         {
-            keys.Add(tail.KeyAt(position));
-        }
-
-        for (int i = 0; i < snapshot.Deleted; i++)
-        {
-            keys.Add(tail.DeletedKeyAt(i));
-        }
-
-        keys.Sort();
-        for (int file = 0; file < readers.Length; file++)
-        {
-            SsTableColumnarSegment segment = readers[file].Columnar!;
-            SsTableV2Properties properties = readers[file].Properties;
-            int at = keys.BinarySearch(properties.SmallestKey);
-            for (at = at < 0 ? ~at : at; at < keys.Count && keys[at] <= properties.LargestKey; at++)
+            // In key order, so each file's chunks are visited front to back.
+            List<RowKey> keys = scratch.Keys;
+            keys.Clear();
+            for (int position = fromPosition; position < snapshot.Count; position++)
             {
-                Shadow(scratch.TailShadows, file, segment, keys[at], scratch.Chunk);
+                keys.Add(tail.KeyAt(position));
             }
+
+            for (int i = fromDelete; i < snapshot.Deleted; i++)
+            {
+                keys.Add(tail.DeletedKeyAt(i));
+            }
+
+            keys.Sort();
+            for (int file = 0; file < readers.Length; file++)
+            {
+                SsTableColumnarSegment segment = readers[file].Columnar!;
+                SsTableV2Properties properties = readers[file].Properties;
+                int at = keys.BinarySearch(properties.SmallestKey);
+                for (at = at < 0 ? ~at : at; at < keys.Count && keys[at] <= properties.LargestKey; at++)
+                {
+                    Shadow(scratch.TailShadows, file, segment, keys[at], scratch.Chunk);
+                }
+            }
+
+            keys.Clear();
         }
 
-        keys.Clear();
+        // Recorded only once marked: a scan that failed part way marks the same keys again (marks are idempotent).
+        scratch.TailPositions = snapshot.Count;
+        scratch.TailDeletes = snapshot.Deleted;
     }
 
     // Whether any file's key range reaches into the range of keys the tail has touched. The range may have
