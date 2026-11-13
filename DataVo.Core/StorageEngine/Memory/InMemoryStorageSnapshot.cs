@@ -1,43 +1,27 @@
-using DataVo.Core.StorageEngine;
-
 namespace DataVo.Core.StorageEngine.Memory;
 
+/// <summary>
+/// A copy of every in-memory table's rows at one moment, to go back to later. The snapshot owns its copy: it
+/// is taken from copies of the tables and hands out further copies, so it can be restored more than once and
+/// nothing done to the tables afterwards reaches it.
+/// </summary>
 internal sealed class InMemoryStorageSnapshot
 {
-    private readonly Dictionary<(string DatabaseName, string TableName), List<object?>> _tables;
+    private readonly Dictionary<(string DatabaseName, string TableName), TableRows> _tables;
 
-    internal InMemoryStorageSnapshot(Dictionary<(string DatabaseName, string TableName), List<object?>> tables)
+    /// <summary>Takes ownership of copies of the tables' rows.</summary>
+    /// <param name="tables">Each table's rows, already copied from the live table.</param>
+    internal InMemoryStorageSnapshot(Dictionary<(string DatabaseName, string TableName), TableRows> tables)
     {
-        _tables = new Dictionary<(string DatabaseName, string TableName), List<object?>>(tables.Count);
-
-        foreach (var entry in tables)
-        {
-            _tables[entry.Key] = CloneRows(entry.Value);
-        }
+        _tables = tables;
     }
 
-    internal IEnumerable<KeyValuePair<(string DatabaseName, string TableName), List<object?>>> EnumerateTables()
+    /// <summary>Each table of the snapshot with a new copy of its rows.</summary>
+    internal IEnumerable<KeyValuePair<(string DatabaseName, string TableName), TableRows>> EnumerateTables()
     {
         foreach (var entry in _tables)
         {
-            yield return new KeyValuePair<(string DatabaseName, string TableName), List<object?>>(entry.Key, CloneRows(entry.Value));
+            yield return new KeyValuePair<(string DatabaseName, string TableName), TableRows>(entry.Key, entry.Value.Clone());
         }
-    }
-
-    private static List<object?> CloneRows(List<object?> rows)
-    {
-        var clone = new List<object?>(rows.Count);
-
-        foreach (object? row in rows)
-        {
-            clone.Add(row switch
-            {
-                byte[] bytes => bytes.ToArray(),
-                StoredRow typed => typed.Clone(),
-                _ => null
-            });
-        }
-
-        return clone;
     }
 }

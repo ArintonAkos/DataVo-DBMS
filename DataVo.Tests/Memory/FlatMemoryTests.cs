@@ -73,6 +73,65 @@ public class FlatMemoryTests
     }
 
     [Fact]
+    public void Directory_SmallFirstChunkGrowsByCopying_UntilItIsFullSize()
+    {
+        var directory = new ChunkDirectory(sizeof(int), firstChunkSlots: 16);
+        directory.EnsureSlots(1);
+        FlatChunk small = directory.Chunk(0);
+        small.As<int>()[15] = 77;
+        Assert.Equal(16, small.Capacity);
+        Assert.Equal(16, directory.Capacity);
+
+        directory.EnsureSlots(17);
+        FlatChunk grown = directory.Chunk(0);
+        Assert.NotSame(small, grown);
+        Assert.Equal(64, grown.Capacity);
+        Assert.Equal(77, grown.As<int>()[15]);
+        Assert.Equal(0, grown.As<int>()[16]);
+
+        directory.EnsureSlots(FlatChunk.Slots + 1);
+        Assert.Equal(FlatChunk.Slots, directory.Chunk(0).Capacity);
+        Assert.Equal(77, directory.Chunk(0).As<int>()[15]);
+        Assert.Equal(FlatChunk.Slots * 2, directory.Capacity);
+        FlatChunk full = directory.Chunk(0);
+        directory.EnsureSlots(FlatChunk.Slots * 3);
+        Assert.Same(full, directory.Chunk(0));
+    }
+
+    [Fact]
+    public void ReferenceDirectory_GivesEachSlotItsOwnRun_AndKeepsReferencesWhenItGrows()
+    {
+        var references = new ReferenceDirectory(perSlot: 2, firstChunkSlots: 4);
+        references.EnsureSlots(4);
+        references.ChunkOf(3)[references.BaseOf(3) + 1] = "last of the small chunk";
+        Assert.Equal(8, references.ChunkOf(0).Length);
+        Assert.Equal(6, references.BaseOf(3));
+
+        references.EnsureSlots(FlatChunk.Slots + 2);
+        Assert.Equal("last of the small chunk", references.ChunkOf(3)[7]);
+        Assert.Equal(FlatChunk.Slots * 2, references.ChunkOf(FlatChunk.Slots + 1).Length);
+        Assert.Equal(2, references.BaseOf(FlatChunk.Slots + 1));
+        Assert.NotSame(references.ChunkOf(0), references.ChunkOf(FlatChunk.Slots));
+    }
+
+    [Fact]
+    public void SlotList_EditReachesAPublishedRecord_AndNothingElse()
+    {
+        var list = new FlatSlotList(4, firstChunkSlots: 2);
+        for (int i = 0; i < 5; i++)
+        {
+            BitConverter.TryWriteBytes(list.Next(), i);
+            list.Publish();
+        }
+
+        list.Edit(3)[0] = 0xFF;
+
+        Assert.True(list.TryRead(3, out ReadOnlySpan<byte> record));
+        Assert.Equal(0xFF, record[0]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => list.Edit(5));
+    }
+
+    [Fact]
     public void SlotList_ReaderSeesOnlyWholeRecordsWhileAWriterAppends()
     {
         const int Total = 200_000;

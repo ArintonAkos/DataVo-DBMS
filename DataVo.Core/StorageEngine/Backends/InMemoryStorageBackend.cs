@@ -3,7 +3,7 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
+internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, DataVo.Core.StorageEngine.Memory.IPackedRowSource, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -11,18 +11,24 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
 
     public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
     public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => RowKeyConversions.ToRowKeys(_inner.InsertRows(databaseName, tableName, rowsBytes));
-    public long InsertTypedRow(string databaseName, string tableName, StoredRow row) =>
-        ((ITypedRowStorageEngine)_inner).InsertTypedRow(databaseName, tableName, row);
-    public List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<StoredRow> rows) =>
-        ((ITypedRowStorageEngine)_inner).InsertTypedRows(databaseName, tableName, rows);
+    public long InsertTypedRow(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, DataVo.Core.Runtime.Reactive.ReactiveRowSchema schema, ReadOnlySpan<DataVo.Core.Runtime.Reactive.CellValue> cells) =>
+        ((ITypedRowStorageEngine)_inner).InsertTypedRow(databaseName, tableName, columns, schema, cells);
+    public List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, DataVo.Core.Runtime.Reactive.ReactiveRowSchema schema, IReadOnlyList<DataVo.Core.Runtime.Reactive.CellValue[]> rows) =>
+        ((ITypedRowStorageEngine)_inner).InsertTypedRows(databaseName, tableName, columns, schema, rows);
     public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, (long)rowId);
     public bool TryReadTypedRow(string databaseName, string tableName, long rowId, out StoredRow? row) =>
         ((ITypedRowStorageEngine)_inner).TryReadTypedRow(databaseName, tableName, rowId, out row);
-    public bool TryReadTypedCells(string databaseName, string tableName, long rowId, out ReadOnlySpan<DataVo.Core.Runtime.Reactive.CellValue> cells) =>
-        ((ITypedRowStorageEngine)_inner).TryReadTypedCells(databaseName, tableName, rowId, out cells);
+    public bool HasTypedRow(string databaseName, string tableName, long rowId) =>
+        ((ITypedRowStorageEngine)_inner).HasTypedRow(databaseName, tableName, rowId);
+    public bool TryVisitTypedCells<TState>(string databaseName, string tableName, long rowId, ref TState state, TypedCellsVisitor<TState> visit) =>
+        ((ITypedRowStorageEngine)_inner).TryVisitTypedCells(databaseName, tableName, rowId, ref state, visit);
+    public void VisitTypedRows<TState>(string databaseName, string tableName, ref TState state, TypedCellsVisitor<TState> visit) =>
+        ((ITypedRowStorageEngine)_inner).VisitTypedRows(databaseName, tableName, ref state, visit);
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.ReadAllRows(databaseName, tableName));
     public IEnumerable<(long RowId, StoredRow Row)> ReadAllTypedRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).ReadAllTypedRows(databaseName, tableName);
+    public DataVo.Core.StorageEngine.Memory.IPackedTable? TableOf(string databaseName, string tableName) =>
+        ((DataVo.Core.StorageEngine.Memory.IPackedRowSource)_inner).TableOf(databaseName, tableName);
     public bool HasAnyRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).HasAnyRows(databaseName, tableName);
     PageScan IPagedRowScan.VisitPage<TState>(string databaseName, string tableName, long? afterRowId, long? expectedGeneration, int maxRows, ref TState state, PagedRowVisitor<TState> visit) =>

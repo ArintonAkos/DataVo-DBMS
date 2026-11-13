@@ -196,11 +196,11 @@ internal partial class Select
         }
     }
 
-    private static bool VisitStreamRow(ref StreamPage page, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow)
+    private static bool VisitStreamRow(ref StreamPage page, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         TypedScanState state = page.Scan;
         CellValue[] cells = state.Cells;
-        Load(state, rowId, rowBytes, typedRow, state.FilterMask);
+        Load(state, rowId, rowBytes, typedCells, state.FilterMask);
         foreach (TypedPredicate predicate in state.Predicates)
         {
             if (!Matches(predicate, cells[predicate.Ordinal], state.Columns[predicate.Ordinal]))
@@ -209,7 +209,7 @@ internal partial class Select
             }
         }
 
-        Load(state, rowId, rowBytes, typedRow, state.RestMask);
+        Load(state, rowId, rowBytes, typedCells, state.RestMask);
         var values = new object?[page.OutputOrdinals.Length];
         for (int i = 0; i < values.Length; i++)
         {

@@ -79,8 +79,8 @@ v0.4 plans native columnar storage in the SSTable format itself: column chunks w
 | Zero-alloc in-memory point lookup & `RowRef` streaming | Completed (`v0.2.0-rc.3`) | `56 B`, ~`405 ns` PK fast path; 0 B heap allocation on `StreamRef()`. |
 | SIMD vector search (`HNSW` & `FLAT`) | Completed (`v0.2.0-rc.3`) | Cosine (`<=>`) and L2 (`<->`) distance operators. |
 | NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
-| Columnar Indexes for HTAP | Active (`v0.3`) | Hybrid transactional/analytical scans to compete with DuckDB on large aggregations. |
-| Compact in-memory row layout | Active (`v0.3`) | Dense memory representation for lower footprint and higher cache locality. |
+| Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
+| Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
 | On-disk columnar SSTable storage (out-of-core, Parquet-style chunks) | Planned (`v0.4`) | Analytical scans over datasets larger than memory, with no rebuild on open. |
 | PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
 | Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |

@@ -171,7 +171,18 @@ public class DataVoTableGeneratorTests
         string generated = GeneratedText(ValidModel);
 
         Assert.DoesNotContain("DataVoSpatialColumn", generated);
-        Assert.Contains("new global::DataVo.Core.DataVoTableInfo<global::App.Player>(\"players\", \"Id, Level, Name\", ReadRow, ReadStreamedRow);", generated);
+        Assert.Contains("new global::DataVo.Core.DataVoTableInfo<global::App.Player>(\"players\", \"Id, Level, Name\", ReadRow, ReadStreamedRow, ReadPackedRow, new string[] { \"INT\", \"INT\", \"VARCHAR\" }, \"Id\");", generated);
+    }
+
+    [Fact]
+    public void Model_GetsAReaderThatTakesEachColumnByItsNumberInTheColumnList()
+    {
+        string generated = GeneratedText(ValidModel);
+
+        Assert.Contains("private static readonly global::DataVo.Core.DataVoPackedReader<global::App.Player> ReadPackedRow = static row =>", generated);
+        Assert.Contains("Id = row.ReadInt32(0, \"Id\"),", generated);
+        Assert.Contains("Level = row.ReadInt32(1, \"Level\"),", generated);
+        Assert.Contains("(2, \"Name\"),", generated);
     }
 
     [Fact]

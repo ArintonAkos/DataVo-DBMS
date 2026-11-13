@@ -1398,13 +1398,13 @@ public sealed partial class DataVoPreparedStatement
         ref MultiRowMaterializeState state,
         RowKey rowId,
         ReadOnlySpan<byte> rowBytes,
-        StoredRow? typedRow)
+        ReadOnlySpan<CellValue> typedCells)
     {
         CompiledSelectPlan plan = state.Plan;
         ThreadSelectWorkspace workspace = state.Workspace;
         CellValue[] cells = workspace.Cells;
 
-        LoadCells(plan, cells, rowId, rowBytes, typedRow, plan.OutputMask);
+        LoadCells(plan, cells, rowId, rowBytes, typedCells, plan.OutputMask);
         state.Rows.Add(BuildRowDictionary(plan, cells));
         return state.StopAfter < 0 || state.Rows.Count < state.StopAfter;
     }
@@ -1413,7 +1413,7 @@ public sealed partial class DataVoPreparedStatement
         ref MultiRowMaterializeState state,
         RowKey rowId,
         ReadOnlySpan<byte> rowBytes,
-        StoredRow? typedRow)
+        ReadOnlySpan<CellValue> typedCells)
     {
         CompiledSelectPlan plan = state.Plan;
         ThreadSelectWorkspace workspace = state.Workspace;
@@ -1421,7 +1421,7 @@ public sealed partial class DataVoPreparedStatement
 
         if (state.HasPredicates)
         {
-            LoadCells(plan, cells, rowId, rowBytes, typedRow, plan.FilterMask);
+            LoadCells(plan, cells, rowId, rowBytes, typedCells, plan.FilterMask);
             BoundScanPredicate[] predicates = workspace.BoundPredicates;
             for (int i = 0; i < plan.Predicates.Length; i++)
             {
@@ -1432,11 +1432,11 @@ public sealed partial class DataVoPreparedStatement
                 }
             }
 
-            LoadCells(plan, cells, rowId, rowBytes, typedRow, plan.RestMask);
+            LoadCells(plan, cells, rowId, rowBytes, typedCells, plan.RestMask);
         }
         else
         {
-            LoadCells(plan, cells, rowId, rowBytes, typedRow, plan.OutputMask);
+            LoadCells(plan, cells, rowId, rowBytes, typedCells, plan.OutputMask);
         }
 
         state.Rows.Add(BuildRowDictionary(plan, cells));
@@ -1448,16 +1448,16 @@ public sealed partial class DataVoPreparedStatement
         CellValue[] cells,
         RowKey rowId,
         ReadOnlySpan<byte> rowBytes,
-        StoredRow? typedRow,
+        ReadOnlySpan<CellValue> typedCells,
         bool[] mask)
     {
-        if (typedRow is not null)
+        if (!typedCells.IsEmpty)
         {
             for (int i = 0; i < mask.Length; i++)
             {
                 if (mask[i])
                 {
-                    cells[i] = typedRow[i];
+                    cells[i] = typedCells[i];
                 }
             }
         }

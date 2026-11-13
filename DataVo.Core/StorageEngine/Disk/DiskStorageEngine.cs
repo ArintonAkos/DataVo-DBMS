@@ -376,7 +376,7 @@ public class DiskStorageEngine : IRowIdStorageEngine, IDisposable, IPagedRowScan
                         continue;
                     }
 
-                    visitor.Visit(rowId, window.Read(offset, length), null);
+                    visitor.Visit(rowId, window.Read(offset, length), default);
                     offset += length;
                     visited++;
                 }

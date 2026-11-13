@@ -268,28 +268,6 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Serializes and inserts typed storage rows without materializing dictionaries.
-    /// </summary>
-    internal List<RowKey> InsertTypedRows(IReadOnlyList<StoredRow> rows, string tableName, string databaseName)
-    {
-        if (rows.Count == 0) return [];
-
-        if (_storageEngine is ITypedRowStorageEngine typedStorage)
-        {
-            return RowKeyConversions.ToRowKeys(typedStorage.InsertTypedRows(databaseName, tableName, rows));
-        }
-
-        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
-        var serializedRows = new List<byte[]>(rows.Count);
-        foreach (StoredRow row in rows)
-        {
-            serializedRows.Add(RowSerializer.SerializeCells(columns, row.AsView().Cells));
-        }
-
-        return (_storageEngine.InsertRows(databaseName, tableName, serializedRows));
-    }
-
-    /// <summary>
     /// Scratch list handed to <see cref="IStorageEngine.InsertRows"/>, which only iterates it (no
     /// backend retains the list itself — the LSM/disk engines retain or write the row buffers).
     /// Thread-static so concurrent sessions never share it; cleared after use so it doesn't pin
@@ -299,24 +277,28 @@ public class StorageContext(DataVoConfig config) : IDisposable
     private static List<byte[]>? _typedInsertSerializeScratch;
 
     /// <summary>
-    /// Serializes and inserts full typed cell rows for serialize-through backends without
-    /// materializing per-row <see cref="StoredRow"/> wrappers. Wire-identical to
-    /// <see cref="InsertTypedRows(IReadOnlyList{StoredRow}, string, string)"/>. Must not be used
-    /// when <see cref="RetainsTypedRowBuffers"/> is <see langword="true"/> — in-memory typed storage
-    /// needs the row wrappers themselves.
+    /// Inserts full typed cell rows. A typed backend packs the cells; a serializing backend (LSM, disk)
+    /// serializes them. Either way the cells are read during the call and no backend keeps the caller's
+    /// arrays, so no per-row wrapper or copy is made.
     /// </summary>
+    /// <param name="columns">The table's columns in catalog order.</param>
+    /// <param name="schema">The column names of the rows' cells.</param>
+    /// <param name="rows">The rows, each one cell per column.</param>
+    /// <param name="tableName">The target table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The assigned row identifiers, in the order given.</returns>
     internal List<RowKey> InsertTypedCellRows(
         IReadOnlyList<Column> columns,
+        ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
         string tableName,
         string databaseName)
     {
         if (rows.Count == 0) return [];
 
-        if (_storageEngine is ITypedRowStorageEngine)
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            throw new InvalidOperationException(
-                "InsertTypedCellRows is only valid for serialize-through backends; typed storage retains row buffers.");
+            return RowKeyConversions.ToRowKeys(typedStorage.InsertTypedRows(databaseName, tableName, columns, schema, rows));
         }
 
         // A clustered table's rows go straight to their stored form: the key comes from the cells and the
@@ -355,17 +337,23 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Serializes and inserts a single typed storage row via the single-row backend path, without
-    /// per-row List churn or a redundant catalog column lookup. Wire-identical to the batch path.
+    /// Inserts a single typed row via the single-row backend path, without per-row List churn, a row wrapper
+    /// or a redundant catalog column lookup. Wire-identical to the batch path.
     /// </summary>
-    internal RowKey InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
+    /// <param name="cells">The row's cells, one per column. They are read during the call and not kept.</param>
+    /// <param name="schema">The column names of the cells.</param>
+    /// <param name="columns">The table's columns in catalog order.</param>
+    /// <param name="tableName">The target table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The assigned row identifier.</returns>
+    internal RowKey InsertTypedRow(ReadOnlySpan<CellValue> cells, ReactiveRowSchema schema, IReadOnlyList<Column> columns, string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            return typedStorage.InsertTypedRow(databaseName, tableName, row);
+            return typedStorage.InsertTypedRow(databaseName, tableName, columns, schema, cells);
         }
 
-        byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
+        byte[] serialized = RowSerializer.SerializeCells(columns, cells);
         return _storageEngine.InsertRow(databaseName, tableName, serialized);
     }
 
@@ -478,7 +466,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     internal byte[]? TryReadRowBytes(string tableName, string databaseName, RowKey rowId)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out _))
+            && typedStorage.HasTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId)))
         {
             return null;
         }
@@ -496,6 +484,15 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return null;
         }
     }
+
+    /// <summary>
+    /// Hands the cells of one typed row to a visitor in place, without copying the row out. Only a typed
+    /// backend holds such rows.
+    /// </summary>
+    /// <returns><see langword="false"/>, without calling the visitor, when the key names no typed row.</returns>
+    internal bool TryVisitTypedCells<TState>(string tableName, string databaseName, RowKey rowId, ref TState state, TypedCellsVisitor<TState> visit) =>
+        _storageEngine is ITypedRowStorageEngine typedStorage
+        && typedStorage.TryVisitTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), ref state, visit);
 
     internal bool TryReadStoredRow(string tableName, string databaseName, RowKey rowId, out StoredRow? row)
     {
@@ -518,10 +515,21 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Whether the active backend retains typed row cell buffers as its storage representation
-    /// (in-memory typed storage) rather than serializing them transiently during the insert call.
+    /// Whether the active backend keeps a typed insert in a typed form of its own (in-memory storage packs
+    /// it) rather than as serialized bytes. Such rows are read through the typed paths only; the paths that
+    /// read serialized bytes do not see them. No backend keeps the caller's cell buffers.
     /// </summary>
-    internal bool RetainsTypedRowBuffers => _storageEngine is ITypedRowStorageEngine;
+    internal bool KeepsTypedRowsTyped => _storageEngine is ITypedRowStorageEngine;
+
+    /// <summary>Whether the backend keeps typed rows as packed records that can be read in place.</summary>
+    internal bool HasPackedRows => _storageEngine is Memory.IPackedRowSource;
+
+    /// <summary>
+    /// A table whose typed rows can be read in place from packed records; null when the backend keeps rows
+    /// another way or has no such table.
+    /// </summary>
+    internal Memory.IPackedTable? PackedTableOf(string tableName, string databaseName) =>
+        (_storageEngine as Memory.IPackedRowSource)?.TableOf(databaseName, tableName);
 
     /// <summary>
     /// Cheap row-count estimate for query planning. Returns false when the backend cannot answer
@@ -594,8 +602,11 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return ApplyTypedMvccVisibilityFilter(rows, tableName, databaseName, rowIds);
     }
 
-    /// <summary>Visits one row of <see cref="ScanTableRows{TState}"/>: serialized bytes, or a typed row for typed backends.</summary>
-    internal delegate bool RawRowVisitor<TState>(ref TState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, StoredRow? typedRow);
+    /// <summary>
+    /// Visits one row of <see cref="ScanTableRows{TState}"/>: serialized bytes, or the cells of a typed row for
+    /// typed backends (then the bytes are empty). Both are borrowed for the call.
+    /// </summary>
+    internal delegate bool RawRowVisitor<TState>(ref TState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells);
 
     /// <summary>
     /// Streams the live rows of a table with keys in <c>[lower, upper)</c> (null bounds are open), without
@@ -619,25 +630,25 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
             var box = (State: state, Visit: visit);
             lsm.ScanStoredRows(databaseName, tableName, lower, upper, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
-                b.Visit(ref b.State, rowId, bytes, null));
+                b.Visit(ref b.State, rowId, bytes, default));
             state = box.State;
             return true;
         }
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            foreach ((RowKey rowId, StoredRow row) in typedStorage.ReadAllTypedRows(databaseName, tableName))
+            var typedScan = new TypedRangeScan<TState>(state, visit, lower, upper);
+            typedStorage.VisitTypedRows(databaseName, tableName, ref typedScan, VisitTypedRowInRange);
+            state = typedScan.State;
+            if (typedScan.Stopped)
             {
-                if (InRange(rowId, lower, upper) && !visit(ref state, rowId, default, row))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
         foreach ((RowKey rowId, byte[] rawRow) in _storageEngine.ReadAllRows(databaseName, tableName))
         {
-            if (InRange(rowId, lower, upper) && !visit(ref state, rowId, rawRow, null))
+            if (InRange(rowId, lower, upper) && !visit(ref state, rowId, rawRow, default))
             {
                 break;
             }
@@ -682,7 +693,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             cursor.Generation,
             maxRows,
             ref box,
-            static (ref PagedBox<TState> b, long rowId, ReadOnlySpan<byte> raw, StoredRow? typed) =>
+            static (ref PagedBox<TState> b, long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed) =>
             {
                 RowKey key = rowId;
                 b.Cursor.After = key;
@@ -771,7 +782,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
     internal interface IStoredRowVisitor
     {
         /// <summary>Receives one live row: serialized bytes, or a typed row from a typed backend.</summary>
-        void Visit(RowKey rowId, ReadOnlySpan<byte> stored, StoredRow? typed);
+        void Visit(RowKey rowId, ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed);
 
         /// <summary>The length of this visitor's row image records, or 0 when it does not read images; see <see cref="IPagedRowVisitor.ImageBytes"/>.</summary>
         int ImageBytes { get; }
@@ -780,7 +791,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         int ImageVersion { get; }
 
         /// <summary>Writes one row as an image record of <see cref="ImageBytes"/> bytes.</summary>
-        void EncodeImage(ReadOnlySpan<byte> stored, StoredRow? typed, Span<byte> record);
+        void EncodeImage(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed, Span<byte> record);
 
         /// <summary>Receives one live row as the image record <see cref="EncodeImage"/> wrote for it.</summary>
         void VisitImage(RowKey rowId, ReadOnlySpan<byte> record);
@@ -924,7 +935,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
         }
 
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        public void Visit(long rowId, ReadOnlySpan<byte> raw, StoredRow? typed)
+        public void Visit(long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed)
         {
             Last = rowId;
             Any = true;
@@ -935,7 +946,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
 
         public readonly int ImageVersion => Inner.ImageVersion;
 
-        public void EncodeImage(ReadOnlySpan<byte> raw, StoredRow? typed, Span<byte> record) => Inner.EncodeImage(raw, typed, record);
+        public void EncodeImage(ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed, Span<byte> record) => Inner.EncodeImage(raw, typed, record);
 
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public void VisitImage(long rowId, ReadOnlySpan<byte> record)
@@ -1003,13 +1014,22 @@ public class StorageContext(DataVoConfig config) : IDisposable
             return true;
         }
 
-        if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out ReadOnlySpan<CellValue> typedCells))
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            visited = true;
-            RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
-            visit(ref state, rowId, default, typedCells);
-            return true;
+            var point = (State: state, Visit: visit);
+            visited = typedStorage.TryVisitTypedCells(
+                databaseName,
+                tableName,
+                RowKeyConversions.ToRowId(rowId),
+                ref point,
+                static (ref (TState State, PointRowVisitor<TState> Visit) p, long id, ReadOnlySpan<CellValue> cells) =>
+                    p.Visit(ref p.State, id, default, cells));
+            state = point.State;
+            if (visited)
+            {
+                RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, 1);
+                return true;
+            }
         }
 
         byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
@@ -1039,30 +1059,62 @@ public class StorageContext(DataVoConfig config) : IDisposable
         {
             var box = (State: state, Visit: visit);
             lsm.ReadStoredRowsByKey(databaseName, tableName, rowIds, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
-                b.Visit(ref b.State, rowId, bytes, null));
+                b.Visit(ref b.State, rowId, bytes, default));
             state = box.State;
             return true;
         }
 
         foreach (RowKey rowId in rowIds)
         {
-            if (_storageEngine is ITypedRowStorageEngine typedStorage
-                && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
-                && typedRow is not null)
+            if (_storageEngine is ITypedRowStorageEngine typedStorage)
             {
-                if (!visit(ref state, rowId, default, typedRow))
+                var keyed = new TypedRangeScan<TState>(state, visit, null, null);
+                bool found = typedStorage.TryVisitTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), ref keyed, VisitTypedRowInRange);
+                state = keyed.State;
+                if (keyed.Stopped)
                 {
                     break;
                 }
 
-                continue;
+                if (found)
+                {
+                    continue;
+                }
             }
 
             byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
-            if (bytes is not null && !visit(ref state, rowId, bytes, null))
+            if (bytes is not null && !visit(ref state, rowId, bytes, default))
             {
                 break;
             }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Carries a <see cref="RawRowVisitor{TState}"/> and its state through a typed backend's cell visit, which
+    /// knows rows by number and has no key range of its own.
+    /// </summary>
+    private struct TypedRangeScan<TState>(TState state, RawRowVisitor<TState> visit, RowKey? lower, RowKey? upper)
+    {
+        public TState State = state;
+        public readonly RawRowVisitor<TState> Visit = visit;
+        public readonly RowKey? Lower = lower;
+        public readonly RowKey? Upper = upper;
+
+        /// <summary>Whether the visitor asked for no more rows.</summary>
+        public bool Stopped;
+    }
+
+    /// <summary>Passes a typed row whose key is in range on to the scan's visitor.</summary>
+    private static bool VisitTypedRowInRange<TState>(ref TypedRangeScan<TState> scan, long rowId, ReadOnlySpan<CellValue> cells)
+    {
+        RowKey key = rowId;
+        if (InRange(key, scan.Lower, scan.Upper) && !scan.Visit(ref scan.State, key, default, cells))
+        {
+            scan.Stopped = true;
+            return false;
         }
 
         return true;

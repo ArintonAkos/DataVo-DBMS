@@ -39,6 +39,7 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     private readonly object _gate = new();
     private DataVoPreparedStatement?[] _statements = [];
     private string? _scanSql;
+    private PackedKeyReader<T>? _keyReader;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string[], FusedColumns> _fusedColumns = new();
 
     internal DataVoTable(DataVoContext context, DataVoTableInfo<T> info)
@@ -468,6 +469,40 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
         public int SchemaVersion { get; } = schemaVersion;
 
         public int[] Ordinals { get; } = ordinals;
+    }
+
+    /// <summary>
+    /// Reads the row with an integer primary key straight from the table's packed rows, when the model has a
+    /// generated packed reader and the table can be read that way; see <see cref="PackedKeyReader{T}"/>.
+    /// </summary>
+    /// <returns><see langword="false"/> when the row was not read this way; the caller runs the statement.</returns>
+    internal bool TryReadByIntegerKey(long key, out T item)
+    {
+        PackedKeyReader<T>? reader = _keyReader ?? CreateKeyReader();
+        if (reader is null)
+        {
+            item = default!;
+            return false;
+        }
+
+        return reader.TryRead(key, out item);
+    }
+
+    private PackedKeyReader<T>? CreateKeyReader()
+    {
+        if (_info.ReadPackedRow is not { } read)
+        {
+            return null;
+        }
+
+        return _keyReader = new PackedKeyReader<T>(
+            Context.Engine,
+            Session,
+            _info.TableName,
+            _info.ColumnNames,
+            _info.ColumnTypes,
+            _info.KeyColumn!,
+            read);
     }
 
     internal static InvalidOperationException MoreThanOne() => new("Sequence contains more than one matching element");

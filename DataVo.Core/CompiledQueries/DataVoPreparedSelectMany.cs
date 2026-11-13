@@ -171,35 +171,16 @@ public sealed class DataVoPreparedSelectMany<T>
             return true;
         }
 
-        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
-            && storedRow is not null)
+        lock (_projection.Buffer)
         {
-            lock (_projection.Buffer)
+            if (_projection.TryFillFromTypedRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId))
             {
-                ProjectStoredRow(storedRow.AsView(), _projection);
                 result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+                return true;
             }
-
-            return true;
         }
 
         return false;
-    }
-
-    private static void ProjectStoredRow(StoredRowView view, PreparedProjection projection)
-    {
-        int projectedOrdinal = 0;
-        for (int ordinal = 0; ordinal < projection.Columns.Count; ordinal++)
-        {
-            if (!projection.IsProjected[ordinal])
-            {
-                continue;
-            }
-
-            projection.Buffer[projectedOrdinal++] = ordinal < view.Count
-                ? view[ordinal]
-                : CellValue.Null;
-        }
     }
 
     private IReadOnlyList<T> ExecuteScanFallback(string expectedKey)

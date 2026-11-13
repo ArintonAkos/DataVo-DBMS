@@ -158,35 +158,16 @@ public sealed class DataVoPreparedSelectSingle<T>
             return true;
         }
 
-        if (_context.Engine.StorageContext.TryReadStoredRow(_plan.TableName, _databaseName, rowId, out StoredRow? storedRow)
-            && storedRow is not null)
+        lock (_projection.Buffer)
         {
-            lock (_projection.Buffer)
+            if (_projection.TryFillFromTypedRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId))
             {
-                ProjectStoredRow(storedRow.AsView(), _projection);
                 result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
+                return true;
             }
-
-            return true;
         }
 
         return false;
-    }
-
-    private static void ProjectStoredRow(StoredRowView view, PreparedProjection projection)
-    {
-        int projectedOrdinal = 0;
-        for (int ordinal = 0; ordinal < projection.Columns.Count; ordinal++)
-        {
-            if (!projection.IsProjected[ordinal])
-            {
-                continue;
-            }
-
-            projection.Buffer[projectedOrdinal++] = ordinal < view.Count
-                ? view[ordinal]
-                : CellValue.Null;
-        }
     }
 
     private T? ExecuteScanFallback(string expectedKey)
@@ -237,6 +218,39 @@ internal sealed class PreparedProjection
     public ReactiveRowSchema ProjectedSchema { get; }
 
     public CellValue[] Buffer { get; }
+
+    /// <summary>
+    /// Reads one typed row from storage and copies its projected columns into <see cref="Buffer"/>, without
+    /// copying the row out first. The caller holds the lock on <see cref="Buffer"/>.
+    /// </summary>
+    /// <returns><see langword="false"/> when the key names no typed row.</returns>
+    public bool TryFillFromTypedRow(StorageContext storage, string tableName, string databaseName, RowKey rowId)
+    {
+        PreparedProjection projection = this;
+        return storage.TryVisitTypedCells(
+            tableName,
+            databaseName,
+            rowId,
+            ref projection,
+            static (ref PreparedProjection target, long _, ReadOnlySpan<CellValue> cells) =>
+            {
+                target.Fill(cells);
+                return true;
+            });
+    }
+
+    /// <summary>Copies the projected columns of a row's cells into <see cref="Buffer"/>; a column the row lacks is NULL.</summary>
+    public void Fill(ReadOnlySpan<CellValue> cells)
+    {
+        int projectedOrdinal = 0;
+        for (int ordinal = 0; ordinal < Columns.Count; ordinal++)
+        {
+            if (IsProjected[ordinal])
+            {
+                Buffer[projectedOrdinal++] = ordinal < cells.Length ? cells[ordinal] : CellValue.Null;
+            }
+        }
+    }
 }
 
 internal readonly struct PreparedSelectSingleCacheKey : IEquatable<PreparedSelectSingleCacheKey>

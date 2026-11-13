@@ -9,9 +9,14 @@ internal sealed class FlatSlotList
     private readonly ChunkDirectory _chunks;
     private int _count;
 
-    /// <summary>Creates an empty list.</summary>
+    /// <summary>Creates an empty list whose chunks are all full size.</summary>
     /// <param name="stride">The width of one record in bytes.</param>
     public FlatSlotList(int stride) => _chunks = new ChunkDirectory(stride);
+
+    /// <summary>Creates an empty list that starts with a small first chunk; see <see cref="ChunkDirectory"/>.</summary>
+    /// <param name="stride">The width of one record in bytes.</param>
+    /// <param name="firstChunkSlots">The number of records the first chunk starts with.</param>
+    public FlatSlotList(int stride, int firstChunkSlots) => _chunks = new ChunkDirectory(stride, firstChunkSlots);
 
     /// <summary>The width of one record in bytes.</summary>
     public int Stride => _chunks.Stride;
@@ -34,6 +39,20 @@ internal sealed class FlatSlotList
         int index = _count;
         Volatile.Write(ref _count, index + 1);
         return index;
+    }
+
+    /// <summary>
+    /// A published record, for the writer to change in place. Readers take no lock, so the writer may change
+    /// only what a reader can safely see change.
+    /// </summary>
+    public Span<byte> Edit(int index)
+    {
+        if ((uint)index >= (uint)_count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        return _chunks.ChunkOf(index).Slot(index & FlatChunk.SlotMask);
     }
 
     /// <summary>Reads a published record without a lock.</summary>

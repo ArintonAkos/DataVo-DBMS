@@ -36,7 +36,8 @@ internal sealed record LinqSite(
     string Where,
     bool Unique,
     EquatableArray<LinqParameter> Parameters,
-    LinqKernel? Kernel = null);
+    LinqKernel? Kernel = null,
+    bool IntegerKeyLookup = false);
 
 /// <summary>A <c>Sum</c> over a query whose selector is one numeric column, summed inside the scan when the query's plan can.</summary>
 /// <param name="ValueType">The C# type summed: <c>int</c>, <c>long</c>, <c>float</c> or <c>double</c>.</param>

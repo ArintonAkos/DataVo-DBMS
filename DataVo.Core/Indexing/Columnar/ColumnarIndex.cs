@@ -162,7 +162,7 @@ internal sealed class ColumnarIndex
     /// </summary>
     /// <param name="stored">The row's serialized bytes, when it has no typed form.</param>
     /// <param name="typed">The row's cells, when it is typed.</param>
-    public void Append(ReadOnlySpan<byte> stored, StoredRow? typed) => AppendRow(stored, typed, default);
+    public void Append(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed) => AppendRow(stored, typed, default);
 
     /// <summary>
     /// Adds the row with a key, or replaces the row that has it. Called by the writer of a keyed index.
@@ -208,12 +208,12 @@ internal sealed class ColumnarIndex
         }
     }
 
-    private int AppendRow(ReadOnlySpan<byte> stored, StoredRow? typed, RowKey key)
+    private int AppendRow(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed, RowKey key)
     {
         int at = Reserve();
-        if (typed is not null)
+        if (!typed.IsEmpty)
         {
-            ReadOnlySpan<CellValue> cells = typed.Cells;
+            ReadOnlySpan<CellValue> cells = typed;
             foreach (Column column in _columns)
             {
                 if (column.Ordinal >= cells.Length || cells[column.Ordinal].IsNull)
