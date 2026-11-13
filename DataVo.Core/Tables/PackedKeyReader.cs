@@ -166,7 +166,7 @@ internal sealed class PackedKeyReader<T>
 
         try
         {
-            item = _read(new DataVoPackedRow(row, binding.Fields));
+            item = _read(new DataVoPackedRow(row, binding.Fields!)); // FieldsFor returns only bindings that have fields
         }
         catch (Exception) when (!rows.IsTypedLive(position))
         {
