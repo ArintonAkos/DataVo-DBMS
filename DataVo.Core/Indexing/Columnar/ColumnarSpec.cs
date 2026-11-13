@@ -66,8 +66,27 @@ internal sealed class ColumnarSpec
         ReferenceEquals(this, other)
         || (Hash == other.Hash
             && KeyOrdinal == other.KeyOrdinal
-            && TableKinds.AsSpan().SequenceEqual(other.TableKinds)
+            && SameKinds(TableKinds, other.TableKinds)
             && Ordinals.AsSpan().SequenceEqual(other.Ordinals));
+
+    // Compared one by one: the portable target has no span comparison for enums.
+    private static bool SameKinds(StorageKind[] left, StorageKind[] right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Writes the spec: <c>i32 key ordinal | i32 table columns | i32 indexed columns | u8 kind[table columns] |
