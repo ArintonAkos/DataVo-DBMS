@@ -278,12 +278,18 @@ internal sealed class SsTableColumnarSegment
 /// </remarks>
 internal sealed unsafe class SsTableColumnarChunkReader
 {
+    [ThreadStatic]
+    private static long t_loads;
+
     private byte[] _buffer = [];
     private byte* _address;
     private SsTableColumnarSegment? _segment;
     private int _chunk;
     private long _offset;
     private int _keyWidth;
+
+    /// <summary>How many chunk groups this thread has loaded from a file (not counting repeats of the loaded one); tests use it to see a scan skip groups.</summary>
+    internal static long LoadsOnThisThread => t_loads;
 
     /// <summary>The number of rows in the loaded group.</summary>
     public int Rows { get; private set; }
@@ -299,6 +305,7 @@ internal sealed unsafe class SsTableColumnarChunkReader
             return;
         }
 
+        t_loads++;
         ref readonly SsTableColumnarChunk info = ref segment.Chunk(chunk);
         if (segment.TryMapChunk(chunk, out IntPtr address))
         {

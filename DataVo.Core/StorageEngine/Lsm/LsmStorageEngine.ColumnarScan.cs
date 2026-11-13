@@ -236,8 +236,9 @@ public sealed partial class LsmStorageEngine
                 // A plain count needs no column: the directory knows how many rows the chunk has.
                 matched += live.IsEmpty ? rows : Bitmask.Count(live);
             }
-            else
+            else if (!SsTableColumnarZones.CanSkip(segment, chunk, steps))
             {
+                // A chunk whose zone maps rule the condition out is never read: no page fault, no copy.
                 scratch.Chunk.Load(segment, chunk);
                 var chunks = new SegmentChunks(scratch.Chunk);
                 matched += ColumnarScan.ScanChunk(ref chunks, steps, folds, totals, rows, live, masks);

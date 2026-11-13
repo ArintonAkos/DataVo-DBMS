@@ -292,6 +292,213 @@ public sealed class LsmOutOfCoreColumnarScanTests : IDisposable
         Assert.True(answered > 100, $"Only {answered} of 400 scans were answered from columns.");
     }
 
+    // ---- Zone-map pruning -------------------------------------------------------------------------------------
+    // A table of three chunk groups with disjoint zones, flushed to one file:
+    //   group 0: Level 0..4095,      Temp (DOUBLE) negative, Ratio (FLOAT) negative
+    //   group 1: Level 4096..8191,   Temp 10..49 with a NaN, Ratio positive with a NaN
+    //   group 2: Level 8192..12287,  Temp all NULL,           Ratio 1000+
+    private const string Readings = "readings";
+    private const int GroupRows = 4096;
+
+    private static readonly Column[] ReadingColumns =
+    [
+        new() { Name = "Level", Type = "INT" },
+        new() { Name = "Temp", Type = "DOUBLE" },
+        new() { Name = "Ratio", Type = "FLOAT" },
+    ];
+
+    private static readonly RowSerializer.StorageColumnType[] ReadingKinds = [.. ReadingColumns.Select(static c => RowSerializer.ClassifyColumnType(c.Type))];
+
+    private readonly record struct Reading(int Level, double? Temp, float Ratio);
+
+    private static Reading ReadingAt(int i) => (i / GroupRows) switch
+    {
+        0 => new Reading(i, -100.5 - (i * 0.01), -1f - (i * 0.001f)),
+        1 => new Reading(i, i == GroupRows + 5 ? double.NaN : 10 + (i % 40), i == GroupRows + 7 ? float.NaN : 1f + (i % 9)),
+        _ => new Reading(i, null, 1000f + (i % 100)),
+    };
+
+    private static byte[] ReadingRow(Reading r) => RowSerializer.SerializeCells(
+        ReadingColumns,
+        [CellValue.From(r.Level), r.Temp is { } t ? CellValue.From(t) : CellValue.Null, CellValue.From((double)r.Ratio)]);
+
+    private LsmStorageEngine OpenReadings(out List<Reading> rows, LsmReadMode mode = LsmReadMode.Auto)
+    {
+        LsmStorageEngine engine = Open(mode, flushThreshold: 1L << 30);
+        engine.BuildColumnar(Db, Readings, ReadingKinds, [0, 1, 2], schemaVersion: 1, keyOrdinal: -1);
+        rows = [.. Enumerable.Range(0, 3 * GroupRows).Select(ReadingAt)];
+        engine.InsertRows(Db, Readings, [.. rows.Select(ReadingRow)]);
+        engine.FlushTableForTesting(Db, Readings);
+        return engine;
+    }
+
+    private static ColumnarStep Cmp(int column, ColumnarTest test, int value) =>
+        new() { Kind = ColumnarStep.Compare, Column = column, Test = test, ValueKind = 'i', Bits = value, NullsMatch = test == ColumnarTest.NotEqual };
+
+    private static ColumnarStep Cmp(int column, ColumnarTest test, double value, bool? nullsMatch = null) =>
+        new() { Kind = ColumnarStep.Compare, Column = column, Test = test, ValueKind = 'd', Bits = BitConverter.DoubleToInt64Bits(value), NullsMatch = nullsMatch ?? test == ColumnarTest.NotEqual };
+
+    private static ColumnarStep Cmp(int column, ColumnarTest test, float value) =>
+        new() { Kind = ColumnarStep.Compare, Column = column, Test = test, ValueKind = 'f', Bits = BitConverter.SingleToInt32Bits(value), NullsMatch = test == ColumnarTest.NotEqual };
+
+    private static ColumnarStep Null(int column, bool isNull) =>
+        new() { Kind = ColumnarStep.NullTest, Column = column, Test = isNull ? ColumnarTest.Equal : ColumnarTest.NotEqual };
+
+    private static readonly ColumnarStep AndStep = new() { Kind = ColumnarStep.And };
+    private static readonly ColumnarStep OrStep = new() { Kind = ColumnarStep.Or };
+
+    // Scans the readings table; returns the matches, the sum of Level over them, and how many chunk groups were read.
+    private static (int Matched, long Levels, long Loads) ScanReadings(LsmStorageEngine engine, ColumnarStep[] steps, int limit = 0)
+    {
+        ColumnarIndex index = engine.Columnar(Db, Readings)!;
+        Assert.True(ColumnarScan.TryBind(index, steps));
+        ColumnarFold[] folds = [new() { Slot = 0, Kind = RowFoldKind.SumInt32 }];
+        var totals = new RowAggregate[1];
+        long before = SsTableColumnarChunkReader.LoadsOnThisThread;
+        Assert.True(engine.TryScanColumnar(Db, Readings, index, steps, folds, totals, limit, out int matched));
+        return (matched, totals[0].Whole, SsTableColumnarChunkReader.LoadsOnThisThread - before);
+    }
+
+    private static void AssertPruned(LsmStorageEngine engine, List<Reading> rows, ColumnarStep[] steps, Func<Reading, bool> model, long expectedLoads)
+    {
+        List<Reading> expected = [.. rows.Where(model)];
+        (int matched, long levels, long loads) = ScanReadings(engine, steps);
+        Assert.Equal(expected.Count, matched);
+        Assert.Equal(expected.Sum(static r => (long)r.Level), levels);
+        Assert.Equal(expectedLoads, loads);
+    }
+
+    [Fact]
+    public void ZoneMaps_SkipChunksTheConditionCannotMatch_WithoutReadingThem()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.GreaterOrEqual, 2 * GroupRows)], static r => r.Level >= 2 * GroupRows, 1);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Less, 0)], static r => r.Level < 0, 0);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Equal, 5000)], static r => r.Level == 5000, 1);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.NotEqual, 5000)], static r => r.Level != 5000, 3);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Greater, 12_287)], static r => r.Level > 12_287, 0);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.LessOrEqual, 4095)], static r => r.Level <= 4095, 1);
+
+        // A limit stops the scan at the first chunk that fills it; skipped chunks never count towards it.
+        (int matched, _, long loads) = ScanReadings(engine, [Cmp(0, ColumnarTest.GreaterOrEqual, 2 * GroupRows)], limit: 10);
+        Assert.Equal(10, matched);
+        Assert.Equal(1, loads);
+        (matched, _, loads) = ScanReadings(engine, [Cmp(0, ColumnarTest.GreaterOrEqual, 0)], limit: 100);
+        Assert.Equal(100, matched);
+        Assert.Equal(1, loads);
+    }
+
+    [Fact]
+    public void ZoneMaps_JoinAndOrSteps_ByWhatEachChunkCanHold()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+
+        // AND: a chunk is out as soon as one side is.
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.GreaterOrEqual, 4000), Cmp(0, ColumnarTest.Less, 4200), AndStep], static r => r.Level is >= 4000 and < 4200, 2);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.GreaterOrEqual, 2 * GroupRows), Null(1, isNull: true), AndStep], static r => r.Level >= 2 * GroupRows && r.Temp is null, 1);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Less, 100), Cmp(0, ColumnarTest.GreaterOrEqual, 200), AndStep], static _ => false, 1); // group 0's zone cannot tell the two apart
+
+        // OR: a chunk is out only when both sides are.
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Less, 10), Cmp(0, ColumnarTest.GreaterOrEqual, 12_000), OrStep], static r => r.Level is < 10 or >= 12_000, 2);
+        AssertPruned(engine, rows, [Cmp(0, ColumnarTest.Less, 100), Cmp(1, ColumnarTest.Greater, 0.0), OrStep], static r => r.Level < 100 || r.Temp > 0, 2);
+
+        // Nested: (Level < 10 OR Level >= 12000) AND Temp IS NULL.
+        AssertPruned(
+            engine,
+            rows,
+            [Cmp(0, ColumnarTest.Less, 10), Cmp(0, ColumnarTest.GreaterOrEqual, 12_000), OrStep, Null(1, isNull: true), AndStep],
+            static r => (r.Level < 10 || r.Level >= 12_000) && r.Temp is null,
+            1);
+    }
+
+    [Fact]
+    public void ZoneMaps_ReadNullsAndAllNullChunks_AsTheStepsNullsMatchSays()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+
+        // IS NULL / IS NOT NULL: the all-NULL group answers both without being read.
+        AssertPruned(engine, rows, [Null(1, isNull: true)], static r => r.Temp is null, 1);
+        AssertPruned(engine, rows, [Null(1, isNull: false)], static r => r.Temp is not null, 2);
+
+        // SQL: a NULL meets no comparison, so the all-NULL group is out.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.NotEqual, 1000.0, nullsMatch: false)], static r => r.Temp is not null && r.Temp != 1000.0, 2);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Equal, 5.0)], static _ => false, 0);
+
+        // C#: != counts a NULL as different, so the all-NULL group is all-matching and must be read.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.NotEqual, 1000.0, nullsMatch: true)], static r => r.Temp is null || r.Temp != 1000.0, 3);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Equal, 5.0, nullsMatch: true)], static r => r.Temp is null, 1);
+    }
+
+    [Fact]
+    public void ZoneMaps_NeverPrune_AwayANaNThatMeetsNotEqual_AndNeverMatchANaNElsewhere()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+
+        // Group 1's zone (10..49) excludes 1000, but its NaN differs from 1000, so it must be read for !=.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.NotEqual, 1000.0, nullsMatch: false)], static r => r.Temp is { } t && t != 1000.0, 2);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.NotEqual, 1000.0, nullsMatch: false), Cmp(1, ColumnarTest.NotEqual, 2000.0, nullsMatch: false), AndStep], static r => r.Temp is { } t && t != 1000.0 && t != 2000.0, 2);
+
+        // A NaN meets none of < <= > >= ==, so a zone that rules the numbers out rules the group out.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.GreaterOrEqual, 100.0)], static r => r.Temp >= 100.0, 0);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.LessOrEqual, -1000.0)], static r => r.Temp <= -1000.0, 0);
+
+        // A zone that covers the group is not enough to call it all-matching when it holds a NaN: it is read.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Less, 100.0)], static r => r.Temp < 100.0, 2);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Greater, 0.0)], static r => r.Temp > 0.0, 1);
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.Less, 100f)], static r => r.Ratio < 100f, 2);
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.GreaterOrEqual, 0f), Cmp(0, ColumnarTest.Less, 4200), AndStep], static r => r.Ratio >= 0f && r.Level < 4200, 1);
+
+        // A NaN on the right-hand side matches nothing but !=; the zones cannot say so, except the all-NULL group.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Less, double.NaN)], static _ => false, 2);
+    }
+
+    [Fact]
+    public void ZoneMaps_OrderNegativeDoublesAndFloats_AsNumbers()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+
+        // Group 0 holds -141.45 .. -100.5; compared as raw bits the order of negatives would flip.
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Less, -120.0)], static r => r.Temp < -120.0, 1);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Greater, -120.0)], static r => r.Temp > -120.0, 2);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Less, -141.5)], static r => r.Temp < -141.5, 0);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.GreaterOrEqual, -100.5)], static r => r.Temp >= -100.5, 2);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Equal, -100.5)], static r => r.Temp == -100.5, 1);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Greater, -100.4)], static r => r.Temp > -100.4, 1);
+        AssertPruned(engine, rows, [Cmp(1, ColumnarTest.Less, -200.0)], static r => r.Temp < -200.0, 0);
+
+        // FLOAT zones are stored widened to double; the value arrives as a float.
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.Less, -3f)], static r => r.Ratio < -3f, 1);
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.Less, -10f)], static r => r.Ratio < -10f, 0);
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.Greater, -0.5f)], static r => r.Ratio > -0.5f, 2);
+        AssertPruned(engine, rows, [Cmp(2, ColumnarTest.GreaterOrEqual, 500f)], static r => r.Ratio >= 500f, 1);
+    }
+
+    [Fact]
+    public void ZoneMaps_SkipChunksOfTheFile_ButStillSeeNewerRowsInMemory()
+    {
+        using LsmStorageEngine engine = OpenReadings(out List<Reading> rows);
+        List<RowKey> keys = [.. engine.ReadAllRows(Db, Readings).Select(static row => row.RowId).Order()];
+
+        // Rewrite a row of group 0 so it now has a Level that no zone of the file reaches, and delete one of group 2.
+        Reading moved = new(99_999, -1.0, -1f);
+        Assert.True(engine.OverwriteRowForTesting(Db, Readings, keys[3], ReadingRow(moved)));
+        engine.DeleteRow(Db, Readings, keys[(2 * GroupRows) + 3]);
+        rows[3] = moved;
+        rows.RemoveAt((2 * GroupRows) + 3);
+
+        AssertCounts(engine, rows, [Cmp(0, ColumnarTest.GreaterOrEqual, 99_999)], static r => r.Level >= 99_999);
+        AssertCounts(engine, rows, [Cmp(0, ColumnarTest.GreaterOrEqual, 2 * GroupRows)], static r => r.Level >= 2 * GroupRows);
+        AssertCounts(engine, rows, [Cmp(0, ColumnarTest.Less, 10)], static r => r.Level < 10);
+    }
+
+    private static void AssertCounts(LsmStorageEngine engine, List<Reading> rows, ColumnarStep[] steps, Func<Reading, bool> model)
+    {
+        List<Reading> expected = [.. rows.Where(model)];
+        (int matched, long levels, _) = ScanReadings(engine, steps);
+        Assert.Equal(expected.Count, matched);
+        Assert.Equal(expected.Sum(static r => (long)r.Level), levels);
+    }
+
     private LsmStorageEngine Open(LsmReadMode mode, long flushThreshold = 96 * 1024) =>
         new(_root, Relaxed, mode) { MemTableFlushThresholdOverrideBytes = flushThreshold };
 
