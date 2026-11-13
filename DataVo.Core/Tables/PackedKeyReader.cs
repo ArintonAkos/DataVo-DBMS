@@ -85,29 +85,52 @@ internal sealed class PackedKeyReader<T>
         }
 
         Source? source = _source;
-        bool kept = source is not null && string.Equals(source.DatabaseName, databaseName, StringComparison.Ordinal);
-        if (kept && TryReadFrom(source!, key, out item))
+        if (source is null || !string.Equals(source.DatabaseName, databaseName, StringComparison.Ordinal))
+        {
+            _source = source = FindSource(databaseName);
+        }
+
+        if (TryReadFrom(source, key, out item))
         {
             return true;
         }
 
         // What was kept did not answer. Usually the key is simply not there, or its row is not packed, and
-        // the statement takes over. But the table or its key map may have been replaced: then find both
-        // again and try once more.
-        if (kept && IsCurrent(source!))
+        // the statement takes over. But the table or its key map may have appeared or been replaced: then
+        // find both again and try once more.
+        if (IsCurrent(source))
         {
             return false;
         }
 
         _source = source = FindSource(databaseName);
-        return source is not null && TryReadFrom(source, key, out item);
+        return TryReadFrom(source, key, out item);
     }
 
-    /// <summary>Whether a kept table and key map are still the ones the engine uses.</summary>
-    private bool IsCurrent(Source source) =>
-        source.Table.CurrentRows is not null
-        && _engine.IndexManager.TryGetIntegerPrimaryKeyMap(source.IndexName, source.StoredTable, source.DatabaseName, out ConcurrentInt64Int64Map? keys)
-        && ReferenceEquals(keys, source.Keys);
+    /// <summary>
+    /// Whether what was found for a table still stands. For a table and key map that were found: they are
+    /// still the ones the engine uses. For a table that could not be served: its schema has not changed, and
+    /// if all it lacked was rows or a key map, it still lacks them. Looks names up but allocates nothing, so a
+    /// lookup that keeps missing costs no more than this check before its statement.
+    /// </summary>
+    private bool IsCurrent(Source source)
+    {
+        if (source.Table is not null)
+        {
+            return source.Table.CurrentRows is not null
+                && _engine.IndexManager.TryGetIntegerPrimaryKeyMap(source.IndexName, source.StoredTable, source.DatabaseName, out ConcurrentInt64Int64Map? keys)
+                && ReferenceEquals(keys, source.Keys);
+        }
+
+        if (_engine.Catalog.GetTableSchemaVersion(_tableName, source.DatabaseName) != source.SchemaVersion)
+        {
+            return false;
+        }
+
+        return !source.HasModelKey
+            || _engine.StorageContext.PackedTableOf(source.StoredTable, source.DatabaseName) is null
+            || !_engine.IndexManager.TryGetIntegerPrimaryKeyMap(source.IndexName, source.StoredTable, source.DatabaseName, out _);
+    }
 
     /// <summary>Whether something about the engine or the session calls for the statement's own handling.</summary>
     private bool MustUseStatement() =>
@@ -126,9 +149,9 @@ internal sealed class PackedKeyReader<T>
     private bool TryReadFrom(Source source, long key, out T item)
     {
         item = default!;
-        if (source.Table.CurrentRows is not { Layout: { } layout } rows
+        if (source.Table?.CurrentRows is not { Layout: { } layout } rows
             || FieldsFor(layout, rows.Schema!) is not { } binding
-            || !source.Keys.TryGetValue(key, out long rowId)
+            || !source.Keys!.TryGetValue(key, out long rowId)
             || rowId < 1
             || rowId > rows.Count)
         {
@@ -155,20 +178,26 @@ internal sealed class PackedKeyReader<T>
     }
 
     /// <summary>
-    /// Finds the table and its key map by name; null when the table is not one this reader can serve: it does
-    /// not exist, is not kept in memory, has no rows yet, or its primary key is not the model's integer key.
+    /// Finds the table and its key map by name. The result has neither when the table is not one this reader
+    /// can serve: it does not exist, is not kept in memory, has no rows yet, or its primary key is not the
+    /// model's integer key. It is kept all the same, so that is not worked out again for every lookup.
     /// </summary>
-    private Source? FindSource(string databaseName)
+    private Source FindSource(string databaseName)
     {
-        if (_engine.Catalog.FindTableName(_tableName, databaseName) is not { } storedTable
-            || !HasModelKey(storedTable, databaseName)
-            || _engine.StorageContext.PackedTableOf(storedTable, databaseName) is not { } table
-            || !_engine.IndexManager.TryGetIntegerPrimaryKeyMap($"_PK_{storedTable}", storedTable, databaseName, out ConcurrentInt64Int64Map? keys))
+        int schemaVersion = _engine.Catalog.GetTableSchemaVersion(_tableName, databaseName);
+        string? storedTable = _engine.Catalog.FindTableName(_tableName, databaseName);
+        if (storedTable is null || !HasModelKey(storedTable, databaseName))
         {
-            return null;
+            return new Source(databaseName, storedTable ?? _tableName, schemaVersion, hasModelKey: false, null, null);
         }
 
-        return new Source(databaseName, storedTable, table, keys);
+        IPackedTable? table = _engine.StorageContext.PackedTableOf(storedTable, databaseName);
+        if (table is null || !_engine.IndexManager.TryGetIntegerPrimaryKeyMap($"_PK_{storedTable}", storedTable, databaseName, out ConcurrentInt64Int64Map? keys))
+        {
+            return new Source(databaseName, storedTable, schemaVersion, hasModelKey: true, null, null);
+        }
+
+        return new Source(databaseName, storedTable, schemaVersion, hasModelKey: true, table, keys);
     }
 
     /// <summary>Whether the table's primary key is the model's key column alone, and an integer.</summary>
@@ -238,14 +267,27 @@ internal sealed class PackedKeyReader<T>
         return parenthesis < 0 ? sqlType : sqlType.Substring(0, parenthesis);
     }
 
-    /// <summary>A table and its key map, found by name once and kept for the lookups that follow.</summary>
-    private sealed class Source(string databaseName, string storedTable, IPackedTable table, ConcurrentInt64Int64Map keys)
+    /// <summary>
+    /// What was found for the table in one database, kept for the lookups that follow: the table and its key
+    /// map, or the fact that it cannot be served and why.
+    /// </summary>
+    private sealed class Source(string databaseName, string storedTable, int schemaVersion, bool hasModelKey, IPackedTable? table, ConcurrentInt64Int64Map? keys)
     {
         public readonly string DatabaseName = databaseName;
         public readonly string StoredTable = storedTable;
         public readonly string IndexName = $"_PK_{storedTable}";
-        public readonly IPackedTable Table = table;
-        public readonly ConcurrentInt64Int64Map Keys = keys;
+
+        /// <summary>The version of the table's schema this was found for.</summary>
+        public readonly int SchemaVersion = schemaVersion;
+
+        /// <summary>Whether the table exists and its primary key is the model's integer key.</summary>
+        public readonly bool HasModelKey = hasModelKey;
+
+        /// <summary>The table's packed rows; null when it cannot be served.</summary>
+        public readonly IPackedTable? Table = table;
+
+        /// <summary>The table's key map; null exactly when <see cref="Table"/> is.</summary>
+        public readonly ConcurrentInt64Int64Map? Keys = keys;
     }
 
     /// <summary>The model's fields in one layout; <see cref="Fields"/> is null when the model does not fit it.</summary>

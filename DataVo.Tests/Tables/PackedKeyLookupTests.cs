@@ -145,6 +145,20 @@ public sealed class PackedKeyLookupTests : IDisposable
     }
 
     [Fact]
+    public void Lookup_ThatFoundTheTableEmpty_ReadsDirectlyOnceRowsArrive()
+    {
+        using DataVoContext db = Open();
+        DataVoTable<PackedHero> heroes = db.Table<PackedHero>();
+        Assert.Null(heroes.FirstOrDefault(1, static (hero, id) => hero.Id == id));
+        Assert.False(heroes.TryReadByIntegerKey(1, out _));
+
+        Load(db, 3);
+
+        Assert.True(heroes.TryReadByIntegerKey(1, out PackedHero direct));
+        AssertSame(Hero(1), direct);
+    }
+
+    [Fact]
     public void Lookup_OfAMissingOrDeletedKey_IsLeftToTheStatement_WhichFindsNothing()
     {
         using DataVoContext db = Open();
