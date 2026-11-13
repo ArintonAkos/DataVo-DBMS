@@ -53,6 +53,18 @@ public sealed class LsmTable : IDisposable
     /// <summary>Highest persisted LSM level. Compaction into this level can drop tombstones.</summary>
     internal int MaxCompactionLevel { get; set; } = DefaultMaxCompactionLevel;
 
+    /// <summary>
+    /// The columns every row-keyed SSTable written from now on (by a flush or a compaction) carries a second
+    /// time as a columnar segment, or null to write none.
+    /// </summary>
+    internal DataVo.Core.Indexing.Columnar.ColumnarSpec? ColumnarSpec
+    {
+        get => Volatile.Read(ref _columnarSpec);
+        set => Volatile.Write(ref _columnarSpec, value);
+    }
+
+    private DataVo.Core.Indexing.Columnar.ColumnarSpec? _columnarSpec;
+
     /// <summary>File registry used by background compaction; compaction is disabled while null.</summary>
     internal LsmFileRegistry? CompactionRegistry { get; set; }
 
@@ -604,7 +616,7 @@ public sealed class LsmTable : IDisposable
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableV2Writer(stream, alignment: 0, memTable.Count);
+                    using var writer = new SsTableV2Writer(stream, alignment: 0, memTable.Count, columnar: ColumnarSpec);
                     RowBounds bounds = WriteRows(writer, memTable);
                     if (!bounds.HasRows)
                     {
@@ -827,7 +839,7 @@ public sealed class LsmTable : IDisposable
     private void CompactEligibleLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
 
         bool madeProgress;
         do
@@ -860,7 +872,7 @@ public sealed class LsmTable : IDisposable
     private void CompactAllLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
 
         for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
         {

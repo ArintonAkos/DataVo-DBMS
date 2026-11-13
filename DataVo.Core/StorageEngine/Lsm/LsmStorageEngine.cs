@@ -882,7 +882,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
 
         // No per-table WAL: durability comes from the shared commit log, and this table's MemTables
         // hold only mutations whose frames are already in it.
-        var table = new LsmTable(tableDirectory, manifest) { Format = LsmSstableFormat.RowKeyed, ReadMode = _readMode };
+        var table = new LsmTable(tableDirectory, manifest)
+        {
+            Format = LsmSstableFormat.RowKeyed,
+            ReadMode = _readMode,
+            ColumnarSpec = LsmColumnarSpecFile.TryLoad(tableDirectory),
+        };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;
@@ -1067,7 +1072,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count);
+                    using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count, columnar: state.Table.ColumnarSpec);
                     long nextRowId = 0;
                     foreach (SstableEntry entry in entries)
                     {

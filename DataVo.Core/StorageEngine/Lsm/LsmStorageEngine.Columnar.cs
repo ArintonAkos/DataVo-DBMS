@@ -34,6 +34,29 @@ public sealed partial class LsmStorageEngine
         }
     }
 
+    /// <summary>The columns the table's SSTables are written with as a columnar segment, or null.</summary>
+    internal ColumnarSpec? ColumnarSpecOf(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).Table.ColumnarSpec;
+
+    /// <summary>
+    /// Makes every SSTable the table writes from now on carry <paramref name="spec"/>'s columns as a columnar
+    /// segment, and remembers that across restarts; null stops it. Files already written are left as they are.
+    /// </summary>
+    internal void SetColumnarSpec(string databaseName, string tableName, ColumnarSpec? spec)
+    {
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        if (spec is null)
+        {
+            LsmColumnarSpecFile.Delete(state.TableDirectory);
+        }
+        else if (state.Table.ColumnarSpec is not { } current || !current.Matches(spec))
+        {
+            LsmColumnarSpecFile.Save(state.TableDirectory, spec);
+        }
+
+        state.Table.ColumnarSpec = spec;
+    }
+
     /// <summary>Stops keeping a columnar index for the table.</summary>
     internal void DropColumnar(string databaseName, string tableName)
     {
