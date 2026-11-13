@@ -31,6 +31,29 @@ internal sealed class LsmSstableHandle
     /// <summary>Whether the file has been unmapped and deleted from disk.</summary>
     public bool IsDeleted => Volatile.Read(ref _deleted) != 0;
 
+    private LsmDeleteVector? _columnarDeleteVector;
+
+    /// <summary>
+    /// The newest vector of this file's columnar rows that newer files replace; the next set of live files
+    /// starts from it (see <see cref="LsmDeleteVector"/>). Dropped with the handle when the file is deleted.
+    /// </summary>
+    public LsmDeleteVector? ColumnarDeleteVector => Volatile.Read(ref _columnarDeleteVector);
+
+    /// <summary>Keeps <paramref name="vector"/> unless the one kept already was made for a newer set of files.</summary>
+    public void OfferColumnarDeleteVector(LsmDeleteVector vector)
+    {
+        LsmDeleteVector? current;
+        do
+        {
+            current = Volatile.Read(ref _columnarDeleteVector);
+            if (current is not null && current.Horizon > vector.Horizon)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref _columnarDeleteVector, vector, current) != current);
+    }
+
     public void AddRef()
     {
         if (Volatile.Read(ref _deleted) != 0)

@@ -872,6 +872,10 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     internal void FlushTableForTesting(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).Table.FlushActiveMemTable();
 
+    /// <summary>Diagnostics: compacts every file of one level of the table into the next level.</summary>
+    internal void CompactLevelForTesting(string databaseName, string tableName, int sourceLevel) =>
+        GetOrCreateTable(databaseName, tableName).Table.CompactLevelForTesting(sourceLevel);
+
     /// <summary>Diagnostics: how many SSTable handles the table's file registry holds.</summary>
     internal int SstableHandleCountForTesting(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).FileRegistry.HandleCount;
@@ -2675,7 +2679,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         /// Which rows of these files' columnar segments a newer one of them replaces or deletes; worked out
         /// by the first columnar scan of this set of files, as the files never change.
         /// </summary>
-        public LsmColumnarShadows? ColumnarShadows;
+        public LsmFileShadows? ColumnarShadows;
 
         public bool IsLive => Volatile.Read(ref _references) > 0;
 
