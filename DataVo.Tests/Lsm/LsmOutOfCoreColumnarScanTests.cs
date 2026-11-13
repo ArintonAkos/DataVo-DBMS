@@ -15,7 +15,7 @@ namespace DataVo.Tests.Lsm;
 /// with a model of the rows: across inserts, updates and deletes, flushes, compaction and reopening, in both
 /// read modes, and while another thread commits.
 /// </summary>
-public sealed class LsmOutOfCoreColumnarScanTests : IDisposable
+public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
 {
     private const string Db = "db";
     private const string Table = "players";
@@ -499,8 +499,8 @@ public sealed class LsmOutOfCoreColumnarScanTests : IDisposable
         Assert.Equal(expected.Sum(static r => (long)r.Level), levels);
     }
 
-    private LsmStorageEngine Open(LsmReadMode mode, long flushThreshold = 96 * 1024) =>
-        new(_root, Relaxed, mode) { MemTableFlushThresholdOverrideBytes = flushThreshold };
+    private LsmStorageEngine Open(LsmReadMode mode, long flushThreshold = 96 * 1024, string? root = null) =>
+        new(root ?? _root, Relaxed, mode) { MemTableFlushThresholdOverrideBytes = flushThreshold };
 
     // Inserts, rewrites and deletes rows, the same way in the engine and in the model.
     private static void Mutate(LsmStorageEngine engine, Dictionary<RowKey, (int Level, long? Gold)> model, Random random, int operations)

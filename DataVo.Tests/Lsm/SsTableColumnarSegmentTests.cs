@@ -15,7 +15,7 @@ namespace DataVo.Tests.Lsm;
 /// put of every key, the keys the file deletes, NULLs, every column type, key order, and what a damaged file
 /// does.
 /// </summary>
-public sealed class SsTableColumnarSegmentTests : IDisposable
+public sealed partial class SsTableColumnarSegmentTests : IDisposable
 {
     private static readonly Column[] Columns =
     [
