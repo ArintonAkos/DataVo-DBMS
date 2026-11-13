@@ -291,6 +291,7 @@ public static class DataVoGeneratedTableSupport
         }
     }
 
-    private static InvalidOperationException NullColumn(string column) =>
+    /// <summary>The error for a NULL read into a property that cannot hold one.</summary>
+    internal static InvalidOperationException NullColumn(string column) =>
         new($"Column {column} is NULL, but the model's property cannot hold null.");
 }

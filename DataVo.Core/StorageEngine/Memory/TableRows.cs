@@ -113,6 +113,26 @@ internal sealed class TableRows
         return false;
     }
 
+    /// <summary>
+    /// Borrows the packed row at a position without a lock, for a reader that takes values straight from the
+    /// record. Such a reader must call <see cref="IsTypedLive"/> once it has its values and discard them when
+    /// the row is gone; see <see cref="FlatRowStore"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> when the position holds no typed row, or holds one that is kept apart rather
+    /// than packed.
+    /// </returns>
+    public bool TryReadPacked(int position, out FlatRow row)
+    {
+        if (_flat is { } flat && flat.TryRead(position - _flatBase, out row) && !row.IsKeptApart)
+        {
+            return true;
+        }
+
+        row = default;
+        return false;
+    }
+
     /// <summary>Copies the typed row at a position out as a row object of its own, without a lock.</summary>
     /// <returns><see langword="false"/> when the position holds no typed row, or it was removed meanwhile.</returns>
     public bool TryCopyTyped(int position, out StoredRow? row)

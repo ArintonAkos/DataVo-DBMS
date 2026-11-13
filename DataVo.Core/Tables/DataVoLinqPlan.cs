@@ -35,6 +35,19 @@ public abstract class DataVoLinqPlan<T, TState>
     /// <returns><see langword="true"/> when the statement answers the query for this state.</returns>
     protected virtual bool CanBind(TState state) => true;
 
+    /// <summary>
+    /// Gets the key a query looks up, when the query is nothing but the model's integer primary key compared
+    /// to a value. The generator overrides this for such queries, which lets a point lookup skip the statement.
+    /// </summary>
+    /// <param name="state">The value passed to the query.</param>
+    /// <param name="key">The primary-key value to look up.</param>
+    /// <returns><see langword="false"/> when the query is not a lookup by integer primary key.</returns>
+    protected virtual bool TryGetIntegerKey(TState state, out long key)
+    {
+        key = 0;
+        return false;
+    }
+
     /// <summary>Binds the state to the statement's parameters and executes it.</summary>
     /// <param name="statement">The prepared statement for this plan.</param>
     /// <param name="state">The value passed to the query.</param>
@@ -102,6 +115,11 @@ public abstract class DataVoLinqPlan<T, TState>
             return table.FirstOrDefault(state, predicate);
         }
 
+        if (TryReadByKey(table, state, out T direct))
+        {
+            return direct;
+        }
+
         QueryResult result = Execute(table, state, _unique ? All : First, borrowed: true);
         return result.Data.Count == 0 ? default : table.Read(result.Data[0]);
     }
@@ -117,6 +135,11 @@ public abstract class DataVoLinqPlan<T, TState>
         if (!CanBind(state))
         {
             return table.SingleOrDefault(state, predicate);
+        }
+
+        if (TryReadByKey(table, state, out T direct))
+        {
+            return direct;
         }
 
         QueryResult result = Execute(table, state, _unique ? All : Single, borrowed: true);
@@ -144,6 +167,11 @@ public abstract class DataVoLinqPlan<T, TState>
     /// <summary>Reads the one row a unique plan can match.</summary>
     internal bool TryFirst(DataVoTable<T> table, TState state, bool borrowed, out T item)
     {
+        if (TryReadByKey(table, state, out item))
+        {
+            return true;
+        }
+
         QueryResult result = Execute(table, state, _unique ? All : First, borrowed);
         if (result.Data.Count == 0)
         {
@@ -175,6 +203,21 @@ public abstract class DataVoLinqPlan<T, TState>
 
     /// <summary>Opens a paged scan of the matching rows.</summary>
     internal IEnumerable<DataVoRow> Stream(DataVoTable<T> table, TState state) => table.Stream(_where, Parameters(state));
+
+    /// <summary>
+    /// Reads the row of a lookup by integer primary key straight from the table, without running the statement.
+    /// </summary>
+    /// <returns><see langword="false"/> when the query is not such a lookup or the table did not answer it directly.</returns>
+    private bool TryReadByKey(DataVoTable<T> table, TState state, out T item)
+    {
+        if (TryGetIntegerKey(state, out long key))
+        {
+            return table.TryReadByIntegerKey(key, out item);
+        }
+
+        item = default!;
+        return false;
+    }
 
     private QueryResult Execute(DataVoTable<T> table, TState state, int kind, bool borrowed)
     {

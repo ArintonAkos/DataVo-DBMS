@@ -148,6 +148,19 @@ internal static class DataVoLinqEmitter
                 """);
         }
 
+        if (site.IntegerKeyLookup && !parameters[0].UsesObjectParameter)
+        {
+            // The whole query is "key = value": the runtime can read the row by key without the statement.
+            code.AppendLine($$"""
+                            protected override bool TryGetIntegerKey({{state}} state, out long key)
+                            {
+                                key = {{parameters[0].Value}};
+                                return true;
+                            }
+
+                """);
+        }
+
         code.AppendLine($"            protected override {Result} Run({Statement} statement, {state} state, bool borrowed)");
         code.AppendLine("            {");
         string[] names = [.. parameters.Select(static (_, index) => "p" + index.ToString(CultureInfo.InvariantCulture))];

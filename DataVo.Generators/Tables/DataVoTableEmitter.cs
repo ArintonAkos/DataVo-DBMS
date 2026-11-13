@@ -114,6 +114,30 @@ internal static class DataVoTableEmitter
 
             code.AppendLine("            };").AppendLine();
         }
+
+        EmitPackedReader(code, model, columns);
+    }
+
+    /// <summary>
+    /// Writes the reader that builds the model from a row read in place. It is the same expression as the other
+    /// readers with each column read by its number in the column list instead of by name.
+    /// </summary>
+    private static void EmitPackedReader(StringBuilder code, TableModel model, ColumnModel[] columns)
+    {
+        string Read(ColumnModel column) =>
+            $"row.{column.Type.ReaderMethod}({Array.IndexOf(columns, column)}, \"{column.PropertyName}\"){column.Type.ReadSuffix}";
+
+        string[] constructorArguments = [.. model.ConstructorParameters.Select(parameter =>
+            Read(columns.Single(column => column.PropertyName.Equals(parameter, StringComparison.OrdinalIgnoreCase))))];
+        code.AppendLine($"        private static readonly {Core}DataVoPackedReader<{model.FullTypeName}> ReadPackedRow = static row =>");
+        code.Append("            new ").Append(model.FullTypeName).Append('(').Append(string.Join(", ", constructorArguments)).AppendLine(")");
+        code.AppendLine("            {");
+        foreach (ColumnModel column in columns.Where(static column => column.IsSettable && !column.IsConstructorParameter))
+        {
+            code.Append("                ").Append(column.PropertyName).Append(" = ").Append(Read(column)).AppendLine(",");
+        }
+
+        code.AppendLine("            };").AppendLine();
     }
 
     /// <summary>The name of the HNSW index a <c>[SpatialIndex]</c> column gets.</summary>
@@ -126,10 +150,13 @@ internal static class DataVoTableEmitter
         string spatial = positions.Length == 0
             ? string.Empty
             : $", new {Core}DataVoSpatialColumn[] {{ {string.Join(", ", positions.Select(column => $"new {Core}DataVoSpatialColumn(\"{column.PropertyName}\", {(column.IsSpatialIndexed ? $"\"{SpatialIndexName(model, column)}\"" : "null")})"))} }}";
+        string sqlTypes = string.Join(", ", columns.Select(static column => $"\"{column.Type.SqlType}\""));
+        string keyColumn = columns.Single(static column => column.IsPrimaryKey).PropertyName;
+        string packed = $", ReadPackedRow, new string[] {{ {sqlTypes} }}, \"{keyColumn}\"";
         code.AppendLine($$"""
                     /// <summary>Describes the {{model.TableName}} table to DataVo. Used by generated code.</summary>
                     [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
-                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow, ReadStreamedRow{{spatial}});
+                    public static readonly {{type}} {{model.ModelName}}TableInfo = new {{type}}("{{model.TableName}}", "{{nameList}}", ReadRow, ReadStreamedRow{{spatial}}{{packed}});
 
                     // An explicit static constructor runs before the first call into this class, so using any
                     // generated method makes the model available to DataVoContext.Table<T>().

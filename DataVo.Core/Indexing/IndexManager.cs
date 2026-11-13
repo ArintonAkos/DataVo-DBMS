@@ -2238,6 +2238,26 @@ public partial class IndexManager : IDisposable
             : null;
     }
 
+    /// <summary>
+    /// The map from integer primary key to row id that serves an in-memory table's point lookups, for a reader
+    /// that keeps it rather than find it by name for every key.
+    /// </summary>
+    /// <remarks>
+    /// The map can be replaced at any time, when the index is rebuilt or dropped. A reader that keeps one must
+    /// therefore check what it finds through it (that the row is live and holds the key it asked for) and fetch
+    /// the map again whenever a lookup through it finds nothing.
+    /// </remarks>
+    /// <returns><see langword="false"/> when the index has no such map, which is always so on the LSM backend.</returns>
+    internal bool TryGetIntegerPrimaryKeyMap(
+        string indexName,
+        string tableName,
+        string databaseName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ConcurrentInt64Int64Map? map)
+    {
+        map = null;
+        return _lsmStore is null && _integerPrimaryKeyMaps.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out map);
+    }
+
     public bool TryLookupIntegerPrimaryKey(
         long key,
         string indexName,

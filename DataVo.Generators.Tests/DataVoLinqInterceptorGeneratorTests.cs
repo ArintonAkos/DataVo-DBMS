@@ -325,6 +325,26 @@ public class DataVoLinqInterceptorGeneratorTests
     }
 
     [Fact]
+    public void LookupByIntegerPrimaryKeyAlone_HandsTheRuntimeItsKey()
+    {
+        string generated = Generate("players.FirstOrDefault(target, static (p, id) => p.Id == id)").Generated;
+
+        Assert.Contains("protected override bool TryGetIntegerKey(int state, out long key)", generated);
+    }
+
+    [Theory]
+    [InlineData("players.FirstOrDefault(target, static (p, id) => p.Id == id && p.IsActive)")]
+    [InlineData("players.FirstOrDefault(target, static (p, level) => p.Level == level)")]
+    [InlineData("players.Where(target, static (p, id) => p.Id > id)")]
+    public void AnyOtherQuery_KeepsToTheStatement(string call)
+    {
+        string generated = Generate(call).Generated;
+
+        Assert.NotEmpty(generated);
+        Assert.DoesNotContain("TryGetIntegerKey", generated);
+    }
+
+    [Fact]
     public void MoreThanFourValues_AreBoundThroughAnArray()
     {
         string generated = Generate("players.Where(p => p.Id > 1 && p.Id < 9 && p.Level > 1 && p.Level < 9 && p.Gold > 5)").Generated;

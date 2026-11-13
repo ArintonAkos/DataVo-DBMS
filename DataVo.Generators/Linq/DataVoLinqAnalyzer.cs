@@ -122,7 +122,8 @@ internal static class DataVoLinqAnalyzer
                 where,
                 translator.Unique,
                 new EquatableArray<LinqParameter>([.. translator.Parameters]),
-                translator.Unique ? null : translator.Kernel(body)),
+                translator.Unique ? null : translator.Kernel(body),
+                IntegerKeyLookup: translator.Parameters.Count == 1 && where == translator.IntegerKeyCondition),
             null);
     }
 
@@ -326,6 +327,12 @@ internal static class DataVoLinqAnalyzer
 
         /// <summary>Whether the condition requires the primary key to equal one value.</summary>
         public bool Unique { get; private set; }
+
+        /// <summary>
+        /// The condition that compares the model's integer primary key to a value, when the predicate has one
+        /// at its top level. A predicate that is nothing else is a lookup by key.
+        /// </summary>
+        public string? IntegerKeyCondition { get; private set; }
 
         // Each leaf of the condition (a comparison, a null test, a bare bool column) as C# in three forms, when
         // its column can be read directly. A leaf without an entry keeps the whole query on the SQL path.
@@ -614,6 +621,10 @@ internal static class DataVoLinqAnalyzer
             if (comparison == "=" && column.IsPrimaryKey && topLevel)
             {
                 Unique = true;
+                if (column.Type.SqlType is "INT" or "BIGINT")
+                {
+                    IntegerKeyCondition = $"{name} = {parameter}";
+                }
             }
 
             // SQL's NULL <> value is unknown, while C# counts a null column as different from the value.

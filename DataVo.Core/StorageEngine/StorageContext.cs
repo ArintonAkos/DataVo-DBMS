@@ -532,6 +532,13 @@ public class StorageContext(DataVoConfig config) : IDisposable
     internal bool RetainsTypedRowBuffers => _storageEngine is ITypedRowStorageEngine;
 
     /// <summary>
+    /// A table whose typed rows can be read in place from packed records; null when the backend keeps rows
+    /// another way or has no such table.
+    /// </summary>
+    internal Memory.IPackedTable? PackedTableOf(string tableName, string databaseName) =>
+        (_storageEngine as Memory.IPackedRowSource)?.TableOf(databaseName, tableName);
+
+    /// <summary>
     /// Cheap row-count estimate for query planning. Returns false when the backend cannot answer
     /// without reading the table.
     /// </summary>

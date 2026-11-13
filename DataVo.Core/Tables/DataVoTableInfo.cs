@@ -48,6 +48,61 @@ public sealed class DataVoTableInfo<T>
         ReadRow = readRow ?? throw new ArgumentNullException(nameof(readRow));
         ReadStreamedRow = readStreamedRow ?? throw new ArgumentNullException(nameof(readStreamedRow));
         SpatialColumns = spatialColumns ?? throw new ArgumentNullException(nameof(spatialColumns));
+        ColumnNames = [];
+        ColumnTypes = [];
+    }
+
+    /// <summary>
+    /// Creates table metadata for a model without 3D position columns that can also be read straight from
+    /// packed in-memory rows.
+    /// </summary>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="columnList">The comma-separated column list, in the order the readers expect.</param>
+    /// <param name="readRow">Builds a model from one row of a statement's result.</param>
+    /// <param name="readStreamedRow">Builds a model from one row of a streamed scan.</param>
+    /// <param name="readPackedRow">Builds a model from a row read in place; it numbers columns as <paramref name="columnList"/> orders them.</param>
+    /// <param name="columnTypes">The SQL type of each column of <paramref name="columnList"/>.</param>
+    /// <param name="keyColumn">The primary-key column.</param>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow,
+        DataVoPackedReader<T> readPackedRow,
+        string[] columnTypes,
+        string keyColumn)
+        : this(tableName, columnList, readRow, readStreamedRow, [], readPackedRow, columnTypes, keyColumn)
+    {
+    }
+
+    /// <summary>Creates table metadata for a model that can also be read straight from packed in-memory rows.</summary>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="columnList">The comma-separated column list, in the order the readers expect.</param>
+    /// <param name="readRow">Builds a model from one row of a statement's result.</param>
+    /// <param name="readStreamedRow">Builds a model from one row of a streamed scan.</param>
+    /// <param name="spatialColumns">The model's 3D position columns, each with the name of its spatial index or null.</param>
+    /// <param name="readPackedRow">Builds a model from a row read in place; it numbers columns as <paramref name="columnList"/> orders them.</param>
+    /// <param name="columnTypes">The SQL type of each column of <paramref name="columnList"/>.</param>
+    /// <param name="keyColumn">The primary-key column.</param>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow,
+        DataVoSpatialColumn[] spatialColumns,
+        DataVoPackedReader<T> readPackedRow,
+        string[] columnTypes,
+        string keyColumn)
+        : this(tableName, columnList, readRow, readStreamedRow, spatialColumns)
+    {
+        ReadPackedRow = readPackedRow ?? throw new ArgumentNullException(nameof(readPackedRow));
+        ColumnTypes = columnTypes ?? throw new ArgumentNullException(nameof(columnTypes));
+        KeyColumn = keyColumn ?? throw new ArgumentNullException(nameof(keyColumn));
+        ColumnNames = [.. columnList.Split(',').Select(static name => name.Trim())];
+        if (ColumnNames.Length != ColumnTypes.Length)
+        {
+            throw new ArgumentException("There must be one column type for each column of the column list.", nameof(columnTypes));
+        }
     }
 
     /// <summary>Gets the table the model is stored in.</summary>
@@ -60,6 +115,18 @@ public sealed class DataVoTableInfo<T>
     internal Func<DataVoRow, T> ReadStreamedRow { get; }
 
     internal DataVoSpatialColumn[] SpatialColumns { get; }
+
+    /// <summary>Builds a model from a row read in place; null for a model generated without one.</summary>
+    internal DataVoPackedReader<T>? ReadPackedRow { get; }
+
+    /// <summary>The model's columns, in the order <see cref="ReadPackedRow"/> numbers them.</summary>
+    internal string[] ColumnNames { get; }
+
+    /// <summary>The SQL type of each of <see cref="ColumnNames"/>.</summary>
+    internal string[] ColumnTypes { get; }
+
+    /// <summary>The primary-key column; null for a model generated without a packed reader.</summary>
+    internal string? KeyColumn { get; }
 
     /// <summary>Gets the model's description, which its generated code registered.</summary>
     internal static DataVoTableInfo<T> Registered => s_registered ?? throw new InvalidOperationException(

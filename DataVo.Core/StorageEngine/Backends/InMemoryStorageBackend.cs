@@ -3,7 +3,7 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
+internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, DataVo.Core.StorageEngine.Memory.IPackedRowSource, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -27,6 +27,8 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
     public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) => RowKeyConversions.ToRowKeys(_inner.ReadAllRows(databaseName, tableName));
     public IEnumerable<(long RowId, StoredRow Row)> ReadAllTypedRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).ReadAllTypedRows(databaseName, tableName);
+    public DataVo.Core.StorageEngine.Memory.IPackedTable? TableOf(string databaseName, string tableName) =>
+        ((DataVo.Core.StorageEngine.Memory.IPackedRowSource)_inner).TableOf(databaseName, tableName);
     public bool HasAnyRows(string databaseName, string tableName) =>
         ((ITypedRowStorageEngine)_inner).HasAnyRows(databaseName, tableName);
     PageScan IPagedRowScan.VisitPage<TState>(string databaseName, string tableName, long? afterRowId, long? expectedGeneration, int maxRows, ref TState state, PagedRowVisitor<TState> visit) =>

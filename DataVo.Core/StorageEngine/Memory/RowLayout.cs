@@ -90,6 +90,9 @@ internal sealed class RowLayout
     /// <summary>The byte offset of the record's status byte.</summary>
     public int StatusOffset { get; }
 
+    /// <summary>The byte offset of the first byte of null bits: column <c>n</c> is bit <c>n &amp; 7</c> of byte <c>n &gt;&gt; 3</c>.</summary>
+    public int NullsOffset => _nullsOffset;
+
     /// <summary>Where the column at <paramref name="ordinal"/> lives.</summary>
     public ref readonly RowField this[int ordinal] => ref _fields[ordinal];
 

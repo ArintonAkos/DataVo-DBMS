@@ -10,7 +10,7 @@ namespace DataVo.Core.StorageEngine.Memory;
 /// <summary>
 /// In-memory storage engine used for fast, non-persistent row operations.
 /// </summary>
-public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IInMemoryStorageSnapshotProvider, IPagedRowScan, DataVo.Core.Indexing.Columnar.IColumnarRowStore
+public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine, IPackedRowSource, IInMemoryStorageSnapshotProvider, IPagedRowScan, DataVo.Core.Indexing.Columnar.IColumnarRowStore
 {
     // A thread-safe, purely RAM-based mapping of (DatabaseName, TableName) -> rows. A value-tuple key
     // avoids allocating a "db.table" string on every read/write/delete (and removes the latent "a.b"+"c" vs
@@ -20,8 +20,16 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     // (append, tombstone, compaction) take exclusive access. This replaces the previous global mutex
     // (lock(_syncRoot) + lock(table)) that serialized every read and write across all tables — the cause
     // of reader starvation under concurrent load. The outer ConcurrentDictionary handles table lookup/creation.
-    private sealed class TableStore
+    private sealed class TableStore : IPackedTable
     {
+        private volatile bool _detached;
+
+        /// <inheritdoc />
+        public TableRows? CurrentRows => _detached ? null : Rows;
+
+        /// <summary>Marks the table as no longer part of the engine, for readers that kept hold of it.</summary>
+        public void Detach() => _detached = true;
+
         public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.NoRecursion);
         /// <summary>Replaced as a whole when the rows are renumbered, so a reader holds one consistent sequence.</summary>
         public volatile TableRows Rows = new();
@@ -539,7 +547,10 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     /// <param name="tableName">The table name.</param>
     public void DropTable(string databaseName, string tableName)
     {
-        _databases.TryRemove(GetKey(databaseName, tableName), out _);
+        if (_databases.TryRemove(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            store.Detach();
+        }
     }
 
     /// <summary>
@@ -550,9 +561,10 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     {
         foreach (var key in _databases.Keys)
         {
-            if (string.Equals(key.DatabaseName, databaseName, StringComparison.Ordinal))
+            if (string.Equals(key.DatabaseName, databaseName, StringComparison.Ordinal)
+                && _databases.TryRemove(key, out TableStore? store))
             {
-                _databases.TryRemove(key, out _);
+                store.Detach();
             }
         }
     }
@@ -600,6 +612,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
         return compacted;
     }
+
+    IPackedTable? IPackedRowSource.TableOf(string databaseName, string tableName) =>
+        _databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store) ? store : null;
 
     bool DataVo.Core.Indexing.Columnar.IColumnarRowStore.KeyedRows => false;
 
@@ -865,7 +880,13 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     void IInMemoryStorageSnapshotProvider.RestoreSnapshot(InMemoryStorageSnapshot snapshot)
     {
         // Every table is replaced, so the rows a table held, packed or kept apart, go with it.
-        _databases.Clear();
+        foreach (var key in _databases.Keys)
+        {
+            if (_databases.TryRemove(key, out TableStore? store))
+            {
+                store.Detach();
+            }
+        }
 
         foreach (var entry in snapshot.EnumerateTables())
         {
