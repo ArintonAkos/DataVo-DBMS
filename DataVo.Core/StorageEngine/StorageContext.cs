@@ -521,6 +521,9 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// </summary>
     internal bool KeepsTypedRowsTyped => _storageEngine is ITypedRowStorageEngine;
 
+    /// <summary>Whether the backend keeps typed rows as packed records that can be read in place.</summary>
+    internal bool HasPackedRows => _storageEngine is Memory.IPackedRowSource;
+
     /// <summary>
     /// A table whose typed rows can be read in place from packed records; null when the backend keeps rows
     /// another way or has no such table.

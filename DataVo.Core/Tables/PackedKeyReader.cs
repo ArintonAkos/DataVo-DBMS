@@ -40,6 +40,7 @@ internal sealed class PackedKeyReader<T>
     private readonly string[] _columnTypes;
     private readonly string _keyColumn;
     private readonly DataVoPackedReader<T> _read;
+    private readonly bool _packedStorage;
     private volatile Source? _source;
     private volatile LayoutBinding? _layout;
 
@@ -67,6 +68,7 @@ internal sealed class PackedKeyReader<T>
         _columnTypes = columnTypes;
         _keyColumn = keyColumn;
         _read = read;
+        _packedStorage = engine.StorageContext.HasPackedRows;
     }
 
     /// <summary>Reads the row with a primary key.</summary>
@@ -134,7 +136,8 @@ internal sealed class PackedKeyReader<T>
 
     /// <summary>Whether something about the engine or the session calls for the statement's own handling.</summary>
     private bool MustUseStatement() =>
-        _engine.Config.EnableAuthorization
+        !_packedStorage
+        || _engine.Config.EnableAuthorization
         || _engine.Diagnostics.Enabled
         || _engine.TransactionManager.HasActiveTransaction(_session)
         || _engine.LockManager.HasActiveRowWriteLocks
