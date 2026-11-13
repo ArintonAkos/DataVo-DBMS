@@ -165,6 +165,29 @@ public sealed class LsmStreamingCompactionTests : IDisposable
     }
 
     [Fact]
+    public void OpeningATable_DeletesSpillFilesACrashLeftBehind()
+    {
+        string root = NewDirectory();
+        string tableDirectory;
+        using (var engine = new LsmStorageEngine(root, LsmWalDurabilityMode.RelaxedOsBuffer))
+        {
+            engine.InsertRow("db", "t", Row(new Random(1)));
+            engine.FlushTableForTesting("db", "t");
+            tableDirectory = Path.GetDirectoryName(Directory.GetFiles(root, "*.sst", SearchOption.AllDirectories).Single())!;
+        }
+
+        string leftover = Path.Combine(tableDirectory, Guid.NewGuid().ToString("N") + SsTableSpillOptions.Extension);
+        File.WriteAllBytes(leftover, new byte[100]);
+        using (var engine = new LsmStorageEngine(root, LsmWalDurabilityMode.RelaxedOsBuffer))
+        {
+            Assert.Single(engine.ReadAllRows("db", "t"));
+        }
+
+        Assert.False(File.Exists(leftover));
+        Assert.Single(Directory.GetFiles(tableDirectory, "*.sst"));
+    }
+
+    [Fact]
     public void Compaction_AllocatesNoMemoryPerRow()
     {
         (long small, long smallReference) = MeasureCompaction(rows: 50_000);

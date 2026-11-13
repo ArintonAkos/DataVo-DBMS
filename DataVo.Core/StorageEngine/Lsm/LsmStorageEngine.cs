@@ -880,6 +880,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     {
         string tableDirectory = GetTableDirectory(databaseName, tableName);
         Directory.CreateDirectory(tableDirectory);
+        SsTableSpillOptions.DeleteLeftovers(tableDirectory); // a compaction's temporary files outlive a crash
 
         var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
         MigrateLegacyTableWal(tableDirectory, manifest);

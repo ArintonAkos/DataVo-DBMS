@@ -12,6 +12,32 @@ internal sealed record SsTableSpillOptions(string Directory, long MemoryLimit)
 
     /// <summary>The memory limit compaction uses unless told otherwise.</summary>
     public const long DefaultMemoryLimit = 4L * 1024 * 1024;
+
+    /// <summary>
+    /// Deletes the spill files a crash left in <paramref name="directory"/>. Call it when a table is opened, before
+    /// anything can write to it; a file still held open elsewhere is left alone.
+    /// </summary>
+    /// <returns>The number of files deleted.</returns>
+    public static int DeleteLeftovers(string directory)
+    {
+        int deleted = 0;
+        foreach (string path in System.IO.Directory.EnumerateFiles(directory, "*" + Extension))
+        {
+            try
+            {
+                File.Delete(path);
+                deleted++;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return deleted;
+    }
 }
 
 /// <summary>
