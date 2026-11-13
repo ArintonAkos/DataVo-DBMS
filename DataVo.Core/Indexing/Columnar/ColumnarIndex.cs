@@ -96,7 +96,7 @@ internal sealed class ColumnarIndex
         kind is StorageKind.Int or StorageKind.BigInt or StorageKind.Float or StorageKind.Double or StorageKind.Bit or StorageKind.Date;
 
     // A DATE is kept as its day number.
-    private static int WidthOf(StorageKind kind) => kind is StorageKind.BigInt or StorageKind.Double ? sizeof(long) : sizeof(int);
+    private static int WidthOf(StorageKind kind) => ColumnarCells.WidthOf(kind);
 
     /// <summary>The table schema version the index was built for.</summary>
     public int SchemaVersion { get; }
@@ -260,18 +260,14 @@ internal sealed class ColumnarIndex
     // A clustered table's key column is the row key itself. Only integer keys can be indexed.
     private void WriteKey(Column column, int at, RowKey key)
     {
-        if (!key.IsInt64)
+        if (ColumnarCells.TryKeyBits(column.Kind, key, out long bits))
         {
-            _usable = false;
-            SetNull(column, at);
-        }
-        else if (column.Kind == StorageKind.BigInt)
-        {
-            column.Values!.ChunkOf(at).As<long>()[at & FlatChunk.SlotMask] = (long)key;
+            StoreBits(column, at, bits);
         }
         else
         {
-            column.Values!.ChunkOf(at).As<int>()[at & FlatChunk.SlotMask] = (int)(long)key;
+            _usable = false;
+            SetNull(column, at);
         }
     }
 
@@ -348,42 +344,29 @@ internal sealed class ColumnarIndex
         }
     }
 
-    private static void WriteBytes(Column column, int at, ReadOnlySpan<byte> stored, int offset)
+    private static void WriteBytes(Column column, int at, ReadOnlySpan<byte> stored, int offset) =>
+        StoreBits(column, at, ColumnarCells.ReadBits(column.Kind, stored, offset));
+
+    // Stores a value in the form ColumnarCells reads it from a row: a FLOAT's bits go into its 4-byte slot as they are.
+    private static void StoreBits(Column column, int at, long bits)
     {
         int inChunk = at & FlatChunk.SlotMask;
-        switch (column.Kind)
+        if (column.Kind == StorageKind.Bit)
         {
-            case StorageKind.Int:
-                column.Values!.ChunkOf(at).As<int>()[inChunk] = RowBytes.Int32(stored, offset);
-                break;
-            case StorageKind.BigInt:
-                column.Values!.ChunkOf(at).As<long>()[inChunk] = RowBytes.Int64(stored, offset);
-                break;
-            case StorageKind.Double:
+            if (bits != 0)
             {
-                double value = RowBytes.Double(stored, offset);
-                column.AnyNaN |= double.IsNaN(value);
-                column.Values!.ChunkOf(at).As<double>()[inChunk] = value;
-                break;
+                column.Bits!.Set(at);
             }
-
-            case StorageKind.Float:
-            {
-                float value = RowBytes.Single(stored, offset);
-                column.AnyNaN |= float.IsNaN(value);
-                column.Values!.ChunkOf(at).As<float>()[inChunk] = value;
-                break;
-            }
-            case StorageKind.Date:
-                column.Values!.ChunkOf(at).As<int>()[inChunk] = RowBytes.DayNumber(stored, offset);
-                break;
-            case StorageKind.Bit:
-                if (RowBytes.Boolean(stored, offset))
-                {
-                    column.Bits!.Set(at);
-                }
-
-                break;
+        }
+        else if (ColumnarCells.WidthOf(column.Kind) == sizeof(long))
+        {
+            column.AnyNaN |= ColumnarCells.IsNaN(column.Kind, bits);
+            column.Values!.ChunkOf(at).As<long>()[inChunk] = bits;
+        }
+        else
+        {
+            column.AnyNaN |= ColumnarCells.IsNaN(column.Kind, bits);
+            column.Values!.ChunkOf(at).As<int>()[inChunk] = (int)bits;
         }
     }
 }
