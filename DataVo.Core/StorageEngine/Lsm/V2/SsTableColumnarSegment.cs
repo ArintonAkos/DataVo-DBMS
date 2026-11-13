@@ -294,6 +294,11 @@ internal sealed unsafe class SsTableColumnarChunkReader
     /// <summary>Makes chunk group <paramref name="chunk"/> of <paramref name="segment"/> the loaded one.</summary>
     public void Load(SsTableColumnarSegment segment, int chunk)
     {
+        if (ReferenceEquals(_segment, segment) && _chunk == chunk)
+        {
+            return;
+        }
+
         ref readonly SsTableColumnarChunk info = ref segment.Chunk(chunk);
         if (segment.TryMapChunk(chunk, out IntPtr address))
         {
@@ -383,4 +388,21 @@ internal sealed unsafe class SsTableColumnarChunkReader
         int at = checked((int)(fileOffset - _offset));
         return _address != null ? new ReadOnlySpan<byte>(_address + at, length) : _buffer.AsSpan(at, length);
     }
+}
+
+/// <summary>The chunk group a <see cref="SsTableColumnarChunkReader"/> has loaded, as a columnar scan reads it.</summary>
+internal readonly struct SegmentChunks(SsTableColumnarChunkReader reader) : IColumnarChunks
+{
+    /// <inheritdoc />
+    public bool AnyNull(int slot) => reader.HasNulls(slot);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<T> Values<T>(int slot)
+        where T : unmanaged => reader.Values<T>(slot);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<ulong> Bits(int slot) => reader.Bits(slot);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<ulong> Nulls(int slot) => reader.Nulls(slot);
 }

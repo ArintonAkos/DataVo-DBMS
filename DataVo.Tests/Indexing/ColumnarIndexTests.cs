@@ -205,7 +205,7 @@ public sealed class ColumnarIndexTests
     }
 
     [Fact]
-    public void OnTheLsmEngine_TheIndexSurvivesFlushes_IsRebuiltAfterReopen_AndAfterHeavyChurn()
+    public void OnTheLsmEngine_FlushedRowsAreScannedFromTheirFiles_AndOnlyUnflushedRowsStayInMemory()
     {
         using var scratch = new Scratch();
         var expected = new Dictionary<int, ColumnarSample>();
@@ -221,22 +221,31 @@ public sealed class ColumnarIndexTests
             db.InsertTypedBatch("col_samples", Schema, batch);
             Check(db, expected, columnar: true);
             ColumnarIndex built = db.Engine.Columnar.Find("S", "col_samples")!;
-            Assert.True(built.InKeyOrder);
+            Assert.True(built.IsTail);
+            Assert.Equal(6_000, built.Count);
 
-            // Rows move from the MemTable to an SSTable; the index mirrors rows, not where they are stored.
+            // The index in memory stands in front of the files, so it never claims the rows' order.
+            Assert.False(built.InKeyOrder);
+
+            // Rows move from the MemTable to an SSTable, and out of memory: the file carries their columns.
             db.Engine.StorageContext.LsmEngine!.FlushTableForTesting("S", "col_samples");
+            ColumnarIndex afterFlush = db.Engine.Columnar.Find("S", "col_samples")!;
+            Assert.NotSame(built, afterFlush);
+            Assert.Equal(0, afterFlush.Count);
+            Check(db, expected, columnar: true);
+
+            // A delete and an insert after the flush: the delete hides a row of the file.
             Run(db, "DELETE FROM col_samples WHERE Id = 17");
             expected.Remove(17);
             db.Insert(expected[7_000] = Sample(7_000));
-            Check(db, expected, columnar: true);
-            Assert.Same(built, db.Engine.Columnar.Find("S", "col_samples"));
-
-            // An insert below the highest key ends key order; floating-point sums then come from rows.
             db.Insert(expected[6_500] = Sample(6_500));
-            Assert.False(built.InKeyOrder);
             Check(db, expected, columnar: true);
+            Assert.Same(afterFlush, db.Engine.Columnar.Find("S", "col_samples"));
+            Assert.Equal(2, afterFlush.Count);
+            Assert.Equal(1, afterFlush.DeletedCount);
 
-            // Rewriting most rows leaves more dead positions than live ones: the next query builds it anew.
+            // Rewriting every row three times leaves more dead positions than live ones in memory: the next
+            // query starts the in-memory part anew. Each rewrite also hides the file's copy of the row.
             for (int round = 0; round < 3; round++)
             {
                 Run(db, "UPDATE col_samples SET Rank = Rank + 1 WHERE Id > 0");
@@ -247,21 +256,22 @@ public sealed class ColumnarIndexTests
                 row.Rank += 3;
             }
 
-            Assert.True(built.WantsRebuild);
+            Assert.True(afterFlush.WantsRebuild);
             Check(db, expected, columnar: true);
             ColumnarIndex rebuilt = db.Engine.Columnar.Find("S", "col_samples")!;
-            Assert.NotSame(built, rebuilt);
+            Assert.NotSame(afterFlush, rebuilt);
             Assert.Equal(0, rebuilt.Dead);
-            Assert.True(rebuilt.InKeyOrder);
+            Assert.Equal(expected.Count, rebuilt.Count);
         }
 
-        // Nothing of the index is on disk: after a reopen there is none until a query asks for one.
+        // The columns are on disk with the rows: after a reopen a query reads them from the files, and the
+        // part in memory holds nothing, because closing flushed every row.
         using (DataVoContext db = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = scratch.Path }))
         {
             Run(db, "USE S");
             Assert.Null(db.Engine.StorageContext.ColumnarStore!.Columnar("S", "col_samples"));
             Check(db, expected, columnar: true);
-            Assert.Equal(expected.Count, db.Engine.Columnar.Find("S", "col_samples")!.Count);
+            Assert.Equal(0, db.Engine.Columnar.Find("S", "col_samples")!.Count);
         }
     }
 

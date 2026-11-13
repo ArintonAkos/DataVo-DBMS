@@ -1159,6 +1159,8 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         {
             Monitor.Exit(state.OverlayGate);
         }
+
+        ResetColumnarTail(state);
     }
 
     /// <summary>
@@ -2659,6 +2661,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         public long Stamp { get; } = stamp;
 
         public LsmSstableHandle[] Files { get; } = files;
+
+        /// <summary>
+        /// Which rows of these files' columnar segments a newer one of them replaces or deletes; worked out
+        /// by the first columnar scan of this set of files, as the files never change.
+        /// </summary>
+        public LsmColumnarShadows? ColumnarShadows;
 
         public bool IsLive => Volatile.Read(ref _references) > 0;
 

@@ -186,6 +186,30 @@ internal sealed class ColumnarIndex
         return _anyTouched;
     }
 
+    /// <summary>Whether <paramref name="other"/> indexes the same columns in the same slots for the same schema version.</summary>
+    public bool SameColumns(ColumnarIndex other)
+    {
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        if (SchemaVersion != other.SchemaVersion || _columns.Length != other._columns.Length)
+        {
+            return false;
+        }
+
+        for (int slot = 0; slot < _columns.Length; slot++)
+        {
+            if (_columns[slot].Ordinal != other._columns[slot].Ordinal)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Asks for the index to be built again by the next query that looks for it.</summary>
     public void RequestRebuild() => _rebuildRequested = true;
 
