@@ -769,6 +769,122 @@ public sealed class LsmTable : IDisposable
         }
     }
 
+    /// <summary>
+    /// Rewrites every live row-keyed SSTable that has no columnar segment for <see cref="ColumnarSpec"/>, so
+    /// each file carries one. A file is copied entry for entry to a new file of the same level and swapped in
+    /// with one manifest edit; nothing is merged and no row changes.
+    /// </summary>
+    /// <returns>The number of files rewritten; 0 when there is no spec or every file already has its segment.</returns>
+    internal int BackfillColumnarSegments()
+    {
+        LsmFileRegistry? registry = CompactionRegistry;
+        DataVo.Core.Indexing.Columnar.ColumnarSpec? spec = ColumnarSpec;
+        if (registry is null || spec is null || Format != LsmSstableFormat.RowKeyed)
+        {
+            return 0;
+        }
+
+        // The I/O gate keeps flushes and compactions out: the file set only changes here until it is released,
+        // and any file they write afterwards already carries the spec's segment.
+        lock (_ioGate)
+        {
+            int rewritten = 0;
+            for (int level = 0; level <= MaxCompactionLevel; level++)
+            {
+                // Level 0 is searched from the highest file number down, so once one of its files gets a new
+                // number every newer one must get a newer number too, in the same order.
+                bool rewriteRest = false;
+                foreach (LsmTableFileMetadata file in _manifest.GetLiveFiles(level).OrderBy(static f => f.FileNumber).ToArray())
+                {
+                    LsmSstableHandle[] handles = registry.AddRefs([file]);
+                    try
+                    {
+                        if (!handles[0].IsV2())
+                        {
+                            continue;
+                        }
+
+                        SsTableV2Reader reader = handles[0].GetV2Reader(ReadMode);
+                        if (!rewriteRest && reader.Columnar is { } segment && segment.Spec.Matches(spec))
+                        {
+                            continue;
+                        }
+
+                        rewriteRest = level == 0;
+                        RewriteWithColumnarSegment(registry, file, reader, spec);
+                        rewritten++;
+                    }
+                    finally
+                    {
+                        registry.Release(handles);
+                    }
+                }
+            }
+
+            return rewritten;
+        }
+    }
+
+    // Copies one SSTable into a new file that carries the spec's columnar segment and replaces it in the manifest.
+    private void RewriteWithColumnarSegment(LsmFileRegistry registry, LsmTableFileMetadata file, SsTableV2Reader reader, DataVo.Core.Indexing.Columnar.ColumnarSpec spec)
+    {
+        long fileNumber = _manifest.AllocateFileNumber();
+        string fileName = $"{fileNumber:D6}.sst";
+        string filePath = Path.Combine(_tableDirectory, fileName);
+        long length = 0;
+        LsmDurableFileOperations.WriteFileAtomically(
+            filePath,
+            overwrite: false,
+            stream =>
+            {
+                SsTableV2Properties properties = reader.Properties;
+                using var writer = new SsTableV2Writer(stream, alignment: 0, (int)Math.Min(properties.EntryCount, int.MaxValue), columnar: spec);
+                SsTableV2Cursor cursor = reader.OpenCursor();
+                try
+                {
+                    while (cursor.MoveNext())
+                    {
+                        writer.Add(cursor.Key, cursor.Sequence, cursor.Type, cursor.Type == LsmValueType.Put ? cursor.Value : default);
+                    }
+                }
+                finally
+                {
+                    cursor.Release();
+                }
+
+                if (properties.NextRowId > 0)
+                {
+                    writer.SetTableMetadata(properties.NextRowId, properties.LiveRowCount, properties.NextRowIdSequence);
+                }
+
+                length = writer.Finish();
+            },
+            crashHook: null,
+            LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
+            LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
+            LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
+
+        var replacement = new LsmTableFileMetadata(fileNumber, file.Level, file.SmallestInternalKey, file.LargestInternalKey, length, fileName);
+        var edit = new LsmVersionEdit();
+        edit.AddFile(replacement);
+        edit.DeleteFile(file.Level, file.FileNumber);
+        try
+        {
+            registry.ExecuteVersionEdit(() =>
+            {
+                _applyEdit(edit);
+                registry.Register(replacement);
+                registry.MarkDeleted([file]);
+                return true;
+            });
+        }
+        catch
+        {
+            DeleteFileIfExists(filePath);
+            throw;
+        }
+    }
+
     private void MaybeCompactLevels()
     {
         LsmFileRegistry? registry = CompactionRegistry;
