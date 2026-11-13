@@ -28,6 +28,8 @@
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
     <!-- Built for CrashRecoveryTests, which runs it as a separate process and kills it. -->
     <ProjectReference Include="..\tests\DataVo.CrashHarness\DataVo.CrashHarness.csproj" ReferenceOutputAssembly="false" />
+    <!-- The columnar crash workload's row generator, so the test rebuilds the rows the harness acknowledged. -->
+    <Compile Include="..\tests\DataVo.CrashHarness\ColumnarCrashWorkload.cs" Link="Durability\ColumnarCrashWorkload.cs" />
     <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
     <ProjectReference Include="..\DataVo.EntityFrameworkCore\DataVo.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\DataVo.Generators\DataVo.Generators.csproj"

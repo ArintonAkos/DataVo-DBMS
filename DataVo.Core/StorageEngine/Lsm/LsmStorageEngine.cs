@@ -872,6 +872,10 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     internal void FlushTableForTesting(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).Table.FlushActiveMemTable();
 
+    /// <summary>Diagnostics: how many SSTable handles the table's file registry holds.</summary>
+    internal int SstableHandleCountForTesting(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).FileRegistry.HandleCount;
+
     private TableState CreateTableState(string databaseName, string tableName)
     {
         string tableDirectory = GetTableDirectory(databaseName, tableName);
