@@ -27,6 +27,7 @@ once with every database in a file.
 | --- | --- | --- | --- |
 | `FilteredAggregateBenchmarks` | `COUNT(*)`, `SUM(Gold)`, `MIN(Gold)`, `MAX(Ratio)` over `WHERE Level >= @min`; 200,000 rows, half match | Compiled LINQ: `Where(...).Count()`, `.Sum()`, `.Min()`, `.Max()` | A statement prepared once, `ExecuteScalar` |
 | `PointLookupBenchmarks` | One row by primary key, read into a `Player`; 100,000 rows, keys in shuffled order | Compiled LINQ: `FirstOrDefault(id, static (p, k) => p.Id == k)` | A statement prepared once, `ExecuteReader`, one `Player` built |
+| `OutOfCoreAggregateBenchmarks` | The same four aggregates over 1,000,000 rows on the LSM engine, with the rows unflushed (columns in memory) and flushed (columns read from SSTable files), plus opening the database and answering the first aggregate | Compiled LINQ, DataVo only | Not run |
 | `BulkInsertBenchmarks` | Load 100,000 rows into an empty table | `InsertTypedBatch` | SQLite: prepared `INSERT` in one transaction. DuckDB: appender |
 
 Before timing, each class checks that the three engines return the same answer.

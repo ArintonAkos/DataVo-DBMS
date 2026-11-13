@@ -154,4 +154,54 @@ public class KeyedColumnarIndexTests
             writer.Join();
         }
     }
+
+    [Fact]
+    public void ATail_RemembersTheKeyOfEveryPositionAndEveryDelete_AndIsNeverInKeyOrder()
+    {
+        var tail = new ColumnarIndex(Kinds, [1, 2], schemaVersion: 1, keyed: true, keyOrdinal: 0, tail: true);
+        Assert.True(tail.IsTail);
+        Assert.False(tail.InKeyOrder);
+        Assert.False(tail.TryGetKeyRange(out _, out _));
+
+        RowKey wide = RowKey.FromGuid(Guid.Parse("7f000000-0000-0000-0000-000000000001"));
+        tail.Upsert(5, Row(5, 1, 1));
+        tail.Upsert(-3, Row(-3, 1, 1));
+        tail.Upsert(5, Row(5, 2, 2)); // replaces position 0
+        tail.Delete(-3);              // a row the tail holds
+        tail.Delete(900);             // a row it does not hold: it may be in a file
+        tail.Delete(wide);
+
+        Assert.Equal([(RowKey)5, (RowKey)(-3), (RowKey)5], Enumerable.Range(0, tail.Count).Select(tail.KeyAt));
+        Assert.Equal([(RowKey)(-3), (RowKey)900, wide], Enumerable.Range(0, tail.DeletedCount).Select(tail.DeletedKeyAt));
+        Assert.True(tail.TryGetKeyRange(out RowKey smallest, out RowKey largest));
+        Assert.Equal((RowKey)(-3), smallest);
+        Assert.Equal(wide, largest);
+        AssertMatchesTail(tail, 1);
+    }
+
+    [Fact]
+    public void ANewTail_IsEmpty_KeepsTheColumns_AndTheNaNsAlreadyKnown()
+    {
+        var kinds = new RowSerializer.StorageColumnType[] { RowSerializer.StorageColumnType.BigInt, RowSerializer.StorageColumnType.Double };
+        var tail = new ColumnarIndex(kinds, [1], schemaVersion: 7, keyed: true, keyOrdinal: 0, tail: true);
+        tail.NoteNaN(0);
+        tail.RequestRebuild();
+        Assert.True(tail.WantsRebuild);
+
+        ColumnarIndex next = tail.NewTail();
+        Assert.True(next.IsTail);
+        Assert.Equal(0, next.Count);
+        Assert.Equal(7, next.SchemaVersion);
+        Assert.Equal(0, next.SlotOf(1));
+        Assert.True(next.AnyNaN(0));
+        Assert.False(next.WantsRebuild);
+        Assert.Throws<ArgumentException>(() => new ColumnarIndex(kinds, [1], 1, keyed: false, tail: true));
+    }
+
+    private static void AssertMatchesTail(ColumnarIndex tail, int expectedLive)
+    {
+        var totals = new RowAggregate[1];
+        Assert.True(ColumnarScan.TryRun(tail, default, default, totals, 0, out int matched));
+        Assert.Equal(expectedLive, matched);
+    }
 }

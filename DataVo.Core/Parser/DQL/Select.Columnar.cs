@@ -76,7 +76,9 @@ internal partial class Select
         int matched;
         try
         {
-            if (!ColumnarScan.TryRun(
+            if (!engine.StorageContext.ColumnarStore.TryScan(
+                    databaseName,
+                    tableName,
                     index,
                     new ReadOnlySpan<ColumnarStep>(workspace.Steps, 0, steps),
                     new ReadOnlySpan<ColumnarFold>(workspace.Folds, 0, aggregates.Count),

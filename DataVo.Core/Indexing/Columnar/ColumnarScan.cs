@@ -145,41 +145,11 @@ internal static class ColumnarScan
         totals.Slice(0, folds.Length).Clear();
         int count = index.Count;
         int matched = 0;
-        Span<ulong> scratch = masks.Slice(MaxDepth * Bitmask.WordsPerChunk, Bitmask.WordsPerChunk);
         for (int chunk = 0, first = 0; first < count; chunk++, first += FlatChunk.Slots)
         {
             int rows = Math.Min(FlatChunk.Slots, count - first);
-            int words = Bitmask.WordsFor(rows);
-            Span<ulong> mask = Evaluate(index, steps, chunk, words, masks);
-            Bitmask.And(mask, index.Live(chunk).Slice(0, words));
-            Bitmask.TrimTo(mask, rows); // positions past the count this scan read
-            int hits = Bitmask.Count(mask);
-            if (hits == 0)
-            {
-                continue;
-            }
-
-            matched += hits;
-            for (int i = 0; i < folds.Length; i++)
-            {
-                ColumnarFold fold = folds[i];
-                ReadOnlySpan<ulong> selected = mask;
-                int values = hits;
-                if (index.AnyNull(fold.Slot))
-                {
-                    Span<ulong> present = scratch.Slice(0, words);
-                    mask.CopyTo(present);
-                    Bitmask.AndNot(present, index.Nulls(fold.Slot, chunk).Slice(0, words));
-                    selected = present;
-                    values = Bitmask.Count(present);
-                }
-
-                if (values > 0)
-                {
-                    Fold(ref totals[i], fold.Kind, index, fold.Slot, chunk, selected, values);
-                }
-            }
-
+            var chunks = new IndexChunks(index, chunk);
+            matched += ScanChunk(ref chunks, steps, folds, totals, rows, index.Live(chunk), masks);
             if (limit > 0 && matched >= limit)
             {
                 matched = limit;
@@ -187,16 +157,82 @@ internal static class ColumnarScan
             }
         }
 
-        for (int i = 0; i < folds.Length; i++)
-        {
-            totals[i].Count = matched;
-        }
-
+        Finish(totals, folds.Length, matched);
         return matched;
     }
 
+    /// <summary>Gives every aggregate the number of rows the scan matched, once its last chunk is folded.</summary>
+    internal static void Finish(Span<RowAggregate> totals, int folds, int matched)
+    {
+        for (int i = 0; i < folds; i++)
+        {
+            totals[i].Count = matched;
+        }
+    }
+
+    /// <summary>
+    /// Runs a bound condition over one chunk and folds each aggregate over the rows it accepts.
+    /// </summary>
+    /// <param name="chunks">The chunk's columns.</param>
+    /// <param name="steps">The condition; empty to accept every row.</param>
+    /// <param name="folds">The aggregates.</param>
+    /// <param name="totals">The running result of each aggregate, added to.</param>
+    /// <param name="rows">The number of rows in the chunk.</param>
+    /// <param name="live">A bit per row, set for the rows that count; empty when they all do.</param>
+    /// <param name="masks">This thread's <see cref="Workspace.Masks"/>.</param>
+    /// <returns>The number of rows that are live and accepted.</returns>
+    /// <exception cref="OverflowException">An integer sum left the range of <see cref="long"/>.</exception>
+    internal static int ScanChunk<TChunks>(
+        ref TChunks chunks,
+        ReadOnlySpan<ColumnarStep> steps,
+        ReadOnlySpan<ColumnarFold> folds,
+        Span<RowAggregate> totals,
+        int rows,
+        ReadOnlySpan<ulong> live,
+        Span<ulong> masks)
+        where TChunks : struct, IColumnarChunks
+    {
+        int words = Bitmask.WordsFor(rows);
+        Span<ulong> mask = Evaluate(ref chunks, steps, words, masks);
+        if (!live.IsEmpty)
+        {
+            Bitmask.And(mask, live.Slice(0, words));
+        }
+
+        Bitmask.TrimTo(mask, rows); // positions past the rows this scan reads
+        int hits = Bitmask.Count(mask);
+        if (hits == 0)
+        {
+            return 0;
+        }
+
+        Span<ulong> scratch = masks.Slice(MaxDepth * Bitmask.WordsPerChunk, Bitmask.WordsPerChunk);
+        for (int i = 0; i < folds.Length; i++)
+        {
+            ColumnarFold fold = folds[i];
+            ReadOnlySpan<ulong> selected = mask;
+            int values = hits;
+            if (chunks.AnyNull(fold.Slot))
+            {
+                Span<ulong> present = scratch.Slice(0, words);
+                mask.CopyTo(present);
+                Bitmask.AndNot(present, chunks.Nulls(fold.Slot).Slice(0, words));
+                selected = present;
+                values = Bitmask.Count(present);
+            }
+
+            if (values > 0)
+            {
+                Fold(ref totals[i], fold.Kind, ref chunks, fold.Slot, selected, values);
+            }
+        }
+
+        return hits;
+    }
+
     /// <summary>Evaluates the condition for one chunk and returns the mask of the rows it accepts.</summary>
-    private static Span<ulong> Evaluate(ColumnarIndex index, ReadOnlySpan<ColumnarStep> steps, int chunk, int words, Span<ulong> masks)
+    private static Span<ulong> Evaluate<TChunks>(ref TChunks chunks, ReadOnlySpan<ColumnarStep> steps, int words, Span<ulong> masks)
+        where TChunks : struct, IColumnarChunks
     {
         if (steps.Length == 0)
         {
@@ -227,9 +263,18 @@ internal static class ColumnarScan
             }
 
             Span<ulong> target = masks.Slice(depth++ * Bitmask.WordsPerChunk, words);
+            bool anyNull = chunks.AnyNull(step.Column);
             if (step.Kind == ColumnarStep.NullTest)
             {
-                index.Nulls(step.Column, chunk).Slice(0, words).CopyTo(target);
+                if (anyNull)
+                {
+                    chunks.Nulls(step.Column).Slice(0, words).CopyTo(target);
+                }
+                else
+                {
+                    target.Clear();
+                }
+
                 if (step.Test != ColumnarTest.Equal)
                 {
                     Bitmask.Not(target);
@@ -238,10 +283,10 @@ internal static class ColumnarScan
                 continue;
             }
 
-            Compare(index, in step, chunk, target);
-            if (index.AnyNull(step.Column))
+            Compare(ref chunks, in step, target);
+            if (anyNull)
             {
-                ReadOnlySpan<ulong> nulls = index.Nulls(step.Column, chunk).Slice(0, words);
+                ReadOnlySpan<ulong> nulls = chunks.Nulls(step.Column).Slice(0, words);
                 if (step.NullsMatch)
                 {
                     Bitmask.Or(target, nulls);
@@ -256,26 +301,27 @@ internal static class ColumnarScan
         return masks.Slice(0, words);
     }
 
-    private static void Compare(ColumnarIndex index, in ColumnarStep step, int chunk, Span<ulong> target)
+    private static void Compare<TChunks>(ref TChunks chunks, in ColumnarStep step, Span<ulong> target)
+        where TChunks : struct, IColumnarChunks
     {
         var op = (ColumnarCompare)step.Test; // the two enums list the comparisons in the same order
         switch (step.ValueKind)
         {
             case 'i':
-                ColumnarKernels.Compare(index.Values<int>(step.Column, chunk), op, (int)step.Bits, target);
+                ColumnarKernels.Compare(chunks.Values<int>(step.Column), op, (int)step.Bits, target);
                 break;
             case 'l':
-                ColumnarKernels.Compare(index.Values<long>(step.Column, chunk), op, step.Bits, target);
+                ColumnarKernels.Compare(chunks.Values<long>(step.Column), op, step.Bits, target);
                 break;
             case 'f':
-                ColumnarKernels.Compare(index.Values<float>(step.Column, chunk), op, BitConverter.Int32BitsToSingle((int)step.Bits), target);
+                ColumnarKernels.Compare(chunks.Values<float>(step.Column), op, BitConverter.Int32BitsToSingle((int)step.Bits), target);
                 break;
             case 'd':
-                ColumnarKernels.Compare(index.Values<double>(step.Column, chunk), op, BitConverter.Int64BitsToDouble(step.Bits), target);
+                ColumnarKernels.Compare(chunks.Values<double>(step.Column), op, BitConverter.Int64BitsToDouble(step.Bits), target);
                 break;
             default:
                 // BIT: the stored bits are the rows that hold true.
-                index.Bits(step.Column, chunk).Slice(0, target.Length).CopyTo(target);
+                chunks.Bits(step.Column).Slice(0, target.Length).CopyTo(target);
                 if ((step.Test == ColumnarTest.Equal) != (step.Bits != 0))
                 {
                     Bitmask.Not(target);
@@ -289,26 +335,27 @@ internal static class ColumnarScan
     /// Folds one chunk's selected values into a running result, to the same answer the row path reaches by
     /// folding them one at a time.
     /// </summary>
-    private static void Fold(ref RowAggregate total, RowFoldKind kind, ColumnarIndex index, int slot, int chunk, ReadOnlySpan<ulong> selected, int values)
+    private static void Fold<TChunks>(ref RowAggregate total, RowFoldKind kind, ref TChunks chunks, int slot, ReadOnlySpan<ulong> selected, int values)
+        where TChunks : struct, IColumnarChunks
     {
         switch (kind)
         {
             case RowFoldKind.SumInt32:
-                total.Whole = checked(total.Whole + ColumnarKernels.SumInt32(index.Values<int>(slot, chunk), selected));
+                total.Whole = checked(total.Whole + ColumnarKernels.SumInt32(chunks.Values<int>(slot), selected));
                 break;
             case RowFoldKind.SumInt64:
-                ColumnarKernels.SumInt64(index.Values<long>(slot, chunk), selected, ref total.Whole);
+                ColumnarKernels.SumInt64(chunks.Values<long>(slot), selected, ref total.Whole);
                 break;
             case RowFoldKind.SumFloat:
-                ColumnarKernels.SumSingle(index.Values<float>(slot, chunk), selected, ref total.Real);
+                ColumnarKernels.SumSingle(chunks.Values<float>(slot), selected, ref total.Real);
                 break;
             case RowFoldKind.SumDouble:
-                ColumnarKernels.SumDouble(index.Values<double>(slot, chunk), selected, ref total.Real);
+                ColumnarKernels.SumDouble(chunks.Values<double>(slot), selected, ref total.Real);
                 break;
             case RowFoldKind.MinInt32:
             case RowFoldKind.MinDate:
             {
-                ColumnarKernels.Extreme(index.Values<int>(slot, chunk), selected, true, out int best);
+                ColumnarKernels.Extreme(chunks.Values<int>(slot), selected, true, out int best);
                 total.Whole = total.Values == 0 ? best : Math.Min(total.Whole, best);
                 break;
             }
@@ -316,21 +363,21 @@ internal static class ColumnarScan
             case RowFoldKind.MaxInt32:
             case RowFoldKind.MaxDate:
             {
-                ColumnarKernels.Extreme(index.Values<int>(slot, chunk), selected, false, out int best);
+                ColumnarKernels.Extreme(chunks.Values<int>(slot), selected, false, out int best);
                 total.Whole = total.Values == 0 ? best : Math.Max(total.Whole, best);
                 break;
             }
 
             case RowFoldKind.MinInt64:
             {
-                ColumnarKernels.Extreme(index.Values<long>(slot, chunk), selected, true, out long best);
+                ColumnarKernels.Extreme(chunks.Values<long>(slot), selected, true, out long best);
                 total.Whole = total.Values == 0 ? best : Math.Min(total.Whole, best);
                 break;
             }
 
             case RowFoldKind.MaxInt64:
             {
-                ColumnarKernels.Extreme(index.Values<long>(slot, chunk), selected, false, out long best);
+                ColumnarKernels.Extreme(chunks.Values<long>(slot), selected, false, out long best);
                 total.Whole = total.Values == 0 ? best : Math.Max(total.Whole, best);
                 break;
             }
@@ -339,7 +386,7 @@ internal static class ColumnarScan
             case RowFoldKind.MaxFloat:
             {
                 bool smallest = kind == RowFoldKind.MinFloat;
-                ColumnarKernels.Extreme(index.Values<float>(slot, chunk), selected, smallest, out float best, out bool anyNumber, out bool anyNaN);
+                ColumnarKernels.Extreme(chunks.Values<float>(slot), selected, smallest, out float best, out bool anyNumber, out bool anyNaN);
                 Combine(ref total, smallest, best, anyNumber, anyNaN);
                 break;
             }
@@ -348,7 +395,7 @@ internal static class ColumnarScan
             case RowFoldKind.MaxDouble:
             {
                 bool smallest = kind == RowFoldKind.MinDouble;
-                ColumnarKernels.Extreme(index.Values<double>(slot, chunk), selected, smallest, out double best, out bool anyNumber, out bool anyNaN);
+                ColumnarKernels.Extreme(chunks.Values<double>(slot), selected, smallest, out double best, out bool anyNumber, out bool anyNaN);
                 Combine(ref total, smallest, best, anyNumber, anyNaN);
                 break;
             }
@@ -385,4 +432,42 @@ internal static class ColumnarScan
             total.Real = double.NaN;
         }
     }
+}
+
+/// <summary>
+/// The columns of one chunk of up to 4,096 rows, as <see cref="ColumnarScan"/> reads them: from a
+/// <see cref="ColumnarIndex"/> in memory or from the columnar segment of an SSTable. Implemented by structs, so
+/// the scan is compiled for each source without a call through the interface.
+/// </summary>
+internal interface IColumnarChunks
+{
+    /// <summary>Whether the column may hold a NULL in this chunk; only then is <see cref="Nulls"/> read.</summary>
+    bool AnyNull(int slot);
+
+    /// <summary>The column's values, a whole number of 64-value runs. <typeparamref name="T"/> must be the column's value type.</summary>
+    ReadOnlySpan<T> Values<T>(int slot)
+        where T : unmanaged;
+
+    /// <summary>A BIT column's values, a bit per row.</summary>
+    ReadOnlySpan<ulong> Bits(int slot);
+
+    /// <summary>The column's NULL mask, a bit per row.</summary>
+    ReadOnlySpan<ulong> Nulls(int slot);
+}
+
+/// <summary>One chunk of a <see cref="ColumnarIndex"/>.</summary>
+internal readonly struct IndexChunks(ColumnarIndex index, int chunk) : IColumnarChunks
+{
+    /// <inheritdoc />
+    public bool AnyNull(int slot) => index.AnyNull(slot);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<T> Values<T>(int slot)
+        where T : unmanaged => index.Values<T>(slot, chunk);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<ulong> Bits(int slot) => index.Bits(slot, chunk);
+
+    /// <inheritdoc />
+    public ReadOnlySpan<ulong> Nulls(int slot) => index.Nulls(slot, chunk);
 }

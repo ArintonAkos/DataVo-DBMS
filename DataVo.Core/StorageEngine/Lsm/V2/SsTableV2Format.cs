@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace DataVo.Core.StorageEngine.Lsm.V2;
 
 /// <summary>
-/// Byte layout of row-keyed SSTables (format versions 2, 4 and 6). All integers are little-endian.
+/// Byte layout of row-keyed SSTables (format versions 2, 4, 6 and 8). All integers are little-endian.
 /// </summary>
 /// <remarks>
 /// <code>
@@ -25,6 +25,11 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// records holding 16-byte first and last keys (48 B), and properties holding 16-byte smallest and largest
 /// keys (128 B). Versions 2 and 4 hold integer keys only and are read as such.
 /// </para>
+/// <para>
+/// Version 8 is version 6 with a columnar segment (<see cref="SsTableColumnarFormat"/>) between the last data
+/// block and the block index, and a fourth handle in the footer, after the properties handle, that points at
+/// the segment's directory. Everything a point lookup reads is unchanged.
+/// </para>
 /// </remarks>
 internal static class SsTableV2Format
 {
@@ -36,8 +41,14 @@ internal static class SsTableV2Format
     /// <summary>Compact blocks keyed by 16-byte row keys (<see cref="SsTableWideRowBlock"/>).</summary>
     public const ushort WideVersion = 6;
 
-    /// <summary>Whether a footer version is a row-keyed SSTable this code reads (v2, v4 or v6).</summary>
-    public static bool IsRowKeyedVersion(ushort version) => version is Version or CompactVersion or WideVersion;
+    /// <summary>Version 6 with a columnar segment and a footer that points at it.</summary>
+    public const ushort ColumnarVersion = 8;
+
+    /// <summary>Whether a footer version is a row-keyed SSTable this code reads (v2, v4, v6 or v8).</summary>
+    public static bool IsRowKeyedVersion(ushort version) => version is Version or CompactVersion or WideVersion or ColumnarVersion;
+
+    /// <summary>Whether a file version keys rows by 16-byte row keys (v6 and v8).</summary>
+    public static bool HasWideKeys(ushort version) => version is WideVersion or ColumnarVersion;
 
     /// <summary>Same magic as v1 ("SLVD"); the version field tells the layouts apart.</summary>
     public const uint Magic = SsTableFormat.Magic;
@@ -52,6 +63,9 @@ internal static class SsTableV2Format
     public const int WidePropertiesSize = 128;
     public const int BlockHandleSize = 12;
     public const int FooterSize = (BlockHandleSize * 3) + sizeof(uint) + sizeof(ushort) + sizeof(uint);
+
+    /// <summary>The footer of a version 8 file: one more handle, for the columnar segment's directory.</summary>
+    public const int ColumnarFooterSize = FooterSize + BlockHandleSize;
     public const int MinimumAlignment = 4096;
     public const int BloomBitsPerKey = 10;
 
@@ -72,7 +86,7 @@ internal static class SsTableV2Format
         return true;
     }
 
-    /// <summary>Whether the file at <paramref name="path"/> is a row-keyed (v2, v4 or v6) SSTable; reads only its last 6 bytes.</summary>
+    /// <summary>Whether the file at <paramref name="path"/> is a row-keyed (v2, v4, v6 or v8) SSTable; reads only its last 6 bytes.</summary>
     public static bool IsV2File(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -107,10 +121,13 @@ internal static class SsTableV2Format
     public static long AlignUp(long value, int alignment) => (value + alignment - 1) / alignment * alignment;
 
     /// <summary>Properties block size of a file version.</summary>
-    public static int PropertiesSizeOf(ushort version) => version == WideVersion ? WidePropertiesSize : PropertiesSize;
+    public static int PropertiesSizeOf(ushort version) => HasWideKeys(version) ? WidePropertiesSize : PropertiesSize;
 
     /// <summary>Block index record size of a file version.</summary>
-    public static int IndexEntrySizeOf(ushort version) => version == WideVersion ? WideIndexEntrySize : IndexEntrySize;
+    public static int IndexEntrySizeOf(ushort version) => HasWideKeys(version) ? WideIndexEntrySize : IndexEntrySize;
+
+    /// <summary>Footer size of a file version.</summary>
+    public static int FooterSizeOf(ushort version) => version == ColumnarVersion ? ColumnarFooterSize : FooterSize;
 
     /// <summary>
     /// The 64-bit Bloom filter key of a row key in a v6 file: the halves folded with a multiplicative
@@ -147,12 +164,12 @@ internal readonly record struct SsTableV2Properties(
     /// <summary>Marks an unknown live-row count (files upgraded from v1); the engine recounts once.</summary>
     public const long UnknownLiveRowCount = -1;
 
-    /// <summary>Writes the layout of <paramref name="version"/>: v6 stores 16-byte keys, so its other fields sit 16 bytes later.</summary>
+    /// <summary>Writes the layout of <paramref name="version"/>: v6 and v8 store 16-byte keys, so its other fields sit 16 bytes later.</summary>
     public void WriteTo(Span<byte> destination, ushort version)
     {
         destination[..SsTableV2Format.PropertiesSizeOf(version)].Clear();
         int rest;
-        if (version == SsTableV2Format.WideVersion)
+        if (SsTableV2Format.HasWideKeys(version))
         {
             SsTableV2Format.WriteKey(destination[0..], SmallestKey);
             SsTableV2Format.WriteKey(destination[16..], LargestKey);
@@ -178,7 +195,7 @@ internal readonly record struct SsTableV2Properties(
 
     public static SsTableV2Properties ReadFrom(ReadOnlySpan<byte> source, ushort version)
     {
-        bool wide = version == SsTableV2Format.WideVersion;
+        bool wide = SsTableV2Format.HasWideKeys(version);
         int rest = wide ? 32 : 16;
         return new(
             wide ? SsTableV2Format.ReadKey(source[0..]) : BinaryPrimitives.ReadInt64LittleEndian(source[0..]),
@@ -201,7 +218,7 @@ internal readonly record struct SsTableV2BlockInfo(RowKey FirstKey, RowKey LastK
     public void WriteTo(Span<byte> destination, ushort version)
     {
         int rest;
-        if (version == SsTableV2Format.WideVersion)
+        if (SsTableV2Format.HasWideKeys(version))
         {
             SsTableV2Format.WriteKey(destination[0..], FirstKey);
             SsTableV2Format.WriteKey(destination[16..], LastKey);
@@ -221,7 +238,7 @@ internal readonly record struct SsTableV2BlockInfo(RowKey FirstKey, RowKey LastK
 
     public static SsTableV2BlockInfo ReadFrom(ReadOnlySpan<byte> source, ushort version)
     {
-        bool wide = version == SsTableV2Format.WideVersion;
+        bool wide = SsTableV2Format.HasWideKeys(version);
         int rest = wide ? 32 : 16;
         return new(
             wide ? SsTableV2Format.ReadKey(source[0..]) : BinaryPrimitives.ReadInt64LittleEndian(source[0..]),

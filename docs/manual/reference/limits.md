@@ -78,4 +78,4 @@ active MemTable grows
 | Long-term storage format compatibility guarantee | Planned | Prerelease files may require migration or rebuild across major storage upgrades. |
 | PostgreSQL-wire clients | Planned (`v0.3+`) | DBeaver, DataGrip, and pgAdmin require future `DataVo.Server` work. |
 | Cloud/server administration model | Not Supported | No server replication daemon, backup daemon, or HA cluster system. |
-| Columnar HTAP scan acceleration | Active (`v0.3`) | Full analytical scans over 1M+ rows are row-oriented in v0.2; Columnar Indexes are under active v0.3 development. |
+| Columnar HTAP scan acceleration | Supported (`InMemory` & `Lsm`) | Synchronized `InMemory` column buffers and out-of-core format-v8 `Lsm` SSTable columnar segments with zone-map chunk pruning. |

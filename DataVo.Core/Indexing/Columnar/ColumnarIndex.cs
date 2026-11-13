@@ -22,6 +22,12 @@ namespace DataVo.Core.Indexing.Columnar;
 /// values are in place. Removing a row changes <see cref="Version"/>; a reader that needs a consistent view
 /// reads the version first and again when it is done, and starts over if it moved.
 /// </para>
+/// <para>
+/// An LSM table keeps one as its <em>tail</em>: only the rows published since the last flush, the rest being in
+/// the columnar segments of its SSTables. A tail also remembers the key of every position and every key that
+/// was deleted, because a row it adds or removes may replace one that lives in a file; a scan of the table
+/// leaves such rows of the files out.
+/// </para>
 /// </remarks>
 internal sealed class ColumnarIndex
 {
@@ -42,6 +48,19 @@ internal sealed class ColumnarIndex
     private bool _anyKey;
     private int _dead;
     private volatile bool _inKeyOrder = true;
+    private volatile bool _rebuildRequested;
+
+    // Set for a tail: the key of every position, and the keys deleted since the tail was made, in the order
+    // they came. Appended to by the writer; a reader looks only below the counts it read.
+    private readonly bool _tail;
+    private readonly ChunkDirectory? _keyHigh;
+    private readonly ChunkDirectory? _keyLow;
+    private readonly ChunkDirectory? _deletedHigh;
+    private readonly ChunkDirectory? _deletedLow;
+    private int _deleted;
+    private RowKey _smallestKey;
+    private RowKey _largestKey;
+    private bool _anyTouched;
 
     /// <summary>One indexed column.</summary>
     private sealed class Column(int ordinal, StorageKind kind)
@@ -67,8 +86,26 @@ internal sealed class ColumnarIndex
     /// For a keyed index over a clustered table, the table position of the key column, whose value is the
     /// row's key and not in the row; otherwise -1.
     /// </param>
-    public ColumnarIndex(StorageKind[] tableKinds, ReadOnlySpan<int> ordinals, int schemaVersion, bool keyed = false, int keyOrdinal = -1)
+    /// <param name="tail">
+    /// Whether this keyed index is the tail of a table whose other rows are in SSTable segments: it then keeps
+    /// the key of every position and of every delete, and never claims to be in key order.
+    /// </param>
+    public ColumnarIndex(StorageKind[] tableKinds, ReadOnlySpan<int> ordinals, int schemaVersion, bool keyed = false, int keyOrdinal = -1, bool tail = false)
     {
+        if (tail && !keyed)
+        {
+            throw new ArgumentException("Only an index whose rows are found by key can be a tail.", nameof(tail));
+        }
+
+        if (tail)
+        {
+            _tail = true;
+            _keyHigh = new ChunkDirectory(sizeof(ulong));
+            _keyLow = new ChunkDirectory(sizeof(ulong));
+            _deletedHigh = new ChunkDirectory(sizeof(ulong));
+            _deletedLow = new ChunkDirectory(sizeof(ulong));
+        }
+
         _keys = keyed ? new RowKeyPositionMap() : null;
         _keyOrdinal = keyOrdinal;
         _tableKinds = tableKinds;
@@ -96,7 +133,7 @@ internal sealed class ColumnarIndex
         kind is StorageKind.Int or StorageKind.BigInt or StorageKind.Float or StorageKind.Double or StorageKind.Bit or StorageKind.Date;
 
     // A DATE is kept as its day number.
-    private static int WidthOf(StorageKind kind) => kind is StorageKind.BigInt or StorageKind.Double ? sizeof(long) : sizeof(int);
+    private static int WidthOf(StorageKind kind) => ColumnarCells.WidthOf(kind);
 
     /// <summary>The table schema version the index was built for.</summary>
     public int SchemaVersion { get; }
@@ -120,13 +157,91 @@ internal sealed class ColumnarIndex
     /// Whether positions are in key order, so a scan visits rows in the order a scan of the table does. True for
     /// an index that is not keyed. A keyed index loses it at the first update or out-of-order insert.
     /// </summary>
-    public bool InKeyOrder => _inKeyOrder;
+    public bool InKeyOrder => !_tail && _inKeyOrder;
+
+    /// <summary>Whether this is the tail of an LSM table: the rows published since its last flush.</summary>
+    public bool IsTail => _tail;
+
+    /// <summary>The key of the row at a position of a tail, live or not.</summary>
+    public RowKey KeyAt(int position) => new(
+        _keyHigh!.ChunkOf(position).As<ulong>()[position & FlatChunk.SlotMask],
+        _keyLow!.ChunkOf(position).As<ulong>()[position & FlatChunk.SlotMask]);
+
+    /// <summary>How many deletes a tail has seen. Each left its key, whether or not the tail held the row.</summary>
+    public int DeletedCount => Volatile.Read(ref _deleted);
+
+    /// <summary>The key of the tail's delete number <paramref name="index"/>, in the order they came.</summary>
+    public RowKey DeletedKeyAt(int index) => new(
+        _deletedHigh!.ChunkOf(index).As<ulong>()[index & FlatChunk.SlotMask],
+        _deletedLow!.ChunkOf(index).As<ulong>()[index & FlatChunk.SlotMask]);
+
+    /// <summary>
+    /// The smallest and largest key a tail has added or deleted; false when it has done neither. Read where
+    /// the writer cannot run (the engine's publish lock), as the two keys are not written together.
+    /// </summary>
+    public bool TryGetKeyRange(out RowKey smallest, out RowKey largest)
+    {
+        smallest = _smallestKey;
+        largest = _largestKey;
+        return _anyTouched;
+    }
+
+    /// <summary>Whether <paramref name="other"/> indexes the same columns in the same slots for the same schema version.</summary>
+    public bool SameColumns(ColumnarIndex other)
+    {
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        if (SchemaVersion != other.SchemaVersion || _columns.Length != other._columns.Length)
+        {
+            return false;
+        }
+
+        for (int slot = 0; slot < _columns.Length; slot++)
+        {
+            if (_columns[slot].Ordinal != other._columns[slot].Ordinal)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Asks for the index to be built again by the next query that looks for it.</summary>
+    public void RequestRebuild() => _rebuildRequested = true;
+
+    /// <summary>
+    /// Records that a FLOAT or DOUBLE column holds a NaN somewhere outside this index: in a file whose rows
+    /// the index stands in front of.
+    /// </summary>
+    public void NoteNaN(int slot) => _columns[slot].AnyNaN = true;
+
+    /// <summary>An empty tail over the same columns, which already knows the NaNs this one knows of.</summary>
+    public ColumnarIndex NewTail()
+    {
+        var ordinals = new int[_columns.Length];
+        for (int slot = 0; slot < ordinals.Length; slot++)
+        {
+            ordinals[slot] = _columns[slot].Ordinal;
+        }
+
+        var tail = new ColumnarIndex(_tableKinds, ordinals, SchemaVersion, keyed: true, _keyOrdinal, tail: true);
+        for (int slot = 0; slot < ordinals.Length; slot++)
+        {
+            tail._columns[slot].AnyNaN = _columns[slot].AnyNaN;
+        }
+
+        return tail;
+    }
 
     /// <summary>How many positions hold a row that was since deleted or replaced.</summary>
     public int Dead => Volatile.Read(ref _dead);
 
     /// <summary>Whether dead positions outnumber live ones by enough that building the index again is worth it.</summary>
-    public bool WantsRebuild => Dead > FlatChunk.Slots && Dead > Count / 2;
+    public bool WantsRebuild => _rebuildRequested || (Dead > FlatChunk.Slots && Dead > Count / 2);
 
     /// <summary>The number of indexed columns.</summary>
     public int ColumnCount => _columns.Length;
@@ -198,7 +313,10 @@ internal sealed class ColumnarIndex
         _keys.Set(key, AppendRow(stored, null, key));
     }
 
-    /// <summary>Removes the row with a key, if the index holds one. Called by the writer of a keyed index.</summary>
+    /// <summary>
+    /// Removes the row with a key, if the index holds one. Called by the writer of a keyed index. A tail notes
+    /// the key either way: the row may be one of a file.
+    /// </summary>
     public void Delete(RowKey key)
     {
         if (_keys!.Remove(key, out int at))
@@ -206,11 +324,48 @@ internal sealed class ColumnarIndex
             Remove(at);
             Volatile.Write(ref _dead, _dead + 1);
         }
+
+        if (_tail)
+        {
+            int index = _deleted;
+            _deletedHigh!.EnsureSlots(index + 1);
+            _deletedLow!.EnsureSlots(index + 1);
+            _deletedHigh.ChunkOf(index).As<ulong>()[index & FlatChunk.SlotMask] = key.High;
+            _deletedLow.ChunkOf(index).As<ulong>()[index & FlatChunk.SlotMask] = key.Low;
+            NoteKey(key);
+            Volatile.Write(ref _deleted, index + 1);
+        }
+    }
+
+    // Widens the range of keys a tail has touched.
+    private void NoteKey(RowKey key)
+    {
+        if (!_anyTouched)
+        {
+            _smallestKey = key;
+            _largestKey = key;
+            _anyTouched = true;
+        }
+        else if (key < _smallestKey)
+        {
+            _smallestKey = key;
+        }
+        else if (key > _largestKey)
+        {
+            _largestKey = key;
+        }
     }
 
     private int AppendRow(ReadOnlySpan<byte> stored, ReadOnlySpan<CellValue> typed, RowKey key)
     {
         int at = Reserve();
+        if (_tail)
+        {
+            _keyHigh!.ChunkOf(at).As<ulong>()[at & FlatChunk.SlotMask] = key.High;
+            _keyLow!.ChunkOf(at).As<ulong>()[at & FlatChunk.SlotMask] = key.Low;
+            NoteKey(key);
+        }
+
         if (!typed.IsEmpty)
         {
             ReadOnlySpan<CellValue> cells = typed;
@@ -260,18 +415,14 @@ internal sealed class ColumnarIndex
     // A clustered table's key column is the row key itself. Only integer keys can be indexed.
     private void WriteKey(Column column, int at, RowKey key)
     {
-        if (!key.IsInt64)
+        if (ColumnarCells.TryKeyBits(column.Kind, key, out long bits))
         {
-            _usable = false;
-            SetNull(column, at);
-        }
-        else if (column.Kind == StorageKind.BigInt)
-        {
-            column.Values!.ChunkOf(at).As<long>()[at & FlatChunk.SlotMask] = (long)key;
+            StoreBits(column, at, bits);
         }
         else
         {
-            column.Values!.ChunkOf(at).As<int>()[at & FlatChunk.SlotMask] = (int)(long)key;
+            _usable = false;
+            SetNull(column, at);
         }
     }
 
@@ -295,6 +446,8 @@ internal sealed class ColumnarIndex
     {
         int at = _count;
         _live.EnsureSlots(at + 1);
+        _keyHigh?.EnsureSlots(at + 1);
+        _keyLow?.EnsureSlots(at + 1);
         foreach (Column column in _columns)
         {
             column.Nulls.EnsureSlots(at + 1);
@@ -348,42 +501,29 @@ internal sealed class ColumnarIndex
         }
     }
 
-    private static void WriteBytes(Column column, int at, ReadOnlySpan<byte> stored, int offset)
+    private static void WriteBytes(Column column, int at, ReadOnlySpan<byte> stored, int offset) =>
+        StoreBits(column, at, ColumnarCells.ReadBits(column.Kind, stored, offset));
+
+    // Stores a value in the form ColumnarCells reads it from a row: a FLOAT's bits go into its 4-byte slot as they are.
+    private static void StoreBits(Column column, int at, long bits)
     {
         int inChunk = at & FlatChunk.SlotMask;
-        switch (column.Kind)
+        if (column.Kind == StorageKind.Bit)
         {
-            case StorageKind.Int:
-                column.Values!.ChunkOf(at).As<int>()[inChunk] = RowBytes.Int32(stored, offset);
-                break;
-            case StorageKind.BigInt:
-                column.Values!.ChunkOf(at).As<long>()[inChunk] = RowBytes.Int64(stored, offset);
-                break;
-            case StorageKind.Double:
+            if (bits != 0)
             {
-                double value = RowBytes.Double(stored, offset);
-                column.AnyNaN |= double.IsNaN(value);
-                column.Values!.ChunkOf(at).As<double>()[inChunk] = value;
-                break;
+                column.Bits!.Set(at);
             }
-
-            case StorageKind.Float:
-            {
-                float value = RowBytes.Single(stored, offset);
-                column.AnyNaN |= float.IsNaN(value);
-                column.Values!.ChunkOf(at).As<float>()[inChunk] = value;
-                break;
-            }
-            case StorageKind.Date:
-                column.Values!.ChunkOf(at).As<int>()[inChunk] = RowBytes.DayNumber(stored, offset);
-                break;
-            case StorageKind.Bit:
-                if (RowBytes.Boolean(stored, offset))
-                {
-                    column.Bits!.Set(at);
-                }
-
-                break;
+        }
+        else if (ColumnarCells.WidthOf(column.Kind) == sizeof(long))
+        {
+            column.AnyNaN |= ColumnarCells.IsNaN(column.Kind, bits);
+            column.Values!.ChunkOf(at).As<long>()[inChunk] = bits;
+        }
+        else
+        {
+            column.AnyNaN |= ColumnarCells.IsNaN(column.Kind, bits);
+            column.Values!.ChunkOf(at).As<int>()[inChunk] = (int)bits;
         }
     }
 }
@@ -408,4 +548,21 @@ internal interface IColumnarRowStore
 
     /// <summary>Stops keeping a columnar index for the table.</summary>
     void DropColumnar(string databaseName, string tableName);
+
+    /// <summary>
+    /// Counts the rows of the table a bound condition accepts and computes each aggregate over them, as
+    /// <see cref="ColumnarScan.TryRun"/> does over one index. The engine decides where the columns are read
+    /// from: the index alone, or the index together with columnar data it keeps on disk.
+    /// </summary>
+    /// <param name="index">The table's index, as <see cref="Columnar"/> returned it; the steps and folds are bound to it.</param>
+    /// <returns><see langword="false"/> when no consistent result was reached; the caller then reads rows.</returns>
+    bool TryScan(
+        string databaseName,
+        string tableName,
+        ColumnarIndex index,
+        ReadOnlySpan<ColumnarStep> steps,
+        ReadOnlySpan<ColumnarFold> folds,
+        Span<RowAggregate> totals,
+        int limit,
+        out int matched);
 }

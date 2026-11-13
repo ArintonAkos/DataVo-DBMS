@@ -59,13 +59,16 @@ Future tooling process (v0.3+)
   -> Embedded LSM storage
 ```
 
-## Planned v0.4
+## Completed v0.4 Milestone (On Branch): On-Disk Columnar SSTables
 
-### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks)
+### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks + Zone Maps)
 
-In v0.3 a columnar index on an LSM table is derived state held in memory: it is rebuilt from the table's rows on first use after the database is opened, and it does not change how rows are stored, so primary-key lookups on the LSM engine keep their cost (239 ns in the current benchmarks). That design needs RAM for every indexed column, which rules it out for datasets larger than memory.
+In v0.3 a columnar index on an LSM table was derived state held entirely in memory: it had to be rebuilt from the table's rows on first use after reopen, which required RAM proportional to the full indexed column dataset.
 
-v0.4 plans native columnar storage in the SSTable format itself: column chunks written at flush and merged at compaction, read from disk a chunk at a time, so analytical scans work on data that does not fit in memory and nothing has to be rebuilt on open. This is planned work; nothing of it exists yet.
+In v0.4 (`feature/on-disk-columnar-sstables`), format-version-8 SSTables persist 4,096-row aligned columnar segments directly inside `.sst` files during flush and compaction (without altering row blocks or `~223–236 ns` point-lookup performance), alongside tombstone key runs and per-chunk min/max/NULL/NaN zone maps:
+
+- **Zero Rebuild & Out-of-Core Execution:** Only unflushed MemTable rows (the "tail") stay in RAM; flushed rows stream directly from memory-mapped or positional SSTable segments in 4,096-row chunks. Opening and answering the first `SUM` over 1,000,000 flushed rows takes `13.7 ms` (`186 KB` allocated) in OS cache, and warm analytical scans run at `135.7–460.8 µs` (`0 B` allocated/query).
+- **Zone-Map Chunk Pruning:** Before loading a chunk group, scans evaluate the predicate over the segment directory's per-chunk `min`/`max` and `NULL`/`NaN` flags, skipping non-matching chunks without page faults or reads.
 
 ## Ecosystem & Platform Evaluation Lanes
 
@@ -84,7 +87,7 @@ v0.4 plans native columnar storage in the SSTable format itself: column chunks w
 | NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
 | Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
 | Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
-| On-disk columnar SSTable storage (out-of-core, Parquet-style chunks) | Planned (`v0.4`) | Analytical scans over datasets larger than memory, with no rebuild on open. |
+| On-disk columnar SSTable storage (out-of-core chunks + zone-map pruning) | Completed (`v0.4` dev) | Format-v8 SSTable columnar segments, tail-only RAM, zone-map chunk skipping, zero rebuild on open (`13.7 ms` open + `SUM` on 1M rows). |
 | PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
 | Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
 | Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |

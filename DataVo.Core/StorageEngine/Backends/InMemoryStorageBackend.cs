@@ -45,6 +45,17 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
     public DataVo.Core.Indexing.Columnar.ColumnarIndex? BuildColumnar(string databaseName, string tableName, DataVo.Core.StorageEngine.Serialization.RowSerializer.StorageColumnType[] tableKinds, int[] ordinals, int schemaVersion, int keyOrdinal) =>
         ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).BuildColumnar(databaseName, tableName, tableKinds, ordinals, schemaVersion, keyOrdinal);
     public bool KeyedRows => false;
+    public bool TryScan(
+        string databaseName,
+        string tableName,
+        DataVo.Core.Indexing.Columnar.ColumnarIndex index,
+        ReadOnlySpan<DataVo.Core.ColumnarStep> steps,
+        ReadOnlySpan<DataVo.Core.Indexing.Columnar.ColumnarFold> folds,
+        Span<DataVo.Core.RowAggregate> totals,
+        int limit,
+        out int matched) =>
+        ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).TryScan(databaseName, tableName, index, steps, folds, totals, limit, out matched);
+
     public void DropColumnar(string databaseName, string tableName) =>
         ((DataVo.Core.Indexing.Columnar.IColumnarRowStore)_inner).DropColumnar(databaseName, tableName);
     public InMemoryStorageSnapshot CreateSnapshot() => ((IInMemoryStorageSnapshotProvider)_inner).CreateSnapshot();

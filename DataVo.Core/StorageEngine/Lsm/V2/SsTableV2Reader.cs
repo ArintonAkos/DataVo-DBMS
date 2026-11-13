@@ -38,11 +38,13 @@ internal sealed class SsTableV2Reader : IDisposable
         ReadOnlyMemory<byte> bloomBits,
         SsTableV2Properties properties,
         int alignment,
-        ushort version)
+        ushort version,
+        SsTableColumnarSegment? columnar)
     {
         _source = source;
+        Columnar = columnar;
         Version = version;
-        _wide = version == SsTableV2Format.WideVersion;
+        _wide = SsTableV2Format.HasWideKeys(version);
         _indexEntrySize = SsTableV2Format.IndexEntrySizeOf(version);
         if (_wide)
         {
@@ -62,6 +64,9 @@ internal sealed class SsTableV2Reader : IDisposable
     }
 
     public SsTableV2Properties Properties { get; }
+
+    /// <summary>The file's columnar segment, or null when it has none (every file older than version 8).</summary>
+    public SsTableColumnarSegment? Columnar { get; }
 
     /// <summary>The file's format version (2, 4 or 6).</summary>
     public ushort Version { get; }
@@ -98,17 +103,21 @@ internal sealed class SsTableV2Reader : IDisposable
             throw new InvalidDataException("SSTable is shorter than its footer.");
         }
 
-        ReadOnlySpan<byte> footer = source.GetRegion(length - SsTableV2Format.FooterSize, SsTableV2Format.FooterSize).Span;
-        if (!SsTableV2Format.TryReadVersion(footer, out ushort version) || !SsTableV2Format.IsRowKeyedVersion(version))
+        const int TailSize = sizeof(ushort) + sizeof(uint);
+        if (!SsTableV2Format.TryReadVersion(source.GetRegion(length - TailSize, TailSize).Span, out ushort version)
+            || !SsTableV2Format.IsRowKeyedVersion(version)
+            || length < SsTableV2Format.FooterSizeOf(version))
         {
-            throw new InvalidDataException("SSTable footer is not a row-keyed (v2, v4 or v6) footer.");
+            throw new InvalidDataException("SSTable footer is not a row-keyed (v2, v4, v6 or v8) footer.");
         }
 
+        int footerSize = SsTableV2Format.FooterSizeOf(version);
+        ReadOnlySpan<byte> footer = source.GetRegion(length - footerSize, footerSize).Span;
         (long indexOffset, int indexLength) = ReadHandle(footer[0..]);
         (long bloomOffset, int bloomLength) = ReadHandle(footer[12..]);
         (long propertiesOffset, int propertiesLength) = ReadHandle(footer[24..]);
-        int alignment = BinaryPrimitives.ReadInt32LittleEndian(footer[36..]);
-        long dataEnd = length - SsTableV2Format.FooterSize;
+        int alignment = BinaryPrimitives.ReadInt32LittleEndian(footer[(footerSize - TailSize - sizeof(int))..]);
+        long dataEnd = length - footerSize;
 
         if (alignment < SsTableV2Format.MinimumAlignment || (alignment & (alignment - 1)) != 0)
         {
@@ -142,7 +151,15 @@ internal sealed class SsTableV2Reader : IDisposable
             bloomOffset + SsTableV2Format.BloomHeaderSize,
             bloomBlocks * BlockedBloomFilter.BlockBytes);
 
-        return new SsTableV2Reader(source, ownsSource, index, bloomBits, properties, alignment, version);
+        SsTableColumnarSegment? columnar = null;
+        if (version == SsTableV2Format.ColumnarVersion)
+        {
+            (long columnarOffset, int columnarLength) = ReadHandle(footer[36..]);
+            ValidateHandle(columnarOffset, columnarLength, indexOffset, "columnar directory");
+            columnar = SsTableColumnarSegment.Open(source, columnarOffset, columnarLength);
+        }
+
+        return new SsTableV2Reader(source, ownsSource, index, bloomBits, properties, alignment, version, columnar);
     }
 
     /// <summary>Block <paramref name="block"/> of the index.</summary>
