@@ -66,6 +66,18 @@ public sealed partial class LsmStorageEngine
         }
     }
 
+    /// <inheritdoc cref="IColumnarRowStore.TryScan"/>
+    internal bool TryScanColumnar(
+        string databaseName,
+        string tableName,
+        ColumnarIndex index,
+        ReadOnlySpan<ColumnarStep> steps,
+        ReadOnlySpan<ColumnarFold> folds,
+        Span<RowAggregate> totals,
+        int limit,
+        out int matched) =>
+        ColumnarScan.TryRun(index, steps, folds, totals, limit, out matched);
+
     private readonly struct ColumnarBuild(ColumnarIndex index) : ILiveRowVisitor
     {
         public ColumnarIndex Index { get; } = index;

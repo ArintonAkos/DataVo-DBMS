@@ -675,6 +675,18 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         }
     }
 
+    // The index holds every row of the table, so a scan of it is a scan of the table.
+    bool DataVo.Core.Indexing.Columnar.IColumnarRowStore.TryScan(
+        string databaseName,
+        string tableName,
+        DataVo.Core.Indexing.Columnar.ColumnarIndex index,
+        ReadOnlySpan<DataVo.Core.ColumnarStep> steps,
+        ReadOnlySpan<DataVo.Core.Indexing.Columnar.ColumnarFold> folds,
+        Span<DataVo.Core.RowAggregate> totals,
+        int limit,
+        out int matched) =>
+        DataVo.Core.Indexing.Columnar.ColumnarScan.TryRun(index, steps, folds, totals, limit, out matched);
+
     void DataVo.Core.Indexing.Columnar.IColumnarRowStore.DropColumnar(string databaseName, string tableName)
     {
         if (_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))

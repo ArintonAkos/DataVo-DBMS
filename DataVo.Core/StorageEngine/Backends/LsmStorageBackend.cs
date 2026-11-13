@@ -29,6 +29,17 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
 
     public void DropColumnar(string databaseName, string tableName) => _inner.DropColumnar(databaseName, tableName);
 
+    public bool TryScan(
+        string databaseName,
+        string tableName,
+        DataVo.Core.Indexing.Columnar.ColumnarIndex index,
+        ReadOnlySpan<DataVo.Core.ColumnarStep> steps,
+        ReadOnlySpan<DataVo.Core.Indexing.Columnar.ColumnarFold> folds,
+        Span<DataVo.Core.RowAggregate> totals,
+        int limit,
+        out int matched) =>
+        _inner.TryScanColumnar(databaseName, tableName, index, steps, folds, totals, limit, out matched);
+
     /// <summary>The underlying engine (test hooks and diagnostics).</summary>
     internal LsmStorageEngine Engine => _inner;
 

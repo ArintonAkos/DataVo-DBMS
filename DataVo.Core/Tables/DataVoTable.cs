@@ -414,7 +414,9 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
             folds = 1;
         }
 
-        if (!Indexing.Columnar.ColumnarScan.TryRun(
+        if (!engine.StorageContext.ColumnarStore.TryScan(
+                database,
+                _info.TableName,
                 index,
                 new ReadOnlySpan<ColumnarStep>(workspace.Steps, 0, steps),
                 new ReadOnlySpan<Indexing.Columnar.ColumnarFold>(workspace.Folds, 0, folds),

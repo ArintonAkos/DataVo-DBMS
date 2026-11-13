@@ -391,4 +391,21 @@ internal interface IColumnarRowStore
 
     /// <summary>Stops keeping a columnar index for the table.</summary>
     void DropColumnar(string databaseName, string tableName);
+
+    /// <summary>
+    /// Counts the rows of the table a bound condition accepts and computes each aggregate over them, as
+    /// <see cref="ColumnarScan.TryRun"/> does over one index. The engine decides where the columns are read
+    /// from: the index alone, or the index together with columnar data it keeps on disk.
+    /// </summary>
+    /// <param name="index">The table's index, as <see cref="Columnar"/> returned it; the steps and folds are bound to it.</param>
+    /// <returns><see langword="false"/> when no consistent result was reached; the caller then reads rows.</returns>
+    bool TryScan(
+        string databaseName,
+        string tableName,
+        ColumnarIndex index,
+        ReadOnlySpan<ColumnarStep> steps,
+        ReadOnlySpan<ColumnarFold> folds,
+        Span<RowAggregate> totals,
+        int limit,
+        out int matched);
 }
