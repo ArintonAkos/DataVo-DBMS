@@ -109,7 +109,7 @@ DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes 
 
 - On both in-memory and LSM file-backed storage, DataVo with the columnar index is 2.6 to 8.9 times faster than DuckDB held to one thread (and up to 10.7 times faster than default DuckDB on `COUNT`), allocating 0 bytes.
 - Against its own row scan in the first table, DataVo is 14 to 71 times faster.
-- The LSM engine maintains a keyed columnar index alongside durable SSTables and MemTables, updated when rows are published. Lookups and aggregate queries hit this index directly without touching disk or reading full rows.
+- On the LSM engine the 200,000 rows of this benchmark fit in one MemTable and are never flushed, so these file-backed rows read the columns from the part of the index held in memory. Rows that have been flushed are read from the columnar segments of their SSTables instead; that is measured separately in [Columnar scans from SSTable files](#columnar-scans-from-sstable-files).
 - This was measured on the Apple M4 Pro only, where the vector code runs as 128-bit NEON. The 256-bit and 512-bit forms are tested for correctness on every machine but have not been timed. The three-platform results in [Part III](#benchmarkdotnet-on-three-platforms) are the row scan.
 
 **What it costs.** The index is a copy: 20 bytes per row for these three columns, about 4 MB for 200,000 rows, by the column widths (not measured). Every insert and delete also writes the index. I have not isolated that cost. The bulk load in this run took 42 ms with a standard deviation of 12 ms in memory, which is inside the noise of the load figures below, so the benchmark neither shows a slowdown nor rules one out. The point lookup did not slow down in that run: 335 ns in memory and 239 ns on a file (in-memory lookups were subsequently reduced to 52.1 ns after the compact row layout work below).
@@ -117,6 +117,23 @@ DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes 
 **How it works.** The index stores each column in chunks of 4,096 values, aligned to 64 bytes. A query's condition is run a chunk at a time: comparing `Level` with the bound value over a run of `int`s produces one bit per row, and the aggregate then reads only the `Gold` or `Ratio` values whose bit is set. No row is located or decoded, and the columns the query does not name are never touched. Comparisons, integer sums, minimums and maximums use vector instructions. A floating-point `SUM` is added one value at a time in row order, so it gives the same bits as the row scan. An integer `SUM` still throws `OverflowException` when it leaves the range of `long`. Readers take no lock; a query inside a transaction reads rows instead, so it sees the transaction's own writes.
 
 The chart above shows the row scan.
+
+### Columnar scans from SSTable files
+
+Since v0.4 the LSM engine writes the indexed columns into every SSTable it flushes or compacts (format version 8), along with per-chunk `min`/`max` and `NULL`/`NaN` zone maps, and keeps in memory only the columns of rows that are not flushed yet. A columnar query skips non-matching chunks via their zone maps and reads surviving flushed rows a chunk of 4,096 at a time straight from the memory-mapped files, so opening a table builds no index and the memory used does not grow with the table.
+
+`OutOfCoreAggregateBenchmarks` runs the four aggregates above over 1,000,000 rows on the LSM engine twice: with the rows not flushed (columns in memory) and after closing and reopening the database (every row in an SSTable, nothing of the table's columns in the managed heap). Apple M4 Pro, mean time per query in microseconds, 0 bytes allocated per query in every row.
+
+| Query | Columns in memory | Columns in SSTable files |
+| --- | ---: | ---: |
+| `COUNT(*)` | 135.8 | 135.7 |
+| `SUM(Gold)` | 388.9 | 388.2 |
+| `MIN(Gold)` | 361.8 | 362.6 |
+| `MAX(Ratio)` | 453.9 | 460.8 |
+
+Opening the database, answering `SUM(Gold)` over the million rows from the files and getting the result takes 13.7 ms (186 KB allocated), with the files in the operating system's cache. The point lookup on the LSM engine measured 223 ns (144 B) in the same run, unchanged by the new file format.
+
+**What this does not show.** The rows were inserted in key order and never updated, so no chunk needed a row masked out. A table with many updates or deletes since its last flush pays extra per query to find which rows of the files those replace; that cost has not been measured here. The files were in the page cache; a first read from a cold disk is not measured either.
 
 ### Point lookup by primary key
 

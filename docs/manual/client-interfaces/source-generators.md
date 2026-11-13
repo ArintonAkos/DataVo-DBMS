@@ -155,7 +155,7 @@ long gold = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Sum(
 `Count()`, `Any()`, `Sum`, `Min` and `Max` on a compiled query are answered from the index when every column the condition reads, and the column the selector reads, is marked. The condition may use comparisons, null tests, `&&` and `||`. The results are the ones the row scan gives, including the `OverflowException` of an integer sum and the `NaN` ordering of `Min` and `Max`, and nothing is allocated. On 200,000 in-memory rows with 100,000 matches these take 0.03 to 0.09 ms, against 0.4 to 0.5 ms for the row scan; see [Benchmark Results](/manual/performance/benchmarks#with-a-columnar-index).
 
 - `[Columnar]` applies to `int`, `long`, `float`, `double`, `bool` and date properties, nullable or not. On any other type, ensuring the table fails with an error that names the column.
-- The index exists for the in-memory storage mode. On other storage modes the attribute is accepted and queries read rows.
+- The index accelerates both `InMemory` and `Lsm` storage modes (legacy `Disk` mode accepts the attribute and falls back to reading rows). On `Lsm`, flushed rows persist in columnar segments inside SSTables and are scanned out-of-core in 4,096-row chunks with per-chunk zone-map pruning while only unflushed rows sit in memory; floating-point `Sum` on `Lsm` uses the row path so rounding matches row order.
 - A query that reads a column outside the index, and any query inside a transaction, read rows, as described above.
 - The index is a second copy of the marked columns and is written on every insert and delete, so mark the columns such queries use, not every column.
 

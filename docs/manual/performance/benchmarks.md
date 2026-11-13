@@ -117,7 +117,7 @@ The chart above shows the row scan.
 
 ### Columnar scans from SSTable files
 
-Since v0.4 the LSM engine writes the indexed columns into every SSTable it flushes or compacts (format version 8), and keeps in memory only the columns of rows that are not flushed yet. A columnar query reads flushed rows a chunk of 4,096 at a time straight from the memory-mapped files, so opening a table builds no index and the memory used does not grow with the table.
+Since v0.4 the LSM engine writes the indexed columns into every SSTable it flushes or compacts (format version 8), along with per-chunk `min`/`max` and `NULL`/`NaN` zone maps, and keeps in memory only the columns of rows that are not flushed yet. A columnar query skips non-matching chunks via their zone maps and reads surviving flushed rows a chunk of 4,096 at a time straight from the memory-mapped files, so opening a table builds no index and the memory used does not grow with the table.
 
 `OutOfCoreAggregateBenchmarks` runs the four aggregates above over 1,000,000 rows on the LSM engine twice: with the rows not flushed (columns in memory) and after closing and reopening the database (every row in an SSTable, nothing of the table's columns in the managed heap). Apple M4 Pro, mean time per query in microseconds, 0 bytes allocated per query in every row.
 

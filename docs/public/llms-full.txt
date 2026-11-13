@@ -300,13 +300,16 @@ Future tooling process (v0.3+)
   -> Embedded LSM storage
 ```
 
-## Planned v0.4
+## Completed v0.4 Milestone (On Branch): On-Disk Columnar SSTables
 
-### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks)
+### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks + Zone Maps)
 
-In v0.3 a columnar index on an LSM table is derived state held in memory: it is rebuilt from the table's rows on first use after the database is opened, and it does not change how rows are stored, so primary-key lookups on the LSM engine keep their cost (239 ns in the current benchmarks). That design needs RAM for every indexed column, which rules it out for datasets larger than memory.
+In v0.3 a columnar index on an LSM table was derived state held entirely in memory: it had to be rebuilt from the table's rows on first use after reopen, which required RAM proportional to the full indexed column dataset.
 
-v0.4 plans native columnar storage in the SSTable format itself: column chunks written at flush and merged at compaction, read from disk a chunk at a time, so analytical scans work on data that does not fit in memory and nothing has to be rebuilt on open. This is planned work; nothing of it exists yet.
+In v0.4 (`feature/on-disk-columnar-sstables`), format-version-8 SSTables persist 4,096-row aligned columnar segments directly inside `.sst` files during flush and compaction (without altering row blocks or `~223–236 ns` point-lookup performance), alongside tombstone key runs and per-chunk min/max/NULL/NaN zone maps:
+
+- **Zero Rebuild & Out-of-Core Execution:** Only unflushed MemTable rows (the "tail") stay in RAM; flushed rows stream directly from memory-mapped or positional SSTable segments in 4,096-row chunks. Opening and answering the first `SUM` over 1,000,000 flushed rows takes `13.7 ms` (`186 KB` allocated) in OS cache, and warm analytical scans run at `135.7–460.8 µs` (`0 B` allocated/query).
+- **Zone-Map Chunk Pruning:** Before loading a chunk group, scans evaluate the predicate over the segment directory's per-chunk `min`/`max` and `NULL`/`NaN` flags, skipping non-matching chunks without page faults or reads.
 
 ## Ecosystem & Platform Evaluation Lanes
 
@@ -325,7 +328,7 @@ v0.4 plans native columnar storage in the SSTable format itself: column chunks w
 | NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
 | Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
 | Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
-| On-disk columnar SSTable storage (out-of-core, Parquet-style chunks) | Planned (`v0.4`) | Analytical scans over datasets larger than memory, with no rebuild on open. |
+| On-disk columnar SSTable storage (out-of-core chunks + zone-map pruning) | Completed (`v0.4` dev) | Format-v8 SSTable columnar segments, tail-only RAM, zone-map chunk skipping, zero rebuild on open (`13.7 ms` open + `SUM` on 1M rows). |
 | PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
 | Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
 | Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |
@@ -1286,11 +1289,11 @@ USING COLUMNAR;
 ```
 
 - The columns must be `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT` or `DATE`. Any other type is rejected.
-- It applies to the in-memory storage mode. On other storage modes the statement is accepted and recorded, and queries read rows as before.
+- It accelerates both `InMemory` and `Lsm` storage modes (legacy `Disk` mode accepts and records the index while queries read rows). On `Lsm`, the `COLUMNAR` spec is saved in the table directory and existing SSTables are backfilled once into format-v8 columnar segments; subsequent flushes and compactions write columnar chunks alongside rows, keeping only unflushed rows in memory.
 - It is used for an aggregate without `GROUP BY` whose `WHERE` is an `AND` of comparisons between an indexed column and a literal, or `IS NULL` tests. Every column in the `WHERE` and in the aggregates must be in the index. Other queries, and queries inside a transaction, read rows.
-- A comparison is left to the row scan when the index could not give exactly the same answer: a fractional literal against an `INT` column, a literal that is not exactly a `FLOAT`, a `BIT` or `DATE` column in the `WHERE`, or a floating-point column that holds a NaN.
+- A comparison is left to the row scan when the index could not give exactly the same answer: a fractional literal against an `INT` column, a literal that is not exactly a `FLOAT`, a `BIT` or `DATE` column in the `WHERE`, or a floating-point column that holds a NaN (or floating-point `SUM` on multi-source LSM tables).
 - It never serves a row lookup, so it does not replace a scalar index. Several columnar indexes on one table are kept as one. `DROP INDEX cx_players ON Players` removes it.
-- It costs memory (4 or 8 bytes per row per column) and a write on every insert and delete. It is held in memory only; nothing is written to disk for it.
+- On `InMemory`, it costs 4 or 8 bytes per row per column in RAM plus a write on insert/delete. On `Lsm`, flushed rows reside inside `.sst` columnar segments on disk rather than staying in the managed heap.
 
 Schema changes are supported but limited. Adding a column rewrites existing rows and fills the new column with a default or null.
 
@@ -1311,7 +1314,7 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (in-memory storage, fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (`InMemory` and persisted out-of-core `Lsm` storage; fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -1889,9 +1892,17 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
+## What SSTables Do
+
+An SSTable (Sorted String Table, `.sst`) is an immutable, page-aligned file produced when a 32 MB MemTable flushes or when background compaction merges older files:
+
+- **Fast Primary-Key Point Lookups:** Entries are stored sorted by clustered `RowKey` inside 4 KiB page-aligned data blocks with a sparse block index and a per-file blocked Bloom filter. Point lookups avoid absent files in memory and read at most one block on a hit (`~223–236 ns` on 100K rows).
+- **Predictable Sequential I/O & Crash Safety:** Because SSTables are never modified in place, writes go sequentially to a temp file, `fsync` before atomic rename, and become visible in one manifest version edit alongside commit-log pruning.
+- **Out-of-Core Columnar Segments (v8 format):** On tables with a `[Columnar]` index (`CREATE INDEX ... USING COLUMNAR`), flush and compaction also write 4,096-row aligned columnar chunks, NULL/NaN masks, deleted-key (tombstone) runs, and per-chunk min/max zone maps directly inside each `.sst` file, without touching row blocks or point-lookup speed.
+
 ## Reopening a Database
 
-An LSM directory keeps its schema (`Catalog.xml`), its data (SSTables plus the commit log), and its transaction-id high-water mark. Opening a new context on the same directory restores all of it.
+An LSM directory keeps its schema (`Catalog.xml`), its data (SSTables plus the commit log), any active `COLUMNAR` index spec, and its transaction-id high-water mark. Opening a new context on the same directory restores all of it.
 
 ```csharp
 using (var db = new DataVoContext(config))
@@ -1907,7 +1918,9 @@ reopened.Execute("USE App");
 reopened.Execute("SELECT * FROM Events WHERE Id = 1"); // returns the row
 ```
 
-Indexes are not stored on disk in LSM mode. They are rebuilt from the durable rows when the engine opens, so they always match the data, even after a crash. The trade-off is that opening a database takes time proportional to its row count (about 0.5–0.8 s for 200,000 rows on a laptop).
+B-tree and vector (`HNSW`/`FLAT`) indexes are still rebuilt from durable rows on open (about 0.5–0.8 s per 200,000 rows on a laptop), so they always match committed data even after a crash.
+
+**Columnar indexes (`[Columnar]` / `USING COLUMNAR`) are persisted on disk inside the SSTables themselves.** Only the unflushed "tail" (writes since the last flush) stays in memory. Reopening an LSM database performs zero columnar index rebuild: covered filters and aggregates stream 4,096-row chunks out-of-core straight from the memory-mapped `.sst` segments and skip chunks whose min/max zone maps rule out the predicate (`13.7 ms` open + first `SUM` on 1,000,000 rows in OS cache).
 
 ## Opening the Same Directory Twice
 
@@ -1917,7 +1930,7 @@ A directory can be open in only one process at a time. DataVo holds a `datavo.lo
 
 ## LSM Support Summary
 
-The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal v0.2 constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and background SSTable compaction. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.
+The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, background SSTable compaction, and persistent format-v8 columnar SSTable segments with per-chunk zone-map pruning. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.
 
 ---
 
@@ -2865,7 +2878,7 @@ long gold = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Sum(
 `Count()`, `Any()`, `Sum`, `Min` and `Max` on a compiled query are answered from the index when every column the condition reads, and the column the selector reads, is marked. The condition may use comparisons, null tests, `&&` and `||`. The results are the ones the row scan gives, including the `OverflowException` of an integer sum and the `NaN` ordering of `Min` and `Max`, and nothing is allocated. On 200,000 in-memory rows with 100,000 matches these take 0.03 to 0.09 ms, against 0.4 to 0.5 ms for the row scan; see [Benchmark Results](/manual/performance/benchmarks#with-a-columnar-index).
 
 - `[Columnar]` applies to `int`, `long`, `float`, `double`, `bool` and date properties, nullable or not. On any other type, ensuring the table fails with an error that names the column.
-- The index exists for the in-memory storage mode. On other storage modes the attribute is accepted and queries read rows.
+- The index accelerates both `InMemory` and `Lsm` storage modes (legacy `Disk` mode accepts the attribute and falls back to reading rows). On `Lsm`, flushed rows persist in columnar segments inside SSTables and are scanned out-of-core in 4,096-row chunks with per-chunk zone-map pruning while only unflushed rows sit in memory; floating-point `Sum` on `Lsm` uses the row path so rounding matches row order.
 - A query that reads a column outside the index, and any query inside a transaction, read rows, as described above.
 - The index is a second copy of the marked columns and is written on every insert and delete, so mark the columns such queries use, not every column.
 
@@ -3282,7 +3295,7 @@ DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes 
 
 - On both in-memory and LSM file-backed storage, DataVo with the columnar index is 2.6 to 8.9 times faster than DuckDB held to one thread (and up to 10.7 times faster than default DuckDB on `COUNT`), allocating 0 bytes.
 - Against its own row scan in the first table, DataVo is 14 to 71 times faster.
-- The LSM engine maintains a keyed columnar index alongside durable SSTables and MemTables, updated when rows are published. Lookups and aggregate queries hit this index directly without touching disk or reading full rows.
+- On the LSM engine the 200,000 rows of this benchmark fit in one MemTable and are never flushed, so these file-backed rows read the columns from the part of the index held in memory. Rows that have been flushed are read from the columnar segments of their SSTables instead; that is measured separately in [Columnar scans from SSTable files](#columnar-scans-from-sstable-files).
 - This was measured on the Apple M4 Pro only, where the vector code runs as 128-bit NEON. The 256-bit and 512-bit forms are tested for correctness on every machine but have not been timed. The three-platform results in [Part III](#benchmarkdotnet-on-three-platforms) are the row scan.
 
 **What it costs.** The index is a copy: 20 bytes per row for these three columns, about 4 MB for 200,000 rows, by the column widths (not measured). Every insert and delete also writes the index. I have not isolated that cost. The bulk load in this run took 42 ms with a standard deviation of 12 ms in memory, which is inside the noise of the load figures below, so the benchmark neither shows a slowdown nor rules one out. The point lookup did not slow down in that run: 335 ns in memory and 239 ns on a file (in-memory lookups were subsequently reduced to 52.1 ns after the compact row layout work below).
@@ -3290,6 +3303,23 @@ DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes 
 **How it works.** The index stores each column in chunks of 4,096 values, aligned to 64 bytes. A query's condition is run a chunk at a time: comparing `Level` with the bound value over a run of `int`s produces one bit per row, and the aggregate then reads only the `Gold` or `Ratio` values whose bit is set. No row is located or decoded, and the columns the query does not name are never touched. Comparisons, integer sums, minimums and maximums use vector instructions. A floating-point `SUM` is added one value at a time in row order, so it gives the same bits as the row scan. An integer `SUM` still throws `OverflowException` when it leaves the range of `long`. Readers take no lock; a query inside a transaction reads rows instead, so it sees the transaction's own writes.
 
 The chart above shows the row scan.
+
+### Columnar scans from SSTable files
+
+Since v0.4 the LSM engine writes the indexed columns into every SSTable it flushes or compacts (format version 8), along with per-chunk `min`/`max` and `NULL`/`NaN` zone maps, and keeps in memory only the columns of rows that are not flushed yet. A columnar query skips non-matching chunks via their zone maps and reads surviving flushed rows a chunk of 4,096 at a time straight from the memory-mapped files, so opening a table builds no index and the memory used does not grow with the table.
+
+`OutOfCoreAggregateBenchmarks` runs the four aggregates above over 1,000,000 rows on the LSM engine twice: with the rows not flushed (columns in memory) and after closing and reopening the database (every row in an SSTable, nothing of the table's columns in the managed heap). Apple M4 Pro, mean time per query in microseconds, 0 bytes allocated per query in every row.
+
+| Query | Columns in memory | Columns in SSTable files |
+| --- | ---: | ---: |
+| `COUNT(*)` | 135.8 | 135.7 |
+| `SUM(Gold)` | 388.9 | 388.2 |
+| `MIN(Gold)` | 361.8 | 362.6 |
+| `MAX(Ratio)` | 453.9 | 460.8 |
+
+Opening the database, answering `SUM(Gold)` over the million rows from the files and getting the result takes 13.7 ms (186 KB allocated), with the files in the operating system's cache. The point lookup on the LSM engine measured 223 ns (144 B) in the same run, unchanged by the new file format.
+
+**What this does not show.** The rows were inserted in key order and never updated, so no chunk needed a row masked out. A table with many updates or deletes since its last flush pays extra per query to find which rows of the files those replace; that cost has not been measured here. The files were in the page cache; a first read from a cold disk is not measured either.
 
 ### Point lookup by primary key
 
@@ -4176,7 +4206,7 @@ active MemTable grows
 | Long-term storage format compatibility guarantee | Planned | Prerelease files may require migration or rebuild across major storage upgrades. |
 | PostgreSQL-wire clients | Planned (`v0.3+`) | DBeaver, DataGrip, and pgAdmin require future `DataVo.Server` work. |
 | Cloud/server administration model | Not Supported | No server replication daemon, backup daemon, or HA cluster system. |
-| Columnar HTAP scan acceleration | Active (`v0.3`) | Full analytical scans over 1M+ rows are row-oriented in v0.2; Columnar Indexes are under active v0.3 development. |
+| Columnar HTAP scan acceleration | Supported (`InMemory` & `Lsm`) | Synchronized `InMemory` column buffers and out-of-core format-v8 `Lsm` SSTable columnar segments with zone-map chunk pruning. |
 
 ---
 

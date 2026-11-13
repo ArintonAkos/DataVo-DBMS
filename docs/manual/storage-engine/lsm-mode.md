@@ -49,9 +49,17 @@ using var db = new DataVoContext(new DataVoConfig
 });
 ```
 
+## What SSTables Do
+
+An SSTable (Sorted String Table, `.sst`) is an immutable, page-aligned file produced when a 32 MB MemTable flushes or when background compaction merges older files:
+
+- **Fast Primary-Key Point Lookups:** Entries are stored sorted by clustered `RowKey` inside 4 KiB page-aligned data blocks with a sparse block index and a per-file blocked Bloom filter. Point lookups avoid absent files in memory and read at most one block on a hit (`~223–236 ns` on 100K rows).
+- **Predictable Sequential I/O & Crash Safety:** Because SSTables are never modified in place, writes go sequentially to a temp file, `fsync` before atomic rename, and become visible in one manifest version edit alongside commit-log pruning.
+- **Out-of-Core Columnar Segments (v8 format):** On tables with a `[Columnar]` index (`CREATE INDEX ... USING COLUMNAR`), flush and compaction also write 4,096-row aligned columnar chunks, NULL/NaN masks, deleted-key (tombstone) runs, and per-chunk min/max zone maps directly inside each `.sst` file, without touching row blocks or point-lookup speed.
+
 ## Reopening a Database
 
-An LSM directory keeps its schema (`Catalog.xml`), its data (SSTables plus the commit log), and its transaction-id high-water mark. Opening a new context on the same directory restores all of it.
+An LSM directory keeps its schema (`Catalog.xml`), its data (SSTables plus the commit log), any active `COLUMNAR` index spec, and its transaction-id high-water mark. Opening a new context on the same directory restores all of it.
 
 ```csharp
 using (var db = new DataVoContext(config))
@@ -67,7 +75,9 @@ reopened.Execute("USE App");
 reopened.Execute("SELECT * FROM Events WHERE Id = 1"); // returns the row
 ```
 
-Indexes are not stored on disk in LSM mode. They are rebuilt from the durable rows when the engine opens, so they always match the data, even after a crash. The trade-off is that opening a database takes time proportional to its row count (about 0.5–0.8 s for 200,000 rows on a laptop).
+B-tree and vector (`HNSW`/`FLAT`) indexes are still rebuilt from durable rows on open (about 0.5–0.8 s per 200,000 rows on a laptop), so they always match committed data even after a crash.
+
+**Columnar indexes (`[Columnar]` / `USING COLUMNAR`) are persisted on disk inside the SSTables themselves.** Only the unflushed "tail" (writes since the last flush) stays in memory. Reopening an LSM database performs zero columnar index rebuild: covered filters and aggregates stream 4,096-row chunks out-of-core straight from the memory-mapped `.sst` segments and skip chunks whose min/max zone maps rule out the predicate (`13.7 ms` open + first `SUM` on 1,000,000 rows in OS cache).
 
 ## Opening the Same Directory Twice
 
@@ -77,4 +87,4 @@ A directory can be open in only one process at a time. DataVo holds a `datavo.lo
 
 ## LSM Support Summary
 
-The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal v0.2 constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, and background SSTable compaction. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.
+The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, background SSTable compaction, and persistent format-v8 columnar SSTable segments with per-chunk zone-map pruning. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.

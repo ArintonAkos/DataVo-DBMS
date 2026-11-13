@@ -104,11 +104,11 @@ USING COLUMNAR;
 ```
 
 - The columns must be `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT` or `DATE`. Any other type is rejected.
-- It applies to the in-memory storage mode. On other storage modes the statement is accepted and recorded, and queries read rows as before.
+- It accelerates both `InMemory` and `Lsm` storage modes (legacy `Disk` mode accepts and records the index while queries read rows). On `Lsm`, the `COLUMNAR` spec is saved in the table directory and existing SSTables are backfilled once into format-v8 columnar segments; subsequent flushes and compactions write columnar chunks alongside rows, keeping only unflushed rows in memory.
 - It is used for an aggregate without `GROUP BY` whose `WHERE` is an `AND` of comparisons between an indexed column and a literal, or `IS NULL` tests. Every column in the `WHERE` and in the aggregates must be in the index. Other queries, and queries inside a transaction, read rows.
-- A comparison is left to the row scan when the index could not give exactly the same answer: a fractional literal against an `INT` column, a literal that is not exactly a `FLOAT`, a `BIT` or `DATE` column in the `WHERE`, or a floating-point column that holds a NaN.
+- A comparison is left to the row scan when the index could not give exactly the same answer: a fractional literal against an `INT` column, a literal that is not exactly a `FLOAT`, a `BIT` or `DATE` column in the `WHERE`, or a floating-point column that holds a NaN (or floating-point `SUM` on multi-source LSM tables).
 - It never serves a row lookup, so it does not replace a scalar index. Several columnar indexes on one table are kept as one. `DROP INDEX cx_players ON Players` removes it.
-- It costs memory (4 or 8 bytes per row per column) and a write on every insert and delete. It is held in memory only; nothing is written to disk for it.
+- On `InMemory`, it costs 4 or 8 bytes per row per column in RAM plus a write on insert/delete. On `Lsm`, flushed rows reside inside `.sst` columnar segments on disk rather than staying in the managed heap.
 
 Schema changes are supported but limited. Adding a column rewrites existing rows and fills the new column with a default or null.
 
@@ -129,4 +129,4 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (in-memory storage, fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (`InMemory` and persisted out-of-core `Lsm` storage; fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
