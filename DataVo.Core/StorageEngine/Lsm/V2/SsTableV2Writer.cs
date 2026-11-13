@@ -23,7 +23,9 @@ internal enum SsTableRowFormat
 /// <summary>
 /// Streams a row-keyed SSTable to <see cref="Stream"/> block by block: only the current block, the
 /// block index (one record per block), and the Bloom keys (8 B per row) are held in memory,
-/// never the whole file image.
+/// never the whole file image. With <see cref="SsTableSpillOptions"/>, the Bloom keys and the columnar
+/// segment move to temporary files once they outgrow a limit, and only the Bloom filter itself
+/// (about 1.25 B per row) is built in memory, at <see cref="Finish"/>.
 /// </summary>
 /// <remarks>
 /// Entries must arrive sorted by row key ascending, then sequence descending (MemTable and merge order).
@@ -37,7 +39,8 @@ internal sealed class SsTableV2Writer : IDisposable
     private readonly Stream _output;
     private readonly int _alignment;
     private readonly List<SsTableV2BlockInfo> _blocks = [];
-    private readonly List<long> _bloomKeys;
+    private readonly SsTableSpillBuffer _bloomKeys;
+    private long _bloomKeyCount;
 
     private byte[] _entries;
     private byte[] _values;
@@ -74,6 +77,9 @@ internal sealed class SsTableV2Writer : IDisposable
     // Set for a version 8 file: collects the columnar segment written after the last data block.
     private readonly SsTableColumnarWriter? _columnar;
 
+    /// <param name="output">The stream the file is written to.</param>
+    /// <param name="alignment">The block size; 0 for the default.</param>
+    /// <param name="expectedEntries">Unused: the Bloom filter is sized from the distinct keys actually added.</param>
     /// <param name="format">
     /// The block encoding. The engine writes <see cref="SsTableRowFormat.Wide"/>; the integer-keyed
     /// formats (versions 2 and 4) remain for reading old files and for format tests.
@@ -82,12 +88,14 @@ internal sealed class SsTableV2Writer : IDisposable
     /// The columns to write a second time as a columnar segment, which makes the file a version 8 file; null
     /// for a file without one. Needs the <see cref="SsTableRowFormat.Wide"/> format.
     /// </param>
+    /// <param name="spill">Where to keep what outgrows memory until <see cref="Finish"/>; null keeps it all in memory.</param>
     public SsTableV2Writer(
         Stream output,
         int alignment = 0,
         int expectedEntries = 0,
         SsTableRowFormat format = SsTableRowFormat.Wide,
-        DataVo.Core.Indexing.Columnar.ColumnarSpec? columnar = null)
+        DataVo.Core.Indexing.Columnar.ColumnarSpec? columnar = null,
+        SsTableSpillOptions? spill = null)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(output);
         if (!Enum.IsDefined(typeof(SsTableRowFormat), format))
@@ -102,14 +110,15 @@ internal sealed class SsTableV2Writer : IDisposable
 
         _output = output;
         _format = format;
-        _columnar = columnar is null ? null : new SsTableColumnarWriter(columnar);
+        _columnar = columnar is null ? null : new SsTableColumnarWriter(columnar, spill);
         _alignment = alignment == 0 ? SsTableV2Format.DefaultAlignment : alignment;
         if (_alignment < SsTableV2Format.MinimumAlignment || (_alignment & (_alignment - 1)) != 0)
         {
             throw new ArgumentOutOfRangeException(nameof(alignment), alignment, "Block alignment must be a power of two of at least 4 KiB.");
         }
 
-        _bloomKeys = new List<long>(Math.Max(0, expectedEntries));
+        _ = expectedEntries; // kept for callers; the Bloom filter is sized from the keys actually added
+        _bloomKeys = new SsTableSpillBuffer(spill);
         _entries = ArrayPool<byte>.Shared.Rent(_alignment);
         _values = ArrayPool<byte>.Shared.Rent(_alignment);
     }
@@ -166,7 +175,7 @@ internal sealed class SsTableV2Writer : IDisposable
 
         if (!_hasLast || key != _lastKey)
         {
-            _bloomKeys.Add(Wide ? SsTableV2Format.WideBloomKey(key) : key.AsInt64());
+            AddBloomKey(Wide ? SsTableV2Format.WideBloomKey(key) : key.AsInt64());
             _columnar?.Add(key, type, value); // entries descend by sequence: the first of a key is its newest
         }
 
@@ -370,7 +379,7 @@ internal sealed class SsTableV2Writer : IDisposable
         }
 
         // Bloom filter: the header sits right before the 64-byte-aligned blocks.
-        int bloomBlocks = BlockedBloomFilter.ComputeBlockCount(_bloomKeys.Count, SsTableV2Format.BloomBitsPerKey);
+        int bloomBlocks = BlockedBloomFilter.ComputeBlockCount(checked((int)_bloomKeyCount), SsTableV2Format.BloomBitsPerKey);
         int bloomBytes = bloomBlocks * BlockedBloomFilter.BlockBytes;
         PadTo(BlockedBloomFilter.BlockBytes);
         PadBytes(BlockedBloomFilter.BlockBytes - SsTableV2Format.BloomHeaderSize);
@@ -382,11 +391,7 @@ internal sealed class SsTableV2Writer : IDisposable
             bloomSpan.Clear();
             BinaryPrimitives.WriteInt32LittleEndian(bloomSpan[0..], bloomBlocks);
             BinaryPrimitives.WriteInt32LittleEndian(bloomSpan[4..], BlockedBloomFilter.ProbeCount);
-            Span<byte> bits = bloomSpan[SsTableV2Format.BloomHeaderSize..];
-            foreach (long key in _bloomKeys)
-            {
-                BlockedBloomFilter.Add(bits, key);
-            }
+            AddBloomKeysTo(bloomSpan[SsTableV2Format.BloomHeaderSize..]);
 
             Write(bloomSpan);
         }
@@ -449,8 +454,39 @@ internal sealed class SsTableV2Writer : IDisposable
         return (offset, length);
     }
 
+    // Bloom keys are kept as raw little-endian longs, in memory or spilled, until the filter is sized.
+    private void AddBloomKey(long key)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(long)];
+        BinaryPrimitives.WriteInt64LittleEndian(bytes, key);
+        _bloomKeys.Write(bytes);
+        _bloomKeyCount++;
+    }
+
+    private void AddBloomKeysTo(Span<byte> bits)
+    {
+        _bloomKeys.Rewind();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            int read;
+            while ((read = _bloomKeys.Read(buffer.AsSpan(0, 64 * 1024))) > 0)
+            {
+                for (int at = 0; at < read; at += sizeof(long))
+                {
+                    BlockedBloomFilter.Add(bits, BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(at)));
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     public void Dispose()
     {
+        _bloomKeys.Dispose();
         _columnar?.Dispose();
         ArrayPool<byte>.Shared.Return(_entries);
         ArrayPool<byte>.Shared.Return(_values);

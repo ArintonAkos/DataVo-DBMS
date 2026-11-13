@@ -6,6 +6,7 @@ using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
 using DataVo.Core.StorageEngine.Serialization;
+using Xunit.Abstractions;
 
 namespace DataVo.Tests.Lsm;
 
@@ -27,6 +28,12 @@ public sealed class LsmStreamingCompactionTests : IDisposable
     private static readonly ColumnarSpec Spec = new([.. Columns.Select(static c => RowSerializer.ClassifyColumnType(c.Type))], [0, 1, 2], keyOrdinal: -1);
 
     private readonly string _root = TestStorageDirectories.Create("lsm_streaming_compaction");
+    private readonly ITestOutputHelper _output;
+
+    public LsmStreamingCompactionTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     public void Dispose()
     {
@@ -68,7 +75,7 @@ public sealed class LsmStreamingCompactionTests : IDisposable
             }
         }
 
-        AssertSameOutput(directory, manifest, LsmSstableFormat.RowKeyed, columnar ? Spec : null, drop);
+        AssertSameOutput(directory, manifest, LsmSstableFormat.RowKeyed, columnar ? Spec : null, drop, spillLimit: (seed % 3) switch { 0 => 1, 1 => 70_000, _ => SsTableSpillOptions.DefaultMemoryLimit });
     }
 
     [Fact]
@@ -157,9 +164,52 @@ public sealed class LsmStreamingCompactionTests : IDisposable
         Assert.Equal([(1, 7UL, 2), (2, 9UL, 1)], emitted);
     }
 
+    [Fact]
+    public void Compaction_AllocatesNoMemoryPerRow()
+    {
+        (long small, long smallReference) = MeasureCompaction(rows: 50_000);
+        (long large, long largeReference) = MeasureCompaction(rows: 400_000);
+        _output.WriteLine($"50K rows: {small:N0} B (reference {smallReference:N0} B); 400K rows: {large:N0} B (reference {largeReference:N0} B)");
+
+        // What is left grows with the output's size but by less than a byte per row: the Bloom filter (10 bits
+        // per key), the block index and the columnar directory. The in-memory merge allocated ~300 B per row.
+        Assert.True(large - small < 350_000L, $"{large - small:N0} B more for 350K more rows");
+        Assert.True(large * 10 < largeReference, $"{large:N0} B against {largeReference:N0} B for the in-memory merge");
+    }
+
+    private (long Streaming, long Reference) MeasureCompaction(int rows)
+    {
+        string directory = NewDirectory();
+        var manifest = new LsmManifest(Path.Combine(directory, "MANIFEST"));
+        var random = new Random(rows);
+        byte[] row = Row(random);
+        for (int file = 0; file < 2; file++)
+        {
+            // Two files with the same keys: the second replaces every row of the first.
+            var entries = Enumerable.Range(0, rows / 2).Select(i => ((RowKey)i, (ulong)(file * rows) + (ulong)i + 1, LsmValueType.Put)).ToList();
+            WriteRowFile(directory, manifest, 0, entries, entries.ToDictionary(static e => (e.Item1, e.Item2), _ => row), (ulong)((file + 1) * rows), Spec);
+        }
+
+        string copy = NewDirectory();
+        foreach (string file in Directory.EnumerateFiles(directory, "*.sst"))
+        {
+            File.Copy(file, Path.Combine(copy, Path.GetFileName(file)));
+        }
+
+        var compactor = new LsmCompactor(directory, manifest) { Format = LsmSstableFormat.RowKeyed, Columnar = Spec, SpillMemoryLimit = 64 * 1024 };
+        IReadOnlyList<LsmTableFileMetadata> inputs = manifest.GetLiveFiles(0);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        compactor.CompactLevel(0, 1);
+        long streaming = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        ReferenceCompaction.Run(copy, inputs, LsmSstableFormat.RowKeyed, Spec, dropTombstones: false);
+        return (streaming, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
     // Runs the streaming compactor and, on a copy of the inputs made beforehand, the reference; both outputs
     // must be the same bytes (or both absent).
-    private LsmTableFileMetadata? AssertSameOutput(string directory, LsmManifest manifest, LsmSstableFormat format, ColumnarSpec? columnar, bool drop)
+    private LsmTableFileMetadata? AssertSameOutput(string directory, LsmManifest manifest, LsmSstableFormat format, ColumnarSpec? columnar, bool drop, long spillLimit = SsTableSpillOptions.DefaultMemoryLimit)
     {
         string copy = NewDirectory();
         foreach (string file in Directory.EnumerateFiles(directory, "*.sst"))
@@ -167,8 +217,9 @@ public sealed class LsmStreamingCompactionTests : IDisposable
             File.Copy(file, Path.Combine(copy, Path.GetFileName(file)));
         }
 
-        var compactor = new LsmCompactor(directory, manifest) { Format = format, Columnar = columnar };
+        var compactor = new LsmCompactor(directory, manifest) { Format = format, Columnar = columnar, SpillMemoryLimit = spillLimit };
         LsmCompactionResult result = compactor.CompactLevel(0, 1, drop)!.Value;
+        Assert.Empty(Directory.EnumerateFiles(directory, "*" + SsTableSpillOptions.Extension));
 
         byte[]? expected = ReferenceCompaction.Run(copy, result.DeletedFiles, format, columnar, drop);
         if (expected is null)

@@ -52,6 +52,12 @@ public sealed class LsmCompactor
     /// <summary>The columns a row-keyed output file carries as a columnar segment, or null for none.</summary>
     internal DataVo.Core.Indexing.Columnar.ColumnarSpec? Columnar { get; set; }
 
+    /// <summary>
+    /// The bytes a row-keyed output keeps in memory per buffer (Bloom keys, column groups, deleted keys) before
+    /// moving it to a temporary file in the table directory.
+    /// </summary>
+    internal long SpillMemoryLimit { get; set; } = SsTableSpillOptions.DefaultMemoryLimit;
+
     /// <summary>How v2 inputs are read when no registry handle provides a reader.</summary>
     internal LsmReadMode ReadMode { get; set; }
 
@@ -316,7 +322,7 @@ public sealed class LsmCompactor
             overwrite: false,
             stream =>
             {
-                using var writer = new SsTableV2Writer(stream, alignment: 0, columnar: Columnar);
+                using var writer = new SsTableV2Writer(stream, alignment: 0, columnar: Columnar, spill: new SsTableSpillOptions(_tableDirectory, SpillMemoryLimit));
                 do
                 {
                     ReadOnlySpan<byte> key = merge.InternalKey;
