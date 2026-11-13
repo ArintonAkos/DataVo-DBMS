@@ -321,7 +321,7 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
             object? value = result.Data.Count == 0 ? null : result.Data[0][result.Fields[i]];
             long? actual = value is null ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
             Assert.True(
-                (expected[i] ?? 0) == (actual ?? 0) && (expected[i] is null || actual is not null),
+                expected[i] == actual,
                 $"cycle {cycle}: '{sql}' column {i} is {value ?? "NULL"}, the model says {expected[i]?.ToString(CultureInfo.InvariantCulture) ?? "NULL"}");
         }
     }
