@@ -126,6 +126,25 @@ public sealed class PackedKeyLookupTests : IDisposable
     }
 
     [Fact]
+    public void TypedBatchInsert_ReadsTheCellsDuringTheCall_SoOneBufferCanCarryEveryRow()
+    {
+        using DataVoContext db = Open();
+        CellValue[] buffer = Cells(Hero(1));
+        for (int i = 1; i <= 50; i++)
+        {
+            Cells(Hero(i)).CopyTo(buffer, 0);
+            db.InsertTypedBatch("packed_heroes", Schema, [buffer], callerOwnsRowBuffers: true);
+        }
+
+        Array.Clear(buffer);
+        DataVoTable<PackedHero> heroes = db.Table<PackedHero>();
+        for (int i = 1; i <= 50; i++)
+        {
+            AssertSame(Hero(i), heroes.FirstOrDefault(i, static (hero, id) => hero.Id == id));
+        }
+    }
+
+    [Fact]
     public void Lookup_OfAMissingOrDeletedKey_IsLeftToTheStatement_WhichFindsNothing()
     {
         using DataVoContext db = Open();

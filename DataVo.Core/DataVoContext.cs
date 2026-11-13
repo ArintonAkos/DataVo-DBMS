@@ -540,7 +540,8 @@ public sealed class DataVoContext : IDisposable
     /// By default the supplied cell arrays are consumed as immutable row buffers and must not be mutated after
     /// this call. With <paramref name="callerOwnsRowBuffers"/> the caller keeps ownership and may reuse the
     /// arrays immediately after the call returns (e.g. pooled row buffers during bulk ingest); the engine
-    /// copies a row only when something actually retains it (in-memory typed storage, change capture).
+    /// copies a row only when something actually retains it, which only change capture does: every storage
+    /// mode reads the cells during the call and keeps its own form of the row.
     /// </summary>
     public IReadOnlyList<RowKey> InsertTypedBatch(
         string tableName,

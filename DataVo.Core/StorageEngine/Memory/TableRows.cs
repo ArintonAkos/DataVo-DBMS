@@ -52,12 +52,13 @@ internal sealed class TableRows
 
     /// <summary>Appends a typed row. Called by the writer.</summary>
     /// <param name="columns">The table's columns in catalog order; they shape the table's first typed row and those after it.</param>
-    /// <param name="row">The row. Its cells are copied.</param>
+    /// <param name="schema">The column names of the row's cells.</param>
+    /// <param name="cells">The row's cells. They are copied; the caller keeps its buffer.</param>
     /// <returns>The row's position.</returns>
-    public int AddTyped(IReadOnlyList<Column> columns, StoredRow row)
+    public int AddTyped(IReadOnlyList<Column> columns, ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
     {
-        FlatRowStore flat = _flat ?? StartTypedRows(columns, row.Schema);
-        flat.Add(row.Cells);
+        FlatRowStore flat = _flat ?? StartTypedRows(columns, schema);
+        flat.Add(cells);
         int position = _count;
         Volatile.Write(ref _count, position + 1);
         return position;

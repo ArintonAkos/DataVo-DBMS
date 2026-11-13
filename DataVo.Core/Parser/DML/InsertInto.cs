@@ -97,9 +97,9 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         // skipping a dictionary per row and its normalization. Any value the conversion rejects (and
         // transactions, which buffer rows differently) take the general path below, so error messages
         // stay exactly those of the general path.
-        // In-memory storage keeps typed inserts as typed row objects, which some older paths (foreign-key
+        // In-memory storage keeps typed inserts as packed typed rows, which some older paths (foreign-key
         // cascades, VACUUM) cannot read; serializing backends (LSM, Disk) store bytes either way.
-        if (txContext is null && !Context.RetainsTypedRowBuffers && TryBuildTypedRows(tableColumns, hasColumns, out ReactiveRowSchema? schema, out List<CellValue[]>? typedRows))
+        if (txContext is null && !Context.KeepsTypedRowsTyped && TryBuildTypedRows(tableColumns, hasColumns, out ReactiveRowSchema? schema, out List<CellValue[]>? typedRows))
         {
             try
             {

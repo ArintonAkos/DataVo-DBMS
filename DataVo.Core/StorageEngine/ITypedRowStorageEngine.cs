@@ -20,13 +20,14 @@ internal interface ITypedRowStorageEngine
     /// <param name="databaseName">The owning database.</param>
     /// <param name="tableName">The table.</param>
     /// <param name="columns">The table's columns in catalog order, which give the rows their stored shape.</param>
-    /// <param name="row">The row. Its cells are copied; the engine keeps no reference to it.</param>
+    /// <param name="schema">The column names of the row's cells, kept for reading rows back as objects.</param>
+    /// <param name="cells">The row's cells. They are copied; the engine keeps no reference to the caller's buffer.</param>
     /// <returns>The row's 1-based id.</returns>
-    long InsertTypedRow(string databaseName, string tableName, IReadOnlyList<Column> columns, StoredRow row);
+    long InsertTypedRow(string databaseName, string tableName, IReadOnlyList<Column> columns, ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells);
 
     /// <summary>Inserts typed rows; see <see cref="InsertTypedRow"/>.</summary>
     /// <returns>The rows' 1-based ids, in the order given.</returns>
-    List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<Column> columns, IReadOnlyList<StoredRow> rows);
+    List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<Column> columns, ReactiveRowSchema schema, IReadOnlyList<CellValue[]> rows);
 
     /// <summary>Copies a live typed row out as an object of its own. Allocates; prefer <see cref="TryVisitTypedCells"/>.</summary>
     bool TryReadTypedRow(string databaseName, string tableName, long rowId, out StoredRow? row);

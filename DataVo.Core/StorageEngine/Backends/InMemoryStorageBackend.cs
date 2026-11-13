@@ -11,10 +11,10 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
 
     public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
     public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => RowKeyConversions.ToRowKeys(_inner.InsertRows(databaseName, tableName, rowsBytes));
-    public long InsertTypedRow(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, StoredRow row) =>
-        ((ITypedRowStorageEngine)_inner).InsertTypedRow(databaseName, tableName, columns, row);
-    public List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, IReadOnlyList<StoredRow> rows) =>
-        ((ITypedRowStorageEngine)_inner).InsertTypedRows(databaseName, tableName, columns, rows);
+    public long InsertTypedRow(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, DataVo.Core.Runtime.Reactive.ReactiveRowSchema schema, ReadOnlySpan<DataVo.Core.Runtime.Reactive.CellValue> cells) =>
+        ((ITypedRowStorageEngine)_inner).InsertTypedRow(databaseName, tableName, columns, schema, cells);
+    public List<long> InsertTypedRows(string databaseName, string tableName, IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns, DataVo.Core.Runtime.Reactive.ReactiveRowSchema schema, IReadOnlyList<DataVo.Core.Runtime.Reactive.CellValue[]> rows) =>
+        ((ITypedRowStorageEngine)_inner).InsertTypedRows(databaseName, tableName, columns, schema, rows);
     public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => _inner.ReadRow(databaseName, tableName, (long)rowId);
     public bool TryReadTypedRow(string databaseName, string tableName, long rowId, out StoredRow? row) =>
         ((ITypedRowStorageEngine)_inner).TryReadTypedRow(databaseName, tableName, rowId, out row);

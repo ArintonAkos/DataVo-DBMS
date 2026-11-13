@@ -431,17 +431,16 @@ internal sealed partial class InsertRowService(
             }
         }
 
-        // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point;
-        // later uses in this method must remain read-only after handing ownership to StoredRow.
+        // normalizedCells is freshly allocated by NormalizeTypedCells and is not mutated after this point:
+        // storage reads it during the insert and keeps nothing, and a recorder shares it with the captured row.
         recorder?.AnnounceTypedInsert(tableName, TypedRow.FromOwnedCells(columns, normalizedCells));
-        var storedRow = StoredRow.FromOwnedCells(columns, normalizedCells);
-        RowKey rowId = context.InsertTypedRow(storedRow, tableColumns, tableName, databaseName);
+        RowKey rowId = context.InsertTypedRow(normalizedCells, columns, tableColumns, tableName, databaseName);
         MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, rowId, statementTxId);
         InsertTypedIndexes(tableName, databaseName, columns, normalizedCells, rowId, indexFiles);
 
         if (recorder is not null)
         {
-            // Share the StoredRow's owned, immutable cells with the captured after-image (no clone, no
+            // Share the owned, immutable cells with the captured after-image (no clone, no
             // eager dict); the owned dict is materialized lazily only if an owned subscriber reads it
             // (Slice 5 P3, lever 4). normalizedCells is never mutated after this point.
             recorder.RecordTypedInsert(tableName, rowId, TypedRow.FromOwnedCells(columns, normalizedCells));
@@ -601,11 +600,11 @@ internal sealed partial class InsertRowService(
             }
         }
 
-        // Caller-owned buffers are copied only when something retains cells past this call: in-memory
-        // typed storage keeps the StoredRow itself, and a change recorder captures the after-image.
-        // Serialize-through backends (LSM/disk) read the cells transiently, so no copy is needed.
+        // Caller-owned buffers are copied only when something retains cells past this call, and only a
+        // change recorder does: it captures the after-image. Every backend reads the cells during the
+        // insert (in-memory storage packs them, LSM and disk serialize them), so storage needs no copy.
         IReadOnlyList<CellValue[]> ownedRows = rows;
-        if (callerOwnsRowBuffers && (context.RetainsTypedRowBuffers || recorder is not null))
+        if (callerOwnsRowBuffers && recorder is not null)
         {
             var copies = new CellValue[rows.Count][];
             for (int i = 0; i < rows.Count; i++)
@@ -624,23 +623,8 @@ internal sealed partial class InsertRowService(
             }
         }
 
-        IReadOnlyList<RowKey> rowIds;
-        if (context.RetainsTypedRowBuffers)
-        {
-            var storedRows = new List<StoredRow>(rows.Count);
-            for (int i = 0; i < rows.Count; i++)
-            {
-                storedRows.Add(StoredRow.FromOwnedCells(columns, ownedRows[i]));
-            }
-
-            rowIds = context.InsertTypedRows(storedRows, tableColumns, tableName, databaseName);
-        }
-        else
-        {
-            // Serialize-through backends (LSM/disk) read the cells transiently, so skip the
-            // per-row StoredRow wrappers entirely and serialize straight from the cell buffers.
-            rowIds = context.InsertTypedCellRows(tableColumns, ownedRows, tableName, databaseName);
-        }
+        // Storage reads the cells straight from the buffers: no per-row wrapper for any backend.
+        IReadOnlyList<RowKey> rowIds = context.InsertTypedCellRows(tableColumns, columns, ownedRows, tableName, databaseName);
         MvccCoordinator.RegisterInsertVersions(engine, databaseName, tableName, rowIds, statementTxId);
         InsertTypedIndexesBatch(
             tableName,

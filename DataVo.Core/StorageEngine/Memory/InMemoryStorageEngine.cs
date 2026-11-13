@@ -57,10 +57,10 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
 
         /// <summary>Appends a typed row, and its position in the columnar index. The caller holds the write lock.</summary>
         /// <returns>The row's 1-based id.</returns>
-        public long AddTyped(IReadOnlyList<Column> columns, StoredRow row)
+        public long AddTyped(IReadOnlyList<Column> columns, ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
         {
-            int position = Rows.AddTyped(columns, row);
-            Columnar?.Append(default, row.Cells);
+            int position = Rows.AddTyped(columns, schema, cells);
+            Columnar?.Append(default, cells);
             return position + 1;
         }
     }
@@ -683,14 +683,14 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         }
     }
 
-    long ITypedRowStorageEngine.InsertTypedRow(string databaseName, string tableName, IReadOnlyList<Column> columns, StoredRow row)
+    long ITypedRowStorageEngine.InsertTypedRow(string databaseName, string tableName, IReadOnlyList<Column> columns, ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells)
     {
         TableStore store = GetOrAddTable(databaseName, tableName);
 
         store.Lock.EnterWriteLock();
         try
         {
-            return store.AddTyped(columns, row);
+            return store.AddTyped(columns, schema, cells);
         }
         finally
         {
@@ -698,7 +698,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         }
     }
 
-    List<long> ITypedRowStorageEngine.InsertTypedRows(string databaseName, string tableName, IReadOnlyList<Column> columns, IReadOnlyList<StoredRow> rows)
+    List<long> ITypedRowStorageEngine.InsertTypedRows(string databaseName, string tableName, IReadOnlyList<Column> columns, ReactiveRowSchema schema, IReadOnlyList<CellValue[]> rows)
     {
         var rowIds = new List<long>(rows.Count);
         TableStore store = GetOrAddTable(databaseName, tableName);
@@ -706,9 +706,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         store.Lock.EnterWriteLock();
         try
         {
-            foreach (StoredRow row in rows)
+            for (int i = 0; i < rows.Count; i++)
             {
-                rowIds.Add(store.AddTyped(columns, row));
+                rowIds.Add(store.AddTyped(columns, schema, rows[i]));
             }
         }
         finally

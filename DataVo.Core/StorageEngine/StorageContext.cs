@@ -268,27 +268,6 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Serializes and inserts typed storage rows without materializing dictionaries.
-    /// </summary>
-    internal List<RowKey> InsertTypedRows(IReadOnlyList<StoredRow> rows, IReadOnlyList<Column> columns, string tableName, string databaseName)
-    {
-        if (rows.Count == 0) return [];
-
-        if (_storageEngine is ITypedRowStorageEngine typedStorage)
-        {
-            return RowKeyConversions.ToRowKeys(typedStorage.InsertTypedRows(databaseName, tableName, columns, rows));
-        }
-
-        var serializedRows = new List<byte[]>(rows.Count);
-        foreach (StoredRow row in rows)
-        {
-            serializedRows.Add(RowSerializer.SerializeCells(columns, row.AsView().Cells));
-        }
-
-        return (_storageEngine.InsertRows(databaseName, tableName, serializedRows));
-    }
-
-    /// <summary>
     /// Scratch list handed to <see cref="IStorageEngine.InsertRows"/>, which only iterates it (no
     /// backend retains the list itself — the LSM/disk engines retain or write the row buffers).
     /// Thread-static so concurrent sessions never share it; cleared after use so it doesn't pin
@@ -298,24 +277,28 @@ public class StorageContext(DataVoConfig config) : IDisposable
     private static List<byte[]>? _typedInsertSerializeScratch;
 
     /// <summary>
-    /// Serializes and inserts full typed cell rows for serialize-through backends without
-    /// materializing per-row <see cref="StoredRow"/> wrappers. Wire-identical to
-    /// <see cref="InsertTypedRows(IReadOnlyList{StoredRow}, IReadOnlyList{Column}, string, string)"/>. Must not be used
-    /// when <see cref="RetainsTypedRowBuffers"/> is <see langword="true"/> — in-memory typed storage
-    /// needs the row wrappers themselves.
+    /// Inserts full typed cell rows. A typed backend packs the cells; a serializing backend (LSM, disk)
+    /// serializes them. Either way the cells are read during the call and no backend keeps the caller's
+    /// arrays, so no per-row wrapper or copy is made.
     /// </summary>
+    /// <param name="columns">The table's columns in catalog order.</param>
+    /// <param name="schema">The column names of the rows' cells.</param>
+    /// <param name="rows">The rows, each one cell per column.</param>
+    /// <param name="tableName">The target table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The assigned row identifiers, in the order given.</returns>
     internal List<RowKey> InsertTypedCellRows(
         IReadOnlyList<Column> columns,
+        ReactiveRowSchema schema,
         IReadOnlyList<CellValue[]> rows,
         string tableName,
         string databaseName)
     {
         if (rows.Count == 0) return [];
 
-        if (_storageEngine is ITypedRowStorageEngine)
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            throw new InvalidOperationException(
-                "InsertTypedCellRows is only valid for serialize-through backends; typed storage retains row buffers.");
+            return RowKeyConversions.ToRowKeys(typedStorage.InsertTypedRows(databaseName, tableName, columns, schema, rows));
         }
 
         // A clustered table's rows go straight to their stored form: the key comes from the cells and the
@@ -354,17 +337,23 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Serializes and inserts a single typed storage row via the single-row backend path, without
-    /// per-row List churn or a redundant catalog column lookup. Wire-identical to the batch path.
+    /// Inserts a single typed row via the single-row backend path, without per-row List churn, a row wrapper
+    /// or a redundant catalog column lookup. Wire-identical to the batch path.
     /// </summary>
-    internal RowKey InsertTypedRow(StoredRow row, IReadOnlyList<Column> columns, string tableName, string databaseName)
+    /// <param name="cells">The row's cells, one per column. They are read during the call and not kept.</param>
+    /// <param name="schema">The column names of the cells.</param>
+    /// <param name="columns">The table's columns in catalog order.</param>
+    /// <param name="tableName">The target table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The assigned row identifier.</returns>
+    internal RowKey InsertTypedRow(ReadOnlySpan<CellValue> cells, ReactiveRowSchema schema, IReadOnlyList<Column> columns, string tableName, string databaseName)
     {
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
         {
-            return typedStorage.InsertTypedRow(databaseName, tableName, columns, row);
+            return typedStorage.InsertTypedRow(databaseName, tableName, columns, schema, cells);
         }
 
-        byte[] serialized = RowSerializer.SerializeCells(columns, row.AsView().Cells);
+        byte[] serialized = RowSerializer.SerializeCells(columns, cells);
         return _storageEngine.InsertRow(databaseName, tableName, serialized);
     }
 
@@ -526,10 +515,11 @@ public class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Whether the active backend retains typed row cell buffers as its storage representation
-    /// (in-memory typed storage) rather than serializing them transiently during the insert call.
+    /// Whether the active backend keeps a typed insert in a typed form of its own (in-memory storage packs
+    /// it) rather than as serialized bytes. Such rows are read through the typed paths only; the paths that
+    /// read serialized bytes do not see them. No backend keeps the caller's cell buffers.
     /// </summary>
-    internal bool RetainsTypedRowBuffers => _storageEngine is ITypedRowStorageEngine;
+    internal bool KeepsTypedRowsTyped => _storageEngine is ITypedRowStorageEngine;
 
     /// <summary>
     /// A table whose typed rows can be read in place from packed records; null when the backend keeps rows

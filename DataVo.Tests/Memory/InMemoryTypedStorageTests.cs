@@ -25,12 +25,12 @@ public class InMemoryTypedStorageTests
 
     private static readonly ReactiveRowSchema Schema = new("Id", "Gold", "Name");
 
-    private static StoredRow Typed(int id) =>
-        new(Schema, [CellValue.From(id), CellValue.From(id * 10L), CellValue.From("n" + id)]);
+    private static CellValue[] Typed(int id) =>
+        [CellValue.From(id), CellValue.From(id * 10L), CellValue.From("n" + id)];
 
     /// <summary>A typed row whose INT column holds a BIGINT cell, so it cannot be packed.</summary>
-    private static StoredRow Odd(int id) =>
-        new(Schema, [CellValue.From((long)id), CellValue.From(id * 10L), CellValue.From("n" + id)]);
+    private static CellValue[] Odd(int id) =>
+        [CellValue.From((long)id), CellValue.From(id * 10L), CellValue.From("n" + id)];
 
     private static byte[] Raw(int id) =>
         RowSerializer.SerializeCells(Columns, [CellValue.From(id), CellValue.From(id * 10L), CellValue.From("n" + id)]);
@@ -81,7 +81,7 @@ public class InMemoryTypedStorageTests
         var serializedOnly = new TableRows();
         for (int id = 1; id <= 5000; id++)
         {
-            Assert.Equal(id - 1, typedOnly.AddTyped(Columns, Typed(id)));
+            Assert.Equal(id - 1, typedOnly.AddTyped(Columns, Schema, Typed(id)));
             Assert.Equal(id - 1, serializedOnly.AddRaw(Raw(id)));
         }
 
@@ -99,10 +99,10 @@ public class InMemoryTypedStorageTests
     {
         var rows = new TableRows();
         Assert.Equal(0, rows.AddRaw(Raw(1)));          // before any typed row
-        Assert.Equal(1, rows.AddTyped(Columns, Typed(2)));
+        Assert.Equal(1, rows.AddTyped(Columns, Schema, Typed(2)));
         Assert.Equal(2, rows.AddRaw(Raw(3)));          // after the packed store began
-        Assert.Equal(3, rows.AddTyped(Columns, Odd(4)));
-        Assert.Equal(4, rows.AddTyped(Columns, Typed(5)));
+        Assert.Equal(3, rows.AddTyped(Columns, Schema, Odd(4)));
+        Assert.Equal(4, rows.AddTyped(Columns, Schema, Typed(5)));
 
         Assert.Equal(5, rows.Count);
         Assert.NotNull(rows.RawAt(0));
@@ -132,8 +132,8 @@ public class InMemoryTypedStorageTests
     {
         var rows = new TableRows();
         rows.AddRaw(Raw(1));
-        rows.AddTyped(Columns, Typed(2));
-        rows.AddTyped(Columns, Odd(3));
+        rows.AddTyped(Columns, Schema, Typed(2));
+        rows.AddTyped(Columns, Schema, Odd(3));
         rows.Remove(1);
 
         TableRows copy = rows.Clone();
@@ -147,7 +147,7 @@ public class InMemoryTypedStorageTests
         Assert.True(copy.TryCopyTyped(2, out StoredRow? odd));
         Assert.Equal(3L, odd![0].AsInt64());
         Assert.Equal(1, copy.KeptApartCount);
-        Assert.Equal(3, copy.AddTyped(Columns, Typed(4)));
+        Assert.Equal(3, copy.AddTyped(Columns, Schema, Typed(4)));
         Assert.Equal(3, rows.Count);
     }
 
@@ -156,9 +156,9 @@ public class InMemoryTypedStorageTests
     {
         var engine = new InMemoryStorageEngine();
         Assert.Equal(1, engine.InsertRow(Db, Table, Raw(1)));
-        Assert.Equal(2, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(2)));
+        Assert.Equal(2, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(2)));
         Assert.Equal([3L, 4L], engine.InsertRows(Db, Table, [Raw(3), Raw(4)]));
-        Assert.Equal([5L, 6L], TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(5), Odd(6)]));
+        Assert.Equal([5L, 6L], TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(5), Odd(6)]));
 
         Assert.Equal(Raw(3), engine.ReadRow(Db, Table, 3));
         Assert.Throws<InvalidOperationException>(() => engine.ReadRow(Db, Table, 2));
@@ -179,7 +179,7 @@ public class InMemoryTypedStorageTests
         Assert.False(TypedEngine(engine).TryReadTypedRow(Db, Table, 2, out _));
         Assert.Throws<RowDeletedException>(() => engine.ReadRow(Db, Table, 3));
         Assert.Throws<RowDeletedException>(() => engine.ReadRow(Db, Table, 2));
-        Assert.Equal(7, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(7)));
+        Assert.Equal(7, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(7)));
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class InMemoryTypedStorageTests
     {
         var engine = new InMemoryStorageEngine();
         engine.InsertRow(Db, Table, Raw(1));
-        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(2), Odd(3), Typed(4)]);
+        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(2), Odd(3), Typed(4)]);
         engine.InsertRow(Db, Table, Raw(5));
         engine.DeleteRow(Db, Table, 4);
 
@@ -203,7 +203,7 @@ public class InMemoryTypedStorageTests
     public void Engine_VisitTypedRows_StopsWhenTheVisitorSaysSo()
     {
         var engine = new InMemoryStorageEngine();
-        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(1), Typed(2), Typed(3)]);
+        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(1), Typed(2), Typed(3)]);
 
         var ids = new List<long>();
         TypedEngine(engine).VisitTypedRows(Db, Table, ref ids,
@@ -220,7 +220,7 @@ public class InMemoryTypedStorageTests
     public void Engine_AVisitorMayReadOtherRowsOnTheSameThread_WithoutLosingTheCellsItHolds()
     {
         var engine = new InMemoryStorageEngine();
-        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(1), Typed(2), Typed(3)]);
+        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(1), Typed(2), Typed(3)]);
 
         var state = (Engine: engine, Seen: new List<string>());
         TypedEngine(engine).VisitTypedRows(Db, Table, ref state,
@@ -267,12 +267,12 @@ public class InMemoryTypedStorageTests
         var engine = new InMemoryStorageEngine();
         IInMemoryStorageSnapshotProvider snapshots = engine;
         engine.InsertRow(Db, Table, Raw(1));
-        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(2), Odd(3)]);
+        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(2), Odd(3)]);
         InMemoryStorageSnapshot snapshot = snapshots.CreateSnapshot();
 
         engine.DeleteRow(Db, Table, 1);
         engine.DeleteRow(Db, Table, 3);
-        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(4));
+        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(4));
 
         for (int round = 0; round < 2; round++) // a snapshot can be restored more than once
         {
@@ -283,7 +283,7 @@ public class InMemoryTypedStorageTests
             Assert.Equal(3L, odd![0].AsInt64());
             Assert.Null(NameOf(engine, 4));
             engine.DeleteRow(Db, Table, 2);
-            Assert.Equal(4, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(9)));
+            Assert.Equal(4, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(9)));
         }
     }
 
@@ -291,13 +291,13 @@ public class InMemoryTypedStorageTests
     public void Engine_DropTable_ForgetsTheLayout_SoTheTableCanComeBackWithOtherColumns()
     {
         var engine = new InMemoryStorageEngine();
-        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, [Typed(1), Odd(2)]);
+        TypedEngine(engine).InsertTypedRows(Db, Table, Columns, Schema, [Typed(1), Odd(2)]);
         engine.DropTable(Db, Table);
 
         Column[] wider = [.. Columns, new Column { Name = "Active", Type = "BIT" }];
         var schema = new ReactiveRowSchema("Id", "Gold", "Name", "Active");
-        var row = new StoredRow(schema, [CellValue.From(1), CellValue.From(5L), CellValue.From("x"), CellValue.From(true)]);
-        Assert.Equal(1, TypedEngine(engine).InsertTypedRow(Db, Table, wider, row));
+        CellValue[] row = [CellValue.From(1), CellValue.From(5L), CellValue.From("x"), CellValue.From(true)];
+        Assert.Equal(1, TypedEngine(engine).InsertTypedRow(Db, Table, wider, schema, row));
 
         Assert.True(TypedEngine(engine).TryReadTypedRow(Db, Table, 1, out StoredRow? read));
         Assert.Equal(4, read!.Count);
@@ -310,7 +310,7 @@ public class InMemoryTypedStorageTests
     {
         var engine = new InMemoryStorageEngine();
         engine.InsertRows(Db, Table, [Raw(1), Raw(2), Raw(3)]);
-        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(4));
+        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(4));
         engine.DeleteRow(Db, Table, 2);
 
         Assert.Throws<InvalidOperationException>(() => engine.CompactTable(Db, Table));
@@ -319,7 +319,7 @@ public class InMemoryTypedStorageTests
         List<(long NewRowId, byte[] RawRow)> compacted = engine.CompactTable(Db, Table);
         Assert.Equal([1L, 2L], compacted.Select(row => row.NewRowId));
         Assert.Equal(Raw(3), engine.ReadRow(Db, Table, 2));
-        Assert.Equal(3, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Typed(5)));
+        Assert.Equal(3, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(5)));
         Assert.Equal("n5", NameOf(engine, 3));
     }
 }
