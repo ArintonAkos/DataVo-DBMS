@@ -71,11 +71,23 @@ internal sealed class SsTableV2Writer : IDisposable
     private bool _blockWide; // the current block uses the wide encoding (v6 files, non-integer keys)
     private ulong _previousTagInBlock;
 
+    // Set for a version 8 file: collects the columnar segment written after the last data block.
+    private readonly SsTableColumnarWriter? _columnar;
+
     /// <param name="format">
     /// The block encoding. The engine writes <see cref="SsTableRowFormat.Wide"/>; the integer-keyed
     /// formats (versions 2 and 4) remain for reading old files and for format tests.
     /// </param>
-    public SsTableV2Writer(Stream output, int alignment = 0, int expectedEntries = 0, SsTableRowFormat format = SsTableRowFormat.Wide)
+    /// <param name="columnar">
+    /// The columns to write a second time as a columnar segment, which makes the file a version 8 file; null
+    /// for a file without one. Needs the <see cref="SsTableRowFormat.Wide"/> format.
+    /// </param>
+    public SsTableV2Writer(
+        Stream output,
+        int alignment = 0,
+        int expectedEntries = 0,
+        SsTableRowFormat format = SsTableRowFormat.Wide,
+        DataVo.Core.Indexing.Columnar.ColumnarSpec? columnar = null)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(output);
         if (!Enum.IsDefined(typeof(SsTableRowFormat), format))
@@ -83,8 +95,14 @@ internal sealed class SsTableV2Writer : IDisposable
             throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown row SSTable format.");
         }
 
+        if (columnar is not null && format != SsTableRowFormat.Wide)
+        {
+            throw new ArgumentException("Only a file of the wide format can carry a columnar segment.", nameof(columnar));
+        }
+
         _output = output;
         _format = format;
+        _columnar = columnar is null ? null : new SsTableColumnarWriter(columnar);
         _alignment = alignment == 0 ? SsTableV2Format.DefaultAlignment : alignment;
         if (_alignment < SsTableV2Format.MinimumAlignment || (_alignment & (_alignment - 1)) != 0)
         {
@@ -101,7 +119,7 @@ internal sealed class SsTableV2Writer : IDisposable
 
     public long EntryCount => _entryTotal;
 
-    private ushort FileVersion => (ushort)_format;
+    private ushort FileVersion => _columnar is null ? (ushort)_format : SsTableV2Format.ColumnarVersion;
 
     private bool Wide => _format == SsTableRowFormat.Wide;
 
@@ -149,6 +167,7 @@ internal sealed class SsTableV2Writer : IDisposable
         if (!_hasLast || key != _lastKey)
         {
             _bloomKeys.Add(Wide ? SsTableV2Format.WideBloomKey(key) : key.AsInt64());
+            _columnar?.Add(key, type, value); // entries descend by sequence: the first of a key is its newest
         }
 
         if (!_hasLast)
@@ -326,6 +345,8 @@ internal sealed class SsTableV2Writer : IDisposable
             FlushBlock();
         }
 
+        (long columnarOffset, int columnarLength) = WriteColumnarSegment();
+
         // Block index.
         PadTo(8);
         long indexOffset = _position;
@@ -395,20 +416,42 @@ internal sealed class SsTableV2Writer : IDisposable
         Write(properties);
 
         // Footer.
-        Span<byte> footer = stackalloc byte[SsTableV2Format.FooterSize];
+        Span<byte> footer = stackalloc byte[SsTableV2Format.FooterSizeOf(FileVersion)];
         WriteHandle(footer[0..], indexOffset, indexLength);
         WriteHandle(footer[12..], bloomOffset, bloomLength);
         WriteHandle(footer[24..], propertiesOffset, properties.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(footer[36..], _alignment);
-        BinaryPrimitives.WriteUInt16LittleEndian(footer[40..], FileVersion);
-        BinaryPrimitives.WriteUInt32LittleEndian(footer[42..], SsTableV2Format.Magic);
+        Span<byte> tail = footer[(SsTableV2Format.BlockHandleSize * 3)..];
+        if (_columnar is not null)
+        {
+            WriteHandle(tail, columnarOffset, columnarLength);
+            tail = tail[SsTableV2Format.BlockHandleSize..];
+        }
+
+        BinaryPrimitives.WriteInt32LittleEndian(tail[0..], _alignment);
+        BinaryPrimitives.WriteUInt16LittleEndian(tail[4..], FileVersion);
+        BinaryPrimitives.WriteUInt32LittleEndian(tail[6..], SsTableV2Format.Magic);
         Write(footer);
         _output.Flush();
         return _position;
     }
 
+    // Writes the columnar segment of a version 8 file after the data blocks and returns its directory's handle.
+    private (long Offset, int Length) WriteColumnarSegment()
+    {
+        if (_columnar is null)
+        {
+            return (0, 0);
+        }
+
+        PadTo(SsTableColumnarFormat.Alignment);
+        (long offset, int length, long end) = _columnar.WriteTo(_output, _position);
+        _position = end;
+        return (offset, length);
+    }
+
     public void Dispose()
     {
+        _columnar?.Dispose();
         ArrayPool<byte>.Shared.Return(_entries);
         ArrayPool<byte>.Shared.Return(_values);
         _entries = [];
