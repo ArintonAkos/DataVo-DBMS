@@ -59,6 +59,14 @@ Future tooling process (v0.3+)
   -> Embedded LSM storage
 ```
 
+## Planned v0.4
+
+### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks)
+
+In v0.3 a columnar index on an LSM table is derived state held in memory: it is rebuilt from the table's rows on first use after the database is opened, and it does not change how rows are stored, so primary-key lookups on the LSM engine keep their cost (239 ns in the current benchmarks). That design needs RAM for every indexed column, which rules it out for datasets larger than memory.
+
+v0.4 plans native columnar storage in the SSTable format itself: column chunks written at flush and merged at compaction, read from disk a chunk at a time, so analytical scans work on data that does not fit in memory and nothing has to be rebuilt on open. This is planned work; nothing of it exists yet.
+
 ## Ecosystem & Platform Evaluation Lanes
 
 - **Unity Integration (Evaluation Target):** A narrow managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls are unsupported by design; Windows IL2CPP validation and broader game-save durability proofs remain separate evaluation gates.
@@ -74,8 +82,9 @@ Future tooling process (v0.3+)
 | Zero-alloc in-memory point lookup & `RowRef` streaming | Completed (`v0.2.0-rc.3`) | `56 B`, ~`405 ns` PK fast path; 0 B heap allocation on `StreamRef()`. |
 | SIMD vector search (`HNSW` & `FLAT`) | Completed (`v0.2.0-rc.3`) | Cosine (`<=>`) and L2 (`<->`) distance operators. |
 | NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
-| Columnar Indexes for HTAP | Active (`v0.3`) | Hybrid transactional/analytical scans to compete with DuckDB on large aggregations. |
-| Compact in-memory row layout | Active (`v0.3`) | Dense memory representation for lower footprint and higher cache locality. |
+| Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
+| Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
+| On-disk columnar SSTable storage (out-of-core, Parquet-style chunks) | Planned (`v0.4`) | Analytical scans over datasets larger than memory, with no rebuild on open. |
 | PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
 | Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
 | Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |

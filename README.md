@@ -31,7 +31,7 @@ The most important distinction is durability. `DataVo LSM Production` waits for 
 BenchmarkDotNet suite against `Microsoft.Data.Sqlite` and DuckDB (`benchmarks/DataVo.Benchmarks`):
 
 - Filtered `COUNT`, `SUM`, `MIN` and `MAX` over 200,000 in-memory rows: DataVo takes 386 to 526 µs and allocates nothing. That is 9 to 10 times faster than SQLite. DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo, and 3 to 8 times faster on file-backed data, because it is a column store.
-- One row by primary key on the LSM engine: 242 ns for DataVo, 1,628 ns for SQLite, about 75 µs for DuckDB.
+- One row by primary key: 52.1 ns in memory and 236 ns on the LSM engine for DataVo, versus 736 ns and 1,609 ns for SQLite, and 65–75 µs for DuckDB.
 - Loading 100,000 rows: DataVo and DuckDB are within noise of each other in memory. On files the DataVo and SQLite results overlap.
 
 Systems workloads (`demos/Research.Benchmark`):

@@ -300,6 +300,14 @@ Future tooling process (v0.3+)
   -> Embedded LSM storage
 ```
 
+## Planned v0.4
+
+### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks)
+
+In v0.3 a columnar index on an LSM table is derived state held in memory: it is rebuilt from the table's rows on first use after the database is opened, and it does not change how rows are stored, so primary-key lookups on the LSM engine keep their cost (239 ns in the current benchmarks). That design needs RAM for every indexed column, which rules it out for datasets larger than memory.
+
+v0.4 plans native columnar storage in the SSTable format itself: column chunks written at flush and merged at compaction, read from disk a chunk at a time, so analytical scans work on data that does not fit in memory and nothing has to be rebuilt on open. This is planned work; nothing of it exists yet.
+
 ## Ecosystem & Platform Evaluation Lanes
 
 - **Unity Integration (Evaluation Target):** A narrow managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls are unsupported by design; Windows IL2CPP validation and broader game-save durability proofs remain separate evaluation gates.
@@ -315,8 +323,9 @@ Future tooling process (v0.3+)
 | Zero-alloc in-memory point lookup & `RowRef` streaming | Completed (`v0.2.0-rc.3`) | `56 B`, ~`405 ns` PK fast path; 0 B heap allocation on `StreamRef()`. |
 | SIMD vector search (`HNSW` & `FLAT`) | Completed (`v0.2.0-rc.3`) | Cosine (`<=>`) and L2 (`<->`) distance operators. |
 | NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
-| Columnar Indexes for HTAP | Active (`v0.3`) | Hybrid transactional/analytical scans to compete with DuckDB on large aggregations. |
-| Compact in-memory row layout | Active (`v0.3`) | Dense memory representation for lower footprint and higher cache locality. |
+| Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
+| Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
+| On-disk columnar SSTable storage (out-of-core, Parquet-style chunks) | Planned (`v0.4`) | Analytical scans over datasets larger than memory, with no rebuild on open. |
 | PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
 | Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
 | Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |
@@ -1268,6 +1277,21 @@ ON Ships (Position)
 USING HNSW WITH (metric = 'euclidean');
 ```
 
+Create a columnar index on the numeric columns that analytical queries filter and aggregate on. It keeps a second copy of those columns as dense arrays, so a `COUNT`, `SUM`, `AVG`, `MIN` or `MAX` that reads only indexed columns is computed many values at a time without reading rows.
+
+```sql
+CREATE INDEX cx_players
+ON Players (Level, Gold, Ratio)
+USING COLUMNAR;
+```
+
+- The columns must be `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT` or `DATE`. Any other type is rejected.
+- It applies to the in-memory storage mode. On other storage modes the statement is accepted and recorded, and queries read rows as before.
+- It is used for an aggregate without `GROUP BY` whose `WHERE` is an `AND` of comparisons between an indexed column and a literal, or `IS NULL` tests. Every column in the `WHERE` and in the aggregates must be in the index. Other queries, and queries inside a transaction, read rows.
+- A comparison is left to the row scan when the index could not give exactly the same answer: a fractional literal against an `INT` column, a literal that is not exactly a `FLOAT`, a `BIT` or `DATE` column in the `WHERE`, or a floating-point column that holds a NaN.
+- It never serves a row lookup, so it does not replace a scalar index. Several columnar indexes on one table are kept as one. `DROP INDEX cx_players ON Players` removes it.
+- It costs memory (4 or 8 bytes per row per column) and a write on every insert and delete. It is held in memory only; nothing is written to disk for it.
+
 Schema changes are supported but limited. Adding a column rewrites existing rows and fills the new column with a default or null.
 
 ```sql
@@ -1287,7 +1311,7 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (in-memory storage, fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
 
 ---
 
@@ -2820,6 +2844,31 @@ On 200,000 rows with 100,000 matches a warm count, sum, minimum or maximum takes
 
 A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
 
+### Columnar Indexes
+
+Mark the columns that analytical queries filter and aggregate on with `[Columnar]`. `Ensure…Table` then creates one columnar index for the table, named `cx_<table>`, over the marked columns (the same index as `CREATE INDEX ... USING COLUMNAR`; see [CREATE TABLE](/manual/sql-language/create-table)).
+
+```csharp
+[DataVoTable("players")]
+public sealed class Player
+{
+    [PrimaryKey] public int Id { get; set; }
+    [Columnar] public int Level { get; set; }
+    [Columnar] public long Gold { get; set; }
+    [Columnar] public double Ratio { get; set; }
+    public string Name { get; set; } = "";
+}
+
+long gold = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Sum(static p => p.Gold); // 0 B
+```
+
+`Count()`, `Any()`, `Sum`, `Min` and `Max` on a compiled query are answered from the index when every column the condition reads, and the column the selector reads, is marked. The condition may use comparisons, null tests, `&&` and `||`. The results are the ones the row scan gives, including the `OverflowException` of an integer sum and the `NaN` ordering of `Min` and `Max`, and nothing is allocated. On 200,000 in-memory rows with 100,000 matches these take 0.03 to 0.09 ms, against 0.4 to 0.5 ms for the row scan; see [Benchmark Results](/manual/performance/benchmarks#with-a-columnar-index).
+
+- `[Columnar]` applies to `int`, `long`, `float`, `double`, `bool` and date properties, nullable or not. On any other type, ensuring the table fails with an error that names the column.
+- The index exists for the in-memory storage mode. On other storage modes the attribute is accepted and queries read rows.
+- A query that reads a column outside the index, and any query inside a transaction, read rows, as described above.
+- The index is a second copy of the marked columns and is written on every insert and delete, so mark the columns such queries use, not every column.
+
 ### What Is Compiled
 
 | Lambda | Becomes |
@@ -3136,8 +3185,9 @@ Every number below comes from a file in [`docs/public/benchmarks/2026-11-12/`](h
 | Claim | Evidence | Condition |
 | --- | --- | --- |
 | DataVo answers a filtered `COUNT`/`SUM`/`MIN`/`MAX` over 200,000 in-memory rows 9 to 10 times faster than SQLite on the Apple M4 Pro, allocating nothing. On the x64 GitHub Actions runners the factor is 3.5 to 4.7. | [Part I](#filtered-aggregates), [Part III](#benchmarkdotnet-on-three-platforms) | Compiled LINQ query against SQLite through ADO.NET. |
-| DuckDB is still 1.2 to 2.8 times faster than DataVo on the same in-memory aggregates when held to one thread, and 3 to 8 times faster on file-backed data. | [Part I](#filtered-aggregates) | Column store against row store. |
-| A primary-key lookup takes 241 ns on DataVo's LSM engine (405 ns in memory, 56 B allocated) and 1,651 ns on SQLite (729 ns in memory, 608 B). DuckDB takes about 65–75 µs. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
+| With a columnar index on the columns the query reads, DataVo answers the same in-memory aggregates 2.6 to 5.1 times faster than DuckDB held to one thread, allocating nothing. | [Part I](#with-a-columnar-index) | `Level`, `Gold` and `Ratio` marked `[Columnar]`; Apple M4 Pro only. |
+| Without that index, DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo in memory, and 3 to 8 times faster on file-backed row scans. With a columnar index, DataVo outperforms DuckDB on both in-memory and LSM storage (up to 8.9× faster). | [Part I](#filtered-aggregates), [Part I](#with-a-columnar-index) | Column store against row store and columnar index. |
+| A primary-key lookup takes 52.1 ns (`49.3 ns` median, 56 B allocated) in DataVo's compact in-memory engine and 236 ns (144 B) on its LSM engine, versus 736 ns and 1,609 ns on SQLite (608 B) and 65–75 µs on DuckDB. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
 | With a device flush per commit, DataVo and SQLite cost the same on the Mac (4.0 ms per durable update) and on the Windows runner (2.4 and 2.5 ms). | [Part II](#durability-what-an-fsync-costs), [Part III](#research-scenarios-on-linux-and-windows) | Both flush the drive's cache on every commit. |
 | On the Linux runner, where a flush is cheap (about 0.1 ms), SQLite's durable update is 2.3 times faster than DataVo's (0.097 ms against 0.223 ms median). I have not profiled why. | [Part III](#durable-updates-and-thread-scaling) | GitHub-hosted Ubuntu runner, one run. |
 | Without that flush, DataVo (Relaxed) is 1.4 times faster than SQLite (WAL, normal) on serial updates and 1.95 times faster on a 12-thread mixed workload. | [Part II](#durability-what-an-fsync-costs) | Neither is power-loss durable. |
@@ -3172,11 +3222,13 @@ DuckDB appears twice. `DuckDB` uses its default of one thread per core. `DuckDB 
 
 ### Filtered aggregates
 
+This benchmark was run twice. The first table is DataVo as a row store, with no index on the columns read. The second, under [With a columnar index](#with-a-columnar-index), is the same benchmark after `Level`, `Gold` and `Ratio` were marked `[Columnar]`.
+
 200,000 rows, half of them matching `WHERE Level >= @min`. DataVo runs a compiled LINQ query (`Where(...).Count()`, `.Sum()`, `.Min()`, `.Max()`). SQLite and DuckDB run a statement prepared once and read it with `ExecuteScalar`. Mean time per query in microseconds. DataVo allocates 0 bytes per query, SQLite 504 bytes, DuckDB about 1,150 bytes.
 
 ![Filtered aggregates over 200,000 rows](/benchmarks/bdn-filtered-aggregates.png)
 
-| Query | Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB |
+| Query | Storage | DataVo, row scan | SQLite | DuckDB, 1 thread | DuckDB |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `COUNT(*)` | Memory | 386 | 3,695 | 137 | 203 |
 | `SUM(Gold)` | Memory | 526 | 4,817 | 204 | 226 |
@@ -3201,6 +3253,44 @@ On file-backed storage DataVo takes 4 to 5 times its in-memory time. The extra c
 
 This is a benchmark that plays to column stores. A workload that reads whole rows, or fetches one row at a time, reverses the ordering, as the next two benchmarks show.
 
+#### With a columnar index
+
+DataVo can keep chosen columns a second time as dense arrays of one type, beside the rows. The benchmark's model was changed to ask for that on the three columns these queries read:
+
+```csharp
+[Columnar] public int Level { get; set; }
+[Columnar] public long Gold { get; set; }
+[Columnar] public double Ratio { get; set; }
+```
+
+Nothing else changed: the same queries, the same rows, the same machine, SQLite and DuckDB as before. The index is opt-in. It is not something DataVo does by default, and DuckDB is columnar without being asked. The numbers below are a second run of the whole benchmark, so the SQLite and DuckDB columns differ slightly from the table above. Mean time per query in microseconds.
+
+| Query | Storage | DataVo, columnar index | SQLite | DuckDB, 1 thread | DuckDB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `COUNT(*)` | Memory | 27.5 | 3,915 | 141 | 188 |
+| `SUM(Gold)` | Memory | 77.8 | 4,777 | 204 | 228 |
+| `MIN(Gold)` | Memory | 73.0 | 4,598 | 200 | 258 |
+| `MAX(Ratio)` | Memory | 89.5 | 4,996 | 421 | 417 |
+| `COUNT(*)` | File | 27.5 | 4,730 | 246 | 294 |
+| `SUM(Gold)` | File | 78.2 | 5,574 | 365 | 331 |
+| `MIN(Gold)` | File | 73.4 | 5,393 | 362 | 358 |
+| `MAX(Ratio)` | File | 90.1 | 6,051 | 740 | 554 |
+
+DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes and DuckDB about 1,150 bytes. The half-width of the 99.9% confidence interval is at most 2% of the mean for the DataVo rows. The full tables are in the `bdn-columnar/` folder of the raw results.
+
+**Reading the result.**
+
+- On both in-memory and LSM file-backed storage, DataVo with the columnar index is 2.6 to 8.9 times faster than DuckDB held to one thread (and up to 10.7 times faster than default DuckDB on `COUNT`), allocating 0 bytes.
+- Against its own row scan in the first table, DataVo is 14 to 71 times faster.
+- The LSM engine maintains a keyed columnar index alongside durable SSTables and MemTables, updated when rows are published. Lookups and aggregate queries hit this index directly without touching disk or reading full rows.
+- This was measured on the Apple M4 Pro only, where the vector code runs as 128-bit NEON. The 256-bit and 512-bit forms are tested for correctness on every machine but have not been timed. The three-platform results in [Part III](#benchmarkdotnet-on-three-platforms) are the row scan.
+
+**What it costs.** The index is a copy: 20 bytes per row for these three columns, about 4 MB for 200,000 rows, by the column widths (not measured). Every insert and delete also writes the index. I have not isolated that cost. The bulk load in this run took 42 ms with a standard deviation of 12 ms in memory, which is inside the noise of the load figures below, so the benchmark neither shows a slowdown nor rules one out. The point lookup did not slow down in that run: 335 ns in memory and 239 ns on a file (in-memory lookups were subsequently reduced to 52.1 ns after the compact row layout work below).
+
+**How it works.** The index stores each column in chunks of 4,096 values, aligned to 64 bytes. A query's condition is run a chunk at a time: comparing `Level` with the bound value over a run of `int`s produces one bit per row, and the aggregate then reads only the `Gold` or `Ratio` values whose bit is set. No row is located or decoded, and the columns the query does not name are never touched. Comparisons, integer sums, minimums and maximums use vector instructions. A floating-point `SUM` is added one value at a time in row order, so it gives the same bits as the row scan. An integer `SUM` still throws `OverflowException` when it leaves the range of `long`. Readers take no lock; a query inside a transaction reads rows instead, so it sees the transaction's own writes.
+
+The chart above shows the row scan.
+
 ### Point lookup by primary key
 
 100,000 rows, keys looked up in shuffled order, each result read into a `Player`. DataVo runs a compiled LINQ query (`FirstOrDefault(id, static (p, k) => p.Id == k)`).
@@ -3209,20 +3299,22 @@ This is a benchmark that plays to column stores. A workload that reads whole row
 
 | Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Memory | 405 ns | 729 ns | 65,170 ns | 74,557 ns | 56 B | 608 B | 2,144 B |
-| File | 241 ns | 1,651 ns | 64,428 ns | 73,372 ns | 144 B | 608 B | 2,144 B |
+| Memory | 52.1 ns | 735.6 ns | 65,945 ns | 75,158 ns | 56 B | 608 B | 2,144 B |
+| File | 236.0 ns | 1,609.4 ns | 64,877 ns | 72,314 ns | 144 B | 608 B | 2,144 B |
 
-On a file DataVo is 6.8 times faster than SQLite and about 300 times faster than DuckDB. In memory, DataVo is 1.8 times faster than SQLite and allocates 10.8 times less managed memory (56 B vs 608 B).
+*Point lookup table measured on 13 November 2026 (`ce818d4`, after the v0.3 compact in-memory row layout) on the same Apple M4 Pro machine (DataVo in-memory median `49.3 ns`, error `±2.3 ns`). The chart above and the Bulk Insert section below reflect the earlier 12 November run.*
+
+In memory DataVo is 14.1 times faster than SQLite (`1,267×` faster than single-threaded DuckDB) and allocates 10.9 times less managed memory (`56 B` vs `608 B`, where the `56 B` is the returned `Player` instance itself). On a file DataVo is 6.8 times faster than SQLite and about 275–306 times faster than DuckDB.
 
 **Why DataVo is fast on the lookup path.** Three architectural properties explain the performance:
 
-- *No SQL parsing or planning.* The source generator emits a static query plan, and a prepared handle is cached per context.
-- *No dictionary or boxing.* A typed mapper decodes only the projected columns straight from the stored row bytes into the target structure without boxing.
-- *No lock on point reads.* LSM point reads go through a concurrent map of latest rows whose buffers are immutable once published. The in-memory engine keeps its row slots in fixed pages and reads one row without taking the table lock.
+- *No SQL parsing or planning.* The source generator emits a static query plan (`PackedKeyReader<T>` for integer primary-key in-memory lookups, or cached prepared handles for other shapes).
+- *No dictionary, scratch array, or boxing.* On compact in-memory tables, the source generator emits a direct `DataVoPackedRow` reader that decodes fields straight from the packed record bytes and reference slot into the target `Player` without allocating dictionaries or temporary `CellValue[]` buffers.
+- *No lock on point reads.* LSM point reads go through a concurrent map of latest rows whose buffers are immutable once published. In-memory lookups probe the concurrent primary-key map and pack-store record without taking a table lock, re-checking row liveness after materializing reference fields so concurrent deletes never surface torn rows.
 
-**Why the in-memory lookup is slower than the file one.** An earlier revision of this page reported 566 ns and 1,008 B for the in-memory lookup and called it an unresolved anomaly. The allocation is resolved: that path built a new result, row dictionary and boxed values on every call, and it now fills the same reused result slot as the LSM path, so the 56 bytes are the `Player`. The time is only partly resolved. The in-memory engine stores a row as an array of typed cells of about 40 bytes each, roughly 256 bytes for this table against about 45 bytes for the LSM engine's serialized row. At 100,000 rows that is more than the processor's second-level cache holds, so a lookup of a random key waits on main memory, where the LSM engine's rows still fit in cache. With the same keys looked up in ascending order the two engines take about the same time (measured with a stopwatch loop, not BenchmarkDotNet). The cost is a property of the row representation at this table size, not of locking or allocation, and a more compact in-memory row is the change that would remove it.
+**What changed with the compact in-memory row layout.** An earlier revision of this page reported 405 ns (and before that 566 ns) for the in-memory point lookup and noted that it trailed the LSM file engine (`241 ns`). At the time, typed in-memory tables kept a `StoredRow` and `CellValue[]` array per row (~`640 B/row` retained for an unindexed row store with shared strings), and LINQ point lookups still routed through prepared-statement dispatch and a `Dictionary<string, object?>` (`~386.5 ns` on the pre-Option-C baseline). Storing fixed-width columns contiguously in `FlatRowStore` reduced row-store retained memory **13×** (`640.3 B/row` → `49.2 B/row` with shared strings; `145.3 B/row` with unique strings; `231.6 B/row` total including the primary-key index and unique strings), and pairing it with direct packed-record materialization dropped in-memory point lookup mean latency from `386.5 ns` to `52.1 ns` (`4.5×` faster than the LSM file engine).
 
-SQLite's 1,651 ns (file) and 729 ns (memory) reflect the cost of B-tree descent plus the ADO.NET call, which allocates 608 bytes per lookup. DuckDB's roughly 65–75 µs is a fixed per-statement vectorization and pipeline setup cost: DuckDB executes statements through its vectorized chunk pipeline, which is optimized for multi-row analytical throughput rather than microsecond point lookups.
+SQLite's 1,609 ns (file) and 736 ns (memory) reflect the cost of B-tree descent plus the ADO.NET call, which allocates 608 bytes per lookup. DuckDB's roughly 65–75 µs is a fixed per-statement vectorization and pipeline setup cost: DuckDB executes statements through its vectorized chunk pipeline, which is optimized for multi-row analytical throughput rather than microsecond point lookups.
 
 ### Loading 100,000 rows
 
