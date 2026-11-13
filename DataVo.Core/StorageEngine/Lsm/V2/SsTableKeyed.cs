@@ -803,6 +803,9 @@ internal sealed class SsTableKeyedReader : IDisposable
         return true;
     }
 
+    /// <summary>Opens a cursor over every entry (all versions) in order.</summary>
+    public SsTableKeyedCursor OpenCursor() => new(this);
+
     /// <summary>Visits every entry (all versions) in order.</summary>
     public void ForEach<TState>(TState state, KeyedEntryAction<TState> visit)
     {
@@ -832,7 +835,7 @@ internal sealed class SsTableKeyedReader : IDisposable
 
     public void Dispose() => _source.Dispose();
 
-    private ReadOnlyMemory<byte> GetVerifiedBlock(int block)
+    internal ReadOnlyMemory<byte> GetVerifiedBlock(int block)
     {
         ReadOnlySpan<byte> record = Record(block);
         long offset = BinaryPrimitives.ReadInt64LittleEndian(record);
@@ -907,7 +910,7 @@ internal sealed class SsTableKeyedReader : IDisposable
         return key.Length < prefix.Length ? -1 : 0;
     }
 
-    private static void ReadEntry(ReadOnlySpan<byte> block, int index, out ReadOnlySpan<byte> userKey, out ReadOnlySpan<byte> value, out ulong tag)
+    internal static void ReadEntry(ReadOnlySpan<byte> block, int index, out ReadOnlySpan<byte> userKey, out ReadOnlySpan<byte> value, out ulong tag)
     {
         int offset = BinaryPrimitives.ReadInt32LittleEndian(block[(SsTableKeyedFormat.BlockHeaderSize + (index * sizeof(uint)))..]);
         ReadOnlySpan<byte> entry = block[offset..];
@@ -1035,5 +1038,103 @@ internal sealed class SsTableKeyedReader : IDisposable
         int offset = BinaryPrimitives.ReadInt32LittleEndian(offsetAndLength);
         int length = BinaryPrimitives.ReadInt32LittleEndian(offsetAndLength[4..]);
         return offset >= 0 && length >= 0 && offset <= indexLength - length;
+    }
+}
+
+/// <summary>
+/// Reads a keyed SSTable entry by entry (user key ascending, then sequence descending), one block in memory at
+/// a time. The key and value are valid until the next <see cref="MoveNext"/>.
+/// </summary>
+internal sealed class SsTableKeyedCursor(SsTableKeyedReader reader)
+{
+    private ReadOnlyMemory<byte> _block;
+    private int _blockIndex = -1;
+    private bool _compact;
+    private int _entry;
+    private int _count;
+    private CompactKeyedBlockReader _compactEntries;
+
+    /// <summary>The current entry's user key.</summary>
+    public ReadOnlySpan<byte> UserKey
+    {
+        get
+        {
+            if (_compact)
+            {
+                return _compactEntries.Key;
+            }
+
+            SsTableKeyedReader.ReadEntry(_block.Span, _entry - 1, out ReadOnlySpan<byte> userKey, out _, out _);
+            return userKey;
+        }
+    }
+
+    /// <summary>The current entry's value.</summary>
+    public ReadOnlySpan<byte> Value
+    {
+        get
+        {
+            if (_compact)
+            {
+                return _block.Span.Slice(_compactEntries.ValueOffset, _compactEntries.ValueLength);
+            }
+
+            SsTableKeyedReader.ReadEntry(_block.Span, _entry - 1, out _, out ReadOnlySpan<byte> value, out _);
+            return value;
+        }
+    }
+
+    /// <summary>The current entry's sequence number.</summary>
+    public ulong Sequence => SsTableV2Format.SequenceOf(Tag);
+
+    /// <summary>Whether the current entry is a put or a deletion.</summary>
+    public LsmValueType Type => SsTableV2Format.TypeOf(Tag);
+
+    private ulong Tag { get; set; }
+
+    /// <summary>Moves to the next entry; false after the last.</summary>
+    public bool MoveNext()
+    {
+        while (true)
+        {
+            if (_blockIndex >= 0)
+            {
+                ReadOnlySpan<byte> bytes = _block.Span;
+                if (_compact)
+                {
+                    if (_compactEntries.MoveNext(bytes))
+                    {
+                        Tag = _compactEntries.Tag;
+                        return true;
+                    }
+                }
+                else if (_entry < _count)
+                {
+                    SsTableKeyedReader.ReadEntry(bytes, _entry, out _, out _, out ulong tag);
+                    Tag = tag;
+                    _entry++;
+                    return true;
+                }
+            }
+
+            if (++_blockIndex >= reader.BlockCount)
+            {
+                _block = default;
+                return false;
+            }
+
+            _block = reader.GetVerifiedBlock(_blockIndex);
+            ReadOnlySpan<byte> block = _block.Span;
+            _compact = SsTableCompactKeyedBlock.IsCompact(block);
+            if (_compact)
+            {
+                _compactEntries.Seek(block, 0);
+            }
+            else
+            {
+                _count = BinaryPrimitives.ReadInt32LittleEndian(block[4..]);
+                _entry = 0;
+            }
+        }
     }
 }
