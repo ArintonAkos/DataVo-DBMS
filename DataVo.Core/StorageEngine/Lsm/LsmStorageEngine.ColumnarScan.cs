@@ -88,8 +88,11 @@ public sealed partial class LsmStorageEngine
             }
             finally
             {
+                // The scratch outlives the scan on this thread: it must not keep the readers of files that are
+                // replaced later (their index, Bloom filter and directory) reachable.
                 scratch.Chunk.Release();
                 scratch.Other.Release();
+                Array.Clear(scratch.Readers, 0, scratch.Readers.Length);
                 snapshot.Version.Release();
             }
         }

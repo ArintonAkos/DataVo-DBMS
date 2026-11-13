@@ -19,6 +19,9 @@ internal sealed class LsmFileRegistry
         RefreshFromManifest();
     }
 
+    /// <summary>The number of handles held: one per file that is live or still read.</summary>
+    public int HandleCount => _handles.Count;
+
     public LsmReadSnapshot OpenSnapshot()
     {
         lock (_versionGate)
@@ -79,6 +82,7 @@ internal sealed class LsmFileRegistry
         foreach (LsmSstableHandle handle in handles)
         {
             handle.Release();
+            ForgetIfDeleted(handle);
         }
     }
 
@@ -94,6 +98,7 @@ internal sealed class LsmFileRegistry
             if (_handles.TryGetValue(file.FileNumber, out LsmSstableHandle? handle))
             {
                 handle.MarkDeletedOrDeleteNow();
+                ForgetIfDeleted(handle);
             }
             else
             {
@@ -129,6 +134,17 @@ internal sealed class LsmFileRegistry
         foreach (LsmTableFileMetadata file in GetAllLiveFiles())
         {
             Register(file);
+        }
+    }
+
+    // A deleted file never comes back (file numbers are not reused), so its handle is dropped; otherwise every
+    // flush, compaction and backfill would leave one behind for the life of the table. Only this exact handle is
+    // removed, so a concurrent GetOrAdd is never undone.
+    private void ForgetIfDeleted(LsmSstableHandle handle)
+    {
+        if (handle.IsDeleted)
+        {
+            ((ICollection<KeyValuePair<long, LsmSstableHandle>>)_handles).Remove(new KeyValuePair<long, LsmSstableHandle>(handle.FileNumber, handle));
         }
     }
 

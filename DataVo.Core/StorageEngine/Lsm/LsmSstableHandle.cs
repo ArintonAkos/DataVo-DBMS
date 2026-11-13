@@ -28,6 +28,9 @@ internal sealed class LsmSstableHandle
 
     public int RefCount => Volatile.Read(ref _refCount);
 
+    /// <summary>Whether the file has been unmapped and deleted from disk.</summary>
+    public bool IsDeleted => Volatile.Read(ref _deleted) != 0;
+
     public void AddRef()
     {
         if (Volatile.Read(ref _deleted) != 0)
