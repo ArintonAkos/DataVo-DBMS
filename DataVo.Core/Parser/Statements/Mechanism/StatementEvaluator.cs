@@ -1,3 +1,4 @@
+using DataVo.Core.Models.Statement;
 using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Enums;
@@ -31,6 +32,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     private TableService TableService { get; set; }
     private Join? Join { get; set; }
     private TableDetail? FromTable { get; set; }
+    private HashedTable? _fullJoin;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StatementEvaluator"/> class.
@@ -93,6 +95,12 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
         }
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
+
+        if (!CanFilterBeforeJoin(table))
+        {
+            return FilterFullJoin(table.TableName, row => row[leftValue] is { } candidate
+                && ExpressionValueComparer.AreEqual(candidate, rightValue, trimQuotedStrings: true));
+        }
 
         if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), table.DatabaseName!, table.TableName))
         {
@@ -228,12 +236,19 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
-        Func<KeyValuePair<RowKey, Record>, bool> pred = DeterminePredicate(root.Operator, leftValue, rightVal);
+        Func<object?, bool> pred = DeterminePredicate(root.Operator, rightVal);
+        if (!CanFilterBeforeJoin(table))
+        {
+            return FilterFullJoin(table.TableName, row => pred(row[leftValue]));
+        }
 
         TableData tableRows = [];
-        foreach (var t in table.TableContent!.Where(pred))
+        foreach (var t in table.TableContent!)
         {
-            tableRows.Add(t.Key, t.Value);
+            if (pred(t.Value[leftValue]))
+            {
+                tableRows.Add(t.Key, t.Value);
+            }
         }
 
         return GetJoinedTableContent(tableRows, table.TableName);
@@ -263,24 +278,29 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(vectorColumn.TableName);
 
-        TableData tableRows = [];
-        foreach (var entry in table.TableContent!)
+        bool Matches(object? cell)
         {
-            if (!VectorParser.TryCoerceToVector(entry.Value[vectorColumn.Column], out float[] rowVector))
+            if (!VectorParser.TryCoerceToVector(cell, out float[] rowVector) || rowVector.Length != queryVector.Length)
             {
-                continue;
-            }
-
-            if (rowVector.Length != queryVector.Length)
-            {
-                continue;
+                return false;
             }
 
             double distance = distanceExpression.Operator == Operators.VECTOR_DISTANCE_COSINE
                 ? ComputeCosineDistance(queryVector, rowVector)
                 : ComputeEuclideanDistance(queryVector, rowVector);
 
-            if (EvaluateDistanceComparison(distance, threshold, comparisonOperator))
+            return EvaluateDistanceComparison(distance, threshold, comparisonOperator);
+        }
+
+        if (!CanFilterBeforeJoin(table))
+        {
+            return FilterFullJoin(table.TableName, row => Matches(row[vectorColumn.Column]));
+        }
+
+        TableData tableRows = [];
+        foreach (var entry in table.TableContent!)
+        {
+            if (Matches(entry.Value[vectorColumn.Column]))
             {
                 tableRows[entry.Key] = entry.Value;
             }
@@ -290,28 +310,27 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     }
 
     /// <summary>
-    /// Builds a row-filtering predicate based on the specified relational operator.
-    /// The predicate reads the value of <paramref name="leftValue"/> from each row and compares it to <paramref name="rightVal"/>.
+    /// Builds a predicate over one column value for the specified relational operator, comparing it to
+    /// <paramref name="rightVal"/>.
     /// </summary>
     /// <param name="op">The relational operator (e.g., <c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>, <c>IS NULL</c>).</param>
-    /// <param name="leftValue">The column name whose value is extracted from each row for comparison.</param>
     /// <param name="rightVal">The literal value to compare against.</param>
-    /// <returns>A predicate function that returns <c>true</c> for rows satisfying the condition.</returns>
+    /// <returns>A predicate that returns <c>true</c> for column values satisfying the condition.</returns>
     /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-    private Func<KeyValuePair<RowKey, Record>, bool> DeterminePredicate(string op, string leftValue, object? rightVal)
+    private static Func<object?, bool> DeterminePredicate(string op, object? rightVal)
     {
         return op switch
         {
-            Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], rightVal),
-            Operators.NOT_EQUALS => entry => ExpressionValueComparer.SqlNotEquals(entry.Value[leftValue], rightVal, trimQuotedStrings: true),
-            Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) < 0,
-            Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], rightVal) > 0,
-            Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) <= 0,
-            Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], rightVal) >= 0,
-            Operators.LIKE => entry => ExpressionValueComparer.MatchesLike(entry.Value[leftValue], rightVal, trimQuotedStrings: true),
-            Operators.NOT_LIKE => entry => ExpressionValueComparer.MatchesNotLike(entry.Value[leftValue], rightVal, trimQuotedStrings: true),
-            Operators.IS_NULL => entry => entry.Value[leftValue] == null,
-            Operators.IS_NOT_NULL => entry => entry.Value[leftValue] != null,
+            Operators.EQUALS => value => EvaluateEquality(value, rightVal),
+            Operators.NOT_EQUALS => value => ExpressionValueComparer.SqlNotEquals(value, rightVal, trimQuotedStrings: true),
+            Operators.LESS_THAN => value => CompareDynamics(value, rightVal) < 0,
+            Operators.GREATER_THAN => value => CompareDynamics(value, rightVal) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => value => CompareDynamics(value, rightVal) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => value => CompareDynamics(value, rightVal) >= 0,
+            Operators.LIKE => value => ExpressionValueComparer.MatchesLike(value, rightVal, trimQuotedStrings: true),
+            Operators.NOT_LIKE => value => ExpressionValueComparer.MatchesNotLike(value, rightVal, trimQuotedStrings: true),
+            Operators.IS_NULL => value => value == null,
+            Operators.IS_NOT_NULL => value => value != null,
             _ => throw new SecurityException("Invalid operator")
         };
     }
@@ -342,37 +361,42 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         var table = TableService.GetTableDetailByAliasOrName(tableName);
 
-        Func<KeyValuePair<RowKey, Record>, bool> pred = DetermineTwoColumnPredicate(root.Operator, leftValue, rightValue);
+        Func<object?, object?, bool> pred = DetermineTwoColumnPredicate(root.Operator);
+        if (!CanFilterBeforeJoin(table))
+        {
+            return FilterFullJoin(table.TableName, row => pred(row[leftValue], row[rightValue]));
+        }
 
         TableData tableRows = [];
-        foreach (var t in table.TableContent!.Where(pred))
+        foreach (var t in table.TableContent!)
         {
-            tableRows.Add(t.Key, t.Value);
+            if (pred(t.Value[leftValue], t.Value[rightValue]))
+            {
+                tableRows.Add(t.Key, t.Value);
+            }
         }
 
         return GetJoinedTableContent(tableRows, table.TableName);
     }
 
     /// <summary>
-    /// Builds a row-filtering predicate that compares two column values within the same row.
+    /// Builds a predicate that compares two column values of the same row.
     /// </summary>
     /// <param name="op">The relational operator (e.g., <c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>).</param>
-    /// <param name="leftValue">The name of the first column.</param>
-    /// <param name="rightValue">The name of the second column.</param>
-    /// <returns>A predicate function that returns <c>true</c> for rows where the two column values satisfy the operator.</returns>
+    /// <returns>A predicate over (left value, right value) that returns <c>true</c> when the operator holds.</returns>
     /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-    private Func<KeyValuePair<RowKey, Record>, bool> DetermineTwoColumnPredicate(string op, string leftValue, string rightValue)
+    private static Func<object?, object?, bool> DetermineTwoColumnPredicate(string op)
     {
         return op switch
         {
-            Operators.EQUALS => entry => EvaluateEquality(entry.Value[leftValue], entry.Value[rightValue]),
-            Operators.NOT_EQUALS => entry => ExpressionValueComparer.SqlNotEquals(entry.Value[leftValue], entry.Value[rightValue], trimQuotedStrings: true),
-            Operators.LESS_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) < 0,
-            Operators.GREATER_THAN => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) > 0,
-            Operators.LESS_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) <= 0,
-            Operators.GREATER_THAN_OR_EQUAL_TO => entry => CompareDynamics(entry.Value[leftValue], entry.Value[rightValue]) >= 0,
-            Operators.LIKE => entry => ExpressionValueComparer.MatchesLike(entry.Value[leftValue], entry.Value[rightValue], trimQuotedStrings: true),
-            Operators.NOT_LIKE => entry => ExpressionValueComparer.MatchesNotLike(entry.Value[leftValue], entry.Value[rightValue], trimQuotedStrings: true),
+            Operators.EQUALS => (left, right) => EvaluateEquality(left, right),
+            Operators.NOT_EQUALS => (left, right) => ExpressionValueComparer.SqlNotEquals(left, right, trimQuotedStrings: true),
+            Operators.LESS_THAN => (left, right) => CompareDynamics(left, right) < 0,
+            Operators.GREATER_THAN => (left, right) => CompareDynamics(left, right) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => (left, right) => CompareDynamics(left, right) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => (left, right) => CompareDynamics(left, right) >= 0,
+            Operators.LIKE => (left, right) => ExpressionValueComparer.MatchesLike(left, right, trimQuotedStrings: true),
+            Operators.NOT_LIKE => (left, right) => ExpressionValueComparer.MatchesNotLike(left, right, trimQuotedStrings: true),
             _ => throw new SecurityException("Invalid operator")
         };
     }
@@ -429,6 +453,50 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             Operators.IS_NOT_NULL => leftVal != null,
             _ => throw new SecurityException("Invalid operator")
         };
+    }
+
+    /// <summary>
+    /// Whether a predicate on <paramref name="table"/> may filter that table's rows before the join, which is
+    /// how leaves are normally evaluated. It is equivalent to filtering the joined rows only when no outer join
+    /// can pad the table with NULLs or keep rows the filter would remove: all joins are INNER/CROSS, or the
+    /// table is the FROM table and every join preserves it (INNER, LEFT, CROSS).
+    /// </summary>
+    private bool CanFilterBeforeJoin(TableDetail table)
+    {
+        List<JoinModel.JoinCondition> conditions = Join!.Model.JoinConditions;
+        if (conditions.All(condition => IsJoinType(condition, JoinTypes.INNER) || IsJoinType(condition, JoinTypes.CROSS)))
+        {
+            return true;
+        }
+
+        return table.TableName == FromTable!.TableName
+            && conditions.All(condition => IsJoinType(condition, JoinTypes.INNER)
+                || IsJoinType(condition, JoinTypes.LEFT)
+                || IsJoinType(condition, JoinTypes.CROSS));
+    }
+
+    private static bool IsJoinType(JoinModel.JoinCondition condition, string joinType) =>
+        condition.JoinType.Equals(joinType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Evaluates a predicate on <paramref name="tableName"/> after the join: the full join is computed once per
+    /// evaluator and its rows are kept when the table's part of the row (NULL-padded for outer joins) matches.
+    /// Keys are the same canonical keys filter-before-join leaves produce, so AND/OR combine them.
+    /// </summary>
+    private HashedTable FilterFullJoin(string tableName, Func<Row, bool> predicate)
+    {
+        _fullJoin ??= GetJoinedTableContent(FromTable!.TableContent!, FromTable.TableName);
+
+        HashedTable result = [];
+        foreach (KeyValuePair<JoinedRowId, JoinedRow> entry in _fullJoin)
+        {
+            if (entry.Value.ContainsKey(tableName) && predicate(entry.Value[tableName]))
+            {
+                result.Add(entry.Key, entry.Value);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

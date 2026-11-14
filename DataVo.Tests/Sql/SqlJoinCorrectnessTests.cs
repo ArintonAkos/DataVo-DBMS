@@ -15,6 +15,7 @@ public sealed class SqlJoinCorrectnessTests
     private const int CustomerCount = 6;
     private const int ProductCount = 4;
     private const int OrderCount = 60;
+    private const int CustomerWithoutOrders = 99;
 
     private static string Region(int customerId) => "R" + (customerId % 3);
     private static int Category(int productId) => productId % 2;
@@ -75,6 +76,49 @@ public sealed class SqlJoinCorrectnessTests
         });
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void LeftJoin_IsNullOnNullSuppliedSide_ReturnsUnmatchedRows(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            int[] orphans = [.. Orders(i => !HasCustomer(i))];
+            Assert.NotEmpty(orphans);
+
+            Assert.Equal(orphans, Ints(context,
+                "SELECT o.Id FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL ORDER BY o.Id"));
+            Assert.Equal(orphans.Length, Scalar(context,
+                "SELECT COUNT(*) FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL"));
+
+            // Combined with a predicate on the preserved side.
+            Assert.Equal([.. orphans.Where(i => i * 10 > 300)], Ints(context,
+                "SELECT o.Id FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL AND o.Amount > 300 ORDER BY o.Id"));
+
+            // The FROM table on the null-supplied side.
+            Assert.Equal([CustomerWithoutOrders], Ints(context,
+                "SELECT c.Id FROM Customers c LEFT JOIN Orders o ON o.CustomerId = c.Id WHERE o.Id IS NULL"));
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OuterJoin_FilterOnNullSuppliedSide_IsAppliedAfterTheJoin(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            // A NULL-rejecting filter on the right side of a LEFT JOIN behaves like an inner join: customers
+            // without orders must not appear as NULL-padded rows.
+            Assert.Equal([.. Orders(i => HasCustomer(i) && Region(CustomerOf(i)) == "R1")], Ints(context,
+                "SELECT o.Id FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1' ORDER BY o.Id"));
+
+            // RIGHT JOIN: the left side is null-supplied.
+            Assert.Equal([CustomerWithoutOrders], Ints(context,
+                "SELECT c.Id FROM Orders o RIGHT JOIN Customers c ON o.CustomerId = c.Id WHERE o.Id IS NULL"));
+            Assert.Equal(Orders(i => HasCustomer(i) && i > 50).Count(), Scalar(context,
+                "SELECT COUNT(*) FROM Orders o RIGHT JOIN Customers c ON o.CustomerId = c.Id WHERE o.Id > 50"));
+        });
+    }
+
     internal static void WithSchema(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_join_correctness") : null;
@@ -87,6 +131,7 @@ public sealed class SqlJoinCorrectnessTests
         Execute(context, "CREATE INDEX ix_orders_customer ON Orders (CustomerId)");
         Execute(context, "INSERT INTO Customers (Id, Region) VALUES " +
             string.Join(", ", Enumerable.Range(1, CustomerCount).Select(i => $"({i}, '{Region(i)}')")));
+        Execute(context, $"INSERT INTO Customers (Id, Region) VALUES ({CustomerWithoutOrders}, 'R1')");
         Execute(context, "INSERT INTO Products (Id, CategoryId) VALUES " +
             string.Join(", ", Enumerable.Range(1, ProductCount).Select(i => $"({i}, {Category(i)})")));
         Execute(context, "INSERT INTO Orders (Id, CustomerId, ProductId, Amount) VALUES " +
