@@ -125,16 +125,16 @@ internal static class ExpressionExtractor
         // Resolved column reference
         if (expression is ResolvedColumnRefNode resolved)
         {
-            return resolved.TableName.Equals(tableName, StringComparison.OrdinalIgnoreCase);
+            return IsSameTable(resolved.TableName, tableName, tableService);
         }
 
         // Unresolved column reference - need to resolve it
         if (expression is ColumnRefNode colRef)
         {
-            // If explicitly qualified, check directly
+            // If explicitly qualified, the qualifier may be the table name or its alias
             if (!string.IsNullOrWhiteSpace(colRef.TableOrAlias))
             {
-                return colRef.TableOrAlias.Equals(tableName, StringComparison.OrdinalIgnoreCase);
+                return IsSameTable(colRef.TableOrAlias, tableName, tableService);
             }
 
             // Otherwise, resolve the column through the table service
@@ -166,6 +166,27 @@ internal static class ExpressionExtractor
 
         // Other expression types (window functions, aggregates) are not table-specific
         return false;
+    }
+
+    /// <summary>
+    /// Checks whether a column qualifier (a table name or an alias) names <paramref name="tableName"/>.
+    /// </summary>
+    private static bool IsSameTable(string qualifier, string tableName, TableService tableService)
+    {
+        if (qualifier.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            return tableService.GetRealTableName(qualifier).Equals(tableName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exceptions.BindingException)
+        {
+            // Unknown qualifier: treat it as another table (conservative).
+            return false;
+        }
     }
 
     /// <summary>

@@ -590,6 +590,11 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         IncrementHybridRoutingCounter($"hybrid.orderby.initial_topk.{initialSizingMode}");
         LogHybridRoutingDecision("accept", topK, initialTopK, seedPredicate);
 
+        if (_model.JoinStatement.ContainsJoin())
+        {
+            return EvaluateNearestNeighborJoin(queryVector, indexName, tableName, indexMetadata.IndexKind, totalRows, initialTopK, seedPredicate, materializedWhere);
+        }
+
         List<RowKey> rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
             indexName,
@@ -604,41 +609,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
-        TableData seedRows = [];
-        foreach (RowKey rowId in rowIds)
-        {
-            if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
-            {
-                continue;
-            }
-
-            seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
-        }
-
-        if (_model.JoinStatement.ContainsJoin())
-        {
-            if (!IsNearestJoinTwoPhaseEligible(materializedWhere, out var embeddingFilter))
-            {
-                if (materializedWhere == null || !ReferencesOnlyFromTable(materializedWhere, _model.FromTable!.TableName))
-                {
-                    ExpressionNode? partialEmbeddingFilter = ResolveSeedPredicateForExpansion(materializedWhere);
-                    try
-                    {
-                        return EvaluateJoinFromSeed(seedRows, partialEmbeddingFilter);
-                    }
-                    catch
-                    {
-                        return null;
-                    }
-                }
-
-                embeddingFilter = materializedWhere;
-            }
-
-            return EvaluateJoinFromSeed(seedRows, embeddingFilter);
-        }
-
+        TableData seedRows = LoadSeedRows(rowIds, tableName);
         if (materializedWhere != null && !IsAllTrueExpression(materializedWhere))
         {
             seedRows = ApplyPredicateToSeedRows(seedRows, materializedWhere);
@@ -647,6 +618,114 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         return new ListedTable(seedRows.Values
             .Select(record => new JoinedRow(_model.FromTable!.TableName, record.ToRow()))
             .ToList());
+    }
+
+    /// <summary>
+    /// Nearest-neighbour top-k over a join. The candidates are the index's nearest rows of the FROM table,
+    /// pre-filtered by the WHERE predicates on that table, joined, and then filtered by the whole WHERE clause,
+    /// so predicates on joined tables apply too. While fewer joined rows survive than the LIMIT needs, the
+    /// candidate count grows; if it cannot grow far enough the query falls back to the general path, which
+    /// computes the exact answer.
+    /// </summary>
+    /// <returns>The surviving joined rows (ORDER BY and LIMIT are applied later), or <see langword="null"/> to use the general path.</returns>
+    private ListedTable? EvaluateNearestNeighborJoin(
+        float[] queryVector,
+        string indexName,
+        string tableName,
+        string indexKind,
+        int totalRows,
+        int initialTopK,
+        ExpressionNode? seedPredicate,
+        ExpressionNode? whereExpression)
+    {
+        // Seeds come from the FROM table, so the FROM table must be the preserved side of every join.
+        bool joinsPreserveFromTable = _model.JoinStatement.Model.JoinConditions.All(condition =>
+            condition.JoinType.Equals(JoinTypes.INNER, StringComparison.OrdinalIgnoreCase)
+            || condition.JoinType.Equals(JoinTypes.LEFT, StringComparison.OrdinalIgnoreCase));
+        if (!joinsPreserveFromTable)
+        {
+            IncrementHybridRoutingCounter("hybrid.orderby.join.reject.join_type");
+            return null;
+        }
+
+        ExpressionNode? joinedFilter = whereExpression == null || IsAllTrueExpression(whereExpression) ? null : whereExpression;
+        int requiredRows = _model.RowsNeededForLimit;
+        int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
+        int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
+        int candidates = ClampInt(initialTopK, 1, totalRows);
+
+        try
+        {
+            for (int pass = 0; pass <= maxPasses; pass++)
+            {
+                List<RowKey> rowIds = Indexes.SearchVector(queryVector, candidates, indexName, tableName, _model.Database!, indexKind);
+                LogVectorPredicateFastPathExpansion($"join pass={pass}; requestedTopK={candidates}; returned={rowIds.Count}");
+
+                TableData seedRows = LoadSeedRows(rowIds, tableName);
+                ListedTable joined = EvaluateJoinFromSeed(seedRows, seedPredicate);
+                if (joinedFilter != null)
+                {
+                    joined = new ListedTable([.. joined.Where(row => EvaluatePredicate(joinedFilter, row))]);
+                }
+
+                if (joined.Count >= requiredRows || candidates >= totalRows)
+                {
+                    RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, candidates, _queryVectorExpansionPasses);
+                    return joined;
+                }
+
+                candidates = NextJoinCandidateCount(candidates, joined.Count, requiredRows, expansionFactor, totalRows);
+                _queryVectorExpansionPasses++;
+            }
+        }
+        catch (Exception)
+        {
+            // A predicate shape the row evaluator does not support. The general path evaluates the query
+            // from scratch and reports any genuine error itself.
+            IncrementHybridRoutingCounter("hybrid.orderby.join.reject.predicate");
+            return null;
+        }
+
+        IncrementHybridRoutingCounter("hybrid.orderby.join.reject.expansion_exhausted");
+        return null;
+    }
+
+    /// <summary>
+    /// Sizes the next candidate fetch of <see cref="EvaluateNearestNeighborJoin"/> from the share of candidates
+    /// that survived the join and the WHERE clause so far, with 50% headroom; never less than one expansion step.
+    /// When nothing survived yet, the step is four expansion factors.
+    /// </summary>
+    private static int NextJoinCandidateCount(int candidates, int survivors, int requiredRows, int expansionFactor, int totalRows)
+    {
+        long next = survivors == 0
+            ? (long)candidates * expansionFactor * 4
+            : (long)Math.Ceiling(candidates * (double)requiredRows / survivors * 1.5d);
+
+        next = Math.Max(next, (long)candidates * expansionFactor);
+        return (int)Math.Min(totalRows, next);
+    }
+
+    /// <summary>
+    /// Loads the rows with the given keys from <paramref name="tableName"/>, in the order of <paramref name="rowIds"/>.
+    /// </summary>
+    private TableData LoadSeedRows(List<RowKey> rowIds, string tableName)
+    {
+        TableData seedRows = [];
+        if (rowIds.Count == 0)
+        {
+            return seedRows;
+        }
+
+        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database!);
+        foreach (RowKey rowId in rowIds)
+        {
+            if (rows.TryGetValue(rowId, out StoredRow? rowValues))
+            {
+                seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
+            }
+        }
+
+        return seedRows;
     }
 
     private bool IsNearestJoinTwoPhaseEligible(ExpressionNode? whereExpression, out ExpressionNode? embeddingFilter)
@@ -748,17 +827,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable();
         }
 
-        Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(rowIds, tableName, _model.Database);
-        TableData seedRows = [];
-        foreach (RowKey rowId in rowIds)
-        {
-            if (!rows.TryGetValue(rowId, out StoredRow? rowValues))
-            {
-                continue;
-            }
-
-            seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
-        }
+        TableData seedRows = LoadSeedRows(rowIds, tableName);
 
         if (_model.JoinStatement.ContainsJoin())
         {
@@ -767,7 +836,17 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 return null;
             }
 
-            return EvaluateJoinFromSeed(seedRows, embeddingFilter);
+            // The extracted filter covers only the FROM table; predicates on joined tables apply after the join.
+            ListedTable joined = EvaluateJoinFromSeed(seedRows, embeddingFilter);
+            try
+            {
+                return new ListedTable([.. joined.Where(row => EvaluatePredicate(materializedWhere, row))]);
+            }
+            catch (Exception)
+            {
+                // Unsupported predicate shape for row evaluation: let the general path answer.
+                return null;
+            }
         }
 
         TableData filtered = ApplyPredicateToSeedRows(seedRows, materializedWhere);
