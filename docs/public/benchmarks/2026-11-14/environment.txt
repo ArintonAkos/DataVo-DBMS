@@ -1,6 +1,7 @@
-benchmark code commit: 638324d
-engine (DataVo.Core) identical to master 9625ac1
+benchmark code: 638324d (unchanged since the baseline run)
+engine (DataVo.Core): 6743521 = master 9625ac1 + correctness fixes fd81cf8 (B4), 8ce4295 (B3/B5), bfb1390 (B1), 6743521 (B2)
 sqlite-vec: v0.1.9 (repository vec0.dylib), SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0), DuckDB.NET.Data.Full 1.5.3
 machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
-date: 2026-11-14
+date: 2026-11-14 (afternoon re-run after the fixes)
 runs: sql-matrix (defaults), hybrid-vector (defaults: 50,000 x 384), hybrid-vector --vectors 20000 --dimensions 1536; one run each
+pre-fix/: the morning baseline against unmodified master 9625ac1, kept for comparison
