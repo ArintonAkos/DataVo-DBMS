@@ -319,6 +319,7 @@ internal static class SqlParameterBinder
             {
                 FunctionName = agg.FunctionName,
                 IsStar = agg.IsStar,
+                IsDistinct = agg.IsDistinct,
                 Argument = agg.Argument is not null ? BindExpression(agg.Argument, parameters) : null,
             },
             ScalarFunctionExpressionNode scalar => BindScalarFunctionExpression(scalar, parameters),

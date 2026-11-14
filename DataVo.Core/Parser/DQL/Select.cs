@@ -2936,6 +2936,12 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     {
         spec = null!;
 
+        // DISTINCT aggregates run on the general aggregation path only.
+        if (agg.IsDistinct)
+        {
+            return false;
+        }
+
         HashAggregateOperator.AggregateFunction function = agg.FunctionName.ToUpperInvariant() switch
         {
             "COUNT" => HashAggregateOperator.AggregateFunction.Count,

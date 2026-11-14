@@ -83,7 +83,51 @@ namespace DataVo.Core.Parser.Aggregations
         {
             Validate();
 
-            return Apply(rows);
+            return Apply(IsDistinct ? DistinctValueRows(rows) : rows);
+        }
+
+        /// <summary>
+        /// Gets or sets whether the aggregate reads only distinct non-NULL argument values
+        /// (<c>COUNT(DISTINCT x)</c>, <c>SUM(DISTINCT x)</c>, ...).
+        /// </summary>
+        internal bool IsDistinct { get; set; }
+
+        /// <summary>
+        /// Keeps the first row of every distinct non-NULL argument value. Numbers are compared by value
+        /// (integral values as <see cref="decimal"/>, others as <see cref="double"/>), so <c>1</c> and <c>1.0</c>
+        /// are one value; other values use their own equality.
+        /// </summary>
+        private ListedTable DistinctValueRows(ListedTable rows)
+        {
+            var seen = new HashSet<object>();
+            var distinct = new ListedTable();
+            foreach (JoinedRow row in rows)
+            {
+                object? value = SelectColumn(row);
+                if (value is not null && seen.Add(DistinctKey(value)))
+                {
+                    distinct.Add(row);
+                }
+            }
+
+            return distinct;
+        }
+
+        private static object DistinctKey(object value)
+        {
+            switch (value)
+            {
+                case double d when !double.IsFinite(d) || Math.Abs(d) >= 7.9e28 || d != Math.Floor(d):
+                    return d;
+                case float f when !float.IsFinite(f) || Math.Abs(f) >= 7.9e28f || f != MathF.Floor(f):
+                    return (double)f;
+                case decimal m when m != decimal.Floor(m):
+                    return (double)m;
+                case double or float or decimal or long or int or short or sbyte or byte or ulong or uint or ushort:
+                    return Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
+                default:
+                    return value;
+            }
         }
 
         /// <summary>

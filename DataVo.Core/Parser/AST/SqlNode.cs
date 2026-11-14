@@ -76,6 +76,12 @@ public class AggregateExpressionNode : ExpressionNode
     /// Gets or sets a value indicating whether this expression is the star form (for example <c>COUNT(*)</c>).
     /// </summary>
     public bool IsStar { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the aggregate reads only distinct non-NULL argument values
+    /// (for example <c>COUNT(DISTINCT x)</c>).
+    /// </summary>
+    public bool IsDistinct { get; set; }
 }
 
 /// <summary>

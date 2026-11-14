@@ -1834,8 +1834,21 @@ public class Parser(List<Token> tokens)
                     // inner now contains tokens for the function argument(s)
                     if (isAggregate)
                     {
+                        // COUNT(DISTINCT x): the modifier applies to this aggregate only
+                        bool isDistinct = inner.Count > 0
+                            && inner.Peek().Type == TokenType.Keyword
+                            && inner.Peek().Value.Equals(SqlKeywords.DISTINCT, StringComparison.OrdinalIgnoreCase);
+                        if (isDistinct)
+                        {
+                            inner.Dequeue();
+                        }
+
                         // COUNT(*) special-case
                         bool isStar = inner.Count == 1 && inner.Peek().Type == TokenType.Punctuation && inner.Peek().Value == SqlPunctuation.StarToken;
+                        if (isDistinct && (isStar || inner.Count == 0))
+                        {
+                            throw new ParserException($"Parser Error: {token.Value}(DISTINCT ...) requires a column or expression argument.");
+                        }
 
                         ExpressionNode? arg = null;
                         if (!isStar && inner.Count > 0)
@@ -1847,7 +1860,8 @@ public class Parser(List<Token> tokens)
                         {
                             FunctionName = token.Value,
                             Argument = arg,
-                            IsStar = isStar
+                            IsStar = isStar,
+                            IsDistinct = isDistinct
                         });
                     }
                     else

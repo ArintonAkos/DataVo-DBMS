@@ -135,7 +135,9 @@ internal partial class Select
         foreach (Aggregation function in _model.AggregateStatement.Model.Functions)
         {
             // A plain column argument (its reference is kept as the expression) or COUNT(*); nothing computed.
+            // DISTINCT aggregates run on the general aggregation path.
             if (function.Field is null
+                || function.IsDistinct
                 || function.ArgumentExpression is not (null or ColumnRefNode or ResolvedColumnRefNode))
             {
                 return null;
