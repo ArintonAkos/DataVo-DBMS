@@ -41,16 +41,15 @@ internal class FullJoinStrategy : IJoinStrategy
         string rightColumn = condition.RightColumn.ColumnName;
 
         TableData rightTableData = context.GetTableData(rightTable);
-        bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
 
         // Track right row keys that have been matched to cleanly append the unmatched ones
         HashSet<RowKey> matchedRightKeys = [];
 
         HashedTable result = rightTableData.Count >= IJoinStrategy.HashLookupThreshold
-            ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys, context)
-            : ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, matchedRightKeys, context);
+            ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, matchedRightKeys, context)
+            : ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, matchedRightKeys, context);
 
-        ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, insertHashAfter, matchedRightKeys, result, context);
+        ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, matchedRightKeys, result, context);
 
         return result;
     }
@@ -65,7 +64,6 @@ internal class FullJoinStrategy : IJoinStrategy
         string leftColumn,
         string rightTable,
         string rightColumn,
-        bool insertHashAfter,
         HashSet<RowKey> matchedRightKeys,
         JoinStrategyContext context)
     {
@@ -91,7 +89,7 @@ internal class FullJoinStrategy : IJoinStrategy
                 {
                     matchedRightKeys.Add(rightRecord.RowId);
 
-                    JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightRecord.RowId, insertHashAfter);
+                    JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightRecord.RowId);
                     JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                         leftRowEntry.Value,
                         rightTable,
@@ -103,7 +101,7 @@ internal class FullJoinStrategy : IJoinStrategy
             else
             {
                 // No match -> Left Join unmatched case
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null);
                 JoinedRow joinedRow = context.CreateNullRightRow(
                     leftRowEntry.Value,
                     rightTable);
@@ -125,7 +123,6 @@ internal class FullJoinStrategy : IJoinStrategy
         string leftColumn,
         string rightTable,
         string rightColumn,
-        bool insertHashAfter,
         HashSet<RowKey> matchedRightKeys,
         JoinStrategyContext context)
     {
@@ -152,7 +149,7 @@ internal class FullJoinStrategy : IJoinStrategy
                 matchFound = true;
                 matchedRightKeys.Add(rightTableRow.Key);
 
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key);
                 JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                     leftRowEntry.Value,
                     rightTable,
@@ -164,7 +161,7 @@ internal class FullJoinStrategy : IJoinStrategy
             if (!matchFound)
             {
                 // No match -> Left Join unmatched case
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null);
                 JoinedRow joinedRow = context.CreateNullRightRow(
                     leftRowEntry.Value,
                     rightTable);
@@ -184,7 +181,6 @@ internal class FullJoinStrategy : IJoinStrategy
         TableData rightTableData,
         string leftTable,
         string rightTable,
-        bool insertHashAfter,
         HashSet<RowKey> matchedRightKeys,
         HashedTable result,
         JoinStrategyContext context)
@@ -225,19 +221,10 @@ internal class FullJoinStrategy : IJoinStrategy
                 dict[rightTable] = rightTableRow.Value.ToRow();
                 JoinedRow nullPaddedRow = new(dict);
 
-                JoinedRowId hash = JoinStrategyContext.BuildHash(null, rightTableRow.Key, insertHashAfter);
+                JoinedRowId hash = context.BuildUnmatchedRightHash(rightTableRow.Key);
                 result.Add(hash, nullPaddedRow);
             }
         }
-    }
-
-    /// <summary>
-    /// Determines the structural direction to append memory identifiers logically securely preserving order.
-    /// </summary>
-    private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
-    {
-        var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
-        return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 
     /// <summary>
