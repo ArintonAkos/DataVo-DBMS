@@ -17,6 +17,7 @@ Every number below comes from a file in [`docs/public/benchmarks/2026-11-12/`](h
 | Without that flush, DataVo (Relaxed) is 1.4 times faster than SQLite (WAL, normal) on serial updates and 1.95 times faster on a 12-thread mixed workload. | [Part II](#durability-what-an-fsync-costs) | Neither is power-loss durable. |
 | When a query is kept up to date incrementally, DataVo is 179 times faster than DuckDB and 658 times faster than SQLite on a three-table join. On a single-table aggregate it is 1.1 times faster than SQLite. | [Part II](#streamed-risk-views-incremental-maintenance) | 50,000 insert-then-read iterations. |
 | DataVo's SQL text path is about 2.6 times faster than SQLite on `GROUP BY` and on a join at 1,000,000 rows, and slower on `COUNT` with a filter, `ORDER BY ... LIMIT` and range scans. DuckDB is 49 to 118 times faster than DataVo on full scans. | [Part II](#sql-over-1000000-rows) | LSM engine, prepared statements. |
+| A 28-query SQL matrix over 1,000,000 orders (14 November) maps where each engine wins: DataVo on key ranges, index lookups, low-cardinality `GROUP BY`, two-table join aggregates, columnar aggregates and single-table vector search; SQLite, by 7 to 68 times, on `OR`, `LIKE`, three-table and outer joins, and index-driven `GROUP BY`. It also found five queries where DataVo returns a wrong answer. | [DataVo vs SQLite: When Each Engine Wins](./datavo-vs-sqlite.md) | LSM Relaxed vs SQLite WAL `NORMAL`, prepared statements, every answer checked against an oracle. |
 | On uniform random 1536-dimension vectors, exact Flat search is the right choice at 10,000 vectors: HNSW is no faster per query and finds 64% of the true neighbours. On clustered vectors HNSW is 8 times faster at 96% recall. | [Part II](#vector-search) | Both measured. |
 
 ## Test environment
@@ -557,5 +558,7 @@ What it does not show. This is a smoke test, not a benchmark, and no IL2CPP timi
 - DuckDB is built for analytical scans, not point operations. Using it for lookups or single-row writes, as several benchmarks here do, measures a design mismatch.
 - Streamed-view results compare an incrementally maintained query with a recomputed one, and apply only to query shapes DataVo can maintain.
 - DataVo is a 0.2.0 release candidate. SQLite and DuckDB are mature engines with broad SQL coverage, sophisticated optimizers, and years of production hardening.
+
+For a query-by-query decision guide between DataVo and SQLite, including the queries on which DataVo currently returns wrong answers, see [DataVo vs SQLite: When Each Engine Wins](./datavo-vs-sqlite.md).
 
 To reproduce anything here, see [Reproducing Benchmarks](./reproducing-benchmarks.md).

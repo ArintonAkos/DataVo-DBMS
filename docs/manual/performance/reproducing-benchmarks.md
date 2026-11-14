@@ -186,6 +186,20 @@ var relaxed = new DataVoConfig
 };
 ```
 
+## SQL capability matrix and hybrid vector queries
+
+The [DataVo vs SQLite](./datavo-vs-sqlite.md) page comes from two scenarios of the research host. `sql-matrix` loads 1,000,000 orders into DataVo (LSM and InMemory), SQLite and DuckDB, checks every query's answer against an oracle computed from the generator, then times it. `hybrid-vector` runs filtered top-10 queries on DataVo Flat, DataVo HNSW and SQLite + sqlite-vec and scores recall against the exact filtered top-10.
+
+```bash
+dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host -c Release
+DLL=demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
+dotnet "$DLL" --scenario sql-matrix > sql-matrix.md                       # about 20 minutes, 5 GB peak
+SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector > hybrid-vector.md
+SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector --vectors 20000 --dimensions 1536
+```
+
+`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). The raw output of the 14 November run is under `docs/public/benchmarks/2026-11-14/`.
+
 ## Reproducing the CI Snapshot
 
 The Linux and Windows measurements in the benchmark results come from the GitHub Actions workflow `.github/workflows/benchmark.yml`. The research-scenario matrix runs on Ubuntu and Windows hosted runners, and the BenchmarkDotNet suite on Ubuntu, Windows and macOS runners. It downloads the pinned `sqlite-vec v0.1.9` loadable extension for each OS, verifies its SHA256, exports `SQLITE_VEC_PATH`, runs the same scenario commands shown above, and uploads the results as workflow artifacts. To reproduce it, trigger that workflow from the repository's Actions tab (it supports manual `workflow_dispatch`), or run the same `dotnet run` commands on a local host with `SQLITE_VEC_PATH` pointing at the extension. The results in [Part III](./benchmarks.md#part-iii-platforms) come from [run 43189115522](https://github.com/ArintonAkos/DataVo-DBMS/actions/runs/43189115522); its logs and BenchmarkDotNet reports are checked in under `docs/public/benchmarks/2026-11-12/ci/`, and `docs/scripts/generate-ci-benchmark-plots.py` regenerates the cross-platform charts from them. Artifacts are named `benchmark-log-<label>` and `benchmarkdotnet-<runner>`; download them with `gh run download <run-id>`.
