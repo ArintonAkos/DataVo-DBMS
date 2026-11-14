@@ -85,7 +85,7 @@ Cross-platform results from GitHub Actions on 12 November 2026 (virtual machines
 
 More detail, including scenario commands and caveats: [docs/manual/performance/benchmarks.md](docs/manual/performance/benchmarks.md).
 
-Choosing between DataVo and SQLite for a relational or hybrid vector workload: [DataVo vs SQLite: When Each Engine Wins](docs/manual/performance/datavo-vs-sqlite.md) maps 28 SQL query shapes and 5 filtered vector queries, including every case where SQLite is faster and the answer-correctness issues the comparison found.
+Choosing between DataVo and SQLite for a relational or hybrid vector workload: [DataVo vs SQLite: When Each Engine Wins](docs/manual/performance/datavo-vs-sqlite.md) maps 28 SQL query shapes and 5 filtered vector queries, including every case where SQLite is faster and the five answer-correctness bugs the comparison found (now fixed).
 
 ## Install with NuGet
 

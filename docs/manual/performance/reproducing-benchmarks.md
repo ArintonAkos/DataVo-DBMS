@@ -198,7 +198,7 @@ SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector > hybrid-
 SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector --vectors 20000 --dimensions 1536
 ```
 
-`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). The raw output of the 14 November run is under `docs/public/benchmarks/2026-11-14/`.
+`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). The raw output of the 14 November runs is under `docs/public/benchmarks/2026-11-14/`: the run after the correctness fixes at the top level, the first run against the unmodified engine in `pre-fix/`.
 
 ## Reproducing the CI Snapshot
 
