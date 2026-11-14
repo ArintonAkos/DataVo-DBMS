@@ -23,6 +23,14 @@ public sealed partial class LsmStorageEngine
         public readonly LsmColumnarShadows TailShadows = new();
         public readonly ulong[] Live = new ulong[Bitmask.WordsPerChunk];
         public SsTableV2Reader[] Readers = [];
+
+        // What TailShadows holds: the rows of one version's files that the first TailPositions positions and
+        // TailDeletes deletes of one tail replace. Both only grow, so the next scan of the same tail and
+        // version adds what came since. Kept by number, not by reference, so no tail or file stays reachable.
+        public long TailIdentity = -1;
+        public long VersionId = -1;
+        public int TailPositions;
+        public int TailDeletes;
     }
 
     /// <summary>What one scan reads: the tail as it was at one moment and the files that were live then.</summary>
@@ -101,6 +109,80 @@ public sealed partial class LsmStorageEngine
         return false;
     }
 
+    /// <summary>Diagnostics: holds the table's current set of files, as a scan that began before later flushes does.</summary>
+    internal IDisposable PinFilesForTesting(string databaseName, string tableName) =>
+        new FilesPin(GetOrCreateTable(databaseName, tableName).AcquireVersion());
+
+    /// <summary>
+    /// Diagnostics: works out the columnar delete vectors of a set of files (the pinned one, or the current one)
+    /// starting from the vectors the files kept, as a scan does, and again from nothing, and throws unless every
+    /// file's vector marks the same rows.
+    /// </summary>
+    /// <returns>How many files started from a kept vector.</returns>
+    internal int VerifyColumnarDeleteVectorsForTesting(string databaseName, string tableName, IDisposable? pin = null)
+    {
+        TableState state = GetOrCreateTable(databaseName, tableName);
+        TableVersion version = pin is FilesPin pinned ? pinned.Version : state.AcquireVersion();
+        var scratch = new ColumnarScanScratch();
+        try
+        {
+            if (!TryOpenSegments(state, tail: null, version.Files, scratch))
+            {
+                throw new InvalidOperationException("A file of the set has no usable columnar segment for the table's spec.");
+            }
+
+            ReadOnlySpan<SsTableV2Reader> readers = scratch.Readers.AsSpan(0, version.Files.Length);
+            LsmFileShadows kept = BuildFileShadows(version.Files, readers, scratch, reuse: true, out int reused);
+            LsmFileShadows fresh = BuildFileShadows(version.Files, readers, scratch, reuse: false, out _);
+            if (kept.Unordered != fresh.Unordered)
+            {
+                throw new InvalidOperationException("The two ways disagree on whether the files can be ordered.");
+            }
+
+            for (int file = 0; !fresh.Unordered && file < readers.Length; file++)
+            {
+                for (int chunk = 0; chunk < readers[file].Columnar!.ChunkCount; chunk++)
+                {
+                    kept.TryGet(file, chunk, out ReadOnlySpan<ulong> a);
+                    fresh.TryGet(file, chunk, out ReadOnlySpan<ulong> b);
+                    for (int word = 0; word < Bitmask.WordsPerChunk; word++)
+                    {
+                        if ((a.IsEmpty ? 0 : a[word]) != (b.IsEmpty ? 0 : b[word]))
+                        {
+                            throw new InvalidOperationException($"File {version.Files[file].FileNumber}, chunk {chunk}, word {word}: started from a kept vector {(a.IsEmpty ? 0 : a[word]):X}, from nothing {(b.IsEmpty ? 0 : b[word]):X}.");
+                        }
+                    }
+                }
+            }
+
+            return reused;
+        }
+        finally
+        {
+            scratch.Chunk.Release();
+            scratch.Other.Release();
+            if (pin is null)
+            {
+                version.Release();
+            }
+        }
+    }
+
+    private sealed class FilesPin(TableVersion version) : IDisposable
+    {
+        private int _released;
+
+        public TableVersion Version { get; } = version;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                Version.Release();
+            }
+        }
+    }
+
     // Reads the tail and the file set in one step. Rows are published, and the tail is replaced after a flush,
     // under the same gate, so the two always describe the same moment.
     private static bool TryCaptureColumnar(TableState state, ColumnarIndex index, out ColumnarSnapshot snapshot)
@@ -138,13 +220,13 @@ public sealed partial class LsmStorageEngine
         }
 
         ReadOnlySpan<SsTableV2Reader> readers = scratch.Readers.AsSpan(0, files.Length);
-        LsmColumnarShadows fileShadows = snapshot.Version.ColumnarShadows ?? BuildFileShadows(snapshot.Version, readers, scratch);
+        LsmFileShadows fileShadows = snapshot.Version.ColumnarShadows ?? CacheFileShadows(snapshot.Version, readers, scratch);
         if (fileShadows.Unordered)
         {
             return false;
         }
 
-        ShadowByTail(in snapshot, readers, scratch);
+        ShadowByTail(in snapshot, readers, snapshot.Version.Id, scratch);
 
         totals.Slice(0, folds.Length).Clear();
         Span<ulong> masks = ColumnarScan.Rent().Masks;
@@ -159,7 +241,7 @@ public sealed partial class LsmStorageEngine
     }
 
     // Collects each file's reader, and checks each has a usable segment written for the table's spec.
-    private bool TryOpenSegments(TableState state, ColumnarIndex tail, LsmSstableHandle[] files, ColumnarScanScratch scratch)
+    private bool TryOpenSegments(TableState state, ColumnarIndex? tail, LsmSstableHandle[] files, ColumnarScanScratch scratch)
     {
         if (state.Table.ColumnarSpec is not { } spec)
         {
@@ -177,7 +259,7 @@ public sealed partial class LsmStorageEngine
             if (reader.Columnar is not { } segment || !segment.Spec.Matches(spec))
             {
                 // A file written before the table had this spec: the next query has it rewritten.
-                tail.RequestRebuild();
+                tail?.RequestRebuild();
                 return false;
             }
 
@@ -221,7 +303,7 @@ public sealed partial class LsmStorageEngine
     private static bool ScanSegment(
         SsTableColumnarSegment segment,
         int file,
-        LsmColumnarShadows fileShadows,
+        LsmFileShadows fileShadows,
         ReadOnlySpan<ColumnarStep> steps,
         ReadOnlySpan<ColumnarFold> folds,
         Span<RowAggregate> totals,
@@ -258,7 +340,7 @@ public sealed partial class LsmStorageEngine
     }
 
     // The rows of a chunk no newer source replaces, a bit per row; empty when that is all of them.
-    private static ReadOnlySpan<ulong> LiveRows(LsmColumnarShadows fileShadows, ColumnarScanScratch scratch, int file, int chunk, int rows)
+    private static ReadOnlySpan<ulong> LiveRows(LsmFileShadows fileShadows, ColumnarScanScratch scratch, int file, int chunk, int rows)
     {
         bool byFile = fileShadows.TryGet(file, chunk, out ReadOnlySpan<ulong> replacedByFile);
         bool byTail = scratch.TailShadows.TryGet(file, chunk, out ReadOnlySpan<ulong> replacedByTail);
@@ -283,12 +365,99 @@ public sealed partial class LsmStorageEngine
         return live;
     }
 
-    // Works out, for every pair of files that share part of their key range, which rows of the older one the
-    // newer one replaces or deletes. Files never change, so the result is kept with the set of files.
-    private static LsmColumnarShadows BuildFileShadows(TableVersion version, ReadOnlySpan<SsTableV2Reader> readers, ColumnarScanScratch scratch)
+    // Works out the file shadows of a set of files once and keeps them with the set, as the files never change.
+    private static LsmFileShadows CacheFileShadows(TableVersion version, ReadOnlySpan<SsTableV2Reader> readers, ColumnarScanScratch scratch)
     {
-        var shadows = new LsmColumnarShadows();
-        for (int a = 0; a < readers.Length && !shadows.Unordered; a++)
+        LsmFileShadows shadows = BuildFileShadows(version.Files, readers, scratch, reuse: true, out _);
+        return Interlocked.CompareExchange(ref version.ColumnarShadows, shadows, null) ?? shadows;
+    }
+
+    // Works out, for each file, which of its rows the newer files it shares keys with replace or delete. With
+    // `reuse`, a file starts from the vector it kept for an earlier set of files when that is sound (see
+    // LsmDeleteVector) and marks only the keys of the files that vector lacks; a set that differs from the last
+    // by one flushed file costs the keys of that file. `reused` counts the files that started from a kept vector.
+    private static LsmFileShadows BuildFileShadows(
+        LsmSstableHandle[] files,
+        ReadOnlySpan<SsTableV2Reader> readers,
+        ColumnarScanScratch scratch,
+        bool reuse,
+        out int reused)
+    {
+        reused = 0;
+        if (!TryFindNewer(readers, out List<int>[] newer))
+        {
+            return LsmFileShadows.UnorderedSet;
+        }
+
+        long[] live = new long[files.Length];
+        for (int i = 0; i < files.Length; i++)
+        {
+            live[i] = files[i].FileNumber;
+        }
+
+        Array.Sort(live);
+        var vectors = new LsmDeleteVector?[files.Length];
+        for (int older = 0; older < files.Length; older++)
+        {
+            if (newer[older].Count == 0)
+            {
+                continue;
+            }
+
+            long[] needed = new long[newer[older].Count];
+            for (int i = 0; i < needed.Length; i++)
+            {
+                needed[i] = files[newer[older][i]].FileNumber;
+            }
+
+            Array.Sort(needed);
+            LsmDeleteVector? start = reuse ? files[older].ColumnarDeleteVector : null;
+            if (start is not null && !start.CanStart(live, needed))
+            {
+                start = null;
+            }
+
+            if (start is not null)
+            {
+                reused++;
+                if (start.Applied.AsSpan().SequenceEqual(needed))
+                {
+                    vectors[older] = start;
+                    continue;
+                }
+            }
+
+            var builder = new LsmDeleteVector.Builder(readers[older].Columnar!.ChunkCount, start);
+            foreach (int file in newer[older])
+            {
+                if (start is null || Array.BinarySearch(start.Applied, files[file].FileNumber) < 0)
+                {
+                    ShadowByFile(builder, readers[older], readers[file], scratch);
+                }
+            }
+
+            LsmDeleteVector vector = builder.Build(needed, live[^1]);
+            vectors[older] = vector;
+            if (reuse)
+            {
+                files[older].OfferColumnarDeleteVector(vector);
+            }
+        }
+
+        return new LsmFileShadows(vectors, unordered: false);
+    }
+
+    // For each file, the files that share part of its key range and are newer: every version in them is newer
+    // than every version in it. False when two files share keys and their sequence ranges interleave.
+    private static bool TryFindNewer(ReadOnlySpan<SsTableV2Reader> readers, out List<int>[] newer)
+    {
+        newer = new List<int>[readers.Length];
+        for (int i = 0; i < readers.Length; i++)
+        {
+            newer[i] = [];
+        }
+
+        for (int a = 0; a < readers.Length; a++)
         {
             for (int b = a + 1; b < readers.Length; b++)
             {
@@ -299,32 +468,26 @@ public sealed partial class LsmStorageEngine
                     continue;
                 }
 
-                // Every version in one file is older than every version in the other, or the order of two
-                // versions of a key cannot be told from the files' properties.
-                int older;
                 if (first.LargestSequence < second.SmallestSequence)
                 {
-                    older = a;
+                    newer[a].Add(b);
                 }
                 else if (second.LargestSequence < first.SmallestSequence)
                 {
-                    older = b;
+                    newer[b].Add(a);
                 }
                 else
                 {
-                    shadows.Unordered = true;
-                    break;
+                    return false;
                 }
-
-                ShadowByFile(shadows, older, readers[older], readers[older == a ? b : a], scratch);
             }
         }
 
-        return Interlocked.CompareExchange(ref version.ColumnarShadows, shadows, null) ?? shadows;
+        return true;
     }
 
     // Marks the rows of an older file whose key a newer file holds, as a row or as a deletion.
-    private static void ShadowByFile(LsmColumnarShadows shadows, int olderFile, SsTableV2Reader older, SsTableV2Reader newer, ColumnarScanScratch scratch)
+    private static void ShadowByFile(LsmDeleteVector.Builder shadows, SsTableV2Reader older, SsTableV2Reader newer, ColumnarScanScratch scratch)
     {
         SsTableColumnarSegment target = older.Columnar!;
         SsTableColumnarSegment source = newer.Columnar!;
@@ -343,54 +506,84 @@ public sealed partial class LsmStorageEngine
             scratch.Other.Load(source, chunk);
             for (int row = 0; row < scratch.Other.Rows; row++)
             {
-                Shadow(shadows, olderFile, target, scratch.Other.KeyAt(row), scratch.Chunk);
+                if (TryFindRow(target, scratch.Other.KeyAt(row), scratch.Chunk, out int targetChunk, out int targetRow))
+                {
+                    shadows.Mark(targetChunk, targetRow);
+                }
             }
         }
 
         ReadOnlySpan<byte> tombstones = source.Tombstones();
         for (int i = 0; i < source.TombstoneCount; i++)
         {
-            Shadow(shadows, olderFile, target, SsTableColumnarSegment.TombstoneAt(tombstones, source.TombstoneKeyWidth, i), scratch.Chunk);
+            if (TryFindRow(target, SsTableColumnarSegment.TombstoneAt(tombstones, source.TombstoneKeyWidth, i), scratch.Chunk, out int targetChunk, out int targetRow))
+            {
+                shadows.Mark(targetChunk, targetRow);
+            }
         }
     }
 
-    // Marks the rows of the files whose key the tail holds, as a row it added or as a key it deleted. Costs
-    // nothing when the tail's keys lie outside every file, as they do for a table that only grows.
-    private static void ShadowByTail(in ColumnarSnapshot snapshot, ReadOnlySpan<SsTableV2Reader> readers, ColumnarScanScratch scratch)
+    // Marks the rows of the files whose key the tail holds, as a row it added or as a key it deleted. The
+    // tail only grows and the files never change, so a thread keeps what it marked for a tail and a version
+    // and marks only the keys published since its last scan of them. Costs nothing when the tail's keys lie
+    // outside every file, as they do for a table that only grows.
+    private static void ShadowByTail(in ColumnarSnapshot snapshot, ReadOnlySpan<SsTableV2Reader> readers, long versionId, ColumnarScanScratch scratch)
     {
-        scratch.TailShadows.Clear();
         ColumnarIndex tail = snapshot.Tail;
-        if ((snapshot.Count == 0 && snapshot.Deleted == 0) || !AnyFileWithin(tail, snapshot, readers))
+        if (scratch.TailIdentity != tail.Identity
+            || scratch.VersionId != versionId
+            || scratch.TailPositions > snapshot.Count
+            || scratch.TailDeletes > snapshot.Deleted)
+        {
+            scratch.TailShadows.Clear();
+            scratch.TailIdentity = tail.Identity;
+            scratch.VersionId = versionId;
+            scratch.TailPositions = 0;
+            scratch.TailDeletes = 0;
+        }
+
+        int fromPosition = scratch.TailPositions;
+        int fromDelete = scratch.TailDeletes;
+        if (fromPosition == snapshot.Count && fromDelete == snapshot.Deleted)
         {
             return;
         }
 
-        // In key order, so each file's chunks are visited front to back.
-        List<RowKey> keys = scratch.Keys;
-        keys.Clear();
-        for (int position = 0; position < snapshot.Count; position++)
+        // A key outside every file's range never replaces a file row; the range only grows, so keys skipped
+        // here stay outside the files of this version.
+        if (AnyFileWithin(tail, snapshot, readers))
         {
-            keys.Add(tail.KeyAt(position));
-        }
-
-        for (int i = 0; i < snapshot.Deleted; i++)
-        {
-            keys.Add(tail.DeletedKeyAt(i));
-        }
-
-        keys.Sort();
-        for (int file = 0; file < readers.Length; file++)
-        {
-            SsTableColumnarSegment segment = readers[file].Columnar!;
-            SsTableV2Properties properties = readers[file].Properties;
-            int at = keys.BinarySearch(properties.SmallestKey);
-            for (at = at < 0 ? ~at : at; at < keys.Count && keys[at] <= properties.LargestKey; at++)
+            // In key order, so each file's chunks are visited front to back.
+            List<RowKey> keys = scratch.Keys;
+            keys.Clear();
+            for (int position = fromPosition; position < snapshot.Count; position++)
             {
-                Shadow(scratch.TailShadows, file, segment, keys[at], scratch.Chunk);
+                keys.Add(tail.KeyAt(position));
             }
+
+            for (int i = fromDelete; i < snapshot.Deleted; i++)
+            {
+                keys.Add(tail.DeletedKeyAt(i));
+            }
+
+            keys.Sort();
+            for (int file = 0; file < readers.Length; file++)
+            {
+                SsTableColumnarSegment segment = readers[file].Columnar!;
+                SsTableV2Properties properties = readers[file].Properties;
+                int at = keys.BinarySearch(properties.SmallestKey);
+                for (at = at < 0 ? ~at : at; at < keys.Count && keys[at] <= properties.LargestKey; at++)
+                {
+                    Shadow(scratch.TailShadows, file, segment, keys[at], scratch.Chunk);
+                }
+            }
+
+            keys.Clear();
         }
 
-        keys.Clear();
+        // Recorded only once marked: a scan that failed part way marks the same keys again (marks are idempotent).
+        scratch.TailPositions = snapshot.Count;
+        scratch.TailDeletes = snapshot.Deleted;
     }
 
     // Whether any file's key range reaches into the range of keys the tail has touched. The range may have
@@ -416,17 +609,24 @@ public sealed partial class LsmStorageEngine
     // Marks the row of a file's segment that holds a key, if it holds it.
     private static void Shadow(LsmColumnarShadows shadows, int file, SsTableColumnarSegment segment, RowKey key, SsTableColumnarChunkReader reader)
     {
-        int chunk = segment.FindChunk(key);
-        if (chunk == segment.ChunkCount || segment.Chunk(chunk).FirstKey > key)
-        {
-            return;
-        }
-
-        reader.Load(segment, chunk);
-        int row = reader.Find(key);
-        if (row >= 0)
+        if (TryFindRow(segment, key, reader, out int chunk, out int row))
         {
             shadows.Shadow(file, chunk, row);
         }
+    }
+
+    // The chunk and row of a file's segment that hold a key; false when the segment does not hold it.
+    private static bool TryFindRow(SsTableColumnarSegment segment, RowKey key, SsTableColumnarChunkReader reader, out int chunk, out int row)
+    {
+        chunk = segment.FindChunk(key);
+        row = -1;
+        if (chunk == segment.ChunkCount || segment.Chunk(chunk).FirstKey > key)
+        {
+            return false;
+        }
+
+        reader.Load(segment, chunk);
+        row = reader.Find(key);
+        return row >= 0;
     }
 }

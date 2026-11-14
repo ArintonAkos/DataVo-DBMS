@@ -14,8 +14,9 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// columns of the puts and the keys of the deletions.
 /// </summary>
 /// <remarks>
-/// Finished chunk groups are held in pooled buffers until <see cref="WriteTo"/> writes them after the file's
-/// last data block, so the memory used is the size of the segment, not of the rows.
+/// Finished chunk groups and deleted keys are held until <see cref="WriteTo"/> writes them after the file's last
+/// data block: in pooled memory, or with <see cref="SsTableSpillOptions"/> in temporary files once they outgrow
+/// its limit, so a compaction of any size keeps only one group in memory.
 /// </remarks>
 internal sealed class SsTableColumnarWriter : IDisposable
 {
@@ -26,10 +27,12 @@ internal sealed class SsTableColumnarWriter : IDisposable
     private readonly ulong[] _keyHigh = new ulong[Rows];
     private readonly ulong[] _keyLow = new ulong[Rows];
     private readonly ColumnBuffer[] _columns;
-    private readonly List<(byte[] Buffer, int Length)> _groups = [];
+    private readonly SsTableSpillBuffer _groups;
     private readonly List<SsTableColumnarChunk> _chunks = [];
     private readonly List<SsTableColumnarColumn> _chunkColumns = [];
-    private readonly List<RowKey> _tombstones = [];
+    private readonly SsTableSpillBuffer _tombstones; // 16 B per deleted key: high, then low, little-endian
+    private long _tombstoneCount;
+    private RowKey _lastTombstone;
     private int _rows;
     private long _rowCount;
     private long _length; // bytes of the finished groups
@@ -62,9 +65,13 @@ internal sealed class SsTableColumnarWriter : IDisposable
     }
 
     /// <summary>Creates a writer for the columns <paramref name="spec"/> names.</summary>
-    public SsTableColumnarWriter(ColumnarSpec spec)
+    /// <param name="spec">The columns to keep.</param>
+    /// <param name="spill">Where to keep groups and deleted keys that outgrow memory; null keeps them in memory.</param>
+    public SsTableColumnarWriter(ColumnarSpec spec, SsTableSpillOptions? spill = null)
     {
         _spec = spec;
+        _groups = new SsTableSpillBuffer(spill);
+        _tombstones = new SsTableSpillBuffer(spill);
         _located = new int[spec.TableKinds.Length];
         _columns = new ColumnBuffer[spec.ColumnCount];
         for (int slot = 0; slot < _columns.Length; slot++)
@@ -83,7 +90,12 @@ internal sealed class SsTableColumnarWriter : IDisposable
     {
         if (type == LsmValueType.Deletion)
         {
-            _tombstones.Add(key);
+            Span<byte> bytes = stackalloc byte[16];
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes, key.High);
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], key.Low);
+            _tombstones.Write(bytes);
+            _tombstoneCount++;
+            _lastTombstone = key;
             return;
         }
 
@@ -193,11 +205,8 @@ internal sealed class SsTableColumnarWriter : IDisposable
         }
 
         long start = position;
-        foreach ((byte[] buffer, int length) in _groups)
-        {
-            output.Write(buffer, 0, length);
-            position += length;
-        }
+        _groups.CopyTo(output);
+        position += _groups.Length;
 
         long tombstoneOffset = position;
         ushort tombstoneWidth = WriteTombstones(output, ref position, out uint tombstoneCrc);
@@ -217,7 +226,7 @@ internal sealed class SsTableColumnarWriter : IDisposable
                 _chunks.Count,
                 _rowCount,
                 tombstoneOffset,
-                _tombstones.Count,
+                _tombstoneCount,
                 specLength,
                 tombstoneCrc).WriteTo(span);
             _spec.WriteTo(span.Slice(SsTableColumnarFormat.HeaderSize, specLength));
@@ -233,15 +242,11 @@ internal sealed class SsTableColumnarWriter : IDisposable
         return (position, directoryLength, position + directoryLength);
     }
 
-    /// <summary>Returns the pooled buffers of the finished groups.</summary>
+    /// <summary>Returns the pooled buffers and deletes any temporary file.</summary>
     public void Dispose()
     {
-        foreach ((byte[] buffer, _) in _groups)
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        _groups.Clear();
+        _groups.Dispose();
+        _tombstones.Dispose();
     }
 
     // Chunk and column records were collected with offsets from the segment's start; the file wants positions.
@@ -268,27 +273,43 @@ internal sealed class SsTableColumnarWriter : IDisposable
     // Writes the deleted keys, padded so the directory starts 8-byte aligned, and returns their width.
     private ushort WriteTombstones(Stream output, ref long position, out uint crc)
     {
-        bool wide = _tombstones.Count > 0 && !_tombstones[^1].IsInt64; // keys ascend: integer keys come first
+        bool wide = _tombstoneCount > 0 && !_lastTombstone.IsInt64; // keys ascend: integer keys come first
         int width = wide ? 16 : 8;
-        int length = _tombstones.Count * width;
-        int padded = (length + 7) & ~7;
-        byte[] bytes = ArrayPool<byte>.Shared.Rent(Math.Max(padded, 1));
+        long length = _tombstoneCount * width;
+        long padded = (length + 7) & ~7L;
+        const int Batch = 4096;
+        byte[] stored = ArrayPool<byte>.Shared.Rent(Batch * 16);
+        byte[] written = ArrayPool<byte>.Shared.Rent(Batch * 16);
         try
         {
-            Span<byte> span = bytes.AsSpan(0, padded);
-            span.Clear();
-            for (int i = 0; i < _tombstones.Count; i++)
+            // The CRC covers the keys only, not the padding; it is computed over the keys as they are written.
+            uint state = WalCrc32C.Seed;
+            _tombstones.Rewind();
+            int read;
+            while ((read = _tombstones.Read(stored.AsSpan(0, Batch * 16))) > 0)
             {
-                WriteKey(span[(i * width)..], _tombstones[i], wide);
+                int keys = read / 16;
+                Span<byte> span = written.AsSpan(0, keys * width);
+                for (int i = 0; i < keys; i++)
+                {
+                    var key = new RowKey(BinaryPrimitives.ReadUInt64LittleEndian(stored.AsSpan(i * 16)), BinaryPrimitives.ReadUInt64LittleEndian(stored.AsSpan((i * 16) + 8)));
+                    WriteKey(span[(i * width)..], key, wide);
+                }
+
+                state = WalCrc32C.Append(state, span);
+                output.Write(span);
             }
 
-            crc = WalCrc32C.HashToUInt32(span[..length]);
-            output.Write(span);
+            crc = ~state;
+            Span<byte> zeros = stackalloc byte[8];
+            zeros.Clear();
+            output.Write(zeros[..(int)(padded - length)]);
             position += padded;
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(bytes);
+            ArrayPool<byte>.Shared.Return(stored);
+            ArrayPool<byte>.Shared.Return(written);
         }
 
         return (ushort)width;
@@ -369,7 +390,8 @@ internal sealed class SsTableColumnarWriter : IDisposable
             _length,
             WalCrc32C.HashToUInt32(group),
             keyWidth));
-        _groups.Add((buffer, length));
+        _groups.Write(group);
+        ArrayPool<byte>.Shared.Return(buffer);
         _length += length;
         _rows = 0;
     }

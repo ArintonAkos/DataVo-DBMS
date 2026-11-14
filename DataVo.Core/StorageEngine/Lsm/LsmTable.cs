@@ -755,6 +755,18 @@ public sealed class LsmTable : IDisposable
         }
     }
 
+    /// <summary>Diagnostics: compacts every file of <paramref name="sourceLevel"/> into the next level, now.</summary>
+    internal void CompactLevelForTesting(int sourceLevel)
+    {
+        LsmFileRegistry registry = CompactionRegistry ?? throw new InvalidOperationException("The table has no file registry.");
+        lock (_ioGate)
+        {
+            int maxLevel = ValidatedMaxCompactionLevel();
+            var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
+            compactor.CompactLevel(sourceLevel, sourceLevel + 1, dropTombstonesAtBottomLevel: sourceLevel + 1 == maxLevel);
+        }
+    }
+
     internal void CompactAllLevelsForMaintenance()
     {
         LsmFileRegistry? registry = CompactionRegistry;

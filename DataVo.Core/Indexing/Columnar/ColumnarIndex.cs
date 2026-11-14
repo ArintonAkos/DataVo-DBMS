@@ -162,6 +162,11 @@ internal sealed class ColumnarIndex
     /// <summary>Whether this is the tail of an LSM table: the rows published since its last flush.</summary>
     public bool IsTail => _tail;
 
+    private static long s_identities;
+
+    /// <summary>A number no other index has, so a cache can tell indexes apart without holding on to one.</summary>
+    public long Identity { get; } = Interlocked.Increment(ref s_identities);
+
     /// <summary>The key of the row at a position of a tail, live or not.</summary>
     public RowKey KeyAt(int position) => new(
         _keyHigh!.ChunkOf(position).As<ulong>()[position & FlatChunk.SlotMask],
