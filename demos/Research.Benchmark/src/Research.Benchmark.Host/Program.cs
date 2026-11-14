@@ -1,3 +1,5 @@
+using Research.Benchmark.Runners.HybridVector;
+using Research.Benchmark.Runners.SqlMatrix;
 using Research.Benchmark.Runners.SqlWorkload;
 using System.Diagnostics;
 using Research.Benchmark.Abstractions;
@@ -268,10 +270,69 @@ else if (benchmarkScenario.Equals("sql-workload", StringComparison.OrdinalIgnore
     Console.Write(SqlWorkloadRunner.ToMarkdown(workloadResults, options));
     return;
 }
+else if (benchmarkScenario.Equals("sql-matrix", StringComparison.OrdinalIgnoreCase))
+{
+    int orders = ReadIntArg(args, "--records", 1_000_000);
+    var options = new SqlMatrixOptions(
+        Orders: orders,
+        Customers: ReadIntArg(args, "--customers", Math.Max(100, orders / 10)),
+        Products: ReadIntArg(args, "--products", 1_000),
+        ScanRepetitions: ReadIntArg(args, "--scan-reps", 10),
+        MediumRepetitions: ReadIntArg(args, "--medium-reps", 100),
+        SelectiveRepetitions: ReadIntArg(args, "--selective-reps", 1_000));
+    Action<string> log = message => Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {message}");
+    log($"sql-matrix: generating {options.Orders:N0} orders and computing the oracle's answers...");
+    var data = new SqlMatrixData(options.Orders, options.Customers, options.Products);
+    IReadOnlyList<SqlMatrixQuery> queries = SqlMatrixQueries.Create(data);
+    var expected = SqlMatrixRunner.ComputeExpected(data, queries);
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-sql-matrix-{Guid.NewGuid():N}");
+    var matrixResults = new List<SqlMatrixEngineResult>();
+    try
+    {
+        foreach (ISqlMatrixEngine engine in SqlMatrixRunner.CreateEngines(ReadStringArg(args, "--engine", "all")))
+        {
+            matrixResults.Add(SqlMatrixRunner.Run(engine, data, queries, expected, options, root, log));
+        }
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+    }
+
+    Console.Write(SqlMatrixRunner.ToMarkdown(matrixResults, queries, options));
+    return;
+}
+else if (benchmarkScenario.Equals("hybrid-vector", StringComparison.OrdinalIgnoreCase))
+{
+    var options = new HybridVectorOptions(
+        Documents: ReadIntArg(args, "--vectors", 50_000),
+        Dimensions: ReadIntArg(args, "--dimensions", 384),
+        Queries: ReadIntArg(args, "--queries", 200));
+    Action<string> log = message => Console.Error.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] {message}");
+    log($"hybrid-vector: generating {options.Documents:N0} x {options.Dimensions} clustered embeddings and the exact filtered top-10...");
+    var data = new HybridVectorData(options.Documents, options.Dimensions, options.Queries);
+    float[][] distances = HybridVectorRunner.ComputeDistances(data);
+    string root = Path.Combine(Path.GetTempPath(), $"datavo-hybrid-vector-{Guid.NewGuid():N}");
+    var hybridResults = new List<HybridEngineResult>();
+    try
+    {
+        foreach (IHybridVectorEngine engine in HybridVectorRunner.CreateEngines(ReadStringArg(args, "--engine", "all")))
+        {
+            hybridResults.Add(HybridVectorRunner.Run(engine, data, distances, options, root, log));
+        }
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+    }
+
+    Console.Write(HybridVectorRunner.ToMarkdown(hybridResults, data, options));
+    return;
+}
 else
 {
     throw new ArgumentException(
-        $"Unknown benchmark scenario '{benchmarkScenario}'. Use arena-live-views, complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, space-and-recovery, or sql-workload.");
+        $"Unknown benchmark scenario '{benchmarkScenario}'. Use arena-live-views, complex-vip, simple-exposure, flat-crud, disk-crud-wal, deep-document, concurrent-ops, vector-search, thread-scaling, ycsb-mixed, space-and-recovery, sql-workload, sql-matrix or hybrid-vector.");
 }
 
 if (outputFormat == "csv")
