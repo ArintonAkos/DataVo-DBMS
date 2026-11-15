@@ -1,0 +1,15 @@
+benchmark code: 638324d (unchanged since the 2026-11-14 runs)
+engine (DataVo.Core): b952574 = 269f226 (2026-11-15-left-join) + 534edbc (GROUP BY without boxing, HAVING/top-N before
+        rows) + 1867fa1 (typed-scan aggregates over no matching row) + c690598 (LSM rows and index entries read by key
+        without copies) + 3939f1d (bound query vector parsed once) + b952574 (InMemory primary-key ranges from the key lane)
+sqlite-vec: v0.1.9 (repository vec0.dylib), SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0); DuckDB.NET 1.5.3
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-16, each run started at a 5-minute load average below 2.5 with no other build or test process (load.txt)
+runs (one each, in this order):
+  sql-matrix (defaults: 1,000,000 orders, all four engines): 120 s wall, 1.12 GB peak memory footprint
+    (295 s on 2026-11-15: R1-R4 on InMemory took ~70 ms per call for 1,000+ timed calls each)
+  hybrid-vector (50,000 x 384): 39 s wall, 0.96 GB
+  hybrid-vector --vectors 20000 --dimensions 1536: 62 s wall, 1.04 GB
+oracle: sql-matrix 0 mismatches on every engine; hybrid-vector 0 short results and 0 rows failing the filter, recall@10
+        100% on every shape and size except HNSW V0 at 384 dimensions, 99.9% (lowest query 90%): HNSW's level sampling
+        is not seeded, so its graph differs per build (see 2026-11-15-hnsw).
