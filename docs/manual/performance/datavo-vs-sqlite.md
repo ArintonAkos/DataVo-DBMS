@@ -1,8 +1,8 @@
 # DataVo vs SQLite: When Each Engine Wins
 
-This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder. On 15 November `OR` and `LIKE` moved onto DataVo's typed scan (commit `9ffb413`) and the SQL matrix was run again; the filter rows W3–W6 and C6 come from that run, whose output is in [`docs/public/benchmarks/2026-11-15/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15). Every other row was within run-to-run noise of the 14 November numbers, which are kept.
+This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder. On 15 November `OR` and `LIKE` moved onto DataVo's typed scan (commit `9ffb413`) and the SQL matrix was run again; the filter rows W3–W6 and C6 come from that run, whose output is in [`docs/public/benchmarks/2026-11-15/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15). Later that day the general join path stopped joining once per comparison (commit `b26e70e`) and the typed join learned `LEFT JOIN`, three or more tables and `ORDER BY ... LIMIT` (commit `80db3ba`); the join rows J1–J7 come from a third run against that engine, in [`docs/public/benchmarks/2026-11-15-joins/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15-joins). Every other row was within run-to-run noise of the earlier numbers, which are kept.
 
-**The short version.** DataVo is faster than SQLite on primary-key and secondary-index lookups, on full-table `GROUP BY` with up to about a thousand groups, on a two-table join with `GROUP BY`, on aggregates its columnar index can answer, and on vector search, including a vector search joined to another table. SQLite is faster, often by one to two orders of magnitude, on anything that leaves DataVo's typed execution paths: joins of three tables, `LEFT JOIN`, joins that return rows, and `GROUP BY` over a key that has an index. On full scans filtered with `OR` or `LIKE` SQLite is now 1.5 to 2 times faster, down from 33 to 69 times. Every engine now returns the exact answer on every relational query. See [Correctness findings](#correctness-findings) for what was wrong and what the fixes cost.
+**The short version.** DataVo is faster than SQLite on primary-key and secondary-index lookups, on full-table `GROUP BY` with up to about a thousand groups, on inner joins of two or three tables, aggregated or returning a top-N, on a `LEFT JOIN` aggregate, on aggregates its columnar index can answer, and on vector search, including a vector search joined to another table. SQLite is faster by an order of magnitude on `GROUP BY` over a key that has an index, and 2 to 5 times faster where an index lets it read a small part of a large table instead of scanning it (an anti-join, a join driven by a selective dimension). On full scans filtered with `OR` or `LIKE` SQLite is 1.5 to 2 times faster. Before 15 November, `OR`, `LIKE`, joins of three tables, `LEFT JOIN` and joins returning rows left DataVo's typed paths and were 7 to 109 times slower. Every engine now returns the exact answer on every relational query. See [Correctness findings](#correctness-findings) for what was wrong and what the fixes cost.
 
 ## Decision guide
 
@@ -19,10 +19,12 @@ Ratios compare medians, DataVo's LSM engine against SQLite (WAL, `synchronous=NO
 | `LIKE`, prefix or substring, no index | SQLite | 1.5–1.8× | [W5, W6](#filters) |
 | `GROUP BY` over the whole table, 4 to 1,000 groups | DataVo | 2.1–2.7× | [G1, G2, C7](#group-by-cardinality) |
 | `GROUP BY` over about 125,000 groups, on an indexed key, `HAVING` + top-100 | SQLite | 13× | [G3](#group-by-cardinality) |
-| Two-table inner join + `GROUP BY` (fact × dimension) | DataVo | 3.4× | [J6](#joins) |
-| Small dimension filtered, joined to a large table through an index | SQLite | 2.6× | [J7](#joins) |
-| Three-table join | SQLite | 7–27× | [J1–J3](#joins) |
-| `LEFT JOIN` | SQLite | 19×; 109× for an anti-join | [J4, J5](#joins) |
+| Two-table inner join + `GROUP BY` (fact × dimension) | DataVo | 3.6× | [J6](#joins) |
+| Three-table inner join, aggregate over all rows | DataVo | 4.0× | [J1](#joins) |
+| Three-table inner join filtered on both dimensions, aggregate or `ORDER BY ... LIMIT 50` | DataVo | 1.6× | [J2, J3](#joins) |
+| `LEFT JOIN` aggregate (`COUNT(*)`, `COUNT(c.Id)`, `SUM`) | DataVo | 1.2× | [J4](#joins) |
+| `LEFT JOIN ... WHERE c.Id IS NULL` (anti-join) | SQLite | 4.5× | [J5](#joins) |
+| Small dimension filtered, joined to a large table through an index | SQLite | 2.4× | [J7](#joins) |
 | `COUNT`/`SUM`/`MIN`/`MAX` with an AND of numeric ranges, columnar index on those columns | DataVo | 5.0–13.9× | [C1, C2, C4](#columnar-index) |
 | The same, without a columnar index | SQLite | 1.5–2.1× | [C1–C4](#columnar-index) |
 | `SUM`/`AVG` of a `DOUBLE`/`FLOAT` column on the LSM engine, columnar index | SQLite | 2.0× | [C3](#columnar-index): the LSM engine does not push floating-point sums down |
@@ -33,7 +35,7 @@ Ratios compare medians, DataVo's LSM engine against SQLite (WAL, `synchronous=NO
 
 Two rules follow from the reasons behind these numbers, explained in each section:
 
-1. **DataVo is fast when a query stays on one of its typed paths:** one table with a `WHERE` built from `AND`, `OR`, `LIKE` and `column op value` comparisons; or exactly two tables in an inner integer-key join with an aggregate; or an index lookup. Anything else is evaluated row by row with a dictionary per row, at 2–4 KB of allocation per row read, and is many times slower than SQLite.
+1. **DataVo is fast when a query stays on one of its typed paths:** one table with a `WHERE` built from `AND`, `OR`, `LIKE` and `column op value` comparisons; or INNER and `LEFT` joins of any number of tables on integer keys, with an aggregate or an `ORDER BY ... LIMIT`; or an index lookup. Anything else (an `OR` across two joined tables, `RIGHT`/`FULL` joins, joins returning every row, computed expressions) is evaluated row by row with a dictionary per row, at 2–4 KB of allocation per row read, and is many times slower than SQLite.
 2. **SQLite wins wherever an index can replace a scan or a hash table,** because its planner uses indexes for joins, grouping and ordering. DataVo's planner does not use a secondary index to drive a join or a `GROUP BY`.
 
 ## Correctness findings
@@ -91,7 +93,7 @@ Before timing a query, the runner executes it with each of its parameter sets an
 
 ### Machine
 
-Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3, Arm64 RyuJIT. Engine commit `6743521` (`9625ac1` plus the four fix commits); benchmark code `638324d`, unchanged between the two runs. One run per scenario, no CPU pinning, background processes not controlled. The SQL matrix took 21 minutes and peaked at 5.6 GB resident; the vector scenarios took 47 and 88 seconds. As on the [results page](./benchmarks.md), treat differences under about 20% as not established.
+Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3, Arm64 RyuJIT. Engine commit `6743521` (`9625ac1` plus the four fix commits) for the 14 November runs, `9ffb413` for the filter rows and `80db3ba` for the join rows; benchmark code `638324d`, unchanged across all runs. One run per scenario, no CPU pinning; the last SQL matrix run had no other build or test process running. The 14 November SQL matrix took 21 minutes and peaked at 5.6 GB resident, the last one 5 minutes and 1.1 GB; the vector scenarios took 47 and 88 seconds. As on the [results page](./benchmarks.md), treat differences under about 20% as not established.
 
 ### Reproducing
 
@@ -126,17 +128,21 @@ Median latency of one call, p99 in brackets. The last column is SQLite's median 
 
 | Query | DataVo (LSM) | DataVo (InMemory) | SQLite | DuckDB | SQLite / DataVo |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| J1 Three-table inner join, `COUNT`, `SUM`, no filter | 5.03 s (5.49 s) | 5.17 s | 725 ms (728 ms) | 2.09 ms | 0.14× |
-| J2 J1 + `WHERE c.Region = @r AND p.CategoryId = @cat` (~0.2%) | 2.34 s (2.44 s) | 2.60 s | 85.3 ms | 1.50 ms | 0.04× |
-| J3 J2 returning rows, `ORDER BY o.Amount DESC, o.Id LIMIT 50` | 2.20 s (2.36 s) | 2.52 s | 85.6 ms | 1.95 ms | 0.04× |
-| J4 `LEFT JOIN`: `COUNT(*)`, `COUNT(c.Id)`, `SUM` | 4.52 s (4.87 s) | 4.34 s | 239 ms | 3.48 ms | 0.05× |
-| J5 `LEFT JOIN ... WHERE c.Id IS NULL` | 4.00 s (4.84 s) | 4.14 s | 36.8 ms | 3.25 ms | 0.01× |
-| J6 Orders × Customers, `GROUP BY c.Region` | 223 ms (227 ms) | 258 ms | 765 ms | 3.35 ms | **3.44×** |
-| J7 Products (one category, 2%) × Orders, `COUNT`, `SUM` | 40.6 ms (41.0 ms) | 75.7 ms | 15.4 ms | 1.07 ms | 0.38× |
+| J1 Three-table inner join, `COUNT`, `SUM`, no filter | 181 ms (186 ms) | 166 ms | 729 ms (740 ms) | 2.06 ms | **4.02×** |
+| J2 J1 + `WHERE c.Region = @r AND p.CategoryId = @cat` (~0.2%) | 53.1 ms (57.2 ms) | 78.0 ms | 85.8 ms | 1.50 ms | **1.62×** |
+| J3 J2 returning rows, `ORDER BY o.Amount DESC, o.Id LIMIT 50` | 53.4 ms (57.3 ms) | 78.3 ms | 85.7 ms | 1.96 ms | **1.60×** |
+| J4 `LEFT JOIN`: `COUNT(*)`, `COUNT(c.Id)`, `SUM` | 201 ms (211 ms) | 185 ms | 238 ms | 3.42 ms | **1.19×** |
+| J5 `LEFT JOIN ... WHERE c.Id IS NULL` | 165 ms (180 ms) | 167 ms | 36.7 ms | 3.32 ms | 0.22× |
+| J6 Orders × Customers, `GROUP BY c.Region` | 212 ms (216 ms) | 240 ms | 767 ms | 3.54 ms | **3.62×** |
+| J7 Products (one category, 2%) × Orders, `COUNT`, `SUM` | 37.2 ms (37.6 ms) | 68.2 ms | 15.4 ms | 1.06 ms | 0.41× |
 
-**Why.** DataVo has one fast join path (`Select.TypedJoin.cs`): exactly two tables, an inner join on one integer column, an aggregate, and per-table AND filters. It hashes the smaller table and streams the larger one, decoding only the columns it needs. J6 and J7 take it. J6 is DataVo's win: SQLite's plan (`SCAN c | SEARCH o USING INDEX ix_orders_customer | USE TEMP B-TREE FOR GROUP BY`) probes the order index 100,000 times and sorts into a temporary B-tree. In J7, SQLite's plan (`SCAN p | SEARCH o USING INDEX ix_orders_product`) reads only the 20,000 orders of the 20 matching products through the index, while DataVo's hash join streams all 1,000,000 orders.
+Before commits `b26e70e` and `80db3ba`, J1–J5 took 2.2–5.0 s on DataVo LSM (0.01–0.14× SQLite) and allocated 2.1–3.7 GB per call; they now allocate 11–41 MB. The whole SQL matrix went from 21 minutes and 5.6 GB peak memory to 5 minutes and 1.1 GB.
 
-Every other join leaves that path: three tables (J1–J3), no aggregate (J3), or `LEFT JOIN` (J4, J5). The general path materializes each joined row as dictionaries, about 3.7 KB of allocation per order in J1 (3.7 GB per call, 33 gen-2 collections over 10 calls). For each `WHERE` comparison it runs a complete join starting from the table that comparison names, then intersects the results (`StatementEvaluator.And`), so J2 joins the million orders twice. A comparison on the null-supplied side of a `LEFT JOIN` (J5) is applied to the rows of one full join. SQLite runs J1–J3 as index nested-loop joins (`SCAN c | SEARCH o USING INDEX ix_orders_customer | SEARCH p USING INTEGER PRIMARY KEY`) and J5 as a scan of the orders with an index probe into customers.
+**Why.** All seven joins take DataVo's typed join (`Select.TypedJoin.cs`). It handles INNER and `LEFT` equalities on integer columns over any number of tables, per-table `WHERE` conditions (including `OR` and `LIKE` within one table), aggregates with or without `GROUP BY`, and `ORDER BY ... LIMIT` without aggregates. One table is streamed: the largest when every join is INNER, the FROM table when a `LEFT JOIN` must keep its rows. Every other table is hashed by its join key, and each streamed row is extended table by table; a `LEFT` step pads an unmatched row with NULLs. A condition on an INNER-joined table filters it while it is hashed. A condition on a `LEFT`-joined table is tested after the join on the matched row or on the NULLs, which is SQL's meaning (correctness finding B1). Only the columns the conditions, keys, groups, aggregates and sort keys read are decoded, and those a joined row reads are decoded only once a streamed row matches. J3 keeps the best 50 rows in a bounded list and builds dictionaries only for them.
+
+J1, J4 and J6 are DataVo's wins: SQLite runs J1–J3 as index nested-loop joins (`SCAN c | SEARCH o USING INDEX ix_orders_customer | SEARCH p USING INTEGER PRIMARY KEY`) and J6 with a temporary B-tree for `GROUP BY` (`SCAN c | SEARCH o USING INDEX ix_orders_customer | USE TEMP B-TREE FOR GROUP BY`), a B-tree probe per joined row, where DataVo probes an in-memory hash. In J2 and J3 the filters leave about 0.2% of the orders, and DataVo still streams all of them, so the margin is smaller. SQLite wins where its index reads only a small part of the orders: in J7 (`SCAN p | SEARCH o USING INDEX ix_orders_product`) it reads the 20,000 orders of the 20 matching products, and J5 is a scan of the orders with an index probe into customers. DataVo hashes the 100,000 customers with whole rows (so it can return them); J1, J4 and J5 allocate 41 MB per call, J2 (customers filtered to one region first) 11 MB and J7 (no customer table) 58 KB, which suggests that hash is most of it. I did not profile J5 further.
+
+The general join path (`StatementEvaluator`) still serves the shapes the typed join does not take. Since commit `b26e70e` it joins once per query: conjuncts on one table filter that table before the join when that is equivalent, and the others are tested on the joined rows. It used to run a complete join for each `WHERE` comparison.
 
 ### Filters
 
@@ -267,4 +273,4 @@ The join shapes read the `Authors` table for every query (the runner's "full tab
 - SQLite and DuckDB are driven through ADO.NET, whose cost is part of their times; DataVo's own API cost is part of its time. Neither SQLite nor DuckDB was tuned beyond `ANALYZE`; DataVo had no columnar index except in the columnar section.
 - The vector attributes are independent of the clusters. A filter correlated with distance (for example, a category that matches the query's cluster) changes how many candidates DataVo needs; that was not measured.
 - `COUNT(DISTINCT ...)` is correct now but was not timed.
-- DataVo is a 0.2 release candidate; SQLite and DuckDB are mature engines with general query optimisers. Most of DataVo's remaining losses here trace to one missing capability: index-driven joins and grouping, together with a typed path for joins beyond two tables.
+- DataVo is a 0.2 release candidate; SQLite and DuckDB are mature engines with general query optimisers. Most of DataVo's remaining losses here trace to one missing capability: using a secondary index to drive a join (J5, J7) or a `GROUP BY` (G3).
