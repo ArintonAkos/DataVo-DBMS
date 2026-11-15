@@ -34,7 +34,9 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     private const int DefaultEfConstruction = 64;
     private const int DefaultEfSearch = 64;
     private const int DefaultMaxAdaptiveEfConstruction = 64;
-    private const bool DefaultEnableDiversityHeuristic = false;
+    // On by default: without it every node links only to its nearest neighbors, so on clustered data
+    // almost no edge leaves a cluster and a search that enters the wrong cluster cannot get out.
+    private const bool DefaultEnableDiversityHeuristic = true;
     private const int MaxSupportedLevels = 33;
 
 #if NET6_0_OR_GREATER
@@ -310,7 +312,10 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     public double AdaptiveEfSearchMultiplier { get; set; } = 1.5d;
 
     /// <summary>
-    /// Gets or sets a value indicating whether diversity-aware neighbor selection is enabled.
+    /// Gets or sets a value indicating whether diversity-aware neighbor selection is enabled (the default).
+    /// A candidate closer to an already selected neighbor than to the node is skipped in favour of one in
+    /// another direction, which keeps edges between clusters. Turning it off links each node to its plain
+    /// nearest neighbors, which builds slightly faster but can strand searches in the wrong cluster.
     /// </summary>
     public bool EnableDiversityHeuristic { get; set; } = DefaultEnableDiversityHeuristic;
 

@@ -1,6 +1,6 @@
 # DataVo vs SQLite: When Each Engine Wins
 
-This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder. On 15 November `OR` and `LIKE` moved onto DataVo's typed scan (commit `9ffb413`) and the SQL matrix was run again; the filter rows W3–W6 and C6 come from that run, whose output is in [`docs/public/benchmarks/2026-11-15/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15). Later that day the general join path stopped joining once per comparison (commit `b26e70e`) and the typed join learned `LEFT JOIN`, three or more tables and `ORDER BY ... LIMIT` (commit `80db3ba`); the join rows J1–J7 come from a third run against that engine, in [`docs/public/benchmarks/2026-11-15-joins/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15-joins). Every other row was within run-to-run noise of the earlier numbers, which are kept.
+This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder. On 15 November `OR` and `LIKE` moved onto DataVo's typed scan (commit `9ffb413`) and the SQL matrix was run again; the filter rows W3–W6 and C6 come from that run, whose output is in [`docs/public/benchmarks/2026-11-15/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15). Later that day the general join path stopped joining once per comparison (commit `b26e70e`) and the typed join learned `LEFT JOIN`, three or more tables and `ORDER BY ... LIMIT` (commit `80db3ba`); the join rows J1–J7 come from a third run against that engine, in [`docs/public/benchmarks/2026-11-15-joins/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15-joins). Every other row was within run-to-run noise of the earlier numbers, which are kept. In the evening HNSW's diversity heuristic became the default (commit `8e472ab`) and its connectivity repair was fixed (`52b78cf`); the vector section comes from a run against that engine, in [`docs/public/benchmarks/2026-11-15-hnsw/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15-hnsw).
 
 **The short version.** DataVo is faster than SQLite on primary-key and secondary-index lookups, on full-table `GROUP BY` with up to about a thousand groups, on inner joins of two or three tables, aggregated or returning a top-N, on a `LEFT JOIN` aggregate, on aggregates its columnar index can answer, and on vector search, including a vector search joined to another table. SQLite is faster by an order of magnitude on `GROUP BY` over a key that has an index, and 2 to 5 times faster where an index lets it read a small part of a large table instead of scanning it (an anti-join, a join driven by a selective dimension). On full scans filtered with `OR` or `LIKE` SQLite is 1.5 to 2 times faster. Before 15 November, `OR`, `LIKE`, joins of three tables, `LEFT JOIN` and joins returning rows left DataVo's typed paths and were 7 to 109 times slower. Every engine now returns the exact answer on every relational query. See [Correctness findings](#correctness-findings) for what was wrong and what the fixes cost.
 
@@ -29,7 +29,8 @@ Ratios compare medians, DataVo's LSM engine against SQLite (WAL, `synchronous=NO
 | The same, without a columnar index | SQLite | 1.5–2.1× | [C1–C4](#columnar-index) |
 | `SUM`/`AVG` of a `DOUBLE`/`FLOAT` column on the LSM engine, columnar index | SQLite | 2.0× | [C3](#columnar-index): the LSM engine does not push floating-point sums down |
 | `ORDER BY ... LIMIT 10` over the whole table | SQLite | 1.6× | [C8](#columnar-index) |
-| Top-10 nearest neighbours, one table, with or without a filter, exact | DataVo Flat | 1.6–7.2× | [V0–V2](#hybrid-vector-and-sql) |
+| Top-10 nearest neighbours, one table, with or without a filter, exact | DataVo Flat | 1.7–7.0× | [V0–V2](#hybrid-vector-and-sql) |
+| Top-10 nearest neighbours, no filter or a broad one, approximate (HNSW) | DataVo HNSW | 5.9–29× over sqlite-vec's exact scan; recall 100% on this data | [V0, V2](#hybrid-vector-and-sql) |
 | Top-10 nearest neighbours **joined to another table**, exact | DataVo Flat | 1.0–1.9× | [V3, V4](#hybrid-vector-and-sql) |
 | Analytical scans, joins and aggregates that read the whole table | DuckDB | 3–2,600× over both | every table below; DuckDB is the slowest of the three on key ranges and index lookups |
 
@@ -93,7 +94,7 @@ Before timing a query, the runner executes it with each of its parameter sets an
 
 ### Machine
 
-Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3, Arm64 RyuJIT. Engine commit `6743521` (`9625ac1` plus the four fix commits) for the 14 November runs, `9ffb413` for the filter rows and `80db3ba` for the join rows; benchmark code `638324d`, unchanged across all runs. One run per scenario, no CPU pinning; the last SQL matrix run had no other build or test process running. The 14 November SQL matrix took 21 minutes and peaked at 5.6 GB resident, the last one 5 minutes and 1.1 GB; the vector scenarios took 47 and 88 seconds. As on the [results page](./benchmarks.md), treat differences under about 20% as not established.
+Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3, Arm64 RyuJIT. Engine commit `6743521` (`9625ac1` plus the four fix commits) for the 14 November runs, `9ffb413` for the filter rows, `80db3ba` for the join rows and `52b78cf` for the vector section; benchmark code `638324d`, unchanged across all runs. One run per scenario, no CPU pinning; the last SQL matrix run and the vector runs had no other build or test process running (a first 384-dimension vector run, started seconds after a build, was discarded; see its `environment.txt`). The 14 November SQL matrix took 21 minutes and peaked at 5.6 GB resident, the last one 5 minutes and 1.1 GB; the vector scenarios took 43 and 74 seconds at about 1 GB. As on the [results page](./benchmarks.md), treat differences under about 20% as not established.
 
 ### Reproducing
 
@@ -225,45 +226,64 @@ DataVo runs `SELECT Id, Emb <=> @q AS dist FROM Docs WHERE ... ORDER BY dist LIM
 
 | Shape | DataVo Flat | DataVo HNSW | SQLite + sqlite-vec | sqlite-vec / Flat |
 | --- | --- | --- | --- | ---: |
-| Load + index build | 345 ms | 1,935 ms | 643 ms | |
-| V0 top-10, no filter | 2.59 ms (16.1 ms), recall 100% | 0.66 ms (1.03 ms), recall 81.6% (min 0%) | 18.6 ms (19.9 ms), recall 100% | **7.2×** |
-| V1 `Category = @c AND Price < 50` (~5%) | 4.24 ms (9.72 ms), 100% | 7.10 ms (19.7 ms), 92.0%, 4 short | 9.79 ms (10.3 ms), 100% | **2.3×** |
-| V2 `Price < 50` (~50%) | 2.75 ms (5.36 ms), 100% | 1.31 ms (2.69 ms), 83.0% | 14.6 ms (15.3 ms), 100% | **5.3×** |
-| V3 V1 + `JOIN Authors` | 5.31 ms (14.3 ms), 100% | 8.40 ms (273 ms), 93.7% | 9.83 ms (10.1 ms), 100% | **1.9×** |
-| V4 `JOIN Authors WHERE a.Country = @k` (~10%) | 8.19 ms (16.5 ms), 100% | 6.71 ms (361 ms), 91.4% | 13.2 ms (13.5 ms), 100% | **1.6×** |
+| Load + index build | 329 ms | 1,635 ms | 679 ms | |
+| V0 top-10, no filter | 2.71 ms (16.0 ms), recall 100% | 0.66 ms (0.94 ms), recall 100% | 19.1 ms (21.0 ms), recall 100% | **7.0×** |
+| V1 `Category = @c AND Price < 50` (~5%) | 4.31 ms (10.1 ms), 100% | 7.76 ms (21.5 ms), 100% | 10.3 ms (11.1 ms), 100% | **2.4×** |
+| V2 `Price < 50` (~50%) | 2.77 ms (6.68 ms), 100% | 1.44 ms (3.19 ms), 100% (min 90%) | 15.1 ms (16.4 ms), 100% | **5.4×** |
+| V3 V1 + `JOIN Authors` | 5.39 ms (15.2 ms), 100% | 8.79 ms (25.8 ms), 100% | 10.3 ms (11.1 ms), 100% | **1.9×** |
+| V4 `JOIN Authors WHERE a.Country = @k` (~10%) | 8.31 ms (17.6 ms), 100% | 7.50 ms (21.8 ms), 100% | 13.9 ms (15.2 ms), 100% | **1.7×** |
 
 The same scenario with 20,000 documents of 1,536 dimensions (`hybrid-vector-1536.md`):
 
 | Shape | DataVo Flat | DataVo HNSW | SQLite + sqlite-vec | sqlite-vec / Flat |
 | --- | --- | --- | --- | ---: |
-| Load + index build | 472 ms | 1,778 ms | 3,971 ms | |
-| V0 | 6.06 ms (28.6 ms), 100% | 2.22 ms (2.75 ms), 85.6% | 32.1 ms (32.9 ms), 100% | **5.3×** |
-| V1 (~5%) | 9.76 ms (21.0 ms), 100% | 11.9 ms (29.7 ms), 87.2%, 24 short | 15.4 ms (18.6 ms), 100% | **1.6×** |
-| V2 (~50%) | 6.86 ms (12.0 ms), 100% | 3.60 ms (5.63 ms), 86.6% | 23.4 ms (24.0 ms), 100% | **3.4×** |
-| V3 | 10.3 ms (22.3 ms), 100% | 12.7 ms (334 ms), 93.1% | 15.3 ms (16.2 ms), 100% | **1.5×** |
-| V4 | 17.3 ms (23.8 ms), 100% | 10.1 ms (452 ms), 91.1% | 17.3 ms (18.5 ms), 100% | 1.0× |
+| Load + index build | 490 ms | 2,020 ms | 4,040 ms | |
+| V0 | 6.24 ms (28.1 ms), 100% | 2.40 ms (2.74 ms), 100% | 32.9 ms (37.9 ms), 100% | **5.3×** |
+| V1 (~5%) | 9.77 ms (21.3 ms), 100% | 13.4 ms (31.9 ms), 100% | 16.2 ms (19.5 ms), 100% | **1.7×** |
+| V2 (~50%) | 6.85 ms (11.9 ms), 100% | 4.10 ms (7.08 ms), 100% | 24.4 ms (26.5 ms), 100% | **3.6×** |
+| V3 | 10.4 ms (22.9 ms), 100% | 13.9 ms (34.9 ms), 100% | 16.1 ms (18.1 ms), 100% | **1.5×** |
+| V4 | 17.4 ms (24.6 ms), 100% | 12.4 ms (25.0 ms), 100% | 18.2 ms (20.9 ms), 100% | 1.0× |
 
-No DataVo shape returned a row that fails its filter, and no Flat shape returned fewer than 10 rows. Before the fixes, V3 returned recall 5% with every query short, and V4 returned about 1,800 failing rows per 200 queries (see `pre-fix/`).
+No DataVo shape returned a row that fails its filter, and no shape, Flat or HNSW, returned fewer than 10 rows. Before the fixes, V3 returned recall 5% with every query short, and V4 returned about 1,800 failing rows per 200 queries (see `pre-fix/`).
 
-**DataVo's planner routes,** from its diagnostics (`RuntimeQueryStats` and the hybrid-routing counters), recorded in a separate untimed pass over the same 200 queries at 384 dimensions:
+**DataVo's planner routes,** from its diagnostics (`RuntimeQueryStats` and the hybrid-routing counters), recorded in a separate untimed pass over the same 200 queries at 384 dimensions (the 1,536-dimension run routed the same way, with no fallback either):
 
 | Shape | Route | Candidates fetched from the vector index (Flat) | Expansion passes (mean) | Fallback to the general path |
 | --- | --- | --- | ---: | ---: |
 | V0 | vector index, baseline | 10 | 0 | 0 of 200 |
-| V1 | vector index, adaptive initial top-k, filter applied to candidates | median 286, max 572 | 0.10 (Flat), 0.14 (HNSW) | 0 |
-| V2 | vector index, adaptive | median 29, max 58 | 0.05 (Flat), 0.02 (HNSW) | 0 |
-| V3 | vector index, adaptive; candidates pre-filtered, joined, filtered by the whole `WHERE` | median 286, max 1,073 | 0.10 (Flat), 0.08 (HNSW) | 0 (Flat), 4 (HNSW) |
-| V4 | vector index, baseline; grows with the share of candidates that survive the join filter | median 150, max 600 | 1.49 (Flat), 1.47 (HNSW) | 0 (Flat), 4 (HNSW) |
+| V1 | vector index, adaptive initial top-k, filter applied to candidates | median 286, max 572 | 0.10 (Flat and HNSW) | 0 |
+| V2 | vector index, adaptive | median 29, max 58 | 0.05 (Flat and HNSW) | 0 |
+| V3 | vector index, adaptive; candidates pre-filtered, joined, filtered by the whole `WHERE` | median 286, max 1,073 | 0.10 (Flat and HNSW) | 0 |
+| V4 | vector index, baseline; grows with the share of candidates that survive the join filter | median 150, max 600 | 1.49 (Flat and HNSW) | 0 |
 
 The join shapes read the `Authors` table for every query (the runner's "full table scan" counter reports 200 of 200).
 
-**Why DataVo Flat is faster than sqlite-vec on V0–V2.** Both compute exact distances. DataVo's Flat index runs its vectorised distance kernels (`SimdDistanceKernels`, NEON on this machine) and is 5.3 to 7.2 times faster than `vec0` without a filter. I did not profile sqlite-vec, so I cannot say how much of the gap is the kernel and how much the scan around it. With a filter the margin shrinks to 1.6–2.3 times, from both sides. sqlite-vec applies metadata filters inside its scan and computes no distance for a row that fails: its V1 is 1.9 times faster than its V0. DataVo instead asks the index for the top 286 to 572 candidates of the whole table, loads those rows, and filters them (6.8 MB allocated per query at 384 dimensions). When fewer than 10 candidates pass, it fetches twice as many, up to two more times. With Flat the candidates are exact, so the filtered top-10 is exact whenever enough candidates pass, which it was in all 200 queries.
+**Why DataVo Flat is faster than sqlite-vec on V0–V2.** Both compute exact distances. DataVo's Flat index runs its vectorised distance kernels (`SimdDistanceKernels`, NEON on this machine) and is 5.3 to 7.0 times faster than `vec0` without a filter. I did not profile sqlite-vec, so I cannot say how much of the gap is the kernel and how much the scan around it. With a filter the margin shrinks to 1.7–2.4 times, from both sides. sqlite-vec applies metadata filters inside its scan and computes no distance for a row that fails: its V1 is 1.9 times faster than its V0. DataVo instead asks the index for the top 286 to 572 candidates of the whole table, loads those rows, and filters them (6.8 MB allocated per query at 384 dimensions). When fewer than 10 candidates pass, it fetches twice as many, up to two more times. With Flat the candidates are exact, so the filtered top-10 is exact whenever enough candidates pass, which it was in all 200 queries.
 
-**Vector search joined to another table (V3, V4).** DataVo pre-filters the candidates with the predicates on `Docs`, joins them to `Authors`, and filters the joined rows with the whole `WHERE`. If fewer than 10 rows survive, the next fetch is sized from the share that survived, with 50% headroom: for V4, where one candidate in ten survives, 10 candidates become about 150. If two expansions are not enough, the query runs on the general path, which reads every document and is exact but slow (about 350 ms here). With Flat that never happened. DataVo Flat is 1.5–1.9 times faster than sqlite-vec on V3 and level with it on V4 at 1,536 dimensions, where the joined candidates' 6 KB vectors are the main cost. sqlite-vec pushes the author filter into its scan as an `IN` list on a metadata column, so it never computes a distance for a document of another country.
+**Vector search joined to another table (V3, V4).** DataVo pre-filters the candidates with the predicates on `Docs`, joins them to `Authors`, and filters the joined rows with the whole `WHERE`. If fewer than 10 rows survive, the next fetch is sized from the share that survived, with 50% headroom: for V4, where one candidate in ten survives, 10 candidates become about 150. If two expansions are not enough, the query runs on the general path, which reads every document and is exact but slow (about 350 ms here). In this run that never happened, with Flat or HNSW. DataVo Flat is 1.5–1.9 times faster than sqlite-vec on V3 and level with it on V4 at 1,536 dimensions, where the joined candidates' 6 KB vectors are the main cost. sqlite-vec pushes the author filter into its scan as an `IN` list on a metadata column, so it never computes a distance for a document of another country.
 
-**HNSW on this data.** HNSW is the fastest on V0, V2 and V4, but its recall is 81.6–93.7% across the shapes and both sizes, with a minimum of 0%. In a separate probe (`EfSearch` 64, 128, 256, 512), 15 of the 200 queries had 0% recall at every `EfSearch`. Their results had a mean distance of 0.74 where the true top-10 had 0.15. The search ended in a different cluster, and widening the search did not bring it back. This data has well-separated clusters (cluster noise is 0.46 of the centre's length), which is hard for a graph index, and the [earlier recall experiment](./benchmarks.md#vector-search) measured 90–96% on clustered data from a different generator. With a selective filter, HNSW's approximate candidates can run out. V1 returned fewer than 10 rows for 4 queries at 384 dimensions and 24 at 1,536 (0 and 18 in the first run, whose graph was built in a different order). On the join shapes, the same shortage sends 3–23 queries to the exact general path, which is HNSW's p99 of 273–452 ms. Use Flat up to at least 50,000 vectors when the result must be complete, and measure HNSW recall on your own embeddings before relying on it.
+**HNSW on this data.** HNSW is the fastest engine on V0, V2 and V4, at recall@10 of 100% on every shape and both sizes; the lowest single query was 90% (V2, 384 dimensions). It is slower than Flat on V1 and V3, where the filter keeps about 5% of the rows and the 286 or more candidates it must return cost more to find in a graph than to scan. HNSW is approximate: these figures hold for this data, and a different distribution can give lower recall.
 
-**Allocation.** sqlite-vec allocates 2–7 KB of managed memory per query. DataVo allocates 1.2 MB per unfiltered query and up to 24 MB per filtered query at 1,536 dimensions. One cause is visible in the API: a `float[]` bound as a query parameter is turned into vector text (`DataVoQueryParameter.FromObject` → `FormatVectorString`) and parsed back for every execution. The rest is the candidate rows loaded for post-filtering. DataVo Flat's p99 is 1.4–6.2 times its median, against at most 1.2 times for sqlite-vec. Garbage collection is the likely cause, but I did not measure it.
+Before 15 November HNSW's recall on this data was 81.6–93.7%, and 12 to 21 of the 200 queries found none of their true top-10 at any `EfSearch` up to 512. The index linked every node only to its nearest neighbours. The data has 128 well-separated clusters (cluster noise is 0.46 of the centre's length), so almost no edge left a cluster: 4–6% of the edges on levels 0 to 3 of the 384-dimension graph. When the descent through the upper levels entered the wrong cluster, the search could not get out, and a wider search only explored that cluster further. Two fixes followed:
+
+- **Diversity heuristic on by default (`8e472ab`).** A candidate that is closer to an already chosen neighbour than to the node is skipped in favour of one in another direction, as in the HNSW paper. On levels 2 and 3 of the same graph, the share of cross-cluster edges rose from 4–5% to 23% and 47%, so the descent now reaches the right cluster. An index loaded from a snapshot keeps the setting it was built with. To rebuild one made before this change, drop the index and create it again. SQL does not expose the setting; in C#, `HNSWIndex.EnableDiversityHeuristic = false` still opts out.
+- **Connectivity repair (`52b78cf`).** After each parallel batch, a repair pass links nodes no search can reach. To make room in a full neighbour list it dropped any edge whose target had two incoming edges. In a nearest-neighbour graph, nodes of a cluster point at each other, so the single edge into a cluster qualified, and builds without the heuristic ended with 4 to 817 unreachable nodes. The pass now never drops an edge of the spanning tree it walked, and the same builds end with none.
+
+An ablation that built the index directly from the same data, one configuration per process (`hnsw-ablation.txt`), shows that the heuristic is the fix. A wider construction search alone does not fix it:
+
+| Construction setting | Dimensions | Build | Recall@10, default width | Queries at 0%: default width / `EfSearch` 512 | Median query |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nearest neighbours only (old default) | 384 | 1,690 ms | 83.6% | 20 / 19 | 0.158 ms |
+| Diversity heuristic (new default) | 384 | 1,592 ms | 100.0% | 0 / 0 | 0.166 ms |
+| Nearest only, `EfConstruction` uncapped | 384 | 5,520 ms | 89.8% | 17 / 13 | 0.164 ms |
+| Nearest only, `EfConstruction` 200 | 384 | 2,777 ms | 86.8% | 15 / 13 | 0.162 ms |
+| Diversity, `EfConstruction` uncapped | 384 | 7,063 ms | 100.0% | 0 / 0 | 0.252 ms |
+| Nearest neighbours only (old default) | 1,536 | 1,800 ms | 87.5% | 15 / 12 | 0.284 ms |
+| Diversity heuristic (new default) | 1,536 | 1,900 ms | 100.0% | 0 / 0 | 0.421 ms |
+
+The heuristic does not change build time beyond noise or the memory the index holds (the neighbour lists have a fixed size). What it costs is query time at 1,536 dimensions, 0.28 to 0.42 ms median, because the search now visits more of the graph. The July measurement on the [results page](./benchmarks.md#vector-search), where the heuristic made the build four times slower, predates the incremental pruning and the parallel build. On uniform random vectors it now costs 8–11% more build time at the same recall (10,000 × 1,536 and 50,000 × 384, measured with the same probe).
+
+**Allocation.** sqlite-vec allocates 2–7 KB of managed memory per query. DataVo allocates 1.2 MB per unfiltered query and up to 24 MB per filtered query at 1,536 dimensions. One cause is visible in the API: a `float[]` bound as a query parameter is turned into vector text (`DataVoQueryParameter.FromObject` → `FormatVectorString`) and parsed back for every execution. The rest is the candidate rows loaded for post-filtering. DataVo Flat's p99 is 1.4–5.9 times its median, against at most 1.2 times for sqlite-vec. Garbage collection is the likely cause, but I did not measure it.
 
 ## What this does not show
 

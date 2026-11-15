@@ -1,0 +1,72 @@
+data 50000 x 384
+
+[nodiv] build 1690 ms, heap +137.6 MB, maxLevel 11, unreachable 0
+  ef adaptive: recall 83.6 % min 0 % zero 20 <50% 27  median 0.158 ms p99 0.416 ms
+  ef       64: recall 83.0 % min 0 % zero 20 <50% 27  median 0.095 ms p99 0.184 ms
+  ef      128: recall 83.5 % min 0 % zero 20 <50% 27  median 0.126 ms p99 0.287 ms
+  ef      256: recall 83.6 % min 0 % zero 20 <50% 27  median 0.164 ms p99 0.432 ms
+  ef      512: recall 84.2 % min 0 % zero 19 <50% 27  median 0.383 ms p99 0.814 ms
+data 50000 x 384
+
+[default] build 1592 ms, heap +138.2 MB, maxLevel 11, unreachable 0
+  ef adaptive: recall 100.0 % min 90 % zero 0 <50% 0  median 0.166 ms p99 0.197 ms
+  ef       64: recall 99.3 % min 90 % zero 0 <50% 0  median 0.103 ms p99 0.161 ms
+  ef      128: recall 99.9 % min 90 % zero 0 <50% 0  median 0.130 ms p99 0.154 ms
+  ef      256: recall 100.0 % min 90 % zero 0 <50% 0  median 0.174 ms p99 0.213 ms
+  ef      512: recall 100.0 % min 90 % zero 0 <50% 0  median 0.410 ms p99 0.624 ms
+data 50000 x 384
+
+[nodiv+maxefc=0] build 5520 ms, heap +118.8 MB, maxLevel 10, unreachable 0
+  ef adaptive: recall 89.8 % min 0 % zero 17 <50% 18  median 0.164 ms p99 0.452 ms
+  ef       64: recall 87.2 % min 0 % zero 19 <50% 21  median 0.099 ms p99 0.243 ms
+  ef      128: recall 88.9 % min 0 % zero 18 <50% 19  median 0.130 ms p99 0.378 ms
+  ef      256: recall 89.8 % min 0 % zero 17 <50% 18  median 0.168 ms p99 0.488 ms
+  ef      512: recall 92.3 % min 0 % zero 13 <50% 13  median 0.395 ms p99 0.908 ms
+data 50000 x 384
+
+[div+maxefc=0] build 7063 ms, heap +140.0 MB, maxLevel 11, unreachable 0
+  ef adaptive: recall 100.0 % min 100 % zero 0 <50% 0  median 0.252 ms p99 0.325 ms
+  ef       64: recall 99.7 % min 90 % zero 0 <50% 0  median 0.132 ms p99 0.182 ms
+  ef      128: recall 100.0 % min 100 % zero 0 <50% 0  median 0.181 ms p99 0.216 ms
+  ef      256: recall 100.0 % min 100 % zero 0 <50% 0  median 0.269 ms p99 0.412 ms
+  ef      512: recall 100.0 % min 100 % zero 0 <50% 0  median 0.628 ms p99 0.847 ms
+data 50000 x 384
+
+[nodiv+efc=200+maxefc=200] build 2777 ms, heap +138.3 MB, maxLevel 11, unreachable 0
+  ef adaptive: recall 86.8 % min 0 % zero 15 <50% 22  median 0.162 ms p99 0.537 ms
+  ef       64: recall 86.1 % min 0 % zero 16 <50% 22  median 0.097 ms p99 0.167 ms
+  ef      128: recall 86.5 % min 0 % zero 15 <50% 22  median 0.123 ms p99 0.352 ms
+  ef      256: recall 86.8 % min 0 % zero 15 <50% 22  median 0.168 ms p99 0.544 ms
+  ef      512: recall 87.8 % min 0 % zero 13 <50% 21  median 0.388 ms p99 0.856 ms
+data 50000 x 384
+
+[div+efc=200+maxefc=200] build 2819 ms, heap +138.1 MB, maxLevel 12, unreachable 0
+  ef adaptive: recall 100.0 % min 100 % zero 0 <50% 0  median 0.191 ms p99 0.238 ms
+  ef       64: recall 99.8 % min 90 % zero 0 <50% 0  median 0.111 ms p99 0.139 ms
+  ef      128: recall 100.0 % min 100 % zero 0 <50% 0  median 0.140 ms p99 0.179 ms
+  ef      256: recall 100.0 % min 100 % zero 0 <50% 0  median 0.197 ms p99 0.274 ms
+  ef      512: recall 100.0 % min 100 % zero 0 <50% 0  median 0.486 ms p99 0.683 ms
+data 20000 x 1536
+
+[nodiv] build 1800 ms, heap +66.9 MB, maxLevel 11, unreachable 0
+  ef adaptive: recall 87.5 % min 0 % zero 15 <50% 20  median 0.284 ms p99 0.566 ms
+  ef       64: recall 87.4 % min 0 % zero 15 <50% 20  median 0.136 ms p99 0.294 ms
+  ef      128: recall 87.5 % min 0 % zero 15 <50% 20  median 0.160 ms p99 0.355 ms
+  ef      256: recall 87.6 % min 0 % zero 15 <50% 20  median 0.331 ms p99 0.641 ms
+  ef      512: recall 88.4 % min 0 % zero 12 <50% 18  median 0.583 ms p99 1.046 ms
+data 20000 x 1536
+
+[default] build 1900 ms, heap +67.4 MB, maxLevel 9, unreachable 0
+  ef adaptive: recall 100.0 % min 100 % zero 0 <50% 0  median 0.421 ms p99 0.596 ms
+  ef       64: recall 99.9 % min 90 % zero 0 <50% 0  median 0.167 ms p99 0.204 ms
+  ef      128: recall 100.0 % min 100 % zero 0 <50% 0  median 0.206 ms p99 0.273 ms
+  ef      256: recall 100.0 % min 100 % zero 0 <50% 0  median 0.518 ms p99 0.742 ms
+  ef      512: recall 100.0 % min 100 % zero 0 <50% 0  median 1.000 ms p99 1.345 ms
+data 20000 x 1536
+
+[div+maxefc=0] build 8061 ms, heap +69.0 MB, maxLevel 10, unreachable 0
+  ef adaptive: recall 100.0 % min 90 % zero 0 <50% 0  median 0.775 ms p99 0.995 ms
+  ef       64: recall 99.8 % min 90 % zero 0 <50% 0  median 0.300 ms p99 0.357 ms
+  ef      128: recall 100.0 % min 90 % zero 0 <50% 0  median 0.404 ms p99 0.474 ms
+  ef      256: recall 100.0 % min 90 % zero 0 <50% 0  median 0.944 ms p99 1.183 ms
+  ef      512: recall 100.0 % min 90 % zero 0 <50% 0  median 1.856 ms p99 2.212 ms
