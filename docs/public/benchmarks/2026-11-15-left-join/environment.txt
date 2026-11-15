@@ -1,0 +1,13 @@
+benchmark code: 638324d (unchanged since the 2026-11-14 runs)
+engine (DataVo.Core): 269f226 = master effbbdb + ee787ba (typed join hashes only the columns it reads; key-only
+        hash for anti-joins) + 3628145 (aggregates over no joined rows stay typed) + 65d6434 (unaggregated joined rows
+        on the typed join) + 269f226 (INNER typed join driven through an index on the streamed table)
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-15, started at load average 2.4 (1 min) with no other build or test process running
+run: sql-matrix (defaults: 1,000,000 orders, 100,000 customers, 1,000 products, all four engines), one run,
+     295 s wall, 1.11 GB peak memory footprint
+oracle: 0 mismatches (no cell marked with a cross) on any engine
+note: every row outside J1-J7 is within run-to-run noise of 2026-11-15-joins/ except C8 (63 -> 78 ms on LSM). C8 is a
+      single-table typed scan these commits do not touch; re-measured right after on master (effbbdb) and on 269f226
+      with the same runner, it took 66.1 ms and 65.5 ms, so the 78 ms is noise.
+join-rows.txt: unaggregated joins returning rows, master against this engine (see the file's header).

@@ -1,0 +1,14 @@
+Unaggregated joins returning rows on the sql-matrix data (1,000,000 orders, 100,000 customers), DataVo LSM, run through the runner's DataVoSqlMatrixEngine.Query (a prepared statement per query); median of 5 calls after one warm-up; MB = managed bytes allocated per call on the calling thread. These shapes are not in the sql-matrix catalog; the program is join-rows-probe.cs.txt (a scratch program that references Research.Benchmark.Runners).
+Measured 2026-11-15 22:36, load averages: 2.92 3.04 3.56
+
+== master effbbdb (general / Volcano join path)
+  4594.00 ms    3355.8 MB     93684 rows  SELECT o.Id, c.Region FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1'
+  4369.57 ms    3349.3 MB       100 rows  SELECT o.Id, c.Region FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1' LIMIT 100
+  1903.75 ms    2037.9 MB      9316 rows  SELECT o.Id, c.Name FROM Orders o JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1' AND o.Qty = 1
+  4633.06 ms    3474.7 MB    250395 rows  SELECT o.Id FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL
+
+== branch 269f226 (typed join)
+   456.96 ms     302.5 MB     93684 rows  SELECT o.Id, c.Region FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1'
+    18.61 ms      24.6 MB       100 rows  SELECT o.Id, c.Region FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1' LIMIT 100
+    81.21 ms      62.5 MB      9316 rows  SELECT o.Id, c.Name FROM Orders o JOIN Customers c ON o.CustomerId = c.Id WHERE c.Region = 'R1' AND o.Qty = 1
+   994.18 ms     751.1 MB    250395 rows  SELECT o.Id FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL
