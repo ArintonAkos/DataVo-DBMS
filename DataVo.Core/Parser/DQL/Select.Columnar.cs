@@ -88,14 +88,13 @@ internal partial class Select
             return true; // no group: aggregates over no rows belong to the general path, as after a row scan
         }
 
-        var group = new TypedGroup([], aggregates.Count);
+        int group = state.GroupKeys!.FindOrAdd([], out _);
+        state.GroupStates!.Add();
         for (int i = 0; i < aggregates.Count; i++)
         {
-            Store(group, i, aggregates[i], index, workspace.Folds[i], in workspace.Totals[i]);
+            Store(state.GroupStates, group, i, aggregates[i], index, workspace.Folds[i], in workspace.Totals[i]);
         }
 
-        state.Groups![new GroupKey(group.Keys)] = group;
-        state.GroupOrder!.Add(group);
         return true;
     }
 
@@ -259,11 +258,11 @@ internal partial class Select
     }
 
     /// <summary>Puts one aggregate's columnar result where the row scan would have accumulated it.</summary>
-    private static void Store(TypedGroup group, int at, TypedAggregate aggregate, ColumnarIndex index, ColumnarFold fold, in RowAggregate total)
+    private static void Store(TypedGroupStates groups, int group, int at, TypedAggregate aggregate, ColumnarIndex index, ColumnarFold fold, in RowAggregate total)
     {
         if (aggregate.Ordinal < 0)
         {
-            group.Counts[at] = total.Count;
+            groups.CountOf(group, at) = total.Count;
             return;
         }
 
@@ -271,35 +270,35 @@ internal partial class Select
         switch (aggregate.Spec.Function)
         {
             case HashAggregateOperator.AggregateFunction.Count:
-                group.Counts[at] = total.Values;
+                groups.CountOf(group, at) = total.Values;
                 break;
             case HashAggregateOperator.AggregateFunction.Sum when total.Values > 0:
                 if (whole)
                 {
-                    group.Totals[at].Add(total.Whole);
+                    groups.TotalOf(group, at).Add(total.Whole);
                 }
                 else
                 {
-                    group.Totals[at].Add(total.Real);
+                    groups.TotalOf(group, at).Add(total.Real);
                 }
 
                 break;
             case HashAggregateOperator.AggregateFunction.Avg:
                 // Integers are added exactly here and one by one as doubles in the row scan; the two differ
                 // only once a sum passes 2^53.
-                group.Sums[at] = whole ? total.Whole : total.Real;
-                group.Counts[at] = total.Values;
+                groups.SumOf(group, at) = whole ? total.Whole : total.Real;
+                groups.CountOf(group, at) = total.Values;
                 break;
             case HashAggregateOperator.AggregateFunction.Min or HashAggregateOperator.AggregateFunction.Max when total.Values > 0:
                 // Boxed as the column's own type, as the row scan's values are.
-                group.Extremes[at] = index.KindOf(fold.Slot) switch
+                groups.ExtremeOf(group, at) = index.KindOf(fold.Slot) switch
                 {
                     StorageKind.Int => (object)(int)total.Whole,
                     StorageKind.BigInt => (object)total.Whole,
                     StorageKind.Float => (object)(float)total.Real,
                     _ => (object)total.Real,
                 };
-                group.HasExtreme[at] = true;
+                groups.HasExtremeOf(group, at) = true;
                 break;
         }
     }

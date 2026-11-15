@@ -113,7 +113,9 @@ internal partial class Select
         // Aggregates.
         public List<(int Side, int Ordinal)>? GroupColumns { get; init; }
         public List<JoinAggregate>? Aggregates { get; init; }
-        public Dictionary<GroupKey, JoinGroup> Groups { get; } = [];
+        public GroupLookup GroupKeys { get; } = new();
+
+        /// <summary>The groups by group number (the order they first appeared in).</summary>
         public List<JoinGroup> GroupOrder { get; } = [];
 
         // Returned rows: the top rows of ORDER BY ... LIMIT, or (Unordered) the rows in the order they are joined.
@@ -873,23 +875,33 @@ internal partial class Select
             return state.GroupOrder[0]; // no GROUP BY: one group, no key to build
         }
 
-        object?[] keys = groupColumns.Count == 0 ? [] : new object?[groupColumns.Count];
-        for (int i = 0; i < keys.Length; i++)
+        int number;
+        bool added;
+        if (groupColumns.Count == 1)
         {
-            (int side, int ordinal) = groupColumns[i];
-            keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal]);
+            // One key column: looked up by its value, with nothing allocated per joined row.
+            (int side, int ordinal) = groupColumns[0];
+            number = state.GroupKeys.FindOrAdd(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal], out added);
+        }
+        else
+        {
+            object?[] keys = groupColumns.Count == 0 ? [] : new object?[groupColumns.Count];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                (int side, int ordinal) = groupColumns[i];
+                keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal]);
+            }
+
+            number = state.GroupKeys.FindOrAdd(keys, out added);
         }
 
-        var groupKey = new GroupKey(keys);
-        if (!state.Groups.TryGetValue(groupKey, out JoinGroup? group))
+        if (added)
         {
             LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
-            group = new JoinGroup(BuildJoinedRow(state.Sides, state.Current), state.Aggregates!.Count);
-            state.Groups[groupKey] = group;
-            state.GroupOrder.Add(group);
+            state.GroupOrder.Add(new JoinGroup(BuildJoinedRow(state.Sides, state.Current), state.Aggregates!.Count));
         }
 
-        return group;
+        return state.GroupOrder[number];
     }
 
     private static void AccumulateJoinedRow(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
