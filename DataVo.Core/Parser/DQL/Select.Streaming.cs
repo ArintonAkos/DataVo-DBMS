@@ -126,7 +126,7 @@ internal partial class Select
             : (null, null);
 
         var filterMask = new bool[columns.Count];
-        predicates.ForEach(predicate => filterMask[predicate.Ordinal] = true);
+        MarkFilterColumns(predicates, filterMask);
         var restMask = new bool[columns.Count];
         foreach (int ordinal in outputOrdinals)
         {
@@ -201,12 +201,9 @@ internal partial class Select
         TypedScanState state = page.Scan;
         CellValue[] cells = state.Cells;
         Load(state, rowId, rowBytes, typedCells, state.FilterMask);
-        foreach (TypedPredicate predicate in state.Predicates)
+        if (!MatchesAll(state.Predicates, cells, state.Columns))
         {
-            if (!Matches(predicate, cells[predicate.Ordinal], state.Columns[predicate.Ordinal]))
-            {
-                return true;
-            }
+            return true;
         }
 
         Load(state, rowId, rowBytes, typedCells, state.RestMask);

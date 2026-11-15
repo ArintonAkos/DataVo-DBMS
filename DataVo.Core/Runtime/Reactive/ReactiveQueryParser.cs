@@ -1,4 +1,6 @@
+using DataVo.Core.Constants;
 using DataVo.Core.Enums;
+using DataVo.Core.Parser;
 using DataVo.Core.Parser.AST;
 using SqlLexer = DataVo.Core.Parser.Lexer;
 using SqlParser = DataVo.Core.Parser.Parser;
@@ -146,16 +148,20 @@ internal static class ReactiveQueryParser
         }
 
         List<SqlStatement> statements;
+        List<Token> tokens;
         try
         {
             var lexer = new SqlLexer(sql);
-            var parser = new SqlParser(lexer.Tokenize());
+            tokens = lexer.Tokenize();
+            var parser = new SqlParser(tokens);
             statements = parser.Parse();
         }
         catch (Exception ex)
         {
             throw new NotSupportedException($"Reactive subscription SQL could not be parsed: {ex.Message}", ex);
         }
+
+        RejectDistinctAggregates(tokens);
 
         if (statements is [SelectStatement { FromTable: null }])
         {
@@ -641,6 +647,26 @@ internal static class ReactiveQueryParser
 
             default:
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// Reactive aggregates are maintained incrementally and have no distinct-value state, so
+    /// <c>COUNT(DISTINCT x)</c> and the other DISTINCT aggregates are rejected instead of being treated as
+    /// their plain form. The check runs on the tokens, so it covers every place an aggregate can appear.
+    /// </summary>
+    private static void RejectDistinctAggregates(List<Token> tokens)
+    {
+        for (int i = 0; i + 2 < tokens.Count; i++)
+        {
+            if (tokens[i + 1].Type == TokenType.Punctuation && tokens[i + 1].Value == SqlPunctuation.OpenParenToken
+                && tokens[i + 2].Type == TokenType.Keyword
+                && tokens[i + 2].Value.Equals(SqlKeywords.DISTINCT, StringComparison.OrdinalIgnoreCase)
+                && tokens[i].Value.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
+            {
+                throw new NotSupportedException(
+                    $"Reactive subscriptions do not support {tokens[i].Value.ToUpperInvariant()}(DISTINCT ...); run the query with Execute instead.");
+            }
         }
     }
 

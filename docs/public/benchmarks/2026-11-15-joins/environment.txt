@@ -1,0 +1,7 @@
+benchmark code: 638324d (unchanged since the 2026-11-14 runs)
+engine (DataVo.Core): 80db3ba = 9ffb413 (OR/LIKE typed scan, results in ../2026-11-15/) + b26e70e (general join path joins once) + 80db3ba (typed join: LEFT JOIN, 3+ tables, ORDER BY ... LIMIT)
+SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0), DuckDB.NET.Data.Full 1.5.3
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-15, run alone with no other build or test process
+runs: sql-matrix (defaults), one run; 303 s wall, 1.12 GB peak memory footprint
+note: a first run of the unamended commit dc6031b showed J7 at 57 ms (probe columns decoded before the hash lookup); fixed in 80db3ba before this run

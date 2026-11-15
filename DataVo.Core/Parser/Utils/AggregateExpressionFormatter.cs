@@ -14,7 +14,7 @@ internal static class AggregateExpressionFormatter
         }
 
         string argument = aggregate.Argument == null ? string.Empty : FormatExpression(aggregate.Argument);
-        return $"{functionName}({argument})";
+        return aggregate.IsDistinct ? $"{functionName}(DISTINCT {argument})" : $"{functionName}({argument})";
     }
 
     public static string FormatExpression(ExpressionNode expression)

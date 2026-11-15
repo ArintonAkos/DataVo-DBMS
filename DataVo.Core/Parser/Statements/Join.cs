@@ -1,3 +1,4 @@
+using DataVo.Core.StorageEngine;
 ﻿using DataVo.Core.Models.Statement;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
@@ -17,6 +18,8 @@ public class Join
     private readonly bool _containsJoin;
     private readonly JoinStrategyContext _strategyContext;
     private readonly Dictionary<string, IJoinStrategy> _strategies;
+    private List<string>? _canonicalLayout;
+    private bool _canonicalLayoutResolved;
 
     /// <summary>
     /// Gets the join model backing this evaluator.
@@ -85,7 +88,18 @@ public class Join
     /// <param name="tableRows">Initial table rows.</param>
     /// <param name="baseTableName">Optional explicit base table name.</param>
     /// <returns>The fully joined row set.</returns>
-    public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "")
+    public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "") =>
+        Evaluate(tableRows, baseTableName, null);
+
+    /// <summary>
+    /// Evaluates all configured join conditions over an initial row set, reading a joined table's rows from
+    /// <paramref name="tableRowsByName"/> (keyed by table name) instead of the whole table where it has them.
+    /// </summary>
+    /// <param name="tableRows">Initial table rows.</param>
+    /// <param name="baseTableName">Optional explicit base table name.</param>
+    /// <param name="tableRowsByName">Rows a filter left for some joined tables, or <see langword="null"/>.</param>
+    /// <returns>The fully joined row set.</returns>
+    public HashedTable Evaluate(HashedTable tableRows, string baseTableName, IReadOnlyDictionary<string, TableData>? tableRowsByName)
     {
         int tableCount;
 
@@ -109,49 +123,161 @@ public class Join
         }
 
         string joinFrom = string.IsNullOrEmpty(baseTableName) ? tableRows.First().Value.Keys.First() : baseTableName;
-        List<string> joinedTables = [joinFrom];
 
-        List<JoinCondition> remainingConditions = [.. Model.JoinConditions.Select(condition => new JoinCondition(
+        if (!TryPlanJoinOrder(joinFrom, out List<JoinCondition> steps, out List<string> layout))
+        {
+            throw new EvaluationException("Error while joining tables!");
+        }
+
+        Runtime.Diagnostics.RuntimeQueryDiagnosticsScope.RecordJoinExecution();
+        _strategyContext.TableRowsByName = tableRowsByName;
+        try
+        {
+            for (int i = 0; i < steps.Count; i++)
+            {
+                _strategyContext.LeftTableCount = i + 1;
+                tableRows = PerformJoinCondition(tableRows, steps[i]);
+            }
+        }
+        finally
+        {
+            _strategyContext.TableRowsByName = null;
+        }
+
+        return ToCanonicalKeys(tableRows, layout);
+    }
+
+    /// <summary>
+    /// Orders the join conditions so each step joins one new table to the tables already joined, starting from
+    /// <paramref name="startTable"/>. Conditions written the other way round are flipped.
+    /// </summary>
+    /// <param name="startTable">The table the evaluation starts from.</param>
+    /// <param name="steps">The conditions in execution order.</param>
+    /// <param name="layout">The tables in the order their row keys appear in a joined row's key.</param>
+    /// <returns><see langword="false"/> when some condition can never be connected to the joined tables.</returns>
+    private bool TryPlanJoinOrder(string startTable, out List<JoinCondition> steps, out List<string> layout)
+    {
+        layout = [startTable];
+        steps = new List<JoinCondition>(Model.JoinConditions.Count);
+
+        List<JoinCondition> remaining = [.. Model.JoinConditions.Select(condition => new JoinCondition(
             new Column(condition.LeftColumn.DatabaseName, condition.LeftColumn.TableName, condition.LeftColumn.ColumnName),
             new Column(condition.RightColumn.DatabaseName, condition.RightColumn.TableName, condition.RightColumn.ColumnName),
             condition.JoinType))];
 
-        while (remainingConditions.Count > 0)
+        while (remaining.Count > 0)
         {
-            bool progressed = false;
-
-            for (int i = 0; i < remainingConditions.Count; i++)
+            int next = -1;
+            for (int i = 0; i < remaining.Count && next < 0; i++)
             {
-                var joinCondition = remainingConditions[i];
-                var leftTableName = joinCondition.LeftColumn.TableName;
-                var rightTableName = joinCondition.RightColumn.TableName;
+                JoinCondition condition = remaining[i];
+                string leftTable = condition.LeftColumn.TableName;
+                string rightTable = condition.RightColumn.TableName;
 
-                if (!joinedTables.Contains(rightTableName) && joinedTables.Contains(leftTableName))
+                if (!layout.Contains(rightTable) && layout.Contains(leftTable))
                 {
-                    tableRows = PerformJoinCondition(tableRows, joinCondition);
-                    joinedTables.Add(rightTableName);
-                    remainingConditions.RemoveAt(i);
-                    progressed = true;
-                    break;
+                    next = i;
                 }
-
-                if (!joinedTables.Contains(leftTableName) && joinedTables.Contains(rightTableName))
+                else if (!layout.Contains(leftTable) && layout.Contains(rightTable))
                 {
-                    (joinCondition.LeftColumn, joinCondition.RightColumn) = (joinCondition.RightColumn, joinCondition.LeftColumn);
-                    tableRows = PerformJoinCondition(tableRows, joinCondition);
-                    joinedTables.Add(leftTableName);
-                    remainingConditions.RemoveAt(i);
-                    progressed = true;
-                    break;
+                    (condition.LeftColumn, condition.RightColumn) = (condition.RightColumn, condition.LeftColumn);
+                    next = i;
                 }
             }
 
-            if (!progressed)
+            if (next < 0)
             {
-                throw new EvaluationException("Error while joining tables!");
+                return false;
             }
+
+            steps.Add(remaining[next]);
+            layout.Add(remaining[next].RightColumn.TableName);
+            remaining.RemoveAt(next);
         }
 
-        return tableRows;
+        return true;
+    }
+
+    /// <summary>
+    /// Rewrites row keys from the join order of this evaluation into the canonical table order, the order an
+    /// evaluation starting from the FROM table produces. WHERE evaluation starts from whichever table a
+    /// predicate filters and combines the partial results with AND/OR on their keys, so the keys must not
+    /// depend on the starting table.
+    /// </summary>
+    /// <param name="rows">The joined rows, keyed in <paramref name="layout"/> order.</param>
+    /// <param name="layout">The table order of the keys in <paramref name="rows"/>.</param>
+    /// <returns>The same rows keyed in canonical order.</returns>
+    private HashedTable ToCanonicalKeys(HashedTable rows, List<string> layout)
+    {
+        List<string>? canonical = CanonicalLayout;
+        if (canonical == null || canonical.Count != layout.Count || rows.Count == 0)
+        {
+            return rows;
+        }
+
+        int[] source = new int[canonical.Count];
+        bool identity = true;
+        for (int i = 0; i < canonical.Count; i++)
+        {
+            source[i] = layout.IndexOf(canonical[i]);
+            if (source[i] < 0)
+            {
+                return rows;
+            }
+
+            identity &= source[i] == i;
+        }
+
+        if (identity)
+        {
+            return rows;
+        }
+
+        HashedTable result = [];
+        foreach (KeyValuePair<JoinedRowId, JoinedRow> entry in rows)
+        {
+            IReadOnlyList<RowKey> ids = entry.Key.RowIds;
+            if (ids.Count != source.Length)
+            {
+                result.Add(entry.Key, entry.Value);
+                continue;
+            }
+
+            var reordered = new List<RowKey>(source.Length);
+            foreach (int position in source)
+            {
+                reordered.Add(ids[position]);
+            }
+
+            result.Add(new JoinedRowId(reordered), entry.Value);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Gets the key layout of an evaluation that starts from the FROM table (the one condition table that is
+    /// not a joined table), or <see langword="null"/> when it cannot be determined.
+    /// </summary>
+    private List<string>? CanonicalLayout
+    {
+        get
+        {
+            if (!_canonicalLayoutResolved)
+            {
+                _canonicalLayoutResolved = true;
+                HashSet<string> joined = [.. Model.JoinTableDetails.Values.Select(detail => detail.TableName)];
+                string? from = Model.JoinConditions
+                    .SelectMany(condition => new[] { condition.LeftColumn.TableName, condition.RightColumn.TableName })
+                    .FirstOrDefault(table => !joined.Contains(table));
+
+                if (from != null && TryPlanJoinOrder(from, out _, out List<string> layout))
+                {
+                    _canonicalLayout = layout;
+                }
+            }
+
+            return _canonicalLayout;
+        }
     }
 }

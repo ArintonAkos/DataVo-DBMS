@@ -28,7 +28,6 @@ internal partial class Select
         if (state.Aggregates is not { } aggregates
             || state.GroupOrdinals is not { Length: 0 }
             || aggregates.Count > ColumnarScan.MaxFolds
-            || state.Predicates.Count > ColumnarScan.MaxSteps / 2
             || engine.StorageContext.ColumnarStore is null
             || MvccExecutionScope.CurrentSnapshot is not null
             || engine.StorageContext.LsmEngine?.HasStagedWrites(databaseName, tableName) == true)
@@ -45,20 +44,8 @@ internal partial class Select
 
         ColumnarScan.Workspace workspace = ColumnarScan.Rent();
         int steps = 0;
-        foreach (TypedPredicate predicate in state.Predicates)
-        {
-            if (!TryDescribe(index, predicate, ref workspace.Steps[steps]))
-            {
-                return false;
-            }
-
-            if (++steps > 1)
-            {
-                workspace.Steps[steps++] = new ColumnarStep { Kind = ColumnarStep.And };
-            }
-        }
-
-        if (!ColumnarScan.TryBind(index, workspace.Steps.AsSpan(0, steps)))
+        if (!TryDescribeAll(index, state.Predicates, workspace.Steps, ref steps)
+            || !ColumnarScan.TryBind(index, workspace.Steps.AsSpan(0, steps)))
         {
             return false;
         }
@@ -109,6 +96,56 @@ internal partial class Select
 
         state.Groups![new GroupKey(group.Keys)] = group;
         state.GroupOrder!.Add(group);
+        return true;
+    }
+
+    /// <summary>
+    /// Writes an AND of predicates as postfix steps: each term, then <c>And</c> after every term but the first.
+    /// An OR becomes its branches joined by <c>Or</c>; the steps' NULL handling (a NULL meets no comparison)
+    /// is the row scan's, since the WHERE has no NOT left. False when a term cannot be written or the steps
+    /// run out.
+    /// </summary>
+    private static bool TryDescribeAll(ColumnarIndex index, IReadOnlyList<TypedPredicate> predicates, ColumnarStep[] steps, ref int count)
+    {
+        for (int i = 0; i < predicates.Count; i++)
+        {
+            if (!TryDescribeTerm(index, predicates[i], steps, ref count)
+                || (i > 0 && !TryAppend(steps, ref count, ColumnarStep.And)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryDescribeTerm(ColumnarIndex index, TypedPredicate predicate, ColumnarStep[] steps, ref int count)
+    {
+        if (predicate.Branches is not { } branches)
+        {
+            return count < steps.Length && TryDescribe(index, predicate, ref steps[count++]);
+        }
+
+        for (int i = 0; i < branches.Length; i++)
+        {
+            if (!TryDescribeAll(index, branches[i], steps, ref count)
+                || (i > 0 && !TryAppend(steps, ref count, ColumnarStep.Or)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryAppend(ColumnarStep[] steps, ref int count, byte kind)
+    {
+        if (count >= steps.Length)
+        {
+            return false;
+        }
+
+        steps[count++] = new ColumnarStep { Kind = kind };
         return true;
     }
 

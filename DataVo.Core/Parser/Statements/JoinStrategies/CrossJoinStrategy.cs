@@ -33,15 +33,13 @@ internal class CrossJoinStrategy : IJoinStrategy
 
         TableData rightTableData = context.GetTableData(rightTable);
 
-        bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
-
         // Terminate early if handling the edge-case where the engine inherently starts with an empty logical model base table physically.
         if (leftRows.Count == 0 && condition.LeftColumn.ColumnName == "__dummy__")
         {
              return [];
         }
 
-        return PerformCartesianProduct(leftRows, rightTableData, rightTable, insertHashAfter, context);
+        return PerformCartesianProduct(leftRows, rightTableData, rightTable, context);
     }
 
     /// <summary>
@@ -50,14 +48,12 @@ internal class CrossJoinStrategy : IJoinStrategy
     /// <param name="leftRows">The data mapping bounds logically tracking accumulated records.</param>
     /// <param name="rightTableData">The physical arrays loaded from the right-hand table definition.</param>
     /// <param name="rightTable">The target table string identifier for the added right sequence.</param>
-    /// <param name="insertHashAfter">Determines if the hash signature is appended or prepended based on topological join order.</param>
     /// <param name="context">The contextual limits bridging operations efficiently.</param>
     /// <returns>A merged dataset representing the cartesian mappings logically mapped.</returns>
     private static HashedTable PerformCartesianProduct(
         HashedTable leftRows, 
         TableData rightTableData, 
         string rightTable, 
-        bool insertHashAfter, 
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -66,7 +62,7 @@ internal class CrossJoinStrategy : IJoinStrategy
         {
             foreach (var rightTableRow in rightTableData)
             {
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key);
                 
                 JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                     leftRowEntry.Value,
@@ -78,18 +74,5 @@ internal class CrossJoinStrategy : IJoinStrategy
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Verifies topological parsing index placement determining where precisely memory insertion targets structurally.
-    /// </summary>
-    /// <param name="joinModel">The parameter tracking the internal structure of connected components.</param>
-    /// <param name="leftTable">The identified string pointer identifying the known source limits.</param>
-    /// <param name="rightTable">The extracted target identity evaluating limits.</param>
-    /// <returns>True if the hash bounds map successfully after, False otherwise.</returns>
-    private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
-    {
-        var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
-        return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 }

@@ -41,14 +41,13 @@ internal class LeftJoinStrategy : IJoinStrategy
         string rightColumn = condition.RightColumn.ColumnName;
 
         TableData rightTableData = context.GetTableData(rightTable);
-        bool insertHashAfter = ShouldInsertHashAfter(context.JoinModel, leftTable, rightTable);
 
         if (rightTableData.Count >= IJoinStrategy.HashLookupThreshold)
         {
-            return ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, context);
+            return ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, context);
         }
 
-        return ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, insertHashAfter, context);
+        return ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, context);
     }
 
     /// <summary>
@@ -61,7 +60,6 @@ internal class LeftJoinStrategy : IJoinStrategy
         string leftColumn,
         string rightTable,
         string rightColumn,
-        bool insertHashAfter,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -77,7 +75,7 @@ internal class LeftJoinStrategy : IJoinStrategy
             var leftValue = leftRowEntry.Value[leftTable][leftColumn];
             if (leftValue == null)
             {
-                JoinedRowId nullHash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRowId nullHash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null);
                 JoinedRow nullJoinedRow = context.CreateNullRightRow(
                     leftRowEntry.Value,
                     rightTable);
@@ -90,7 +88,7 @@ internal class LeftJoinStrategy : IJoinStrategy
             {
                 foreach (var rightRecord in rightTableRows!)
                 {
-                    JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightRecord.RowId, insertHashAfter);
+                    JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightRecord.RowId);
                     JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                         leftRowEntry.Value,
                         rightTable,
@@ -101,7 +99,7 @@ internal class LeftJoinStrategy : IJoinStrategy
             }
             else
             {
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null);
                 JoinedRow joinedRow = context.CreateNullRightRow(
                     leftRowEntry.Value,
                     rightTable);
@@ -123,7 +121,6 @@ internal class LeftJoinStrategy : IJoinStrategy
         string leftColumn,
         string rightTable,
         string rightColumn,
-        bool insertHashAfter,
         JoinStrategyContext context)
     {
         HashedTable result = [];
@@ -147,7 +144,7 @@ internal class LeftJoinStrategy : IJoinStrategy
                 }
 
                 matchFound = true;
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, rightTableRow.Key);
                 JoinedRow joinedRow = JoinStrategyContext.CreateJoinedRow(
                     leftRowEntry.Value,
                     rightTable,
@@ -158,7 +155,7 @@ internal class LeftJoinStrategy : IJoinStrategy
 
             if (!matchFound)
             {
-                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null, insertHashAfter);
+                JoinedRowId hash = JoinStrategyContext.BuildHash(leftRowEntry.Key, null);
                 JoinedRow joinedRow = context.CreateNullRightRow(
                     leftRowEntry.Value,
                     rightTable);
@@ -168,15 +165,6 @@ internal class LeftJoinStrategy : IJoinStrategy
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Determines the correct structural direction to append memory identifiers logically.
-    /// </summary>
-    private static bool ShouldInsertHashAfter(JoinModel joinModel, string leftTable, string rightTable)
-    {
-        var joinTables = joinModel.JoinTableDetails.Values.Select(jtd => jtd.TableName).ToList();
-        return joinTables.IndexOf(leftTable) < joinTables.IndexOf(rightTable);
     }
 
     /// <summary>

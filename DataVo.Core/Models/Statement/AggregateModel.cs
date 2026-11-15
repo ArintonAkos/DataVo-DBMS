@@ -47,6 +47,7 @@ namespace DataVo.Core.Models.Statement
 
                     string headerName = AggregateExpressionFormatter.BuildHeader(aggNode);
                     Aggregation aggregation = AggregationService.CreateInstance(functionName, aggNode.Argument, selector, headerName, column);
+                    aggregation.IsDistinct = aggNode.IsDistinct;
                     aggregations.Add(aggregation);
                     continue;
                 }

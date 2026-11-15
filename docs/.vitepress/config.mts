@@ -115,6 +115,7 @@ export default withMermaid(
           collapsed: true,
           items: [
             { text: "Benchmark Results", link: "/manual/performance/benchmarks" },
+            { text: "DataVo vs SQLite: When Each Wins", link: "/manual/performance/datavo-vs-sqlite" },
             { text: "Benchmark Methodology", link: "/manual/performance/methodology" },
             { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
           ],

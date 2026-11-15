@@ -36,6 +36,9 @@ public sealed class ColumnarSqlPushdownTests
         "SELECT SUM(Gold) FROM {t} WHERE Speed >= 2.5",
         "SELECT COUNT(*) FROM {t} WHERE Ratio <= 0.5",
         "SELECT COUNT(*) FROM {t} WHERE Level > 1000",
+        "SELECT COUNT(*) FROM {t} WHERE Level >= 50 OR Gold > 0",
+        "SELECT COUNT(*), SUM(Gold) FROM {t} WHERE (Level = 3 OR Level = 7 OR Gold IS NULL) AND Ratio < 0.75",
+        "SELECT COUNT(*), MIN(Level), MAX(Gold) FROM {t} WHERE (Level < 10 AND Gold > 0) OR (Level > 90 AND Speed >= 2.5)",
     ];
 
     /// <summary>Statements the index must leave to the row scan, and which must still agree.</summary>
@@ -47,7 +50,7 @@ public sealed class ColumnarSqlPushdownTests
         "SELECT COUNT(*) FROM {t} WHERE Speed > 0.1",
         "SELECT COUNT(*) FROM {t} WHERE Name = 'n7'",
         "SELECT Level, COUNT(*) FROM {t} WHERE Gold > 0 GROUP BY Level",
-        "SELECT COUNT(*) FROM {t} WHERE Level >= 50 OR Gold > 0",
+        "SELECT COUNT(*) FROM {t} WHERE Level >= 50 OR Rank > 5",
         "SELECT COUNT(*) FROM {t} WHERE Id = 77",
     ];
 

@@ -31,6 +31,10 @@ public class JoinStrategyContext
     public TableData GetTableData(string tableAliasOrName)
     {
         var tableDetail = TableService.GetTableDetailByAliasOrName(tableAliasOrName);
+        if (TableRowsByName is { } narrowed && narrowed.TryGetValue(tableDetail.TableName, out TableData? rows))
+        {
+            return rows;
+        }
 
         if (tableDetail.TableContent == null)
         {
@@ -41,27 +45,47 @@ public class JoinStrategyContext
     }
 
     /// <summary>
-    /// Constructs a compound unique identifier used in join mapping evaluations.
+    /// Gets or sets the rows a WHERE filter left for some tables, keyed by table name, while a join runs; a
+    /// table without an entry is read whole.
     /// </summary>
-    /// <param name="leftRowKey">The hash id defining the base sequence element. Can be null initially.</param>
-    /// <param name="rightRowKey">The secondary hash mapping directly to records.</param>
-    /// <param name="insertHashAfter">Determines memory injection sequencing.</param>
-    /// <returns>A compounded <see cref="JoinedRowId"/> resolving uniqueness limits.</returns>
-    public static JoinedRowId BuildHash(JoinedRowId? leftRowKey, RowKey? rightRowKey, bool insertHashAfter)
+    public IReadOnlyDictionary<string, TableData>? TableRowsByName { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many tables the left-side rows already span when the current join step runs.
+    /// <see cref="Join"/> sets it before every step so unmatched right rows get a key of the right width.
+    /// </summary>
+    public int LeftTableCount { get; set; } = 1;
+
+    /// <summary>
+    /// Builds the key of a joined row by appending the right row's key to the left row's key, so a key always
+    /// lists row keys in the order the tables were joined. <see cref="Join"/> later rewrites keys into one
+    /// canonical table order, which makes keys comparable whichever table the evaluation started from.
+    /// </summary>
+    /// <param name="leftRowKey">The key of the accumulated left row.</param>
+    /// <param name="rightRowKey">The right row's key, or <see langword="null"/> when an outer join found no match.</param>
+    /// <returns>The key of the joined row.</returns>
+    public static JoinedRowId BuildHash(JoinedRowId leftRowKey, RowKey? rightRowKey)
     {
         // long.MinValue marks the missing side of an outer join, as before row keys.
-        RowKey rKey = rightRowKey ?? long.MinValue;
-        
-        if (leftRowKey == null)
+        return leftRowKey.Append(rightRowKey ?? long.MinValue);
+    }
+
+    /// <summary>
+    /// Builds the key of a right row that matched no left row (RIGHT/FULL join): one missing-side marker per
+    /// left table followed by the right row's key.
+    /// </summary>
+    /// <param name="rightRowKey">The unmatched right row's key.</param>
+    /// <returns>The key of the null-padded joined row.</returns>
+    public JoinedRowId BuildUnmatchedRightHash(RowKey rightRowKey)
+    {
+        var ids = new List<RowKey>(LeftTableCount + 1);
+        for (int i = 0; i < LeftTableCount; i++)
         {
-            return insertHashAfter 
-                ? new JoinedRowId(long.MinValue, rKey) 
-                : new JoinedRowId(rKey, (RowKey)long.MinValue);
+            ids.Add(long.MinValue);
         }
-        
-        return insertHashAfter
-            ? leftRowKey.Append(rKey)
-            : leftRowKey.Prepend(rKey);
+
+        ids.Add(rightRowKey);
+        return new JoinedRowId(ids);
     }
 
     /// <summary>

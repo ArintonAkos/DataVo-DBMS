@@ -60,6 +60,10 @@ internal sealed class RuntimeQueryStatsBuilder
         AddIndex(indexName);
     }
 
+    public int JoinExecutions { get; private set; }
+
+    public void RecordJoinExecution() => JoinExecutions++;
+
     public void RecordError(string message)
     {
         IsError = true;
@@ -85,6 +89,9 @@ internal sealed class RuntimeQueryStatsBuilder
             VectorTopK,
             VectorExpansionPasses,
             IsError,
-            ErrorMessage);
+            ErrorMessage)
+        {
+            JoinExecutions = JoinExecutions,
+        };
     }
 }
