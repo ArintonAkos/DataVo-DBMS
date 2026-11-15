@@ -15,6 +15,9 @@ namespace DataVo.Core.Indexing;
 /// table and publish it with a single volatile store; readers mid-probe keep a consistent snapshot.</para>
 /// <para>Writers (upsert/remove) serialize on an internal lock; occupancy (live + tombstones) is kept
 /// under ~60% so probe chains always terminate on an empty slot.</para>
+/// <para>Key ranges (<see cref="TryCollectValuesInKeyRange"/>) are read from a sorted copy of the keys, built by
+/// the first range read and kept up to date by logging the keys inserted since; a map that is never read by
+/// range pays nothing for it.</para>
 /// </summary>
 internal sealed class ConcurrentInt64Int64Map
 {
@@ -43,6 +46,17 @@ internal sealed class ConcurrentInt64Int64Map
     private Table _table = new(InitialCapacity);
     private int _count;    // Live entries; volatile-read by IsEmpty/Count.
     private int _occupied; // Live + tombstoned slots; writer-only, gates resize.
+    private SortedKeys? _sortedKeys; // Writer-lock guarded; null until a range is read, or after too many inserts.
+
+    /// <summary>
+    /// The keys in ascending order as of when they were sorted, and the keys inserted since. A removed key stays
+    /// listed until the next sort; readers drop it by looking it up.
+    /// </summary>
+    private sealed class SortedKeys(long[] keys)
+    {
+        public long[] Keys { get; } = keys;
+        public List<long> Inserted { get; } = [];
+    }
 
     /// <summary>Whether the map currently holds no live entries. Lock-free.</summary>
     public bool IsEmpty => Volatile.Read(ref _count) == 0;
@@ -129,6 +143,92 @@ internal sealed class ConcurrentInt64Int64Map
     }
 
     /// <summary>
+    /// Appends to <paramref name="values"/> the values of the keys in <c>[lower, upperExclusive)</c> (a null bound
+    /// is open), in ascending key order; false, with nothing appended, when there are more than
+    /// <paramref name="maxCount"/>. The first call sorts the keys under the writer lock (O(n log n), once); later
+    /// calls binary-search that order and merge the keys inserted since. Keys removed since are skipped, and a
+    /// key's value is read when it is collected, so an upsert in between is seen.
+    /// </summary>
+    public bool TryCollectValuesInKeyRange(long? lower, long? upperExclusive, int maxCount, List<long> values)
+    {
+        long[] sorted;
+        long[] inserted;
+        lock (_writeLock)
+        {
+            _sortedKeys ??= SortKeysNoLock();
+            sorted = _sortedKeys.Keys;
+            inserted = [.. _sortedKeys.Inserted.Where(key => InRange(key, lower, upperExclusive))];
+        }
+
+        int from = lower is { } low ? LowerBound(sorted, low) : 0;
+        int to = upperExclusive is { } high ? LowerBound(sorted, high) : sorted.Length;
+        if (to - from + inserted.Length > maxCount)
+        {
+            return false;
+        }
+
+        Array.Sort(inserted);
+        int next = 0;
+        long previous = 0;
+        bool any = false;
+        for (int i = from; i < to || next < inserted.Length;)
+        {
+            // Merge the two ascending lists; a key in both (removed, then inserted again) is taken once.
+            long key = next >= inserted.Length || (i < to && sorted[i] <= inserted[next]) ? sorted[i++] : inserted[next++];
+            if ((any && key == previous) || !TryGetValue(key, out long value))
+            {
+                continue;
+            }
+
+            (previous, any) = (key, true);
+            values.Add(value);
+        }
+
+        return true;
+    }
+
+    private static bool InRange(long key, long? lower, long? upperExclusive) =>
+        (lower is not { } low || key >= low) && (upperExclusive is not { } high || key < high);
+
+    /// <summary>The first index of <paramref name="sorted"/> whose key is at least <paramref name="key"/>.</summary>
+    private static int LowerBound(long[] sorted, long key)
+    {
+        int low = 0;
+        int high = sorted.Length;
+        while (low < high)
+        {
+            int mid = (low + high) >>> 1;
+            if (sorted[mid] < key)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid;
+            }
+        }
+
+        return low;
+    }
+
+    private SortedKeys SortKeysNoLock()
+    {
+        var keys = new long[_count];
+        int count = 0;
+        Table table = _table;
+        for (int i = 0; i < table.States.Length && count < keys.Length; i++)
+        {
+            if (table.States[i] == SlotFull)
+            {
+                keys[count++] = table.Keys[i];
+            }
+        }
+
+        Array.Sort(keys, 0, count);
+        return new SortedKeys(count == keys.Length ? keys : keys[..count]);
+    }
+
+    /// <summary>
     /// Invokes <paramref name="visit"/> for every live pair; returning <see langword="false"/> stops the
     /// walk. Enumerates a table snapshot, so concurrent mutations may or may not be observed (same
     /// contract as ConcurrentDictionary enumeration).
@@ -181,10 +281,29 @@ internal sealed class ConcurrentInt64Int64Map
                 }
 
                 Volatile.Write(ref _count, _count + 1);
+                LogInsertedNoLock(key);
                 return;
             }
 
             index = (index + 1) & table.Mask;
+        }
+    }
+
+    /// <summary>
+    /// Logs a new key for the sorted order; once the log is past an eighth of the sorted keys (plus some slack),
+    /// the order is dropped and the next range read sorts again, so the log stays short.
+    /// </summary>
+    private void LogInsertedNoLock(long key)
+    {
+        if (_sortedKeys is not { } sorted)
+        {
+            return;
+        }
+
+        sorted.Inserted.Add(key);
+        if (sorted.Inserted.Count > (sorted.Keys.Length / 8) + 1024)
+        {
+            _sortedKeys = null;
         }
     }
 

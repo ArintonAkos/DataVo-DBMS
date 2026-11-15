@@ -2258,6 +2258,52 @@ public partial class IndexManager : IDisposable
         return _lsmStore is null && _integerPrimaryKeyMaps.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out map);
     }
 
+    /// <summary>
+    /// Appends to <paramref name="rowIds"/> the row ids of the rows whose single-column integer primary key is in
+    /// <c>[lower, upperExclusive)</c> (null bounds are open), in key order, from the InMemory primary-key lane.
+    /// False, with nothing appended, on the LSM backend (its clustered keys are ranges already), when the lane is
+    /// not known to hold every key, or when more than <paramref name="maxRows"/> rows are in the range.
+    /// </summary>
+    internal bool TryCollectPrimaryKeyRange(string tableName, string databaseName, long? lower, long? upperExclusive, int maxRows, List<long> rowIds)
+    {
+        string indexName = $"_PK_{tableName}";
+        IndexCacheKey cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_lsmStore is not null
+            || !IsLaneComplete(cacheKey)
+            || !_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
+            || !map.TryCollectValuesInKeyRange(lower, upperExclusive, maxRows, rowIds))
+        {
+            return false;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return true;
+    }
+
+    /// <summary>
+    /// The rows whose single-column integer primary key is in <c>[lower, upperExclusive)</c>, read from the InMemory
+    /// primary-key lane and sorted by row id (the order a scan visits them in); null when the lane cannot answer or
+    /// the range holds more than a quarter of the table's <paramref name="tableRows"/>, which a scan reads faster.
+    /// </summary>
+    internal List<RowKey>? TryPrimaryKeyRangeRows(string tableName, string databaseName, long? lower, long? upperExclusive, long tableRows)
+    {
+        var rowIds = new List<long>();
+        int maxRows = (int)Math.Min(int.MaxValue, Math.Max(16, tableRows / 4));
+        if (!TryCollectPrimaryKeyRange(tableName, databaseName, lower, upperExclusive, maxRows, rowIds))
+        {
+            return null;
+        }
+
+        rowIds.Sort();
+        var rows = new List<RowKey>(rowIds.Count);
+        foreach (long rowId in rowIds)
+        {
+            rows.Add(rowId);
+        }
+
+        return rows;
+    }
+
     public bool TryLookupIntegerPrimaryKey(
         long key,
         string indexName,

@@ -199,12 +199,24 @@ internal partial class Select
             return null;
         }
 
+        List<RowKey>? keyRangeRows = indexLookup is null && clustered is null
+            ? TryPrimaryKeyRangeRows(engine, tableName, databaseName, columns, primaryKeys, predicates)
+            : null;
         if (indexLookup is { } lookup)
         {
             var rowIds = engine.IndexManager.FilterUsingIndex(lookup.Key, lookup.IndexName, tableName, databaseName).ToList();
             rowIds.Sort();
             LockRowsForRead(databaseName, tableName, rowIds);
             if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, VisitTypedRow))
+            {
+                return null;
+            }
+        }
+        else if (keyRangeRows is not null)
+        {
+            // A range on the InMemory engine's integer primary key: only the rows in it are read.
+            LockRowsForRead(databaseName, tableName, keyRangeRows);
+            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, keyRangeRows, ref state, VisitTypedRow))
             {
                 return null;
             }
@@ -218,12 +230,42 @@ internal partial class Select
             return null;
         }
 
-        if (indexLookup is null && lower is null && upper is null)
+        if (indexLookup is null && keyRangeRows is null && lower is null && upper is null)
         {
             RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
         }
 
         return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
+    }
+
+    /// <summary>
+    /// The rows a range on a table's single-column integer primary key selects, read from the InMemory engine's
+    /// primary-key lane in key order and returned in row order (the order a scan visits them in); null when there
+    /// is no such range, the lane cannot answer, or the range holds more than a quarter of the table, which a scan
+    /// reads faster. The WHERE is still tested on every row read.
+    /// </summary>
+    private static List<RowKey>? TryPrimaryKeyRangeRows(DataVoEngine engine, string tableName, string databaseName, IReadOnlyList<Column> columns, List<string> primaryKeys, List<TypedPredicate> predicates)
+    {
+        int keyOrdinal = primaryKeys.Count == 1 ? OrdinalOf(columns, primaryKeys[0]) : -1;
+        if (keyOrdinal < 0
+            || !(columns[keyOrdinal].Type.Equals("INT", StringComparison.OrdinalIgnoreCase) || columns[keyOrdinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase))
+            || !engine.StorageContext.TryEstimateRowCount(tableName, databaseName, out long tableRows))
+        {
+            return null;
+        }
+
+        (RowKey? lower, RowKey? upper) = KeyRangeOf(predicates, keyOrdinal);
+        if (lower is null && upper is null)
+        {
+            return null;
+        }
+
+        if (lower is { } from && upper is { } to && from >= to)
+        {
+            return []; // an empty range
+        }
+
+        return engine.IndexManager.TryPrimaryKeyRangeRows(tableName, databaseName, lower?.AsInt64(), upper?.AsInt64(), tableRows);
     }
 
     private bool TryCollectTypedPredicates(ExpressionNode node, string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates) =>
