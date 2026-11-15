@@ -152,10 +152,47 @@ public class BinaryExpressionNode : ExpressionNode
 /// </summary>
 public class LiteralNode : ExpressionNode
 {
+    private ParsedVector? _vector;
+
     /// <summary>
     /// Gets or sets the literal value.
     /// </summary>
     public object? Value { get; set; }
+
+    /// <summary>
+    /// The literal as a vector (vector text, or an array of numbers), parsed once and kept for as long as
+    /// <see cref="Value"/> is unchanged: a distance computed per row reads the same array instead of parsing the
+    /// text again. Callers must not modify the array.
+    /// </summary>
+    /// <param name="vector">The vector; empty when the value is not one.</param>
+    /// <returns><see langword="true"/> when the value is a vector.</returns>
+    internal bool TryGetVector(out float[] vector)
+    {
+        object? value = Value;
+        if (_vector is { } parsed && ReferenceEquals(parsed.Source, value))
+        {
+            vector = parsed.Vector;
+            return true;
+        }
+
+        if (!DataVo.Core.Utils.VectorParser.TryCoerceToVector(value, out vector))
+        {
+            return false;
+        }
+
+        _vector = new ParsedVector(value, vector);
+        return true;
+    }
+
+    /// <summary>Records <paramref name="vector"/> as the parsed form of the current <see cref="Value"/>.</summary>
+    internal void SetVector(float[] vector) => _vector = new ParsedVector(Value, vector);
+
+    /// <summary>A parsed vector and the value it was parsed from, replaced together.</summary>
+    private sealed class ParsedVector(object? source, float[] vector)
+    {
+        public object? Source { get; } = source;
+        public float[] Vector { get; } = vector;
+    }
 }
 
 /// <summary>

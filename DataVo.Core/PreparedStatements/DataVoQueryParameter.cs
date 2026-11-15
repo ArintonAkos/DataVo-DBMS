@@ -68,6 +68,7 @@ public readonly struct DataVoQueryParameter
     private readonly long _bits;
     private readonly Guid _guid;
     private readonly object? _object;
+    private readonly float[]? _vector;
 
     /// <summary>
     /// Gets the parameter name (with or without a leading <c>@</c> prefix).
@@ -206,6 +207,13 @@ public readonly struct DataVoQueryParameter
         _object = obj;
     }
 
+    /// <summary>A vector parameter: its text, as every SQL consumer reads it, and a copy of the floats it came from.</summary>
+    private DataVoQueryParameter(string name, float[] vector)
+        : this(name, DataVoQueryParameterKind.String, 0, default, FormatVector(vector))
+    {
+        _vector = (float[])vector.Clone();
+    }
+
     /// <summary>
     /// Creates a SQL <c>NULL</c> parameter for the given parameter name.
     /// </summary>
@@ -239,7 +247,7 @@ public readonly struct DataVoQueryParameter
             bool flag => new DataVoQueryParameter(name, flag),
             Guid g => new DataVoQueryParameter(name, g),
             string str => new DataVoQueryParameter(name, str),
-            float[] floats => new DataVoQueryParameter(name, FormatVectorString(floats)),
+            float[] floats => new DataVoQueryParameter(name, floats),
             double[] doubles => new DataVoQueryParameter(name, FormatVectorString(doubles)),
             decimal[] decimals => new DataVoQueryParameter(name, FormatVectorString(decimals)),
             IEnumerable<float> floatSeq => new DataVoQueryParameter(name, FormatVectorString(floatSeq)),
@@ -282,6 +290,12 @@ public readonly struct DataVoQueryParameter
     /// Gets the string value when <see cref="Kind"/> is <see cref="DataVoQueryParameterKind.String"/>.
     /// </summary>
     public string? AsString() => _object as string;
+
+    /// <summary>
+    /// The vector a string parameter was made from (a copy of the <c>float[]</c> passed to <see cref="FromObject"/>),
+    /// so the query uses it as is instead of parsing <see cref="AsString"/> back; null for any other parameter.
+    /// </summary>
+    internal float[]? Vector => _vector;
 
     /// <summary>
     /// Converts this parameter to a boxed CLR value suitable for AST literal nodes.
@@ -371,6 +385,35 @@ public readonly struct DataVoQueryParameter
     /// </summary>
     public static implicit operator DataVoQueryParameter((string Name, object? Value) tuple)
         => FromObject(tuple.Name, tuple.Value);
+
+    /// <summary>
+    /// <c>[a, b, ...]</c> with each float in its shortest round-trip form: the same text as
+    /// <see cref="FormatVectorString{T}"/>, written into one buffer instead of a string per element.
+    /// </summary>
+    private static string FormatVector(float[] values)
+    {
+        var text = new System.Text.StringBuilder((values.Length * 12) + 2);
+        Span<char> number = stackalloc char[32];
+        text.Append('[');
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (i > 0)
+            {
+                text.Append(", ");
+            }
+
+            if (values[i].TryFormat(number, out int written, default, CultureInfo.InvariantCulture))
+            {
+                text.Append(number[..written]);
+            }
+            else
+            {
+                text.Append(values[i].ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        return text.Append(']').ToString();
+    }
 
     private static string FormatVectorString<T>(IEnumerable<T> values) where T : IFormattable
     {

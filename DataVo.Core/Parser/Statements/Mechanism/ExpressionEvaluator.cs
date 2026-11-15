@@ -92,13 +92,13 @@ internal static class ExpressionEvaluator
         bool leftFromColumn = node.Left is ColumnRefNode || node.Left is ResolvedColumnRefNode;
         bool rightFromColumn = node.Right is ColumnRefNode || node.Right is ResolvedColumnRefNode;
 
-        if (!VectorParser.TryCoerceToVector(left, out float[] leftVector))
+        if (!TryReadVectorOperand(node.Left, left, out float[] leftVector))
         {
             string side = leftFromColumn ? "left VECTOR column" : "left vector operand";
             throw new EvaluationException($"Vector operator '{node.Operator}' requires {side}.");
         }
 
-        if (!VectorParser.TryCoerceToVector(right, out float[] rightVector))
+        if (!TryReadVectorOperand(node.Right, right, out float[] rightVector))
         {
             string side = rightFromColumn ? "right VECTOR column" : "right vector operand";
             throw new EvaluationException($"Vector operator '{node.Operator}' requires {side}.");
@@ -112,6 +112,24 @@ internal static class ExpressionEvaluator
         return useCosine
             ? VectorParser.CosineDistance(leftVector, rightVector)
             : VectorParser.EuclideanDistance(leftVector, rightVector);
+    }
+
+    /// <summary>
+    /// An operand of a vector distance, read without copying: a stored vector (a <c>float[]</c>) as it is, and a
+    /// literal (the query vector, often bound as a parameter) parsed once per literal rather than once per row.
+    /// The distance only reads the arrays.
+    /// </summary>
+    private static bool TryReadVectorOperand(ExpressionNode operand, object? value, out float[] vector)
+    {
+        if (value is float[] stored)
+        {
+            vector = stored;
+            return true;
+        }
+
+        return operand is LiteralNode literal && ReferenceEquals(literal.Value, value)
+            ? literal.TryGetVector(out vector)
+            : VectorParser.TryCoerceToVector(value, out vector);
     }
 
     private static object? EvaluateScalarFunction(
