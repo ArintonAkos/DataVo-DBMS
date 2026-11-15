@@ -1,0 +1,7 @@
+benchmark code: 638324d (unchanged since the 2026-11-14 runs)
+engine (DataVo.Core): 9ffb413 = 6743521 (the 2026-11-14 post-fix engine) + OR/LIKE on the typed single-table scan and OR in the columnar pushdown
+SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0), DuckDB.NET.Data.Full 1.5.3
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-15
+runs: sql-matrix (defaults), one run; 829 s wall, 5.65 GB peak memory footprint
+compare with: ../2026-11-14/sql-matrix.md (same benchmark code, engine before this change)
