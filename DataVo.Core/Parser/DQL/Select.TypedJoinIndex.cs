@@ -27,7 +27,7 @@ internal partial class Select
     /// <summary>The index drives the probe when it names at most 1/<c>IndexDrivenShare</c> of the probe's rows.</summary>
     private const int IndexDrivenShare = 8;
 
-    /// <summary>How many hashed keys are looked up to estimate the rows an index names.</summary>
+    /// <summary>How many hashed keys are looked up to estimate the rows an index names; their rows are kept.</summary>
     private const int IndexEstimateSample = 32;
 
     /// <summary>
@@ -43,11 +43,14 @@ internal partial class Select
             return null;
         }
 
-        // Estimate each candidate from a sample of its keys, then collect the rows of the best one only.
+        // Sample each candidate's keys, then finish collecting the rows of the best one only.
         long budget = probeRows / IndexDrivenShare;
+        List<RowKey>? best = null;
+        List<RowKey>? spare = null;
         JoinStep? bestStep = null;
         string? bestIndex = null;
         long bestEstimate = budget;
+        int bestSampled = 0;
         foreach (JoinStep step in steps)
         {
             if (step.SourceSide != probeIndex
@@ -57,62 +60,116 @@ internal partial class Select
                 continue;
             }
 
-            long estimate = EstimateIndexedRows(engine, probe, step.Table, indexName, databaseName);
+            List<RowKey> sample = spare ?? RentRowKeyList();
+            spare = null;
+            sample.Clear();
+            long estimate = SampleIndexedRows(engine, probe, step.Table, indexName, databaseName, bestEstimate, sample, out int sampled);
             if (estimate <= bestEstimate)
             {
-                (bestStep, bestIndex, bestEstimate) = (step, indexName, estimate);
+                spare = best;
+                (best, bestStep, bestIndex, bestEstimate, bestSampled) = (sample, step, indexName, estimate, sampled);
+            }
+            else
+            {
+                spare = sample;
             }
         }
 
-        if (bestStep is null || CollectIndexedRows(engine, probe, bestStep.Table, bestIndex!, databaseName, budget, (int)bestEstimate) is not { } rows)
+        if (spare is not null)
         {
+            ReleaseRowKeyList(spare);
+        }
+
+        if (best is null || !CollectIndexedRows(engine, probe, bestStep!.Table, bestIndex!, databaseName, budget, bestSampled, best))
+        {
+            if (best is not null)
+            {
+                ReleaseRowKeyList(best);
+            }
+
             return null;
         }
 
-        rows.Sort();
+        best.Sort();
         RuntimeQueryDiagnosticsScope.RecordIndexUse(bestIndex!);
+        return best;
+    }
+
+    /// <summary>The largest row-key list kept per thread for the next index-driven join.</summary>
+    private const int RetainedRowKeys = 256 * 1024;
+
+    [ThreadStatic]
+    private static List<RowKey>? _rowKeyLists;
+
+    /// <summary>An empty row-key list: the one this thread kept from an earlier join, or a new one.</summary>
+    private static List<RowKey> RentRowKeyList()
+    {
+        List<RowKey> rows = _rowKeyLists ?? [];
+        _rowKeyLists = null;
+        rows.Clear();
         return rows;
     }
 
-    /// <summary>
-    /// How many probe rows the index lists under the keys of <paramref name="table"/>, extrapolated from the
-    /// first <see cref="IndexEstimateSample"/> keys (all of them when there are fewer).
-    /// </summary>
-    private static long EstimateIndexedRows(DataVoEngine engine, JoinSide probe, JoinHashTable table, string indexName, string databaseName)
+    /// <summary>Keeps <paramref name="rows"/> for the next join on this thread, unless it has grown past reason.</summary>
+    private static void ReleaseRowKeyList(List<RowKey> rows)
     {
-        long sampled = 0;
-        int keys = 0;
+        if (rows.Capacity <= RetainedRowKeys)
+        {
+            rows.Clear();
+            _rowKeyLists = rows;
+        }
+    }
+
+    /// <summary>
+    /// Appends to <paramref name="rows"/> the rows the index lists under the first <see cref="IndexEstimateSample"/>
+    /// keys of <paramref name="table"/> (all of them when there are fewer) and returns the rows all its keys are
+    /// estimated to name. Stops early, returning <see cref="long.MaxValue"/>, as soon as the sample alone is past
+    /// its share of <paramref name="limit"/>.
+    /// </summary>
+    private static long SampleIndexedRows(DataVoEngine engine, JoinSide probe, JoinHashTable table, string indexName, string databaseName, long limit, List<RowKey> rows, out int sampled)
+    {
+        sampled = 0;
+        int keyCount = table.KeyCount;
+        long sampleLimit = limit * Math.Min(IndexEstimateSample, keyCount) / Math.Max(1, keyCount);
         foreach (long key in table.Keys)
         {
-            sampled += engine.IndexManager.PeekIntegerIndex(key, indexName, probe.Detail.TableName, databaseName).Count;
-            if (++keys == IndexEstimateSample)
+            engine.IndexManager.AppendIntegerIndexRows(key, indexName, probe.Detail.TableName, databaseName, rows);
+            if (rows.Count > sampleLimit)
+            {
+                return long.MaxValue;
+            }
+
+            if (++sampled == IndexEstimateSample)
             {
                 break;
             }
         }
 
-        return keys == 0 ? 0 : sampled * table.KeyCount / keys;
+        return sampled == 0 ? 0 : (long)rows.Count * keyCount / sampled;
     }
 
-    /// <summary>The row keys the index lists under every key of <paramref name="table"/>; null once there are more than <paramref name="limit"/>.</summary>
-    private static List<RowKey>? CollectIndexedRows(DataVoEngine engine, JoinSide probe, JoinHashTable table, string indexName, string databaseName, long limit, int expected)
+    /// <summary>
+    /// Appends the rows of the keys after the first <paramref name="skip"/> (already sampled) to
+    /// <paramref name="rows"/>; false once there are more than <paramref name="limit"/>.
+    /// </summary>
+    private static bool CollectIndexedRows(DataVoEngine engine, JoinSide probe, JoinHashTable table, string indexName, string databaseName, long limit, int skip, List<RowKey> rows)
     {
-        var rows = new List<RowKey>(expected);
+        int index = 0;
         foreach (long key in table.Keys)
         {
-            IReadOnlyList<RowKey> matches = engine.IndexManager.PeekIntegerIndex(key, indexName, probe.Detail.TableName, databaseName);
-            if (rows.Count + matches.Count > limit)
+            if (index++ < skip)
             {
-                return null;
+                continue;
             }
 
-            for (int i = 0; i < matches.Count; i++)
+            engine.IndexManager.AppendIntegerIndexRows(key, indexName, probe.Detail.TableName, databaseName, rows);
+            if (rows.Count > limit)
             {
-                rows.Add(matches[i]);
+                return false;
             }
         }
 
-        return rows;
+        return true;
     }
 
     /// <summary>The name of a single-column B-tree index on <paramref name="column"/> whose lookups are exact, else null.</summary>

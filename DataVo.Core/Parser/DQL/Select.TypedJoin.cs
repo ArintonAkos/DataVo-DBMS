@@ -242,9 +242,17 @@ internal partial class Select
             Unordered = unordered,
         };
         state.Current[probeIndex] = new CellValue[probe.Columns.Count];
-        bool streamed = TryIndexDrivenProbeRows(engine, sides, steps, probeIndex, databaseName) is { } indexedRows
-            ? engine.StorageContext.VisitRowsByKey(probe.Detail.TableName, databaseName, indexedRows, ref state, VisitJoinProbeRow)
-            : engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow);
+        bool streamed;
+        if (TryIndexDrivenProbeRows(engine, sides, steps, probeIndex, databaseName) is { } indexedRows)
+        {
+            streamed = engine.StorageContext.VisitRowsByKey(probe.Detail.TableName, databaseName, indexedRows, ref state, VisitJoinProbeRow);
+            ReleaseRowKeyList(indexedRows);
+        }
+        else
+        {
+            streamed = engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow);
+        }
+
         if (!streamed)
         {
             return null;

@@ -2611,11 +2611,31 @@ public partial class IndexManager : IDisposable
         LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: true);
 
     /// <summary>
-    /// The rows a single-column integer index lists under <paramref name="integerKey"/>, without recording the
-    /// index as used by the query: for a planner that looks before it decides whether to use the index.
+    /// Appends the rows a single-column integer index lists under <paramref name="integerKey"/> to
+    /// <paramref name="rows"/>, without recording the index as used by the query (for a planner that looks before
+    /// it decides) and without allocating a list per lookup; returns how many were appended.
     /// </summary>
-    internal IReadOnlyList<RowKey> PeekIntegerIndex(long integerKey, string indexName, string tableName, string databaseName) =>
-        LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: false);
+    internal int AppendIntegerIndexRows(long integerKey, string indexName, string tableName, string databaseName, List<RowKey> rows)
+    {
+        int before = rows.Count;
+        if (_lsmStore is { } store)
+        {
+            if (!store.IndexLookupInto(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(integerKey), rows))
+            {
+                throw MissingIndex(indexName, tableName);
+            }
+
+            return rows.Count - before;
+        }
+
+        IReadOnlyList<RowKey> found = LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: false);
+        for (int i = 0; i < found.Count; i++)
+        {
+            rows.Add(found[i]);
+        }
+
+        return rows.Count - before;
+    }
 
     private IReadOnlyList<RowKey> LookupIntegerIndex(long integerKey, string indexName, string tableName, string databaseName, bool recordUse)
     {

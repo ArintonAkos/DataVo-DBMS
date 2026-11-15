@@ -108,6 +108,57 @@ public sealed class SqlTypedJoinIndexDrivenTests
         });
     }
 
+    /// <summary>
+    /// After a reopen the LSM engine reads the indexed rows from its files. Rows changed since (updated, deleted,
+    /// inserted) come from the in-memory overlay instead; both kinds are visited in key order, and a row read from
+    /// a file is not copied: the join allocates far less than a row per row read (each was a new array, and each
+    /// index lookup a new list).
+    /// </summary>
+    [Fact]
+    public void Lsm_AfterReopen_ReadsIndexedRowsFromFilesAndOverlay()
+    {
+        string directory = TestStorageDirectories.Create("sql_typed_join_index_reopen");
+        List<Order> orders = SeedOrders();
+        using (var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory }))
+        {
+            CreateSchema(context, orders);
+        }
+
+        using var reopened = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        Execute(reopened, "USE TypedJoinIndex");
+        Execute(reopened, "UPDATE Orders SET Amount = 999.5 WHERE Id <= 400");
+        Execute(reopened, "DELETE FROM Orders WHERE Id > 400 AND Id <= 800");
+        Execute(reopened, "INSERT INTO Orders (Id, ProductId, Qty, Amount) VALUES (5001, 4, 1, 1.5), (5002, 24, 2, 2.5)");
+        List<Order> current = [.. orders
+            .Where(o => o.Id is <= 400 or > 800)
+            .Select(o => o.Id <= 400 ? o with { Amount = 999.5 } : o)
+            .Append(new Order(5001, 4, 1, 1.5))
+            .Append(new Order(5002, 24, 2, 2.5))];
+        reopened.Diagnostics.Enabled = true;
+
+        Order[] matching = [.. current.Where(o => Products.Any(p => p.Id == o.ProductId && p.CategoryId == 3))];
+        const string sql = "SELECT COUNT(*), SUM(o.Amount), MAX(o.Id) FROM Products p JOIN Orders o ON o.ProductId = p.Id WHERE p.CategoryId = 3";
+        AssertTotals(reopened, sql, [matching.Length, matching.Sum(o => o.Amount), matching.Max(o => o.Id)]);
+        AssertIndexDriven(reopened, matching.Length);
+
+        QueryResult rows = Run(reopened, "SELECT o.Id, o.Amount FROM Orders o JOIN Products p ON o.ProductId = p.Id WHERE p.CategoryId = 3");
+        Assert.Equal(
+            matching.Select(o => $"{o.Id}:{o.Amount.ToString(CultureInfo.InvariantCulture)}"),
+            rows.Data.Select(r => $"{r.Values.First()}:{Convert.ToDouble(r.Values.Last(), CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)}"));
+
+        // What reading the rows adds over the same query for a category with no product (same plan, no row read).
+        long perRow = (Allocated(reopened, sql) - Allocated(reopened, sql.Replace("= 3", "= 99", StringComparison.Ordinal))) / matching.Length;
+        Assert.True(perRow < 64, $"{perRow} B per indexed row read");
+    }
+
+    private static long Allocated(DataVoContext context, string sql)
+    {
+        Assert.False(context.Execute(sql)[^1].IsError); // warm up
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Assert.False(context.Execute(sql)[^1].IsError);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
     private static void AssertIndexDriven(DataVoContext context, int rowsRead)
     {
         var stats = context.Diagnostics.LastQuery!;
@@ -140,21 +191,25 @@ public sealed class SqlTypedJoinIndexDrivenTests
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_index") : null;
         using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        List<Order> orders = SeedOrders();
+        CreateSchema(context, orders);
+        context.Diagnostics.Enabled = true;
+        test(context, orders);
+    }
+
+    private static void CreateSchema(DataVoContext context, List<Order> orders)
+    {
         Execute(context, "CREATE DATABASE TypedJoinIndex");
         Execute(context, "USE TypedJoinIndex");
         Execute(context, "CREATE TABLE Products (Id INT PRIMARY KEY, CategoryId INT, Name VARCHAR(8))");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, ProductId INT, Qty INT, Amount DOUBLE)");
         Execute(context, "CREATE INDEX ix_orders_product ON Orders (ProductId)");
         Execute(context, "INSERT INTO Products (Id, CategoryId, Name) VALUES " + string.Join(", ", Products.Select(p => $"({p.Id}, {p.CategoryId}, '{p.Name}')")));
-        List<Order> orders = SeedOrders();
         foreach (Order[] chunk in orders.Chunk(1_000))
         {
             Execute(context, "INSERT INTO Orders (Id, ProductId, Qty, Amount) VALUES " + string.Join(", ", chunk.Select(o =>
                 $"({o.Id}, {o.ProductId?.ToString(CultureInfo.InvariantCulture) ?? "NULL"}, {o.Qty}, {o.Amount.ToString(CultureInfo.InvariantCulture)})")));
         }
-
-        context.Diagnostics.Enabled = true;
-        test(context, orders);
     }
 
     private static void Execute(DataVoContext context, string sql)

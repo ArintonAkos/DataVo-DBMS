@@ -72,6 +72,27 @@ public sealed partial class LsmStorageEngine
             : null;
     }
 
+    bool ILsmIndexStore.IndexLookupInto(string databaseName, string tableName, string indexName, byte[] encodedKey, List<RowKey> rows)
+    {
+        if (RowKeyIndex(databaseName, tableName, indexName) is not null)
+        {
+            if (ClusteredKeyLayout.KeyOfIndexKey(encodedKey) is RowKey key && IsRowLive(databaseName, tableName, key))
+            {
+                rows.Add(key);
+            }
+
+            return true;
+        }
+
+        if (!_indexTables.ContainsKey((databaseName, tableName, indexName)))
+        {
+            return false;
+        }
+
+        IndexLookupInto(databaseName, tableName, indexName, encodedKey, rows);
+        return true;
+    }
+
     List<(byte[] EncodedKey, RowKey RowId)>? ILsmIndexStore.IndexEntries(string databaseName, string tableName, string indexName)
     {
         if (RowKeyIndex(databaseName, tableName, indexName) is { } layout)
@@ -122,12 +143,27 @@ public sealed partial class LsmStorageEngine
     /// </summary>
     internal List<RowKey> IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey)
     {
+        var rows = new List<RowKey>();
+        IndexLookupInto(databaseName, tableName, indexName, encodedKey, rows);
+        return rows;
+    }
+
+    /// <summary>
+    /// Appends the row keys indexed under <paramref name="encodedKey"/> to <paramref name="rows"/>, ascending, as
+    /// <see cref="IndexLookup"/> returns them. The candidates are gathered in a per-thread buffer, so a lookup
+    /// allocates nothing beyond the key prefix and what <paramref name="rows"/> grows by.
+    /// </summary>
+    internal void IndexLookupInto(string databaseName, string tableName, string indexName, byte[] encodedKey, List<RowKey> rows)
+    {
         IndexTableState state = GetOrCreateIndexTable(databaseName, tableName, indexName);
         byte[] prefix = LsmIndexKeyCodec.KeyPrefix(encodedKey);
 
         // Candidates from every source; merged by (row id, newest sequence) only when more than one source
-        // contributed, because a single file already yields sorted, unique row ids.
-        var found = new List<(RowKey RowId, ulong Sequence, bool Live)>();
+        // contributed, because a single file already yields sorted, unique row ids. A lookup made while another
+        // runs on this thread (from inside its callbacks) gets a buffer of its own.
+        List<(RowKey RowId, ulong Sequence, bool Live)> found = _indexCandidates ?? [];
+        _indexCandidates = null;
+        found.Clear();
         int sources = 0;
         bool unsorted = false;
 
@@ -183,7 +219,11 @@ public sealed partial class LsmStorageEngine
             found.Sort(static (x, y) => x.RowId != y.RowId ? x.RowId.CompareTo(y.RowId) : y.Sequence.CompareTo(x.Sequence));
         }
 
-        var rows = new List<RowKey>(found.Count);
+        if (rows.Capacity < rows.Count + found.Count)
+        {
+            rows.Capacity = Math.Max(rows.Count + found.Count, rows.Capacity * 2);
+        }
+
         RowKey previousRow = default;
         bool hasPrevious = false;
         foreach ((RowKey rowId, _, bool live) in found)
@@ -201,8 +241,19 @@ public sealed partial class LsmStorageEngine
             }
         }
 
-        return rows;
+        // Keep the buffer for the next lookup on this thread, unless one large lookup grew it past reason.
+        if (found.Capacity <= RetainedIndexCandidates)
+        {
+            found.Clear();
+            _indexCandidates = found;
+        }
     }
+
+    /// <summary>The largest candidate buffer kept per thread between index lookups.</summary>
+    private const int RetainedIndexCandidates = 64 * 1024;
+
+    [ThreadStatic]
+    private static List<(RowKey RowId, ulong Sequence, bool Live)>? _indexCandidates;
 
     /// <summary>Every live (key, row id) entry of the index; used by the rare delete-by-row-id paths.</summary>
     internal List<(byte[] EncodedKey, RowKey RowId)> IndexEntries(string databaseName, string tableName, string indexName)
