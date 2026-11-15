@@ -119,6 +119,39 @@ public sealed class HNSWClusteredRecallTests
         }
     }
 
+    /// <summary>
+    /// Nearest-neighbor-only graphs are clique-like: the nodes of a cluster point at each other and few
+    /// edges come in. The connectivity repair used to free a slot by dropping any edge whose target had
+    /// two incoming edges, which could drop the only edge into such a clique; a parallel build of this
+    /// data then left 30 to 156 nodes that no search could reach. It now keeps a spanning tree intact.
+    /// (Reachable is all this checks: such a graph still strands searches in the wrong cluster, which is
+    /// why the diversity heuristic is the default.)
+    /// </summary>
+    [Fact]
+    public void NearestOnlyGraph_ParallelBuild_LeavesNoNodeUnreachable()
+    {
+        ClusteredData data = Data.Value;
+        for (int round = 0; round < 3; round++)
+        {
+            var index = new HNSWIndex { Metric = "cosine", EnableDiversityHeuristic = false };
+
+            index.InsertBatchParallel(data.Ids, data.Flat, Dimensions, maxDegreeOfParallelism: Math.Max(4, Environment.ProcessorCount));
+
+            Assert.Equal(0, index.CountUnreachableNodes());
+        }
+    }
+
+    [Fact]
+    public void RepairConnectivity_OnAConnectedGraph_AddsNothing()
+    {
+        ClusteredData data = Data.Value;
+        var index = new HNSWIndex { Metric = "cosine", EnableDiversityHeuristic = false };
+        index.InsertBatchParallel(data.Ids, data.Flat, Dimensions);
+
+        Assert.Equal(0, index.RepairConnectivity());
+        Assert.Equal(0, index.CountUnreachableNodes());
+    }
+
     // No query may lose its own cluster (recall below 50%), and recall over all queries stays near 100%.
     private static void AssertRecall(ClusteredData data, Func<int, IEnumerable<long>> search)
     {
