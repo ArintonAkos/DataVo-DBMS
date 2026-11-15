@@ -43,6 +43,12 @@ internal partial class Select
             }
         }
 
+        /// <summary>The number of distinct keys.</summary>
+        public int KeyCount => _counts?.Count ?? _rows!.Count;
+
+        /// <summary>The distinct keys, each once.</summary>
+        public IEnumerable<long> Keys => _counts is not null ? _counts.Keys : _rows!.Keys;
+
         /// <summary>Counts one more row with <paramref name="key"/> in a key-only table.</summary>
         public void AddKey(long key)
         {

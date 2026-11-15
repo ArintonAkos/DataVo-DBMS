@@ -22,7 +22,8 @@ namespace DataVo.Core.Parser.DQL;
 /// <remarks>
 /// <para>
 /// One table is streamed (the probe): the largest one when every join is INNER, the FROM table when a LEFT JOIN
-/// must preserve it. Every other table is hashed by its join key, and each probe row is extended table by table
+/// must preserve it. With INNER joins only, a small hashed table may instead select the probe rows through an
+/// index on the probe's join column (see <c>Select.TypedJoinIndex.cs</c>). Every other table is hashed by its join key, and each probe row is extended table by table
 /// along the join steps. An INNER step drops a row with no match; a LEFT step pads it with NULLs.
 /// </para>
 /// <para>
@@ -239,7 +240,10 @@ internal partial class Select
             Unordered = unordered,
         };
         state.Current[probeIndex] = new CellValue[probe.Columns.Count];
-        if (!engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow))
+        bool streamed = TryIndexDrivenProbeRows(engine, sides, steps, probeIndex, databaseName) is { } indexedRows
+            ? engine.StorageContext.VisitRowsByKey(probe.Detail.TableName, databaseName, indexedRows, ref state, VisitJoinProbeRow)
+            : engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow);
+        if (!streamed)
         {
             return null;
         }

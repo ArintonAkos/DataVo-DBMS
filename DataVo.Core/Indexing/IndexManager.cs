@@ -2338,6 +2338,15 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
+        out IReadOnlyList<RowKey> rowIds) =>
+        TryLookupIntegerIndex(key, indexName, tableName, databaseName, recordUse: true, out rowIds);
+
+    private bool TryLookupIntegerIndex(
+        long key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        bool recordUse,
         out IReadOnlyList<RowKey> rowIds)
     {
         if (_lsmStore is { } store)
@@ -2353,7 +2362,11 @@ public partial class IndexManager : IDisposable
             // A partial secondary lane may miss older rows for the same key, so it answers nothing.
             if (IsLaneComplete(cacheKey) && _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map))
             {
-                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                if (recordUse)
+                {
+                    RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                }
+
                 rowIds = map.TryGetValue(key, out List<RowKey>? rows)
                     ? rows
                     : Array.Empty<RowKey>();
@@ -2594,11 +2607,25 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Performs a point lookup against a single-column integer index without string formatting or parsing.
     /// </summary>
-    public IReadOnlyList<RowKey> FilterUsingIntegerIndex(long integerKey, string indexName, string tableName, string databaseName)
+    public IReadOnlyList<RowKey> FilterUsingIntegerIndex(long integerKey, string indexName, string tableName, string databaseName) =>
+        LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: true);
+
+    /// <summary>
+    /// The rows a single-column integer index lists under <paramref name="integerKey"/>, without recording the
+    /// index as used by the query: for a planner that looks before it decides whether to use the index.
+    /// </summary>
+    internal IReadOnlyList<RowKey> PeekIntegerIndex(long integerKey, string indexName, string tableName, string databaseName) =>
+        LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: false);
+
+    private IReadOnlyList<RowKey> LookupIntegerIndex(long integerKey, string indexName, string tableName, string databaseName, bool recordUse)
     {
         if (_lsmStore is { } store)
         {
-            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            if (recordUse)
+            {
+                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            }
+
             return store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(integerKey))
                 ?? throw MissingIndex(indexName, tableName);
         }
@@ -2608,7 +2635,7 @@ public partial class IndexManager : IDisposable
             return [rowId];
         }
 
-        if (TryLookupIntegerIndex(integerKey, indexName, tableName, databaseName, out IReadOnlyList<RowKey> rowIds)
+        if (TryLookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse, out IReadOnlyList<RowKey> rowIds)
             && rowIds.Count > 0)
         {
             return rowIds;
@@ -2616,7 +2643,11 @@ public partial class IndexManager : IDisposable
 
         string formatted = ScalarKeyFormatter.FormatBracketed(integerKey, System.Globalization.CultureInfo.InvariantCulture);
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        if (recordUse)
+        {
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        }
+
         return index.SearchReadOnly(formatted);
     }
 
