@@ -474,14 +474,19 @@ internal partial class Select
         _ => group.Extremes[i],
     };
 
-    private ListedTable? FinishJoinAggregates(JoinRunState state)
+    /// <summary>
+    /// One row per group: the group's first joined row with the aggregates added. With no joined row, a query
+    /// without GROUP BY still returns one row, as the general path does: COUNT is 0, the others NULL, and no
+    /// table columns.
+    /// </summary>
+    private ListedTable FinishJoinAggregates(JoinRunState state)
     {
-        if (state.GroupOrder.Count == 0)
+        List<JoinAggregate> aggregates = state.Aggregates!;
+        if (state.GroupOrder.Count == 0 && state.GroupColumns!.Count == 0)
         {
-            return null; // aggregates over no rows: the general path owns those semantics
+            state.GroupOrder.Add(new JoinGroup(new JoinedRow(), aggregates.Count));
         }
 
-        List<JoinAggregate> aggregates = state.Aggregates!;
         var rows = new List<JoinedRow>(state.GroupOrder.Count);
         foreach (JoinGroup group in state.GroupOrder)
         {

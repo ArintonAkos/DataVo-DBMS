@@ -9,8 +9,8 @@ namespace DataVo.Tests.Sql;
 /// The hashed side of the typed join keeps only the columns a joined row reads, and only key counts when that is
 /// nothing but the join key (anti-joins, <c>COUNT(c.Id)</c>, existence-only INNER joins). These tests compare
 /// those shapes with LINQ over the seed data under SQL's rules: NULL and dangling foreign keys, duplicate build
-/// keys, and LEFT JOIN conditions tested after the join. Every query must stay on the typed path (no general
-/// join).
+/// keys, empty results, and LEFT JOIN conditions tested after the join. Every query must stay on the typed path
+/// (no general join).
 /// </summary>
 public sealed class SqlTypedJoinBuildSideTests
 {
@@ -152,6 +152,24 @@ public sealed class SqlTypedJoinBuildSideTests
             QueryResult star = Run(context, "SELECT *" + FromLeftC + " ORDER BY o.Id LIMIT 3");
             Assert.Equal(3, star.Data.Count);
             Assert.Equal(4 + 4, star.Data[0].Count);
+            AssertTyped(context);
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void AggregatesOverNoJoinedRows_AnswerOnTheTypedPath(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            // One row: COUNT 0 and NULL for the rest, as SQL (and the general path) define it.
+            QueryResult empty = Run(context, "SELECT COUNT(*), COUNT(c.Id), SUM(o.Amount), AVG(o.Qty), MIN(c.Name), MAX(o.Id)" + FromLeftC + " WHERE c.Region = 'R9'");
+            object?[] row = [.. Assert.Single(empty.Data).Values];
+            Assert.Equal([0, 0, null, null, null, null], row);
+            AssertTyped(context);
+
+            // With GROUP BY there is no group, so no row.
+            Assert.Empty(Run(context, "SELECT c.Region, COUNT(*)" + FromLeftC + " WHERE o.Qty > 99 GROUP BY c.Region").Data);
             AssertTyped(context);
         });
     }
