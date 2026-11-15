@@ -88,7 +88,18 @@ public class Join
     /// <param name="tableRows">Initial table rows.</param>
     /// <param name="baseTableName">Optional explicit base table name.</param>
     /// <returns>The fully joined row set.</returns>
-    public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "")
+    public HashedTable Evaluate(HashedTable tableRows, string baseTableName = "") =>
+        Evaluate(tableRows, baseTableName, null);
+
+    /// <summary>
+    /// Evaluates all configured join conditions over an initial row set, reading a joined table's rows from
+    /// <paramref name="tableRowsByName"/> (keyed by table name) instead of the whole table where it has them.
+    /// </summary>
+    /// <param name="tableRows">Initial table rows.</param>
+    /// <param name="baseTableName">Optional explicit base table name.</param>
+    /// <param name="tableRowsByName">Rows a filter left for some joined tables, or <see langword="null"/>.</param>
+    /// <returns>The fully joined row set.</returns>
+    public HashedTable Evaluate(HashedTable tableRows, string baseTableName, IReadOnlyDictionary<string, TableData>? tableRowsByName)
     {
         int tableCount;
 
@@ -118,10 +129,19 @@ public class Join
             throw new EvaluationException("Error while joining tables!");
         }
 
-        for (int i = 0; i < steps.Count; i++)
+        Runtime.Diagnostics.RuntimeQueryDiagnosticsScope.RecordJoinExecution();
+        _strategyContext.TableRowsByName = tableRowsByName;
+        try
         {
-            _strategyContext.LeftTableCount = i + 1;
-            tableRows = PerformJoinCondition(tableRows, steps[i]);
+            for (int i = 0; i < steps.Count; i++)
+            {
+                _strategyContext.LeftTableCount = i + 1;
+                tableRows = PerformJoinCondition(tableRows, steps[i]);
+            }
+        }
+        finally
+        {
+            _strategyContext.TableRowsByName = null;
         }
 
         return ToCanonicalKeys(tableRows, layout);

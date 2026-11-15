@@ -79,4 +79,9 @@ public sealed class RuntimeQueryStats
     public bool IsError { get; }
     /// <summary>Gets the last recorded error message, if any.</summary>
     public string? ErrorMessage { get; }
+    /// <summary>
+    /// Gets how many times the general join path joined the query's tables. A SELECT with joins joins them once
+    /// whatever its WHERE; a fast path that answers without the general join records none.
+    /// </summary>
+    public int JoinExecutions { get; internal init; }
 }

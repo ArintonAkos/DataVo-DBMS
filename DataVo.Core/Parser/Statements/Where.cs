@@ -51,7 +51,7 @@ internal class Where
 
         var boundStatement = BindStatement(tableService);
 
-        return new StatementEvaluator(tableService, joinStatements, _fromTable!).Evaluate(boundStatement)
+        return new StatementEvaluator(tableService, joinStatements, _fromTable!).EvaluateWhere(boundStatement)
             .Select(row => row.Value)
             .ToListedTable();
     }

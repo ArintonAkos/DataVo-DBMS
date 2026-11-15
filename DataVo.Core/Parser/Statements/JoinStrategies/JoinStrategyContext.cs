@@ -31,6 +31,10 @@ public class JoinStrategyContext
     public TableData GetTableData(string tableAliasOrName)
     {
         var tableDetail = TableService.GetTableDetailByAliasOrName(tableAliasOrName);
+        if (TableRowsByName is { } narrowed && narrowed.TryGetValue(tableDetail.TableName, out TableData? rows))
+        {
+            return rows;
+        }
 
         if (tableDetail.TableContent == null)
         {
@@ -39,6 +43,12 @@ public class JoinStrategyContext
 
         return tableDetail.TableContent;
     }
+
+    /// <summary>
+    /// Gets or sets the rows a WHERE filter left for some tables, keyed by table name, while a join runs; a
+    /// table without an entry is read whole.
+    /// </summary>
+    public IReadOnlyDictionary<string, TableData>? TableRowsByName { get; set; }
 
     /// <summary>
     /// Gets or sets how many tables the left-side rows already span when the current join step runs.

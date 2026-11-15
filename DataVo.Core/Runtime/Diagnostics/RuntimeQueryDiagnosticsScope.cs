@@ -51,6 +51,11 @@ internal sealed class RuntimeQueryDiagnosticsScope : IDisposable
         scope.Builder.MarkFullTableScan();
     }
 
+    public static void RecordJoinExecution()
+    {
+        CurrentScope.Value?.Builder.RecordJoinExecution();
+    }
+
     public static void RecordIndexUse(string indexName)
     {
         CurrentScope.Value?.Builder.AddIndex(indexName);
