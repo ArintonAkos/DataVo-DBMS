@@ -17,7 +17,7 @@ namespace DataVo.Core.Parser.DQL;
 /// <summary>
 /// The typed join path: stored tables joined by INNER and LEFT equalities on integer columns, filtered by
 /// per-table <c>column op literal</c> conditions, and either aggregated (with or without GROUP BY) or returned as
-/// the top rows of an <c>ORDER BY ... LIMIT</c>.
+/// rows: the top rows of an <c>ORDER BY ... LIMIT</c>, or every joined row (up to a LIMIT without ORDER BY).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -115,15 +115,19 @@ internal partial class Select
         public Dictionary<GroupKey, JoinGroup> Groups { get; } = [];
         public List<JoinGroup> GroupOrder { get; } = [];
 
-        // Top rows of ORDER BY ... LIMIT.
+        // Returned rows: the top rows of ORDER BY ... LIMIT, or (Unordered) the rows in the order they are joined.
         public List<(int Side, int Ordinal)>? OrderKeys { get; init; }
         public bool[]? Ascending { get; init; }
         public int TopLimit { get; init; }
+        public bool Unordered { get; init; }
         public List<(object?[] Keys, long Sequence, CellValue[][] Cells)> Top { get; } = [];
         public long Sequence;
+
+        /// <summary>Set once an unordered result has its LIMIT of rows: the scan stops.</summary>
+        public bool Done;
     }
 
-    /// <summary>Returns the joined rows (aggregated, or the top rows), or null when the query needs the general path.</summary>
+    /// <summary>Returns the joined rows (aggregated, the top rows, or every row up to a LIMIT), or null when the query needs the general path.</summary>
     private ListedTable? TryEvaluateTypedJoin()
     {
         if (_activeSnapshot is not null
@@ -144,16 +148,17 @@ internal partial class Select
         if (!aggregated
             && (_model.GroupByStatement.Model.Columns.Count > 0
                 || _model.GetHavingExpression() is not null
-                || _model.GetOrderByExpression() is not { Columns.Count: > 0 }
-                || !_model.LimitTake.HasValue
-                || _model.RowsNeededForLimit <= 0))
+                || (_model.LimitTake.HasValue && _model.RowsNeededForLimit <= 0)))
         {
-            return null; // rows without a bounded top-N are built by the general path
+            return null;
         }
 
+        // Rows without a bounded top-N are returned in the order they are joined, streaming the FROM table.
+        bool topRows = !aggregated && _model.GetOrderByExpression() is { Columns.Count: > 0 } && _model.LimitTake.HasValue;
+        bool unordered = !aggregated && !topRows;
         DataVoEngine engine = DataVoEngine.Current();
         if (!TryBuildJoinSides(engine, out JoinSide[] sides, out int fromIndex)
-            || !TryPlanJoinSteps(engine, sides, fromIndex, out int probeIndex, out JoinStep[] steps))
+            || !TryPlanJoinSteps(engine, sides, fromIndex, streamFrom: unordered, out int probeIndex, out JoinStep[] steps))
         {
             return null;
         }
@@ -196,7 +201,7 @@ internal partial class Select
                 }
             }
         }
-        else
+        else if (topRows)
         {
             if (!TryResolveJoinOrderKeys(sides, out orderKeys, out ascending))
             {
@@ -230,7 +235,8 @@ internal partial class Select
             Aggregates = aggregates,
             OrderKeys = orderKeys,
             Ascending = ascending,
-            TopLimit = aggregated ? 0 : _model.RowsNeededForLimit,
+            TopLimit = aggregated ? 0 : _model.LimitTake.HasValue ? _model.RowsNeededForLimit : int.MaxValue,
+            Unordered = unordered,
         };
         state.Current[probeIndex] = new CellValue[probe.Columns.Count];
         if (!engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow))
@@ -298,14 +304,15 @@ internal partial class Select
     /// Chooses the probe and orders the steps so each adds one table keyed by a column of a table already joined.
     /// With a LEFT JOIN the FROM table is the probe and the steps follow the written order, which SQL's
     /// left-to-right evaluation requires; with INNER joins only, the largest table is the probe and any order
-    /// that connects the tables gives the same rows.
+    /// that connects the tables gives the same rows. <paramref name="streamFrom"/> keeps the FROM table as the
+    /// probe, so rows returned without an ORDER BY come in the FROM table's order.
     /// </summary>
-    private bool TryPlanJoinSteps(DataVoEngine engine, JoinSide[] sides, int fromIndex, out int probeIndex, out JoinStep[] steps)
+    private bool TryPlanJoinSteps(DataVoEngine engine, JoinSide[] sides, int fromIndex, bool streamFrom, out int probeIndex, out JoinStep[] steps)
     {
         List<JoinModel.JoinCondition> conditions = _model.JoinStatement.Model.JoinConditions;
         bool anyOuter = conditions.Any(condition => condition.JoinType.Equals(JoinTypes.LEFT, StringComparison.OrdinalIgnoreCase));
         probeIndex = fromIndex;
-        if (!anyOuter)
+        if (!anyOuter && !streamFrom)
         {
             long largest = EstimateRows(engine, sides[fromIndex], _model.Database!);
             for (int i = 0; i < sides.Length; i++)
@@ -504,9 +511,17 @@ internal partial class Select
         return new ListedTable(rows);
     }
 
-    /// <summary>The top rows in order, as joined rows of the kept columns; ORDER BY and LIMIT then run over them as usual.</summary>
-    private static ListedTable FinishJoinTop(JoinRunState state) =>
-        new([.. state.Top.Select(entry => BuildJoinedRow(state.Sides, entry.Cells))]);
+    /// <summary>The returned rows, as joined rows of the kept columns; ORDER BY and LIMIT then run over them as usual.</summary>
+    private static ListedTable FinishJoinTop(JoinRunState state)
+    {
+        var rows = new List<JoinedRow>(state.Top.Count);
+        foreach ((object?[] _, long _, CellValue[][] cells) in state.Top)
+        {
+            rows.Add(BuildJoinedRow(state.Sides, cells));
+        }
+
+        return new ListedTable(rows);
+    }
 
     private JoinSide? BuildJoinSide(DataVoEngine engine, Column joinColumn)
     {
@@ -657,7 +672,7 @@ internal partial class Select
         state.ProbeNeededLoaded = false;
         state.ProbeFullyLoaded = false;
         ExtendJoinedRow(state, 0, rowId, rowBytes, typedCells);
-        return true;
+        return !state.Done;
     }
 
     /// <summary>Adds the table of step <paramref name="stepIndex"/> to the joined row in every way it matches, then the next step.</summary>
@@ -709,10 +724,27 @@ internal partial class Select
         {
             AccumulateJoinedRow(state, rowId, rowBytes, typedCells);
         }
+        else if (state.Unordered)
+        {
+            AppendJoinedRow(state, rowId, rowBytes, typedCells);
+        }
         else
         {
             OfferJoinedRow(state, rowId, rowBytes, typedCells);
         }
+    }
+
+    /// <summary>Keeps a joined row of an unordered result, and stops the scan once the LIMIT is reached.</summary>
+    private static void AppendJoinedRow(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
+    {
+        if (state.Done)
+        {
+            return;
+        }
+
+        LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
+        state.Top.Add(([], state.Sequence++, SnapshotJoinedRow(state)));
+        state.Done = state.Top.Count >= state.TopLimit;
     }
 
     /// <summary>

@@ -9,8 +9,8 @@ namespace DataVo.Tests.Sql;
 /// The hashed side of the typed join keeps only the columns a joined row reads, and only key counts when that is
 /// nothing but the join key (anti-joins, <c>COUNT(c.Id)</c>, existence-only INNER joins). These tests compare
 /// those shapes with LINQ over the seed data under SQL's rules: NULL and dangling foreign keys, duplicate build
-/// keys, empty results, and LEFT JOIN conditions tested after the join. Every query must stay on the typed path
-/// (no general join).
+/// keys, empty tables and empty results, LEFT JOIN conditions tested after the join, and joined rows returned
+/// without a bounded top-N. Every query must stay on the typed path (no general join).
 /// </summary>
 public sealed class SqlTypedJoinBuildSideTests
 {
@@ -117,6 +117,9 @@ public sealed class SqlTypedJoinBuildSideTests
                 [Orders.Length, LeftC.Count(j => j.C is not null), LeftC.Count(j => hasTier(j.C))]);
             AssertTotals(context, "SELECT COUNT(*) FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN Tiers t ON c.Tier = t.Id WHERE t.Label = 'gold'",
                 [LeftC.Count(j => j.C?.Tier == 1)]);
+            AssertSameRows(
+                [.. LeftC.Where(j => hasTier(j.C)).Select(j => new object?[] { j.O.Id, j.C!.Tier == 1 ? "gold" : "basic" })],
+                Run(context, "SELECT o.Id, t.Label FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN Tiers t ON c.Tier = t.Id"));
             AssertTyped(context);
         });
     }
@@ -170,6 +173,65 @@ public sealed class SqlTypedJoinBuildSideTests
 
             // With GROUP BY there is no group, so no row.
             Assert.Empty(Run(context, "SELECT c.Region, COUNT(*)" + FromLeftC + " WHERE o.Qty > 99 GROUP BY c.Region").Data);
+            AssertTyped(context);
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void EmptyTables_JoinAsSqlDefines(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            Execute(context, "CREATE TABLE NoCustomers (Id BIGINT PRIMARY KEY, Region VARCHAR(4))");
+            Execute(context, "CREATE TABLE NoOrders (Id INT PRIMARY KEY, CustomerId BIGINT)");
+
+            // Nothing to match: every order is padded, and an INNER join has no row.
+            AssertTotals(context, "SELECT COUNT(*), COUNT(c.Id) FROM Orders o LEFT JOIN NoCustomers c ON o.CustomerId = c.Id", [Orders.Length, 0]);
+            AssertTotals(context, "SELECT COUNT(*) FROM Orders o LEFT JOIN NoCustomers c ON o.CustomerId = c.Id WHERE c.Id IS NULL", [Orders.Length]);
+            AssertTotals(context, "SELECT COUNT(*) FROM Orders o JOIN NoCustomers c ON o.CustomerId = c.Id", [0]);
+
+            // Nothing to stream.
+            AssertTotals(context, "SELECT COUNT(*), SUM(c.Tier) FROM NoOrders o LEFT JOIN Customers c ON o.CustomerId = c.Id", [0, double.NaN]);
+            Assert.Empty(Run(context, "SELECT o.Id, c.Name FROM NoOrders o LEFT JOIN Customers c ON o.CustomerId = c.Id").Data);
+            AssertTyped(context);
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void JoinedRowsWithoutATopN_ReturnEveryJoinedRow(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            // No ORDER BY, no LIMIT: every joined row, NULL-padded ones included (order unspecified).
+            object?[][] left = [.. LeftC.Select(j => new object?[] { j.O.Id, j.C?.Region, j.C?.Id })];
+            AssertSameRows(left, Run(context, "SELECT o.Id, c.Region, c.Id" + FromLeftC));
+            AssertTyped(context);
+
+            object?[][] inner = [.. LeftC.Where(j => j.C is not null && j.O.Qty == 2).Select(j => new object?[] { j.O.Id, j.C!.Name })];
+            AssertSameRows(inner, Run(context, "SELECT o.Id, c.Name FROM Orders o JOIN Customers c ON o.CustomerId = c.Id WHERE o.Qty = 2"));
+            AssertTyped(context);
+
+            // ORDER BY without LIMIT: every row, sorted.
+            AssertRows(context, "SELECT o.Id, c.Id" + FromLeftC + " WHERE c.Id IS NULL ORDER BY o.Amount, o.Id",
+                [.. LeftC.Where(j => j.C is null).OrderBy(j => j.O.Amount).ThenBy(j => j.O.Id).Select(j => new object?[] { j.O.Id, null })]);
+
+            // LIMIT without ORDER BY: that many rows, each a real joined row; with OFFSET the rows after it.
+            QueryResult limited = Run(context, "SELECT o.Id, c.Region" + FromLeftC + " WHERE c.Tier = 1 LIMIT 5");
+            Assert.Equal(5, limited.Data.Count);
+            var valid = LeftC.Where(j => j.C?.Tier == 1).ToDictionary(j => j.O.Id, j => j.C!.Region);
+            Assert.All(limited.Data, r => Assert.Equal(valid[Convert.ToInt32(r.Values.First(), CultureInfo.InvariantCulture)], r.Values.Last()));
+            QueryResult offset = Run(context, "SELECT o.Id" + FromLeftC + " WHERE c.Tier = 1 LIMIT 5 OFFSET 3");
+            Assert.Equal(5, offset.Data.Count);
+            Assert.Equal(
+                limited.Data.Skip(3).Select(r => r.Values.First()),
+                offset.Data.Take(2).Select(r => r.Values.First()));
+            AssertTyped(context);
+
+            // SELECT * returns every column of both tables.
+            QueryResult star = Run(context, "SELECT *" + FromLeftC + " WHERE o.Qty = 3");
+            Assert.Equal(Orders.Count(o => o.Qty == 3), star.Data.Count);
             AssertTyped(context);
         });
     }
@@ -234,6 +296,12 @@ public sealed class SqlTypedJoinBuildSideTests
         QueryResult result = Run(context, sql);
         Assert.Equal(expected.Select(r => r.Select(Normalize).ToArray()), result.Data.Select(r => r.Values.Select(Normalize).ToArray()));
         AssertTyped(context);
+    }
+
+    private static void AssertSameRows(object?[][] expected, QueryResult result)
+    {
+        static string Key(IEnumerable<object?> row) => string.Join("|", row.Select(value => Normalize(value)?.ToString() ?? "NULL"));
+        Assert.Equal(expected.Select(Key).Order(StringComparer.Ordinal), result.Data.Select(r => Key(r.Values)).Order(StringComparer.Ordinal));
     }
 
     private static object? Normalize(object? value) => value switch
