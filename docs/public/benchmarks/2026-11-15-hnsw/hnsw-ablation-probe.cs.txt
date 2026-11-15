@@ -1,0 +1,187 @@
+using System.Diagnostics;
+using System.Reflection;
+using DataVo.Core.Indexing.HNSW;
+using DataVo.Core.StorageEngine.Config;
+using Research.Benchmark.Runners.HybridVector;
+
+// HNSW ablation on the hybrid-vector data: builds the index directly (4,096-row parallel batches, as the
+// SQL load does) under several configurations and reports build time, recall@10, trapped queries, latency.
+public static class HProbe
+{
+    public static void Run(int docs, int dims, string[] configs, int[] efs)
+    {
+        int clusters = int.Parse(Environment.GetEnvironmentVariable("CLUSTERS") ?? "128");
+        var data = new HybridVectorData(docs, dims, 200, clusters: clusters);
+        if (Environment.GetEnvironmentVariable("UNIFORM") == "1")
+        {
+            var r = new Random(7);
+            float[] U() { var v = new float[dims]; for (int i = 0; i < dims; i++) v[i] = (float)(r.NextDouble() * 2 - 1); float n = MathF.Sqrt(v.Sum(x => x * x)); for (int i = 0; i < dims; i++) v[i] /= n; return v; }
+            for (int i = 1; i <= docs; i++) data.Embeddings[i] = U();
+            for (int q = 0; q < data.QueryVectors.Length; q++) data.QueryVectors[q] = U();
+            Console.WriteLine("uniform random data");
+        }
+        Console.WriteLine($"data {docs} x {dims}");
+        var truth = new int[data.QueryVectors.Length][];
+        for (int q = 0; q < truth.Length; q++)
+        {
+            float[] d = data.Distances(data.QueryVectors[q]);
+            truth[q] = [.. Enumerable.Range(1, docs).OrderBy(i => d[i]).Take(10)];
+        }
+
+        foreach (string config in configs)
+        {
+            RunConfig(data, truth, config, efs);
+        }
+    }
+
+    private static HNSWIndex Create(string config)
+    {
+        var index = new HNSWIndex { Metric = "cosine" };
+        foreach (string part in config.Split('+'))
+        {
+            string[] kv = part.Split('=');
+            switch (kv[0])
+            {
+                case "default": break;
+                case "div": index.EnableDiversityHeuristic = true; break;
+                case "nodiv": index.EnableDiversityHeuristic = false; break;
+                case "efc": index.EfConstruction = int.Parse(kv[1]); break;
+                case "maxefc": index.MaxAdaptiveEfConstruction = int.Parse(kv[1]); break;
+                case "noadapt": index.EnableAdaptiveEfConstruction = false; break;
+                case "m": index.M = int.Parse(kv[1]); break;
+                default: throw new ArgumentException(part);
+            }
+        }
+
+        return index;
+    }
+
+    private static void RunConfig(HybridVectorData data, int[][] truth, string config, int[] efs)
+    {
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        long before = GC.GetTotalMemory(true);
+        HNSWIndex index = Create(config);
+        index.Reserve(data.Documents, data.Dimensions);
+        var sw = Stopwatch.StartNew();
+        const int batch = 4096;
+        for (int start = 1; start <= data.Documents; start += batch)
+        {
+            int n = Math.Min(batch, data.Documents - start + 1);
+            var ids = new DataVo.Core.RowKey[n];
+            var flat = new float[n * data.Dimensions];
+            for (int i = 0; i < n; i++)
+            {
+                ids[i] = start + i;
+                data.Embeddings[start + i].CopyTo(flat, i * data.Dimensions);
+            }
+
+            index.InsertBatch(ids, flat, data.Dimensions);
+        }
+
+        double buildMs = sw.Elapsed.TotalMilliseconds;
+        long after = GC.GetTotalMemory(true);
+        Console.WriteLine($"\n[{config}] build {buildMs:F0} ms, heap +{(after - before) / 1048576.0:F1} MB, maxLevel {index.MaxLevel}, unreachable {index.CountUnreachableNodes()}");
+
+        if (Environment.GetEnvironmentVariable("REPAIR") == "1")
+        {
+            for (int pass = 1; pass <= 3; pass++)
+            {
+                int added = index.RepairConnectivity();
+                Console.WriteLine($"  repair pass {pass}: added {added}, unreachable now {index.CountUnreachableNodes()}");
+            }
+        }
+
+        foreach (int ef in efs)
+        {
+            if (ef == 0)
+            {
+                index.EnableAdaptiveEfSearch = true;
+                index.EfSearch = 64;
+            }
+            else
+            {
+                index.EnableAdaptiveEfSearch = false;
+                index.EfSearch = ef;
+            }
+
+            for (int w = 0; w < 10; w++) index.SearchTopK(data.QueryVectors[w], 10);
+            double sum = 0; double min = 1; int zero = 0; int low = 0;
+            var lat = new List<double>();
+            for (int q = 0; q < truth.Length; q++)
+            {
+                long t0 = Stopwatch.GetTimestamp();
+                var got = index.SearchTopK(data.QueryVectors[q], 10);
+                lat.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                var set = new HashSet<long>(got.Select(r => (long)r));
+                double recall = truth[q].Count(i => set.Contains(i)) / 10.0;
+                sum += recall; min = Math.Min(min, recall);
+                if (recall == 0) zero++;
+                if (recall < 0.5) low++;
+            }
+
+            lat.Sort();
+            Console.WriteLine($"  ef {(ef == 0 ? "adaptive" : ef.ToString()),8}: recall {sum / truth.Length:P1} min {min:P0} zero {zero} <50% {low}  median {lat[lat.Count / 2]:F3} ms p99 {lat[(int)(lat.Count * 0.99)]:F3} ms");
+        }
+
+        if (Environment.GetEnvironmentVariable("HDIAG") == "1")
+        {
+            Diagnose(index, data, truth);
+        }
+    }
+
+    // Graph structure by cluster: labels every document with its generating centre (the generator's first
+    // draws, replayed), counts edges that cross clusters per level, and checks whether layer-0 beam search
+    // finds the answer when started from a node of the query's own cluster.
+    private static void Diagnose(HNSWIndex index, HybridVectorData data, int[][] truth)
+    {
+        var random = new Random(20261114);
+        int clusters = 128, dims = data.Dimensions;
+        float[][] centers = new float[clusters][];
+        for (int c = 0; c < clusters; c++)
+        {
+            var v = new float[dims];
+            for (int i = 0; i < dims; i++) v[i] = (float)(random.NextDouble() * 2 - 1);
+            float n = MathF.Sqrt(v.Sum(x => x * x));
+            centers[c] = [.. v.Select(x => x / n)];
+        }
+
+        int Label(float[] v) { int best = 0; float bd = float.MinValue; for (int c = 0; c < clusters; c++) { float d = 0; for (int i = 0; i < dims; i++) d += v[i] * centers[c][i]; if (d > bd) { bd = d; best = c; } } return best; }
+        var state = index.ExportFlatState();
+        int stride = state.LevelOffsets[^1] + state.LevelStrides[^1];
+        var label = new int[state.NextOrdinal];
+        for (int o = 0; o < state.NextOrdinal; o++) label[o] = Label(data.Embeddings[(long)state.RowIdByOrdinal[o]]);
+        for (int level = 0; level <= state.MaxLevel; level++)
+        {
+            long edges = 0, cross = 0; int nodes = 0, nodesWithCross = 0;
+            var clustersAtLevel = new HashSet<int>();
+            for (int o = 0; o < state.NextOrdinal; o++)
+            {
+                if (state.NodeLevels[o] < level) continue;
+                nodes++; clustersAtLevel.Add(label[o]);
+                bool any = false;
+                for (int i = 0; i < state.LevelStrides[level]; i++)
+                {
+                    int nb = state.GraphLinks[o * stride + state.LevelOffsets[level] + i];
+                    if (nb < 0) break;
+                    edges++;
+                    if (label[nb] != label[o]) { cross++; any = true; }
+                }
+                if (any) nodesWithCross++;
+            }
+            Console.WriteLine($"  level {level}: nodes {nodes}, clusters {clustersAtLevel.Count}, edges {edges}, cross-cluster {cross} ({(double)cross / Math.Max(1, edges):P2}), nodes with a cross edge {nodesWithCross}");
+        }
+
+        index.EnableAdaptiveEfSearch = false; index.EfSearch = 64;
+        int trapped = 0, wrongCluster = 0;
+        for (int q = 0; q < truth.Length; q++)
+        {
+            var got = index.SearchTopK(data.QueryVectors[q], 10);
+            var set = new HashSet<long>(got.Select(r => (long)r));
+            if (truth[q].Any(i => set.Contains(i))) continue;
+            trapped++;
+            int qc = Label(data.QueryVectors[q]);
+            if (got.Count > 0 && Label(data.Embeddings[(long)got[0]]) != qc) wrongCluster++;
+        }
+        Console.WriteLine($"  ef 64: {trapped} queries with 0% recall, {wrongCluster} of them answered from another cluster");
+    }
+}

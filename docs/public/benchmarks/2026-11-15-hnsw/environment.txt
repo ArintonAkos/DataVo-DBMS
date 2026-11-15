@@ -1,0 +1,19 @@
+benchmark code: 638324d (unchanged since the 2026-11-14 runs)
+engine (DataVo.Core): 52b78cf = master 81d8c91 + 8e472ab (HNSW diversity heuristic on by default) + 52b78cf (connectivity repair keeps a spanning tree)
+sqlite-vec: v0.1.9 (repository vec0.dylib), SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0)
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-15, run alone with no other build or test process
+runs: hybrid-vector (defaults: 50,000 x 384), 43 s wall, 0.97 GB peak memory footprint;
+      hybrid-vector --vectors 20000 --dimensions 1536, 74 s wall, 1.05 GB peak memory footprint; one run each
+note: a first 384-dimension run started seconds after the Release build (load average 8.9) and measured DataVo Flat,
+      whose code did not change, at 4.02 ms on V0 against 2.6-2.7 ms otherwise; it was discarded and the scenario re-run.
+      Its HNSW recall was identical (100% on every shape).
+
+hnsw-ablation.txt: HNSWIndex built directly (4,096-row InsertBatch calls, as the SQL load does) on the same
+hybrid-vector data, one configuration per process, 200 held-out queries, recall@10 against the exact top-10.
+"zero" = queries with 0% recall, "<50%" = queries below 50%. Configurations: nodiv = diversity heuristic off
+(the default before 8e472ab), default = after 8e472ab (heuristic on), maxefc=0 = adaptive EfConstruction uncapped,
+efc=200+maxefc=200 = EfConstruction 200. "ef adaptive" is the default search width (about 234 at 50,000 vectors).
+The heap column is GC.GetTotalMemory after the build minus before; compare it only between rows of one size.
+Source: hnsw-ablation-probe.cs.txt (a scratch program that references Research.Benchmark.Runners; run as
+`h <documents> <dimensions> <config> <ef list>`, e.g. `h 50000 384 nodiv 0,64,128,256,512`).
