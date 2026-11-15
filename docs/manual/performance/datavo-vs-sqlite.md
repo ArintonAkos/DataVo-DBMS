@@ -1,8 +1,8 @@
 # DataVo vs SQLite: When Each Engine Wins
 
-This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder.
+This page compares DataVo with SQLite on 28 relational query shapes over 1,000,000 orders and on five filtered nearest-neighbour queries, with DuckDB as an analytical reference. It records where each engine is faster and why. Measured on 14 November 2026 on an Apple M4 Pro. The first run that day found five queries on which DataVo returned a wrong answer. All five are fixed, and every number on this page comes from a second run against the fixed engine. The raw output of both runs is in [`docs/public/benchmarks/2026-11-14/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-14); the first run is in its `pre-fix/` folder. On 15 November `OR` and `LIKE` moved onto DataVo's typed scan (commit `9ffb413`) and the SQL matrix was run again; the filter rows W3–W6 and C6 come from that run, whose output is in [`docs/public/benchmarks/2026-11-15/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-15). Every other row was within run-to-run noise of the 14 November numbers, which are kept.
 
-**The short version.** DataVo is faster than SQLite on primary-key and secondary-index lookups, on full-table `GROUP BY` with up to about a thousand groups, on a two-table join with `GROUP BY`, on aggregates its columnar index can answer, and on vector search, including a vector search joined to another table. SQLite is faster, often by one to two orders of magnitude, on anything that leaves DataVo's typed execution paths: `OR`, `LIKE`, joins of three tables, `LEFT JOIN`, joins that return rows, and `GROUP BY` over a key that has an index. Every engine now returns the exact answer on every relational query. See [Correctness findings](#correctness-findings) for what was wrong and what the fixes cost.
+**The short version.** DataVo is faster than SQLite on primary-key and secondary-index lookups, on full-table `GROUP BY` with up to about a thousand groups, on a two-table join with `GROUP BY`, on aggregates its columnar index can answer, and on vector search, including a vector search joined to another table. SQLite is faster, often by one to two orders of magnitude, on anything that leaves DataVo's typed execution paths: joins of three tables, `LEFT JOIN`, joins that return rows, and `GROUP BY` over a key that has an index. On full scans filtered with `OR` or `LIKE` SQLite is now 1.5 to 2 times faster, down from 33 to 69 times. Every engine now returns the exact answer on every relational query. See [Correctness findings](#correctness-findings) for what was wrong and what the fixes cost.
 
 ## Decision guide
 
@@ -14,8 +14,9 @@ Ratios compare medians, DataVo's LSM engine against SQLite (WAL, `synchronous=NO
 | Primary-key range read on the **InMemory** engine | SQLite | about 3,900× | [R1–R4](#primary-key-ranges): InMemory scans the whole table |
 | Equality on an indexed column, about 1,000 rows | DataVo | 2.7× | [W1](#filters) |
 | Equality on a column without an index | SQLite | 1.2× | [W2](#filters) |
-| Any `OR` in `WHERE` | SQLite | 56–69× | [W3, W4, C6](#filters) |
-| `LIKE`, prefix or substring | SQLite | 33–39× | [W5, W6](#filters) |
+| `OR` in `WHERE`, full scan | SQLite | 1.7–2.0× | [W3, W4, C6](#filters) |
+| `OR` of numeric comparisons, columnar index on those columns, `COUNT`/`SUM`/... | DataVo | 7.6× | [C6](#columnar-index) |
+| `LIKE`, prefix or substring, no index | SQLite | 1.5–1.8× | [W5, W6](#filters) |
 | `GROUP BY` over the whole table, 4 to 1,000 groups | DataVo | 2.1–2.7× | [G1, G2, C7](#group-by-cardinality) |
 | `GROUP BY` over about 125,000 groups, on an indexed key, `HAVING` + top-100 | SQLite | 13× | [G3](#group-by-cardinality) |
 | Two-table inner join + `GROUP BY` (fact × dimension) | DataVo | 3.4× | [J6](#joins) |
@@ -32,7 +33,7 @@ Ratios compare medians, DataVo's LSM engine against SQLite (WAL, `synchronous=NO
 
 Two rules follow from the reasons behind these numbers, explained in each section:
 
-1. **DataVo is fast when a query stays on one of its typed paths:** one table with an AND of `column op value` comparisons; or exactly two tables in an inner integer-key join with an aggregate; or an index lookup. Anything else is evaluated row by row with a dictionary per row, at 2–4 KB of allocation per row read, and is many times slower than SQLite.
+1. **DataVo is fast when a query stays on one of its typed paths:** one table with a `WHERE` built from `AND`, `OR`, `LIKE` and `column op value` comparisons; or exactly two tables in an inner integer-key join with an aggregate; or an index lookup. Anything else is evaluated row by row with a dictionary per row, at 2–4 KB of allocation per row read, and is many times slower than SQLite.
 2. **SQLite wins wherever an index can replace a scan or a hash table,** because its planner uses indexes for joins, grouping and ordering. DataVo's planner does not use a secondary index to drive a join or a `GROUP BY`.
 
 ## Correctness findings
@@ -143,12 +144,16 @@ Every other join leaves that path: three tables (J1–J3), no aggregate (J3), or
 | --- | ---: | ---: | ---: | ---: | ---: |
 | W1 `WHERE ProductId = @p` (indexed, ~1,000 rows) | 303 µs (1.10 ms) | 185 µs (451 µs) | 820 µs (938 µs) | 1.12 ms | **2.70×** |
 | W2 `WHERE ProductTag = @p` (no index, ~1,000 rows) | 35.1 ms (37.1 ms) | 68.3 ms | 28.7 ms | 0.52 ms | 0.82× |
-| W3 `(Status = 'PAID' OR Status = 'SHIPPED') AND Amount >= @lo AND Amount < @hi` | 3.40 s (3.54 s) | 3.46 s | 61.3 ms | 2.05 ms | 0.02× |
-| W4 W3 `AND Discount IS NOT NULL AND Discount < @d` | 4.35 s (4.82 s) | 4.30 s | 63.3 ms | 2.08 ms | 0.01× |
-| W5 `Sku LIKE 'S0042%'` (no index) | 1.66 s (1.77 s) | 1.92 s | 42.1 ms | 2.96 ms | 0.03× |
-| W6 `Sku LIKE '%042-%'` (no index) | 1.66 s (1.91 s) | 1.94 s | 50.9 ms | 4.20 ms | 0.03× |
+| W3 `(Status = 'PAID' OR Status = 'SHIPPED') AND Amount >= @lo AND Amount < @hi` | 100 ms (104 ms) | 108 ms | 60.4 ms | 2.21 ms | 0.60× |
+| W4 W3 `AND Discount IS NOT NULL AND Discount < @d` | 112 ms (143 ms) | 110 ms | 62.8 ms | 2.23 ms | 0.56× |
+| W5 `Sku LIKE 'S0042%'` (no index) | 73.7 ms (74.6 ms) | 67.2 ms | 42.2 ms | 3.04 ms | 0.57× |
+| W6 `Sku LIKE '%042-%'` (no index) | 77.7 ms (78.2 ms) | 76.1 ms | 51.4 ms | 4.01 ms | 0.66× |
 
-**Why.** DataVo's typed single-table scan (`Select.TypedScan.cs`, `TryCollectSidePredicates`) accepts only an AND of `column op literal` comparisons with `=`, `<>`, `<`, `<=`, `>`, `>=`, `IS NULL` and `IS NOT NULL`. It decodes only the filtered columns and builds a result row only for matches. An `OR` or a `LIKE` anywhere in `WHERE` sends the whole query to the general path, which builds a dictionary for each of the million rows (3.2–4.0 GB allocated per call in W3/W4, 1.8 GB in W5/W6). That is the 33–69× gap; SQLite evaluates these predicates on its row format without allocating.
+W3–W6 are from the 15 November run. Before commit `9ffb413` they took 1.66–4.35 s on DataVo LSM and allocated 1.8–4.0 GB per call.
+
+**Why.** DataVo's typed single-table scan (`Select.TypedScan.cs`, `TryCollectSidePredicates`) takes a `WHERE` built from `AND`, `OR`, `LIKE`/`NOT LIKE` and `column op literal` comparisons with `=`, `<>`, `<`, `<=`, `>`, `>=`, `IS NULL` and `IS NOT NULL`. It decodes only the filtered columns and builds a result row only for matches. An `OR` becomes one predicate whose branches are AND lists. The parser pushes `NOT` down into the comparisons, and `WHERE` keeps only rows that are true, so treating a branch that compared a NULL as false gives SQL's three-valued result. `LIKE` is matched by `SqlLikePattern`, which tests the prefix (`'S0042%'`), suffix and substring (`'%042-%'`) shapes with ordinal span searches and anything else with a wildcard matcher. Until 15 November an `OR` or a `LIKE` sent the whole query to the general path, which built a dictionary for each of the million rows. That was the 33–69× gap.
+
+SQLite is still 1.5 to 1.8 times faster. On the LSM engine W3–W6 allocate 36–46 MB per call, about one string per row read: the size matches the `Status` or `Sku` value decoded from the row bytes into a .NET string before it is compared. The InMemory engine holds those strings already and allocates 16 KB to 3.3 MB per call, yet is no faster, so the allocation is not the whole difference. I did not profile the rest of the per-row cost.
 
 On the typed path the gap is small. W2 reads every row on both engines (SQLite: `SCAN Orders`) and SQLite is 1.2 times faster. W1 uses the index on both, and DataVo is 2.7 times faster: its secondary index returns all matching row keys in one lookup (`IndexManager.FilterUsingIndex`), and the typed scan then reads those rows by key. I did not profile where SQLite spends its 820 µs. The W1 p99 of 1.10 ms comes from garbage collection: 555 KB allocated per call, 67 gen-0 and 24 gen-1 collections over 1,000 calls. SQLite allocates 49 KB per call.
 
@@ -194,13 +199,13 @@ DataVo's columnar index (`CREATE INDEX cx_orders ON Orders (Amount, Qty, Bucket,
 | C3 `SUM(Amount) WHERE Qty >= @q` (DOUBLE sum) | 76.9 ms | 77.6 ms, row scan | 3.12 ms, pushed | 39.8 ms | 0.50 ms | 0.51× |
 | C4 `COUNT(*), SUM(Qty), MIN(Amount), MAX(Amount) WHERE Bucket < @b AND Discount IS NOT NULL` | 99.2 ms | 11.5 ms, pushed | 12.0 ms, pushed | 57.7 ms | 1.39 ms | **5.02×** |
 | C5 `COUNT(*) WHERE Status = @s AND Amount >= @lo` (string column) | 67.8 ms | 67.8 ms, row scan | 74.0 ms, row scan | 42.6 ms | 0.91 ms | 0.63× |
-| C6 `COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= @lo` | 2.09 s | 2.25 s, row scan | 2.32 s, row scan | 35.4 ms | 1.63 ms | 0.02× |
+| C6 `COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= @lo` (15 November) | 70.1 ms | 4.62 ms, pushed | 0.49 ms, pushed | 35.0 ms | 1.62 ms | **7.58×** |
 | C7 `GROUP BY Bucket`: `COUNT(*)`, `SUM(Qty)` | 95.9 ms | 95.9 ms, row scan | 104 ms, row scan | 200 ms | 0.73 ms | 2.09× |
 | C8 `ORDER BY Amount DESC, Id LIMIT 10` | 65.3 ms | 65.8 ms, row scan | 82.0 ms, row scan | 40.6 ms | 1.30 ms | 0.62× |
 
 Pushed queries allocate 14–20 KB per call, against 4.6–25 MB per call for the same query as a row scan.
 
-**Which SQL shapes the index answers** (`Select.Columnar.cs`): a single-table `COUNT`, `SUM`, `AVG`, `MIN` or `MAX` without `GROUP BY` and without `DISTINCT`, whose `WHERE` is an AND of comparisons, `IS NULL` or `IS NOT NULL` between an indexed numeric column and a value of a compatible type, and whose aggregated columns are all in the index. Not answered: anything with `GROUP BY` (C7), `ORDER BY` (C8), `OR` (C6), a column outside the index such as a string column (C5), or a statement inside an explicit transaction.
+**Which SQL shapes the index answers** (`Select.Columnar.cs`): a single-table `COUNT`, `SUM`, `AVG`, `MIN` or `MAX` without `GROUP BY` and without `DISTINCT`, whose `WHERE` is built from `AND` and `OR` over comparisons, `IS NULL` or `IS NOT NULL` between an indexed numeric column and a value of a compatible type, and whose aggregated columns are all in the index. An `OR` is answered since commit `9ffb413` (C6; before it, C6 took 2.25 s as a general-path row scan). Not answered: anything with `GROUP BY` (C7), `ORDER BY` (C8), `LIKE`, a column outside the index such as a string column (C5), or a statement inside an explicit transaction.
 
 **Floating-point sums on the LSM engine (C3).** On the LSM engine the in-memory part of the columnar index is the tail of rows not yet flushed, and an index in that state reports itself as not in key order (`ColumnarIndex.InKeyOrder`). A `SUM` or `AVG` of a `FLOAT` or `DOUBLE` column is then left to the row scan, because floating-point addition in a different order can give different bits than the row scan's. This is deliberate: the index only answers when it can return exactly the row scan's result. On the InMemory engine the same query is pushed. Integer sums, counts, minimums and maximums are pushed on both.
 
@@ -262,4 +267,4 @@ The join shapes read the `Authors` table for every query (the runner's "full tab
 - SQLite and DuckDB are driven through ADO.NET, whose cost is part of their times; DataVo's own API cost is part of its time. Neither SQLite nor DuckDB was tuned beyond `ANALYZE`; DataVo had no columnar index except in the columnar section.
 - The vector attributes are independent of the clusters. A filter correlated with distance (for example, a category that matches the query's cluster) changes how many candidates DataVo needs; that was not measured.
 - `COUNT(DISTINCT ...)` is correct now but was not timed.
-- DataVo is a 0.2 release candidate; SQLite and DuckDB are mature engines with general query optimisers. Most of DataVo's losses here trace to two missing capabilities: index-driven joins and grouping, and typed evaluation of `OR` and `LIKE`.
+- DataVo is a 0.2 release candidate; SQLite and DuckDB are mature engines with general query optimisers. Most of DataVo's remaining losses here trace to one missing capability: index-driven joins and grouping, together with a typed path for joins beyond two tables.
