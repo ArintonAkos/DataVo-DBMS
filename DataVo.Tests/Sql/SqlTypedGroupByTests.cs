@@ -102,6 +102,43 @@ public sealed class SqlTypedGroupByTests
         });
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void AggregatesOverNoMatchingRow_AnswerAsSqlDefines(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            // One row: COUNT 0 (an int, as the general path returns it), the other aggregates NULL.
+            QueryResult empty = Run(context, "SELECT COUNT(*), COUNT(CustomerId), SUM(Amount), AVG(Amount), MIN(Status), MAX(Id) FROM Orders WHERE Amount > 100000");
+            Assert.Equal([0, 0, null, null, null, null], Assert.Single(empty.Data).Values.ToArray());
+            Assert.IsType<int>(empty.Data[0].Values.First());
+
+            // ORDER BY and LIMIT see that row; with GROUP BY there is no group and no row.
+            Assert.Single(Run(context, "SELECT COUNT(*) AS n FROM Orders WHERE Amount > 100000 ORDER BY n LIMIT 5").Data);
+            Assert.Empty(Run(context, "SELECT CustomerId, COUNT(*) FROM Orders WHERE Amount > 100000 GROUP BY CustomerId").Data);
+
+            // The same through a columnar index, which answers it without reading rows.
+            Execute(context, "CREATE INDEX cx ON Orders (Amount, Id) USING COLUMNAR");
+            Assert.Equal([0, null], Assert.Single(Run(context, "SELECT COUNT(*), SUM(Id) FROM Orders WHERE Amount > 100000").Data).Values.ToArray());
+        });
+    }
+
+    /// <summary>
+    /// An aggregate whose WHERE matches no row stays on the typed scan: it used to re-run on the general path,
+    /// building a dictionary for every row (about 900 bytes per row).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void AggregatesOverNoMatchingRow_DoNotRescanOnTheGeneralPath(StorageMode mode)
+    {
+        WithSchema(mode, context =>
+        {
+            (QueryResult result, long bytes) = Measure(context, "SELECT COUNT(*), SUM(Amount) FROM Orders WHERE Amount > 100000");
+            Assert.Equal([0, null], Assert.Single(result.Data).Values.ToArray());
+            Assert.True(bytes / Orders.Length < 64, $"{mode}: {bytes / Orders.Length} B per row");
+        });
+    }
+
     /// <summary>
     /// A typed GROUP BY over many groups allocates per group, not per row. Measured as what grouping adds to the
     /// same scan without it: about 260 bytes per row before (a boxed <c>object[]</c> key per row, an object per

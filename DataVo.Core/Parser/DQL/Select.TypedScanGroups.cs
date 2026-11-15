@@ -270,13 +270,13 @@ internal partial class Select
 
     /// <summary>
     /// The result rows of a typed GROUP BY: one per group that passes HAVING, and when ORDER BY has a LIMIT only
-    /// the first LIMIT + OFFSET of them in order. Null with no group, where the general path owns the semantics.
+    /// the first LIMIT + OFFSET of them in order.
     /// </summary>
-    private ListedTable? FinishAggregates(TypedScanState state)
+    private ListedTable FinishAggregates(TypedScanState state)
     {
         if (state.GroupStates!.Count == 0)
         {
-            return null; // aggregates over no rows: the general path owns those semantics
+            return FinishAggregatesOverNoRows(state);
         }
 
         List<int> groups = SelectTypedGroups(state);
@@ -288,6 +288,30 @@ internal partial class Select
 
         _volcanoAggregatePushedDown = true;
         return new ListedTable(rows);
+    }
+
+    /// <summary>
+    /// The result when no row matched, as the general path builds it: with GROUP BY no row; without, one row with
+    /// no table columns whose COUNTs are 0 (an <see cref="int"/>, as the general COUNT returns) and whose other
+    /// aggregates are NULL. HAVING, ORDER BY and LIMIT then run over it as usual.
+    /// </summary>
+    private ListedTable FinishAggregatesOverNoRows(TypedScanState state)
+    {
+        _volcanoAggregatePushedDown = true;
+        if (state.GroupOrdinals!.Length > 0)
+        {
+            return new ListedTable([]);
+        }
+
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (TypedAggregate aggregate in state.Aggregates!)
+        {
+            values[aggregate.Spec.OutputColumn] = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Count ? 0 : null;
+        }
+
+        var row = new JoinedRow();
+        row.Add(GroupBy.HASH_VALUE, new Row(values));
+        return new ListedTable([row]);
     }
 
     /// <summary>

@@ -85,7 +85,7 @@ internal partial class Select
         state.Sequence = matched;
         if (matched == 0)
         {
-            return true; // no group: aggregates over no rows belong to the general path, as after a row scan
+            return true; // no group: answered as aggregates over no rows, as after a row scan
         }
 
         int group = state.GroupKeys!.FindOrAdd([], out _);
