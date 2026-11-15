@@ -162,7 +162,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 }
                 else
                 {
-                    ListedTable result = typedRows ?? TryEvaluateTypedJoinAggregate() ?? EvaluateStatements();
+                    ListedTable result = typedRows ?? TryEvaluateTypedJoin() ?? EvaluateStatements();
 
                     if (_volcanoAggregatePushedDown)
                     {
