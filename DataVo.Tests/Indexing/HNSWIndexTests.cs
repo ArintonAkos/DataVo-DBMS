@@ -51,7 +51,7 @@ public class HNSWIndexTests : IDisposable
     }
 
     [Fact]
-    public void Factory_KeepsBuildThroughputDefaultButAllowsDiversityOverride()
+    public void Factory_DefaultsToDiversityHeuristicButAllowsOptOut()
     {
         var factory = new HNSWIndexFactory();
 
@@ -59,13 +59,13 @@ public class HNSWIndexTests : IDisposable
             "idx",
             "emb",
             []));
-        var diversityIndex = Assert.IsType<HNSWIndex>(factory.CreateIndex(
+        var nearestOnlyIndex = Assert.IsType<HNSWIndex>(factory.CreateIndex(
             "idx",
             "emb",
-            new Dictionary<string, object> { ["enableDiversityHeuristic"] = true }));
+            new Dictionary<string, object> { ["enableDiversityHeuristic"] = false }));
 
-        Assert.False(defaultIndex.EnableDiversityHeuristic);
-        Assert.True(diversityIndex.EnableDiversityHeuristic);
+        Assert.True(defaultIndex.EnableDiversityHeuristic);
+        Assert.False(nearestOnlyIndex.EnableDiversityHeuristic);
     }
 
     [Fact]
