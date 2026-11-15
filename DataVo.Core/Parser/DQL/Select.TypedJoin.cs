@@ -176,10 +176,7 @@ internal partial class Select
         foreach (JoinSide side in sides)
         {
             side.FilterMask = new bool[side.Columns.Count];
-            foreach (TypedPredicate predicate in side.Predicates)
-            {
-                side.FilterMask[predicate.Ordinal] = true;
-            }
+            MarkFilterColumns(side.Predicates, side.FilterMask);
 
             side.FilterMask[side.KeyOrdinal] = true;
             side.NeededMask = new bool[side.Columns.Count];
@@ -381,18 +378,7 @@ internal partial class Select
         }
     }
 
-    private static bool PassesFilters(JoinSide side, CellValue[] cells)
-    {
-        foreach (TypedPredicate predicate in side.Predicates)
-        {
-            if (!Matches(predicate, cells[predicate.Ordinal], side.Columns[predicate.Ordinal]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    private static bool PassesFilters(JoinSide side, CellValue[] cells) => MatchesAll(side.Predicates, cells, side.Columns);
 
     private static bool TryJoinKey(CellValue cell, out long key)
     {

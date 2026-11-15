@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using DataVo.Core.Compat;
 
 namespace DataVo.Core.Parser.Utils;
@@ -230,17 +229,17 @@ internal static class ExpressionValueComparer
         }
     }
 
+    /// <summary>SQL <c>NOT LIKE</c>: unknown (false) when either side is NULL, otherwise the negated match.</summary>
+    public static bool MatchesNotLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false) =>
+        inputValue is not null && patternValue is not null && !MatchesLike(inputValue, patternValue, trimQuotedStrings);
+
     /// <summary>
-    /// Evaluates SQL LIKE pattern matching using '%' and '_' wildcards.
+    /// Evaluates SQL LIKE pattern matching using '%' and '_' wildcards (see <see cref="SqlLikePattern"/>).
     /// </summary>
     /// <param name="inputValue">The input value being tested.</param>
     /// <param name="patternValue">The SQL LIKE pattern.</param>
     /// <param name="trimQuotedStrings">Whether to trim single quotes from string values first.</param>
     /// <returns><see langword="true"/> when the input matches the pattern; otherwise <see langword="false"/>.</returns>
-    /// <summary>SQL <c>NOT LIKE</c>: unknown (false) when either side is NULL, otherwise the negated match.</summary>
-    public static bool MatchesNotLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false) =>
-        inputValue is not null && patternValue is not null && !MatchesLike(inputValue, patternValue, trimQuotedStrings);
-
     public static bool MatchesLike(object? inputValue, object? patternValue, bool trimQuotedStrings = false)
     {
         if (inputValue == null || patternValue == null)
@@ -257,11 +256,7 @@ internal static class ExpressionValueComparer
             pattern = UnquoteSingleQuoted(pattern);
         }
 
-        string regexPattern = "^" + Regex.Escape(pattern)
-            .Replace("%", ".*")
-            .Replace("_", ".") + "$";
-
-        return Regex.IsMatch(input, regexPattern, RegexOptions.Singleline);
+        return SqlLikePattern.IsMatch(input, pattern);
     }
 
     private static string UnquoteSingleQuoted(string value)

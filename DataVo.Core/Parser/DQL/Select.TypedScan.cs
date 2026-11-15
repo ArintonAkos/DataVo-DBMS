@@ -27,10 +27,11 @@ namespace DataVo.Core.Parser.DQL;
 /// </summary>
 internal partial class Select
 {
-    private enum TypedPredicateKind { Numeric, Integer, Text, ExactText, General, IsNull, IsNotNull }
+    private enum TypedPredicateKind { Numeric, Integer, Text, ExactText, General, IsNull, IsNotNull, Like, Or }
 
     private sealed class TypedPredicate(int ordinal, string op, object? literal, TypedPredicateKind kind, double number, long integer = 0)
     {
+        /// <summary>The column tested; -1 for an <see cref="TypedPredicateKind.Or"/>, whose branches name their own.</summary>
         public int Ordinal { get; } = ordinal;
         public string Operator { get; } = op;
         public object? Literal { get; } = literal;
@@ -39,6 +40,18 @@ internal partial class Select
 
         /// <summary>The exact value of an <see cref="TypedPredicateKind.Integer"/> predicate; a double cannot hold every BIGINT.</summary>
         public long Integer { get; } = integer;
+
+        /// <summary>The compiled pattern of a <see cref="TypedPredicateKind.Like"/> predicate (<c>LIKE</c> or <c>NOT LIKE</c>).</summary>
+        public SqlLikePattern? Pattern { get; private init; }
+
+        /// <summary>The branches of an <see cref="TypedPredicateKind.Or"/>: it holds when every predicate of some branch holds.</summary>
+        public TypedPredicate[][]? Branches { get; private init; }
+
+        public static TypedPredicate Like(int ordinal, string op, object literal, string pattern) =>
+            new(ordinal, op, literal, TypedPredicateKind.Like, 0) { Pattern = new SqlLikePattern(pattern) };
+
+        public static TypedPredicate Or(TypedPredicate[][] branches) =>
+            new(-1, Operators.OR, null, TypedPredicateKind.Or, 0) { Branches = branches };
     }
 
     private sealed class TypedAggregate(HashAggregateOperator.AggregateSpec spec, int ordinal)
@@ -216,10 +229,7 @@ internal partial class Select
         }
 
         var filterMask = new bool[columns.Count];
-        foreach (TypedPredicate predicate in predicates)
-        {
-            filterMask[predicate.Ordinal] = true;
-        }
+        MarkFilterColumns(predicates, filterMask);
 
         TypedScanState? state = _model.GetAggregateColumns().Count > 0
             ? BuildAggregateScan(tableName, columns, predicates, filterMask, clusteredOrdinal, clusteredIsGuid)
@@ -266,8 +276,8 @@ internal partial class Select
             [predicates]);
 
     /// <summary>
-    /// Collects an AND of <c>column op literal</c> comparisons, assigning each to the table side
-    /// <paramref name="resolve"/> names. False when any part has another shape.
+    /// Collects an AND of <c>column op literal</c> comparisons, <c>LIKE</c> tests and ORs of those, assigning
+    /// each to the table side <paramref name="resolve"/> names. False when any part has another shape.
     /// </summary>
     private bool TryCollectSidePredicates(
         ExpressionNode node,
@@ -290,6 +300,16 @@ internal partial class Select
         {
             return TryCollectSidePredicates(binary.Left, resolve, columnsBySide, predicatesBySide)
                 && TryCollectSidePredicates(binary.Right, resolve, columnsBySide, predicatesBySide);
+        }
+
+        if (binary.Operator == Operators.OR)
+        {
+            return TryCollectDisjunction(binary, resolve, columnsBySide, predicatesBySide);
+        }
+
+        if (binary.Operator == Operators.LIKE || binary.Operator == Operators.NOT_LIKE)
+        {
+            return TryCollectLike(binary, resolve, columnsBySide, predicatesBySide);
         }
 
         BinaryExpressionNode comparison = ExpressionNodeNormalizer.NormalizeComparisonNode(binary);
@@ -358,6 +378,163 @@ internal partial class Select
         return true;
     }
 
+    /// <summary>
+    /// Collects an OR whose branches all read the same table side as one predicate that holds when some
+    /// branch's conjunction holds. The WHERE has no NOT left (the parser pushes NOT into the comparisons), and
+    /// keeps a row only when it is true, so treating an unknown branch (one that compared a NULL) as false
+    /// gives the same rows as SQL's three-valued OR.
+    /// </summary>
+    private bool TryCollectDisjunction(
+        BinaryExpressionNode node,
+        Func<ExpressionNode?, (int Side, string Column)?> resolve,
+        IReadOnlyList<Column>[] columnsBySide,
+        List<TypedPredicate>[] predicatesBySide)
+    {
+        var branchNodes = new List<ExpressionNode>();
+        FlattenOr(node, branchNodes);
+
+        int side = -1;
+        var branches = new TypedPredicate[branchNodes.Count][];
+        for (int i = 0; i < branchNodes.Count; i++)
+        {
+            var bySide = new List<TypedPredicate>[columnsBySide.Length];
+            for (int s = 0; s < bySide.Length; s++)
+            {
+                bySide[s] = [];
+            }
+
+            if (!TryCollectSidePredicates(branchNodes[i], resolve, columnsBySide, bySide))
+            {
+                return false;
+            }
+
+            int branchSide = -1;
+            for (int s = 0; s < bySide.Length; s++)
+            {
+                if (bySide[s].Count == 0)
+                {
+                    continue;
+                }
+
+                if (branchSide >= 0)
+                {
+                    return false; // one branch reads two tables
+                }
+
+                branchSide = s;
+            }
+
+            // A constant branch, or branches over different tables, take the general path.
+            if (branchSide < 0 || (side >= 0 && side != branchSide))
+            {
+                return false;
+            }
+
+            side = branchSide;
+            branches[i] = [.. bySide[side]];
+        }
+
+        predicatesBySide[side].Add(TypedPredicate.Or(branches));
+        return true;
+
+        static void FlattenOr(ExpressionNode node, List<ExpressionNode> branches)
+        {
+            if (node is BinaryExpressionNode { Operator: Operators.OR } or)
+            {
+                FlattenOr(or.Left!, branches);
+                FlattenOr(or.Right!, branches);
+            }
+            else
+            {
+                branches.Add(node);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects <c>column LIKE literal</c> or <c>column NOT LIKE literal</c>. A text column is matched against
+    /// the compiled pattern; another column type keeps the general comparer's text conversion.
+    /// </summary>
+    private static bool TryCollectLike(
+        BinaryExpressionNode node,
+        Func<ExpressionNode?, (int Side, string Column)?> resolve,
+        IReadOnlyList<Column>[] columnsBySide,
+        List<TypedPredicate>[] predicatesBySide)
+    {
+        // The pattern is the right operand; the comparison normaliser's operand swap does not apply to LIKE.
+        if (resolve(node.Left) is not { } target
+            || node.Right is not LiteralNode literal
+            || literal is NullLiteralNode
+            || literal.Value is null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Column> columns = columnsBySide[target.Side];
+        int ordinal = OrdinalOf(columns, target.Column);
+        if (ordinal < 0)
+        {
+            return false;
+        }
+
+        // The general path unquotes both sides, a bound value included.
+        predicatesBySide[target.Side].Add(IsTextColumn(columns[ordinal]) && literal.Value is string pattern
+            ? TypedPredicate.Like(ordinal, node.Operator, pattern, UnquoteSingleQuoted(pattern))
+            : new TypedPredicate(ordinal, node.Operator, literal.Value, TypedPredicateKind.General, 0));
+        return true;
+    }
+
+    /// <summary>Marks every column <paramref name="predicates"/> read, inside ORs too.</summary>
+    private static void MarkFilterColumns(IEnumerable<TypedPredicate> predicates, bool[] mask)
+    {
+        foreach (TypedPredicate predicate in predicates)
+        {
+            if (predicate.Branches is { } branches)
+            {
+                foreach (TypedPredicate[] branch in branches)
+                {
+                    MarkFilterColumns(branch, mask);
+                }
+            }
+            else
+            {
+                mask[predicate.Ordinal] = true;
+            }
+        }
+    }
+
+    /// <summary>Whether a row's loaded <paramref name="cells"/> meet every predicate.</summary>
+    private static bool MatchesAll(IReadOnlyList<TypedPredicate> predicates, CellValue[] cells, IReadOnlyList<Column> columns)
+    {
+        for (int i = 0; i < predicates.Count; i++)
+        {
+            if (!Matches(predicates[i], cells, columns))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool Matches(TypedPredicate predicate, CellValue[] cells, IReadOnlyList<Column> columns)
+    {
+        if (predicate.Branches is not { } branches)
+        {
+            return Matches(predicate, cells[predicate.Ordinal], columns[predicate.Ordinal]);
+        }
+
+        foreach (TypedPredicate[] branch in branches)
+        {
+            if (MatchesAll(branch, cells, columns))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The column name when <paramref name="node"/> is a reference to the FROM table, else null.</summary>
     private string? ColumnOfTable(ExpressionNode? node, string tableName) => node switch
     {
@@ -375,6 +552,9 @@ internal partial class Select
         || column.Type.Equals("NVARCHAR", StringComparison.OrdinalIgnoreCase);
 
     private static string UnquoteSingleQuoted(string value) =>
+        value.Length >= 2 && value[0] == '\'' && value[^1] == '\'' ? value[1..^1] : value;
+
+    private static ReadOnlySpan<char> UnquoteSingleQuoted(ReadOnlySpan<char> value) =>
         value.Length >= 2 && value[0] == '\'' && value[^1] == '\'' ? value[1..^1] : value;
 
     private static int OrdinalOf(IReadOnlyList<Column> columns, string name)
@@ -658,12 +838,9 @@ internal partial class Select
     {
         CellValue[] cells = state.Cells;
         Load(state, rowId, rowBytes, typedCells, state.FilterMask);
-        foreach (TypedPredicate predicate in state.Predicates)
+        if (!MatchesAll(state.Predicates, cells, state.Columns))
         {
-            if (!Matches(predicate, cells[predicate.Ordinal], state.Columns[predicate.Ordinal]))
-            {
-                return true;
-            }
+            return true;
         }
 
         Load(state, rowId, rowBytes, typedCells, state.RestMask);
@@ -753,6 +930,12 @@ internal partial class Select
             return false;
         }
 
+        if (predicate.Kind == TypedPredicateKind.Like && cell.Type == CellType.String)
+        {
+            bool like = predicate.Pattern!.IsMatch(UnquoteSingleQuoted(cell.AsString().AsSpan()));
+            return predicate.Operator == Operators.LIKE ? like : !like;
+        }
+
         if (predicate.Kind is TypedPredicateKind.Text or TypedPredicateKind.ExactText && cell.Type == CellType.String)
         {
             string stored = predicate.Kind == TypedPredicateKind.Text ? UnquoteSingleQuoted(cell.AsString()!) : cell.AsString()!;
@@ -788,6 +971,8 @@ internal partial class Select
         {
             Operators.EQUALS => ExpressionValueComparer.AreEqual(boxed, predicate.Literal, trimQuotedStrings: true),
             Operators.NOT_EQUALS => ExpressionValueComparer.SqlNotEquals(boxed, predicate.Literal, trimQuotedStrings: true),
+            Operators.LIKE => ExpressionValueComparer.MatchesLike(boxed, predicate.Literal, trimQuotedStrings: true),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(boxed, predicate.Literal, trimQuotedStrings: true),
             _ => Satisfies(predicate.Operator, ExpressionValueComparer.Compare(boxed, predicate.Literal, trimQuotedStrings: true)),
         };
     }
