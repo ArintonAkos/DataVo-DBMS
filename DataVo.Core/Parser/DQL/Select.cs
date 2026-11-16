@@ -595,7 +595,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return EvaluateNearestNeighborJoin(queryVector, indexName, tableName, indexMetadata.IndexKind, totalRows, initialTopK, seedPredicate, materializedWhere);
         }
 
-        List<RowKey> rowIds = SearchVectorWithExpansionIfNeeded(
+        List<RowKey>? rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
             indexName,
             tableName,
@@ -603,6 +603,12 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             totalRows,
             initialTopK,
             seedPredicate);
+        if (rowIds is null)
+        {
+            IncrementHybridRoutingCounter("hybrid.orderby.reject.expansion_exhausted");
+            return null;
+        }
+
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, _queryVectorExpansionPasses);
         if (rowIds.Count == 0)
         {
@@ -653,6 +659,8 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         int expansionFactor = Math.Max(2, Engine.Config.VectorPredicateFastPathExpansionFactor);
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
         int candidates = ClampInt(initialTopK, 1, totalRows);
+        SeedJoinPlan? typedJoin = TryPlanSeedJoin(joinedFilter);
+        VectorCandidateFilter? seedFilter = typedJoin is null ? TryBuildCandidateFilter(seedPredicate, tableName) : null;
 
         try
         {
@@ -661,12 +669,8 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 List<RowKey> rowIds = Indexes.SearchVector(queryVector, candidates, indexName, tableName, _model.Database!, indexKind);
                 LogVectorPredicateFastPathExpansion($"join pass={pass}; requestedTopK={candidates}; returned={rowIds.Count}");
 
-                TableData seedRows = LoadSeedRows(rowIds, tableName);
-                ListedTable joined = EvaluateJoinFromSeed(seedRows, seedPredicate);
-                if (joinedFilter != null)
-                {
-                    joined = new ListedTable([.. joined.Where(row => EvaluatePredicate(joinedFilter, row))]);
-                }
+                ListedTable joined = (typedJoin is null ? null : TryJoinSeeds(typedJoin, rowIds))
+                    ?? JoinSeedsAsDictionaries(rowIds, tableName, seedFilter, seedPredicate, joinedFilter);
 
                 if (joined.Count >= requiredRows || candidates >= totalRows)
                 {
@@ -688,6 +692,24 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         IncrementHybridRoutingCounter("hybrid.orderby.join.reject.expansion_exhausted");
         return null;
+    }
+
+    /// <summary>
+    /// Joins vector-index candidates on the general path: the candidates passing the FROM table's own
+    /// predicates are loaded as dictionaries, joined, and filtered by the whole WHERE clause.
+    /// </summary>
+    private ListedTable JoinSeedsAsDictionaries(
+        List<RowKey> rowIds,
+        string tableName,
+        VectorCandidateFilter? seedFilter,
+        ExpressionNode? seedPredicate,
+        ExpressionNode? joinedFilter)
+    {
+        List<RowKey> seeds = seedFilter is null ? rowIds : TryFilterCandidates(seedFilter, rowIds, tableName) ?? rowIds;
+        ListedTable joined = EvaluateJoinFromSeed(LoadSeedRows(seeds, tableName), seedPredicate);
+        return joinedFilter is null
+            ? joined
+            : new ListedTable([.. joined.Where(row => EvaluatePredicate(joinedFilter, row))]);
     }
 
     /// <summary>
@@ -812,7 +834,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         LogVectorPredicateFastPathDecision("accepted", totalRows, topK, distanceSelectivity);
 
-        List<RowKey> rowIds = SearchVectorWithExpansionIfNeeded(
+        List<RowKey>? rowIds = SearchVectorWithExpansionIfNeeded(
             queryVector,
             indexName,
             tableName,
@@ -820,6 +842,11 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             totalRows,
             topK,
             materializedWhere);
+        if (rowIds is null)
+        {
+            return null;
+        }
+
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, _queryVectorExpansionPasses);
 
         if (rowIds.Count == 0)
@@ -856,7 +883,15 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     }
 
 
-    private List<RowKey> SearchVectorWithExpansionIfNeeded(
+    /// <summary>
+    /// Searches the vector index, widening the request while too few candidates pass
+    /// <paramref name="whereExpression"/>. When that condition can be tested on stored rows, the result holds
+    /// only the candidates that pass it (nearest first), so the caller loads no row it would drop; otherwise it
+    /// holds every candidate of the last search and the caller filters the loaded rows. Returns null when the
+    /// passes are used up with too few passing rows and no exact answer can be given here: the caller then
+    /// leaves the query to the general path.
+    /// </summary>
+    private List<RowKey>? SearchVectorWithExpansionIfNeeded(
         float[] queryVector,
         string indexName,
         string tableName,
@@ -870,24 +905,27 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         int maxPasses = Math.Max(0, Engine.Config.VectorPredicateFastPathMaxExpansionPasses);
         int requiredRows = _model.RowsNeededForLimit;
         bool canEstimatePostFilter = whereExpression != null && !IsAllTrueExpression(whereExpression);
+        VectorCandidateFilter? candidateFilter = canEstimatePostFilter ? TryBuildCandidateFilter(whereExpression, tableName) : null;
         int lastPostFilterEstimate = -1;
 
         List<RowKey> rowIds = [];
         for (int pass = 0; pass <= maxPasses; pass++)
         {
-            rowIds = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database!, indexKind);
-            LogVectorPredicateFastPathExpansion($"pass={pass}; requestedTopK={topK}; returned={rowIds.Count}");
-            if (rowIds.Count == 0)
+            List<RowKey> candidates = Indexes.SearchVector(queryVector, topK, indexName, tableName, _model.Database!, indexKind);
+            LogVectorPredicateFastPathExpansion($"pass={pass}; requestedTopK={topK}; returned={candidates.Count}");
+            if (candidates.Count == 0)
             {
-                return rowIds;
+                return candidates;
             }
 
+            List<RowKey>? survivors = candidateFilter is null ? null : TryFilterCandidates(candidateFilter, candidates, tableName);
+            rowIds = survivors ?? candidates;
             if (requiredRows <= 0 || topK >= totalRows || !canEstimatePostFilter)
             {
                 return rowIds;
             }
 
-            int postFilterEstimate = EstimatePostFilterCandidateMatches(rowIds, tableName, whereExpression!);
+            int postFilterEstimate = survivors?.Count ?? EstimatePostFilterCandidateMatches(candidates, tableName, whereExpression!);
             lastPostFilterEstimate = postFilterEstimate;
             LogVectorPredicateFastPathExpansion($"pass={pass}; postFilterEstimate={postFilterEstimate}; required={requiredRows}");
             if (postFilterEstimate >= requiredRows)
@@ -906,12 +944,13 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             LogVectorPredicateFastPathExpansion($"pass={pass}; expandingTopK={topK}");
         }
 
-        if (requiredRows > 0)
-        {
-            LogVectorPredicateFastPathExpansion($"exhausted; finalCandidates={rowIds.Count}; finalPostFilterEstimate={Math.Max(0, lastPostFilterEstimate)}; required={requiredRows}");
-        }
+        LogVectorPredicateFastPathExpansion($"exhausted; finalCandidates={rowIds.Count}; finalPostFilterEstimate={Math.Max(0, lastPostFilterEstimate)}; required={requiredRows}");
 
-        return rowIds;
+        // Too few passing rows among the candidates the passes allow: the nearest passing rows may lie beyond
+        // them. Filter the whole table first and rank what passes; without that, the general path answers.
+        return candidateFilter is null
+            ? null
+            : TryFilterThenRank(candidateFilter, queryVector, indexName, tableName, indexKind, requiredRows);
     }
 
     private ExpressionNode? ResolveSeedPredicateForExpansion(ExpressionNode? whereExpression)

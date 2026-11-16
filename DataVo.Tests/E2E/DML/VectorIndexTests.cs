@@ -508,8 +508,12 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal([131, 132], ids);
     }
 
+    /// <summary>
+    /// With no expansion pass allowed, the first candidates (all 'inactive') hold no passing row. The query
+    /// used to return nothing although two rows match; it now falls back to an exact answer.
+    /// </summary>
     [Fact]
-    public void Select_VectorDistanceWherePredicate_WithLimit_NoExpansionPasses_CanUnderfillAfterPostFilter()
+    public void Select_VectorDistanceWherePredicate_WithLimit_NoExpansionPasses_StillReturnsEveryMatchingRow()
     {
         Engine.Config.VectorPredicateFastPathMinRows = 1;
         Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 0;
@@ -535,7 +539,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
             LIMIT 2");
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        Assert.Empty(result.Data);
+        Assert.Equal([131, 132], result.Data.Select(row => Convert.ToInt32(row["Id"])));
     }
 
     [Fact]
@@ -574,8 +578,12 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         Assert.Equal([131, 132], ids);
     }
 
+    /// <summary>
+    /// With no expansion pass allowed, the nearest candidates (all 'inactive') hold no passing row. The query
+    /// used to return nothing although two rows match; it now finds the passing rows first and ranks those.
+    /// </summary>
     [Fact]
-    public void Select_VectorOrderByWithWhereLimit_NoExpansionCanUnderfill()
+    public void Select_VectorOrderByWithWhereLimit_NoExpansion_StillReturnsTheNearestMatchingRows()
     {
         Engine.Config.VectorPredicateFastPathMaxExpansionPasses = 0;
         Engine.Config.VectorPredicateFastPathExpansionFactor = 2;
@@ -600,7 +608,7 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
             LIMIT 2");
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        Assert.Empty(result.Data);
+        Assert.Equal([131, 132], result.Data.Select(row => Convert.ToInt32(row["Id"])).Order());
     }
 
     [Fact]

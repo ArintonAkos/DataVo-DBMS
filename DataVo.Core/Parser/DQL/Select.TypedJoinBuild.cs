@@ -27,6 +27,7 @@ internal partial class Select
         private readonly CellValue[]? _keyRow;
         private readonly int _keyOrdinal;
         private readonly bool _bigIntKey;
+        private HashSet<long>? _absent;
 
         public JoinHashTable(bool keyOnly, int columns, int keyOrdinal, bool bigIntKey, int capacity)
         {
@@ -42,6 +43,12 @@ internal partial class Select
                 _rows = new Dictionary<long, (CellValue[] First, List<CellValue[]>? More)>(capacity);
             }
         }
+
+        /// <summary>
+        /// When set, the table is filled on demand: a key not seen yet is read through this (null for no row)
+        /// and remembered, so only the rows the join asks for are ever read.
+        /// </summary>
+        public Func<long, CellValue[]?>? Loader { get; set; }
 
         /// <summary>The number of distinct keys.</summary>
         public int KeyCount => _counts?.Count ?? _rows!.Count;
@@ -91,9 +98,34 @@ internal partial class Select
                 matches = new JoinMatches(bucket.First, bucket.More, 1 + (bucket.More?.Count ?? 0));
                 return true;
             }
+            else if (Loader is not null && TryLoad(key, out CellValue[]? loaded))
+            {
+                matches = new JoinMatches(loaded, null, 1);
+                return true;
+            }
 
             matches = default;
             return false;
+        }
+
+        /// <summary>Reads the row of a key asked for the first time; a key without a row is not read again.</summary>
+        private bool TryLoad(long key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CellValue[]? row)
+        {
+            row = null;
+            if (_absent is not null && _absent.Contains(key))
+            {
+                return false;
+            }
+
+            row = Loader!(key);
+            if (row is null)
+            {
+                (_absent ??= []).Add(key);
+                return false;
+            }
+
+            _rows![key] = (row, null);
+            return true;
         }
     }
 

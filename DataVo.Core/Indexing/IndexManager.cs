@@ -1370,6 +1370,22 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
+    /// Ranks the given rows by distance to <paramref name="queryVector"/> using the vectors the index stores, and
+    /// returns the nearest <paramref name="topK"/>, nearest first. Returns null when the index cannot rank rows.
+    /// </summary>
+    internal List<RowKey>? TryRankRowsByVectorDistance(ReadOnlySpan<float> queryVector, IReadOnlyList<RowKey> rowIds, int topK, string indexName, string tableName, string databaseName, string indexType)
+    {
+        if (GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType) is not IRowRankingVectorIndex ranking)
+        {
+            return null;
+        }
+
+        var nearest = new List<RowKey>(Math.Min(Math.Max(topK, 0), rowIds.Count));
+        ranking.RankNearest(queryVector, rowIds, topK, nearest);
+        return nearest;
+    }
+
+    /// <summary>
     /// Inserts a scalar key into a BTree index.
     /// </summary>
     public void InsertIntoIndex(string value, RowKey rowId, string indexName, string tableName, string databaseName)
