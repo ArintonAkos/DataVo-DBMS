@@ -44,6 +44,15 @@ internal partial class Select
         /// <summary>The compiled pattern of a <see cref="TypedPredicateKind.Like"/> predicate (<c>LIKE</c> or <c>NOT LIKE</c>).</summary>
         public SqlLikePattern? Pattern { get; private init; }
 
+        /// <summary>
+        /// The UTF-8 bytes of the literal of a <see cref="TypedPredicateKind.Text"/> or
+        /// <see cref="TypedPredicateKind.ExactText"/> predicate, to compare stored text without decoding it;
+        /// null for other kinds and for a literal that is not valid Unicode.
+        /// </summary>
+        public byte[]? LiteralUtf8 { get; } = kind is TypedPredicateKind.Text or TypedPredicateKind.ExactText && literal is string text
+            ? Utf8Text.TryEncode(text)
+            : null;
+
         /// <summary>The branches of an <see cref="TypedPredicateKind.Or"/>: it holds when every predicate of some branch holds.</summary>
         public TypedPredicate[][]? Branches { get; private init; }
 
@@ -68,6 +77,9 @@ internal partial class Select
         public required List<TypedPredicate> Predicates { get; init; }
         public required bool[] FilterMask { get; init; }
         public required bool[] RestMask { get; init; }
+
+        /// <summary>The text filter columns compared as stored bytes when rows arrive serialized; null when there is none.</summary>
+        public RawTextColumns? RawText { get; init; }
 
         /// <summary>Columns the rest of the query reads from a matched row; the others are never decoded or copied.</summary>
         public bool[]? OutputMask { get; init; }
@@ -686,12 +698,15 @@ internal partial class Select
             restMask[i] = outputMask[i] && !filterMask[i];
         }
 
+        RawTextColumns? rawText = TryPlanRawText(columns, predicates, filterMask);
+        DecodeRawTextAfterMatch(rawText, outputMask, restMask);
         return new TypedScanState
         {
             Columns = columns,
             Predicates = predicates,
             FilterMask = filterMask,
             RestMask = restMask,
+            RawText = rawText,
             Cells = new CellValue[columns.Count],
             ClusteredOrdinal = clusteredOrdinal,
             ClusteredIsGuid = clusteredIsGuid,
@@ -782,7 +797,7 @@ internal partial class Select
         }
 
         var aggregates = new List<TypedAggregate>(specs.Count);
-        var needed = (bool[])filterMask.Clone();
+        var needed = new bool[columns.Count];
         for (int i = 0; i < specs.Count; i++)
         {
             var node = (AggregateExpressionNode)aggregateColumns[i].Expression!;
@@ -816,12 +831,18 @@ internal partial class Select
 
         _volcanoAggregateGroupKeyColumns = [.. groupByColumns];
         _volcanoAggregateOutputColumns = [.. specs.Select(spec => spec.OutputColumn)];
+
+        // needed: the columns the aggregates and group keys read; those the filter already loaded are not loaded twice.
+        bool[] restMask = needed.Select((need, i) => need && !filterMask[i]).ToArray();
+        RawTextColumns? rawText = TryPlanRawText(columns, predicates, filterMask);
+        DecodeRawTextAfterMatch(rawText, needed, restMask);
         return new TypedScanState
         {
             Columns = columns,
             Predicates = predicates,
             FilterMask = filterMask,
-            RestMask = needed.Select((need, i) => need && !filterMask[i]).ToArray(),
+            RestMask = restMask,
+            RawText = rawText,
             Cells = new CellValue[columns.Count],
             ClusteredOrdinal = clusteredOrdinal,
             ClusteredIsGuid = clusteredIsGuid,
@@ -837,10 +858,22 @@ internal partial class Select
     private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         CellValue[] cells = state.Cells;
-        Load(state, rowId, rowBytes, typedCells, state.FilterMask);
-        if (!MatchesAll(state.Predicates, cells, state.Columns))
+        if (state.RawText is { } rawText && typedCells.IsEmpty)
         {
-            return true;
+            // Serialized rows: text conditions are tested on the stored bytes, without a string per row.
+            LoadFilterColumnsRaw(state, rawText, rowId, rowBytes);
+            if (!MatchesAllRaw(state, rawText, state.Predicates, rowBytes))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            Load(state, rowId, rowBytes, typedCells, state.FilterMask);
+            if (!MatchesAll(state.Predicates, cells, state.Columns))
+            {
+                return true;
+            }
         }
 
         Load(state, rowId, rowBytes, typedCells, state.RestMask);
@@ -901,10 +934,16 @@ internal partial class Select
             RowSerializer.DecodeCellsByOrdinal(rowBytes, state.Columns, mask, cells);
         }
 
+        RestoreClusteredKey(state, rowId, mask);
+    }
+
+    /// <summary>Clustered rows store the key cell as NULL (the row key holds it): puts the key back when <paramref name="mask"/> reads it.</summary>
+    private static void RestoreClusteredKey(TypedScanState state, RowKey rowId, bool[] mask)
+    {
+        CellValue[] cells = state.Cells;
         int key = state.ClusteredOrdinal;
         if (key >= 0 && mask[key] && cells[key].IsNull)
         {
-            // Clustered rows store the key cell as NULL: the row key holds it.
             cells[key] = state.ClusteredIsGuid ? CellValue.From(rowId.AsGuid()) : KeyCell(state.Columns[key], rowId);
         }
     }
