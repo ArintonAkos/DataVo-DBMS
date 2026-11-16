@@ -25,7 +25,7 @@ public class HNSWPagedBackingTests
         const int vectors = 200;
         var rng = new Random(20260623);
 
-        var index = new HNSWIndex { Metric = "cosine", M = 16, EfConstruction = 100, EfSearch = 64 };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine", M = 16, EfConstruction = 100, EfSearch = 64 };
         var data = new Dictionary<long, float[]>(vectors);
 
         for (int id = 1; id <= vectors; id++)
@@ -57,6 +57,7 @@ public class HNSWPagedBackingTests
 
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 16,
             EfConstruction = 96,
@@ -94,7 +95,7 @@ public class HNSWPagedBackingTests
         const int vectors = 120; // ~15 vector pages at dim=1536.
         var rng = new Random(20260625);
 
-        var index = new HNSWIndex { Metric = "cosine", M = 12, EfConstruction = 80, EfSearch = 64 };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine", M = 12, EfConstruction = 80, EfSearch = 64 };
         var data = new Dictionary<long, float[]>(vectors);
         for (int id = 1; id <= vectors; id++)
         {
@@ -143,7 +144,7 @@ public class HNSWPagedBackingTests
             data[i] = RandomUnitVector(rng, ProductionDimension);
         }
 
-        var index = new HNSWIndex { Metric = "cosine", M = 16, EfConstruction = 100, EfSearch = 64 };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine", M = 16, EfConstruction = 100, EfSearch = 64 };
 
         // Warm up one insert so one-time level-layout / workspace allocations are excluded.
         index.Insert(1, data[0]);
