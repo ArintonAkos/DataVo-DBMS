@@ -1139,10 +1139,12 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName,
         string metric = "cosine",
-        string indexType = "HNSW")
+        string indexType = "HNSW",
+        Models.Catalog.HnswIndexOptions? hnswOptions = null)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric);
+        hnswOptions?.CopyTo(metadata.Parameters);
 
         if (!SupportsVectorIndexType(metadata.IndexType))
         {
@@ -3019,7 +3021,7 @@ public partial class IndexManager : IDisposable
                 vectors.Add((row.Key, cell.AsVector()));
             }
 
-            CreateVectorIndex(vectors, indexName, tableName, databaseName, metric: catalogIndex.EffectiveMetric, indexType: catalogIndex.IndexKind);
+            CreateVectorIndex(vectors, indexName, tableName, databaseName, metric: catalogIndex.EffectiveMetric, indexType: catalogIndex.IndexKind, hnswOptions: catalogIndex.Hnsw);
 
             var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             if (_cache.TryGetValue(cacheKey, out IIndexBase? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)

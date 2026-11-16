@@ -527,7 +527,8 @@ public sealed partial class DataVoEngine : IDisposable
             tableName,
             databaseName,
             metric: index.EffectiveMetric,
-            indexType: index.IndexKind);
+            indexType: index.IndexKind,
+            hnswOptions: index.Hnsw);
     }
 
     private DataVoSnapshot CaptureSnapshotNoLock(Guid session)

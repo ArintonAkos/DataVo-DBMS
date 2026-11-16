@@ -35,6 +35,13 @@ public class IndexFile
     [XmlAttribute("Metric")]
     public string? Metric { get; set; }
 
+    /// <summary>
+    /// Gets or sets the graph parameters an HNSW index was created with, or <see langword="null"/> when it
+    /// uses the defaults. Ignored by other index kinds.
+    /// </summary>
+    [XmlIgnore]
+    public HnswIndexOptions? Hnsw { get; set; }
+
     /// <summary>Gets the metric a vector index uses, with the default applied.</summary>
     [XmlIgnore]
     public string EffectiveMetric => Metric ?? CosineMetric;

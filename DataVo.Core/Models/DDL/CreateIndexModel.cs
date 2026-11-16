@@ -40,6 +40,12 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
     public string? Metric { get; set; }
 
     /// <summary>
+    /// Gets or sets the graph parameters given for an HNSW index (<c>m</c>, <c>ef_construction</c>,
+    /// <c>ef_search</c>, <c>enable_diversity_heuristic</c>), or <see langword="null"/> when none was given.
+    /// </summary>
+    public HnswIndexOptions? Hnsw { get; set; }
+
+    /// <summary>
     /// Builds a model from CREATE INDEX AST.
     /// </summary>
     /// <param name="ast">The parsed CREATE INDEX statement.</param>
@@ -54,13 +60,21 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
 
         foreach ((string name, string value) in ast.Options)
         {
-            if (!name.Equals("metric", StringComparison.OrdinalIgnoreCase))
+            if (name.Equals("metric", StringComparison.OrdinalIgnoreCase))
             {
-                throw new Exceptions.ParserException($"Unknown index option '{name}'. The supported option is metric.");
+                model.Metric = IndexFile.NormalizeMetric(value)
+                    ?? throw new Exceptions.ParserException($"Unknown vector metric '{value}'. Use cosine, euclidean or l2.");
+                continue;
             }
 
-            model.Metric = IndexFile.NormalizeMetric(value)
-                ?? throw new Exceptions.ParserException($"Unknown vector metric '{value}'. Use cosine, euclidean or l2.");
+            var hnsw = model.Hnsw ?? new HnswIndexOptions();
+            if (!hnsw.TrySet(name, value, out string? error))
+            {
+                throw new Exceptions.ParserException(error
+                    ?? $"Unknown index option '{name}'. The supported options are metric and, for HNSW, {HnswIndexOptions.OptionNames}.");
+            }
+
+            model.Hnsw = hnsw;
         }
 
         return model;
@@ -77,5 +91,6 @@ public class CreateIndexModel(string indexName, string tableName, List<string> a
             AttributeNames = Attributes,
             IndexKind = IndexKind,
             Metric = Metric,
+            Hnsw = Hnsw?.Clone(),
         };
 }

@@ -438,6 +438,7 @@ internal sealed class CatalogStore
                     AttributeNames = [.. index.AttributeNames],
                     IndexKind = index.IndexKind,
                     Metric = index.Metric,
+                    Hnsw = index.Hnsw?.Clone(),
                 });
             }
 
