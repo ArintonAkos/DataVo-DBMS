@@ -401,7 +401,13 @@ internal static class SqlParameterBinder
             return new NullLiteralNode();
         }
 
-        return new BoundValueLiteralNode(found.ToBoxedValue());
+        var bound = new BoundValueLiteralNode(found.ToBoxedValue());
+        if (found.Vector is { } vector)
+        {
+            bound.SetVector(vector); // bound from a float[]: no need to parse the text back
+        }
+
+        return bound;
     }
 
     /// <summary>

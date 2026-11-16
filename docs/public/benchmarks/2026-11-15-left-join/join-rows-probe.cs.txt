@@ -1,0 +1,37 @@
+using System.Diagnostics;
+using DataVo.Core.StorageEngine.Config;
+using Research.Benchmark.Runners.SqlMatrix;
+
+// Times ad-hoc SQL over the sql-matrix data on DataVo LSM: median of N calls, rows and bytes per call.
+public static class AdHocQueryProbe
+{
+    public static void Run(int orders, int reps, string[] sqls)
+    {
+        var data = new SqlMatrixData(orders, Math.Max(100, orders / 10), 1_000);
+        string dir = Path.Combine(Path.GetTempPath(), "adhoc" + Guid.NewGuid().ToString("N"));
+        using var engine = new DataVoSqlMatrixEngine(StorageMode.Lsm);
+        engine.Create(dir);
+        engine.Load(data);
+        engine.Reopen();
+        foreach (string sql in sqls)
+        {
+            var query = new SqlMatrixQuery("Q", "adhoc", sql, sql, false, SqlMatrixCost.Scan, [[]], static (_, _) => []);
+            int rows = engine.Query(query, []).Count;
+            var times = new List<double>();
+            long bytes = 0;
+            for (int i = 0; i < reps; i++)
+            {
+                long b0 = GC.GetAllocatedBytesForCurrentThread();
+                long t0 = Stopwatch.GetTimestamp();
+                engine.Query(query, []);
+                times.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                bytes += GC.GetAllocatedBytesForCurrentThread() - b0;
+            }
+
+            times.Sort();
+            Console.WriteLine($"{times[times.Count / 2],9:F2} ms  {bytes / reps / 1048576.0,8:F1} MB  {rows,8} rows  {sql}");
+        }
+
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}

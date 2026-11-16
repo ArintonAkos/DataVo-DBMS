@@ -17,12 +17,13 @@ namespace DataVo.Core.Parser.DQL;
 /// <summary>
 /// The typed join path: stored tables joined by INNER and LEFT equalities on integer columns, filtered by
 /// per-table <c>column op literal</c> conditions, and either aggregated (with or without GROUP BY) or returned as
-/// the top rows of an <c>ORDER BY ... LIMIT</c>.
+/// rows: the top rows of an <c>ORDER BY ... LIMIT</c>, or every joined row (up to a LIMIT without ORDER BY).
 /// </summary>
 /// <remarks>
 /// <para>
 /// One table is streamed (the probe): the largest one when every join is INNER, the FROM table when a LEFT JOIN
-/// must preserve it. Every other table is hashed by its join key, and each probe row is extended table by table
+/// must preserve it. With INNER joins only, a small hashed table may instead select the probe rows through an
+/// index on the probe's join column (see <c>Select.TypedJoinIndex.cs</c>). Every other table is hashed by its join key, and each probe row is extended table by table
 /// along the join steps. An INNER step drops a row with no match; a LEFT step pads it with NULLs.
 /// </para>
 /// <para>
@@ -30,7 +31,8 @@ namespace DataVo.Core.Parser.DQL;
 /// which gives the same rows. A condition on a LEFT-joined table is tested after its step, on the matched row or
 /// on the NULLs, as SQL defines it. Only the cells the conditions, keys, groups, aggregates and sort keys read are
 /// decoded from a probe row; whole rows are built as dictionaries only for a group's first row or a row that is
-/// returned, in the general path's shape.
+/// returned, in the general path's shape. A hashed table keeps only the columns read after the join (see
+/// <c>Select.TypedJoinBuild.cs</c>).
 /// </para>
 /// </remarks>
 internal partial class Select
@@ -56,6 +58,12 @@ internal partial class Select
         /// <summary>Columns of a probe row read once it is part of a joined row: groups, aggregates, sort keys.</summary>
         public bool[] NeededMask { get; set; } = [];
 
+        /// <summary>Columns of a hashed table kept for joined rows; null for the probe, whose rows are kept whole.</summary>
+        public bool[]? KeepMask { get; set; }
+
+        /// <summary>Whether a hashed table keeps nothing but its join key, so only its key counts are hashed.</summary>
+        public bool KeyOnly { get; set; }
+
         private CellValue[]? _nullCells;
     }
 
@@ -67,7 +75,9 @@ internal partial class Select
         public int SourceSide { get; } = sourceSide;
         public int SourceOrdinal { get; } = sourceOrdinal;
         public bool Outer { get; } = outer;
-        public Dictionary<long, List<CellValue[]>> Hash { get; } = [];
+
+        /// <summary>The added table's rows by key, filled before the probe is streamed.</summary>
+        public JoinHashTable Table { get; set; } = null!;
     }
 
     private enum JoinAggregateKind { CountRows, CountValues, Sum, Avg, Min, Max }
@@ -103,27 +113,24 @@ internal partial class Select
         // Aggregates.
         public List<(int Side, int Ordinal)>? GroupColumns { get; init; }
         public List<JoinAggregate>? Aggregates { get; init; }
-        public Dictionary<GroupKey, JoinGroup> Groups { get; } = [];
+        public GroupLookup GroupKeys { get; } = new();
+
+        /// <summary>The groups by group number (the order they first appeared in).</summary>
         public List<JoinGroup> GroupOrder { get; } = [];
 
-        // Top rows of ORDER BY ... LIMIT.
+        // Returned rows: the top rows of ORDER BY ... LIMIT, or (Unordered) the rows in the order they are joined.
         public List<(int Side, int Ordinal)>? OrderKeys { get; init; }
         public bool[]? Ascending { get; init; }
         public int TopLimit { get; init; }
+        public bool Unordered { get; init; }
         public List<(object?[] Keys, long Sequence, CellValue[][] Cells)> Top { get; } = [];
         public long Sequence;
+
+        /// <summary>Set once an unordered result has its LIMIT of rows: the scan stops.</summary>
+        public bool Done;
     }
 
-    private sealed class JoinBuildState(JoinSide side, JoinStep step, bool filter)
-    {
-        public JoinSide Side { get; } = side;
-        public JoinStep Step { get; } = step;
-        public bool Filter { get; } = filter;
-        public CellValue[] Cells { get; } = new CellValue[side.Columns.Count];
-        public bool[] AllColumns { get; } = Enumerable.Repeat(true, side.Columns.Count).ToArray();
-    }
-
-    /// <summary>Returns the joined rows (aggregated, or the top rows), or null when the query needs the general path.</summary>
+    /// <summary>Returns the joined rows (aggregated, the top rows, or every row up to a LIMIT), or null when the query needs the general path.</summary>
     private ListedTable? TryEvaluateTypedJoin()
     {
         if (_activeSnapshot is not null
@@ -144,16 +151,17 @@ internal partial class Select
         if (!aggregated
             && (_model.GroupByStatement.Model.Columns.Count > 0
                 || _model.GetHavingExpression() is not null
-                || _model.GetOrderByExpression() is not { Columns.Count: > 0 }
-                || !_model.LimitTake.HasValue
-                || _model.RowsNeededForLimit <= 0))
+                || (_model.LimitTake.HasValue && _model.RowsNeededForLimit <= 0)))
         {
-            return null; // rows without a bounded top-N are built by the general path
+            return null;
         }
 
+        // Rows without a bounded top-N are returned in the order they are joined, streaming the FROM table.
+        bool topRows = !aggregated && _model.GetOrderByExpression() is { Columns.Count: > 0 } && _model.LimitTake.HasValue;
+        bool unordered = !aggregated && !topRows;
         DataVoEngine engine = DataVoEngine.Current();
         if (!TryBuildJoinSides(engine, out JoinSide[] sides, out int fromIndex)
-            || !TryPlanJoinSteps(engine, sides, fromIndex, out int probeIndex, out JoinStep[] steps))
+            || !TryPlanJoinSteps(engine, sides, fromIndex, streamFrom: unordered, out int probeIndex, out JoinStep[] steps))
         {
             return null;
         }
@@ -196,7 +204,7 @@ internal partial class Select
                 }
             }
         }
-        else
+        else if (topRows)
         {
             if (!TryResolveJoinOrderKeys(sides, out orderKeys, out ascending))
             {
@@ -209,16 +217,15 @@ internal partial class Select
             }
         }
 
+        IEnumerable<(int Side, int Ordinal)> used = (groupColumns ?? [])
+            .Concat(aggregates?.Where(a => a.Side >= 0).Select(a => (a.Side, a.Ordinal)) ?? [])
+            .Concat(orderKeys ?? []);
+        MarkHashedColumns(sides, probeIndex, steps, used);
+
         string databaseName = _model.Database;
-        foreach (JoinStep step in steps)
+        if (!TryBuildJoinTables(engine, sides, steps, databaseName))
         {
-            // An INNER-joined table may be filtered while it is hashed; a LEFT-joined one is tested after its step.
-            JoinSide side = sides[step.Side];
-            var buildState = new JoinBuildState(side, step, filter: !step.Outer);
-            if (!engine.StorageContext.ScanTableRows(side.Detail.TableName, databaseName, null, null, ref buildState, VisitJoinBuildRow))
-            {
-                return null;
-            }
+            return null;
         }
 
         var state = new JoinRunState
@@ -231,10 +238,22 @@ internal partial class Select
             Aggregates = aggregates,
             OrderKeys = orderKeys,
             Ascending = ascending,
-            TopLimit = aggregated ? 0 : _model.RowsNeededForLimit,
+            TopLimit = aggregated ? 0 : _model.LimitTake.HasValue ? _model.RowsNeededForLimit : int.MaxValue,
+            Unordered = unordered,
         };
         state.Current[probeIndex] = new CellValue[probe.Columns.Count];
-        if (!engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow))
+        bool streamed;
+        if (TryIndexDrivenProbeRows(engine, sides, steps, probeIndex, databaseName) is { } indexedRows)
+        {
+            streamed = engine.StorageContext.VisitRowsByKey(probe.Detail.TableName, databaseName, indexedRows, ref state, VisitJoinProbeRow);
+            ReleaseRowKeyList(indexedRows);
+        }
+        else
+        {
+            streamed = engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow);
+        }
+
+        if (!streamed)
         {
             return null;
         }
@@ -299,14 +318,15 @@ internal partial class Select
     /// Chooses the probe and orders the steps so each adds one table keyed by a column of a table already joined.
     /// With a LEFT JOIN the FROM table is the probe and the steps follow the written order, which SQL's
     /// left-to-right evaluation requires; with INNER joins only, the largest table is the probe and any order
-    /// that connects the tables gives the same rows.
+    /// that connects the tables gives the same rows. <paramref name="streamFrom"/> keeps the FROM table as the
+    /// probe, so rows returned without an ORDER BY come in the FROM table's order.
     /// </summary>
-    private bool TryPlanJoinSteps(DataVoEngine engine, JoinSide[] sides, int fromIndex, out int probeIndex, out JoinStep[] steps)
+    private bool TryPlanJoinSteps(DataVoEngine engine, JoinSide[] sides, int fromIndex, bool streamFrom, out int probeIndex, out JoinStep[] steps)
     {
         List<JoinModel.JoinCondition> conditions = _model.JoinStatement.Model.JoinConditions;
         bool anyOuter = conditions.Any(condition => condition.JoinType.Equals(JoinTypes.LEFT, StringComparison.OrdinalIgnoreCase));
         probeIndex = fromIndex;
-        if (!anyOuter)
+        if (!anyOuter && !streamFrom)
         {
             long largest = EstimateRows(engine, sides[fromIndex], _model.Database!);
             for (int i = 0; i < sides.Length; i++)
@@ -475,14 +495,19 @@ internal partial class Select
         _ => group.Extremes[i],
     };
 
-    private ListedTable? FinishJoinAggregates(JoinRunState state)
+    /// <summary>
+    /// One row per group: the group's first joined row with the aggregates added. With no joined row, a query
+    /// without GROUP BY still returns one row, as the general path does: COUNT is 0, the others NULL, and no
+    /// table columns.
+    /// </summary>
+    private ListedTable FinishJoinAggregates(JoinRunState state)
     {
-        if (state.GroupOrder.Count == 0)
+        List<JoinAggregate> aggregates = state.Aggregates!;
+        if (state.GroupOrder.Count == 0 && state.GroupColumns!.Count == 0)
         {
-            return null; // aggregates over no rows: the general path owns those semantics
+            state.GroupOrder.Add(new JoinGroup(new JoinedRow(), aggregates.Count));
         }
 
-        List<JoinAggregate> aggregates = state.Aggregates!;
         var rows = new List<JoinedRow>(state.GroupOrder.Count);
         foreach (JoinGroup group in state.GroupOrder)
         {
@@ -500,9 +525,17 @@ internal partial class Select
         return new ListedTable(rows);
     }
 
-    /// <summary>The top rows in order, as whole joined rows; ORDER BY and LIMIT then run over them as usual.</summary>
-    private static ListedTable FinishJoinTop(JoinRunState state) =>
-        new([.. state.Top.Select(entry => BuildJoinedRow(state.Sides, entry.Cells))]);
+    /// <summary>The returned rows, as joined rows of the kept columns; ORDER BY and LIMIT then run over them as usual.</summary>
+    private static ListedTable FinishJoinTop(JoinRunState state)
+    {
+        var rows = new List<JoinedRow>(state.Top.Count);
+        foreach ((object?[] _, long _, CellValue[][] cells) in state.Top)
+        {
+            rows.Add(BuildJoinedRow(state.Sides, cells));
+        }
+
+        return new ListedTable(rows);
+    }
 
     private JoinSide? BuildJoinSide(DataVoEngine engine, Column joinColumn)
     {
@@ -640,29 +673,6 @@ internal partial class Select
         }
     }
 
-    private static bool VisitJoinBuildRow(ref JoinBuildState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
-    {
-        JoinSide side = state.Side;
-        CellValue[] cells = state.Cells;
-
-        // Build rows are kept whole: a returned row or a group's first row has every column.
-        LoadJoinCells(side, rowId, rowBytes, typedCells, state.AllColumns, cells);
-        if ((state.Filter && !MatchesAll(side.Predicates, cells, side.Columns))
-            || !TryJoinKey(cells[state.Step.KeyOrdinal], out long key))
-        {
-            return true;
-        }
-
-        if (!state.Step.Hash.TryGetValue(key, out List<CellValue[]>? bucket))
-        {
-            bucket = [];
-            state.Step.Hash[key] = bucket;
-        }
-
-        bucket.Add((CellValue[])cells.Clone());
-        return true;
-    }
-
     private static bool VisitJoinProbeRow(ref JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         JoinSide probe = state.Sides[state.ProbeIndex];
@@ -676,7 +686,7 @@ internal partial class Select
         state.ProbeNeededLoaded = false;
         state.ProbeFullyLoaded = false;
         ExtendJoinedRow(state, 0, rowId, rowBytes, typedCells);
-        return true;
+        return !state.Done;
     }
 
     /// <summary>Adds the table of step <paramref name="stepIndex"/> to the joined row in every way it matches, then the next step.</summary>
@@ -691,10 +701,12 @@ internal partial class Select
         JoinStep step = state.Steps[stepIndex];
         JoinSide side = state.Sides[step.Side];
         if (TryJoinKey(state.Current[step.SourceSide]![step.SourceOrdinal], out long key)
-            && step.Hash.TryGetValue(key, out List<CellValue[]>? matches))
+            && step.Table.TryMatch(key, out JoinMatches matches))
         {
-            foreach (CellValue[] match in matches)
+            for (int i = 0; i < matches.Count; i++)
             {
+                CellValue[] match = matches[i];
+
                 // A matched row that fails a condition on its LEFT-joined table is dropped, not NULL-padded.
                 if (step.Outer && !MatchesAll(side.Predicates, match, side.Columns))
                 {
@@ -726,10 +738,43 @@ internal partial class Select
         {
             AccumulateJoinedRow(state, rowId, rowBytes, typedCells);
         }
+        else if (state.Unordered)
+        {
+            AppendJoinedRow(state, rowId, rowBytes, typedCells);
+        }
         else
         {
             OfferJoinedRow(state, rowId, rowBytes, typedCells);
         }
+    }
+
+    /// <summary>Keeps a joined row of an unordered result, and stops the scan once the LIMIT is reached.</summary>
+    private static void AppendJoinedRow(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
+    {
+        if (state.Done)
+        {
+            return;
+        }
+
+        LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
+        state.Top.Add(([], state.Sequence++, SnapshotJoinedRow(state)));
+        state.Done = state.Top.Count >= state.TopLimit;
+    }
+
+    /// <summary>
+    /// The cells of the joined row being built, safe to keep: the probe's cells and a key-only table's shared
+    /// row are rewritten for the next row, so they are copied; other hashed rows are never changed.
+    /// </summary>
+    private static CellValue[][] SnapshotJoinedRow(JoinRunState state)
+    {
+        var snapshot = new CellValue[state.Sides.Length][];
+        for (int side = 0; side < snapshot.Length; side++)
+        {
+            CellValue[] cells = state.Current[side]!;
+            snapshot[side] = side == state.ProbeIndex || state.Sides[side].KeyOnly ? (CellValue[])cells.Clone() : cells;
+        }
+
+        return snapshot;
     }
 
     /// <summary>Decodes the rest of the probe row once a joined row from it is kept whole.</summary>
@@ -752,12 +797,17 @@ internal partial class Select
         var row = new JoinedRow();
         for (int side = 0; side < sides.Length; side++)
         {
+            // A hashed table has only its kept columns; reading another would be a planning bug, so it fails loudly.
             JoinSide owner = sides[side];
             CellValue[] source = cells[side]!;
+            bool[]? keep = owner.KeepMask;
             var values = new Dictionary<string, object?>(owner.Columns.Count);
             for (int c = 0; c < owner.Columns.Count; c++)
             {
-                values[owner.Columns[c].Name] = StorageContext.ConvertCellForLegacyDictionary(owner.Columns[c], source[c]);
+                if (keep is null || keep[c])
+                {
+                    values[owner.Columns[c].Name] = StorageContext.ConvertCellForLegacyDictionary(owner.Columns[c], source[c]);
+                }
             }
 
             row.Add(owner.Name, new Row(values));
@@ -803,14 +853,7 @@ internal partial class Select
         }
 
         LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
-        var snapshot = new CellValue[state.Sides.Length][];
-        for (int side = 0; side < snapshot.Length; side++)
-        {
-            CellValue[] cells = state.Current[side]!;
-            snapshot[side] = side == state.ProbeIndex ? (CellValue[])cells.Clone() : cells; // hashed rows are not reused
-        }
-
-        top.Insert(low, (keys, sequence, snapshot));
+        top.Insert(low, (keys, sequence, SnapshotJoinedRow(state)));
         if (top.Count > state.TopLimit)
         {
             top.RemoveAt(top.Count - 1);
@@ -831,25 +874,48 @@ internal partial class Select
         return leftSequence.CompareTo(rightSequence);
     }
 
-    private static void AccumulateJoinedRow(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
+    /// <summary>The group of the joined row being built, created (with the row as its representative) at its first row.</summary>
+    private static JoinGroup FindJoinGroup(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         List<(int Side, int Ordinal)> groupColumns = state.GroupColumns!;
-        object?[] keys = groupColumns.Count == 0 ? [] : new object?[groupColumns.Count];
-        for (int i = 0; i < keys.Length; i++)
+        if (groupColumns.Count == 0 && state.GroupOrder.Count == 1)
         {
-            (int side, int ordinal) = groupColumns[i];
-            keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal]);
+            return state.GroupOrder[0]; // no GROUP BY: one group, no key to build
         }
 
-        var groupKey = new GroupKey(keys);
-        List<JoinAggregate> aggregates = state.Aggregates!;
-        if (!state.Groups.TryGetValue(groupKey, out JoinGroup? group))
+        int number;
+        bool added;
+        if (groupColumns.Count == 1)
+        {
+            // One key column: looked up by its value, with nothing allocated per joined row.
+            (int side, int ordinal) = groupColumns[0];
+            number = state.GroupKeys.FindOrAdd(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal], out added);
+        }
+        else
+        {
+            object?[] keys = groupColumns.Count == 0 ? [] : new object?[groupColumns.Count];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                (int side, int ordinal) = groupColumns[i];
+                keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal]);
+            }
+
+            number = state.GroupKeys.FindOrAdd(keys, out added);
+        }
+
+        if (added)
         {
             LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
-            group = new JoinGroup(BuildJoinedRow(state.Sides, state.Current), aggregates.Count);
-            state.Groups[groupKey] = group;
-            state.GroupOrder.Add(group);
+            state.GroupOrder.Add(new JoinGroup(BuildJoinedRow(state.Sides, state.Current), state.Aggregates!.Count));
         }
+
+        return state.GroupOrder[number];
+    }
+
+    private static void AccumulateJoinedRow(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
+    {
+        List<JoinAggregate> aggregates = state.Aggregates!;
+        JoinGroup group = FindJoinGroup(state, rowId, rowBytes, typedCells);
 
         for (int i = 0; i < aggregates.Count; i++)
         {

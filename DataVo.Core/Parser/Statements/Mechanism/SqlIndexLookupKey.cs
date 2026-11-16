@@ -188,6 +188,47 @@ internal static class SqlIndexLookupKey
         return true;
     }
 
+    /// <summary>
+    /// Whether <paramref name="indexName"/> is a single-column B-tree on the integer column
+    /// <paramref name="columnName"/> whose lookups are exact (the InMemory and LSM engines), so the rows it lists
+    /// under a key are exactly the rows with that value.
+    /// </summary>
+    public static bool IsExactIntegerIndex(DataVoEngine engine, string tableName, string databaseName, string columnName, string indexName)
+    {
+        if (engine.Config.StorageMode is not (StorageMode.InMemory or StorageMode.Lsm))
+        {
+            return false;
+        }
+
+        Column? column = null;
+        foreach (Column candidate in engine.Catalog.GetTableColumnsReadOnly(tableName, databaseName))
+        {
+            if (candidate.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                column = candidate;
+                break;
+            }
+        }
+
+        if (column is null
+            || !(column.Type.Equals("INT", StringComparison.OrdinalIgnoreCase) || column.Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        foreach (IndexFile index in engine.Catalog.GetTableIndexesReadOnly(tableName, databaseName))
+        {
+            if (index.IndexFileName.Equals(indexName, StringComparison.OrdinalIgnoreCase))
+            {
+                return index.AttributeNames.Count == 1
+                    && index.AttributeNames[0].Equals(columnName, StringComparison.OrdinalIgnoreCase)
+                    && index.IndexKind.Equals("BTREE", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsSingleColumnBTree(DataVoEngine engine, TableDetail table, string columnName, string indexName)
     {
         if (indexName.Equals($"_PK_{table.TableName}", StringComparison.OrdinalIgnoreCase))

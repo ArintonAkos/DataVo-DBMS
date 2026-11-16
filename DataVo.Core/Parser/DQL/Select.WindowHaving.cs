@@ -299,33 +299,45 @@ internal partial class Select
 
     private object? ResolveNodeValue(ExpressionNode node, JoinedRow row)
     {
-        return ExpressionEvaluator.Evaluate(
-            node,
-            row,
-            (colRef, r) =>
-            {
-                string reference = string.IsNullOrEmpty(colRef.TableOrAlias) ? colRef.Column : $"{colRef.TableOrAlias}.{colRef.Column}";
-                return ResolveColumnValue(r, reference);
-            },
-            (aggNode, r) =>
-            {
-                if (!r.ContainsKey(GroupBy.HASH_VALUE))
-                {
-                    throw new EvaluationException("Aggregate expression used outside grouped/aggregated context.");
-                }
+        // HAVING and ORDER BY evaluate this once per group: the resolvers are made once per statement.
+        _resolveColumnValue ??= (colRef, r) =>
+        {
+            string reference = string.IsNullOrEmpty(colRef.TableOrAlias) ? colRef.Column : $"{colRef.TableOrAlias}.{colRef.Column}";
+            return ResolveColumnValue(r, reference);
+        };
+        _resolveAggregateValue ??= ResolveAggregateValue;
+        return ExpressionEvaluator.Evaluate(node, row, _resolveColumnValue, _resolveAggregateValue);
+    }
 
-                Row aggMap = r[GroupBy.HASH_VALUE];
+    private Func<ColumnRefNode, JoinedRow, object?>? _resolveColumnValue;
+    private Func<AggregateExpressionNode, JoinedRow, object?>? _resolveAggregateValue;
+    private Dictionary<AggregateExpressionNode, string>? _aggregateHeaders;
 
-                string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggNode);
-                if (aggMap.ContainsKey(canonicalKey))
-                {
-                    return aggMap[canonicalKey];
-                }
+    /// <summary>The value of an aggregate in a grouped row, found under its canonical header.</summary>
+    private object? ResolveAggregateValue(AggregateExpressionNode aggNode, JoinedRow r)
+    {
+        if (!r.ContainsKey(GroupBy.HASH_VALUE))
+        {
+            throw new EvaluationException("Aggregate expression used outside grouped/aggregated context.");
+        }
 
-                string resolvedKey = ResolveAggregateKey(aggNode, r);
-                return aggMap[resolvedKey];
-            }
-        );
+        Row aggMap = r[GroupBy.HASH_VALUE];
+
+        // The header depends only on the node, so it is built once per node (AST nodes compare by reference).
+        _aggregateHeaders ??= [];
+        if (!_aggregateHeaders.TryGetValue(aggNode, out string? canonicalKey))
+        {
+            canonicalKey = AggregateExpressionFormatter.BuildHeader(aggNode);
+            _aggregateHeaders[aggNode] = canonicalKey;
+        }
+
+        if (aggMap.ContainsKey(canonicalKey))
+        {
+            return aggMap[canonicalKey];
+        }
+
+        string resolvedKey = ResolveAggregateKey(aggNode, r);
+        return aggMap[resolvedKey];
     }
 
     private string ResolveAggregateKey(AggregateExpressionNode aggNode, JoinedRow row)

@@ -657,6 +657,15 @@ public class StorageContext(DataVoConfig config) : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Whether <see cref="ScanTableRows{TState}"/> can read the table's committed rows here: false inside a
+    /// snapshot or while the LSM backend has writes staged for it. A read by key that must see the same rows as
+    /// a scan checks this first.
+    /// </summary>
+    internal bool CanStreamRows(string tableName, string databaseName) =>
+        MvccExecutionScope.CurrentSnapshot is null
+        && !(LsmEngine is { } lsm && lsm.HasStagedWrites(databaseName, tableName));
+
     /// <summary>Tracks where a paged scan has reached.</summary>
     internal sealed class RowPageCursor
     {

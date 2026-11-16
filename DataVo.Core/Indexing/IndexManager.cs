@@ -2258,6 +2258,52 @@ public partial class IndexManager : IDisposable
         return _lsmStore is null && _integerPrimaryKeyMaps.TryGetValue(GetCacheKey(indexName, tableName, databaseName), out map);
     }
 
+    /// <summary>
+    /// Appends to <paramref name="rowIds"/> the row ids of the rows whose single-column integer primary key is in
+    /// <c>[lower, upperExclusive)</c> (null bounds are open), in key order, from the InMemory primary-key lane.
+    /// False, with nothing appended, on the LSM backend (its clustered keys are ranges already), when the lane is
+    /// not known to hold every key, or when more than <paramref name="maxRows"/> rows are in the range.
+    /// </summary>
+    internal bool TryCollectPrimaryKeyRange(string tableName, string databaseName, long? lower, long? upperExclusive, int maxRows, List<long> rowIds)
+    {
+        string indexName = $"_PK_{tableName}";
+        IndexCacheKey cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        if (_lsmStore is not null
+            || !IsLaneComplete(cacheKey)
+            || !_integerPrimaryKeyMaps.TryGetValue(cacheKey, out ConcurrentInt64Int64Map? map)
+            || !map.TryCollectValuesInKeyRange(lower, upperExclusive, maxRows, rowIds))
+        {
+            return false;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        return true;
+    }
+
+    /// <summary>
+    /// The rows whose single-column integer primary key is in <c>[lower, upperExclusive)</c>, read from the InMemory
+    /// primary-key lane and sorted by row id (the order a scan visits them in); null when the lane cannot answer or
+    /// the range holds more than a quarter of the table's <paramref name="tableRows"/>, which a scan reads faster.
+    /// </summary>
+    internal List<RowKey>? TryPrimaryKeyRangeRows(string tableName, string databaseName, long? lower, long? upperExclusive, long tableRows)
+    {
+        var rowIds = new List<long>();
+        int maxRows = (int)Math.Min(int.MaxValue, Math.Max(16, tableRows / 4));
+        if (!TryCollectPrimaryKeyRange(tableName, databaseName, lower, upperExclusive, maxRows, rowIds))
+        {
+            return null;
+        }
+
+        rowIds.Sort();
+        var rows = new List<RowKey>(rowIds.Count);
+        foreach (long rowId in rowIds)
+        {
+            rows.Add(rowId);
+        }
+
+        return rows;
+    }
+
     public bool TryLookupIntegerPrimaryKey(
         long key,
         string indexName,
@@ -2338,6 +2384,15 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
+        out IReadOnlyList<RowKey> rowIds) =>
+        TryLookupIntegerIndex(key, indexName, tableName, databaseName, recordUse: true, out rowIds);
+
+    private bool TryLookupIntegerIndex(
+        long key,
+        string indexName,
+        string tableName,
+        string databaseName,
+        bool recordUse,
         out IReadOnlyList<RowKey> rowIds)
     {
         if (_lsmStore is { } store)
@@ -2353,7 +2408,11 @@ public partial class IndexManager : IDisposable
             // A partial secondary lane may miss older rows for the same key, so it answers nothing.
             if (IsLaneComplete(cacheKey) && _integerIndexMaps.TryGetValue(cacheKey, out Dictionary<long, List<RowKey>>? map))
             {
-                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                if (recordUse)
+                {
+                    RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+                }
+
                 rowIds = map.TryGetValue(key, out List<RowKey>? rows)
                     ? rows
                     : Array.Empty<RowKey>();
@@ -2594,11 +2653,45 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Performs a point lookup against a single-column integer index without string formatting or parsing.
     /// </summary>
-    public IReadOnlyList<RowKey> FilterUsingIntegerIndex(long integerKey, string indexName, string tableName, string databaseName)
+    public IReadOnlyList<RowKey> FilterUsingIntegerIndex(long integerKey, string indexName, string tableName, string databaseName) =>
+        LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: true);
+
+    /// <summary>
+    /// Appends the rows a single-column integer index lists under <paramref name="integerKey"/> to
+    /// <paramref name="rows"/>, without recording the index as used by the query (for a planner that looks before
+    /// it decides) and without allocating a list per lookup; returns how many were appended.
+    /// </summary>
+    internal int AppendIntegerIndexRows(long integerKey, string indexName, string tableName, string databaseName, List<RowKey> rows)
+    {
+        int before = rows.Count;
+        if (_lsmStore is { } store)
+        {
+            if (!store.IndexLookupInto(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(integerKey), rows))
+            {
+                throw MissingIndex(indexName, tableName);
+            }
+
+            return rows.Count - before;
+        }
+
+        IReadOnlyList<RowKey> found = LookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse: false);
+        for (int i = 0; i < found.Count; i++)
+        {
+            rows.Add(found[i]);
+        }
+
+        return rows.Count - before;
+    }
+
+    private IReadOnlyList<RowKey> LookupIntegerIndex(long integerKey, string indexName, string tableName, string databaseName, bool recordUse)
     {
         if (_lsmStore is { } store)
         {
-            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            if (recordUse)
+            {
+                RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+            }
+
             return store.IndexLookup(databaseName, tableName, indexName, LsmIndexKeyCodec.EncodeInteger(integerKey))
                 ?? throw MissingIndex(indexName, tableName);
         }
@@ -2608,7 +2701,7 @@ public partial class IndexManager : IDisposable
             return [rowId];
         }
 
-        if (TryLookupIntegerIndex(integerKey, indexName, tableName, databaseName, out IReadOnlyList<RowKey> rowIds)
+        if (TryLookupIntegerIndex(integerKey, indexName, tableName, databaseName, recordUse, out IReadOnlyList<RowKey> rowIds)
             && rowIds.Count > 0)
         {
             return rowIds;
@@ -2616,7 +2709,11 @@ public partial class IndexManager : IDisposable
 
         string formatted = ScalarKeyFormatter.FormatBracketed(integerKey, System.Globalization.CultureInfo.InvariantCulture);
         IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-        RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        if (recordUse)
+        {
+            RuntimeQueryDiagnosticsScope.RecordIndexUse(indexName);
+        }
+
         return index.SearchReadOnly(formatted);
     }
 

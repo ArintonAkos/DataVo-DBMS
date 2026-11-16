@@ -1489,7 +1489,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (expression is LiteralNode literal)
         {
-            return VectorParser.TryCoerceToVector(literal.Value, out vector);
+            return literal.TryGetVector(out vector);
         }
 
         if (expression is NullLiteralNode)

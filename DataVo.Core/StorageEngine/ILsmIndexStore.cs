@@ -15,6 +15,12 @@ internal interface ILsmIndexStore
     /// <summary>Row ids under <paramref name="encodedKey"/>, ascending; null when the index does not exist.</summary>
     List<RowKey>? IndexLookup(string databaseName, string tableName, string indexName, byte[] encodedKey);
 
+    /// <summary>
+    /// Appends the row keys indexed under <paramref name="encodedKey"/> (ascending) to <paramref name="rows"/>
+    /// without allocating a list per lookup; false (nothing appended) when the index does not exist.
+    /// </summary>
+    bool IndexLookupInto(string databaseName, string tableName, string indexName, byte[] encodedKey, List<RowKey> rows);
+
     /// <summary>Every live entry (null when the index does not exist); for the rare delete-by-row-id paths.</summary>
     List<(byte[] EncodedKey, RowKey RowId)>? IndexEntries(string databaseName, string tableName, string indexName);
 

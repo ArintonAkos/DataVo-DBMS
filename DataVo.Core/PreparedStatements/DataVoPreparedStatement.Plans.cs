@@ -203,6 +203,7 @@ public sealed partial class DataVoPreparedStatement
         int clusteredOrdinal = clustered?.Ordinal ?? -1;
         bool clusteredIsGuid = clustered is not null
             && string.Equals(columns[clusteredOrdinal].Type, "GUID", StringComparison.OrdinalIgnoreCase);
+        int keyRangeOrdinal = clustered is null ? IntegerPrimaryKeyOrdinal(tableName, databaseName, columns) : -1;
 
         var colTypes = new FastColumnType[columns.Count];
         for (int i = 0; i < columns.Count; i++)
@@ -345,6 +346,7 @@ public sealed partial class DataVoPreparedStatement
                 LastDecodedOrdinal = lastDecodedOrdinal,
                 ClusteredOrdinal = clusteredOrdinal,
                 ClusteredIsGuid = clusteredIsGuid,
+                PrimaryKeyRangeOrdinal = keyRangeOrdinal,
                 Predicates = [.. predicateSlots],
                 LimitSkip = limitSkip,
                 LimitTake = limitTake,
@@ -1115,7 +1117,13 @@ public sealed partial class DataVoPreparedStatement
             HasPredicates = plan.Predicates.Length > 0,
         };
 
-        if (!_engine.StorageContext.ScanTableRows(plan.TableName, plan.DatabaseName, lower, upper, ref state, VisitScanMaterializedRow))
+        List<RowKey>? keyRangeRows = plan.PrimaryKeyRangeOrdinal >= 0
+            ? TryPrimaryKeyRangeRows(plan, boundPredicates.AsSpan(0, plan.Predicates.Length))
+            : null;
+        bool read = keyRangeRows is not null
+            ? _engine.StorageContext.VisitRowsByKey(plan.TableName, plan.DatabaseName, keyRangeRows, ref state, VisitScanMaterializedRow)
+            : _engine.StorageContext.ScanTableRows(plan.TableName, plan.DatabaseName, lower, upper, ref state, VisitScanMaterializedRow);
+        if (!read)
         {
             return false;
         }
@@ -1335,6 +1343,32 @@ public sealed partial class DataVoPreparedStatement
                 value = 0;
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The rows a range on an InMemory table's integer primary key selects, from its key lane (see
+    /// <see cref="IndexManager.TryPrimaryKeyRangeRows"/>); null when the predicates bound no range or a scan is cheaper.
+    /// </summary>
+    private List<RowKey>? TryPrimaryKeyRangeRows(CompiledSelectPlan plan, ReadOnlySpan<BoundScanPredicate> predicates)
+    {
+        (RowKey? lower, RowKey? upper) = ComputeClusteredKeyRange(predicates, plan.PrimaryKeyRangeOrdinal);
+        if ((lower is null && upper is null)
+            || !_engine.StorageContext.TryEstimateRowCount(plan.TableName, plan.DatabaseName, out long tableRows))
+        {
+            return null;
+        }
+
+        return lower is { } from && upper is { } to && from >= to
+            ? []
+            : _engine.IndexManager.TryPrimaryKeyRangeRows(plan.TableName, plan.DatabaseName, lower?.AsInt64(), upper?.AsInt64(), tableRows);
+    }
+
+    /// <summary>The ordinal of a table's primary key when it is one INT or BIGINT column; else -1.</summary>
+    private int IntegerPrimaryKeyOrdinal(string tableName, string databaseName, IReadOnlyList<Column> columns)
+    {
+        List<string> primaryKeys = _engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
+        int ordinal = primaryKeys.Count == 1 ? FindColumnOrdinal(columns, primaryKeys[0]) : -1;
+        return ordinal >= 0 && ClassifyColumnType(columns[ordinal].Type) is FastColumnType.Int or FastColumnType.BigInt ? ordinal : -1;
     }
 
     private static (RowKey? Lower, RowKey? Upper) ComputeClusteredKeyRange(
@@ -2208,6 +2242,9 @@ public sealed partial class DataVoPreparedStatement
         public int LastDecodedOrdinal { get; init; } = -1;
         public int ClusteredOrdinal { get; init; } = -1;
         public bool ClusteredIsGuid { get; init; }
+
+        /// <summary>The single integer primary key of a table that is not clustered (InMemory), whose ranges its key lane reads; -1 otherwise.</summary>
+        public int PrimaryKeyRangeOrdinal { get; init; } = -1;
         public CompiledPredicateSlot[] Predicates { get; init; } = [];
         public string? IndexName { get; init; }
         public int LimitSkip { get; init; }

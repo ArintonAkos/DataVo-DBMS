@@ -28,8 +28,10 @@ public class VolcanoJoinFeedbackPersistenceTests : SqlExecutionTestsBase
             Execute("INSERT INTO Customers (Id, Name) VALUES (10, 'Alice')");
             Execute("INSERT INTO Customers (Id, Name) VALUES (11, 'Bob')");
 
+            // DISTINCT keeps the query on the Volcano join that records feedback; the typed join returns
+            // plain joined rows without it.
             var result = ExecuteAndReturn(@"
-                SELECT o.Id, c.Name
+                SELECT DISTINCT o.Id, c.Name
                 FROM Orders o
                 JOIN Customers c ON o.CustomerId = c.Id
                 ORDER BY o.Id ASC");
@@ -78,7 +80,7 @@ public class VolcanoJoinFeedbackPersistenceTests : SqlExecutionTestsBase
                 string tableName = $"Leaf{i}";
                 Execute($"CREATE TABLE {tableName} (Id INT PRIMARY KEY)");
                 Execute($"INSERT INTO {tableName} (Id) VALUES (1)");
-                Execute($"SELECT h.Id FROM Hub h JOIN {tableName} l ON h.Id = l.Id");
+                Execute($"SELECT DISTINCT h.Id FROM Hub h JOIN {tableName} l ON h.Id = l.Id"); // DISTINCT: the Volcano join
             }
 
             Assert.True(File.Exists(cappedPath));

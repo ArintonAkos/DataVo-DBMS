@@ -62,16 +62,6 @@ internal partial class Select
         public int Ordinal { get; } = ordinal;
     }
 
-    private sealed class TypedGroup(object?[] keys, int aggregates)
-    {
-        public object?[] Keys { get; } = keys;
-        public long[] Counts { get; } = new long[aggregates];
-        public double[] Sums { get; } = new double[aggregates];
-        public DataVo.Core.Execution.SqlSumAccumulator[] Totals { get; } = new DataVo.Core.Execution.SqlSumAccumulator[aggregates];
-        public object?[] Extremes { get; } = new object?[aggregates];
-        public bool[] HasExtreme { get; } = new bool[aggregates];
-    }
-
     private sealed class TypedScanState
     {
         public required IReadOnlyList<Column> Columns { get; init; }
@@ -104,41 +94,9 @@ internal partial class Select
         public List<TypedAggregate>? Aggregates { get; init; }
         public int[]? GroupOrdinals { get; init; }
         public List<string>? GroupColumnNames { get; init; }
-        public Dictionary<GroupKey, TypedGroup>? Groups { get; init; }
-        public List<TypedGroup>? GroupOrder { get; init; }
+        public GroupLookup? GroupKeys { get; init; }
+        public TypedGroupStates? GroupStates { get; init; }
         public long Matched;
-    }
-
-    /// <summary>A group key compared the way the general path's hash aggregate compares it (by value).</summary>
-    private readonly struct GroupKey(object?[] values) : IEquatable<GroupKey>
-    {
-        public object?[] Values { get; } = values;
-
-        public bool Equals(GroupKey other)
-        {
-            for (int i = 0; i < Values.Length; i++)
-            {
-                if (!Equals(Values[i], other.Values[i]))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        public override bool Equals(object? obj) => obj is GroupKey other && Equals(other);
-
-        public override int GetHashCode()
-        {
-            var hash = new HashCode();
-            foreach (object? value in Values)
-            {
-                hash.Add(value);
-            }
-
-            return hash.ToHashCode();
-        }
     }
 
     /// <summary>Returns the matched rows, or null when the query needs the general path.</summary>
@@ -241,12 +199,24 @@ internal partial class Select
             return null;
         }
 
+        List<RowKey>? keyRangeRows = indexLookup is null && clustered is null
+            ? TryPrimaryKeyRangeRows(engine, tableName, databaseName, columns, primaryKeys, predicates)
+            : null;
         if (indexLookup is { } lookup)
         {
             var rowIds = engine.IndexManager.FilterUsingIndex(lookup.Key, lookup.IndexName, tableName, databaseName).ToList();
             rowIds.Sort();
             LockRowsForRead(databaseName, tableName, rowIds);
             if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, VisitTypedRow))
+            {
+                return null;
+            }
+        }
+        else if (keyRangeRows is not null)
+        {
+            // A range on the InMemory engine's integer primary key: only the rows in it are read.
+            LockRowsForRead(databaseName, tableName, keyRangeRows);
+            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, keyRangeRows, ref state, VisitTypedRow))
             {
                 return null;
             }
@@ -260,12 +230,42 @@ internal partial class Select
             return null;
         }
 
-        if (indexLookup is null && lower is null && upper is null)
+        if (indexLookup is null && keyRangeRows is null && lower is null && upper is null)
         {
             RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
         }
 
         return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
+    }
+
+    /// <summary>
+    /// The rows a range on a table's single-column integer primary key selects, read from the InMemory engine's
+    /// primary-key lane in key order and returned in row order (the order a scan visits them in); null when there
+    /// is no such range, the lane cannot answer, or the range holds more than a quarter of the table, which a scan
+    /// reads faster. The WHERE is still tested on every row read.
+    /// </summary>
+    private static List<RowKey>? TryPrimaryKeyRangeRows(DataVoEngine engine, string tableName, string databaseName, IReadOnlyList<Column> columns, List<string> primaryKeys, List<TypedPredicate> predicates)
+    {
+        int keyOrdinal = primaryKeys.Count == 1 ? OrdinalOf(columns, primaryKeys[0]) : -1;
+        if (keyOrdinal < 0
+            || !(columns[keyOrdinal].Type.Equals("INT", StringComparison.OrdinalIgnoreCase) || columns[keyOrdinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase))
+            || !engine.StorageContext.TryEstimateRowCount(tableName, databaseName, out long tableRows))
+        {
+            return null;
+        }
+
+        (RowKey? lower, RowKey? upper) = KeyRangeOf(predicates, keyOrdinal);
+        if (lower is null && upper is null)
+        {
+            return null;
+        }
+
+        if (lower is { } from && upper is { } to && from >= to)
+        {
+            return []; // an empty range
+        }
+
+        return engine.IndexManager.TryPrimaryKeyRangeRows(tableName, databaseName, lower?.AsInt64(), upper?.AsInt64(), tableRows);
     }
 
     private bool TryCollectTypedPredicates(ExpressionNode node, string tableName, IReadOnlyList<Column> columns, List<TypedPredicate> predicates) =>
@@ -829,8 +829,8 @@ internal partial class Select
             Aggregates = aggregates,
             GroupOrdinals = groupOrdinals,
             GroupColumnNames = groupByColumns,
-            Groups = [],
-            GroupOrder = [],
+            GroupKeys = new GroupLookup(),
+            GroupStates = new TypedGroupStates(aggregates),
         };
     }
 
@@ -1061,29 +1061,15 @@ internal partial class Select
     private static void Accumulate(TypedScanState state)
     {
         state.Matched++;
-        int[] groupOrdinals = state.GroupOrdinals!;
-        var keys = new object?[groupOrdinals.Length];
-        for (int i = 0; i < keys.Length; i++)
-        {
-            int ordinal = groupOrdinals[i];
-            keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Columns[ordinal], state.Cells[ordinal]);
-        }
-
-        var key = new GroupKey(keys);
-        if (!state.Groups!.TryGetValue(key, out TypedGroup? group))
-        {
-            group = new TypedGroup(keys, state.Aggregates!.Count);
-            state.Groups[key] = group;
-            state.GroupOrder!.Add(group);
-        }
-
+        int group = FindTypedGroup(state);
+        TypedGroupStates groups = state.GroupStates!;
         List<TypedAggregate> aggregates = state.Aggregates!;
         for (int i = 0; i < aggregates.Count; i++)
         {
             TypedAggregate aggregate = aggregates[i];
             if (aggregate.Ordinal < 0)
             {
-                group.Counts[i]++;
+                groups.CountOf(group, i)++;
                 continue;
             }
 
@@ -1096,80 +1082,41 @@ internal partial class Select
             switch (aggregate.Spec.Function)
             {
                 case HashAggregateOperator.AggregateFunction.Count:
-                    group.Counts[i]++;
+                    groups.CountOf(group, i)++;
                     break;
                 case HashAggregateOperator.AggregateFunction.Sum:
                     switch (cell.Type)
                     {
-                        case CellType.Int32: group.Totals[i].Add((long)cell.AsInt32()); break;
-                        case CellType.Int64: group.Totals[i].Add(cell.AsInt64()); break;
-                        case CellType.Double: group.Totals[i].Add(StorageContext.FloatingValue(state.Columns[aggregate.Ordinal], cell)); break;
-                        default: group.Totals[i].Add(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell)!); break;
+                        case CellType.Int32: groups.TotalOf(group, i).Add((long)cell.AsInt32()); break;
+                        case CellType.Int64: groups.TotalOf(group, i).Add(cell.AsInt64()); break;
+                        case CellType.Double: groups.TotalOf(group, i).Add(StorageContext.FloatingValue(state.Columns[aggregate.Ordinal], cell)); break;
+                        default: groups.TotalOf(group, i).Add(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell)!); break;
                     }
 
                     break;
                 case HashAggregateOperator.AggregateFunction.Avg:
-                    group.Sums[i] += cell.Type switch
+                    groups.SumOf(group, i) += cell.Type switch
                     {
                         CellType.Int32 => cell.AsInt32(),
                         CellType.Int64 => cell.AsInt64(),
                         CellType.Double => StorageContext.FloatingValue(state.Columns[aggregate.Ordinal], cell),
                         _ => Convert.ToDouble(StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell), CultureInfo.InvariantCulture),
                     };
-                    group.Counts[i]++;
+                    groups.CountOf(group, i)++;
                     break;
                 default:
                     object? value = StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell);
-                    int order = group.HasExtreme[i] ? DynamicObjectComparer.Instance.Compare(value, group.Extremes[i]) : 0;
+                    int order = groups.HasExtremeOf(group, i) ? DynamicObjectComparer.Instance.Compare(value, groups.ExtremeOf(group, i)) : 0;
                     bool better = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Min ? order < 0 : order > 0;
-                    if (!group.HasExtreme[i] || better)
+                    if (!groups.HasExtremeOf(group, i) || better)
                     {
-                        group.Extremes[i] = value;
-                        group.HasExtreme[i] = true;
+                        groups.ExtremeOf(group, i) = value;
+                        groups.HasExtremeOf(group, i) = true;
                     }
 
                     break;
             }
         }
-    }
-
-    private ListedTable? FinishAggregates(TypedScanState state)
-    {
-        if (state.GroupOrder!.Count == 0)
-        {
-            return null; // aggregates over no rows: the general path owns those semantics
-        }
-
-        var rows = new List<JoinedRow>(state.GroupOrder.Count);
-        foreach (TypedGroup group in state.GroupOrder)
-        {
-            var keyValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < state.GroupColumnNames!.Count; i++)
-            {
-                keyValues[state.GroupColumnNames[i]] = group.Keys[i];
-            }
-
-            var aggregateValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < state.Aggregates!.Count; i++)
-            {
-                HashAggregateOperator.AggregateSpec spec = state.Aggregates[i].Spec;
-                aggregateValues[spec.OutputColumn] = spec.Function switch
-                {
-                    HashAggregateOperator.AggregateFunction.Count => group.Counts[i],
-                    // SQL: SUM and AVG over no non-null values are NULL.
-                    HashAggregateOperator.AggregateFunction.Sum => group.Totals[i].Result,
-                    HashAggregateOperator.AggregateFunction.Avg => group.Counts[i] == 0 ? null : group.Sums[i] / group.Counts[i],
-                    _ => group.Extremes[i],
-                };
-            }
-
-            var joined = new JoinedRow(state.TableName, new Row(keyValues));
-            joined.Add(GroupBy.HASH_VALUE, new Row(aggregateValues));
-            rows.Add(joined);
-        }
-
-        _volcanoAggregatePushedDown = true;
-        return new ListedTable(rows);
     }
 
     private ListedTable FinishRows(TypedScanState state)

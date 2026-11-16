@@ -1945,7 +1945,9 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// <summary>
     /// Reads several rows by key in one pass, visiting the live ones in the order given, in stored form (a
     /// clustered table's key cell is NULL). Every key's overlay probe happens before the file set is pinned,
-    /// as in <see cref="ResolveRow"/>, and the file set is pinned once for all keys the overlay lacks.
+    /// as in <see cref="ResolveRow"/>, and the file set is pinned once for all keys the overlay lacks. A row read
+    /// from a file is copied into a per-thread buffer and visited from there while the file set is pinned, so
+    /// nothing is allocated per row; as with any stored row, the visitor may use the bytes only during the call.
     /// Only valid outside a write flow (staged writes are not merged).
     /// </summary>
     internal void ReadStoredRowsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> keys, ref TState state, StoredRowScanVisitor<TState> visit)
@@ -1956,76 +1958,69 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             return;
         }
 
+        // Per key: the overlay's live row, NotInOverlay (read it from the files), or null (deleted).
         TableState table = GetOrCreateTable(databaseName, tableName);
-        var found = new byte[]?[keys.Count];
-        var inFiles = new List<int>();
-        for (int i = 0; i < keys.Count; i++)
+        byte[]?[] found = System.Buffers.ArrayPool<byte[]?>.Shared.Rent(keys.Count);
+        try
         {
-            switch (table.LatestRows.TryGet(keys[i], out byte[] overlay))
+            bool anyInFiles = false;
+            for (int i = 0; i < keys.Count; i++)
             {
-                case LatestRowLookup.Live:
-                    found[i] = overlay;
-                    break;
-                case LatestRowLookup.Missing:
-                    inFiles.Add(i);
-                    break;
+                switch (table.LatestRows.TryGet(keys[i], out byte[] overlay))
+                {
+                    case LatestRowLookup.Live:
+                        found[i] = overlay;
+                        break;
+                    case LatestRowLookup.Missing:
+                        found[i] = NotInOverlay;
+                        anyInFiles = true;
+                        break;
+                    default:
+                        found[i] = null;
+                        break;
+                }
             }
-        }
 
-        if (inFiles.Count > 0)
-        {
-            TableVersion version = table.AcquireVersion();
+            TableVersion? version = anyInFiles ? table.AcquireVersion() : null;
             try
             {
-                foreach (int i in inFiles)
+                for (int i = 0; i < keys.Count; i++)
                 {
-                    byte[]? row = ReadFromVersion(version, keys[i]);
-                    found[i] = ReferenceEquals(row, DeletedMarker) ? null : row;
+                    if (found[i] is not { } row)
+                    {
+                        continue;
+                    }
+
+                    bool more;
+                    if (ReferenceEquals(row, NotInOverlay))
+                    {
+                        int length = ReadFromVersionToScratch(version!, keys[i]);
+                        more = length < 0 || visit(ref state, keys[i], _singleRowScratch.AsSpan(0, length));
+                    }
+                    else
+                    {
+                        more = visit(ref state, keys[i], row);
+                    }
+
+                    if (!more)
+                    {
+                        return;
+                    }
                 }
             }
             finally
             {
-                version.Release();
+                version?.Release();
             }
         }
-
-        for (int i = 0; i < found.Length; i++)
+        finally
         {
-            if (found[i] is { } row && !visit(ref state, keys[i], row))
-            {
-                return;
-            }
+            System.Buffers.ArrayPool<byte[]?>.Shared.Return(found, clearArray: true);
         }
     }
 
-    /// <summary>The newest version of a row in a pinned file set (see <see cref="ReadFromSstables"/>), copied.</summary>
-    private byte[]? ReadFromVersion(TableVersion version, RowKey rowId)
-    {
-        SstableHit best = default;
-        int bestLevel = -1;
-        foreach (LsmSstableHandle file in version.Files)
-        {
-            int level = file.Metadata.Level;
-            if (bestLevel >= 0 && level != bestLevel)
-            {
-                break;
-            }
-
-            SstableHit hit = file.GetV2Reader(_readMode).Lookup(
-                rowId,
-                ulong.MaxValue,
-                0,
-                static (type, sequence, value, _) => new SstableHit(true, sequence, type == LsmValueType.Put ? value.ToArray() : DeletedMarker),
-                default(SstableHit));
-            if (hit.Found && (!best.Found || hit.Sequence > best.Sequence))
-            {
-                best = hit;
-                bestLevel = level;
-            }
-        }
-
-        return best.Found ? best.Value : null;
-    }
+    /// <summary>Marks, in <see cref="ReadStoredRowsByKey"/>, a key the overlay does not hold.</summary>
+    private static readonly byte[] NotInOverlay = new byte[1];
 
     /// <summary>Whether this flow has staged writes to the table that a scan would have to merge (a scan then takes the general path).</summary>
     internal bool HasStagedWrites(string databaseName, string tableName) =>
