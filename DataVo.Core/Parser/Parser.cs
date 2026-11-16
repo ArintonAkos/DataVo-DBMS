@@ -1271,7 +1271,8 @@ public class Parser(List<Token> tokens)
         // 4. Parse optional WHERE (also supports historical WHERE-before-JOIN form)
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
-            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
+            // HAVING ends the WHERE condition too: an aggregate query may have HAVING without GROUP BY.
+            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsHavingKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
 
             RequireCondition(expressionTokens, "WHERE");
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
@@ -1434,6 +1435,12 @@ public class Parser(List<Token> tokens)
     private bool IsOffsetKeyword()
     {
         return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.OFFSET);
+    }
+
+    /// <summary>Whether the current token is the <c>HAVING</c> keyword.</summary>
+    private bool IsHavingKeyword()
+    {
+        return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.HAVING);
     }
 
     private bool IsUnionKeyword()
