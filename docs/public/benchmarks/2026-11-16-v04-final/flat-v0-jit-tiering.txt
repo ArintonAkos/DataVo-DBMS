@@ -1,0 +1,32 @@
+DataVo Flat, V0 (unfiltered top-10), 50,000 x 384: why the official run's median is 11.29 ms
+
+The official hybrid-vector run (hybrid-vector.md) measured DataVo Flat V0 at p50 11.29 ms, p99 13.48 ms.
+The 2026-11-16-backlog run measured 2.13 ms / 17.29 ms. 1,536-dimension Flat V0 did not move (4.25 ms
+against 4.53 ms). Reruns of the 384-dimension scenario, Flat engine only, one process each, 2026-11-17
+10:47-11:00, load average about 3 (Spotlight indexing on one core):
+
+  command: dotnet Research.Benchmark.Host.dll --scenario hybrid-vector --engine datavo-flat
+
+  HEAD (216205d), 13 reruns, V0 p50 / p99:
+    2.47/17.15  12.76/13.56  2.15/13.94  2.13/17.32  2.38/13.99  2.42/13.87  2.12/13.85
+    2.38/13.94  2.21/14.69   2.57/13.64  11.09/13.72 2.19/14.29  2.15/14.19
+    (plus the official run, 11.29/13.48)
+  master (b568c16, before the v0.4 closeout commits), 11 runs, interleaved with the HEAD runs:
+    2.13/14.14  2.45/14.12  2.41/13.55  2.14/13.75  2.16/13.97
+    2.19/13.88  2.30/14.06  2.19/13.93  2.16/14.12  2.15/14.12  2.18/13.66
+  HEAD with DOTNET_TC_QuickJitForLoops=0 (methods with loops compiled fully optimized at once), 8 runs:
+    2.11/3.96  2.14/3.47  2.13/3.64  2.15/4.01  2.25/4.37  2.13/3.90  2.12/3.80  2.12/4.14
+
+Reading:
+- Both builds have two speeds for this query: about 2.1 ms and about 11-14 ms. The slow speed is the
+  ~14 ms p99 of every normal run on both builds.
+- With loops fully optimized from the start, the slow speed disappears (p99 about 4 ms). The slow
+  speed is therefore the exact-scan loop running as tier-0 / on-stack-replacement code before tiered
+  compilation replaces it, not the algorithm. When the replacement is late, a whole run's median
+  lands in the slow mode.
+- HEAD fell into the slow mode for the whole run in 3 of 14 runs (official run included), master in
+  0 of 11. That difference is suggestive but not statistically established with these counts
+  (Fisher's exact test, two-sided, p about 0.23). Commit a8b3bca changed FlatVectorIndex's scan
+  (pooled NearestHeap), which may change when the loop is promoted.
+- Not done here: an engine change (for example AggressiveOptimization on the scan kernel) and a re-run.
+  It is recorded as a follow-up; the official numbers are left as measured.

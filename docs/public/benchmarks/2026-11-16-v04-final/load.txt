@@ -1,0 +1,7 @@
+sql-matrix start: 10:43  up 8 days,  1:01, 1 user, load averages: 2.38 3.10 3.17
+sql-matrix end: 10:45  up 8 days,  1:02, 1 user, load averages: 2.69 3.03 3.13
+hybrid-vector start: 10:45  up 8 days,  1:03, 1 user, load averages: 2.42 2.96 3.11
+hybrid-vector end: 10:46  up 8 days,  1:03, 1 user, load averages: 2.26 2.87 3.07
+hybrid-vector-1536 start: 10:46  up 8 days,  1:03, 1 user, load averages: 2.26 2.87 3.07
+hybrid-vector-1536 end: 10:46  up 8 days,  1:04, 1 user, load averages: 3.21 3.05 3.12
+ALLDONE
