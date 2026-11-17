@@ -56,7 +56,7 @@ One open item is documented honestly there: in memory, rows inserted through the
 
 ## Not compiled
 
-A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
+A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`; `DATAVOL004` and `DATAVOL005` cover sort keys, projections and `ExecuteUpdate`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
 
 The full table of supported lambda shapes and diagnostics is in [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators#what-is-compiled).
 

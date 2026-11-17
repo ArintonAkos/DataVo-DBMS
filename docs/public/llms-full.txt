@@ -279,7 +279,7 @@ v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a
 
 ## v0.5: interop and client-side ergonomics (planned)
 
-v0.5 has two tracks. Neither is started; the scope below is the plan, not a commitment to dates.
+v0.5 has two tracks. The first item of Track B is done; the rest is the plan, not a commitment to dates.
 
 **Track A: native interop.**
 
@@ -289,7 +289,7 @@ v0.5 has two tracks. Neither is started; the scope below is the plan, not a comm
 
 **Track B: client applications.**
 
-- More of LINQ compiled at build time by `DataVo.Generators`, still with no Entity Framework dependency: `OrderBy`/`OrderByDescending`/`ThenBy`, `Take`/`Skip`, and `Select` projections that read only the projected columns, plus compiled single-table updates and deletes. Today `DataVoTable<T>` compiles `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList`.
+- **Done:** more of LINQ compiled at build time by `DataVo.Generators`, still with no Entity Framework dependency: `OrderBy`/`OrderByDescending`/`ThenBy`/`ThenByDescending`, `Skip`/`Take`, `Select` projections that read only the projected columns, and compiled single-table `ExecuteDelete` and `ExecuteUpdate`. See [Roslyn Source Generators](/manual/client-interfaces/source-generators#sorting-and-paging).
 - Two-dimensional geographic data: WGS84 latitude/longitude points with spherical (haversine) distance, bounding boxes that cross the ±180° meridian, and a 2D spatial index (R-tree, quadtree or a Morton-ordered B-tree) so that radius and box queries over a million points do not scan the table. The current spatial support is three-dimensional Cartesian (`Vector3`) and scans.
 - Multi-target packages (`net8.0`, `net9.0`, `net10.0`, and `netstandard2.1` where the code allows), so that MAUI, Avalonia, WPF, WinUI, Unity and Blazor WebAssembly applications are not blocked by a `net10.0`-only asset, and a guide for migrating client applications from `Microsoft.Data.Sqlite` and EF Core.
 
@@ -2754,7 +2754,7 @@ Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inser
 
 Use source-generated queries for queries called often enough that parse and mapping overhead matters. Instead of parsing and planning the same SQL pattern repeatedly at runtime, you annotate a static partial method, or write a lambda against `DataVoTable<T>`, and the `DataVo.Generators` package emits the call path at build time.
 
-`DataVo.Generators` is a Roslyn source generator and nothing more: it depends on the C# compiler APIs, not on Entity Framework Core, and the code it emits uses only `DataVo.Core`. That makes it the LINQ-shaped API to use in Native AOT applications and anywhere EF Core is unwanted. It compiles single-table `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList` today; `OrderBy`, `Take`/`Skip` and column-minimal `Select` projections are planned for v0.5 (see the [Roadmap](/manual/preface/roadmap#v0-5-interop-and-client-side-ergonomics-planned)). Shapes it cannot compile still return the right rows by scanning, and the build says why.
+`DataVo.Generators` is a Roslyn source generator and nothing more: it depends on the C# compiler APIs, not on Entity Framework Core, and the code it emits uses only `DataVo.Core`. That makes it the LINQ-shaped API to use in Native AOT applications and anywhere EF Core is unwanted. It compiles single-table `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList`, sorting with `OrderBy`/`OrderByDescending`/`ThenBy`/`ThenByDescending`, paging with `Skip`/`Take`, `Select` projections that read only the projected columns, and bulk `ExecuteDelete`/`ExecuteUpdate`. Shapes it cannot compile still return the right rows, in memory, and the build says why.
 
 Start with a projection type.
 
@@ -2888,6 +2888,78 @@ On 200,000 rows with 100,000 matches a warm count, sum, minimum or maximum takes
 
 A condition on the primary key or an indexed column keeps using the index, and a condition that compares text is evaluated by the SQL engine; both count by reading the matching rows, as before.
 
+### Sorting And Paging
+
+`DataVoTable<T>` and the `DataVoQuery` a `Where` returns have `OrderBy` and `OrderByDescending`; the sorted query has `ThenBy` and `ThenByDescending`. All of them, and the projections below, have `Skip` and `Take`. When every key is one column (`p => p.Column`, of the column's own type) and the filter is compiled, the engine sorts and pages the rows: the query becomes `ORDER BY ... LIMIT @limit OFFSET @offset`, and a `Take` after a sort keeps only that many rows while it scans instead of sorting the table.
+
+```csharp
+List<Player> page = db.Table<Player>()
+    .Where(true, static (p, active) => p.IsActive == active)
+    .OrderByDescending(static p => p.Level)
+    .ThenBy(static p => p.Id)
+    .Skip(pageIndex * 20)
+    .Take(20)
+    .ToList();
+```
+
+The results are the ones LINQ to Objects gives over the same rows:
+
+- Each key orders by `Comparer<TKey>.Default`: null first when sorting up and last when sorting down, a floating-point `NaN` below every number, text in the current culture's order. Ties keep the order the unsorted query enumerates its rows in.
+- `Skip` and `Take` follow `Enumerable.Skip` and `Enumerable.Take`: a count of zero or less skips nothing or takes nothing, and chained calls narrow one window (`Skip(2).Take(10).Skip(3).Take(4)` keeps rows 6 to 9). `Take(0)` does not run a statement.
+- `Count()` and `Any()` on a sorted or paged query do not sort; they count the filter's matches (inside the scan when the filter is compiled into it) and apply the window. `FirstOrDefault()` reads one row and `SingleOrDefault()` two.
+- Without `OrderBy`, `Skip` and `Take` page the rows in the order the query enumerates them, which is storage order for a scan. Sort first for a stable page.
+
+A key the generator cannot compile (a computed key such as `p => p.Level % 7`, a cast, a `Vector3` column) sorts in memory, with the same result, and the build warns with `DATAVOL004`. An overload that takes a comparer always sorts in memory, without a warning. A sorted query also chains with `System.Linq`: `Enumerable.ThenBy` on it adds an in-memory key.
+
+### Projections
+
+`Select` on a table, a filtered, sorted or paged query projects each row. When the generator compiles the selector, the statement selects only the columns the selector reads (the engine still reads the filter's and the sort's columns to test and order rows) and the result is built straight from those columns: no model is built, so `Select(p => p.Name)` over a row with a large text column never decodes that text.
+
+```csharp
+public sealed record PlayerName(int Id, string Name);
+
+List<string> names = db.Table<Player>().Select(static p => p.Name).ToList();          // SELECT Name FROM players
+var board = db.Table<Player>()
+    .OrderByDescending(static p => p.Score)
+    .Take(10)
+    .Select(static p => new { p.Name, p.Score, Rank = p.Score > 1_000 ? "gold" : "silver" })
+    .ToList();                                                                          // SELECT Name, Score FROM players ORDER BY Score DESC LIMIT @limit
+PlayerName? first = db.Table<Player>().Where(static p => p.IsActive).Select(static p => new PlayerName(p.Id, p.Name)).FirstOrDefault();
+```
+
+A compiled selector can build a scalar, a tuple, an anonymous type, a class or record through its constructor or an object initializer, a collection, or any expression over the row's columns, constants and accessible static members: arithmetic, `?:`, `??`, `?.`, `switch` expressions and patterns, interpolated strings, casts, and calls to methods, including extension methods such as `p.Name.Count()`. The projected query's `Sql` property shows the statement it runs, and `IsCompiled` says whether no model is built.
+
+A selector that uses the row itself (`p => p`, `p => Describe(p)`), captures a variable or contains a lambda reads models and runs as written, and the build warns with `DATAVOL004`. A projection whose filter or sort runs in memory also reads models, since the filter and the keys need them.
+
+Inside an explicit transaction the engine reads the transaction's view of the table through its general path, which decodes whole rows. The statement still selects only the projected columns and no model is built, but the text columns a projection leaves out are decoded there.
+
+### Bulk Deletes And Updates
+
+`ExecuteDelete()` deletes the rows a table or a filtered query holds and returns how many it deleted. A compiled filter becomes one `DELETE FROM ... WHERE ...` statement; the whole table is `DELETE FROM ...`.
+
+`ExecuteUpdate` sets columns of those rows with one `UPDATE ... SET ... WHERE ...` statement and returns how many rows changed. The setters are a lambda that chains `Set` calls; the generator reads it at build time and the lambda is never run:
+
+```csharp
+int paid = db.Table<Player>()
+    .Where(static p => p.IsActive)
+    .ExecuteUpdate(250L, static (set, reward) => set
+        .Set(p => p.Gold, p => p.Gold + reward)   // Gold = Gold + @u0
+        .Set(p => p.Guild, "veterans")            // Guild = @u1
+        .SetNull(p => p.Bonus));                  // Bonus = NULL
+
+int reset = db.Table<Player>().ExecuteUpdate(static set => set.Set(p => p.Level, 1));
+```
+
+- A value is a literal, the state argument or a field or property of it, an accessible static member, or null for a nullable column (`SetNull`, or a state value that is null at run time). Pass values as state with a `static` lambda, as with `Where`.
+- A computed value (`Set(p => p.Column, p => ...)`) joins the row's columns and such values with `+`, `-` and `*`. Every column in it must have the target column's type. The engine evaluates it, in double precision for `FLOAT` and `DOUBLE` columns.
+- The primary key cannot be set, and a column cannot be set twice.
+
+Both methods take part in an open transaction, so a `ROLLBACK` undoes them, and outside one each is a single atomic statement. A statement that fails (a `NOT NULL` column set to null, for example) throws and changes nothing. The statements are prepared once per shape and run like any other prepared `UPDATE` or `DELETE`, so a filter on the primary key (`Where(id, static (p, k) => p.Id == k)`) changes one row through its key.
+
+When the filter cannot be compiled (it captures a variable, for example) the rows are still changed correctly: their primary keys are read first, then one statement per key runs inside a single transaction (the caller's, when one is open), so the change is applied whole or not at all.
+
+`ExecuteUpdate` has no in-memory form, since only the generator knows which columns the setters name. A call it cannot compile fails the build with `DATAVOL005`, which says why. On a compiler without interceptors, such as Unity's, the call throws `NotSupportedException`; use a prepared `UPDATE` statement there.
+
 ### Columnar Indexes
 
 Mark the columns that analytical queries filter and aggregate on with `[Columnar]`. `Ensure…Table` then creates one columnar index for the table, named `cx_<table>`, over the marked columns (the same index as `CREATE INDEX ... USING COLUMNAR`; see [CREATE TABLE](/manual/sql-language/create-table)).
@@ -2922,18 +2994,25 @@ long gold = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Sum(
 | `p.IsActive`, `!p.IsActive` | `IsActive = true`, `IsActive = false` |
 | `p.Guild == null`, `p.Guild is not null` | `IS NULL`, `IS NOT NULL` |
 | `a && b`, `a \|\| b`, parentheses | `AND`, `OR`, parentheses |
+| `OrderBy(p => p.Level)`, `ThenByDescending(p => p.Gold)` | `ORDER BY Level, Gold DESC` |
+| `Skip(n)`, `Take(n)` | `OFFSET @offset`, `LIMIT @limit` |
+| `Select(p => new { p.Id, p.Name })` | `SELECT Id, Name`, and the result built from those two columns |
+| `ExecuteDelete()` | `DELETE FROM ... WHERE ...` |
+| `ExecuteUpdate(v, static (set, v) => set.Set(p => p.Gold, p => p.Gold + v))` | `UPDATE ... SET Gold = Gold + @u0 WHERE ...` |
 
 A value can be a literal, a constant, the state argument, a field or property of the state (including tuple elements), or an accessible static field or property. Null follows C# rules, not SQL rules: a nullable column that holds null counts as different from a value in `!=`, and a state value that is null at run time is answered by running the lambda over the table.
 
 ### What Is Not Compiled
 
-A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why:
+A call the generator cannot compile still returns the right rows. A filter reads the whole table and tests each row with the lambda, a sort key or a selector runs in memory, and the build reports why:
 
 | Warning | Meaning |
 | --- | --- |
 | `DATAVOL001` | The lambda captures a local, a parameter or an instance member. Pass it as state with a `static` lambda. |
 | `DATAVOL002` | The lambda uses something that has no compiled form: a method call, arithmetic, two columns compared with each other, or a value whose type differs from the column's. |
 | `DATAVOL003` | The project has not enabled interceptors for the generated namespace, so no call is compiled. |
+| `DATAVOL004` | An `OrderBy`/`ThenBy` key or a `Select` selector has no compiled form, so that step runs in memory over whole models. The message says why. |
+| `DATAVOL005` | An `ExecuteUpdate` cannot be compiled (a captured value, a computed value outside `+ - *`, the primary key, interceptors not enabled). This is an error: the call has no other way to run. |
 
 Silence a deliberate scan with `#pragma warning disable DATAVOL001`. A delegate created elsewhere and passed in is treated as a deliberate scan and is not reported.
 
@@ -2996,7 +3075,7 @@ The cross-target projection type for SQL `DATE` is `DataVo.Core.DataVoDate`. Gen
 
 ## Source Generator Support Summary
 
-The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It supports `System.Numerics.Vector3` columns with `WithinRadius`, `WithinBoundingBox` and `NearestNeighbors` on typed tables. It does **not** generate `DELETE`, joins, aggregates, or general vector search, and its typed table queries cover single-table filters only, not a full LINQ provider — use runtime SQL for those shapes.
+The generator supports `static partial` methods whose first parameter is a `DataVoContext`, with SQL/C# parameter validation, and it emits compiled paths for equality `SELECT`, `INSERT INTO ... VALUES (...)`, and `UPDATE ... SET ... WHERE ...`, plus typed projection mappers and single-column schema-manifest index hints. It supports `System.Numerics.Vector3` columns with `WithinRadius`, `WithinBoundingBox` and `NearestNeighbors` on typed tables. Its typed table queries compile single-table filters, sorting, paging, column-minimal projections, `ExecuteDelete` and `ExecuteUpdate`. They do **not** compile joins, grouping, `Distinct` or general vector search, and they are not a full LINQ provider — use runtime SQL for those shapes.
 
 ---
 
@@ -3203,7 +3282,7 @@ One open item is documented honestly there: in memory, rows inserted through the
 
 ## Not compiled
 
-A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
+A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`; `DATAVOL004` and `DATAVOL005` cover sort keys, projections and `ExecuteUpdate`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
 
 The full table of supported lambda shapes and diagnostics is in [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators#what-is-compiled).
 

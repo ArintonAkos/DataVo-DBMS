@@ -56,7 +56,7 @@ v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a
 
 ## v0.5: interop and client-side ergonomics (planned)
 
-v0.5 has two tracks. Neither is started; the scope below is the plan, not a commitment to dates.
+v0.5 has two tracks. The first item of Track B is done; the rest is the plan, not a commitment to dates.
 
 **Track A: native interop.**
 
@@ -66,7 +66,7 @@ v0.5 has two tracks. Neither is started; the scope below is the plan, not a comm
 
 **Track B: client applications.**
 
-- More of LINQ compiled at build time by `DataVo.Generators`, still with no Entity Framework dependency: `OrderBy`/`OrderByDescending`/`ThenBy`, `Take`/`Skip`, and `Select` projections that read only the projected columns, plus compiled single-table updates and deletes. Today `DataVoTable<T>` compiles `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList`.
+- **Done:** more of LINQ compiled at build time by `DataVo.Generators`, still with no Entity Framework dependency: `OrderBy`/`OrderByDescending`/`ThenBy`/`ThenByDescending`, `Skip`/`Take`, `Select` projections that read only the projected columns, and compiled single-table `ExecuteDelete` and `ExecuteUpdate`. See [Roslyn Source Generators](/manual/client-interfaces/source-generators#sorting-and-paging).
 - Two-dimensional geographic data: WGS84 latitude/longitude points with spherical (haversine) distance, bounding boxes that cross the ±180° meridian, and a 2D spatial index (R-tree, quadtree or a Morton-ordered B-tree) so that radius and box queries over a million points do not scan the table. The current spatial support is three-dimensional Cartesian (`Vector3`) and scans.
 - Multi-target packages (`net8.0`, `net9.0`, `net10.0`, and `netstandard2.1` where the code allows), so that MAUI, Avalonia, WPF, WinUI, Unity and Blazor WebAssembly applications are not blocked by a `net10.0`-only asset, and a guide for migrating client applications from `Microsoft.Data.Sqlite` and EF Core.
 
