@@ -115,7 +115,7 @@ internal partial class Select
         {
             RowSerializer.DecodeCellsLocatingText(rowBytes, columns, raw.DecodeMask, raw.Mask, raw.Last, cells, raw.Offsets, raw.Lengths);
             RestoreJoinKey(side, rowId, raw.DecodeMask, cells);
-            if (!MatchesAllRaw(cells, columns, raw, side.Predicates, rowBytes))
+            if (!JoinMatchesAllRaw(cells, columns, raw, side.Predicates, rowBytes))
             {
                 return false;
             }
@@ -152,5 +152,58 @@ internal partial class Select
         }
 
         RestoreJoinKey(side, rowId, load.RestDecode, cells);
+    }
+
+    /// <summary>
+    /// Whether a hashed row meets every predicate: text columns in <paramref name="raw"/> are compared where they lie
+    /// in <paramref name="rowBytes"/>, the others read from <paramref name="cells"/>.
+    /// </summary>
+    /// <remarks>
+    /// The single-table scan has its own copy (<see cref="MatchesAllRaw"/>): sharing one method let the runtime
+    /// optimize it for whichever path ran first, and a scan run after a join was 25% slower.
+    /// </remarks>
+    private static bool JoinMatchesAllRaw(CellValue[] cells, IReadOnlyList<CatalogColumn> columns, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes)
+    {
+        for (int i = 0; i < predicates.Count; i++)
+        {
+            if (!JoinMatchesRaw(cells, columns, raw, predicates[i], rowBytes))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool JoinMatchesRaw(CellValue[] cells, IReadOnlyList<CatalogColumn> columns, RawTextColumns raw, TypedPredicate predicate, ReadOnlySpan<byte> rowBytes)
+    {
+        if (predicate.Branches is { } branches)
+        {
+            foreach (TypedPredicate[] branch in branches)
+            {
+                if (JoinMatchesAllRaw(cells, columns, raw, branch, rowBytes))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        int ordinal = predicate.Ordinal;
+        if (!raw.Mask[ordinal])
+        {
+            return Matches(predicate, cells[ordinal], columns[ordinal]);
+        }
+
+        int length = raw.Lengths[ordinal];
+        return predicate.Kind switch
+        {
+            TypedPredicateKind.IsNull => length < 0,
+            TypedPredicateKind.IsNotNull => length >= 0,
+
+            // A comparison with NULL is unknown: the row is not kept.
+            _ => length >= 0 && MatchesText(predicate, columns[ordinal], rowBytes.Slice(raw.Offsets[ordinal], length)),
+        };
     }
 }

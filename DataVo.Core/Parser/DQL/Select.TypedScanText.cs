@@ -117,18 +117,11 @@ internal partial class Select
     }
 
     /// <summary>Whether the current row meets every predicate, reading the located text columns from <paramref name="rowBytes"/>.</summary>
-    private static bool MatchesAllRaw(TypedScanState state, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes) =>
-        MatchesAllRaw(state.Cells, state.Columns, raw, predicates, rowBytes);
-
-    /// <summary>
-    /// Whether a row meets every predicate: text columns in <paramref name="raw"/> are compared where they lie in
-    /// <paramref name="rowBytes"/>, the others read from <paramref name="cells"/>.
-    /// </summary>
-    private static bool MatchesAllRaw(CellValue[] cells, IReadOnlyList<Column> columns, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes)
+    private static bool MatchesAllRaw(TypedScanState state, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes)
     {
         for (int i = 0; i < predicates.Count; i++)
         {
-            if (!MatchesRaw(cells, columns, raw, predicates[i], rowBytes))
+            if (!MatchesRaw(state, raw, predicates[i], rowBytes))
             {
                 return false;
             }
@@ -137,13 +130,13 @@ internal partial class Select
         return true;
     }
 
-    private static bool MatchesRaw(CellValue[] cells, IReadOnlyList<Column> columns, RawTextColumns raw, TypedPredicate predicate, ReadOnlySpan<byte> rowBytes)
+    private static bool MatchesRaw(TypedScanState state, RawTextColumns raw, TypedPredicate predicate, ReadOnlySpan<byte> rowBytes)
     {
         if (predicate.Branches is { } branches)
         {
             foreach (TypedPredicate[] branch in branches)
             {
-                if (MatchesAllRaw(cells, columns, raw, branch, rowBytes))
+                if (MatchesAllRaw(state, raw, branch, rowBytes))
                 {
                     return true;
                 }
@@ -155,7 +148,7 @@ internal partial class Select
         int ordinal = predicate.Ordinal;
         if (!raw.Mask[ordinal])
         {
-            return Matches(predicate, cells[ordinal], columns[ordinal]);
+            return Matches(predicate, state.Cells[ordinal], state.Columns[ordinal]);
         }
 
         int length = raw.Lengths[ordinal];
@@ -168,7 +161,7 @@ internal partial class Select
         }
 
         // A comparison with NULL is unknown: the row is not kept.
-        return length >= 0 && MatchesText(predicate, columns[ordinal], rowBytes.Slice(raw.Offsets[ordinal], length));
+        return length >= 0 && MatchesText(predicate, state.Columns[ordinal], rowBytes.Slice(raw.Offsets[ordinal], length));
     }
 
     /// <summary>Tests an equality or LIKE condition on the UTF-8 bytes of a stored text value.</summary>
