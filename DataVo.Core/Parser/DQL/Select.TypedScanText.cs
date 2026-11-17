@@ -117,11 +117,18 @@ internal partial class Select
     }
 
     /// <summary>Whether the current row meets every predicate, reading the located text columns from <paramref name="rowBytes"/>.</summary>
-    private static bool MatchesAllRaw(TypedScanState state, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes)
+    private static bool MatchesAllRaw(TypedScanState state, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes) =>
+        MatchesAllRaw(state.Cells, state.Columns, raw, predicates, rowBytes);
+
+    /// <summary>
+    /// Whether a row meets every predicate: text columns in <paramref name="raw"/> are compared where they lie in
+    /// <paramref name="rowBytes"/>, the others read from <paramref name="cells"/>.
+    /// </summary>
+    private static bool MatchesAllRaw(CellValue[] cells, IReadOnlyList<Column> columns, RawTextColumns raw, IReadOnlyList<TypedPredicate> predicates, ReadOnlySpan<byte> rowBytes)
     {
         for (int i = 0; i < predicates.Count; i++)
         {
-            if (!MatchesRaw(state, raw, predicates[i], rowBytes))
+            if (!MatchesRaw(cells, columns, raw, predicates[i], rowBytes))
             {
                 return false;
             }
@@ -130,13 +137,13 @@ internal partial class Select
         return true;
     }
 
-    private static bool MatchesRaw(TypedScanState state, RawTextColumns raw, TypedPredicate predicate, ReadOnlySpan<byte> rowBytes)
+    private static bool MatchesRaw(CellValue[] cells, IReadOnlyList<Column> columns, RawTextColumns raw, TypedPredicate predicate, ReadOnlySpan<byte> rowBytes)
     {
         if (predicate.Branches is { } branches)
         {
             foreach (TypedPredicate[] branch in branches)
             {
-                if (MatchesAllRaw(state, raw, branch, rowBytes))
+                if (MatchesAllRaw(cells, columns, raw, branch, rowBytes))
                 {
                     return true;
                 }
@@ -148,7 +155,7 @@ internal partial class Select
         int ordinal = predicate.Ordinal;
         if (!raw.Mask[ordinal])
         {
-            return Matches(predicate, state.Cells[ordinal], state.Columns[ordinal]);
+            return Matches(predicate, cells[ordinal], columns[ordinal]);
         }
 
         int length = raw.Lengths[ordinal];
@@ -161,7 +168,7 @@ internal partial class Select
         }
 
         // A comparison with NULL is unknown: the row is not kept.
-        return length >= 0 && MatchesText(predicate, state.Columns[ordinal], rowBytes.Slice(raw.Offsets[ordinal], length));
+        return length >= 0 && MatchesText(predicate, columns[ordinal], rowBytes.Slice(raw.Offsets[ordinal], length));
     }
 
     /// <summary>Tests an equality or LIKE condition on the UTF-8 bytes of a stored text value.</summary>
@@ -197,5 +204,81 @@ internal partial class Select
         {
             restMask[i] |= raw.Mask[i] && readAfterFilter[i];
         }
+    }
+
+    /// <summary>
+    /// The one text column a GROUP BY keys on, located in serialized rows so the group is found by its UTF-8 bytes:
+    /// on LSM a <c>GROUP BY Status</c> decoded a string per row only to look its group up (34 MB per million rows).
+    /// </summary>
+    private sealed class GroupTextColumn
+    {
+        /// <summary>The key column.</summary>
+        public required int Ordinal { get; init; }
+
+        /// <summary>The other columns the aggregates read after the filter, decoded as usual.</summary>
+        public required bool[] DecodeMask { get; init; }
+
+        /// <summary>Only the key column: located, not decoded.</summary>
+        public required bool[] LocateMask { get; init; }
+
+        /// <summary>The last column either mask names.</summary>
+        public required int Last { get; init; }
+
+        public required int[] Offsets { get; init; }
+
+        public required int[] Lengths { get; init; }
+    }
+
+    /// <summary>
+    /// Plans grouping by stored bytes: a single text GROUP BY column that no aggregate reads, that the filter has
+    /// not already decoded, and that is not the clustered key. Null otherwise.
+    /// </summary>
+    private static GroupTextColumn? TryPlanGroupText(IReadOnlyList<Column> columns, List<TypedAggregate> aggregates, int[] groupOrdinals, bool[] restMask, int clusteredOrdinal)
+    {
+        if (groupOrdinals.Length != 1)
+        {
+            return null;
+        }
+
+        int key = groupOrdinals[0];
+        if (!IsTextColumn(columns[key]) || !restMask[key] || key == clusteredOrdinal || aggregates.Exists(aggregate => aggregate.Ordinal == key))
+        {
+            return null;
+        }
+
+        bool[] decode = (bool[])restMask.Clone();
+        decode[key] = false;
+        var locate = new bool[columns.Count];
+        locate[key] = true;
+        return new GroupTextColumn
+        {
+            Ordinal = key,
+            DecodeMask = decode,
+            LocateMask = locate,
+            Last = Array.LastIndexOf(restMask, true),
+            Offsets = new int[columns.Count],
+            Lengths = new int[columns.Count],
+        };
+    }
+
+    /// <summary>
+    /// Decodes the aggregates' columns of a matched serialized row and returns its group, found by the stored bytes
+    /// of the text key: no string is built unless the key starts a group.
+    /// </summary>
+    private static int FindLocatedTextGroup(TypedScanState state, GroupTextColumn groupText, RowKey rowId, ReadOnlySpan<byte> rowBytes)
+    {
+        RowSerializer.DecodeCellsLocatingText(rowBytes, state.Columns, groupText.DecodeMask, groupText.LocateMask, groupText.Last, state.Cells, groupText.Offsets, groupText.Lengths);
+        RestoreClusteredKey(state, rowId, groupText.DecodeMask);
+        int length = groupText.Lengths[groupText.Ordinal];
+        bool added;
+        int group = length < 0
+            ? state.GroupKeys!.FindOrAdd(state.Columns[groupText.Ordinal], CellValue.Null, out added)
+            : state.GroupKeys!.FindOrAddUtf8(rowBytes.Slice(groupText.Offsets[groupText.Ordinal], length), out added);
+        if (added)
+        {
+            state.GroupStates!.Add();
+        }
+
+        return group;
     }
 }

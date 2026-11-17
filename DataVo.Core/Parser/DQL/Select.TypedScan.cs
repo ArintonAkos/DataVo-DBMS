@@ -111,6 +111,9 @@ internal partial class Select
         public List<string>? GroupColumnNames { get; init; }
         public GroupLookup? GroupKeys { get; init; }
         public TypedGroupStates? GroupStates { get; init; }
+
+        /// <summary>The one text GROUP BY column, located in serialized rows instead of decoded; null when there is none.</summary>
+        public GroupTextColumn? GroupText { get; init; }
         public long Matched;
     }
 
@@ -861,6 +864,7 @@ internal partial class Select
         bool[] restMask = needed.Select((need, i) => need && !filterMask[i]).ToArray();
         RawTextColumns? rawText = TryPlanRawText(columns, predicates, filterMask);
         DecodeRawTextAfterMatch(rawText, needed, restMask);
+        GroupTextColumn? groupText = TryPlanGroupText(columns, aggregates, groupOrdinals, restMask, clusteredOrdinal);
         return new TypedScanState
         {
             Columns = columns,
@@ -875,8 +879,9 @@ internal partial class Select
             Aggregates = aggregates,
             GroupOrdinals = groupOrdinals,
             GroupColumnNames = groupByColumns,
-            GroupKeys = new GroupLookup(),
+            GroupKeys = new GroupLookup(textKeys: groupText is not null),
             GroupStates = new TypedGroupStates(aggregates),
+            GroupText = groupText,
         };
     }
 
@@ -901,11 +906,18 @@ internal partial class Select
             }
         }
 
+        if (state.GroupText is { } groupText && typedCells.IsEmpty)
+        {
+            state.Sequence++;
+            Accumulate(state, FindLocatedTextGroup(state, groupText, rowId, rowBytes));
+            return true;
+        }
+
         Load(state, rowId, rowBytes, typedCells, state.RestMask);
         state.Sequence++;
         if (state.Aggregates is not null)
         {
-            Accumulate(state);
+            Accumulate(state, FindTypedGroup(state));
             return true;
         }
 
@@ -1133,10 +1145,9 @@ internal partial class Select
         return leftSequence.CompareTo(rightSequence);
     }
 
-    private static void Accumulate(TypedScanState state)
+    private static void Accumulate(TypedScanState state, int group)
     {
         state.Matched++;
-        int group = FindTypedGroup(state);
         TypedGroupStates groups = state.GroupStates!;
         List<TypedAggregate> aggregates = state.Aggregates!;
         for (int i = 0; i < aggregates.Count; i++)

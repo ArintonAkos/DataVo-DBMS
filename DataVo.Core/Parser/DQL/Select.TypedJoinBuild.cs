@@ -207,6 +207,7 @@ internal partial class Select
                 MarkFilterColumns(side.Predicates, DecodeMask);
             }
 
+            Load = PlanJoinBuildLoad(side, step.KeyOrdinal, filter, side.KeepMask!);
             bool bigIntKey = side.Columns[step.KeyOrdinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase);
             step.Table = new JoinHashTable(side.KeyOnly, side.Columns.Count, step.KeyOrdinal, bigIntKey, capacity);
         }
@@ -216,6 +217,9 @@ internal partial class Select
         public bool Filter { get; }
         public CellValue[] Cells { get; }
         public bool[] DecodeMask { get; }
+
+        /// <summary>How serialized rows are read: filter first, kept columns only for rows that pass.</summary>
+        public JoinBuildLoad Load { get; }
     }
 
     /// <summary>Scans every joined table into its hash table; false when a table cannot be scanned here.</summary>
@@ -249,9 +253,18 @@ internal partial class Select
     {
         JoinSide side = state.Side;
         CellValue[] cells = state.Cells;
-        LoadJoinCells(side, rowId, rowBytes, typedCells, state.DecodeMask, cells);
-        if ((state.Filter && !MatchesAll(side.Predicates, cells, side.Columns))
-            || !TryJoinKey(cells[state.Step.KeyOrdinal], out long key))
+        bool passed;
+        if (typedCells.IsEmpty)
+        {
+            passed = LoadSerializedBuildRow(side, state.Load, state.Filter, rowId, rowBytes, cells);
+        }
+        else
+        {
+            LoadJoinCells(side, rowId, rowBytes, typedCells, state.DecodeMask, cells);
+            passed = !state.Filter || MatchesAll(side.Predicates, cells, side.Columns);
+        }
+
+        if (!passed || !TryJoinKey(cells[state.Step.KeyOrdinal], out long key))
         {
             return true;
         }

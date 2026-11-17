@@ -653,6 +653,12 @@ internal partial class Select
             RowSerializer.DecodeCellsByOrdinal(rowBytes, side.Columns, mask, cells);
         }
 
+        RestoreJoinKey(side, rowId, mask, cells);
+    }
+
+    /// <summary>Clustered rows store the key cell as NULL (the row key holds it): puts it back when <paramref name="mask"/> reads it.</summary>
+    private static void RestoreJoinKey(JoinSide side, RowKey rowId, bool[] mask, CellValue[] cells)
+    {
         int key = side.ClusteredOrdinal;
         if (key >= 0 && mask[key] && cells[key].IsNull)
         {

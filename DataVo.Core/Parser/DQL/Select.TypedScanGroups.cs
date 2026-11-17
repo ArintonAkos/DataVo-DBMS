@@ -1,3 +1,4 @@
+using System.Text;
 using DataVo.Core.Execution;
 using DataVo.Core.Execution.Volcano;
 using DataVo.Core.Models.Catalog;
@@ -62,8 +63,11 @@ internal partial class Select
     /// they do there. A one-column key is looked up without allocating; a group's key values are boxed once, when
     /// the group is created. Keys of several columns use an <c>object[]</c> per row, as before.
     /// </summary>
-    private sealed class GroupLookup
+    private sealed class GroupLookup(bool textKeys = false)
     {
+        /// <summary>Text keys by their UTF-8 bytes, when the scan groups by one text column; see <see cref="FindOrAddUtf8"/>.</summary>
+        private readonly Utf8KeyTable? _utf8 = textKeys ? new Utf8KeyTable() : null;
+        private byte[] _encoded = new byte[64];
         private readonly Dictionary<int, int> _int32 = [];
         private readonly Dictionary<long, int> _int64 = [];
         private readonly Dictionary<object, int> _values = [];
@@ -115,6 +119,13 @@ internal partial class Select
                 return group;
             }
 
+            if (_utf8 is not null && cell.Type == CellType.String
+                && Utf8KeyTable.TryEncode(cell.AsString()!, ref _encoded) is var length and >= 0)
+            {
+                // A text key that arrived decoded joins the group its stored bytes would find.
+                return FindOrAddUtf8(_encoded.AsSpan(0, length), out added);
+            }
+
             object? value = StorageContext.ConvertCellForLegacyDictionary(column, cell);
             if (value is null)
             {
@@ -128,6 +139,22 @@ internal partial class Select
             }
 
             return found;
+        }
+
+        /// <summary>
+        /// The group of a one-column text key given as its stored UTF-8 bytes. The key is decoded into a string only
+        /// when it starts a group. Only a lookup made for text keys accepts this.
+        /// </summary>
+        public int FindOrAddUtf8(ReadOnlySpan<byte> utf8, out bool added)
+        {
+            added = !_utf8!.TryGetValue(utf8, out int group);
+            if (added)
+            {
+                group = AddSingle(Encoding.UTF8.GetString(utf8));
+                _utf8.Add(utf8, group);
+            }
+
+            return group;
         }
 
         /// <summary>The group of a key of several columns.</summary>
