@@ -36,7 +36,7 @@ readonly support_rows=(
 )
 
 for support_file in \
-  "$ROOT/docs/manual/preface/alpha-scope.md" \
+  "$ROOT/docs/manual/preface/project-status.md" \
   "$ROOT/docs/features/unity-and-godot.md"; do
   for row in "${support_rows[@]}"; do
     require_text "$support_file" "$row"
@@ -44,11 +44,14 @@ for support_file in \
 done
 
 require_text \
-  "$ROOT/README.md" \
-  "Unity is an evaluation target, not a supported runtime."
+  "$ROOT/docs/manual/preface/alpha-scope.md" \
+  "| Unity | Evaluation target |"
 require_text \
   "$ROOT/README.md" \
-  "A narrow macOS IL2CPP smoke proof is recorded for Unity 6000.5.4f1 only."
+  "**Unity** is an evaluation target, not a supported runtime."
+require_text \
+  "$ROOT/README.md" \
+  "Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design."
 require_text \
   "$ROOT/docs/features/setup-and-packaging.md" \
   "The public DataVo.Core package currently contains only a net10.0 asset."
