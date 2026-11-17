@@ -766,6 +766,68 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         }
     }
 
+    /// <summary>
+    /// Visits every live row of a table in position order: a serialized row as its bytes, a typed row as its cells.
+    /// Stops when <paramref name="visit"/> returns false. Unlike <see cref="ReadAllRows"/> nothing table-sized is
+    /// built: the serialized rows of each block of positions are noted under the read lock, and the visitor runs
+    /// outside it, so it may read the table again. Rows added after the visit starts are not part of it.
+    /// </summary>
+    internal void VisitAllRows<TState>(string databaseName, string tableName, ref TState state, StoredRowVisitor<TState> visit)
+    {
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return;
+        }
+
+        TableRows rows = store.Rows;
+        int count = rows.Count;
+        byte[]?[] block = System.Buffers.ArrayPool<byte[]?>.Shared.Rent(Math.Min(count, VisitBlockRows));
+        var reader = new PackedRowReader();
+        try
+        {
+            for (int start = 0; start < count; start += VisitBlockRows)
+            {
+                int end = Math.Min(count, start + VisitBlockRows);
+                NoteRawRows(store, rows, start, end, block);
+                for (int position = start; position < end; position++)
+                {
+                    bool keepGoing = block[position - start] is { } raw
+                        ? visit(ref state, position + 1, raw, default)
+                        : !rows.TryReadTypedCells(position, ref reader, out ReadOnlySpan<CellValue> cells) || visit(ref state, position + 1, default, cells);
+                    if (!keepGoing)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            reader.Dispose();
+            System.Buffers.ArrayPool<byte[]?>.Shared.Return(block, clearArray: true);
+        }
+    }
+
+    /// <summary>Positions per read-lock hold in <see cref="VisitAllRows{TState}"/>, so writers run between blocks.</summary>
+    private const int VisitBlockRows = 4096;
+
+    /// <summary>Copies the serialized rows of positions <c>[start, end)</c> into <paramref name="block"/> (null for any other position).</summary>
+    private static void NoteRawRows(TableStore store, TableRows rows, int start, int end, byte[]?[] block)
+    {
+        store.Lock.EnterReadLock();
+        try
+        {
+            for (int position = start; position < end; position++)
+            {
+                block[position - start] = rows.RawAt(position);
+            }
+        }
+        finally
+        {
+            store.Lock.ExitReadLock();
+        }
+    }
+
     void ITypedRowStorageEngine.VisitTypedRows<TState>(string databaseName, string tableName, ref TState state, TypedCellsVisitor<TState> visit)
     {
         if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))

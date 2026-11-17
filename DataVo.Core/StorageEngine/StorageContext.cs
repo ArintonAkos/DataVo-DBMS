@@ -633,10 +633,19 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     {
         if (LsmEngine is { } lsm)
         {
-            var box = (State: state, Visit: visit);
-            lsm.ScanStoredRows(databaseName, tableName, lower, upper, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
-                b.Visit(ref b.State, rowId, bytes, default));
-            state = box.State;
+            ScanLsmRows(lsm, tableName, databaseName, lower, upper, ref state, visit);
+            return;
+        }
+
+        if (_storageEngine is InMemoryStorageBackend memory)
+        {
+            var rangeScan = new TypedRangeScan<TState>(state, visit, lower, upper);
+            memory.VisitAllRows(databaseName, tableName, ref rangeScan, static (ref TypedRangeScan<TState> scan, long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed) =>
+            {
+                RowKey key = rowId;
+                return !InRange(key, scan.Lower, scan.Upper) || scan.Visit(ref scan.State, key, raw, typed);
+            });
+            state = rangeScan.State;
             return;
         }
 
@@ -658,6 +667,41 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
                 break;
             }
         }
+    }
+
+    /// <summary>Unflushed LSM versions captured per merge by <see cref="ScanLsmRows{TState}"/>; the merge's pooled buffer keeps this many.</summary>
+    private const int LsmOverlayPage = 8192;
+
+    /// <summary>
+    /// Walks an LSM table's live rows in key order, capturing at most <see cref="LsmOverlayPage"/> unflushed
+    /// versions per merge and resuming after the last key each merge covered. A whole-table capture of a large
+    /// memtable allocated a fresh buffer on every scan (about 32 bytes per unflushed row).
+    /// </summary>
+    private static void ScanLsmRows<TState>(LsmStorageEngine lsm, string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    {
+        var box = (State: state, Visit: visit, Stopped: false);
+        RowKey? start = lower;
+        while (true)
+        {
+            lsm.ScanStoredRows(
+                databaseName,
+                tableName,
+                start,
+                upper,
+                ref box,
+                static (ref (TState State, RawRowVisitor<TState> Visit, bool Stopped) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
+                    !(b.Stopped = !b.Visit(ref b.State, rowId, bytes, default)),
+                LsmOverlayPage,
+                out RowKey? coveredThrough);
+            if (box.Stopped || coveredThrough is not { } covered || (covered.High == ulong.MaxValue && covered.Low == ulong.MaxValue))
+            {
+                break;
+            }
+
+            start = covered.Low == ulong.MaxValue ? new RowKey(covered.High + 1, 0) : new RowKey(covered.High, covered.Low + 1);
+        }
+
+        state = box.State;
     }
 
     /// <summary>

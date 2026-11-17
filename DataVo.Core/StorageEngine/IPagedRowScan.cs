@@ -2,6 +2,12 @@ using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core.StorageEngine;
 
+/// <summary>
+/// Receives one stored row: serialized bytes, or the cells of a typed row (then the bytes are empty). Both are
+/// borrowed for the call. Returns false to stop.
+/// </summary>
+internal delegate bool StoredRowVisitor<TState>(ref TState state, long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed);
+
 /// <summary>Visits one row of a page: its serialized bytes, or a typed row (then the bytes are empty).</summary>
 /// <remarks>The bytes are only valid during the call.</remarks>
 internal delegate void PagedRowVisitor<TState>(ref TState state, long rowId, ReadOnlySpan<byte> raw, ReadOnlySpan<CellValue> typed);
