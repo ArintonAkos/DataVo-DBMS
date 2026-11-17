@@ -179,7 +179,7 @@ A compiled selector can build a scalar, a tuple, an anonymous type, a class or r
 
 A selector that uses the row itself (`p => p`, `p => Describe(p)`), captures a variable or contains a lambda reads models and runs as written, and the build warns with `DATAVOL004`. A projection whose filter or sort runs in memory also reads models, since the filter and the keys need them.
 
-Inside an explicit transaction the engine reads the transaction's view of the table through its general path, which decodes whole rows. The statement still selects only the projected columns and no model is built, but the text columns a projection leaves out are decoded there.
+Inside an explicit transaction the engine reads the transaction's view of the table: the committed rows its snapshot sees, the old versions of rows other sessions changed since it began, and its own uncommitted inserts, updates and deletes. A single-table projection still decodes only the columns it selects, filters on and sorts by, so a wide text column it leaves out is not decoded there either. The rows the transaction itself wrote are serialized once per query to be read the same way.
 
 ### Bulk Deletes And Updates
 

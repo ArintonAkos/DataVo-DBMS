@@ -27,7 +27,7 @@ namespace DataVo.Core.StorageEngine;
 /// context.InsertOneIntoTable(new Dictionary&lt;string, object?&gt; { ["Id"] = 1 }, "Users", "DemoDb");
 /// </code>
 /// </example>
-public class StorageContext(DataVoConfig config) : IDisposable
+public partial class StorageContext(DataVoConfig config) : IDisposable
 {
     /// <summary>
     /// Gets the configuration that created this context.
@@ -616,23 +616,28 @@ public class StorageContext(DataVoConfig config) : IDisposable
     /// </summary>
     internal bool ScanTableRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
     {
-        if (MvccExecutionScope.CurrentSnapshot is not null)
+        if (!CanStreamRows(tableName, databaseName))
         {
             return false;
         }
 
+        ScanCommittedRows(tableName, databaseName, lower, upper, ref state, visit);
+        return true;
+    }
+
+    /// <summary>
+    /// Walks the committed rows with keys in <c>[lower, upper)</c>, ignoring snapshots; callers first check that
+    /// committed rows answer their read.
+    /// </summary>
+    private void ScanCommittedRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    {
         if (LsmEngine is { } lsm)
         {
-            if (lsm.HasStagedWrites(databaseName, tableName))
-            {
-                return false;
-            }
-
             var box = (State: state, Visit: visit);
             lsm.ScanStoredRows(databaseName, tableName, lower, upper, ref box, static (ref (TState State, RawRowVisitor<TState> Visit) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
                 b.Visit(ref b.State, rowId, bytes, default));
             state = box.State;
-            return true;
+            return;
         }
 
         if (_storageEngine is ITypedRowStorageEngine typedStorage)
@@ -642,7 +647,7 @@ public class StorageContext(DataVoConfig config) : IDisposable
             state = typedScan.State;
             if (typedScan.Stopped)
             {
-                return true;
+                return;
             }
         }
 
@@ -653,8 +658,6 @@ public class StorageContext(DataVoConfig config) : IDisposable
                 break;
             }
         }
-
-        return true;
     }
 
     /// <summary>

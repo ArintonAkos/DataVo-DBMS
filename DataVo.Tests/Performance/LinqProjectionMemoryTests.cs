@@ -74,8 +74,8 @@ public sealed class LinqProjectionMemoryTests : IDisposable
     [MemberData(nameof(Modes))]
     public void ProjectionInsideATransaction_SeesTheTransactionsOwnWrites(StorageMode mode)
     {
-        // Inside a transaction the engine's general path reads whole rows (it overlays the transaction's
-        // buffered writes), so only the result, not the decoded columns, is checked here.
+        // Inside a transaction the rows come from its snapshot with its own writes overlaid; the projection
+        // still decodes only the columns it reads, so the wide text column is never turned into strings.
         using DataVoContext db = Open(mode);
         DataVoTable<Document> documents = db.Table<Document>();
         db.Execute("BEGIN");
@@ -83,11 +83,18 @@ public sealed class LinqProjectionMemoryTests : IDisposable
         {
             Assert.Equal(Rows / 7, documents.Where(0, static (d, kind) => d.Kind == kind).ExecuteUpdate(static set => set.Set(d => d.Kind, 9)));
             Assert.Equal(1, documents.Where(1995, static (d, id) => d.Id == id).ExecuteDelete());
+            db.Insert(new Document { Id = Rows + 1, Kind = 9, Body = "inserted" });
             var query = documents.Where(8, static (d, kind) => d.Kind > kind).OrderByDescending(static d => d.Id).Select(static d => d.Id).Take(3);
 
             Assert.True(query.IsCompiled);
-            Assert.Equal([1988, 1981, 1974], query.ToList());
-            Assert.Equal(Rows / 7 - 1, documents.Where(9, static (d, kind) => d.Kind == kind).Select(static d => d.Body.Length).Count());
+            Assert.Equal([Rows + 1, 1988, 1981], query.ToList());
+            Assert.Equal(Rows / 7, documents.Where(9, static (d, kind) => d.Kind == kind).Select(static d => d.Body.Length).Count());
+
+            long models = Measure(() => documents.Where(0, static (d, min) => d.Kind >= min).ToList().Count);
+            long ids = Measure(() => documents.Where(0, static (d, min) => d.Kind >= min).Select(static d => d.Id).ToList().Count);
+            long bodies = Rows * BodyLength * 2L;
+            Assert.True(models > bodies, $"models allocated {models:N0} B");
+            Assert.True(models - ids > bodies * 9 / 10, $"the projection allocated {ids:N0} B against {models:N0} B for models: the text column was decoded");
         }
         finally
         {

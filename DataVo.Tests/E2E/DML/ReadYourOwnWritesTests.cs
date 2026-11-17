@@ -105,10 +105,11 @@ public sealed class ReadYourOwnWritesTests : IDisposable
         Ok(db, "BEGIN", _tx);
         Ok(db, "INSERT INTO T (Id, V, G) VALUES (3, 30, 7)", _tx);
 
-        Assert.Equal(3, Assert.Single(Ok(db, "SELECT COUNT(*) AS C FROM T", _tx).Data)["C"]);
+        // The typed scan answers these inside a transaction too, so COUNT is a long, as it is outside one.
+        Assert.Equal(3L, Assert.Single(Ok(db, "SELECT COUNT(*) AS C FROM T", _tx).Data)["C"]);
         Assert.Equal(60, Convert.ToInt32(Assert.Single(Ok(db, "SELECT SUM(V) AS S FROM T", _tx).Data)["S"]));
         Assert.Equal(3, Assert.Single(Ok(db, "SELECT Id FROM T ORDER BY V DESC LIMIT 1", _tx).Data)["Id"]);
-        Assert.Equal(3, Assert.Single(Ok(db, "SELECT G, COUNT(*) AS C FROM T GROUP BY G", _tx).Data)["C"]);
+        Assert.Equal(3L, Assert.Single(Ok(db, "SELECT G, COUNT(*) AS C FROM T GROUP BY G", _tx).Data)["C"]);
     }
 
     [Theory]

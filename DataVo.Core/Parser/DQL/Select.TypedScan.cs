@@ -117,8 +117,7 @@ internal partial class Select
     /// <summary>Returns the matched rows, or null when the query needs the general path.</summary>
     private ListedTable? TryEvaluateTypedSingleTable()
     {
-        if (_activeSnapshot is not null
-            || ast.Ctes.Count > 0
+        if (ast.Ctes.Count > 0
             || _model.JoinStatement.ContainsJoin()
             || _model.FromTable is null
             || _model.FromTable.IsMaterialized
@@ -214,6 +213,12 @@ internal partial class Select
             return null;
         }
 
+        if (_activeSnapshot is not null)
+        {
+            // Inside a transaction the rows come from its snapshot, which committed indexes do not describe.
+            return ScanSnapshotRows(engine, tableName, databaseName, lower, upper, state);
+        }
+
         List<RowKey>? keyRangeRows = indexLookup is null && clustered is null
             ? TryPrimaryKeyRangeRows(engine, tableName, databaseName, columns, primaryKeys, predicates)
             : null;
@@ -250,6 +255,21 @@ internal partial class Select
             RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
         }
 
+        return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
+    }
+
+    /// <summary>
+    /// Answers the typed scan from the transaction's snapshot: committed rows it sees, retained images and its own
+    /// writes, each decoded only in the columns the query reads. Null when the snapshot cannot be streamed here.
+    /// </summary>
+    private ListedTable? ScanSnapshotRows(DataVoEngine engine, string tableName, string databaseName, RowKey? lower, RowKey? upper, TypedScanState state)
+    {
+        if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
+        {
+            return null;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
         return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
     }
 
