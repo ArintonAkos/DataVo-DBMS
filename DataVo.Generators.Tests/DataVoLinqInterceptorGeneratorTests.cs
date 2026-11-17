@@ -2,54 +2,13 @@ using DataVo.Core;
 using DataVo.Generators.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using static DataVo.Generators.Tests.LinqGeneratorHarness;
 
 namespace DataVo.Generators.Tests;
 
 /// <summary>What the interceptor generator translates, what it leaves to scan, and what it tells the developer.</summary>
 public class DataVoLinqInterceptorGeneratorTests
 {
-    private const string Model = """
-        using System;
-        using DataVo.Core;
-        using DataVo.Core.Annotations;
-
-        namespace App
-        {
-            [DataVoTable("players")]
-            public sealed class Player
-            {
-                [PrimaryKey] public int Id { get; set; }
-                [Indexed] public int Level { get; set; }
-                [Indexed] public string Name { get; set; } = "";
-                public string? Guild { get; set; }
-                public int? Score { get; set; }
-                public bool IsActive { get; set; }
-                public float Speed { get; set; }
-                public long Gold { get; set; }
-                public double? Rating { get; set; }
-                public DataVoDate Joined { get; set; }
-                public DateOnly? Seen { get; set; }
-            }
-
-            public static class Limits
-            {
-                public const int Max = 60;
-                public static readonly int Soft = 40;
-                private static readonly int Hidden = 1;
-                public static int Peek() => Hidden;
-            }
-
-            public static class Queries
-            {
-                public static object? Run(DataVoContext db, int target, string? text, int? maybe)
-                {
-                    DataVoTable<Player> players = db.Table<Player>();
-                    return BODY;
-                }
-            }
-        }
-        """;
-
     [Theory]
     [InlineData("players.FirstOrDefault(target, static (p, id) => p.Id == id)", "Id = @p0", "new global::DataVo.Core.DataVoQueryParameter(\"p0\", (int)(state))")]
     [InlineData("players.FirstOrDefault(p => p.Id == 42)", "Id = @p0", "(\"p0\", 42)")]
@@ -439,45 +398,5 @@ public class DataVoLinqInterceptorGeneratorTests
         IncrementalGeneratorRunStep[] outputs = [.. driver.GetRunResult().Results[0].TrackedOutputSteps.SelectMany(static step => step.Value)];
         Assert.NotEmpty(outputs);
         Assert.All(outputs.SelectMany(static step => step.Outputs), output => Assert.Equal(IncrementalStepRunReason.Cached, output.Reason));
-    }
-
-    private static (string Generated, Diagnostic[] Diagnostics) Generate(string call)
-    {
-        Compile(call, LanguageVersion.Latest, out GeneratorRunResult result);
-        return (string.Concat(result.GeneratedSources.Select(static source => source.SourceText.ToString())), [.. result.Diagnostics]);
-    }
-
-    private static Compilation Compile(string call, LanguageVersion version, out GeneratorRunResult linq, bool interceptors = true, string feature = "InterceptorsNamespaces")
-    {
-        CSharpParseOptions parse = ParseOptions(version, interceptors ? feature : null);
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [new DataVoTableGenerator().AsSourceGenerator(), new DataVoLinqInterceptorGenerator().AsSourceGenerator()],
-            parseOptions: parse);
-        driver = driver.RunGeneratorsAndUpdateCompilation(CreateCompilation(Model.Replace("BODY", call), parse), out Compilation output, out _);
-        linq = driver.GetRunResult().Results[1];
-        return output;
-    }
-
-    private static CSharpParseOptions ParseOptions(LanguageVersion version, string? feature)
-    {
-        var options = new CSharpParseOptions(version);
-        return feature is null ? options : options.WithFeatures([new KeyValuePair<string, string>(feature, "Other.Namespace;DataVo.Generated")]);
-    }
-
-    private static CSharpCompilation CreateCompilation(string source, CSharpParseOptions parse)
-    {
-        string[] platform = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
-        MetadataReference[] references =
-        [
-            .. platform.Where(static path => Path.GetFileName(path).StartsWith("System.", StringComparison.Ordinal) || Path.GetFileName(path) == "netstandard.dll")
-                .Select(static path => MetadataReference.CreateFromFile(path)),
-            MetadataReference.CreateFromFile(typeof(DataVoContext).Assembly.Location),
-        ];
-
-        return CSharpCompilation.Create(
-            "LinqGeneratorTest",
-            [CSharpSyntaxTree.ParseText(source, parse, path: "Query.cs")],
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
     }
 }

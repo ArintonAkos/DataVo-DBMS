@@ -15,6 +15,11 @@ public sealed class InventoryItem
     public string? Name { get; set; }
 }
 
+[DataVoTable("quests")]
+public sealed record Quest([PrimaryKey] int Id, string Title, int Reward, bool Done);
+
+public sealed record QuestLine(int Id, string Title);
+
 [DataVoTable("probes")]
 public sealed class Probe
 {
@@ -75,6 +80,8 @@ internal static class GeneratedTableSmoke
 
         Require(threw, "A minimum over no rows did not throw.");
 
+        ComposedQueries(second);
+
         // Spatial queries over a Vector3 column, with the HNSW index and with the exact scan.
         second.EnsureProbeTable();
         for (int cell = 0; cell < 64; cell++)
@@ -118,6 +125,33 @@ internal static class GeneratedTableSmoke
         }
 
         Require(corner == new Vector3(3, 3, 3), "StreamRef read the wrong Vector3.");
+    }
+
+    /// <summary>Sorting, paging, column-minimal projections and bulk changes, compiled at build time.</summary>
+    private static void ComposedQueries(DataVoContext db)
+    {
+        db.EnsureQuestTable();
+        for (int id = 1; id <= 12; id++)
+        {
+            db.Insert(new Quest(id, $"quest-{id}", id * 10 % 70, id % 3 == 0));
+        }
+
+        DataVoTable<Quest> quests = db.Table<Quest>();
+        var top = quests.Where(static q => !q.Done).OrderByDescending(static q => q.Reward).ThenBy(static q => q.Id).Skip(1).Take(3);
+        Require(top.IsCompiled, "The sorted, paged query was not compiled at build time.");
+        Require(string.Join(",", top.Select(static q => q.Id).ToList()) == "4,11,10", "OrderBy, ThenBy, Skip and Take returned the wrong rows.");
+
+        var lines = quests.OrderBy(static q => q.Id).Take(2).Select(static q => new QuestLine(q.Id, q.Title.ToUpperInvariant()));
+        Require(lines.IsCompiled && lines.Sql == "SELECT Id, Title FROM quests ORDER BY Id LIMIT @limit", "The projection did not select only its columns.");
+        Require(lines.FirstOrDefault() == new QuestLine(1, "QUEST-1"), "A compiled record projection built the wrong value.");
+
+        var anonymous = quests.Where(4, static (q, min) => q.Reward > min).Select(static q => new { q.Title, Doubled = q.Reward * 2 }).ToList();
+        Require(anonymous.Count == 11 && anonymous[0].Doubled == 20, "A compiled anonymous projection built the wrong values.");
+        Require(quests.Take(0).Count() == 0 && quests.Skip(-5).Count() == 12 && !quests.Skip(12).Any(), "Skip or Take edge cases did not match LINQ.");
+
+        Require(quests.Where(static q => q.Done).ExecuteUpdate(5, static (set, bonus) => set.Set(q => q.Reward, q => q.Reward + bonus)) == 4, "ExecuteUpdate changed the wrong number of rows.");
+        Require(quests.Where(12, static (q, id) => q.Id == id).Select(static q => q.Reward).SingleOrDefault() == 55, "ExecuteUpdate arithmetic was wrong.");
+        Require(quests.Where(static q => q.Reward < 25).ExecuteDelete() == 4 && quests.Count() == 8, "ExecuteDelete removed the wrong rows.");
     }
 
     private static void Require(bool condition, string message)
