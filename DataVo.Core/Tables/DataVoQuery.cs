@@ -16,7 +16,7 @@ namespace DataVo.Core;
 /// Player? any = active.FirstOrDefault();
 /// </code>
 /// </example>
-public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
+public readonly partial struct DataVoQuery<T, TState> : IEnumerable<T>
 {
     private readonly DataVoTable<T> _table;
     private readonly TState _state;
@@ -325,7 +325,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    private DataVoTable<T> Table => _table ?? throw new InvalidOperationException("This query was not created by a DataVoTable.");
+    internal DataVoTable<T> Table => _table ?? throw new InvalidOperationException("This query was not created by a DataVoTable.");
 
     /// <summary>Enumerates a query's rows.</summary>
     public struct Enumerator : IEnumerator<T>
@@ -399,12 +399,13 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
         public readonly void Dispose() => _rows?.Dispose();
 
         /// <summary>Counts the rows left, building a model only when the predicate has to see it.</summary>
-        internal int CountRemaining()
+        /// <param name="limit">Stop after this many rows, or 0 to count them all.</param>
+        internal int CountRemaining(int limit = 0)
         {
             int count = 0;
             if (_filter is not null || _rows is null)
             {
-                while (MoveNext())
+                while ((limit == 0 || count < limit) && MoveNext())
                 {
                     count++;
                 }
@@ -412,7 +413,7 @@ public readonly struct DataVoQuery<T, TState> : IEnumerable<T>
                 return count;
             }
 
-            while (_rows.MoveNext())
+            while ((limit == 0 || count < limit) && _rows.MoveNext())
             {
                 count++;
             }

@@ -519,9 +519,9 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
     /// <summary>Streams the rows meeting a condition, or all rows when there is none.</summary>
     internal IEnumerable<DataVoRow> Stream(string? where, DataVoQueryParameter[] parameters)
     {
-        string sql = where is null
-            ? _scanSql ??= $"SELECT {_info.ColumnList} FROM {_info.TableName}"
-            : $"SELECT {_info.ColumnList} FROM {_info.TableName} WHERE {where}";
+        string sql = string.IsNullOrEmpty(where)
+            ? _scanSql ??= DataVoSql.Select(_info.ColumnList, _info.TableName, null, null, false, false)
+            : DataVoSql.Select(_info.ColumnList, _info.TableName, where, null, false, false);
         return QueryStream.Open(Context.Engine, sql, parameters, Context.SessionId);
     }
 
@@ -548,7 +548,7 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
                 return raced;
             }
 
-            string sql = $"SELECT {_info.ColumnList} FROM {_info.TableName} WHERE {where}";
+            string sql = DataVoSql.Select(_info.ColumnList, _info.TableName, where, null, false, false);
             DataVoPreparedStatement prepared = Context.Prepare(limit > 0 ? $"{sql} LIMIT {limit}" : sql);
             Volatile.Write(ref statements[slot], prepared);
             return prepared;

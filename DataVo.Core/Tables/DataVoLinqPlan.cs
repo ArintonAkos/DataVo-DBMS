@@ -190,7 +190,10 @@ public abstract class DataVoLinqPlan<T, TState>
             : Execute(table, state, _unique ? All : First, borrowed: true).Data.Count > 0;
 
     /// <summary>Counts the matching rows without building them, when the plan has a compiled condition.</summary>
-    internal bool TryCountMatching(DataVoTable<T> table, TState state, out int count)
+    internal bool TryCountMatching(DataVoTable<T> table, TState state, out int count) => TryCountMatching(table, state, 0, out count);
+
+    /// <summary>Counts the matching rows up to <paramref name="limit"/> (0 for all) without building them, when the plan has a compiled condition.</summary>
+    internal bool TryCountMatching(DataVoTable<T> table, TState state, int limit, out int count)
     {
         if (_unique)
         {
@@ -198,8 +201,14 @@ public abstract class DataVoLinqPlan<T, TState>
             return false;
         }
 
-        return TryCount(table, state, 0, out count);
+        return TryCount(table, state, limit, out count);
     }
+
+    /// <summary>Gets the condition as SQL, or <see langword="null"/> when the plan reads every row.</summary>
+    internal string? Condition => _where.Length == 0 ? null : _where;
+
+    /// <summary>Binds a state value to the condition's parameters.</summary>
+    internal DataVoQueryParameter[] Bind(TState state) => Parameters(state);
 
     /// <summary>Opens a paged scan of the matching rows.</summary>
     internal IEnumerable<DataVoRow> Stream(DataVoTable<T> table, TState state) => table.Stream(_where, Parameters(state));
