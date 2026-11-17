@@ -5,7 +5,7 @@
 
 DataVo ships as four NuGet packages. Install only the ones you need: `DataVo.Core` is the engine and everything else builds on it.
 
-The current release is **v0.2.0-rc.3 (Release Candidate)**, so include `--prerelease` when you add a package. See [Project Status & Stability](/manual/preface/project-status) for what that means.
+The latest published packages are **0.2.0-rc.3 (release candidate)**, so include `--prerelease` when you add a package. The v0.3 and v0.4 features described in this manual are not in those packages yet; to use them, build the packages from the repository with `dotnet pack DataVo.sln -c Release`, which writes them to `artifacts/packages`, and add that folder as a package source. See [Project Status & Stability](/manual/preface/project-status) for what that means.
 
 ## Packages
 

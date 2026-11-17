@@ -1,93 +1,81 @@
 # Roadmap
 
-DataVo's roadmap separates completed **v0.2 Release Candidate (`v0.2.0-rc.3`)** milestones from active **v0.3 HTAP & Tooling** engineering. The core design principle remains unchanged: predictable in-process storage, explicit durability contracts, locked Native AOT compliance, and allocation-aware execution paths.
+DataVo's milestones are numbered by what they change in the engine. The latest published NuGet packages are **0.2.0-rc.3**; **v0.3** and **v0.4** are complete in the repository but not yet published, and **v0.5** is planned. The principles behind every milestone are the same: one process owns its data, durability is an explicit setting with a stated contract, `DataVo.Core` stays Native AOT clean, and a fast path either returns exactly what the general path would or declines.
 
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./app_data",
-    LsmStrictFsync = true
-});
-```
+## v0.2: the embedded engine (published as 0.2.0-rc.3)
 
-## Completed v0.2 Milestones (`v0.2.0-rc.3`)
+- **LSM storage.** A commit log, arena-backed MemTables, background SSTable flushes and compaction. `LsmStrictFsync = true` (the default) acknowledges a commit only after the log is on stable storage. Tables whose primary key is one `INT` or `GUID` column are clustered: rows are stored under their key, which roughly halves the footprint of an integer-keyed table compared with a separate primary-key index.
+- **Native AOT.** `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers (`IL2026`, `IL3050`) as errors.
+- **Allocation-free reads.** In-memory primary-key lookups that skip SQL parsing and row dictionaries, and `StreamRef()`/`RowRef` table scans that allocate nothing.
+- **Vector search.** `VECTOR(n)` columns, `HNSW` and `FLAT` indexes, cosine (`<=>`) and Euclidean (`<->`) distance with SIMD kernels.
+- **Packaging.** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore` and `DataVo.Generators` on nuget.org as prereleases, published from CI with NuGet Trusted Publishing.
 
-The v0.2 release line has completed its foundational embedded engine milestones and is backed by 2,358 passing tests:
+## v0.3: columnar indexes and compact rows (complete, unpublished)
 
-- **LSM Storage Stability & Clustered Keys:** WAL-backed arena MemTables, background SSTable flushes, strict `fsync` durability (`LsmStrictFsync = true`), and clustered `INT`/`GUID` primary keys that halve on-disk footprint.
-- **Locked Native AOT:** `DataVo.Core` and `DataVo.Data` enforce trim and AOT analyzers (`IL2026`/`IL3050`) as build errors.
-- **Zero-Allocation In-Memory Fast Path:** Primary-key point lookups bypass SQL parsing and dictionary materialization (`56 B` ADO.NET reader wrapper, ~`405 ns`), alongside zero-allocation `StreamRef()` / `RowRef` table scans.
-- **SIMD Vector Search:** Built-in `VECTOR(n)` columns (`VEC2`, `VEC3`, `VEC4` shorthands), `HNSW` and `FLAT` indexes, and SIMD-accelerated cosine (`<=>`) and Euclidean/L2 (`<->`) distance operators.
-- **NuGet Release Candidate Packaging:** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore`, and `DataVo.Generators` are published to nuget.org via CI Trusted Publishing (`--prerelease`).
+- **Columnar indexes** (`[Columnar]` on a typed model, `CREATE INDEX ... USING COLUMNAR` in SQL). The marked columns are kept a second time as contiguous column buffers, and single-table `COUNT`, `SUM`, `AVG`, `MIN` and `MAX` with numeric `AND`/`OR` filters are answered from those buffers with SIMD kernels instead of from rows.
+- **Compact in-memory rows.** `FlatRowStore` packs rows into fixed-width cells in contiguous buffers, read through `PackedKeyReader<T>`: 49.2 bytes per row in the measured table, 13 times less than the previous object-per-row layout, and a 52.1 ns primary-key lookup.
 
-```bash
-dotnet add package DataVo.Core --prerelease
-dotnet add package DataVo.Data --prerelease
-dotnet add package DataVo.EntityFrameworkCore --prerelease
-dotnet add package DataVo.Generators --prerelease
-```
+## v0.4: out-of-core columns, SQL and vector correctness, typed execution (complete, unpublished)
 
-## Active v0.3 Roadmap: HTAP, Compact Rows & Wire Tooling
+v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a cross-engine oracle found, and moves the common SQL shapes onto typed paths. Its final measurements are in [`2026-11-16-v04-final/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-16-v04-final) and explained in [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite).
 
-Active engineering for **v0.3** focuses on closing the analytical scan gap with columnar engines while preserving DataVo's sub-microsecond OLTP point lookups:
+**Storage**
 
-### 1. Columnar Indexes for HTAP (Hybrid Transactional/Analytical Processing)
+- **Columnar SSTables (format version 8).** Flush and compaction write the columnar index's columns into each `.sst` file as 4,096-row segments, with NULL and NaN masks, runs of deleted keys, and a min/max zone map per chunk. Only the unflushed tail of a table is held in memory, so opening a database does not rebuild the index, and a scan skips any chunk whose zone map rules out the predicate. Compaction merges segments as a stream instead of materializing them.
+- **Shadow masks and delete vectors.** A row in an SSTable segment can be replaced or deleted by a newer file or by the unflushed tail. Each SSTable keeps a delete vector, a bit per row for the chunks that have such rows, built for one set of live files and extended incrementally when the set changes; the rows the tail shadows are marked per scan in a reused mask that grows as the tail grows. A columnar scan therefore never counts a replaced or deleted row.
 
-While DataVo v0.2 leads SQLite on compiled in-memory aggregates and OLTP point lookups, full analytical table scans over 1M+ rows remain faster on pure column stores like DuckDB. In v0.3, DataVo is introducing **Columnar Indexes** so tables can maintain synchronized columnar projections alongside row storage, enabling SIMD-vectorized analytical scans, filtered aggregations, and `GROUP BY` pipelines directly on contiguous column buffers.
+**Correctness.** A benchmark that checks every answer against an oracle before timing it found five queries on which DataVo returned a wrong result. All five are fixed, with regression tests on both active engines; [Correctness findings](/manual/performance/datavo-vs-sqlite#correctness-findings) describes each.
 
-### 2. Compact In-Memory Row Layout
+- `B1`: a `WHERE` condition on the NULL-supplying side of a `LEFT JOIN` was applied before the join.
+- `B2`: `DISTINCT` inside an aggregate (`COUNT(DISTINCT x)`) was dropped by the parser.
+- `B3`: a filtered vector search over aliased tables fetched too few candidates.
+- `B4`: `AND`/`OR` across two joined tables intersected row keys listed in different table orders.
+- `B5`: a vector search joined to another table dropped the joined table's filter.
+- `WHERE ... HAVING` without `GROUP BY` failed to parse; `HAVING` now ends the `WHERE` condition.
+- A `BIT` column could not be filtered: `WHERE IsActive = true` failed to bind, and `= 1` or `= 'true'` silently matched no row. `TRUE`/`FALSE`, `1`/`0` and `'true'`/`'false'` now all compare as booleans.
+- On the legacy Disk engine, an indexed `DOUBLE` equality found no row under a culture whose decimal separator is a comma, because the lookup key was formatted in that culture.
 
-v0.3 overhauls the in-memory row representation into a dense, contiguous layout that eliminates per-row object header overhead, reduces memory footprint on multi-million-row tables, and improves CPU cache-line utilization during scans and index probes.
+**Typed SQL execution**
 
-### 3. PostgreSQL-Wire Tooling Bridge (`DataVo.Server`)
+- `OR` and `LIKE`/`NOT LIKE` on the typed single-table scan and on columnar indexes.
+- A typed hash join for `INNER` and `LEFT` joins on integer keys over any number of tables, aggregated or returning rows, with `ORDER BY ... LIMIT` kept to a bounded top-N.
+- Index-driven joins: when a selective dimension names few rows of a large table, the large table is read through its index on the join column.
+- A joined table that contributes only its key (an anti-join such as `LEFT JOIN ... WHERE c.Id IS NULL`) is kept as a dense bit set when its keys are distinct and closely spaced, instead of a hash table.
+- `GROUP BY` without boxing its keys, with `HAVING`, `ORDER BY` and `LIMIT` applied to the groups before any group becomes a row.
+- On the LSM engine, text equality and `LIKE` are tested against the stored UTF-8 bytes rather than a decoded string per row.
+- `ORDER BY ... LIMIT k` without an index compares sort keys in place and copies only rows that enter the top-k.
+- Primary-key ranges on the InMemory engine are read from the key map's sorted key copy.
 
-Developers need to inspect embedded DataVo databases from standard GUI clients such as DBeaver, DataGrip, and pgAdmin. `DataVo.Server` is planned as an optional companion host implementing a subset of the PostgreSQL wire protocol and catalog views (`pg_catalog`) over an existing DataVo storage directory.
+**Vector search**
 
-```text
-Application process (OLTP + HTAP)
-  -> DataVoContext / DataVoConnection
-  -> Row store + v0.3 Columnar Indexes
-  -> Embedded LSM / In-Memory storage
+- HNSW's neighbour-selection diversity heuristic is on by default, and connectivity repair no longer drops the last edge into a cluster. On strongly clustered embeddings this raised recall@10 from 82–94% to 100%.
+- HNSW answers a search by an exact scan when the candidate count a filter requires makes the graph walk more expensive. The scan is exact, so recall can only rise.
+- A filtered vector search tests the `WHERE` conditions on the stored candidate rows and builds only the rows that pass; over a join, candidates go through the typed join and joined tables are read by key.
+- `CREATE INDEX ... USING HNSW WITH (m, ef_construction, ef_search, enable_diversity_heuristic)` sets the graph parameters from SQL and stores them in the catalog.
 
-Future tooling process (v0.3+)
-  -> DataVo.Server
-  -> PostgreSQL wire protocol subset
-  -> Embedded LSM storage
-```
+## v0.5: interop and client-side ergonomics (planned)
 
-## Completed v0.4 Milestone (On Branch): On-Disk Columnar SSTables
+v0.5 has two tracks. Neither is started; the scope below is the plan, not a commitment to dates.
 
-### On-Disk Columnar SSTable Storage (Out-of-core Parquet-style chunks + Zone Maps)
+**Track A: native interop.**
 
-In v0.3 a columnar index on an LSM table was derived state held entirely in memory: it had to be rebuilt from the table's rows on first use after reopen, which required RAM proportional to the full indexed column dataset.
+- A C ABI exported from a Native AOT build of the engine (`dv_open`, `dv_close`, `dv_exec`, `dv_prepare`, parameter binding, `dv_exec_prepared`, and a direct single-row read), so that C, Python, Rust or Go can embed DataVo without .NET.
+- Zero-copy export of columnar data through the Apache Arrow C Data Interface (`ArrowArray`, `ArrowSchema`), from in-memory column buffers and from SSTable segments, for Polars, PyArrow, DuckDB and similar consumers.
+- A reference Python binding with an end-to-end test and benchmark.
 
-In v0.4 (`feature/on-disk-columnar-sstables`), format-version-8 SSTables persist 4,096-row aligned columnar segments directly inside `.sst` files during flush and compaction (without altering row blocks or `~223–236 ns` point-lookup performance), alongside tombstone key runs and per-chunk min/max/NULL/NaN zone maps:
+**Track B: client applications.**
 
-- **Zero Rebuild & Out-of-Core Execution:** Only unflushed MemTable rows (the "tail") stay in RAM; flushed rows stream directly from memory-mapped or positional SSTable segments in 4,096-row chunks. Opening and answering the first `SUM` over 1,000,000 flushed rows takes `13.7 ms` (`186 KB` allocated) in OS cache, and warm analytical scans run at `135.7–460.8 µs` (`0 B` allocated/query).
-- **Zone-Map Chunk Pruning:** Before loading a chunk group, scans evaluate the predicate over the segment directory's per-chunk `min`/`max` and `NULL`/`NaN` flags, skipping non-matching chunks without page faults or reads.
+- More of LINQ compiled at build time by `DataVo.Generators`, still with no Entity Framework dependency: `OrderBy`/`OrderByDescending`/`ThenBy`, `Take`/`Skip`, and `Select` projections that read only the projected columns, plus compiled single-table updates and deletes. Today `DataVoTable<T>` compiles `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList`.
+- Two-dimensional geographic data: WGS84 latitude/longitude points with spherical (haversine) distance, bounding boxes that cross the ±180° meridian, and a 2D spatial index (R-tree, quadtree or a Morton-ordered B-tree) so that radius and box queries over a million points do not scan the table. The current spatial support is three-dimensional Cartesian (`Vector3`) and scans.
+- Multi-target packages (`net8.0`, `net9.0`, `net10.0`, and `netstandard2.1` where the code allows), so that MAUI, Avalonia, WPF, WinUI, Unity and Blazor WebAssembly applications are not blocked by a `net10.0`-only asset, and a guide for migrating client applications from `Microsoft.Data.Sqlite` and EF Core.
 
-## Ecosystem & Platform Evaluation Lanes
+## Later, and out of scope
 
-- **Unity Integration (Evaluation Target):** A narrow managed, in-memory candidate has passed a pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player smoke. Direct Burst calls are unsupported by design; Windows IL2CPP validation and broader game-save durability proofs remain separate evaluation gates.
-- **WebAssembly (`Experimental / Playground Lane`):** `DataVo.Browser` (`docs/src/DataVoClient.ts`) powers the interactive documentation playground, but is **not** a production target and is **not** published on npm.
-
-## Roadmap Summary
-
-| Milestone / Feature | Status | Target / Notes |
+| Item | Status | Notes |
 | --- | --- | --- |
-| Core embedded API (`DataVoContext`) & ADO.NET (`DataVo.Data`) | Completed (`v0.2.0-rc.3`) | Primary in-process interfaces on .NET 10. |
-| LSM storage stability & clustered PKs | Completed (`v0.2.0-rc.3`) | Strict WAL `fsync`, SSTables, and clustered `INT`/`GUID` keys. |
-| Native AOT lock (`DataVo.Core` + `DataVo.Data`) | Completed (`v0.2.0-rc.3`) | Trim and AOT analyzers enforced as build errors. |
-| Zero-alloc in-memory point lookup & `RowRef` streaming | Completed (`v0.2.0-rc.3`) | `56 B`, ~`405 ns` PK fast path; 0 B heap allocation on `StreamRef()`. |
-| SIMD vector search (`HNSW` & `FLAT`) | Completed (`v0.2.0-rc.3`) | Cosine (`<=>`) and L2 (`<->`) distance operators. |
-| NuGet prerelease packages | Completed (`v0.2.0-rc.3`) | Published to nuget.org via CI Trusted Publishing. |
-| Columnar Indexes for HTAP | Completed (`v0.3`) | Synchronized columnar buffers on In-Memory and LSM tables; beats DuckDB by up to 8.9× on covered aggregates. |
-| Compact in-memory row layout | Completed (`v0.3`) | `FlatRowStore` + direct `PackedKeyReader<T>`: 13× lower row-store memory (`49.2 B/row`) and `52.1 ns` PK lookup. |
-| On-disk columnar SSTable storage (out-of-core chunks + zone-map pruning) | Completed (`v0.4` dev) | Format-v8 SSTable columnar segments, tail-only RAM, zone-map chunk skipping, zero rebuild on open (`13.7 ms` open + `SUM` on 1M rows). |
-| PostgreSQL-wire tooling bridge (`DataVo.Server`) | Planned (`v0.3+`) | Connect DBeaver, DataGrip, and pgAdmin to DataVo storage. |
-| Long-term on-disk format stability guarantee | Planned | Requires cross-version compatibility suite and migration tooling. |
-| Unity managed integration proof | Evaluation Target | Narrow Unity 6000.5.4f1 Editor and macOS IL2CPP smoke passed; Windows x64 unverified. |
-| Browser / WebAssembly (`DataVo.Browser`) | `Experimental / Playground Lane` | Interactive docs playground only; not production-ready and not published on npm. |
-| EF Core migrations | Not Supported | `DataVo.EntityFrameworkCore` is a query/DML bridge, not a migration provider. |
-| Multi-node replication & high availability | Not Supported | Out of scope for the embedded engine. |
+| PostgreSQL wire protocol bridge (`DataVo.Server`) | Planned, unscheduled | A companion process speaking a subset of the PostgreSQL protocol so that DBeaver, DataGrip or pgAdmin can inspect a database directory. |
+| Long-term on-disk format guarantee | Planned | Needs a cross-version compatibility suite and migration tooling. Until then, keep a way to rebuild important data. |
+| Unity runtime support | Evaluation target | A narrow Editor and macOS IL2CPP smoke passes on Unity 6000.5.4f1; Windows IL2CPP is unverified and Burst is unsupported by design. |
+| Browser / WebAssembly package (`DataVo.Browser`) | Playground only | Runs this site's playground; not published on npm. |
+| EF Core migrations | Not planned | `DataVo.EntityFrameworkCore` is a query and DML bridge. |
+| Replication and high availability | Out of scope | DataVo is an embedded engine. |

@@ -4,42 +4,46 @@ layout: home
 hero:
   name: "DataVo"
   text: "A C#-native embedded database engine"
-  tagline: "v0.2.0-rc.3 Release Candidate documentation for allocation-aware SQL, LSM storage, vector search, and local-first .NET 10 workloads."
+  tagline: "In-process SQL, LSM storage, columnar indexes and vector search for .NET 10. This manual describes the v0.4 source line; the published packages are 0.2.0-rc.3."
   actions:
     - theme: brand
       text: Get started
       link: /manual/tutorial/quickstart
     - theme: alt
-      text: Read benchmarks
-      link: /manual/performance/benchmarks
+      text: DataVo vs SQLite
+      link: /manual/performance/datavo-vs-sqlite
     - theme: alt
       text: SQL reference
       link: /manual/sql-language/supported-sql
 
 features:
-  - title: Native AOT compatible core
-    details: DataVo.Core and DataVo.Data enable trim/AOT analyzers and treat IL2026/IL3050-family diagnostics as errors, keeping the engine aligned with Native AOT constraints.
-    link: /manual/client-interfaces/native-aot
-  - title: Zero-allocation hot paths
-    details: Typed rows, arena-backed LSM MemTables, compiled access paths, and zero-alloc in-memory point lookups (56 B, 405 ns) avoid dictionary materialization on hot internal paths.
+  - title: Typed execution paths
+    details: Filters, grouping, top-k and INNER/LEFT joins on integer keys read cells straight from stored rows. A typed path returns exactly what the general evaluator would, or declines.
     link: /manual/storage-engine/query-planner-fast-paths
-  - title: Roslyn compiled queries
-    details: The DataVo.Generators package emits compiled query plans, typed row mappers, and optional schema-manifest index hints for supported SELECT, INSERT, and UPDATE shapes.
-    link: /manual/client-interfaces/source-generators
-  - title: Vector search
-    details: Store VECTOR(n) columns, build HNSW or FLAT vector indexes, and rank by cosine (<=>) or L2 (<->) distance directly in DataVo SQL.
+  - title: LSM storage with columnar SSTables
+    details: A commit log with optional per-commit fsync, arena MemTables, clustered primary keys, memory-mapped SSTables, and columnar segments with per-chunk zone maps that are read out of core.
+    link: /manual/storage-engine/lsm-mode
+  - title: Vector search in SQL
+    details: VECTOR(n) columns with FLAT and HNSW indexes. Filtered and joined searches test the filter on stored rows and switch to an exact scan when that is cheaper than the graph.
     link: /manual/sql-language/vector-search-syntax
+  - title: Compiled LINQ without EF Core
+    details: DataVo.Generators turns DataVoTable<T> lambdas and [DataVoQuery] methods into build-time code. No Entity Framework dependency, Native AOT clean.
+    link: /manual/client-interfaces/source-generators
 ---
 
-DataVo **v0.2.0-rc.3 (Release Candidate)** is an embedded database engine built directly inside the .NET 10 runtime instead of behind a native provider boundary. Written in C# and backed by 2,358 passing tests, it runs in-process and is engineered around `Span<T>`, source-generated serialization, locked Native AOT constraints, typed row paths, SIMD kernels, and GC-aware execution.
+DataVo is an embedded database engine written in C# that runs inside a .NET 10 process. There is no server and no native library: storage, SQL execution and vector indexes are managed code, built with the trim and Native AOT analyzers as errors.
 
-DataVo is not a full client/server RDBMS or a drop-in PostgreSQL replacement. Its scope is focused: C#-native embedded storage for local-first .NET 10 applications, game tooling, simulations, reactive query maintenance, and SIMD vector search. In v0.2.0-rc.3, the core embedded API (`DataVoContext`), strict-fsync LSM storage, ADO.NET provider (`DataVo.Data`), Roslyn compiled queries (`DataVo.Generators`), zero-alloc in-memory point lookups, and vector indexing (`HNSW` and `FLAT`) are at Release Candidate status, while active **v0.3** development targets Columnar Indexes for HTAP, compact in-memory row layouts, and a future PostgreSQL-wire tooling bridge (`DataVo.Server`).
+Two storage engines are under active development. **InMemory** packs rows into contiguous fixed-width cells. **LSM** appends each commit to a log (flushed to stable storage before the commit is acknowledged, unless you choose relaxed durability), applies it to an arena-backed MemTable, flushes 32 MB MemTables to immutable SSTables in the background, and compacts them. Tables keyed by one `INT` or `GUID` are clustered by that key; secondary indexes are themselves keyed SSTables committed with their rows; and a columnar index is written into the SSTables as 4,096-row segments with min/max zone maps, so analytical scans skip chunks and nothing is rebuilt on open.
+
+On one machine with warm caches, the v0.4 engine is faster than SQLite on key lookups and ranges, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates and filtered vector search, and slower on index-ordered `GROUP BY`, unindexed top-k and `OR`/`LIKE` full scans. DuckDB is far faster than both on whole-table analytics. Every number is checked against an oracle before it is timed.
+
+DataVo is not a client/server database: one process owns a database directory, there is no wire protocol or replication, and transactions are snapshot-isolated rather than serializable.
 
 ## What to read first
 
+- [What Is DataVo?](./manual/preface/what-is-datavo.md): the architecture in one page, and which version this manual describes.
 - [Quickstart](./manual/tutorial/quickstart.md): create a database, table, row, and query from C#.
-- [Release Scope & Boundaries](./manual/preface/alpha-scope.md): review the v0.2.0-rc.3 Release Candidate contract and explicit architectural boundaries.
-- [SQL Compatibility Matrix](./manual/sql-language/sql-compatibility.md): see the public SQL support boundary.
-- [MVCC, Transactions, And ACID](./manual/storage-engine/transactions-acid-mvcc.md): review the exact isolation and durability setting.
-- [Entity Framework Support](./manual/client-interfaces/entity-framework.md): see supported EF workflows and unsupported provider features.
-- [Benchmark Results](./manual/performance/benchmarks.md): review v0.2.0-rc.3 benchmark measurements and workload caveats.
+- [DataVo vs SQLite](./manual/performance/datavo-vs-sqlite.md): where each engine wins on 28 SQL shapes and five filtered vector queries, and why.
+- [Query Planner And Fast Paths](./manual/storage-engine/query-planner-fast-paths.md): which query shapes run on typed paths.
+- [Release Scope & Boundaries](./manual/preface/alpha-scope.md): durability, isolation and what is out of scope.
+- [Roadmap](./manual/preface/roadmap.md): what v0.3 and v0.4 added, and the v0.5 plan.
