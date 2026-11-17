@@ -316,7 +316,7 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
     /// <summary>The literal's text without the single quotes an unbound string literal carries.</summary>
     private static string UnquotedLiteral(LiteralNode literal)
     {
-        string value = literal.Value?.ToString() ?? string.Empty;
+        string value = Convert.ToString(literal.Value, CultureInfo.InvariantCulture) ?? string.Empty;
         return literal is not BoundValueLiteralNode && value.StartsWith('\'') && value.EndsWith('\'')
             ? value[1..^1]
             : value;

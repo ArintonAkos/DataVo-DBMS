@@ -1,3 +1,4 @@
+using System.Globalization;
 using DataVo.Core;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.StorageEngine.Config;
@@ -20,7 +21,7 @@ public sealed class SqlTransactionalAggregateTests
         Run(db, "CREATE TABLE scores (Id INT PRIMARY KEY, Level INT, Gold BIGINT, Ratio DOUBLE, Name VARCHAR(20))");
         for (int i = 1; i <= 40; i++)
         {
-            Run(db, $"INSERT INTO scores (Id, Level, Gold, Ratio, Name) VALUES ({i}, {i % 10}, {(i % 7 == 0 ? "NULL" : (i * 100L).ToString())}, {i / 8.0}, 'n{i}')");
+            Run(db, $"INSERT INTO scores (Id, Level, Gold, Ratio, Name) VALUES ({i}, {i % 10}, {(i % 7 == 0 ? "NULL" : (i * 100L).ToString())}, {(i / 8.0).ToString(CultureInfo.InvariantCulture)}, 'n{i}')");
         }
 
         const string query = "SELECT COUNT(*), SUM(Gold), AVG(Gold), MIN(Level), MAX(Ratio), MIN(Gold), MAX(Gold), SUM(Ratio) FROM scores WHERE Level >= 3";
