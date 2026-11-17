@@ -244,7 +244,7 @@ internal partial class Select
             var rowIds = engine.IndexManager.FilterUsingIndex(lookup.Key, lookup.IndexName, tableName, databaseName).ToList();
             rowIds.Sort();
             LockRowsForRead(databaseName, tableName, rowIds);
-            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, VisitTypedRow))
+            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, RowVisitorOf(state)))
             {
                 return null;
             }
@@ -253,7 +253,7 @@ internal partial class Select
         {
             // A range on the InMemory engine's integer primary key: only the rows in it are read.
             LockRowsForRead(databaseName, tableName, keyRangeRows);
-            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, keyRangeRows, ref state, VisitTypedRow))
+            if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, keyRangeRows, ref state, RowVisitorOf(state)))
             {
                 return null;
             }
@@ -262,7 +262,7 @@ internal partial class Select
         {
             // Answered from the table's columnar index; no row was read.
         }
-        else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow, state.TypedReadMask))
+        else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, RowVisitorOf(state), state.TypedReadMask))
         {
             return null;
         }
@@ -281,7 +281,7 @@ internal partial class Select
     /// </summary>
     private ListedTable? ScanSnapshotRows(DataVoEngine engine, string tableName, string databaseName, RowKey? lower, RowKey? upper, TypedScanState state)
     {
-        if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow, state.TypedReadMask))
+        if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, RowVisitorOf(state), state.TypedReadMask))
         {
             return null;
         }
@@ -920,13 +920,6 @@ internal partial class Select
             }
         }
 
-        if (state.GroupText is { } groupText && typedCells.IsEmpty)
-        {
-            state.Sequence++;
-            Accumulate(state, FindLocatedTextGroup(state, groupText, rowId, rowBytes));
-            return true;
-        }
-
         Load(state, rowId, rowBytes, typedCells, state.RestMask);
         state.Sequence++;
         if (state.Aggregates is not null)
@@ -955,6 +948,44 @@ internal partial class Select
         state.Rows!.Add(BuildJoinedRow(state));
         return true;
     }
+
+    /// <summary>
+    /// <see cref="VisitTypedRow"/> for a scan that groups by one text column (<see cref="TypedScanState.GroupText"/>):
+    /// a matched serialized row finds its group by the stored bytes of the key instead of decoding it. A separate
+    /// visitor, chosen once per scan, so other scans pay no per-row test for it.
+    /// </summary>
+    private static bool VisitTypedRowGroupedByText(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
+    {
+        if (!typedCells.IsEmpty)
+        {
+            return VisitTypedRow(ref state, rowId, rowBytes, typedCells);
+        }
+
+        if (state.RawText is { } rawText)
+        {
+            LoadFilterColumnsRaw(state, rawText, rowId, rowBytes);
+            if (!MatchesAllRaw(state, rawText, state.Predicates, rowBytes))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            Load(state, rowId, rowBytes, typedCells, state.FilterMask);
+            if (!MatchesAll(state.Predicates, state.Cells, state.Columns))
+            {
+                return true;
+            }
+        }
+
+        state.Sequence++;
+        Accumulate(state, FindLocatedTextGroup(state, state.GroupText!, rowId, rowBytes));
+        return true;
+    }
+
+    /// <summary>The row visitor of a typed scan.</summary>
+    private static StorageContext.RawRowVisitor<TypedScanState> RowVisitorOf(TypedScanState state) =>
+        state.GroupText is null ? VisitTypedRow : VisitTypedRowGroupedByText;
 
     private static object BuildOutputRow(TypedScanState state) =>
         state.DirectOutput is null ? BuildJoinedRow(state) : BuildDirectRow(state);

@@ -695,7 +695,15 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
                 upper,
                 ref box,
                 static (ref (TState State, RawRowVisitor<TState> Visit, bool Stopped) b, RowKey rowId, ReadOnlySpan<byte> bytes) =>
-                    !(b.Stopped = !b.Visit(ref b.State, rowId, bytes, default)),
+                {
+                    if (b.Visit(ref b.State, rowId, bytes, default))
+                    {
+                        return true;
+                    }
+
+                    b.Stopped = true;
+                    return false;
+                },
                 LsmOverlayPage,
                 out RowKey? coveredThrough);
             if (box.Stopped || coveredThrough is not { } covered || (covered.High == ulong.MaxValue && covered.Low == ulong.MaxValue))
