@@ -19,6 +19,8 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
     [
         DataVoGeneratorDiagnostics.LinqCapturedVariable,
         DataVoGeneratorDiagnostics.LinqNotTranslated,
+        DataVoGeneratorDiagnostics.LinqStepInMemory,
+        DataVoGeneratorDiagnostics.LinqUpdateNotCompiled,
     ];
 
     /// <inheritdoc />
@@ -44,14 +46,33 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
         {
             LinqInspection first = calls[0];
             output.ReportDiagnostic(Diagnostic.Create(DataVoGeneratorDiagnostics.LinqInterceptorsDisabled, Location.Create(first.Tree, first.Span)));
+            ReportUncompiledUpdates(output, calls);
             return;
         }
 
         var sites = new List<LinqSite>();
         var sums = new List<LinqSumSite>();
         var extremes = new List<LinqExtremeSite>();
+        var orders = new List<LinqOrderSite>();
+        var projections = new List<LinqProjectionSite>();
+        var updates = new List<LinqUpdateSite>();
         foreach (LinqInspection call in calls)
         {
+            if (call.Order is { } order)
+            {
+                orders.Add(order);
+            }
+
+            if (call.Projection is { } projection)
+            {
+                projections.Add(projection);
+            }
+
+            if (call.Update is { } update)
+            {
+                updates.Add(update);
+            }
+
             if (call.Diagnostic is { } info)
             {
                 DiagnosticDescriptor descriptor = Descriptors.First(candidate => candidate.Id == info.DescriptorId);
@@ -74,9 +95,25 @@ public sealed class DataVoLinqInterceptorGenerator : IIncrementalGenerator
             }
         }
 
-        if (sites.Count > 0 || sums.Count > 0 || extremes.Count > 0)
+        var shapes = new LinqShapes(orders, projections, updates);
+        if (sites.Count > 0 || sums.Count > 0 || extremes.Count > 0 || !shapes.IsEmpty)
         {
-            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, sums, extremes, options.FileLocalTypes), System.Text.Encoding.UTF8));
+            output.AddSource("DataVoLinqInterceptors.g.cs", SourceText.From(DataVoLinqEmitter.Emit(sites, sums, extremes, shapes, options.FileLocalTypes), System.Text.Encoding.UTF8));
+        }
+    }
+
+    /// <summary>
+    /// Fails the build at each <c>ExecuteUpdate</c> call when interceptors are disabled: nothing else can run it, so it
+    /// would otherwise throw when the program reaches it.
+    /// </summary>
+    private static void ReportUncompiledUpdates(SourceProductionContext output, ImmutableArray<LinqInspection> calls)
+    {
+        foreach (LinqInspection call in calls.Where(static call => call.RequiresInterception))
+        {
+            output.ReportDiagnostic(Diagnostic.Create(
+                DataVoGeneratorDiagnostics.LinqUpdateNotCompiled,
+                Location.Create(call.Tree, call.Span),
+                "interceptors are not enabled for this project; add <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces> to the project file"));
         }
     }
 

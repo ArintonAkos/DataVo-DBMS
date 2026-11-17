@@ -59,6 +59,19 @@ internal static class DataVoGeneratorDiagnostics
         "DataVo query interceptors are disabled",
         "DataVoTable queries read the whole table because interceptors are not enabled for this project. Add <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces> to the project file.");
 
+    public static readonly DiagnosticDescriptor LinqStepInMemory = Linq(
+        "DATAVOL004",
+        "DataVo query step runs in memory",
+        "This {0} runs in memory over whole models instead of in the engine: {1}");
+
+    public static readonly DiagnosticDescriptor LinqUpdateNotCompiled = new(
+        "DATAVOL005",
+        "DataVo ExecuteUpdate is not compiled",
+        "ExecuteUpdate must be compiled at build time and this call cannot be: {0}",
+        "DataVo.Linq",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private static DiagnosticDescriptor Linq(string id, string title, string message) =>
         new(id, title, message, "DataVo.Linq", DiagnosticSeverity.Warning, isEnabledByDefault: true);
 

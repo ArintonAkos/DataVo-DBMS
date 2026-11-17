@@ -57,12 +57,75 @@ internal sealed record LinqSumSite(LinqLocation Location, string ModelType, stri
 /// <param name="Column">The column.</param>
 internal sealed record LinqExtremeSite(LinqLocation Location, bool Largest, string ModelType, string StateType, string ValueType, bool Nullable, char Kind, string Result, string Column);
 
+/// <summary>Which DataVo type a composed call is made on, which fixes the interceptor's receiver.</summary>
+internal enum LinqReceiver
+{
+    /// <summary><c>DataVoTable&lt;T&gt;</c>, a class.</summary>
+    Table,
+
+    /// <summary><c>DataVoQuery&lt;T, TState&gt;</c>, a struct.</summary>
+    Query,
+
+    /// <summary><c>DataVoOrderedQuery&lt;T, TState&gt;</c>, a struct.</summary>
+    OrderedQuery,
+
+    /// <summary><c>DataVoPagedQuery&lt;T, TState&gt;</c>, a struct.</summary>
+    PagedQuery,
+}
+
+/// <summary>The receiver and return type of an intercepted call on a DataVo table or query.</summary>
+/// <param name="Kind">The DataVo type the call is made on.</param>
+/// <param name="ReceiverType">The receiver's fully qualified type.</param>
+/// <param name="ReturnType">The called method's fully qualified return type.</param>
+/// <param name="ModelType">The model's fully qualified type.</param>
+internal sealed record LinqCall(LinqLocation Location, LinqReceiver Kind, string ReceiverType, string ReturnType, string ModelType);
+
+/// <summary>An <c>OrderBy</c>, <c>OrderByDescending</c>, <c>ThenBy</c> or <c>ThenByDescending</c> whose key is one column.</summary>
+/// <param name="Method">The intercepted method's name.</param>
+/// <param name="KeyType">The key's fully qualified type: the column's property type.</param>
+/// <param name="Column">The column rows are sorted by.</param>
+/// <param name="Descending">Whether the call sorts from largest to smallest.</param>
+internal sealed record LinqOrderSite(LinqCall Call, string Method, string KeyType, string Column, bool Descending);
+
+/// <summary>A <c>Select</c> whose selector was rewritten to build its result from the columns it reads.</summary>
+/// <param name="ResultType">The projected type, or null when generated code cannot name it (an anonymous type), so the interceptor is generic.</param>
+/// <param name="Columns">The columns the projection reads, each once, in the order the selector first reads them.</param>
+/// <param name="Body">The selector's body as C# over a <c>DataVoRow</c> named <c>row</c>.</param>
+internal sealed record LinqProjectionSite(LinqCall Call, string? ResultType, EquatableArray<string> Columns, string Body);
+
+/// <summary>An <c>ExecuteUpdate</c> whose setters were translated into a SET list.</summary>
+/// <param name="StateType">The state value's fully qualified type, or null for the overload without state.</param>
+/// <param name="Assignments">The SET list over <c>@u0</c>, <c>@u1</c>...</param>
+/// <param name="Values">The C# that binds each <c>@u</c> parameter, in order.</param>
+internal sealed record LinqUpdateSite(LinqCall Call, string? StateType, string Assignments, EquatableArray<string> Values);
+
 /// <summary>The outcome of inspecting one call: a translated site, or a diagnostic explaining why it runs as a scan.</summary>
 /// <param name="Tree">The file the call is in. Kept so a diagnostic lands in source, where <c>#pragma warning</c> can reach it.</param>
 /// <param name="Span">The lambda's position in <paramref name="Tree"/>.</param>
 /// <param name="Sum">A translated <c>Sum</c> call, when the call is one.</param>
 /// <param name="Extreme">A translated <c>Min</c> or <c>Max</c> call, when the call is one.</param>
-internal sealed record LinqInspection(LinqSite? Site, DiagnosticInfo? Diagnostic, SyntaxTree Tree, TextSpan Span, LinqSumSite? Sum = null, LinqExtremeSite? Extreme = null);
+/// <param name="Order">A translated sort key, when the call is one.</param>
+/// <param name="Projection">A translated <c>Select</c>, when the call is one.</param>
+/// <param name="Update">A translated <c>ExecuteUpdate</c>, when the call is one.</param>
+/// <param name="RequiresInterception">Whether the call fails at run time unless it is intercepted, as <c>ExecuteUpdate</c> does.</param>
+internal sealed record LinqInspection(
+    LinqSite? Site,
+    DiagnosticInfo? Diagnostic,
+    SyntaxTree Tree,
+    TextSpan Span,
+    LinqSumSite? Sum = null,
+    LinqExtremeSite? Extreme = null,
+    LinqOrderSite? Order = null,
+    LinqProjectionSite? Projection = null,
+    LinqUpdateSite? Update = null,
+    bool RequiresInterception = false);
+
+/// <summary>The sort keys, projections and updates of one compilation, in the order they were found.</summary>
+internal sealed record LinqShapes(IReadOnlyList<LinqOrderSite> Orders, IReadOnlyList<LinqProjectionSite> Projections, IReadOnlyList<LinqUpdateSite> Updates)
+{
+    /// <summary>Gets whether there is nothing to emit.</summary>
+    public bool IsEmpty => Orders.Count == 0 && Projections.Count == 0 && Updates.Count == 0;
+}
 
 /// <summary>Whether the compilation can take interceptors, and which syntax the output may use.</summary>
 internal sealed record LinqOptions(LinqMode Mode, bool FileLocalTypes);
