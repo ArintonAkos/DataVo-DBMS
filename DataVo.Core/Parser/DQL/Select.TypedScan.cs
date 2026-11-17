@@ -660,7 +660,8 @@ internal partial class Select
         if (orderBy is { Columns.Count: > 0 })
         {
             // Only a top-N over plain columns is kept in the scan; a full ORDER BY sorts afterwards as before.
-            if (!_model.LimitTake.HasValue)
+            // OFFSET without LIMIT asks for every row (LIMIT is int.MaxValue), which is a full sort, not a top-N.
+            if (!_model.LimitTake.HasValue || _model.RowsNeededForLimit == int.MaxValue)
             {
                 orderKeys = null;
             }
@@ -896,6 +897,11 @@ internal partial class Select
 
         if (state.OutputRows is { } output)
         {
+            if (state.StopAfter == 0)
+            {
+                return false; // LIMIT 0: nothing is returned, so no row is built
+            }
+
             output.Add(BuildDirectRow(state));
             return state.StopAfter < 0 || output.Count < state.StopAfter;
         }
@@ -1054,6 +1060,11 @@ internal partial class Select
     private static void OfferTop(TypedScanState state)
     {
         List<(CellValue[] Keys, long Sequence, object Row)> top = state.Top!;
+        if (state.TopLimit <= 0)
+        {
+            return; // LIMIT 0 keeps no row
+        }
+
         CellValue[] keys = state.TopCandidate!;
         for (int i = 0; i < keys.Length; i++)
         {

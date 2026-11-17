@@ -123,6 +123,23 @@ public sealed class TransactionKeyReuseTests : IDisposable
         Assert.True(db.Execute("INSERT INTO T (Id, E, V) VALUES (9, 'a@x', 'dup')").Last().IsError);
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void RowsDeletedEarlier_AreNotCountedAgain_ByLaterUpdatesAndDeletes(StorageMode mode)
+    {
+        using DataVoContext db = Open(mode);
+        Run(db, "BEGIN TRANSACTION");
+        Run(db, "DELETE FROM T WHERE Id = 1");
+
+        Assert.Equal(["Rows affected: 1"], db.Execute("UPDATE T SET V = 'z'").Last().Messages);
+        Assert.Equal(["Rows affected: 0"], db.Execute("UPDATE T SET V = 'z' WHERE Id = 1").Last().Messages);
+        Assert.Equal(["Rows affected: 1"], db.Execute("DELETE FROM T WHERE Id > 0").Last().Messages);
+        Assert.Equal(["Rows affected: 0"], db.Execute("DELETE FROM T").Last().Messages);
+        Run(db, "COMMIT");
+
+        Assert.Empty(Rows(db));
+    }
+
     private DataVoContext Open(StorageMode mode)
     {
         string directory = Path.Combine(Path.GetTempPath(), "datavo-tx-keys-" + Guid.NewGuid().ToString("N"));

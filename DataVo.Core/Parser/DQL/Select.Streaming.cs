@@ -160,7 +160,10 @@ internal partial class Select
         int remaining = take;
         while (remaining > 0 && !cursor.Done && !IsEmptyRange(lower, upper))
         {
-            ReadNextPage(page, cursor, databaseName, lower, upper, schemaVersion);
+            // A page never examines more rows than LIMIT and OFFSET can still use, so Take(10) decodes ten rows, not
+            // a full page. A filter that rejects some of them only means another, equally small, page is read.
+            int pageRows = (int)Math.Min(StreamPageRows, (long)skip + remaining);
+            ReadNextPage(page, cursor, databaseName, lower, upper, schemaVersion, pageRows);
             foreach (DataVoRow row in page.Rows)
             {
                 if (skip > 0)
@@ -180,7 +183,7 @@ internal partial class Select
 
     private static bool IsEmptyRange(RowKey? lower, RowKey? upper) => lower is { } l && upper is { } u && l >= u;
 
-    private void ReadNextPage(StreamPage page, StorageContext.RowPageCursor cursor, string databaseName, RowKey? lower, RowKey? upper, int schemaVersion)
+    private void ReadNextPage(StreamPage page, StorageContext.RowPageCursor cursor, string databaseName, RowKey? lower, RowKey? upper, int schemaVersion, int pageRows)
     {
         using SnapshotLockScope readScope = Engine.EnterRuntimeReadScope();
         using IDisposable current = DataVoEngine.PushCurrent(Engine);
@@ -190,7 +193,7 @@ internal partial class Select
         }
 
         page.Rows.Clear();
-        if (!Context.ScanRowPage(page.Scan.TableName, databaseName, cursor, lower, upper, StreamPageRows, ref page, VisitStreamRow))
+        if (!Context.ScanRowPage(page.Scan.TableName, databaseName, cursor, lower, upper, pageRows, ref page, VisitStreamRow))
         {
             throw new InvalidOperationException($"Table {page.Scan.TableName} cannot be streamed at this point.");
         }

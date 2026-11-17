@@ -93,6 +93,21 @@ public class TransactionContext
     }
 
     /// <summary>
+    /// Removes the rows this transaction has already deleted from a statement's candidate rows. The statement
+    /// reads committed storage, which still holds them until COMMIT, so without this an UPDATE or DELETE would
+    /// count them as changed again.
+    /// </summary>
+    /// <param name="tableName">The table the statement changes.</param>
+    /// <param name="rowIds">The rows the statement's condition matched; rows deleted earlier are removed in place.</param>
+    public void ExcludeDeleted(string tableName, List<RowKey> rowIds)
+    {
+        if (DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted) && deleted.Count > 0)
+        {
+            rowIds.RemoveAll(deleted.Contains);
+        }
+    }
+
+    /// <summary>
     /// Buffers a column update for the specified row in the specified table.
     /// </summary>
     /// <param name="tableName">The target table name.</param>

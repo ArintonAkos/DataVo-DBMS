@@ -30,6 +30,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             if (txContext != null)
             {
                 List<RowKey> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+                txContext.ExcludeDeleted(_model.TableName, toBeDeleted);
 
                 if (toBeDeleted.Count == 0)
                 {

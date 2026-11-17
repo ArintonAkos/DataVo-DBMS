@@ -76,6 +76,35 @@ public abstract class LimitOffsetTestsBase : SqlExecutionTestsBase
         Assert.NotNull(result);
         Assert.Equal(6, result.Data.Count);
     }
+
+    [Theory]
+    [InlineData("SELECT * FROM Ranking LIMIT 0")]
+    [InlineData("SELECT Player FROM Ranking LIMIT 0")]
+    [InlineData("SELECT Player FROM Ranking WHERE Score > 100 LIMIT 0")]
+    [InlineData("SELECT Player FROM Ranking ORDER BY Score DESC LIMIT 0")]
+    [InlineData("SELECT * FROM Ranking ORDER BY Score LIMIT 0 OFFSET 2")]
+    public void Select_LimitZero_ReturnsNoRows(string sql)
+    {
+        var result = ExecuteAndReturn(sql);
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Empty(result.Data);
+    }
+
+    [Theory]
+    [InlineData("SELECT Player FROM Ranking ORDER BY Score DESC OFFSET 2", new[] { "David", "Charlie", "Bob", "Alice" })]
+    [InlineData("SELECT Player FROM Ranking WHERE Score >= 200 ORDER BY Score OFFSET 1", new[] { "Charlie", "David", "Eve", "Frank" })]
+    [InlineData("SELECT Player FROM Ranking ORDER BY Score DESC OFFSET 6", new string[0])]
+    [InlineData("SELECT Player FROM Ranking ORDER BY Score DESC LIMIT 2 OFFSET 1", new[] { "Eve", "David" })]
+    [InlineData("SELECT Player FROM Ranking ORDER BY Score DESC LIMIT 2", new[] { "Frank", "Eve" })]
+    public void Select_OrderByWithOffset_SortsBySkippedColumnAndPages(string sql, string[] expected)
+    {
+        var result = ExecuteAndReturn(sql);
+
+        Assert.False(result.IsError, string.Join(" | ", result.Messages));
+        Assert.Equal(expected, result.Data.Select(r => r["Player"]?.ToString()).ToArray());
+        Assert.All(result.Data, row => Assert.Single(row));
+    }
 }
 
 public class LimitOffsetTestsMemory : LimitOffsetTestsBase
@@ -86,4 +115,9 @@ public class LimitOffsetTestsMemory : LimitOffsetTestsBase
 public class LimitOffsetTestsDisk : LimitOffsetTestsBase
 {
     public LimitOffsetTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "LimitDB_Disk" }, "LimitDB_Disk") { }
+}
+
+public class LimitOffsetTestsLsm : LimitOffsetTestsBase
+{
+    public LimitOffsetTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "LimitDB_Lsm" }, "LimitDB_Lsm") { }
 }

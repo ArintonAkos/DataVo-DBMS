@@ -82,6 +82,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             if (txContext != null)
             {
                 List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+                txContext.ExcludeDeleted(_model.TableName, toBeUpdated);
                 if (toBeUpdated.Count == 0)
                 {
                     Messages.Add("Rows affected: 0");
