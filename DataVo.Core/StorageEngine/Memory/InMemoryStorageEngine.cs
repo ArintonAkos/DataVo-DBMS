@@ -770,9 +770,9 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     /// Visits every live row of a table in position order: a serialized row as its bytes, a typed row as its cells.
     /// Stops when <paramref name="visit"/> returns false. Unlike <see cref="ReadAllRows"/> nothing table-sized is
     /// built: the serialized rows of each block of positions are noted under the read lock, and the visitor runs
-    /// outside it, so it may read the table again. Rows added after the visit starts are not part of it.
+    /// outside it, so it may read the table again. Rows added after the visit starts are not part of it. When
+    /// <paramref name="typedColumns"/> is set, a typed row is decoded only in those columns and the visitor reads no others.
     /// </summary>
-    /// <param name="typedColumns">When set, a typed row is decoded only in these columns; the visitor reads no others.</param>
     internal void VisitAllRows<TState>(string databaseName, string tableName, ref TState state, StoredRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))

@@ -23,8 +23,10 @@ public partial class StorageContext
     /// <paramref name="lower"/> and <paramref name="upper"/> bound only the committed rows walked; overlay rows are
     /// always offered, so the visitor must test the predicates the range was derived from.
     /// </remarks>
-    /// <returns>False when the scan cannot run here (staged LSM writes), so the caller takes the general path.</returns>
-    /// <param name="typedColumns">As for <see cref="ScanTableRows{TState}"/>.</param>
+    /// <returns>
+    /// False when the scan cannot run here (staged LSM writes), so the caller takes the general path.
+    /// <paramref name="typedColumns"/> limits the decoded typed columns as for <see cref="ScanTableRows{TState}"/>.
+    /// </returns>
     internal bool ScanVisibleRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;

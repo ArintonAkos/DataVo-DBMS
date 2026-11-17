@@ -94,9 +94,9 @@ internal sealed class TableRows
 
     /// <summary>
     /// Reads the typed row at a position as cells, without a lock and without allocating. The cells are valid
-    /// until the reader is used again or disposed.
+    /// until the reader is used again or disposed. When <paramref name="columns"/> is set, only those columns of a
+    /// packed row are decoded, and the others must not be read.
     /// </summary>
-    /// <param name="columns">When set, only these columns of a packed row are decoded; the others must not be read.</param>
     /// <returns><see langword="false"/> when the position holds no typed row, or it was removed meanwhile.</returns>
     public bool TryReadTypedCells(int position, ref PackedRowReader reader, out ReadOnlySpan<CellValue> cells, bool[]? columns = null)
     {

@@ -613,11 +613,9 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     /// building a table-sized collection. The LSM backend seeks to the range and passes rows in stored form
     /// (a clustered table's key cell is NULL there; the row key holds it). Returns false when a scan is not
     /// possible here (an active snapshot or staged writes), so the caller takes the general path.
+    /// <paramref name="typedColumns"/>, when set, names the columns the visitor reads from a typed row: the
+    /// in-memory engine then decodes only those, and the visitor must not read the others.
     /// </summary>
-    /// <param name="typedColumns">
-    /// When set, the columns the visitor reads from a typed row; the in-memory engine then decodes only those, and
-    /// the visitor must not read the others.
-    /// </param>
     internal bool ScanTableRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (!CanStreamRows(tableName, databaseName))

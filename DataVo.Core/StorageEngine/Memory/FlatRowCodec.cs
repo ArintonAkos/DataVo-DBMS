@@ -162,13 +162,10 @@ internal static class FlatRowCodec
         return true;
     }
 
-    /// <summary>Reads a whole row into cells, one per column.</summary>
-    /// <param name="layout">The row's layout.</param>
-    /// <param name="record">The row's record.</param>
-    /// <param name="references">The array holding the row's references.</param>
-    /// <param name="referenceBase">The index of the row's first reference.</param>
-    /// <param name="cells">Receives the cells; at least as long as the column count.</param>
-    /// <summary>Decodes only the columns <paramref name="columns"/> flags; the other cells are left as they were.</summary>
+    /// <summary>
+    /// Reads only some columns of a row into cells, as <see cref="Decode(RowLayout, ReadOnlySpan{byte}, object?[], int, Span{CellValue})"/>
+    /// reads all of them. The cells of the columns <paramref name="columns"/> does not flag are left as they were.
+    /// </summary>
     public static void Decode(RowLayout layout, ReadOnlySpan<byte> record, object?[] references, int referenceBase, Span<CellValue> cells, bool[] columns)
     {
         int count = Math.Min(layout.ColumnCount, columns.Length);
@@ -181,6 +178,12 @@ internal static class FlatRowCodec
         }
     }
 
+    /// <summary>Reads a whole row into cells, one per column.</summary>
+    /// <param name="layout">The row's layout.</param>
+    /// <param name="record">The row's record.</param>
+    /// <param name="references">The array holding the row's references.</param>
+    /// <param name="referenceBase">The index of the row's first reference.</param>
+    /// <param name="cells">Receives the cells; at least as long as the column count.</param>
     public static void Decode(RowLayout layout, ReadOnlySpan<byte> record, object?[] references, int referenceBase, Span<CellValue> cells)
     {
         for (int ordinal = 0; ordinal < layout.ColumnCount; ordinal++)
