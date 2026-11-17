@@ -9,6 +9,17 @@ using System.Numerics;
 
 namespace DataVo.Core.Utils;
 
+/// <summary>
+/// Dot product, cosine and Euclidean distance over float vectors, with AVX-512, AVX and AdvSimd (NEON) paths.
+/// </summary>
+/// <remarks>
+/// The span entry points are compiled fully optimized on first use
+/// (<see cref="Compat.MethodImplCompat.AggressiveOptimization"/>) and the per-ISA workers are inlined into them,
+/// so a distance computation never runs as tier-0 code. A vector search calls them once per stored
+/// vector, so under tiered compilation the first searches of a process ran their SIMD loops as unoptimized
+/// tier-0 code until the runtime promoted them, which waits for a quiet period in JIT activity: 50,000 x 384
+/// exact searches took 11-14 ms instead of about 2 ms until then, and sometimes for a whole benchmark run.
+/// </remarks>
 internal static class SimdDistanceKernels
 {
     public static float CosineDistance(float[] a, float[] b)
@@ -21,6 +32,7 @@ internal static class SimdDistanceKernels
         return Dot(a.AsSpan(), b.AsSpan());
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     public static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length != b.Length)
@@ -45,6 +57,7 @@ internal static class SimdDistanceKernels
 #endif
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     public static float CosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length != b.Length)
@@ -74,6 +87,7 @@ internal static class SimdDistanceKernels
         return EuclideanDistance(a.AsSpan(), b.AsSpan());
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     public static float EuclideanDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length != b.Length)
@@ -100,6 +114,7 @@ internal static class SimdDistanceKernels
     }
 
 #if NET10_0_OR_GREATER
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryDotAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
     {
         result = 0f;
@@ -155,6 +170,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryDotAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
     {
         result = 0f;
@@ -200,6 +216,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryCosineDistanceAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -296,6 +313,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryEuclideanDistanceAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -367,6 +385,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryCosineDistanceAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -433,6 +452,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryEuclideanDistanceAdvSimd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -482,6 +502,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryCosineDistanceAvx512(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -527,6 +548,7 @@ internal static class SimdDistanceKernels
         return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryEuclideanDistanceAvx512(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float distance)
     {
         distance = 0f;
@@ -622,6 +644,7 @@ internal static class SimdDistanceKernels
         return sum;
     }
 #else
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static float PortableDot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)
@@ -662,6 +685,7 @@ internal static class SimdDistanceKernels
         return scalar;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static float PortableCosineDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)
@@ -735,6 +759,7 @@ internal static class SimdDistanceKernels
         return 1f - similarity;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static float PortableEuclideanDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)

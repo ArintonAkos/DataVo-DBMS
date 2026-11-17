@@ -299,6 +299,16 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         }
     }
 
+    /// <summary>
+    /// Scores every stored vector and keeps the <paramref name="rowIds"/>.Length nearest, sorted.
+    /// </summary>
+    /// <remarks>
+    /// Compiled fully optimized on its first call. It runs once per query but loops over every vector, so
+    /// tiered compilation could only reach optimized code for it by on-stack replacement. The distance
+    /// kernels it calls per vector are marked the same way (<see cref="SimdDistanceKernels"/>); they were
+    /// what kept early searches at tier-0 speed.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private void SearchIntoTopK(
         ReadOnlySpan<float> queryVector,
         bool useEuclidean,
