@@ -24,12 +24,13 @@ public partial class StorageContext
     /// always offered, so the visitor must test the predicates the range was derived from.
     /// </remarks>
     /// <returns>False when the scan cannot run here (staged LSM writes), so the caller takes the general path.</returns>
-    internal bool ScanVisibleRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    /// <param name="typedColumns">As for <see cref="ScanTableRows{TState}"/>.</param>
+    internal bool ScanVisibleRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
         if (snapshot is null)
         {
-            return ScanTableRows(tableName, databaseName, lower, upper, ref state, visit);
+            return ScanTableRows(tableName, databaseName, lower, upper, ref state, visit, typedColumns);
         }
 
         if (LsmEngine is { } lsm && lsm.HasStagedWrites(databaseName, tableName))
@@ -39,7 +40,7 @@ public partial class StorageContext
 
         DataVoEngine engine = DataVoEngine.Current();
         var scan = new SnapshotScan<TState>(state, visit, engine, snapshot, tableName, databaseName, BuildSnapshotOverlay(engine, tableName, databaseName, snapshot));
-        ScanCommittedRows(tableName, databaseName, lower, upper, ref scan, VisitCommittedRow);
+        ScanCommittedRows(tableName, databaseName, lower, upper, ref scan, VisitCommittedRow, typedColumns);
         if (!scan.Stopped)
         {
             VisitUnseenOverlayRows(ref scan);

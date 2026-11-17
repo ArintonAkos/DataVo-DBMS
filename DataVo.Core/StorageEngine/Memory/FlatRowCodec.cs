@@ -168,6 +168,19 @@ internal static class FlatRowCodec
     /// <param name="references">The array holding the row's references.</param>
     /// <param name="referenceBase">The index of the row's first reference.</param>
     /// <param name="cells">Receives the cells; at least as long as the column count.</param>
+    /// <summary>Decodes only the columns <paramref name="columns"/> flags; the other cells are left as they were.</summary>
+    public static void Decode(RowLayout layout, ReadOnlySpan<byte> record, object?[] references, int referenceBase, Span<CellValue> cells, bool[] columns)
+    {
+        int count = Math.Min(layout.ColumnCount, columns.Length);
+        for (int ordinal = 0; ordinal < count; ordinal++)
+        {
+            if (columns[ordinal])
+            {
+                cells[ordinal] = ReadCell(layout, ordinal, record, references, referenceBase);
+            }
+        }
+    }
+
     public static void Decode(RowLayout layout, ReadOnlySpan<byte> record, object?[] references, int referenceBase, Span<CellValue> cells)
     {
         for (int ordinal = 0; ordinal < layout.ColumnCount; ordinal++)

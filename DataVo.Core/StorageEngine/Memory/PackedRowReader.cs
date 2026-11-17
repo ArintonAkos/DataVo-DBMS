@@ -35,7 +35,8 @@ internal struct PackedRowReader
     /// <summary>The cells of a borrowed row.</summary>
     /// <param name="layout">The layout of the store the row came from.</param>
     /// <param name="row">The row.</param>
-    public ReadOnlySpan<CellValue> Cells(RowLayout layout, FlatRow row)
+    /// <param name="columns">When set, only the flagged columns are decoded and the others hold stale values.</param>
+    public ReadOnlySpan<CellValue> Cells(RowLayout layout, FlatRow row, bool[]? columns = null)
     {
         if (row.IsKeptApart)
         {
@@ -49,7 +50,15 @@ internal struct PackedRowReader
             _buffer = CellScratch.Rent(_cells);
         }
 
-        FlatRowCodec.Decode(layout, row.Record, row.References, row.ReferenceBase, _buffer);
+        if (columns is null)
+        {
+            FlatRowCodec.Decode(layout, row.Record, row.References, row.ReferenceBase, _buffer);
+        }
+        else
+        {
+            FlatRowCodec.Decode(layout, row.Record, row.References, row.ReferenceBase, _buffer, columns);
+        }
+
         return new ReadOnlySpan<CellValue>(_buffer, 0, _cells);
     }
 

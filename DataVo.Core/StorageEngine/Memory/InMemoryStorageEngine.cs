@@ -772,7 +772,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     /// built: the serialized rows of each block of positions are noted under the read lock, and the visitor runs
     /// outside it, so it may read the table again. Rows added after the visit starts are not part of it.
     /// </summary>
-    internal void VisitAllRows<TState>(string databaseName, string tableName, ref TState state, StoredRowVisitor<TState> visit)
+    /// <param name="typedColumns">When set, a typed row is decoded only in these columns; the visitor reads no others.</param>
+    internal void VisitAllRows<TState>(string databaseName, string tableName, ref TState state, StoredRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
         {
@@ -793,7 +794,7 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
                 {
                     bool keepGoing = block[position - start] is { } raw
                         ? visit(ref state, position + 1, raw, default)
-                        : !rows.TryReadTypedCells(position, ref reader, out ReadOnlySpan<CellValue> cells) || visit(ref state, position + 1, default, cells);
+                        : !rows.TryReadTypedCells(position, ref reader, out ReadOnlySpan<CellValue> cells, typedColumns) || visit(ref state, position + 1, default, cells);
                     if (!keepGoing)
                     {
                         return;

@@ -99,7 +99,7 @@ internal partial class Select
             {
                 step.Table.Loader = key => LoadSeedJoinRow(engine, plan, build, databaseName, key);
             }
-            else if (!engine.StorageContext.ScanTableRows(side.Detail.TableName, databaseName, null, null, ref build, VisitJoinBuildRow))
+            else if (!engine.StorageContext.ScanTableRows(side.Detail.TableName, databaseName, null, null, ref build, VisitJoinBuildRow, build.DecodeMask))
             {
                 return false;
             }

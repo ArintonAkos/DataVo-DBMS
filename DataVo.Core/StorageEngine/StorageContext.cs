@@ -614,14 +614,18 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     /// (a clustered table's key cell is NULL there; the row key holds it). Returns false when a scan is not
     /// possible here (an active snapshot or staged writes), so the caller takes the general path.
     /// </summary>
-    internal bool ScanTableRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    /// <param name="typedColumns">
+    /// When set, the columns the visitor reads from a typed row; the in-memory engine then decodes only those, and
+    /// the visitor must not read the others.
+    /// </param>
+    internal bool ScanTableRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (!CanStreamRows(tableName, databaseName))
         {
             return false;
         }
 
-        ScanCommittedRows(tableName, databaseName, lower, upper, ref state, visit);
+        ScanCommittedRows(tableName, databaseName, lower, upper, ref state, visit, typedColumns);
         return true;
     }
 
@@ -629,7 +633,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     /// Walks the committed rows with keys in <c>[lower, upper)</c>, ignoring snapshots; callers first check that
     /// committed rows answer their read.
     /// </summary>
-    private void ScanCommittedRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit)
+    private void ScanCommittedRows<TState>(string tableName, string databaseName, RowKey? lower, RowKey? upper, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (LsmEngine is { } lsm)
         {
@@ -644,7 +648,8 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
             {
                 RowKey key = rowId;
                 return !InRange(key, scan.Lower, scan.Upper) || scan.Visit(ref scan.State, key, raw, typed);
-            });
+            },
+            typedColumns);
             state = rangeScan.State;
             return;
         }

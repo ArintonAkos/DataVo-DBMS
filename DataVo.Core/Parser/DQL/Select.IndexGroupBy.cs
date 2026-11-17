@@ -80,6 +80,8 @@ internal partial class Select
     private static bool TryCountNullKeys(DataVoEngine engine, string tableName, string databaseName, TypedScanState state, int key, out long nulls)
     {
         var count = (Columns: state.Columns, Key: key, Nulls: 0L, Rows: 0L);
+        var keyOnly = new bool[state.Columns.Count];
+        keyOnly[key] = true;
         bool scanned = engine.StorageContext.ScanTableRows(tableName, databaseName, null, null, ref count,
             static (ref (IReadOnlyList<Column> Columns, int Key, long Nulls, long Rows) c, RowKey _, ReadOnlySpan<byte> bytes, ReadOnlySpan<CellValue> typed) =>
             {
@@ -87,7 +89,8 @@ internal partial class Select
                 c.Nulls += isNull ? 1 : 0;
                 c.Rows++;
                 return true;
-            });
+            },
+            keyOnly);
         nulls = count.Nulls;
         if (scanned)
         {

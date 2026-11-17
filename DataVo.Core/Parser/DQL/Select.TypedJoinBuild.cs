@@ -231,7 +231,7 @@ internal partial class Select
             JoinSide side = sides[step.Side];
             bool filter = !step.Outer && side.Predicates.Count > 0;
             var buildState = new JoinBuildState(side, step, filter: !step.Outer, filter ? 0 : HashCapacity(engine, side, databaseName));
-            if (!engine.StorageContext.ScanTableRows(side.Detail.TableName, databaseName, null, null, ref buildState, VisitJoinBuildRow))
+            if (!engine.StorageContext.ScanTableRows(side.Detail.TableName, databaseName, null, null, ref buildState, VisitJoinBuildRow, buildState.DecodeMask))
             {
                 return false;
             }

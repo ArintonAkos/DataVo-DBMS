@@ -78,6 +78,11 @@ internal partial class Select
         public required bool[] FilterMask { get; init; }
         public required bool[] RestMask { get; init; }
 
+        /// <summary>Every column read from a typed row (<see cref="FilterMask"/> and <see cref="RestMask"/>): the in-memory engine decodes no others.</summary>
+        public bool[] TypedReadMask => _typedReadMask ??= [.. FilterMask.Select((filter, i) => filter || RestMask[i])];
+
+        private bool[]? _typedReadMask;
+
         /// <summary>The text filter columns compared as stored bytes when rows arrive serialized; null when there is none.</summary>
         public RawTextColumns? RawText { get; init; }
 
@@ -257,7 +262,7 @@ internal partial class Select
         {
             // Answered from the table's columnar index; no row was read.
         }
-        else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
+        else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow, state.TypedReadMask))
         {
             return null;
         }
@@ -276,7 +281,7 @@ internal partial class Select
     /// </summary>
     private ListedTable? ScanSnapshotRows(DataVoEngine engine, string tableName, string databaseName, RowKey? lower, RowKey? upper, TypedScanState state)
     {
-        if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow))
+        if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, VisitTypedRow, state.TypedReadMask))
         {
             return null;
         }

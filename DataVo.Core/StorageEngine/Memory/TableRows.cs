@@ -96,12 +96,13 @@ internal sealed class TableRows
     /// Reads the typed row at a position as cells, without a lock and without allocating. The cells are valid
     /// until the reader is used again or disposed.
     /// </summary>
+    /// <param name="columns">When set, only these columns of a packed row are decoded; the others must not be read.</param>
     /// <returns><see langword="false"/> when the position holds no typed row, or it was removed meanwhile.</returns>
-    public bool TryReadTypedCells(int position, ref PackedRowReader reader, out ReadOnlySpan<CellValue> cells)
+    public bool TryReadTypedCells(int position, ref PackedRowReader reader, out ReadOnlySpan<CellValue> cells, bool[]? columns = null)
     {
         if (_flat is { } flat && flat.TryRead(position - _flatBase, out FlatRow row))
         {
-            cells = reader.Cells(flat.Layout, row);
+            cells = reader.Cells(flat.Layout, row, columns);
 
             // The row was read without a lock: it counts only if it was still there once it had been read.
             if (row.IsKeptApart || flat.IsLive(position - _flatBase))
