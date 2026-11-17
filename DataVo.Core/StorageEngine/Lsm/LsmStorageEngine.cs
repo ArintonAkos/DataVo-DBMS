@@ -2037,8 +2037,103 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// The buffers of one merge, kept per thread so a paged scan allocates nothing per page. A merge started from
     /// inside another one's visitor finds the slot empty and uses fresh buffers.
     /// </summary>
+    /// <summary>
+    /// Orders the non-empty runs of a table by key into <c>scratch.Order</c> when their key ranges do not overlap,
+    /// as the runs of a table written in key order do. False when some ranges overlap, so the runs must be merged.
+    /// </summary>
+    private bool TryOrderDisjointFiles(LsmSstableHandle[] files, MergeScratch scratch, out int count)
+    {
+        count = 0;
+        if (scratch.Order.Length < files.Length)
+        {
+            scratch.Order = new int[files.Length];
+        }
+
+        int[] order = scratch.Order;
+        for (int i = 0; i < files.Length; i++)
+        {
+            if (files[i].GetV2Reader(_readMode).Properties.EntryCount == 0)
+            {
+                continue;
+            }
+
+            // Insertion sort by smallest key: a table has few runs.
+            RowKey smallest = SmallestKeyOf(files[i]);
+            int at = count++;
+            while (at > 0 && SmallestKeyOf(files[order[at - 1]]) > smallest)
+            {
+                order[at] = order[at - 1];
+                at--;
+            }
+
+            order[at] = i;
+        }
+
+        for (int i = 1; i < count; i++)
+        {
+            if (files[order[i - 1]].GetV2Reader(_readMode).Properties.LargestKey >= SmallestKeyOf(files[order[i]]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private RowKey SmallestKeyOf(LsmSstableHandle file) => file.GetV2Reader(_readMode).Properties.SmallestKey;
+
+    /// <summary>
+    /// Visits the live rows of runs whose key ranges do not overlap, one run after another: no key is in two runs,
+    /// so a run's newest version of each key decides it and nothing is merged across runs. Stops when the visitor
+    /// does.
+    /// </summary>
+    private void ScanDisjointFiles<TVisitor>(LsmSstableHandle[] files, MergeScratch scratch, int count, ref TVisitor visitor, RowKey? lower, RowKey? upper)
+        where TVisitor : struct, ILiveRowVisitor
+    {
+        scratch.Prepare(1);
+        for (int i = 0; i < count; i++)
+        {
+            SsTableV2Reader reader = files[scratch.Order[i]].GetV2Reader(_readMode);
+            if (upper is { } end && reader.Properties.SmallestKey >= end)
+            {
+                return; // this run and every later one lie past the range
+            }
+
+            if (lower is { } start && reader.Properties.LargestKey < start)
+            {
+                continue;
+            }
+
+            SsTableV2Cursor cursor = scratch.Cursors[0] = scratch.Cursors[0]?.Reset(reader) ?? reader.OpenCursor();
+            bool has = lower is { } from ? cursor.SeekTo(from) : cursor.MoveNext();
+            while (has)
+            {
+                RowKey key = cursor.Key;
+                if (upper is { } to && key >= to)
+                {
+                    return;
+                }
+
+                if (cursor.Type == LsmValueType.Put && !visitor.Visit(key, cursor.Sequence, cursor.Value))
+                {
+                    return;
+                }
+
+                // The run lists a key's versions newest first: the rest are superseded.
+                do
+                {
+                    has = cursor.MoveNext();
+                }
+                while (has && cursor.Key == key);
+            }
+        }
+    }
+
     private sealed class MergeScratch
     {
+        /// <summary>Run order for <see cref="ScanDisjointFiles{TVisitor}"/>.</summary>
+        public int[] Order = [];
+
         // An overlay list grown past this by a whole-table merge is dropped rather than kept for the thread.
         private const int RetainedOverlay = 16 * 1024;
 
@@ -2187,6 +2282,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         TableVersion version = state.AcquireVersion();
         try
         {
+            if (overlay.Count == 0 && TryOrderDisjointFiles(version.Files, scratch, out int ordered))
+            {
+                ScanDisjointFiles(version.Files, scratch, ordered, ref visitor, lower, upper);
+                return null;
+            }
+
             int files = version.Files.Length;
             scratch.Prepare(files);
             SsTableV2Cursor?[] cursors = scratch.Cursors;
