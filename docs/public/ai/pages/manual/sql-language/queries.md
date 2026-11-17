@@ -91,6 +91,15 @@ GROUP BY IsActive
 HAVING COUNT(*) > 0;
 ```
 
+`HAVING` also works without `GROUP BY`. The whole filtered table is then one group, and `HAVING` decides whether its single result row is returned.
+
+```sql
+SELECT COUNT(*) AS ActiveCount, AVG(Score) AS AverageScore
+FROM Users
+WHERE IsActive = true
+HAVING COUNT(*) >= 10;
+```
+
 Join tables when a query needs fields from both sides.
 
 ```sql
@@ -119,6 +128,25 @@ WHERE DepartmentId IN (
 );
 ```
 
+Name an intermediate result with a common table expression. DataVo materializes it before running the main query; recursive CTEs are available to reactive queries only.
+
+```sql
+WITH HighScorers AS (
+  SELECT Id, Name, DepartmentId FROM Users WHERE Score >= 90
+)
+SELECT d.Name, COUNT(*) AS N
+FROM HighScorers h
+INNER JOIN Departments d ON h.DepartmentId = d.Id
+GROUP BY d.Name;
+```
+
+Rank rows within a partition with `RANK()`, the one supported window function.
+
+```sql
+SELECT Name, DepartmentId, RANK() OVER (PARTITION BY DepartmentId ORDER BY Score DESC) AS ScoreRank
+FROM Users;
+```
+
 Combine compatible result sets with `UNION ALL`.
 
 ```sql
@@ -140,4 +168,6 @@ LIMIT 5;
 
 ## Query Support Summary
 
-Supported query features: projection and aliases; `WHERE` predicates including equality, comparisons, `IN`, `BETWEEN`, `LIKE`, and vector-distance predicates; `ORDER BY` (including vector ranking); `LIMIT`/`OFFSET`; aggregates (`COUNT`, `SUM`, `MIN`, `MAX`); `GROUP BY`/`HAVING`; all major joins; subqueries (`IN` and `EXISTS` shapes); `UNION`/`UNION ALL`; and vector distance ranking (`<=>` for cosine, `<->` for L2). The planner is early and configuration-controlled — it is not at cost-based-optimizer parity with mature RDBMSs. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported: projection and aliases; `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IN`, `BETWEEN`, `LIKE`/`NOT LIKE`, `IS [NOT] NULL` and vector-distance predicates; `ORDER BY` (including vector ranking), `LIMIT` and `OFFSET`; `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, with `DISTINCT` inside the parentheses; `GROUP BY` and `HAVING`, including `HAVING` without `GROUP BY`; `INNER`, `LEFT`, `RIGHT`, `FULL` and `CROSS` joins; `IN` and `EXISTS` subqueries; non-recursive common table expressions; `RANK() OVER (PARTITION BY ... ORDER BY ...)`; `UNION` and `UNION ALL`; and vector distance (`<=>` cosine, `<->` Euclidean).
+
+All of these return correct results, but not all are equally fast. Single-table filters and aggregates, and `INNER`/`LEFT` joins on integer keys, run on DataVo's typed paths; `DISTINCT`, `RIGHT`/`FULL`/`CROSS` joins, joins on text or `GUID` keys, an `OR` across two joined tables, CTEs, window functions and queries inside an explicit transaction run on the general evaluator, which is much slower on large tables. See [Query Planner And Fast Paths](/manual/storage-engine/query-planner-fast-paths) and the [SQL compatibility matrix](/manual/sql-language/sql-compatibility).

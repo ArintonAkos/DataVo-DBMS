@@ -28,7 +28,7 @@ INSERT INTO Embeddings (Id, Label, Emb)
 VALUES (4, 'warm-red', '[0.9,0.1,0]');
 ```
 
-To search vectors efficiently, create a vector index on the vector column. DataVo supports two index families in v0.2: `HNSW` and `FLAT`.
+To search vectors efficiently, create a vector index on the vector column. DataVo has two vector index families: `HNSW` and `FLAT`.
 
 Use `FLAT` when you want perfect accuracy and the dataset is small enough that scanning every vector is acceptable. A flat index is simple: compare the query vector with every stored vector and return the exact nearest rows. It is a good default for tests, small local datasets, and correctness checks.
 
@@ -94,10 +94,12 @@ ORDER BY distance ASC
 LIMIT 10;
 ```
 
+## Filtered searches
+
 A filtered search still returns the exact number of rows the `LIMIT` asks for when that many rows pass the filter. DataVo asks the index for more candidates than the `LIMIT` (about `LIMIT / selectivity`), tests the filter on each candidate's stored row, and builds only the rows that pass. Two cost rules keep selective filters fast:
 
-- When the filter needs so many candidates that walking the HNSW graph would cost more than comparing every stored vector, the HNSW index scans its vectors instead. That scan is exact.
-- When even the widest candidate search finds too few passing rows, DataVo finds the passing rows first with a table scan and ranks only those by distance. That answer is exact as well.
+- When the filter needs so many candidates that walking the HNSW graph would cost more than comparing every stored vector, the HNSW index scans its vectors instead. A graph search widens its beam with the number of candidates requested (roughly `log2(n) × k × 1.5`), and each beam slot costs a fixed amount of queue work and cache misses plus about 2.4 distance computations; an exact scan costs one distance computation per vector. The index compares the two estimates per query. With the measured constants the scan wins once the beam exceeds about 9% of the vectors at 384 dimensions and 20% at 1,536. The scan is exact, so this routing can only raise recall. In C#, `HNSWIndex.EnableExactScanCostRouting = false` turns it off.
+- When even the widest candidate search finds too few passing rows (by default the candidate count is doubled at most twice), DataVo finds the passing rows first with a table scan and ranks only those by the index's stored vectors. That answer is exact as well. Before v0.4 such a query returned fewer rows than its `LIMIT` even though more rows matched.
 
 The same applies to a filtered search over a join, such as `FROM Docs d JOIN Authors a ON d.AuthorId = a.Id WHERE a.Country = 'DE'`: the candidates are joined and filtered in stored form, and a joined table is read by primary key only for the candidates that refer to it.
 
@@ -110,6 +112,8 @@ WHERE Emb <=> '[1,0,0]' < 0.25
 ORDER BY distance ASC
 LIMIT 10;
 ```
+
+## Large embeddings
 
 For production-sized embeddings, the same SQL shape works with larger dimensions. The only difference is the column declaration and the vector literal length.
 

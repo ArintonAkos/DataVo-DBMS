@@ -1,6 +1,6 @@
 # Native AOT
 
-DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) locks Native AOT compatibility across `DataVo.Core` and `DataVo.Data`. Both assemblies enable .NET trim and AOT analyzers and treat `IL2026` and `IL3050` diagnostics as build errors.
+DataVo locks Native AOT compatibility across `DataVo.Core` and `DataVo.Data`; this has held since the 0.2 packages and is checked on every change by `scripts/check-aot-baseline.sh`. Both assemblies enable .NET trim and AOT analyzers and treat `IL2026` and `IL3050` diagnostics as build errors.
 
 For dynamic SQL, DataVo parses the runtime SQL string without reflection-based type discovery.
 
@@ -45,4 +45,4 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
 
 ## Native AOT Support Summary
 
-In v0.2.0-rc.3, `DataVo.Core` and `DataVo.Data` are locked and passing under Native AOT (`PublishAot=true`), including the C#-native embedded core, ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`), source-generated query paths (`[DataVoQuery]`), and zero-allocation `RowRef` readers. `DataVo.EntityFrameworkCore` depends on EF Core's runtime infrastructure and is **not** covered by the Native AOT guarantee.
+`DataVo.Core` and `DataVo.Data` are locked and passing under Native AOT (`PublishAot=true`), including the C#-native embedded core, ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`), source-generated query paths (`[DataVoQuery]`), and zero-allocation `RowRef` readers. `DataVo.EntityFrameworkCore` depends on EF Core's runtime infrastructure and is **not** covered by the Native AOT guarantee.

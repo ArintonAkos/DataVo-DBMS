@@ -78,9 +78,12 @@ reopened.Execute("USE App");
 reopened.Execute("SELECT * FROM Events WHERE Id = 1"); // returns the row
 ```
 
-B-tree and vector (`HNSW`/`FLAT`) indexes are still rebuilt from durable rows on open (about 0.5–0.8 s per 200,000 rows on a laptop), so they always match committed data even after a crash.
+What happens to each kind of index on open:
 
-**Columnar indexes (`[Columnar]` / `USING COLUMNAR`) are persisted on disk inside the SSTables themselves.** Only the unflushed "tail" (writes since the last flush) stays in memory. Reopening an LSM database performs zero columnar index rebuild: covered filters and aggregates stream 4,096-row chunks out-of-core straight from the memory-mapped `.sst` segments and skip chunks whose min/max zone maps rule out the predicate (`13.7 ms` open + first `SUM` on 1,000,000 rows in OS cache).
+- **Primary-key and secondary B-tree indexes** are stored as their own key spaces ("index tables") of `(key, row id)` entries in keyed SSTables under the table's `.idx` directory. An index change is staged in the same write unit as the row change, so it reaches the commit log in the same record, and rows and indexes recover together after a crash. Opening a database does not rebuild them. A clustered table's primary key is not stored at all: the rows are keyed by it.
+- **HNSW graphs** are written to a snapshot file on a clean close, stamped with the commit-log sequence number they reflect. On open, the snapshot is loaded and only rows written after that number are inserted into or removed from the graph; if more than half the rows changed, or the snapshot is missing or fails its checksum, the graph is rebuilt from the rows. After a crash the graph is therefore rebuilt or caught up, never trusted beyond what the rows say.
+- **FLAT vector indexes** are rebuilt from the rows on open. They hold only the vectors, so the rebuild is a sequential read.
+- **Columnar indexes (`[Columnar]` / `USING COLUMNAR`)** live inside the SSTables themselves (format version 8). Only the unflushed tail stays in memory, so nothing is rebuilt: covered filters and aggregates stream 4,096-row chunks from the memory-mapped `.sst` segments and skip chunks whose min/max zone maps rule out the predicate. Opening a database and answering a first `SUM` over 1,000,000 flushed rows took 13.7 ms with the files in the OS page cache.
 
 ## Opening the Same Directory Twice
 
@@ -90,4 +93,4 @@ A directory can be open in only one process at a time. DataVo holds a `datavo.lo
 
 ## LSM Support Summary
 
-The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, background SSTable compaction, and persistent format-v8 columnar SSTable segments with per-chunk zone-map pruning. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.
+The LSM engine provides an arena-backed MemTable, clustered `INT` and `GUID` primary keys, a single commit log per data directory (records are pruned once every table has flushed them; directories written by earlier versions with per-table WAL files are migrated automatically on first open), a 32 MB MemTable flush threshold (an internal constant, not a public tuning knob), a background flush pipeline that runs outside the foreground write path, background SSTable compaction, memory-mapped SSTable reads (`LsmReadMode.Auto`; `PositionalRead` uses file reads instead), secondary indexes persisted as index tables in the same commit as their rows, HNSW graph snapshots caught up from the commit log on open, and persistent format-v8 columnar SSTable segments with per-chunk zone-map pruning. The on-disk format does not yet carry a long-term cross-version compatibility guarantee prior to 1.0.

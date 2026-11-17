@@ -3,9 +3,9 @@
 > Source route: /manual/reference/unsupported-features
 > Source file: manual/reference/unsupported-features.md
 
-This page exists so adopters do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable in DataVo v0.2 Release Candidate (`v0.2.0-rc.3`) even if related internal work exists.
+This page exists so adopters do not have to infer product boundaries from source files, tests, or roadmap notes. If a feature is listed here, treat it as unavailable even if related internal work exists. The list applies to the v0.4 source line and to the published 0.2.0-rc.3 packages.
 
-DataVo is not PostgreSQL-compatible in v0.2. You can write SQL, but it is DataVo's SQL dialect.
+DataVo is not PostgreSQL-compatible. You can write SQL, but it is DataVo's SQL dialect; the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) lists what it accepts.
 
 ```sql
 -- Supported DataVo-style vector query:
@@ -18,7 +18,7 @@ LIMIT 5;
 PostgreSQL system catalogs are not present. Tools that expect `pg_class`, `pg_attribute`, or PostgreSQL authentication cannot connect directly to the embedded engine.
 
 ```sql
--- Not a supported v0.2 DataVo catalog workflow:
+-- Not a supported DataVo catalog workflow:
 SELECT relname
 FROM pg_class
 WHERE relkind = 'r';
@@ -32,7 +32,7 @@ List<User> users = ctx.Users
     .Where(user => user.IsActive)
     .ToList();
 
-// Not supported as a v0.2 claim: full migration lifecycle.
+// Not supported: the migration lifecycle.
 // dotnet ef migrations add InitialCreate
 // dotnet ef database update
 ```
@@ -46,16 +46,16 @@ SELECT Id, Name
 FROM Users
 WHERE IsActive = true;
 
--- v0.2 does not claim complete phantom-read prevention
+-- DataVo does not claim complete phantom-read prevention
 -- for arbitrary predicate ranges.
 
 COMMIT;
 ```
 
-There is no stored procedure or trigger runtime in v0.2. Keep application logic in application code.
+There is no stored procedure or trigger runtime. Keep application logic in application code.
 
 ```sql
--- Not supported in v0.2:
+-- Not supported:
 CREATE TRIGGER update_timestamp
 BEFORE UPDATE ON Users
 FOR EACH ROW
@@ -65,10 +65,10 @@ EXECUTE PROCEDURE set_updated_at();
 Replication and high availability are also out of scope. DataVo's product shape is embedded local storage.
 
 ```text
-Supported v0.2 shape:
+Supported shape:
   application -> DataVoContext -> local storage
 
-Not supported v0.2 shape:
+Not supported shape:
   primary server -> replica server -> failover orchestration
 ```
 
@@ -76,15 +76,18 @@ Not supported v0.2 shape:
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol in v0.2. |
+| Full PostgreSQL compatibility | Not Supported | DataVo has its own SQL dialect and no PostgreSQL server protocol. |
 | PostgreSQL system catalogs | Not Supported | No `pg_class`, `pg_attribute`, or related catalog compatibility layer. |
 | EF Core migrations | Not Supported | No migration scaffolding, diffing, or apply pipeline. |
 | EF Core shadow properties | Not Supported | The bridge expects explicit mapped CLR properties. |
-| Complex EF LINQ joins | Not Supported | Broad join translation is outside the v0.2 claim. |
+| Complex EF LINQ joins | Not Supported | Broad join translation is outside the bridge's scope. |
 | Multi-row serializability | Not Supported | DataVo does not claim serializable isolation for arbitrary multi-row predicates. |
 | Phantom-read prevention | Not Supported | No public predicate-range locking guarantee. |
 | Stored procedures | Not Supported | No procedural SQL runtime. |
 | Triggers | Not Supported | No trigger system. |
-| Replication/high availability | Not Supported | Out of scope for embedded v0.2. |
-| PostgreSQL-like role administration | Not Supported | Principal/grant commands exist, but no PostgreSQL role catalog is documented for v0.2. |
+| Replication/high availability | Not Supported | Out of scope for an embedded engine. |
+| PostgreSQL-like role administration | Not Supported | Principal/grant commands exist, but no PostgreSQL role catalog exists. |
 | Production WebAssembly / npm package | Not Supported | `DataVo.Browser` is an `Experimental / Playground Lane` runtime for docs only; not published on npm. |
+| Views, `INTERSECT`, `EXCEPT`, `CASE`, `CAST`, `COALESCE` | Not Supported | See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility). |
+| Window functions other than `RANK()` | Not Supported | `RANK() OVER (PARTITION BY ... ORDER BY ...)` is the only window function. |
+| Collation-aware text comparison | Not Supported | Text compares ordinally; `LIKE` is case-sensitive. |
