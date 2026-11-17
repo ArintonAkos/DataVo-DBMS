@@ -431,7 +431,13 @@ public sealed class SpatialQueryTests : IDisposable
         var box = new BoundingBox3(new Vector3(-10), new Vector3(10));
         float[] stored = [1f, 2f, 3f];
         var center = new Vector3(0.5f, 0.25f, -0.75f);
-        RunMath(box, stored, center, 1_000); // JIT the path first
+        // Warm enough invocations and iterations so tiered JIT promotes every callee and branch before measuring.
+        for (int w = 0; w < 64; w++)
+        {
+            RunMath(box, stored, center, 64);
+        }
+
+        RunMath(box, stored, center, 10_000);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         double sink = RunMath(box, stored, center, 200_000);
