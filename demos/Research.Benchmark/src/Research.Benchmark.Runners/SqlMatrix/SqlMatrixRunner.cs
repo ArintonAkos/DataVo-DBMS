@@ -40,6 +40,7 @@ public sealed record SqlMatrixEngineResult(
     string Notes,
     double LoadMs,
     double ReopenMs,
+    double ReopenAgainMs,
     double SizeMb,
     double ColumnarBuildMs,
     IReadOnlyList<SqlMatrixMeasurement> Measurements,
@@ -91,7 +92,7 @@ public static class SqlMatrixRunner
     {
         string directory = Path.Combine(root, new string(engine.Name.Where(char.IsLetterOrDigit).ToArray()));
         var measurements = new List<SqlMatrixMeasurement>();
-        double loadMs = 0, reopenMs = 0, sizeMb = 0, columnarMs = 0;
+        double loadMs = 0, reopenMs = 0, reopenAgainMs = 0, sizeMb = 0, columnarMs = 0;
         try
         {
             using (engine)
@@ -106,6 +107,12 @@ public static class SqlMatrixRunner
                 stopwatch.Restart();
                 engine.Reopen();
                 reopenMs = stopwatch.Elapsed.TotalMilliseconds;
+
+                // The first close writes out what the load left in memory; a second close and open has nothing
+                // to write, so it times opening the files on its own.
+                stopwatch.Restart();
+                engine.Reopen();
+                reopenAgainMs = stopwatch.Elapsed.TotalMilliseconds;
                 sizeMb = engine.SizeOnDiskBytes() / 1_000_000d;
 
                 foreach (SqlMatrixQuery query in queries)
@@ -128,12 +135,12 @@ public static class SqlMatrixRunner
                 }
             }
 
-            return new SqlMatrixEngineResult(engine.Name, engine.Notes, loadMs, reopenMs, sizeMb, columnarMs, measurements, null);
+            return new SqlMatrixEngineResult(engine.Name, engine.Notes, loadMs, reopenMs, reopenAgainMs, sizeMb, columnarMs, measurements, null);
         }
         catch (Exception exception)
         {
             log($"{engine.Name}: FAILED {exception.GetType().Name}: {exception.Message}");
-            return new SqlMatrixEngineResult(engine.Name, engine.Notes, loadMs, reopenMs, sizeMb, columnarMs, measurements, exception.Message);
+            return new SqlMatrixEngineResult(engine.Name, engine.Notes, loadMs, reopenMs, reopenAgainMs, sizeMb, columnarMs, measurements, exception.Message);
         }
         finally
         {
@@ -229,7 +236,8 @@ public static class SqlMatrixRunner
 
         Header(b, "Setup", results, extra: null);
         Row(b, "Load (ms)", results, r => r.LoadMs.ToString("N0", CultureInfo.InvariantCulture), null);
-        Row(b, "Reopen (ms)", results, r => r.ReopenMs.ToString("N1", CultureInfo.InvariantCulture), null);
+        Row(b, "Close and reopen after the load (ms)", results, r => r.ReopenMs.ToString("N1", CultureInfo.InvariantCulture), null);
+        Row(b, "Close and reopen again, nothing to write (ms)", results, r => r.ReopenAgainMs.ToString("N1", CultureInfo.InvariantCulture), null);
         Row(b, "Size on disk (MB)", results, r => r.SizeMb > 0 ? r.SizeMb.ToString("N1", CultureInfo.InvariantCulture) : "in memory", null);
         Row(b, "Create columnar index (ms)", results, r => r.ColumnarBuildMs > 0 ? r.ColumnarBuildMs.ToString("N0", CultureInfo.InvariantCulture) : "-", null);
         b.AppendLine();
