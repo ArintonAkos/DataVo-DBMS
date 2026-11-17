@@ -7,7 +7,7 @@
 
 DataVo is an embedded database engine written in C# for .NET 10. It runs inside your process, with no server and no native library: storage, SQL execution and vector indexes are managed code, and `DataVo.Core` builds with the trim and Native AOT analyzers as errors.
 
-**Versions.** The latest packages on nuget.org are **0.2.0-rc.3** (10 November 2026). This repository's `master` branch has since completed the **v0.3** (columnar indexes, compact in-memory rows) and **v0.4** (columnar SSTables, SQL and vector correctness, typed execution) milestones, which are not yet published. The [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/preface/roadmap) lists what each added and what v0.5 plans.
+**Versions.** The latest packages on nuget.org are **0.4.0-rc.1** (17 November 2026), shipping both the **v0.3** (columnar indexes, compact in-memory rows) and **v0.4** (columnar SSTables, SQL and vector correctness, typed execution) milestones. The [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/preface/roadmap) lists what each added and what v0.5 plans.
 
 ## How it works
 
@@ -47,7 +47,7 @@ Cross-platform runs on GitHub Actions (four-core virtual machines) are in [Part 
 
 ## Install
 
-Published prereleases on [nuget.org](https://www.nuget.org/packages/DataVo.Core/) (0.2.0-rc.3):
+Published prereleases on [nuget.org](https://www.nuget.org/packages/DataVo.Core/) (0.4.0-rc.1):
 
 ```bash
 dotnet add package DataVo.Core --prerelease
@@ -56,7 +56,7 @@ dotnet add package DataVo.Generators --prerelease            # compiled LINQ, no
 dotnet add package DataVo.EntityFrameworkCore --prerelease   # EF Core bridge (not a full provider)
 ```
 
-To use the v0.3/v0.4 features before they are published, build the packages from this repository:
+To build the packages locally from this repository:
 
 ```bash
 dotnet pack DataVo.sln -c Release

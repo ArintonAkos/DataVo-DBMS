@@ -45,7 +45,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Versions
 
-The latest published NuGet packages are **0.2.0-rc.3** (10 November 2026). Development has continued on the repository's `master` branch through two further milestones, **v0.3** and **v0.4**, which have not yet been published as packages. This manual describes the v0.4 source line. Where a feature is newer than the published packages, the [Roadmap](/manual/preface/roadmap) says which milestone it belongs to; build from source if you need it today.
+The latest published NuGet packages are **0.4.0-rc.1** (17 November 2026), which ship both the **v0.3** and **v0.4** milestones described in this manual. The [Roadmap](/manual/preface/roadmap) lists what each milestone added and what v0.5 plans.
 
 ## How the engine is put together
 
@@ -95,9 +95,9 @@ It is not a client/server database. One process owns a database directory at a t
 > Source route: /manual/preface/project-status
 > Source file: manual/preface/project-status.md
 
-**Latest published packages: 0.2.0-rc.3 (release candidate, 10 November 2026). Repository: v0.4 complete, unpublished.**
+**Latest published packages: 0.4.0-rc.1 (release candidate, 17 November 2026).**
 
-DataVo is a C#-native embedded database engine. The 0.2 packages on nuget.org are a release candidate for the 0.2 line. The repository's `master` branch has since completed the v0.3 (columnar indexes, compact in-memory rows) and v0.4 (columnar SSTables, SQL and vector correctness, typed execution) milestones listed in the [Roadmap](/manual/preface/roadmap); they ship in the next published version. This page says what "release candidate" promises and what state each subsystem is in.
+DataVo is a C#-native embedded database engine. The **0.4.0-rc.1** packages on nuget.org ship the 0.2 baseline together with the completed **v0.3** (columnar indexes, compact in-memory rows) and **v0.4** (columnar SSTables, SQL and vector correctness, typed execution) milestones listed in the [Roadmap](/manual/preface/roadmap). This page says what "release candidate" promises and what state each subsystem is in.
 
 ## What "release candidate" means here
 
@@ -118,7 +118,7 @@ DataVo is a C#-native embedded database engine. The 0.2 packages on nuget.org ar
 | Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
 | Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Roslyn Source Generators](/manual/client-interfaces/source-generators). Other shapes still return the right rows by scanning. No Entity Framework dependency. |
 | Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance, filtered and joined searches with exact cost-based fallback, HNSW parameters in SQL (v0.4). See [Vector Search and Indexes](/manual/sql-language/vector-search-syntax). |
-| Columnar indexes | Complete in repository (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Not in the 0.2 packages. |
+| Columnar indexes | Release candidate (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Included in `0.4.0-rc.1`. |
 | ADO.NET provider (`DataVo.Data`) | Release candidate | Standard `System.Data.Common` types. See [ADO.NET Provider](/manual/client-interfaces/ado-net). |
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
@@ -167,7 +167,7 @@ Unity is an evaluation target, not a supported runtime. The public `DataVo.Core`
 > Source route: /manual/preface/alpha-scope
 > Source file: manual/preface/alpha-scope.md
 
-This page states the contract: what DataVo is built to do, the settings under which its guarantees hold, and what it deliberately does not do. It applies to the v0.4 source line described by this manual; the published 0.2.0-rc.3 packages have the same boundaries, minus the v0.3 and v0.4 features listed in the [Roadmap](/manual/preface/roadmap). For the state of each subsystem, see [Project Status & Stability](/manual/preface/project-status).
+This page states the contract: what DataVo is built to do, the settings under which its guarantees hold, and what it deliberately does not do. It applies to the v0.4 line published as **0.4.0-rc.1** (17 November 2026); see the [Roadmap](/manual/preface/roadmap) for the milestone breakdown and [Project Status & Stability](/manual/preface/project-status) for the state of each subsystem.
 
 ## The supported shape
 
@@ -223,9 +223,9 @@ SQL `DATE` materializes as `DataVo.Core.DataVoDate` in the row APIs. `CellValue.
 > Source route: /manual/preface/roadmap
 > Source file: manual/preface/roadmap.md
 
-DataVo's milestones are numbered by what they change in the engine. The latest published NuGet packages are **0.2.0-rc.3**; **v0.3** and **v0.4** are complete in the repository but not yet published, and **v0.5** is planned. The principles behind every milestone are the same: one process owns its data, durability is an explicit setting with a stated contract, `DataVo.Core` stays Native AOT clean, and a fast path either returns exactly what the general path would or declines.
+DataVo's milestones are numbered by what they change in the engine. The latest published NuGet packages are **0.4.0-rc.1**, which ship both **v0.3** and **v0.4**; **v0.5** is planned next. The principles behind every milestone are the same: one process owns its data, durability is an explicit setting with a stated contract, `DataVo.Core` stays Native AOT clean, and a fast path either returns exactly what the general path would or declines.
 
-## v0.2: the embedded engine (published as 0.2.0-rc.3)
+## v0.2: the embedded engine (first 0.2.0-rc.3 line)
 
 - **LSM storage.** A commit log, arena-backed MemTables, background SSTable flushes and compaction. `LsmStrictFsync = true` (the default) acknowledges a commit only after the log is on stable storage. Tables whose primary key is one `INT` or `GUID` column are clustered: rows are stored under their key, which roughly halves the footprint of an integer-keyed table compared with a separate primary-key index.
 - **Native AOT.** `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers (`IL2026`, `IL3050`) as errors.
@@ -233,12 +233,12 @@ DataVo's milestones are numbered by what they change in the engine. The latest p
 - **Vector search.** `VECTOR(n)` columns, `HNSW` and `FLAT` indexes, cosine (`<=>`) and Euclidean (`<->`) distance with SIMD kernels.
 - **Packaging.** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore` and `DataVo.Generators` on nuget.org as prereleases, published from CI with NuGet Trusted Publishing.
 
-## v0.3: columnar indexes and compact rows (complete, unpublished)
+## v0.3: columnar indexes and compact rows (shipped in 0.4.0-rc.1)
 
 - **Columnar indexes** (`[Columnar]` on a typed model, `CREATE INDEX ... USING COLUMNAR` in SQL). The marked columns are kept a second time as contiguous column buffers, and single-table `COUNT`, `SUM`, `AVG`, `MIN` and `MAX` with numeric `AND`/`OR` filters are answered from those buffers with SIMD kernels instead of from rows.
 - **Compact in-memory rows.** `FlatRowStore` packs rows into fixed-width cells in contiguous buffers, read through `PackedKeyReader<T>`: 49.2 bytes per row in the measured table, 13 times less than the previous object-per-row layout, and a 52.1 ns primary-key lookup.
 
-## v0.4: out-of-core columns, SQL and vector correctness, typed execution (complete, unpublished)
+## v0.4: out-of-core columns, SQL and vector correctness, typed execution (published as 0.4.0-rc.1)
 
 v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a cross-engine oracle found, and moves the common SQL shapes onto typed paths. Its final measurements are in [`2026-11-16-v04-final/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-16-v04-final) and explained in [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite).
 
@@ -313,7 +313,7 @@ v0.5 has two tracks. Neither is started; the scope below is the plan, not a comm
 
 DataVo ships as four NuGet packages. Install only the ones you need: `DataVo.Core` is the engine and everything else builds on it.
 
-The latest published packages are **0.2.0-rc.3 (release candidate)**, so include `--prerelease` when you add a package. The v0.3 and v0.4 features described in this manual are not in those packages yet; to use them, build the packages from the repository with `dotnet pack DataVo.sln -c Release`, which writes them to `artifacts/packages`, and add that folder as a package source. See [Project Status & Stability](/manual/preface/project-status) for what that means.
+The latest published packages are **0.4.0-rc.1 (release candidate)**, so include `--prerelease` when you add a package. They include the v0.3 and v0.4 features described in this manual; to build packages locally from this repository instead, run `dotnet pack DataVo.sln -c Release`, which writes them to `artifacts/packages`, and add that folder as a package source. See [Project Status & Stability](/manual/preface/project-status) for what that means.
 
 ## Packages
 

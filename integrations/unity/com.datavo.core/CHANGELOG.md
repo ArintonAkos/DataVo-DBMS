@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0-rc.1
+
+- **Columnar Indexes & Out-of-Core SSTables (v0.3–v0.4):** `[Columnar]` / `CREATE INDEX ... USING COLUMNAR` contiguous buffers and persistent format-v8 SSTable segments with per-chunk min/max zone maps and delete vectors.
+- **Compact In-Memory Storage:** `FlatRowStore` packs rows into fixed-width contiguous buffers (`PackedKeyReader<T>`) with sorted key ranges.
+- **Typed SQL Execution & Vector Search:** Typed scans (`OR`, `LIKE`, UTF-8 byte matching, bounded top-k), multi-table `INNER`/`LEFT` hash joins, unboxed `GROUP BY`, diversity-heuristic `HNSW` defaults, SQL `WITH (...)` graph options, cost-based filtered exact-scan routing, eager-optimized SIMD distance kernels, and `WHERE ... HAVING` / `BIT` / culture fixes.
+
 ## 0.2.0-rc.3
 
 - **Zero-Copy `RowRef` & `StreamRef`:** Stream table rows with 0 bytes allocated on the managed heap across 50,000+ rows for 60/120 FPS game simulation loops.

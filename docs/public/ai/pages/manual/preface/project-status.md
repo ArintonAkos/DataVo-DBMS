@@ -3,9 +3,9 @@
 > Source route: /manual/preface/project-status
 > Source file: manual/preface/project-status.md
 
-**Latest published packages: 0.2.0-rc.3 (release candidate, 10 November 2026). Repository: v0.4 complete, unpublished.**
+**Latest published packages: 0.4.0-rc.1 (release candidate, 17 November 2026).**
 
-DataVo is a C#-native embedded database engine. The 0.2 packages on nuget.org are a release candidate for the 0.2 line. The repository's `master` branch has since completed the v0.3 (columnar indexes, compact in-memory rows) and v0.4 (columnar SSTables, SQL and vector correctness, typed execution) milestones listed in the [Roadmap](/manual/preface/roadmap); they ship in the next published version. This page says what "release candidate" promises and what state each subsystem is in.
+DataVo is a C#-native embedded database engine. The **0.4.0-rc.1** packages on nuget.org ship the 0.2 baseline together with the completed **v0.3** (columnar indexes, compact in-memory rows) and **v0.4** (columnar SSTables, SQL and vector correctness, typed execution) milestones listed in the [Roadmap](/manual/preface/roadmap). This page says what "release candidate" promises and what state each subsystem is in.
 
 ## What "release candidate" means here
 
@@ -26,7 +26,7 @@ DataVo is a C#-native embedded database engine. The 0.2 packages on nuget.org ar
 | Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
 | Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Roslyn Source Generators](/manual/client-interfaces/source-generators). Other shapes still return the right rows by scanning. No Entity Framework dependency. |
 | Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance, filtered and joined searches with exact cost-based fallback, HNSW parameters in SQL (v0.4). See [Vector Search and Indexes](/manual/sql-language/vector-search-syntax). |
-| Columnar indexes | Complete in repository (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Not in the 0.2 packages. |
+| Columnar indexes | Release candidate (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Included in `0.4.0-rc.1`. |
 | ADO.NET provider (`DataVo.Data`) | Release candidate | Standard `System.Data.Common` types. See [ADO.NET Provider](/manual/client-interfaces/ado-net). |
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |

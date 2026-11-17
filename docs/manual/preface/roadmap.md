@@ -1,8 +1,8 @@
 # Roadmap
 
-DataVo's milestones are numbered by what they change in the engine. The latest published NuGet packages are **0.2.0-rc.3**; **v0.3** and **v0.4** are complete in the repository but not yet published, and **v0.5** is planned. The principles behind every milestone are the same: one process owns its data, durability is an explicit setting with a stated contract, `DataVo.Core` stays Native AOT clean, and a fast path either returns exactly what the general path would or declines.
+DataVo's milestones are numbered by what they change in the engine. The latest published NuGet packages are **0.4.0-rc.1**, which ship both **v0.3** and **v0.4**; **v0.5** is planned next. The principles behind every milestone are the same: one process owns its data, durability is an explicit setting with a stated contract, `DataVo.Core` stays Native AOT clean, and a fast path either returns exactly what the general path would or declines.
 
-## v0.2: the embedded engine (published as 0.2.0-rc.3)
+## v0.2: the embedded engine (first 0.2.0-rc.3 line)
 
 - **LSM storage.** A commit log, arena-backed MemTables, background SSTable flushes and compaction. `LsmStrictFsync = true` (the default) acknowledges a commit only after the log is on stable storage. Tables whose primary key is one `INT` or `GUID` column are clustered: rows are stored under their key, which roughly halves the footprint of an integer-keyed table compared with a separate primary-key index.
 - **Native AOT.** `DataVo.Core` and `DataVo.Data` build with the trim and AOT analyzers (`IL2026`, `IL3050`) as errors.
@@ -10,12 +10,12 @@ DataVo's milestones are numbered by what they change in the engine. The latest p
 - **Vector search.** `VECTOR(n)` columns, `HNSW` and `FLAT` indexes, cosine (`<=>`) and Euclidean (`<->`) distance with SIMD kernels.
 - **Packaging.** `DataVo.Core`, `DataVo.Data`, `DataVo.EntityFrameworkCore` and `DataVo.Generators` on nuget.org as prereleases, published from CI with NuGet Trusted Publishing.
 
-## v0.3: columnar indexes and compact rows (complete, unpublished)
+## v0.3: columnar indexes and compact rows (shipped in 0.4.0-rc.1)
 
 - **Columnar indexes** (`[Columnar]` on a typed model, `CREATE INDEX ... USING COLUMNAR` in SQL). The marked columns are kept a second time as contiguous column buffers, and single-table `COUNT`, `SUM`, `AVG`, `MIN` and `MAX` with numeric `AND`/`OR` filters are answered from those buffers with SIMD kernels instead of from rows.
 - **Compact in-memory rows.** `FlatRowStore` packs rows into fixed-width cells in contiguous buffers, read through `PackedKeyReader<T>`: 49.2 bytes per row in the measured table, 13 times less than the previous object-per-row layout, and a 52.1 ns primary-key lookup.
 
-## v0.4: out-of-core columns, SQL and vector correctness, typed execution (complete, unpublished)
+## v0.4: out-of-core columns, SQL and vector correctness, typed execution (published as 0.4.0-rc.1)
 
 v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a cross-engine oracle found, and moves the common SQL shapes onto typed paths. Its final measurements are in [`2026-11-16-v04-final/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-16-v04-final) and explained in [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite).
 

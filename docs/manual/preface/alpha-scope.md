@@ -1,6 +1,6 @@
 # Release Scope & Boundaries
 
-This page states the contract: what DataVo is built to do, the settings under which its guarantees hold, and what it deliberately does not do. It applies to the v0.4 source line described by this manual; the published 0.2.0-rc.3 packages have the same boundaries, minus the v0.3 and v0.4 features listed in the [Roadmap](/manual/preface/roadmap). For the state of each subsystem, see [Project Status & Stability](/manual/preface/project-status).
+This page states the contract: what DataVo is built to do, the settings under which its guarantees hold, and what it deliberately does not do. It applies to the v0.4 line published as **0.4.0-rc.1** (17 November 2026); see the [Roadmap](/manual/preface/roadmap) for the milestone breakdown and [Project Status & Stability](/manual/preface/project-status) for the state of each subsystem.
 
 ## The supported shape
 

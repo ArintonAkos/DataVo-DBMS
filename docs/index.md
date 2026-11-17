@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "DataVo"
   text: "A C#-native embedded database engine"
-  tagline: "In-process SQL, LSM storage, columnar indexes and vector search for .NET 10. This manual describes the v0.4 source line; the published packages are 0.2.0-rc.3."
+  tagline: "In-process SQL, LSM storage, columnar indexes and vector search for .NET 10. This manual describes the v0.4 line, published on NuGet as 0.4.0-rc.1."
   actions:
     - theme: brand
       text: Get started

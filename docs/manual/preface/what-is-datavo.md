@@ -42,7 +42,7 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Versions
 
-The latest published NuGet packages are **0.2.0-rc.3** (10 November 2026). Development has continued on the repository's `master` branch through two further milestones, **v0.3** and **v0.4**, which have not yet been published as packages. This manual describes the v0.4 source line. Where a feature is newer than the published packages, the [Roadmap](/manual/preface/roadmap) says which milestone it belongs to; build from source if you need it today.
+The latest published NuGet packages are **0.4.0-rc.1** (17 November 2026), which ship both the **v0.3** and **v0.4** milestones described in this manual. The [Roadmap](/manual/preface/roadmap) lists what each milestone added and what v0.5 plans.
 
 ## How the engine is put together
 
