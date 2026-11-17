@@ -5,3 +5,8 @@ hybrid-vector end: 10:46  up 8 days,  1:03, 1 user, load averages: 2.26 2.87 3.0
 hybrid-vector-1536 start: 10:46  up 8 days,  1:03, 1 user, load averages: 2.26 2.87 3.07
 hybrid-vector-1536 end: 10:46  up 8 days,  1:04, 1 user, load averages: 3.21 3.05 3.12
 ALLDONE
+hybrid-vector start (rerun after 5cbcd14): 12:12  up 8 days,  2:29, 1 user, load averages: 2.28 3.46 3.33
+hybrid-vector end: 12:12  up 8 days,  2:30, 1 user, load averages: 2.42 3.38 3.31
+hybrid-vector-1536 start (rerun after 5cbcd14): 12:12  up 8 days,  2:30, 1 user, load averages: 2.42 3.38 3.31
+hybrid-vector-1536 end: 12:13  up 8 days,  2:31, 1 user, load averages: 2.52 3.27 3.27
+VECDONE

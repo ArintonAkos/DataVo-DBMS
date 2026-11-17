@@ -1,4 +1,9 @@
-DataVo Flat, V0 (unfiltered top-10), 50,000 x 384: why the official run's median is 11.29 ms
+DataVo Flat, V0 (unfiltered top-10), 50,000 x 384: why the first final run's median was 11.29 ms, and the fix
+
+(Sections 1-2 were written before the cause was found. Their "Reading" names the scan loop's on-stack
+replacement as the cause; section 3 shows that was wrong and gives the actual cause and the fix.)
+
+1. Measurements
 
 The official hybrid-vector run (hybrid-vector.md) measured DataVo Flat V0 at p50 11.29 ms, p99 13.48 ms.
 The 2026-11-16-backlog run measured 2.13 ms / 17.29 ms. 1,536-dimension Flat V0 did not move (4.25 ms
@@ -17,7 +22,7 @@ against 4.53 ms). Reruns of the 384-dimension scenario, Flat engine only, one pr
   HEAD with DOTNET_TC_QuickJitForLoops=0 (methods with loops compiled fully optimized at once), 8 runs:
     2.11/3.96  2.14/3.47  2.13/3.64  2.15/4.01  2.25/4.37  2.13/3.90  2.12/3.80  2.12/4.14
 
-Reading:
+2. First reading (superseded by section 3):
 - Both builds have two speeds for this query: about 2.1 ms and about 11-14 ms. The slow speed is the
   ~14 ms p99 of every normal run on both builds.
 - With loops fully optimized from the start, the slow speed disappears (p99 about 4 ms). The slow
@@ -30,3 +35,35 @@ Reading:
   (pooled NearestHeap), which may change when the loop is promoted.
 - Not done here: an engine change (for example AggressiveOptimization on the scan kernel) and a re-run.
   It is recorded as a follow-up; the official numbers are left as measured.
+
+3. Cause and fix (2026-11-17, after the above)
+
+Marking FlatVectorIndex.SearchIntoTopK alone with AggressiveOptimization did NOT fix it: 15 runs gave
+  2.10 2.06 2.17 2.21 12.68 2.26 12.33 12.81 2.12 2.11 2.13 2.11 2.12 2.26 2.16 ms (p50), p99 12.8-17.3 ms.
+
+JIT compile logs (DOTNET_JitStdOutFile + DOTNET_JitDisasmSummary=1) of a slow run (12.84 ms) and a fast run
+(2.13 ms) show the same final code in both: SearchIntoTopK FullOpts; SimdDistanceKernels.Dot and its workers
+TryDotAvx / TryDotAdvSimd (separate methods, not inlined) go Tier0 -> Instrumented Tier0 -> Tier1. What
+differs is when: Dot reached Tier1 at compile event 3,938 in the slow run and 3,519 in the fast one.
+Tiered compilation promotes a method only after a quiet period in JIT activity; every search before that
+computed 50,000 distances with tier-0 Vector128 code (~12 ms). Late promotion puts the run's median in the
+slow mode; the first few timed searches of every run were the ~14 ms p99. DOTNET_TC_QuickJitForLoops=0
+compiles methods with loops (the SIMD workers) fully optimized at once, which is why it removed both.
+
+Fix, commit 5cbcd14: SimdDistanceKernels.Dot / CosineDistance / EuclideanDistance (span entry points) are
+AggressiveOptimization and their per-ISA workers (AVX, AVX-512, AdvSimd, portable) AggressiveInlining;
+SearchIntoTopK keeps AggressiveOptimization. Compile log after the fix: Dot compiled once, FullOpts, workers
+inlined (no TryDot* entries), no tier-0 or instrumented versions. Disassembly of SearchIntoTopK (FullOpts):
+GetVectorReadOnlySpan, CosineDistanceFromDot and IsBetter inlined; out-of-line calls only to the distance
+kernels and InsertSorted. (An intermediate variant with AggressiveOptimization on every worker, not
+inlined, measured the same: 2.21-2.28 ms.)
+
+After the fix, 15 single-process runs (Flat only), V0 p50 / p99:
+  2.24/3.57 2.23/3.78 2.24/3.61 2.25/4.16 2.26/3.42 2.24/3.04 2.25/3.72 2.24/3.80
+  2.28/4.19 2.24/3.76 2.25/3.59 2.24/3.65 2.24/4.15 2.21/3.91 2.24/4.08
+Inlined variant (as committed), 6 runs: 2.22/3.59 2.22/4.07 2.24/3.71 2.24/4.22 2.18/3.63 2.23/4.17
+
+Rerun of both scenarios against 5cbcd14 (hybrid-vector.md, hybrid-vector-1536.md, now the official files):
+  384 dims:   Flat V0 2.19 ms (p99 3.96), was 11.29 (13.48)
+  1,536 dims: Flat V0 4.57 ms (p99 5.71), was 4.25 (20.02); the median change is within run-to-run noise.
+
