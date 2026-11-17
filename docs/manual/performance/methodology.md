@@ -14,7 +14,7 @@ The results are split into two parts because they answer different questions and
 
 - **Data.** Each benchmark generates its rows from a fixed seed, so every engine stores the same values.
 - **Machine and build.** One machine, a Release build, one .NET runtime. The environment table on the results page records the chip, OS, runtime, and commit.
-- **Result checking.** Part I compares every engine's answer to DataVo's before timing. A benchmark that returns a wrong answer fails and produces no numbers.
+- **Result checking.** Part I compares every engine's answer to DataVo's before timing. A benchmark that returns a wrong answer fails and produces no numbers. The `sql-matrix` and `hybrid-vector` scenarios behind [DataVo vs SQLite](./datavo-vs-sqlite.md) go further: every column of their data is a function of the row id, so the runner computes the exact answer to each query itself, without any engine, and compares every engine with it (a normalized digest of the rows, with doubles compared bit for bit) before timing. A mismatching cell is marked `✗` and is not a result. The vector scenario scores recall@10 against the exact filtered top-10 and counts short results and returned rows that fail the filter.
 - **Indexes.** The polling engines in the streamed-view scenarios get explicit indexes on the join and filter columns (see the scenario's README in `demos/Research.Benchmark`).
 
 ## What is not held constant, and why
