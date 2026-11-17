@@ -82,4 +82,4 @@ Use query capability checks before running a LINQ query that may be outside the 
 
 ## Entity Framework Support Summary
 
-Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported in v0.2: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.
+Supported: basic `DbSet` querying over mapped scalar CLR properties, basic inserts (`Add` plus `SaveChanges`), `LoadFromDataVo`, `QueryFromDataVo`/`QueryFromDataVoAsync` (`Where`, `OrderBy`, `ThenBy`, `Skip`, `Take`, `Select`), `ExplainQueryFromDataVo` capability checks, and vector function shims (`CosineDistance`, `L2Distance`). Native provider identity is planned. **Not** supported: migrations, shadow properties, complex LINQ joins, and broad `GroupBy` translation.

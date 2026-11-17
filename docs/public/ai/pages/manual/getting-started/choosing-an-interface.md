@@ -9,7 +9,7 @@ DataVo has five ways to talk to the same engine. They differ in ergonomics and i
 
 | Interface | Package | Best for | Per-call cost | Native AOT |
 | --- | --- | --- | --- | --- |
-| [Compiled LINQ](/manual/client-interfaces/source-generators) | `DataVo.Core` + `DataVo.Generators` | Hot paths: point lookups, filtered counts and aggregates. | Lowest. Predicates are compiled at build time; aggregates allocate nothing once warm. | Yes |
+| [Compiled LINQ](/manual/client-interfaces/source-generators) | `DataVo.Core` + `DataVo.Generators` | Hot paths: point lookups, filtered counts and aggregates. No EF Core dependency. | Lowest. Predicates are compiled at build time; aggregates allocate nothing once warm. | Yes |
 | [Embedded API](/manual/client-interfaces/datavo-context-api) (`DataVoContext`) | `DataVo.Core` | Application code that wants SQL, DDL, vector search and full control. | Parses SQL per call unless prepared. Rows come back as dictionaries. | Yes |
 | [ADO.NET provider](/manual/client-interfaces/ado-net) | `DataVo.Data` | Code or libraries that already speak `DbConnection`. | Same engine as the embedded API, behind the standard ADO.NET types. | Yes |
 | [Dapper](/manual/client-interfaces/dapper) | `DataVo.Data` + `Dapper` | Micro-ORM mapping with plain SQL. | ADO.NET cost plus Dapper's mapping. | Per Dapper's own support |
@@ -20,7 +20,7 @@ A short rule of thumb:
 - Start with the **embedded API** to learn the engine and for anything that is not performance critical.
 - Move the few queries that run constantly to **compiled LINQ**.
 - Use **ADO.NET or Dapper** when you are adapting existing code or want a familiar abstraction.
-- Use **EF Core** when the rest of your application is already modelled in EF.
+- Use **EF Core** when the rest of your application is already modelled in EF. If you want LINQ without EF (for example under Native AOT), use compiled LINQ: `DataVo.Generators` has no EF dependency.
 
 ## How they fit together
 

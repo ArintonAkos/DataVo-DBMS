@@ -1,6 +1,8 @@
 # Roslyn Source Generators
 
-Use source-generated queries for queries called often enough that parse and mapping overhead matters. Instead of parsing and planning the same SQL pattern repeatedly at runtime, you annotate a static partial method and let the generator emit the call path.
+Use source-generated queries for queries called often enough that parse and mapping overhead matters. Instead of parsing and planning the same SQL pattern repeatedly at runtime, you annotate a static partial method, or write a lambda against `DataVoTable<T>`, and the `DataVo.Generators` package emits the call path at build time.
+
+`DataVo.Generators` is a Roslyn source generator and nothing more: it depends on the C# compiler APIs, not on Entity Framework Core, and the code it emits uses only `DataVo.Core`. That makes it the LINQ-shaped API to use in Native AOT applications and anywhere EF Core is unwanted. It compiles single-table `Where`, `Count`, `Any`, `Sum`, `Min`, `Max`, `FirstOrDefault`, `SingleOrDefault` and `ToList` today; `OrderBy`, `Take`/`Skip` and column-minimal `Select` projections are planned for v0.5 (see the [Roadmap](/manual/preface/roadmap#v0-5-interop-and-client-side-ergonomics-planned)). Shapes it cannot compile still return the right rows by scanning, and the build says why.
 
 Start with a projection type.
 

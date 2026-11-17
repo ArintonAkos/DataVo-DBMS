@@ -123,7 +123,10 @@ internal partial class Select
         public bool[]? Ascending { get; init; }
         public int TopLimit { get; init; }
         public bool Unordered { get; init; }
-        public List<(object?[] Keys, long Sequence, CellValue[][] Cells)> Top { get; } = [];
+        public List<(CellValue[] Keys, long Sequence, CellValue[][] Cells)> Top { get; } = [];
+
+        /// <summary>The sort-key cells of the joined row being offered to <see cref="Top"/>; copied only when it is kept.</summary>
+        public CellValue[]? TopCandidate { get; set; }
         public long Sequence;
 
         /// <summary>Set once an unordered result has its LIMIT of rows: the scan stops.</summary>
@@ -529,7 +532,7 @@ internal partial class Select
     private static ListedTable FinishJoinTop(JoinRunState state)
     {
         var rows = new List<JoinedRow>(state.Top.Count);
-        foreach ((object?[] _, long _, CellValue[][] cells) in state.Top)
+        foreach ((CellValue[] _, long _, CellValue[][] cells) in state.Top)
         {
             rows.Add(BuildJoinedRow(state.Sides, cells));
         }
@@ -824,15 +827,15 @@ internal partial class Select
     {
         long sequence = state.Sequence++;
         List<(int Side, int Ordinal)> orderKeys = state.OrderKeys!;
-        var keys = new object?[orderKeys.Count];
+        CellValue[] keys = state.TopCandidate ??= new CellValue[orderKeys.Count];
         for (int i = 0; i < keys.Length; i++)
         {
             (int side, int ordinal) = orderKeys[i];
-            keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Sides[side].Columns[ordinal], state.Current[side]![ordinal]);
+            keys[i] = state.Current[side]![ordinal];
         }
 
-        List<(object?[] Keys, long Sequence, CellValue[][] Cells)> top = state.Top;
-        if (top.Count >= state.TopLimit && CompareJoinedRows(state.Ascending!, keys, sequence, top[^1].Keys, top[^1].Sequence) >= 0)
+        List<(CellValue[] Keys, long Sequence, CellValue[][] Cells)> top = state.Top;
+        if (top.Count >= state.TopLimit && CompareJoinedRows(state, keys, sequence, top[^1].Keys, top[^1].Sequence) >= 0)
         {
             return;
         }
@@ -842,7 +845,7 @@ internal partial class Select
         while (low < high)
         {
             int mid = (low + high) >>> 1;
-            if (CompareJoinedRows(state.Ascending!, top[mid].Keys, top[mid].Sequence, keys, sequence) <= 0)
+            if (CompareJoinedRows(state, top[mid].Keys, top[mid].Sequence, keys, sequence) <= 0)
             {
                 low = mid + 1;
             }
@@ -853,28 +856,30 @@ internal partial class Select
         }
 
         LoadWholeProbeRow(state, rowId, rowBytes, typedCells);
-        top.Insert(low, (keys, sequence, SnapshotJoinedRow(state)));
+        top.Insert(low, ((CellValue[])keys.Clone(), sequence, SnapshotJoinedRow(state)));
         if (top.Count > state.TopLimit)
         {
             top.RemoveAt(top.Count - 1);
         }
     }
 
-    private static int CompareJoinedRows(bool[] ascending, object?[] left, long leftSequence, object?[] right, long rightSequence)
+    /// <summary>Orders two joined rows by their sort-key cells as the general ORDER BY orders the boxed values; ties keep the order produced.</summary>
+    private static int CompareJoinedRows(JoinRunState state, CellValue[] left, long leftSequence, CellValue[] right, long rightSequence)
     {
+        List<(int Side, int Ordinal)> orderKeys = state.OrderKeys!;
         for (int i = 0; i < left.Length; i++)
         {
-            int order = DynamicObjectComparer.Instance.Compare(left[i], right[i]);
+            (int side, int ordinal) = orderKeys[i];
+            int order = CompareCells(state.Sides[side].Columns[ordinal], left[i], right[i]);
             if (order != 0)
             {
-                return ascending[i] ? order : -order;
+                return state.Ascending![i] ? order : -order;
             }
         }
 
         return leftSequence.CompareTo(rightSequence);
     }
 
-    /// <summary>The group of the joined row being built, created (with the row as its representative) at its first row.</summary>
     private static JoinGroup FindJoinGroup(JoinRunState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         List<(int Side, int Ordinal)> groupColumns = state.GroupColumns!;

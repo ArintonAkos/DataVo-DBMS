@@ -63,7 +63,7 @@ public sealed class HNSWClusteredRecallTests
     public void DefaultIndex_AtAFixedSearchWidth_FindsEveryQuerysOwnCluster(int efSearch)
     {
         ClusteredData data = Data.Value;
-        var index = new HNSWIndex { Metric = "cosine" };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine" };
         index.InsertBatchParallel(data.Ids, data.Flat, Dimensions);
         index.EnableAdaptiveEfSearch = false;
         index.EfSearch = efSearch;
@@ -94,6 +94,8 @@ public sealed class HNSWClusteredRecallTests
                 })]);
             }
 
+            // Recall of the graph is what is measured: keep the search from scanning the vectors exactly.
+            context.Engine.IndexManager.TryGetHnswVectorIndex("vx", "Docs", "Clustered")!.EnableExactScanCostRouting = false;
             DataVoPreparedStatement statement = context.Prepare($"SELECT Id, Emb <=> @q AS dist FROM Docs ORDER BY dist LIMIT {TopK}");
             context.Diagnostics.Enabled = true;
             AssertRecall(data, query =>
@@ -133,7 +135,7 @@ public sealed class HNSWClusteredRecallTests
         ClusteredData data = Data.Value;
         for (int round = 0; round < 3; round++)
         {
-            var index = new HNSWIndex { Metric = "cosine", EnableDiversityHeuristic = false };
+            var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine", EnableDiversityHeuristic = false };
 
             index.InsertBatchParallel(data.Ids, data.Flat, Dimensions, maxDegreeOfParallelism: Math.Max(4, Environment.ProcessorCount));
 
@@ -145,7 +147,7 @@ public sealed class HNSWClusteredRecallTests
     public void RepairConnectivity_OnAConnectedGraph_AddsNothing()
     {
         ClusteredData data = Data.Value;
-        var index = new HNSWIndex { Metric = "cosine", EnableDiversityHeuristic = false };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine", EnableDiversityHeuristic = false };
         index.InsertBatchParallel(data.Ids, data.Flat, Dimensions);
 
         Assert.Equal(0, index.RepairConnectivity());

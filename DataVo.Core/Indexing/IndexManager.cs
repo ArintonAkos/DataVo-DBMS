@@ -1139,10 +1139,12 @@ public partial class IndexManager : IDisposable
         string tableName,
         string databaseName,
         string metric = "cosine",
-        string indexType = "HNSW")
+        string indexType = "HNSW",
+        Models.Catalog.HnswIndexOptions? hnswOptions = null)
     {
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric);
+        hnswOptions?.CopyTo(metadata.Parameters);
 
         if (!SupportsVectorIndexType(metadata.IndexType))
         {
@@ -1365,6 +1367,22 @@ public partial class IndexManager : IDisposable
             : vectorIndex.SearchTopK(queryVector.ToArray(), topK);
         RuntimeQueryDiagnosticsScope.RecordVectorSearch(indexName, topK, expansionPasses: 0);
         return results;
+    }
+
+    /// <summary>
+    /// Ranks the given rows by distance to <paramref name="queryVector"/> using the vectors the index stores, and
+    /// returns the nearest <paramref name="topK"/>, nearest first. Returns null when the index cannot rank rows.
+    /// </summary>
+    internal List<RowKey>? TryRankRowsByVectorDistance(ReadOnlySpan<float> queryVector, IReadOnlyList<RowKey> rowIds, int topK, string indexName, string tableName, string databaseName, string indexType)
+    {
+        if (GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType) is not IRowRankingVectorIndex ranking)
+        {
+            return null;
+        }
+
+        var nearest = new List<RowKey>(Math.Min(Math.Max(topK, 0), rowIds.Count));
+        ranking.RankNearest(queryVector, rowIds, topK, nearest);
+        return nearest;
     }
 
     /// <summary>
@@ -3019,7 +3037,7 @@ public partial class IndexManager : IDisposable
                 vectors.Add((row.Key, cell.AsVector()));
             }
 
-            CreateVectorIndex(vectors, indexName, tableName, databaseName, metric: catalogIndex.EffectiveMetric, indexType: catalogIndex.IndexKind);
+            CreateVectorIndex(vectors, indexName, tableName, databaseName, metric: catalogIndex.EffectiveMetric, indexType: catalogIndex.IndexKind, hnswOptions: catalogIndex.Hnsw);
 
             var cacheKey = GetCacheKey(indexName, tableName, databaseName);
             if (_cache.TryGetValue(cacheKey, out IIndexBase? cachedAfterRebuild) && cachedAfterRebuild is IVectorIndex rebuiltVector)

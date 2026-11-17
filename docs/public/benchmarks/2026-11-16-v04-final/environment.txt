@@ -1,0 +1,30 @@
+benchmark code: 563c400 (638324d plus a --queries option to run selected sql-matrix shapes; not used here,
+        every run used all shapes)
+engine (DataVo.Core): 216205d = master b568c16 + the v0.4 closeout commits on feat/v04-closeout:
+        09b958c (WHERE ... HAVING without GROUP BY), a8b3bca (HNSW exact-scan cost routing),
+        55cd6e6 (HNSW options in CREATE INDEX ... WITH), 50afc36 (vector candidates filtered on stored rows,
+        no short results), 7967a45 (key-only join table as a dense bit set), 29277aa (no group lookup per row
+        without GROUP BY), e3caf04 (text = / LIKE on stored UTF-8 bytes), 216205d (typed top-N and MIN/MAX
+        compared in place)
+sqlite-vec: v0.1.9 (repository vec0.dylib), SQLite 3.50.4 (Microsoft.Data.Sqlite 10.0.0); DuckDB.NET 1.5.3
+machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 26.3 (Darwin 25.3.0), .NET 10.0.3 Arm64
+date: 2026-11-17 (folder named for the v0.4 closeout set it completes)
+load: no build or test process ran. Spotlight indexing (spotlightknowledged) kept one core busy throughout
+        and could not be stopped from the session; each run started when the 1-minute load average fell
+        below 2.5 (2.38, 2.42, 2.26; 5-minute averages 2.87-3.10, see load.txt). The 2026-11-16 runs started
+        at 5-minute averages below 2.5.
+runs (one each, in this order, one process per scenario):
+  sql-matrix (defaults: 1,000,000 orders, all four engines): 114.5 s wall, 1.11 GB peak memory footprint
+  hybrid-vector (50,000 x 384, 200 queries): 30.4 s wall, 0.78 GB
+  hybrid-vector --vectors 20000 --dimensions 1536 (200 queries): 49.3 s wall, 0.99 GB
+oracle: sql-matrix 0 mismatches on every engine and query; hybrid-vector 0 short results and 0 rows failing
+        the filter on every shape at both sizes; recall@10 100% on every shape, engine, size and single query
+        (vector rerun).
+vector rerun: hybrid-vector.md and hybrid-vector-1536.md were re-run against 5cbcd14 (216205d + the SIMD
+        distance kernels and Flat scan compiled fully optimized on first use), 12:12-12:13, one process each,
+        started at 1-minute load averages 2.28 and 2.42 (load.txt): 30.0 s wall / 0.79 GB and 50.3 s / 0.99 GB.
+        The first run against 216205d measured Flat V0 at 384 dimensions at 11.29 ms (two-speed tiering of
+        the distance kernel); see flat-v0-jit-tiering.txt. sql-matrix.md is from 216205d; the kernel change
+        does not touch any SQL-matrix query path.
+note: the .log files format numbers with the machine's regional settings (French separators: "100,0 %",
+        "50 000"); the .md tables use invariant formatting.

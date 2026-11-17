@@ -744,7 +744,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
             return [];
         }
 
-        if (topK >= _count)
+        if (PrefersExactScan(topK))
         {
             return ExactSearch(queryVector, topK, ComputeInverseNorm(queryVector));
         }
@@ -1833,73 +1833,41 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
         }
     }
 
+    /// <summary>
+    /// Scans every stored vector and returns the <paramref name="topK"/> nearest rows, nearest first. The kept
+    /// rows live in pooled buffers, so a scan for many candidates allocates only its result list.
+    /// </summary>
     private List<RowKey> ExactSearch(ReadOnlySpan<float> query, int topK, float queryInvNorm)
     {
         int take = Math.Min(topK, _count);
-        var maxHeap = new DataVoPriorityQueue<(int Ordinal, float Distance), (float NegDistance, int NegOrdinal)>();
-
-        for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
+        float[] distances = System.Buffers.ArrayPool<float>.Shared.Rent(take);
+        int[] ordinals = System.Buffers.ArrayPool<int>.Shared.Rent(take);
+        try
         {
-            PrefetchOrdinalVector(ordinal + 1);
-
-            if ((uint)ordinal >= (uint)_isActive.Length || !_isActive[ordinal])
+            var nearest = new NearestHeap(distances.AsSpan(0, take), ordinals.AsSpan(0, take));
+            for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
             {
-                continue;
+                PrefetchOrdinalVector(ordinal + 1);
+                if ((uint)ordinal < (uint)_isActive.Length && _isActive[ordinal])
+                {
+                    nearest.Offer(DistanceToOrdinal(query, queryInvNorm, ordinal), ordinal);
+                }
             }
 
-            float distance = DistanceToOrdinal(query, queryInvNorm, ordinal);
-            if (maxHeap.Count < take)
+            int count = nearest.SortAscending();
+            var result = new List<RowKey>(count);
+            for (int i = 0; i < count; i++)
             {
-                maxHeap.Enqueue((ordinal, distance), (-distance, -ordinal));
-                continue;
+                result.Add(_rowIdByOrdinal[ordinals[i]]);
             }
 
-            if (!maxHeap.TryPeek(out _, out var worst))
-            {
-                continue;
-            }
-
-            float worstDistance = -worst.NegDistance;
-            if (distance >= worstDistance)
-            {
-                continue;
-            }
-
-            maxHeap.Dequeue();
-            maxHeap.Enqueue((ordinal, distance), (-distance, -ordinal));
+            return result;
         }
-
-        var ordinals = new List<int>(maxHeap.Count);
-        var distances = new List<float>(maxHeap.Count);
-        while (maxHeap.TryDequeue(out var item, out _))
+        finally
         {
-            ordinals.Add(item.Ordinal);
-            distances.Add(item.Distance);
+            System.Buffers.ArrayPool<float>.Shared.Return(distances);
+            System.Buffers.ArrayPool<int>.Shared.Return(ordinals);
         }
-
-        for (int i = 1; i < ordinals.Count; i++)
-        {
-            int ord = ordinals[i];
-            float dist = distances[i];
-            int j = i - 1;
-            while (j >= 0 && distances[j] > dist)
-            {
-                ordinals[j + 1] = ordinals[j];
-                distances[j + 1] = distances[j];
-                j--;
-            }
-
-            ordinals[j + 1] = ord;
-            distances[j + 1] = dist;
-        }
-
-        var result = new List<RowKey>(ordinals.Count);
-        for (int i = 0; i < ordinals.Count; i++)
-        {
-            result.Add(_rowIdByOrdinal[ordinals[i]]);
-        }
-
-        return result;
     }
 
     private void ResolveFallbackEntryPoint()

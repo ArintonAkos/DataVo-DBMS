@@ -44,6 +44,15 @@ internal partial class Select
         /// <summary>The compiled pattern of a <see cref="TypedPredicateKind.Like"/> predicate (<c>LIKE</c> or <c>NOT LIKE</c>).</summary>
         public SqlLikePattern? Pattern { get; private init; }
 
+        /// <summary>
+        /// The UTF-8 bytes of the literal of a <see cref="TypedPredicateKind.Text"/> or
+        /// <see cref="TypedPredicateKind.ExactText"/> predicate, to compare stored text without decoding it;
+        /// null for other kinds and for a literal that is not valid Unicode.
+        /// </summary>
+        public byte[]? LiteralUtf8 { get; } = kind is TypedPredicateKind.Text or TypedPredicateKind.ExactText && literal is string text
+            ? Utf8Text.TryEncode(text)
+            : null;
+
         /// <summary>The branches of an <see cref="TypedPredicateKind.Or"/>: it holds when every predicate of some branch holds.</summary>
         public TypedPredicate[][]? Branches { get; private init; }
 
@@ -69,6 +78,9 @@ internal partial class Select
         public required bool[] FilterMask { get; init; }
         public required bool[] RestMask { get; init; }
 
+        /// <summary>The text filter columns compared as stored bytes when rows arrive serialized; null when there is none.</summary>
+        public RawTextColumns? RawText { get; init; }
+
         /// <summary>Columns the rest of the query reads from a matched row; the others are never decoded or copied.</summary>
         public bool[]? OutputMask { get; init; }
 
@@ -86,7 +98,10 @@ internal partial class Select
         public List<JoinedRow>? Rows { get; init; }
         public List<(int Ordinal, bool Ascending)>? OrderKeys { get; init; }
         public int TopLimit { get; init; } = -1;
-        public List<(object?[] Keys, long Sequence, object Row)>? Top { get; init; }
+        public List<(CellValue[] Keys, long Sequence, object Row)>? Top { get; init; }
+
+        /// <summary>The sort-key cells of the row being offered to <see cref="Top"/>; copied only when the row is kept.</summary>
+        public CellValue[]? TopCandidate { get; init; }
         public List<Dictionary<string, object?>>? OutputRows { get; init; }
         public long Sequence;
 
@@ -686,12 +701,15 @@ internal partial class Select
             restMask[i] = outputMask[i] && !filterMask[i];
         }
 
+        RawTextColumns? rawText = TryPlanRawText(columns, predicates, filterMask);
+        DecodeRawTextAfterMatch(rawText, outputMask, restMask);
         return new TypedScanState
         {
             Columns = columns,
             Predicates = predicates,
             FilterMask = filterMask,
             RestMask = restMask,
+            RawText = rawText,
             Cells = new CellValue[columns.Count],
             ClusteredOrdinal = clusteredOrdinal,
             ClusteredIsGuid = clusteredIsGuid,
@@ -704,6 +722,7 @@ internal partial class Select
             OrderKeys = topLimit < 0 ? null : orderKeys,
             TopLimit = topLimit,
             Top = topLimit < 0 ? null : [],
+            TopCandidate = topLimit < 0 ? null : new CellValue[orderKeys!.Count],
         };
     }
 
@@ -782,7 +801,7 @@ internal partial class Select
         }
 
         var aggregates = new List<TypedAggregate>(specs.Count);
-        var needed = (bool[])filterMask.Clone();
+        var needed = new bool[columns.Count];
         for (int i = 0; i < specs.Count; i++)
         {
             var node = (AggregateExpressionNode)aggregateColumns[i].Expression!;
@@ -816,12 +835,18 @@ internal partial class Select
 
         _volcanoAggregateGroupKeyColumns = [.. groupByColumns];
         _volcanoAggregateOutputColumns = [.. specs.Select(spec => spec.OutputColumn)];
+
+        // needed: the columns the aggregates and group keys read; those the filter already loaded are not loaded twice.
+        bool[] restMask = needed.Select((need, i) => need && !filterMask[i]).ToArray();
+        RawTextColumns? rawText = TryPlanRawText(columns, predicates, filterMask);
+        DecodeRawTextAfterMatch(rawText, needed, restMask);
         return new TypedScanState
         {
             Columns = columns,
             Predicates = predicates,
             FilterMask = filterMask,
-            RestMask = needed.Select((need, i) => need && !filterMask[i]).ToArray(),
+            RestMask = restMask,
+            RawText = rawText,
             Cells = new CellValue[columns.Count],
             ClusteredOrdinal = clusteredOrdinal,
             ClusteredIsGuid = clusteredIsGuid,
@@ -837,10 +862,22 @@ internal partial class Select
     private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         CellValue[] cells = state.Cells;
-        Load(state, rowId, rowBytes, typedCells, state.FilterMask);
-        if (!MatchesAll(state.Predicates, cells, state.Columns))
+        if (state.RawText is { } rawText && typedCells.IsEmpty)
         {
-            return true;
+            // Serialized rows: text conditions are tested on the stored bytes, without a string per row.
+            LoadFilterColumnsRaw(state, rawText, rowId, rowBytes);
+            if (!MatchesAllRaw(state, rawText, state.Predicates, rowBytes))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            Load(state, rowId, rowBytes, typedCells, state.FilterMask);
+            if (!MatchesAll(state.Predicates, cells, state.Columns))
+            {
+                return true;
+            }
         }
 
         Load(state, rowId, rowBytes, typedCells, state.RestMask);
@@ -901,10 +938,16 @@ internal partial class Select
             RowSerializer.DecodeCellsByOrdinal(rowBytes, state.Columns, mask, cells);
         }
 
+        RestoreClusteredKey(state, rowId, mask);
+    }
+
+    /// <summary>Clustered rows store the key cell as NULL (the row key holds it): puts the key back when <paramref name="mask"/> reads it.</summary>
+    private static void RestoreClusteredKey(TypedScanState state, RowKey rowId, bool[] mask)
+    {
+        CellValue[] cells = state.Cells;
         int key = state.ClusteredOrdinal;
         if (key >= 0 && mask[key] && cells[key].IsNull)
         {
-            // Clustered rows store the key cell as NULL: the row key holds it.
             cells[key] = state.ClusteredIsGuid ? CellValue.From(rowId.AsGuid()) : KeyCell(state.Columns[key], rowId);
         }
     }
@@ -1005,16 +1048,16 @@ internal partial class Select
 
     /// <summary>
     /// Keeps the best <c>TopLimit</c> rows in a sorted list. Ties keep scan order, as the general path's
-    /// stable sort over the same rows would.
+    /// stable sort over the same rows would. A row is compared with the kept rows as typed cells, so the
+    /// rows that do not make the list (nearly all of a large scan) allocate nothing.
     /// </summary>
     private static void OfferTop(TypedScanState state)
     {
-        List<(object?[] Keys, long Sequence, object Row)> top = state.Top!;
-        var keys = new object?[state.OrderKeys!.Count];
+        List<(CellValue[] Keys, long Sequence, object Row)> top = state.Top!;
+        CellValue[] keys = state.TopCandidate!;
         for (int i = 0; i < keys.Length; i++)
         {
-            int ordinal = state.OrderKeys[i].Ordinal;
-            keys[i] = StorageContext.ConvertCellForLegacyDictionary(state.Columns[ordinal], state.Cells[ordinal]);
+            keys[i] = state.Cells[state.OrderKeys![i].Ordinal];
         }
 
         if (top.Count >= state.TopLimit && CompareTop(state, keys, state.Sequence, top[^1].Keys, top[^1].Sequence) >= 0)
@@ -1037,21 +1080,22 @@ internal partial class Select
             }
         }
 
-        top.Insert(low, (keys, state.Sequence, BuildOutputRow(state)));
+        top.Insert(low, ((CellValue[])keys.Clone(), state.Sequence, BuildOutputRow(state)));
         if (top.Count > state.TopLimit)
         {
             top.RemoveAt(top.Count - 1);
         }
     }
 
-    private static int CompareTop(TypedScanState state, object?[] left, long leftSequence, object?[] right, long rightSequence)
+    private static int CompareTop(TypedScanState state, CellValue[] left, long leftSequence, CellValue[] right, long rightSequence)
     {
+        List<(int Ordinal, bool Ascending)> orderKeys = state.OrderKeys!;
         for (int i = 0; i < left.Length; i++)
         {
-            int order = DynamicObjectComparer.Instance.Compare(left[i], right[i]);
+            int order = CompareCells(state.Columns[orderKeys[i].Ordinal], left[i], right[i]);
             if (order != 0)
             {
-                return state.OrderKeys![i].Ascending ? order : -order;
+                return orderKeys[i].Ascending ? order : -order;
             }
         }
 
@@ -1105,17 +1149,37 @@ internal partial class Select
                     groups.CountOf(group, i)++;
                     break;
                 default:
-                    object? value = StorageContext.ConvertCellForLegacyDictionary(state.Columns[aggregate.Ordinal], cell);
-                    int order = groups.HasExtremeOf(group, i) ? DynamicObjectComparer.Instance.Compare(value, groups.ExtremeOf(group, i)) : 0;
-                    bool better = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Min ? order < 0 : order > 0;
-                    if (!groups.HasExtremeOf(group, i) || better)
-                    {
-                        groups.ExtremeOf(group, i) = value;
-                        groups.HasExtremeOf(group, i) = true;
-                    }
-
+                    AccumulateExtreme(state, groups, group, i, aggregate, cell);
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Keeps <paramref name="cell"/> as the MIN or MAX of a group when it beats the kept value. A number is
+    /// compared with the kept value in place and boxed only when it replaces it.
+    /// </summary>
+    private static void AccumulateExtreme(TypedScanState state, TypedGroupStates groups, int group, int i, TypedAggregate aggregate, CellValue cell)
+    {
+        Column column = state.Columns[aggregate.Ordinal];
+        bool min = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Min;
+        if (groups.HasExtremeOf(group, i) && TryCompareCellToBoxed(column, cell, groups.ExtremeOf(group, i), out int typedOrder))
+        {
+            if (min ? typedOrder >= 0 : typedOrder <= 0)
+            {
+                return;
+            }
+
+            groups.ExtremeOf(group, i) = StorageContext.ConvertCellForLegacyDictionary(column, cell);
+            return;
+        }
+
+        object? value = StorageContext.ConvertCellForLegacyDictionary(column, cell);
+        int order = groups.HasExtremeOf(group, i) ? DynamicObjectComparer.Instance.Compare(value, groups.ExtremeOf(group, i)) : 0;
+        if (!groups.HasExtremeOf(group, i) || (min ? order < 0 : order > 0))
+        {
+            groups.ExtremeOf(group, i) = value;
+            groups.HasExtremeOf(group, i) = true;
         }
     }
 

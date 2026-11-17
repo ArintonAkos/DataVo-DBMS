@@ -5,7 +5,7 @@ namespace DataVo.Core.Indexing.Flat;
 /// <summary>
 /// Exact brute-force vector index optimized for fast inserts and SIMD-accelerated scans.
 /// </summary>
-public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex
+public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpanVectorIndex, IBatchVectorIndex, IRowRankingVectorIndex
 {
     private readonly Dictionary<RowKey, int> _rowIdToOrdinal = [];
     private readonly object _stateGate = new();
@@ -253,6 +253,62 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         }
     }
 
+    /// <inheritdoc />
+    void IRowRankingVectorIndex.RankNearest(ReadOnlySpan<float> queryVector, IReadOnlyList<RowKey> rowIds, int topK, List<RowKey> nearest)
+    {
+        if (topK <= 0 || rowIds.Count == 0)
+        {
+            return;
+        }
+
+        float[] distances = System.Buffers.ArrayPool<float>.Shared.Rent(rowIds.Count);
+        RowKey[] ranked = System.Buffers.ArrayPool<RowKey>.Shared.Rent(rowIds.Count);
+        try
+        {
+            int count = 0;
+            lock (_stateGate)
+            {
+                if (_vectorDimension != queryVector.Length)
+                {
+                    return;
+                }
+
+                bool useEuclidean = UsesEuclideanMetric();
+                float queryInvNorm = useEuclidean ? 0f : ComputeInverseNorm(queryVector);
+                for (int i = 0; i < rowIds.Count; i++)
+                {
+                    if (!_rowIdToOrdinal.TryGetValue(rowIds[i], out int ordinal) || !_isActive[ordinal])
+                    {
+                        continue;
+                    }
+
+                    ReadOnlySpan<float> candidate = GetVectorReadOnlySpan(ordinal);
+                    distances[count] = useEuclidean
+                        ? SimdDistanceKernels.EuclideanDistance(queryVector, candidate)
+                        : CosineDistanceFromDot(queryVector, candidate, queryInvNorm, _inverseNormByOrdinal[ordinal]);
+                    ranked[count++] = rowIds[i];
+                }
+            }
+
+            RowRanking.AppendNearest(distances, ranked, count, topK, nearest);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<float>.Shared.Return(distances);
+            System.Buffers.ArrayPool<RowKey>.Shared.Return(ranked);
+        }
+    }
+
+    /// <summary>
+    /// Scores every stored vector and keeps the <paramref name="rowIds"/>.Length nearest, sorted.
+    /// </summary>
+    /// <remarks>
+    /// Compiled fully optimized on its first call. It runs once per query but loops over every vector, so
+    /// tiered compilation could only reach optimized code for it by on-stack replacement. The distance
+    /// kernels it calls per vector are marked the same way (<see cref="SimdDistanceKernels"/>); they were
+    /// what kept early searches at tier-0 speed.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private void SearchIntoTopK(
         ReadOnlySpan<float> queryVector,
         bool useEuclidean,

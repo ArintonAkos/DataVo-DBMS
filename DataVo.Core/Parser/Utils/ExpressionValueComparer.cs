@@ -50,6 +50,11 @@ internal static class ExpressionValueComparer
             return leftGuid == rightGuid;
         }
 
+        if (TryAsBooleanPair(leftValue, rightValue, out bool leftBoolean, out bool rightBoolean))
+        {
+            return leftBoolean == rightBoolean;
+        }
+
         if (TryAsDatePair(leftValue, rightValue, out DataVoDate leftDate, out DataVoDate rightDate))
         {
             return leftDate == rightDate;
@@ -117,6 +122,11 @@ internal static class ExpressionValueComparer
             return leftGuid.CompareTo(rightGuid);
         }
 
+        if (TryAsBooleanPair(leftValue, rightValue, out bool leftBoolean, out bool rightBoolean))
+        {
+            return leftBoolean.CompareTo(rightBoolean);
+        }
+
         if (TryAsDatePair(leftValue, rightValue, out DataVoDate leftDate, out DataVoDate rightDate))
         {
             return leftDate.CompareTo(rightDate);
@@ -142,6 +152,46 @@ internal static class ExpressionValueComparer
             Convert.ToString(leftValue, CultureInfo.InvariantCulture),
             Convert.ToString(rightValue, CultureInfo.InvariantCulture),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A BIT value compared with a literal: TRUE/FALSE arrive as booleans, but <c>1</c>/<c>0</c> arrive as
+    /// integers (or as text when written before the column) and <c>'true'</c>/<c>'false'</c> as text, which
+    /// INSERT also accepts for a BIT column. When one
+    /// side is a boolean and the other is one of those, both are read as booleans. Any other pairing (a
+    /// boolean against <c>2</c> or <c>'yes'</c>) is not a boolean pair and stays unequal.
+    /// </summary>
+    private static bool TryAsBooleanPair(object leftValue, object rightValue, out bool left, out bool right)
+    {
+        left = right = false;
+        return (leftValue is bool || rightValue is bool)
+            && TryAsBoolean(leftValue, out left)
+            && TryAsBoolean(rightValue, out right);
+    }
+
+    private static bool TryAsBoolean(object value, out bool result)
+    {
+        switch (value)
+        {
+            case bool boolean:
+                result = boolean;
+                return true;
+            case ulong unsigned:
+                result = unsigned == 1;
+                return unsigned <= 1;
+            case int or long or short or byte or sbyte or uint or ushort:
+                long integer = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                result = integer == 1;
+                return integer is 0 or 1;
+            // A number written before the column (1 = IsActive) reaches the comparer as its text.
+            case string text:
+                string trimmed = text.Trim();
+                result = trimmed == "1";
+                return trimmed is "1" or "0" || bool.TryParse(trimmed, out result);
+            default:
+                result = false;
+                return false;
+        }
     }
 
     /// <summary>

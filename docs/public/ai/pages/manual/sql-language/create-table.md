@@ -27,7 +27,7 @@ FROM Users
 WHERE Id = 1;
 ```
 
-Use `VARCHAR(n)` for text fields. DataVo treats unrecognized string-like declarations as variable text in the v0.2 parser, but explicit `VARCHAR(n)` keeps schemas readable.
+Use `VARCHAR(n)` for text fields. The parser treats unrecognized string-like declarations as variable text, but explicit `VARCHAR(n)` keeps schemas readable.
 
 ```sql
 CREATE TABLE Articles (
@@ -90,7 +90,7 @@ ON Documents (Embedding)
 USING HNSW;
 ```
 
-An HNSW index ranks by cosine distance unless you choose another metric. Positions need straight-line distance, so index them with `metric = 'euclidean'` (or `'l2'`). The metric is saved with the index and kept when the database is reopened.
+An HNSW index ranks by cosine distance unless you choose another metric. Positions need straight-line distance, so index them with `metric = 'euclidean'` (or `'l2'`). The metric is saved with the index and kept when the database is reopened. `WITH` also accepts the graph options `m`, `ef_construction`, `ef_search` and `enable_diversity_heuristic`; see [Vector Search and Indexes](/manual/sql-language/vector-search-syntax) for their defaults and ranges.
 
 ```sql
 CREATE INDEX ix_ships_position
@@ -132,4 +132,4 @@ MODIFY COLUMN Name VARCHAR(160);
 
 ## DDL Support Summary
 
-Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, and `WITH (metric = 'cosine' | 'euclidean')` for HNSW), columnar `CREATE INDEX ... USING COLUMNAR` (`InMemory` and persisted out-of-core `Lsm` storage; fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.
+Supported DDL: `CREATE TABLE` (catalog metadata and table storage), integer primary keys, `VARCHAR(n)`, the scalar type set (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`), `VECTOR(n)` (with `VEC2`/`VEC3`/`VEC4` and `FLOAT[n]` shorthands), scalar and vector `CREATE INDEX` (`USING HNSW`, `USING FLAT`, `WITH (metric = 'cosine' | 'euclidean')`, and the HNSW graph options `m`, `ef_construction`, `ef_search` and `enable_diversity_heuristic`), columnar `CREATE INDEX ... USING COLUMNAR` (`InMemory` and persisted out-of-core `Lsm` storage; fixed-width numeric, `BIT` and `DATE` columns), `ALTER TABLE ADD COLUMN` (rewrites rows and backfills null/default values), and limited `ALTER TABLE DROP/MODIFY COLUMN` (which rejects key, foreign-key, referenced, indexed, or incompatible changes). PostgreSQL domains and collations are **not** supported. See the [SQL compatibility matrix](/manual/sql-language/sql-compatibility) for the authoritative feature status.

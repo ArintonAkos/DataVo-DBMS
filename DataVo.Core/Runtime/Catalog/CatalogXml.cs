@@ -95,6 +95,15 @@ internal static class CatalogXml
             element.SetAttributeValue("Metric", indexFile.Metric);
         }
 
+        if (indexFile.Hnsw is { IsEmpty: false } hnsw)
+        {
+            // Each set HNSW option is one attribute; an unset one is omitted and reads back as the default.
+            element.SetAttributeValue("HnswM", hnsw.M);
+            element.SetAttributeValue("HnswEfConstruction", hnsw.EfConstruction);
+            element.SetAttributeValue("HnswEfSearch", hnsw.EfSearch);
+            element.SetAttributeValue("HnswDiversityHeuristic", hnsw.EnableDiversityHeuristic);
+        }
+
         element.Add(new XElement("IndexAttributes",
             (indexFile.AttributeNames ?? []).Select(name => new XElement("IAttribute", name))));
         return element;
@@ -119,7 +128,22 @@ internal static class CatalogXml
         IndexFileName = element.Attribute("IndexName")!.Value,
         IndexKind = element.Attribute("IndexKind")?.Value ?? "BTREE",
         Metric = IndexFile.NormalizeMetric(element.Attribute("Metric")?.Value),
+        Hnsw = HnswOptionsFromXElement(element),
         AttributeNames = element.Element("IndexAttributes")?.Elements("IAttribute")
             .Select(item => item.Value).ToList() ?? [],
     };
+
+    /// <summary>Reads the HNSW option attributes of an index element; null when it has none.</summary>
+    private static HnswIndexOptions? HnswOptionsFromXElement(XElement element)
+    {
+        var options = new HnswIndexOptions
+        {
+            M = (int?)element.Attribute("HnswM"),
+            EfConstruction = (int?)element.Attribute("HnswEfConstruction"),
+            EfSearch = (int?)element.Attribute("HnswEfSearch"),
+            EnableDiversityHeuristic = (bool?)element.Attribute("HnswDiversityHeuristic"),
+        };
+
+        return options.IsEmpty ? null : options;
+    }
 }

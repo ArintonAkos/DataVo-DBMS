@@ -19,7 +19,7 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Hnsw_AdvertisesSpanInsertAndReservationCapabilities()
     {
-        var index = new HNSWIndex();
+        var index = new HNSWIndex { EnableExactScanCostRouting = false };
 
         Assert.IsAssignableFrom<ISpanVectorIndex>(index);
         Assert.IsAssignableFrom<IReservableVectorIndex>(index);
@@ -28,7 +28,7 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void SearchTopK_ReadOnlySpan_ReturnsNearestRow()
     {
-        var index = new HNSWIndex { Metric = "euclidean", M = 8, EfSearch = 32 };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "euclidean", M = 8, EfSearch = 32 };
         index.Insert(10L, [1f, 0f, 0f]);
         index.Insert(20L, [0f, 1f, 0f]);
 
@@ -73,6 +73,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 4,
             EfConstruction = 16,
@@ -105,6 +106,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 8,
             EfConstruction = 32,
@@ -134,6 +136,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             EfSearch = 32
         };
@@ -154,7 +157,7 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void Insert_RejectsNonFiniteVectorValues()
     {
-        var index = new HNSWIndex { Metric = "cosine" };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine" };
 
         Assert.Throws<ArgumentException>(() => index.Insert(1, new float[] { 1f, float.NaN, 0f }));
         Assert.Throws<ArgumentException>(() => index.Insert(2, new float[] { 1f, float.PositiveInfinity, 0f }));
@@ -163,7 +166,7 @@ public class HNSWIndexTests : IDisposable
     [Fact]
     public void SearchTopK_RejectsNonFiniteQueryValues()
     {
-        var index = new HNSWIndex { Metric = "cosine" };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "cosine" };
         index.Insert(1, new float[] { 1f, 0f, 0f });
 
         Assert.Throws<ArgumentException>(() => index.SearchTopK(new float[] { 1f, float.NaN, 0f }, 1));
@@ -181,6 +184,7 @@ public class HNSWIndexTests : IDisposable
 
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = metric,
             EfSearch = 64,
             EfConstruction = 64,
@@ -226,6 +230,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "euclidean",
             M = 10,
             EfConstruction = 40,
@@ -292,7 +297,7 @@ public class HNSWIndexTests : IDisposable
             vectors.Add([(float)random.NextDouble(), (float)random.NextDouble(), (float)random.NextDouble()]);
         }
 
-        var index = new HNSWIndex { Metric = "euclidean" };
+        var index = new HNSWIndex { EnableExactScanCostRouting = false, Metric = "euclidean" };
         for (int i = 0; i < 200; i++)
         {
             index.Insert(i + 1, vectors[i]);
@@ -325,6 +330,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "euclidean",
             M = 8,
             EnableDeleteGraphRepair = true,
@@ -358,6 +364,7 @@ public class HNSWIndexTests : IDisposable
 
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 12,
             EfConstruction = 96,
@@ -548,6 +555,7 @@ public class HNSWIndexTests : IDisposable
 
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 12,
             EfConstruction = 96,
@@ -641,6 +649,7 @@ public class HNSWIndexTests : IDisposable
             var random = new Random(20260330 + ratioIndex);
             var index = new HNSWIndex
             {
+            EnableExactScanCostRouting = false,
                 Metric = "cosine",
                 M = 12,
                 EfConstruction = 96,
@@ -828,6 +837,7 @@ public class HNSWIndexTests : IDisposable
 
             var index = new HNSWIndex
             {
+            EnableExactScanCostRouting = false,
                 Metric = "cosine",
                 M = m,
                 EfConstruction = efConstruction,
@@ -1063,6 +1073,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = m,
             EfConstruction = efConstruction,
@@ -1164,6 +1175,7 @@ public class HNSWIndexTests : IDisposable
     {
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = m,
             EfConstruction = efConstruction,
@@ -1205,6 +1217,7 @@ public class HNSWIndexTests : IDisposable
         long memoryBeforeBuildBytes = GC.GetTotalMemory(forceFullCollection: false);
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = m,
             EfConstruction = efConstruction,
@@ -1325,6 +1338,7 @@ public class HNSWIndexTests : IDisposable
 
         var index = new HNSWIndex
         {
+            EnableExactScanCostRouting = false,
             Metric = "cosine",
             M = 12,
             EfConstruction = 96,

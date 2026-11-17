@@ -102,7 +102,8 @@ public class HNSWParallelBuildTests
             }
         }
 
-        var damaged = new HNSWIndex();
+        // The test is about the graph: a small index would otherwise answer by scanning its vectors.
+        var damaged = new HNSWIndex { EnableExactScanCostRouting = false };
         damaged.ImportFlatState(state);
         ReadOnlySpan<float> victimVector = vectors.AsSpan(victimPosition * dimension, dimension);
         Assert.True(damaged.CountUnreachableNodes() > 0);
@@ -150,6 +151,9 @@ public class HNSWParallelBuildTests
     {
         var index = (HNSWIndex)new HNSWIndexFactory().CreateIndex("idx", "embedding", new Dictionary<string, object> { ["metric"] = metric });
         index.EnableDiversityHeuristic = diversity;
+
+        // These tests are about the graph: a small index would otherwise answer by scanning its vectors.
+        index.EnableExactScanCostRouting = false;
         return index;
     }
 

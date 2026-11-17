@@ -193,12 +193,12 @@ The [DataVo vs SQLite](./datavo-vs-sqlite.md) page comes from two scenarios of t
 ```bash
 dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host -c Release
 DLL=demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
-dotnet "$DLL" --scenario sql-matrix > sql-matrix.md                       # about 20 minutes, 5 GB peak
+dotnet "$DLL" --scenario sql-matrix > sql-matrix.md                       # about 2 minutes, 1.1 GB peak
 SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector > hybrid-vector.md
 SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector --vectors 20000 --dimensions 1536
 ```
 
-`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). The raw output of the 14 November runs is under `docs/public/benchmarks/2026-11-14/`: the run after the correctness fixes at the top level, the first run against the unmodified engine in `pre-fix/`.
+`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). `--queries J5,C8` runs only the named matrix shapes. The raw output of the final v0.4 runs is under `docs/public/benchmarks/2026-11-16-v04-final/`; earlier runs are in sibling folders, including the first run against the unmodified engine in `2026-11-14/pre-fix/`. Run each scenario in its own process on an otherwise idle machine; the runs on that page started below a 1-minute load average of 2.5.
 
 ## Reproducing the CI Snapshot
 

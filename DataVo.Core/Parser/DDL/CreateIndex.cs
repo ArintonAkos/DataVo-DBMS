@@ -63,6 +63,11 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                 throw new BindingException($"Index option metric applies only to vector indexes; {_model.IndexKind} has no distance metric.");
             }
 
+            if (_model.Hnsw is not null && !string.Equals(_model.IndexKind, "HNSW", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new BindingException($"Index options {Models.Catalog.HnswIndexOptions.OptionNames} apply only to HNSW indexes, not {_model.IndexKind}.");
+            }
+
             if (string.Equals(_model.IndexKind, Models.Catalog.IndexFile.ColumnarKind, StringComparison.OrdinalIgnoreCase))
             {
                 CreateColumnar(databaseName);
@@ -106,7 +111,8 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                     _model.TableName,
                     databaseName,
                     metric: _model.Metric ?? Models.Catalog.IndexFile.CosineMetric,
-                    indexType: _model.IndexKind);
+                    indexType: _model.IndexKind,
+                    hnswOptions: _model.Hnsw);
             }
             else
             {

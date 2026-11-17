@@ -284,6 +284,14 @@ else if (benchmarkScenario.Equals("sql-matrix", StringComparison.OrdinalIgnoreCa
     log($"sql-matrix: generating {options.Orders:N0} orders and computing the oracle's answers...");
     var data = new SqlMatrixData(options.Orders, options.Customers, options.Products);
     IReadOnlyList<SqlMatrixQuery> queries = SqlMatrixQueries.Create(data);
+
+    // --queries J5,W3 runs only those shapes (for a quick look at one change); the default runs them all.
+    string[] onlyQueries = ReadStringArg(args, "--queries", "all").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    if (!onlyQueries.Contains("all", StringComparer.OrdinalIgnoreCase))
+    {
+        queries = [.. queries.Where(query => onlyQueries.Contains(query.Id, StringComparer.OrdinalIgnoreCase))];
+    }
+
     var expected = SqlMatrixRunner.ComputeExpected(data, queries);
     string root = Path.Combine(Path.GetTempPath(), $"datavo-sql-matrix-{Guid.NewGuid():N}");
     var matrixResults = new List<SqlMatrixEngineResult>();

@@ -1,6 +1,7 @@
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -11,30 +12,39 @@ namespace DataVo.Core.Parser.DQL;
 /// <remarks>
 /// A hashed table keeps only the columns a joined row reads after the join: those in the SELECT list, GROUP BY,
 /// aggregates and ORDER BY, and those a LEFT-joined table's conditions test. When that is nothing but the join key,
-/// as in <c>LEFT JOIN c ... WHERE c.Id IS NULL</c> or <c>COUNT(c.Id)</c>, the table keeps only how many rows have
-/// each key: no row is decoded beyond its key and none is copied.
+/// as in <c>LEFT JOIN c ... WHERE c.Id IS NULL</c> or <c>COUNT(c.Id)</c>, the table keeps only its keys: no row is
+/// decoded beyond its key and none is copied. Keys that are unique and close together (integer primary keys) are
+/// kept as one bit per key of their range (<see cref="DenseInt64Set"/>), so a probe is a bit test instead of a
+/// hash lookup; other keys are hashed with the number of rows that have each.
 /// </remarks>
 internal partial class Select
 {
     /// <summary>
-    /// The rows of one joined table by join key. A key-only table counts its rows per key and hands out one
-    /// shared row holding the key, which is rewritten at every match.
+    /// The rows of one joined table by join key. A key-only table keeps its keys (a dense set, or row counts
+    /// per key) and hands out one shared row holding the key, which is rewritten at every match.
     /// </summary>
     private sealed class JoinHashTable
     {
-        private readonly Dictionary<long, int>? _counts;
+        private readonly bool _keyOnly;
+        private Dictionary<long, int>? _counts;
+        private DenseInt64Set? _keySet;
+        private long[]? _pendingKeys;
+        private int _pendingCount;
         private readonly Dictionary<long, (CellValue[] First, List<CellValue[]>? More)>? _rows;
         private readonly CellValue[]? _keyRow;
         private readonly int _keyOrdinal;
         private readonly bool _bigIntKey;
+        private HashSet<long>? _absent;
 
         public JoinHashTable(bool keyOnly, int columns, int keyOrdinal, bool bigIntKey, int capacity)
         {
             _keyOrdinal = keyOrdinal;
             _bigIntKey = bigIntKey;
+            _keyOnly = keyOnly;
             if (keyOnly)
             {
-                _counts = new Dictionary<long, int>(capacity);
+                // Keys are gathered in a pooled buffer and turned into a set once all are known (see Seal).
+                _pendingKeys = System.Buffers.ArrayPool<long>.Shared.Rent(Math.Max(capacity, 256));
                 _keyRow = new CellValue[columns];
             }
             else
@@ -43,17 +53,64 @@ internal partial class Select
             }
         }
 
+        /// <summary>
+        /// When set, the table is filled on demand: a key not seen yet is read through this (null for no row)
+        /// and remembered, so only the rows the join asks for are ever read.
+        /// </summary>
+        public Func<long, CellValue[]?>? Loader { get; set; }
+
         /// <summary>The number of distinct keys.</summary>
-        public int KeyCount => _counts?.Count ?? _rows!.Count;
+        public int KeyCount => !_keyOnly ? _rows!.Count : Sealed()._keySet?.Count ?? _counts!.Count;
 
         /// <summary>The distinct keys, each once.</summary>
-        public IEnumerable<long> Keys => _counts is not null ? _counts.Keys : _rows!.Keys;
+        public IEnumerable<long> Keys => !_keyOnly ? _rows!.Keys : Sealed()._keySet?.Keys() ?? _counts!.Keys;
 
-        /// <summary>Counts one more row with <paramref name="key"/> in a key-only table.</summary>
+        /// <summary>Notes one more row with <paramref name="key"/> in a key-only table.</summary>
         public void AddKey(long key)
         {
-            _counts!.TryGetValue(key, out int count);
-            _counts[key] = count + 1;
+            long[] pending = _pendingKeys!;
+            if (_pendingCount == pending.Length)
+            {
+                long[] larger = System.Buffers.ArrayPool<long>.Shared.Rent(pending.Length * 2);
+                pending.AsSpan().CopyTo(larger);
+                System.Buffers.ArrayPool<long>.Shared.Return(pending);
+                _pendingKeys = pending = larger;
+            }
+
+            pending[_pendingCount++] = key;
+        }
+
+        /// <summary>
+        /// Ends the filling of a key-only table: the gathered keys become a dense set when they are unique and
+        /// close together, and counts per key in a hash table otherwise. Calling it again does nothing.
+        /// </summary>
+        public void Seal()
+        {
+            if (_pendingKeys is not { } pending)
+            {
+                return;
+            }
+
+            ReadOnlySpan<long> keys = pending.AsSpan(0, _pendingCount);
+            _keySet = DenseInt64Set.TryCreate(keys);
+            if (_keySet is null)
+            {
+                _counts = new Dictionary<long, int>(keys.Length);
+                foreach (long key in keys)
+                {
+                    _counts.TryGetValue(key, out int count);
+                    _counts[key] = count + 1;
+                }
+            }
+
+            _pendingKeys = null;
+            System.Buffers.ArrayPool<long>.Shared.Return(pending);
+        }
+
+        private JoinHashTable Sealed()
+        {
+            Seal();
+            return this;
         }
 
         /// <summary>Adds a row (owned by the table from now on) under <paramref name="key"/>.</summary>
@@ -77,9 +134,11 @@ internal partial class Select
         /// <summary>The rows with <paramref name="key"/>; false when there are none.</summary>
         public bool TryMatch(long key, out JoinMatches matches)
         {
-            if (_counts is not null)
+            if (_keyOnly)
             {
-                if (_counts.TryGetValue(key, out int count))
+                Seal();
+                int count = 0;
+                if (_keySet is { } keySet ? keySet.Contains(key) && (count = 1) == 1 : _counts!.TryGetValue(key, out count))
                 {
                     _keyRow![_keyOrdinal] = _bigIntKey ? CellValue.From(key) : CellValue.From((int)key);
                     matches = new JoinMatches(_keyRow, null, count);
@@ -91,9 +150,34 @@ internal partial class Select
                 matches = new JoinMatches(bucket.First, bucket.More, 1 + (bucket.More?.Count ?? 0));
                 return true;
             }
+            else if (Loader is not null && TryLoad(key, out CellValue[]? loaded))
+            {
+                matches = new JoinMatches(loaded, null, 1);
+                return true;
+            }
 
             matches = default;
             return false;
+        }
+
+        /// <summary>Reads the row of a key asked for the first time; a key without a row is not read again.</summary>
+        private bool TryLoad(long key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CellValue[]? row)
+        {
+            row = null;
+            if (_absent is not null && _absent.Contains(key))
+            {
+                return false;
+            }
+
+            row = Loader!(key);
+            if (row is null)
+            {
+                (_absent ??= []).Add(key);
+                return false;
+            }
+
+            _rows![key] = (row, null);
+            return true;
         }
     }
 
@@ -147,6 +231,8 @@ internal partial class Select
             {
                 return false;
             }
+
+            step.Table.Seal();
         }
 
         return true;

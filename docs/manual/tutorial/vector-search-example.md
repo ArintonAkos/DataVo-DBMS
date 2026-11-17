@@ -79,7 +79,7 @@ LIMIT 3;
 """)[0];
 ```
 
-For larger tables, create an HNSW index instead. HNSW is approximate, but it is designed to avoid scanning every vector. DataVo v0.2 uses built-in HNSW defaults (`metric = 'cosine'` or `'euclidean'`); it does not expose graph construction tuning parameters such as `efConstruction` or `M`.
+For larger tables, create an HNSW index instead. HNSW is approximate: it walks a neighbour graph instead of comparing the query with every vector, so it can miss a true neighbour, and how often depends on the data. The defaults (`m = 16`, `ef_construction = 64`, `ef_search = 64`, diversity heuristic on) are a reasonable start; `WITH (...)` changes them, as described in [Vector Search and Indexes](/manual/sql-language/vector-search-syntax). Measure recall on your own embeddings before relying on it.
 
 ```csharp
 db.Execute("CREATE INDEX idx_embeddings_hnsw ON Embeddings (Emb) USING HNSW");

@@ -3,16 +3,16 @@
 > Source route: /manual/preface/project-status
 > Source file: manual/preface/project-status.md
 
-**Current release: v0.2.0-rc.3 (Release Candidate).**
+**Latest published packages: 0.2.0-rc.3 (release candidate, 10 November 2026). Repository: v0.4 complete, unpublished.**
 
-DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete for its documented scope and is in release verification: benchmark runs, crash-recovery testing and package publishing checks are ongoing before a stable tag. This page is the single place that states what that means in practice.
+DataVo is a C#-native embedded database engine. The 0.2 packages on nuget.org are a release candidate for the 0.2 line. The repository's `master` branch has since completed the v0.3 (columnar indexes, compact in-memory rows) and v0.4 (columnar SSTables, SQL and vector correctness, typed execution) milestones listed in the [Roadmap](/manual/preface/roadmap); they ship in the next published version. This page says what "release candidate" promises and what state each subsystem is in.
 
-## What "Release Candidate" means here
+## What "release candidate" means here
 
-- The documented API surface and SQL dialect are the surface being verified for 0.2. Changes to it between release candidates are called out in the release notes.
-- Behavior outside the documented surface is not covered by that expectation. [Limits](/manual/reference/limits) and [Unsupported Features](/manual/reference/unsupported-features) list those boundaries.
-- Release candidates are published to nuget.org as prerelease packages. Add `--prerelease` when installing. See [Installation & Packages](/manual/getting-started/installation).
-- The on-disk storage format is not yet covered by a long-term compatibility guarantee. Keep a way to rebuild important data (an export, seed data or an import script) until a stable release states one.
+- The documented API surface and SQL dialect are the surface being verified. Changes to it are called out in release notes.
+- Behaviour outside the documented surface is not covered. [Limits](/manual/reference/limits) and [Unsupported Features](/manual/reference/unsupported-features) list those boundaries.
+- Packages are prereleases on nuget.org; add `--prerelease` when installing. See [Installation & Packages](/manual/getting-started/installation).
+- The on-disk format is not covered by a long-term compatibility guarantee. v0.4 writes SSTable format version 8 and still reads the earlier row-keyed versions (2, 4 and 6), but there is no promise yet that a future version will read today's files. Keep a way to rebuild important data (an export, seed data or an import script).
 
 ## Subsystem status
 
@@ -24,8 +24,9 @@ DataVo is a C#-native embedded database engine. The 0.2 line is feature-complete
 | LSM-Tree storage | Release candidate | The recommended persistent engine: WAL, MemTable, SSTables, strict fsync by default. |
 | Disk storage (paged) | Legacy | Kept for existing data. It receives no further durability work. Prefer LSM. |
 | Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
-| Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Compiled LINQ](/manual/client-interfaces/source-generators). Other shapes fall back to the interpreter. |
-| Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance. See [Vector Search Syntax](/manual/sql-language/vector-search-syntax). |
+| Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Roslyn Source Generators](/manual/client-interfaces/source-generators). Other shapes still return the right rows by scanning. No Entity Framework dependency. |
+| Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance, filtered and joined searches with exact cost-based fallback, HNSW parameters in SQL (v0.4). See [Vector Search and Indexes](/manual/sql-language/vector-search-syntax). |
+| Columnar indexes | Complete in repository (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Not in the 0.2 packages. |
 | ADO.NET provider (`DataVo.Data`) | Release candidate | Standard `System.Data.Common` types. See [ADO.NET Provider](/manual/client-interfaces/ado-net). |
 | Dapper | Works through ADO.NET | No separate package. See [Dapper](/manual/client-interfaces/dapper). |
 | Entity Framework Core integration | Bridge | Attaches DataVo to an EF context with a host EF provider. It is not a standalone provider and has no migrations. See [Entity Framework Core](/manual/client-interfaces/entity-framework). |
@@ -62,7 +63,7 @@ Unity is an evaluation target, not a supported runtime. The public `DataVo.Core`
 | ADO.NET provider | Supported | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`; Dapper works through it. |
 | Entity Framework bridge | Supported | Basic `DbSet` workflows and query previews with explicit operator limits, not a full provider. |
 | Roslyn source generators | Supported | `[DataVoQuery]` and typed table queries compile at build time. |
-| NuGet packaging | Supported | Four packages. The public Core package is `net10.0`-only; the opt-in portable target is an experimental local candidate, not a published or supported Unity asset. |
+| NuGet packaging | Supported | Four packages. The public Core package is `net10.0`-only; the opt-in portable target is an experimental local candidate, not a published or supported Unity asset. Multi-target packages are planned for v0.5. |
 | Stable storage format | Planned | Requires compatibility tests and migration guidance. |
 | Production support contract | Not Supported | No production support contract is offered. |
 | Stored procedures, triggers, PostgreSQL-compatible server | Not Supported | See [Unsupported Features](/manual/reference/unsupported-features). |

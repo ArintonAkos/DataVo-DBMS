@@ -82,7 +82,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             }
 
             string leftValue = leftCol.Column;
-            string rightValue = rightLit.Value?.ToString() ?? string.Empty;
+            // Index keys are written in the invariant culture; a culture-formatted literal (0,1) would miss them.
+            string rightValue = Convert.ToString(rightLit.Value, CultureInfo.InvariantCulture) ?? string.Empty;
 
             if (rightLit is not BoundValueLiteralNode && rightValue.StartsWith('\'') && rightValue.EndsWith('\''))
             {

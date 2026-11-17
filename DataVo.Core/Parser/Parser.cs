@@ -1271,7 +1271,8 @@ public class Parser(List<Token> tokens)
         // 4. Parse optional WHERE (also supports historical WHERE-before-JOIN form)
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
-            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
+            // HAVING ends the WHERE condition too: an aggregate query may have HAVING without GROUP BY.
+            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsHavingKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
 
             RequireCondition(expressionTokens, "WHERE");
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
@@ -1434,6 +1435,12 @@ public class Parser(List<Token> tokens)
     private bool IsOffsetKeyword()
     {
         return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.OFFSET);
+    }
+
+    /// <summary>Whether the current token is the <c>HAVING</c> keyword.</summary>
+    private bool IsHavingKeyword()
+    {
+        return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.HAVING);
     }
 
     private bool IsUnionKeyword()
@@ -2465,13 +2472,29 @@ public class Parser(List<Token> tokens)
         };
     }
 
+    /// <summary>
+    /// Turns an identifier token into a column reference, or into a boolean literal for the bare words
+    /// <c>TRUE</c> and <c>FALSE</c>, which SQL reserves; the lexer reads them as names.
+    /// </summary>
     private static ExpressionNode ParseIdentifierExpression(Token token)
     {
+        if (TryParseBooleanLiteral(token.Value, out bool boolean))
+        {
+            return new LiteralNode { Value = boolean };
+        }
+
         string[] parts = token.Value.Split('.', 2);
 
         return parts.Length == 2
             ? new ColumnRefNode { TableOrAlias = parts[0], Column = parts[1] }
             : new ColumnRefNode { TableOrAlias = null, Column = token.Value };
+    }
+
+    /// <summary>Whether <paramref name="word"/> is the boolean literal <c>TRUE</c> or <c>FALSE</c> (any case).</summary>
+    private static bool TryParseBooleanLiteral(string word, out bool value)
+    {
+        value = word.Equals("TRUE", StringComparison.OrdinalIgnoreCase);
+        return value || word.Equals("FALSE", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Parses <c>WITH (name = value, ...)</c> after CREATE INDEX.</summary>

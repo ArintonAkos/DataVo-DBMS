@@ -1,3 +1,4 @@
+using System.Globalization;
 using DataVo.Core;
 using DataVo.Core.Annotations;
 using DataVo.Core.Contracts.Results;
@@ -311,6 +312,34 @@ public sealed class BigIntAndDoubleColumnTests : IDisposable
 
         Assert.Equal(new[] { 1 }, Ids(db, "SELECT Id FROM T WHERE V = 0.1"));
         Assert.Equal(new[] { 2 }, Ids(db, "SELECT Id FROM T WHERE V = 3.141592653589793"));
+    }
+
+    /// <summary>
+    /// Index keys are written in the invariant culture. Under a culture whose decimal separator is a comma, the
+    /// legacy Disk path formatted the literal as "0,1" and its index lookup found nothing.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void Double_Index_FindsExactRows_UnderACommaDecimalCulture(StorageMode mode)
+    {
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+        try
+        {
+            using DataVoContext db = Open(mode);
+            Ok(db, "CREATE TABLE T (Id INT PRIMARY KEY, V DOUBLE)");
+            Ok(db, "INSERT INTO T (Id, V) VALUES (1, 0.1)");
+            Ok(db, "CREATE INDEX IX_V ON T (V)");
+            Ok(db, "INSERT INTO T (Id, V) VALUES (2, 2.5)");
+
+            Assert.Equal(new[] { 1 }, Ids(db, "SELECT Id FROM T WHERE V = 0.1"));
+            Assert.Equal(new[] { 2 }, Ids(db, "SELECT Id FROM T WHERE V = 2.5"));
+            Assert.Equal(new[] { 1 }, Ids(db, "SELECT Id FROM T WHERE V > 0.05 AND V < 0.2"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Theory]

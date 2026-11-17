@@ -597,6 +597,50 @@ public static partial class RowSerializer
     }
 
     /// <summary>
+    /// Walks a serialized row up to column <paramref name="last"/>, decoding the columns flagged in
+    /// <paramref name="decode"/> as <see cref="DecodeCellsByOrdinal"/> does and, for the text columns flagged in
+    /// <paramref name="locate"/>, recording where the UTF-8 bytes of the value lie instead of building a string:
+    /// <paramref name="textOffsets"/> and <paramref name="textLengths"/> at the column's ordinal, with a length
+    /// of -1 for NULL. A caller can then compare the text in place.
+    /// </summary>
+    public static void DecodeCellsLocatingText(
+        ReadOnlySpan<byte> data,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<bool> decode,
+        ReadOnlySpan<bool> locate,
+        int last,
+        Span<CellValue> byOrdinal,
+        Span<int> textOffsets,
+        Span<int> textLengths)
+    {
+        var reader = new ByteSpanReader(data);
+        for (int i = 0; i <= last; i++)
+        {
+            bool isNull = reader.ReadBoolean();
+            if (locate[i])
+            {
+                if (isNull)
+                {
+                    textLengths[i] = -1;
+                    continue;
+                }
+
+                int length = reader.ReadStringSpan().Length;
+                textLengths[i] = length;
+                textOffsets[i] = reader.Position - length;
+            }
+            else if (decode[i])
+            {
+                byOrdinal[i] = isNull ? CellValue.Null : DecodeTypedCell(ref reader, columns[i]);
+            }
+            else if (!isNull)
+            {
+                SkipTypedCell(ref reader, columns[i]);
+            }
+        }
+    }
+
+    /// <summary>
     /// Decodes the single cell at <paramref name="ordinal"/> (storage order) of a serialized row, skipping
     /// the cells before it without allocating. Used to read a clustered table's key out of a row.
     /// </summary>

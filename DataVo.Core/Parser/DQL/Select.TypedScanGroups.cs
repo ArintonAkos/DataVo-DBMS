@@ -229,6 +229,11 @@ internal partial class Select
     {
         int[] ordinals = state.GroupOrdinals!;
         GroupLookup lookup = state.GroupKeys!;
+        if (ordinals.Length == 0 && lookup.Count == 1)
+        {
+            return 0; // no GROUP BY: every row belongs to the one group, with no key to build or look up
+        }
+
         int group;
         bool added;
         if (ordinals.Length == 1)
