@@ -52,6 +52,7 @@ v0.4 makes the LSM engine's columnar data persistent, fixes every wrong answer a
 - HNSW answers a search by an exact scan when the candidate count a filter requires makes the graph walk more expensive. The scan is exact, so recall can only rise.
 - A filtered vector search tests the `WHERE` conditions on the stored candidate rows and builds only the rows that pass; over a join, candidates go through the typed join and joined tables are read by key.
 - `CREATE INDEX ... USING HNSW WITH (m, ef_construction, ef_search, enable_diversity_heuristic)` sets the graph parameters from SQL and stores them in the catalog.
+- The SIMD distance kernels and the Flat scan loop are compiled fully optimized on first use. Under tiered compilation the first searches of a process, sometimes a whole run, used unoptimized kernel code: 11–14 ms instead of about 2 ms for an exact search over 50,000 × 384 vectors.
 
 ## v0.5: interop and client-side ergonomics (planned)
 

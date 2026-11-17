@@ -28,7 +28,7 @@ All figures are from one Apple M4 Pro (macOS 26.3, .NET 10.0.3, arm64), one run 
 - Faster than SQLite: primary-key ranges (12 µs against 18 µs for 100 rows), an indexed equality lookup (2.4×), `GROUP BY` with 4 to 1,000 groups (2.8–3.0×), inner and `LEFT` joins of two or three tables on integer keys (2.3–9.7×), and aggregates answered by a columnar index (5–14×).
 - Slower than SQLite: `GROUP BY` over 125,000 groups of an indexed key, which SQLite reads in index order (2.4×); unindexed `ORDER BY ... LIMIT 10` (1.4×); unindexed aggregates and full scans with `OR`, `LIKE` or an unindexed equality (1.1–2.1×); and a `LEFT JOIN` anti-join (1.2×).
 - DuckDB, a parallel column store, is faster than both on every query that reads the whole table, and slower on key lookups and ranges.
-- Filtered top-10 vector search over 50,000 × 384 clustered embeddings: DataVo Flat (exact) 2.0–5.4 ms and HNSW 0.64–3.5 ms, against 9.5–14.0 ms for SQLite with sqlite-vec (exact); recall@10 100% for all three, no short results.
+- Filtered top-10 vector search over 50,000 × 384 clustered embeddings: DataVo Flat (exact) 2.0–4.3 ms and HNSW 0.67–3.6 ms, against 9.8–14.4 ms for SQLite with sqlite-vec (exact); recall@10 100% for all three, no short results.
 
 **Storage and systems workloads, 0.2.0-rc.3 engine, 12 November 2026** ([results page](https://arintonakos.github.io/DataVo-DBMS/manual/performance/benchmarks)):
 
