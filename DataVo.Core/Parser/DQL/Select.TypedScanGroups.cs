@@ -171,6 +171,15 @@ internal partial class Select
             return group;
         }
 
+        /// <summary>
+        /// Adds a one-column group whose key no other group has, without indexing it for <see cref="FindOrAdd(Column, CellValue, out bool)"/>:
+        /// for keys that arrive already grouped, such as an index's keys.
+        /// </summary>
+        public int AddUnique(object? value) => AddSingle(value);
+
+        /// <summary>Drops the group added last by <see cref="AddUnique"/>.</summary>
+        public void RemoveLast() => _singleKeys.RemoveAt(_singleKeys.Count - 1);
+
         /// <summary>The value of key column <paramref name="column"/> of <paramref name="group"/>.</summary>
         public object? KeyOf(int group, int column) =>
             _compositeKeys.Count > 0 ? _compositeKeys[group][column] : _singleKeys[group];
@@ -237,7 +246,33 @@ internal partial class Select
                 }
             }
 
+            ClearGroup(Count);
             return Count++;
+        }
+
+        /// <summary>Drops the group added last; its slots are cleared when the number is used again.</summary>
+        public void RemoveLast() => Count--;
+
+        /// <summary>Empties every aggregate of a group slot, which may hold a dropped group's values.</summary>
+        private void ClearGroup(int group)
+        {
+            int start = group * _aggregates;
+            Array.Clear(_counts, start, _aggregates);
+            if (_useSums)
+            {
+                Array.Clear(_sums, start, _aggregates);
+            }
+
+            if (_useTotals)
+            {
+                Array.Clear(_totals, start, _aggregates);
+            }
+
+            if (_useExtremes)
+            {
+                Array.Clear(_extremes, start, _aggregates);
+                Array.Clear(_hasExtreme, start, _aggregates);
+            }
         }
 
         public ref long CountOf(int group, int i) => ref _counts[(group * _aggregates) + i];
@@ -304,14 +339,12 @@ internal partial class Select
     /// The result rows of a typed GROUP BY: one per group that passes HAVING, and when ORDER BY has a LIMIT only
     /// the first LIMIT + OFFSET of them in order.
     /// </summary>
-    private ListedTable FinishAggregates(TypedScanState state)
-    {
-        if (state.GroupStates!.Count == 0)
-        {
-            return FinishAggregatesOverNoRows(state);
-        }
+    private ListedTable FinishAggregates(TypedScanState state) =>
+        state.GroupStates!.Count == 0 ? FinishAggregatesOverNoRows(state) : FinishAggregates(state, SelectTypedGroups(state));
 
-        List<int> groups = SelectTypedGroups(state);
+    /// <summary>The result rows of a typed GROUP BY for groups already selected, in order.</summary>
+    private ListedTable FinishAggregates(TypedScanState state, List<int> groups)
+    {
         var rows = new List<JoinedRow>(groups.Count);
         foreach (int group in groups)
         {
@@ -354,57 +387,117 @@ internal partial class Select
     /// </summary>
     private List<int> SelectTypedGroups(TypedScanState state)
     {
+        var selector = new TypedGroupSelector(this, state);
         int count = state.GroupStates!.Count;
-        ExpressionNode? having = _model.GetHavingExpression();
-        // DISTINCT and window functions run over all the grouped rows, so they need every group, not a top-N.
-        OrderByNode? orderBy = _model.GetOrderByExpression() is { Columns.Count: > 0 } order
-            && _model.LimitTake.HasValue
-            && !_model.IsDistinct
-            && _model.GetWindowFunctionColumns().Count == 0 ? order : null;
-        if (having is null && orderBy is null)
+        if (selector.SelectsAll)
         {
             return [.. Enumerable.Range(0, count)];
         }
 
-        int limit = orderBy is null ? int.MaxValue : _model.RowsNeededForLimit;
-        (int Kind, int Index)[] sources = orderBy is null ? [] : [.. orderBy.Columns.Select(column => ResolveTypedOrderKey(state, column.Column.Name))];
-        bool needsRow = having is not null || sources.Any(source => source.Kind == OrderKeyGeneral);
-        var kept = new List<int>();
-        var top = new List<(object?[] Keys, int Group)>();
-        JoinedRow scratch = NewTypedGroupRow(state, 0);
-        object?[] keys = new object?[sources.Length];
-        for (int group = 0; group < count && limit > 0; group++)
+        for (int group = 0; group < count && !selector.SelectsNone; group++)
         {
-            if (needsRow)
+            selector.Offer(group);
+        }
+
+        return selector.Result();
+    }
+
+    /// <summary>
+    /// Applies HAVING and, when ORDER BY has a LIMIT, the top-N to groups offered one at a time. Ties keep the order
+    /// the groups were offered in (their numbers), as the general stable sort does.
+    /// </summary>
+    private sealed class TypedGroupSelector
+    {
+        private readonly Select _select;
+        private readonly TypedScanState _state;
+        private readonly ExpressionNode? _having;
+        private readonly OrderByNode? _orderBy;
+        private readonly int _limit;
+        private readonly (int Kind, int Index)[] _sources;
+        private readonly bool _needsRow;
+        private readonly List<int> _kept = [];
+        private readonly List<(object?[] Keys, int Group)> _top = [];
+        private readonly object?[] _keys;
+        private JoinedRow? _scratch;
+
+        public TypedGroupSelector(Select select, TypedScanState state)
+        {
+            _select = select;
+            _state = state;
+            _having = select._model.GetHavingExpression();
+
+            // DISTINCT and window functions run over all the grouped rows, so they need every group, not a top-N.
+            _orderBy = select._model.GetOrderByExpression() is { Columns.Count: > 0 } order
+                && select._model.LimitTake.HasValue
+                && !select._model.IsDistinct
+                && select._model.GetWindowFunctionColumns().Count == 0 ? order : null;
+            _limit = _orderBy is null ? int.MaxValue : select._model.RowsNeededForLimit;
+            _sources = _orderBy is null ? [] : [.. _orderBy.Columns.Select(column => select.ResolveTypedOrderKey(state, column.Column.Name))];
+            _needsRow = _having is not null || _sources.Any(source => source.Kind == OrderKeyGeneral);
+            _keys = new object?[_sources.Length];
+        }
+
+        /// <summary>Whether every group is returned, in the order offered, with no evaluation.</summary>
+        public bool SelectsAll => _having is null && _orderBy is null;
+
+        /// <summary>Whether no group can be returned (LIMIT 0).</summary>
+        public bool SelectsNone => _limit <= 0;
+
+        /// <summary>
+        /// Offers a group; returns whether it is retained for now (it passed HAVING and, under a top-N, ranks within
+        /// it). A group not retained can be discarded by the caller.
+        /// </summary>
+        public bool Offer(int group)
+        {
+            if (SelectsNone)
             {
-                FillTypedGroupRow(state, group, scratch);
+                return false;
             }
 
-            if (having is not null && !EvaluatePredicate(having, scratch))
+            if (SelectsAll)
             {
-                continue;
+                _kept.Add(group);
+                return true;
             }
 
-            if (orderBy is null)
+            if (_needsRow)
             {
-                kept.Add(group);
-                continue;
-            }
-
-            for (int i = 0; i < keys.Length; i++)
-            {
-                keys[i] = sources[i].Kind switch
+                if (_scratch is null)
                 {
-                    OrderKeyAggregate => TypedAggregateValue(state, group, sources[i].Index),
-                    OrderKeyGroupColumn => state.GroupKeys!.KeyOf(group, sources[i].Index),
-                    _ => ResolveOrderByValue(scratch, orderBy.Columns[i].Column.Name),
+                    _scratch = NewTypedGroupRow(_state, group);
+                }
+                else
+                {
+                    FillTypedGroupRow(_state, group, _scratch);
+                }
+            }
+
+            if (_having is not null && !_select.EvaluatePredicate(_having, _scratch!))
+            {
+                return false;
+            }
+
+            if (_orderBy is null)
+            {
+                _kept.Add(group);
+                return true;
+            }
+
+            for (int i = 0; i < _keys.Length; i++)
+            {
+                _keys[i] = _sources[i].Kind switch
+                {
+                    OrderKeyAggregate => TypedAggregateValue(_state, group, _sources[i].Index),
+                    OrderKeyGroupColumn => _state.GroupKeys!.KeyOf(group, _sources[i].Index),
+                    _ => _select.ResolveOrderByValue(_scratch!, _orderBy.Columns[i].Column.Name),
                 };
             }
 
-            OfferTypedGroup(orderBy, top, limit, keys, group);
+            return OfferTypedGroup(_orderBy, _top, _limit, _keys, group);
         }
 
-        return orderBy is null ? kept : [.. top.Select(entry => entry.Group)];
+        /// <summary>The retained groups, in the order they are returned.</summary>
+        public List<int> Result() => _orderBy is null ? _kept : [.. _top.Select(entry => entry.Group)];
     }
 
     private const int OrderKeyGeneral = 0;
@@ -462,11 +555,12 @@ internal partial class Select
     /// Keeps the first <paramref name="limit"/> groups in ORDER BY order, compared as the general sort compares
     /// them; ties keep the order the groups first appeared in, as its stable sort does.
     /// </summary>
-    private static void OfferTypedGroup(OrderByNode orderBy, List<(object?[] Keys, int Group)> top, int limit, object?[] keys, int group)
+    /// <returns>Whether the group is among the first <paramref name="limit"/> now.</returns>
+    private static bool OfferTypedGroup(OrderByNode orderBy, List<(object?[] Keys, int Group)> top, int limit, object?[] keys, int group)
     {
         if (top.Count >= limit && CompareTypedGroups(orderBy, keys, group, top[^1].Keys, top[^1].Group) >= 0)
         {
-            return;
+            return false;
         }
 
         int low = 0;
@@ -489,6 +583,8 @@ internal partial class Select
         {
             top.RemoveAt(top.Count - 1);
         }
+
+        return true;
     }
 
     private static int CompareTypedGroups(OrderByNode orderBy, object?[] left, int leftGroup, object?[] right, int rightGroup)

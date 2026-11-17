@@ -641,6 +641,24 @@ public static partial class RowSerializer
     }
 
     /// <summary>
+    /// Whether the cell at <paramref name="ordinal"/> (storage order) of a serialized row is NULL, reading only its
+    /// null flag after skipping the cells before it. Nothing is decoded or allocated.
+    /// </summary>
+    public static bool IsNullAt(ReadOnlySpan<byte> data, IReadOnlyList<Column> columns, int ordinal)
+    {
+        var reader = new ByteSpanReader(data);
+        for (int i = 0; i < ordinal; i++)
+        {
+            if (!reader.ReadBoolean())
+            {
+                SkipTypedCell(ref reader, columns[i]);
+            }
+        }
+
+        return reader.ReadBoolean();
+    }
+
+    /// <summary>
     /// Decodes the single cell at <paramref name="ordinal"/> (storage order) of a serialized row, skipping
     /// the cells before it without allocating. Used to read a clustered table's key out of a row.
     /// </summary>

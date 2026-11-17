@@ -222,6 +222,15 @@ internal partial class Select
             return ScanSnapshotRows(engine, tableName, databaseName, lower, upper, state);
         }
 
+        if (state.Aggregates is not null)
+        {
+            ListedTable? grouped = TryGroupCountsFromIndex(engine, tableName, databaseName, predicates, state, out IndexGroupOutcome outcome);
+            if (outcome != IndexGroupOutcome.NotPlanned)
+            {
+                return grouped; // null when the index stopped answering part way: the general path decides
+            }
+        }
+
         List<RowKey>? keyRangeRows = indexLookup is null && clustered is null
             ? TryPrimaryKeyRangeRows(engine, tableName, databaseName, columns, primaryKeys, predicates)
             : null;

@@ -36,6 +36,12 @@ internal interface ILsmIndexStore
     /// </summary>
     bool IsRowKeyIndex(string databaseName, string tableName, string indexName);
 
+    /// <summary>
+    /// Visits every key of a secondary index with its live-row count, in key order, without reading table rows;
+    /// false, visiting nothing, when the index table does not exist or this flow has index changes staged.
+    /// </summary>
+    bool TryVisitIndexKeyCounts<TState>(string databaseName, string tableName, string indexName, ref TState state, Lsm.IndexKeyCountVisitor<TState> visit);
+
     /// <summary>For a <see cref="IsRowKeyIndex"/> index: whether a live row has <paramref name="key"/>, without allocating.</summary>
     bool RowKeyIndexContains(string databaseName, string tableName, RowKey key);
 }
