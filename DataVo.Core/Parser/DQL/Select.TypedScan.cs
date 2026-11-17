@@ -899,6 +899,8 @@ internal partial class Select
         };
     }
 
+    // Compiled fully optimized on first use, so its speed does not depend on which queries ran before it.
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
         CellValue[] cells = state.Cells;

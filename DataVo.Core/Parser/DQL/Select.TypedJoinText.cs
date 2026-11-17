@@ -108,6 +108,9 @@ internal partial class Select
     /// Loads a serialized row of a hashed table into <paramref name="cells"/>: the filter step, then, when the row
     /// passes, the kept columns. Returns false when the row fails the table's conditions.
     /// </summary>
+    // Compiled fully optimized on first use: left to tiered compilation, the per-row code of a hashed table's
+    // load could stay at a lower tier depending on which queries ran before it.
+    [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private static bool LoadSerializedBuildRow(JoinSide side, JoinBuildLoad load, bool filter, RowKey rowId, ReadOnlySpan<byte> rowBytes, CellValue[] cells)
     {
         IReadOnlyList<CatalogColumn> columns = side.Columns;
