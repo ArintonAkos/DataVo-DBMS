@@ -17,12 +17,15 @@ internal sealed class ChangeRecorder
 {
     private readonly ChangeCapture _capture;
     private readonly string _databaseName;
+    private readonly string? _origin;
     private List<RowChange>? _changes;
 
     private ChangeRecorder(ChangeCapture capture, string databaseName)
     {
         _capture = capture;
         _databaseName = databaseName;
+        // Captured now: publication may be deferred to a commit callback that runs outside the origin scope.
+        _origin = ChangeCapture.CurrentOrigin;
     }
 
     /// <summary>
@@ -123,7 +126,7 @@ internal sealed class ChangeRecorder
             return;
         }
 
-        _capture.Publish(new ChangeSet(_capture.NextSequenceId(), _databaseName, _changes));
+        _capture.Publish(new ChangeSet(_capture.NextSequenceId(), _databaseName, _changes, _origin));
     }
 
     private static IReadOnlyDictionary<string, object?> Clone(IReadOnlyDictionary<string, object?> row)

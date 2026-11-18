@@ -49,6 +49,56 @@ public sealed class ChangeCapture
     /// </summary>
     public long NextSequenceId() => System.Threading.Interlocked.Increment(ref _sequence);
 
+    private static readonly System.Threading.AsyncLocal<string?> OriginSlot = new();
+
+    /// <summary>
+    /// Gets the write origin of the current flow, or <c>null</c> outside any <see cref="BeginOrigin"/> scope.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Recording"/> handlers run on the writing thread, so they can read this to see where a change
+    /// comes from. Committed change sets carry the same value as <see cref="ChangeSet.Origin"/>.
+    /// </remarks>
+    public static string? CurrentOrigin => OriginSlot.Value;
+
+    /// <summary>
+    /// Marks the writes of the current flow (the current thread and the asynchronous calls it makes) as coming
+    /// from <paramref name="origin"/> until the returned scope is disposed.
+    /// </summary>
+    /// <remarks>
+    /// The tag only labels changes: every subscriber (reactive queries included) still receives them, and
+    /// SQL and storage behave exactly as without it. The origin in effect when a statement, batch or COMMIT
+    /// runs is the one its change set carries. Scopes nest; disposing one restores the previous origin.
+    /// </remarks>
+    /// <param name="origin">A caller-chosen label, for example <c>"import"</c> or <c>"replica:primary"</c>.</param>
+    /// <returns>A scope that ends the origin when disposed.</returns>
+    /// <example>
+    /// <code>
+    /// using (ChangeCapture.BeginOrigin("import"))
+    /// {
+    ///     context.Execute("INSERT INTO Players VALUES (1, 'Ann')");
+    /// }
+    /// // Subscribers see ChangeSet.Origin == "import" for that insert.
+    /// </code>
+    /// </example>
+    public static OriginScope BeginOrigin(string origin)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(origin);
+        string? previous = OriginSlot.Value;
+        OriginSlot.Value = origin;
+        return new OriginScope(previous);
+    }
+
+    /// <summary>Ends a write origin started by <see cref="BeginOrigin"/>.</summary>
+    public readonly struct OriginScope : IDisposable
+    {
+        private readonly string? _previous;
+
+        internal OriginScope(string? previous) => _previous = previous;
+
+        /// <summary>Restores the origin that was in effect before the scope began.</summary>
+        public void Dispose() => OriginSlot.Value = _previous;
+    }
+
     /// <summary>
     /// Publishes a committed change set to subscribers when capture is enabled; otherwise does nothing.
     /// </summary>
