@@ -352,6 +352,25 @@ public sealed class ApplyBatchTests : IDisposable
         Assert.Equal("5", Scalar(context, "SELECT Hp FROM Players WHERE Id = 5"));
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void Update_ChangesExistingRows_AndReportsMissingOnes(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "INSERT INTO Players VALUES (1, 'Ann', 100)");
+
+        var batch = new DataVoWriteBatch();
+        batch.Update(PlayerHp, 1, 50);          // exists: updated
+        batch.Update(PlayerHp, 2, 10);          // missing: reported, not created
+        batch.Update(PlayerHp, 3, 1);
+        batch.Upsert(Players, 3, "Cid", 2);     // an upsert in the fold may create the row
+        batch.Delete(Players, 1, null, null);
+        batch.Update(PlayerHp, 1, 99);          // after a delete: the row stays deleted
+
+        Assert.Equal(new DataVoBatchResult(Inserted: 1, Updated: 0, Deleted: 1, Unchanged: 0, Missing: 1), context.ApplyBatch(batch));
+        Assert.Equal(["3:Cid:2"], Rows(context));
+    }
+
     [Fact]
     public void SessionOverload_WritesToThatSessionsDatabase()
     {

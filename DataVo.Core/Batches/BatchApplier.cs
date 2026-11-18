@@ -25,6 +25,7 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
     private readonly List<TablePlan> _order = [];
     private readonly Dictionary<DataVoBatchLayout, LayoutPlan> _layouts = new(ReferenceEqualityComparer.Instance);
     private int _unchanged;
+    private int _missing;
 
     /// <summary>Gets the stored names of the tables the batch writes, in the order they first appear.</summary>
     public IEnumerable<string> Tables => _order.Select(static table => table.Name);
@@ -49,7 +50,7 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
             }
             else
             {
-                row.Set(layout, values, BindAndNormalize);
+                row.Set(layout, values, BindAndNormalize, updateOnly: entry.Operation == DataVoBatchOperation.Update);
             }
         }
     }
@@ -159,6 +160,10 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
             if (row.IsDelete)
             {
                 AddDelete(table, existing, rowId);
+            }
+            else if (existing is null && row.UpdateOnly)
+            {
+                _missing++;
             }
             else if (existing is null)
             {
@@ -292,7 +297,7 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
             deleted += table.DeleteIds.Count;
         }
 
-        return new DataVoBatchResult(inserted, updated, deleted, _unchanged);
+        return new DataVoBatchResult(inserted, updated, deleted, _unchanged, _missing);
     }
 
     private static bool SameRow(Dictionary<string, object?> stored, Dictionary<string, object?> updated)
@@ -446,21 +451,35 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         /// <summary>Gets whether a delete came before the upserts, so the row restarts from its defaults.</summary>
         public bool Reset { get; private set; }
 
+        /// <summary>Gets whether only updates set the row, so a missing row must not be created.</summary>
+        public bool UpdateOnly { get; private set; }
+
         public bool IsDelete => Values is null;
 
         public void MarkDeleted()
         {
             Values = null;
             Reset = false;
+            UpdateOnly = false;
             _deleted = true;
         }
 
-        public void Set(LayoutPlan layout, ReadOnlySpan<object?> values, Func<Column, object?, object?> normalize)
+        public void Set(LayoutPlan layout, ReadOnlySpan<object?> values, Func<Column, object?, object?> normalize, bool updateOnly)
         {
             if (Values is null)
             {
+                if (_deleted && updateOnly)
+                {
+                    return; // an update after a delete finds no row
+                }
+
                 Reset = _deleted;
+                UpdateOnly = updateOnly;
                 Values = new Dictionary<string, object?>(layout.Columns.Length, StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                UpdateOnly &= updateOnly; // an upsert anywhere in the fold may create the row
             }
 
             for (int i = 0; i < values.Length; i++)

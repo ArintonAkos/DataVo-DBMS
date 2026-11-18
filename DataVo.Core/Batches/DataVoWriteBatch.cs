@@ -8,6 +8,9 @@ public enum DataVoBatchOperation
 
     /// <summary>Deletes the row with the primary key the values carry; nothing happens when there is none.</summary>
     Delete,
+
+    /// <summary>Sets the layout's columns of the row with the same primary key; a missing row is reported, not created.</summary>
+    Update,
 }
 
 /// <summary>
@@ -52,6 +55,13 @@ public sealed class DataVoWriteBatch
     /// <exception cref="ArgumentException">The number of values does not match the layout.</exception>
     public void Upsert(DataVoBatchLayout layout, params ReadOnlySpan<object?> values) =>
         Add(layout, DataVoBatchOperation.Upsert, values);
+
+    /// <summary>Adds an update: like <see cref="Upsert"/>, but a row that does not exist is counted in <see cref="DataVoBatchResult.Missing"/> instead of being inserted.</summary>
+    /// <param name="layout">The table and the columns <paramref name="values"/> carry.</param>
+    /// <param name="values">One value per layout column, in layout order.</param>
+    /// <exception cref="ArgumentException">The number of values does not match the layout.</exception>
+    public void Update(DataVoBatchLayout layout, params ReadOnlySpan<object?> values) =>
+        Add(layout, DataVoBatchOperation.Update, values);
 
     /// <summary>Adds a delete.</summary>
     /// <param name="layout">The table and the columns <paramref name="values"/> carry; it must list the primary key.</param>
@@ -107,4 +117,5 @@ public sealed class DataVoWriteBatch
 /// Rows the batch left as they were: an upsert that matched the stored values, or a delete of a missing row.
 /// Re-applying a batch therefore reports every row here.
 /// </param>
-public readonly record struct DataVoBatchResult(int Inserted, int Updated, int Deleted, int Unchanged);
+/// <param name="Missing">Rows an <see cref="DataVoWriteBatch.Update"/> named that do not exist; nothing was written for them.</param>
+public readonly record struct DataVoBatchResult(int Inserted, int Updated, int Deleted, int Unchanged, int Missing = 0);
