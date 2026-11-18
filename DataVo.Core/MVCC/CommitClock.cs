@@ -50,10 +50,11 @@ public sealed class CommitClock
         _anyOtherTransactionOpen = anyOtherTransactionOpen;
         _waitTimeoutMs = waitTimeoutMs;
         _versionedUnitRetired = versionedUnitRetired;
+        Gate = new SnapshotPublicationGate(waitTimeoutMs);
     }
 
     /// <summary>Keeps snapshot reads apart from version-publishing writes.</summary>
-    internal SnapshotPublicationGate Gate { get; } = new();
+    internal SnapshotPublicationGate Gate { get; }
 
     /// <summary>
     /// Opens (or nests into) the current thread's write unit for a block that takes its stamp before it opens the

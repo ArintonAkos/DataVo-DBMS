@@ -11,9 +11,11 @@ namespace DataVo.Core.MVCC;
 /// The gate is phase-fair: a waiting group takes the next turn, so neither side starves. A writer that already
 /// holds row or table locks bypasses the turn order (it only waits for active readers, which never wait on
 /// locks), which keeps the gate out of any lock cycle. Entries nest per thread; a nested entry of either kind
-/// joins the thread's outer entry.
+/// joins the thread's outer entry. Every wait is bounded: when the other group does not leave in time (a stalled
+/// statement), the entry fails with <see cref="TimeoutException"/> and leaves the gate's bookkeeping as it was.
 /// </remarks>
-internal sealed class SnapshotPublicationGate
+/// <param name="waitTimeoutMs">How long an entry waits for the other group, in milliseconds.</param>
+internal sealed class SnapshotPublicationGate(int waitTimeoutMs = 30000)
 {
     private readonly object _sync = new();
     private int _readers;
@@ -36,18 +38,26 @@ internal sealed class SnapshotPublicationGate
 
         lock (_sync)
         {
+            long deadline = Compat.MonotonicClock.GetMilliseconds() + waitTimeoutMs;
             _waitingReaders++;
-            while (_writers > 0 || (!_readersTurn && _waitingWriters > 0))
+            try
             {
-                if (_writers > 0)
+                while (_writers > 0 || (!_readersTurn && _waitingWriters > 0))
                 {
-                    _readersTurn = true;
-                }
+                    if (_writers > 0)
+                    {
+                        _readersTurn = true;
+                    }
 
-                Monitor.Wait(_sync);
+                    WaitUntil(deadline, "a snapshot read");
+                }
+            }
+            finally
+            {
+                _waitingReaders--;
+                Monitor.PulseAll(_sync); // a reader that stopped waiting may let a writer through
             }
 
-            _waitingReaders--;
             _readers++;
         }
 
@@ -65,18 +75,26 @@ internal sealed class SnapshotPublicationGate
 
         lock (_sync)
         {
+            long deadline = Compat.MonotonicClock.GetMilliseconds() + waitTimeoutMs;
             _waitingWriters++;
-            while (_readers > 0 || (!holdsLocks && _readersTurn && _waitingReaders > 0))
+            try
             {
-                if (_readers > 0)
+                while (_readers > 0 || (!holdsLocks && _readersTurn && _waitingReaders > 0))
                 {
-                    _readersTurn = false;
-                }
+                    if (_readers > 0)
+                    {
+                        _readersTurn = false;
+                    }
 
-                Monitor.Wait(_sync);
+                    WaitUntil(deadline, "a version-publishing write");
+                }
+            }
+            finally
+            {
+                _waitingWriters--;
+                Monitor.PulseAll(_sync); // a writer that stopped waiting may let readers through
             }
 
-            _waitingWriters--;
             _writers++;
         }
 
@@ -111,6 +129,22 @@ internal sealed class SnapshotPublicationGate
 
             Monitor.PulseAll(_sync);
         }
+    }
+
+    /// <summary>
+    /// Waits for a change of the gate's state, at most until <paramref name="deadline"/>. The caller re-checks its
+    /// condition after every wait, so this throws only when the deadline has passed and the condition still holds.
+    /// The caller holds <c>_sync</c>.
+    /// </summary>
+    private void WaitUntil(long deadline, string what)
+    {
+        long remaining = deadline - Compat.MonotonicClock.GetMilliseconds();
+        if (remaining <= 0)
+        {
+            throw new TimeoutException($"Timed out after {waitTimeoutMs} ms waiting for {what} to enter the MVCC snapshot gate.");
+        }
+
+        Monitor.Wait(_sync, (int)Math.Min(remaining, int.MaxValue));
     }
 
     private bool TryNest()
