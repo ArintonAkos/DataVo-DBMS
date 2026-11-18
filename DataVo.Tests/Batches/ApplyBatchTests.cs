@@ -353,6 +353,26 @@ public sealed class ApplyBatchTests : IDisposable
     }
 
     [Fact]
+    public void SessionOverload_WritesToThatSessionsDatabase()
+    {
+        DataVoContext context = Open(StorageMode.InMemory);
+        Ok(context, "CREATE DATABASE Other");
+        Ok(context, "USE Other");
+        Ok(context, "CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Hp INT)");
+        Guid importer = Guid.NewGuid();
+        context.Engine.Sessions.Set(importer, "B");
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(Players, 1, "Ann", 1);
+
+        context.ApplyBatch(batch, importer);
+
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM Players"));
+        Ok(context, "USE B");
+        Assert.Equal(["1:Ann:1"], Rows(context));
+        Assert.Throws<InvalidOperationException>(() => context.ApplyBatch(batch, Guid.NewGuid()));
+    }
+
+    [Fact]
     public void DiskMode_IsNotSupported()
     {
         using DataVoContext context = Create(StorageMode.Disk, NewRoot());

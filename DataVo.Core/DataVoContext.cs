@@ -671,7 +671,23 @@ public sealed class DataVoContext : IDisposable
     /// DataVoBatchResult result = context.ApplyBatch(batch);
     /// </code>
     /// </example>
-    public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch)
+    public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch) => ApplyBatch(batch, SessionId);
+
+    /// <summary>
+    /// Writes a batch as <see cref="ApplyBatch(DataVoWriteBatch)"/> does, against the database bound to
+    /// <paramref name="sessionId"/> instead of the context's own session.
+    /// </summary>
+    /// <param name="batch">The operations to write.</param>
+    /// <param name="sessionId">The session whose current database (and open-transaction state) applies.</param>
+    /// <returns>How many rows were inserted, updated, deleted, or left unchanged.</returns>
+    /// <example>
+    /// <code>
+    /// Guid importer = Guid.NewGuid();
+    /// context.Engine.Sessions.Set(importer, "Game");
+    /// context.ApplyBatch(batch, importer);
+    /// </code>
+    /// </example>
+    public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch, Guid sessionId)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(batch);
         if (Engine.Config.StorageMode == StorageMode.Disk)
@@ -686,10 +702,11 @@ public sealed class DataVoContext : IDisposable
 
         using IDisposable engineScope = DataVoEngine.PushCurrent(Engine);
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
-        string databaseName = ResolveCurrentDatabase();
-        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        string databaseName = Engine.Sessions.Get(sessionId)
+            ?? throw new InvalidOperationException("ApplyBatch needs a current database: run USE <database> on the session first.");
+        if (Engine.TransactionManager.HasActiveTransaction(sessionId))
         {
-            throw new InvalidOperationException("ApplyBatch cannot run while the current session has an active transaction.");
+            throw new InvalidOperationException("ApplyBatch cannot run while the session has an active transaction.");
         }
 
         var applier = new Batches.BatchApplier(this, databaseName);
