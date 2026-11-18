@@ -2132,6 +2132,21 @@ public static class DataVoCompiledQuery
             return;
         }
 
+        // Remove the exact old (key, row id) pairs from every lane first, as SQL UPDATE does. The fast-lane
+        // branches below only overwrite their own lane, so without this an entry that another write path put
+        // in the scalar tree kept pointing at the replaced row, and a later delete left the key behind: the
+        // next insert of that key then failed with a primary key violation for a row that no longer existed.
+        var oldEntries = new List<(string Key, RowKey RowId)>(oldRows.Count);
+        for (int i = 0; i < oldRows.Count; i++)
+        {
+            if (IndexKeyEncoder.HasCompleteKey(oldRows[i], index.AttributeNames))
+            {
+                oldEntries.Add((IndexKeyEncoder.BuildKeyString(oldRows[i], index.AttributeNames), oldRowIds[i]));
+            }
+        }
+
+        indexes.DeleteIndexEntries(oldEntries, indexName, tableName, databaseName);
+
         bool isPrimaryKeyIndex = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
         if (isPrimaryKeyIndex && indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
         {
