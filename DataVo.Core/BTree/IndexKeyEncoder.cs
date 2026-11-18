@@ -75,6 +75,51 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
+    /// Builds the logical index key string for a single column from a row dictionary when that column is
+    /// present and non-null, without allocating an attribute array.
+    /// </summary>
+    /// <param name="row">The row values keyed by column name.</param>
+    /// <param name="columnName">The indexed column name.</param>
+    /// <param name="key">The normalized index key string when present.</param>
+    /// <returns><see langword="true"/> when the row has a non-null value for <paramref name="columnName"/>.</returns>
+    /// <example>
+    /// <code>
+    /// if (IndexKeyEncoder.TryBuildSingleColumnKey(row, "Id", out string key)) { /* use key */ }
+    /// </code>
+    /// </example>
+    public static bool TryBuildSingleColumnKey(IReadOnlyDictionary<string, object?> row, string columnName, out string key)
+    {
+        if (TryGetColumnValue(row, columnName, out object? value) && value is not null && value is not DBNull)
+        {
+            key = NormalizeValue(value);
+            return true;
+        }
+
+        key = string.Empty;
+        return false;
+    }
+
+    private static bool TryGetColumnValue(IReadOnlyDictionary<string, object?> row, string columnName, out object? value)
+    {
+        if (row.TryGetValue(columnName, out value))
+        {
+            return true;
+        }
+
+        foreach (KeyValuePair<string, object?> pair in row)
+        {
+            if (string.Equals(pair.Key, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    /// <summary>
     /// Gets whether a row has a value for every indexed attribute. NULL keys are never indexed: a row with a
     /// NULL (or absent) key column gets no entry in a scalar index, on every write and rebuild path.
     /// </summary>

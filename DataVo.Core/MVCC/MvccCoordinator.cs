@@ -199,13 +199,14 @@ public static class MvccCoordinator
     }
 
     /// <summary>
-    /// Gets whether a read must scan the table instead of using an index. Indexes describe only current rows,
-    /// so once a table holds retained images, an index cannot answer for an older snapshot.
+    /// Gets whether a non-authoritative index probe must fall back to a full table scan. Authoritative single-column
+    /// index lookups use <see cref="FilterUsingIndex"/> instead, which merges retained images and buffered transaction
+    /// writes directly without scanning the table.
     /// </summary>
     /// <param name="engine">The owning engine.</param>
     /// <param name="databaseName">The owning database.</param>
     /// <param name="tableName">The table being read.</param>
-    /// <returns><see langword="true"/> when the current snapshot needs a table scan.</returns>
+    /// <returns><see langword="true"/> when a non-authoritative index lookup must scan the table.</returns>
     /// <example>
     /// <code>
     /// if (MvccCoordinator.SnapshotRequiresScan(engine, database, table)) { /* scan */ }
@@ -215,6 +216,212 @@ public static class MvccCoordinator
         MvccExecutionScope.CurrentSnapshot is not null
         && (engine.VersionStorageManager.HasRetainedImages(databaseName, tableName)
             || MvccExecutionScope.CurrentTransaction?.HasBufferedWrites(tableName) == true);
+
+    /// <summary>
+    /// Resolves the row identifiers matching an authoritative single-column index lookup under the active
+    /// <see cref="MvccExecutionScope"/>, combining committed index entries with visible retained images and the
+    /// current transaction's buffered inserts, updates, and deletes.
+    /// </summary>
+    /// <param name="engine">The owning engine.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The table being read.</param>
+    /// <param name="indexName">The index covering <paramref name="columnName"/>.</param>
+    /// <param name="columnName">The indexed column name.</param>
+    /// <param name="key">The canonical encoded index lookup key.</param>
+    /// <returns>The matching row identifiers visible to the current execution scope.</returns>
+    /// <example>
+    /// <code>
+    /// List&lt;RowKey&gt; rowIds = MvccCoordinator.FilterUsingIndex(engine, "AppDb", "Users", "_PK_Users", "Id", "[42]");
+    /// </code>
+    /// </example>
+    public static List<RowKey> FilterUsingIndex(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        string indexName,
+        string columnName,
+        string key)
+    {
+        IReadOnlyList<RowKey> committed = engine.IndexManager.FilterUsingIndex(key, indexName, tableName, databaseName);
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot is null)
+        {
+            return [.. committed];
+        }
+
+        Transactions.TransactionContext? transaction = MvccExecutionScope.CurrentTransaction;
+        bool hasRetainedImages = engine.VersionStorageManager.HasRetainedImages(databaseName, tableName);
+        bool hasBufferedWrites = transaction?.HasBufferedWrites(tableName) == true;
+        if (!hasRetainedImages && !hasBufferedWrites)
+        {
+            return FilterVisibleCommittedRows(engine, databaseName, tableName, committed, snapshot);
+        }
+
+        Dictionary<RowKey, string?>? retainedKeysByRowId = hasRetainedImages
+            ? BuildRetainedImageKeyMap(engine, databaseName, tableName, columnName, snapshot)
+            : null;
+
+        var matched = new List<RowKey>(committed.Count + 4);
+        var seen = new HashSet<RowKey>();
+
+        AppendCommittedMatches(engine, databaseName, tableName, committed, snapshot, transaction, retainedKeysByRowId, seen, matched);
+        AppendRetainedImageMatches(tableName, key, transaction, retainedKeysByRowId, seen, matched);
+        AppendBufferedMatches(engine, databaseName, tableName, columnName, key, snapshot, transaction, retainedKeysByRowId, seen, matched);
+
+        return matched;
+    }
+
+    private static List<RowKey> FilterVisibleCommittedRows(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        IReadOnlyList<RowKey> committed,
+        TransactionSnapshot snapshot)
+    {
+        var visible = new List<RowKey>(committed.Count);
+        for (int i = 0; i < committed.Count; i++)
+        {
+            RowKey rowId = committed[i];
+            if (SnapshotVisibilityEvaluator.IsVersionVisible(GetVersionOrBase(engine, databaseName, tableName, rowId), snapshot))
+            {
+                visible.Add(rowId);
+            }
+        }
+
+        return visible;
+    }
+
+    private static Dictionary<RowKey, string?>? BuildRetainedImageKeyMap(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        string columnName,
+        TransactionSnapshot snapshot)
+    {
+        List<RetainedRowImage> images = engine.VersionStorageManager.GetVisibleImages(databaseName, tableName, snapshot);
+        if (images.Count == 0)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<RowKey, string?>(images.Count);
+        for (int i = 0; i < images.Count; i++)
+        {
+            RetainedRowImage image = images[i];
+            map[image.RowId] = BTree.IndexKeyEncoder.TryBuildSingleColumnKey(image.Row, columnName, out string imageKey)
+                ? imageKey
+                : null;
+        }
+
+        return map;
+    }
+
+    private static void AppendCommittedMatches(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        IReadOnlyList<RowKey> committed,
+        TransactionSnapshot snapshot,
+        Transactions.TransactionContext? transaction,
+        Dictionary<RowKey, string?>? retainedKeysByRowId,
+        HashSet<RowKey> seen,
+        List<RowKey> matched)
+    {
+        for (int i = 0; i < committed.Count; i++)
+        {
+            RowKey rowId = committed[i];
+            if (transaction?.IsDeleted(tableName, rowId) == true)
+            {
+                continue;
+            }
+
+            if (transaction is not null && transaction.TryGetUpdatedRow(tableName, rowId, out _))
+            {
+                continue;
+            }
+
+            if (retainedKeysByRowId is not null && retainedKeysByRowId.ContainsKey(rowId))
+            {
+                continue;
+            }
+
+            if (SnapshotVisibilityEvaluator.IsVersionVisible(GetVersionOrBase(engine, databaseName, tableName, rowId), snapshot)
+                && seen.Add(rowId))
+            {
+                matched.Add(rowId);
+            }
+        }
+    }
+
+    private static void AppendRetainedImageMatches(
+        string tableName,
+        string key,
+        Transactions.TransactionContext? transaction,
+        Dictionary<RowKey, string?>? retainedKeysByRowId,
+        HashSet<RowKey> seen,
+        List<RowKey> matched)
+    {
+        if (retainedKeysByRowId is null)
+        {
+            return;
+        }
+
+        foreach ((RowKey rowId, string? imageKey) in retainedKeysByRowId)
+        {
+            if (transaction?.IsDeleted(tableName, rowId) == true)
+            {
+                continue;
+            }
+
+            if (transaction is not null && transaction.TryGetUpdatedRow(tableName, rowId, out _))
+            {
+                continue;
+            }
+
+            if (string.Equals(imageKey, key, StringComparison.Ordinal) && seen.Add(rowId))
+            {
+                matched.Add(rowId);
+            }
+        }
+    }
+
+    private static void AppendBufferedMatches(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        string columnName,
+        string key,
+        TransactionSnapshot snapshot,
+        Transactions.TransactionContext? transaction,
+        Dictionary<RowKey, string?>? retainedKeysByRowId,
+        HashSet<RowKey> seen,
+        List<RowKey> matched)
+    {
+        if (transaction is null || !transaction.HasBufferedWrites(tableName))
+        {
+            return;
+        }
+
+        foreach (RowKey rowId in transaction.GetMatchingBufferedRowIds(tableName, columnName, key))
+        {
+            if (Transactions.TransactionContext.IsBufferedRowKey(rowId))
+            {
+                if (seen.Add(rowId))
+                {
+                    matched.Add(rowId);
+                }
+
+                continue;
+            }
+
+            bool baseVisible = (retainedKeysByRowId is not null && retainedKeysByRowId.ContainsKey(rowId))
+                || SnapshotVisibilityEvaluator.IsVersionVisible(GetVersionOrBase(engine, databaseName, tableName, rowId), snapshot);
+            if (baseVisible && seen.Add(rowId))
+            {
+                matched.Add(rowId);
+            }
+        }
+    }
 
     /// <summary>
     /// Drops retained images and version metadata no open snapshot can need. Call when a transaction ends; the

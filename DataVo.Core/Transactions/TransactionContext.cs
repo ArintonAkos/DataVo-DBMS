@@ -1,5 +1,7 @@
 namespace DataVo.Core.Transactions;
 
+using System.Diagnostics.CodeAnalysis;
+using DataVo.Core.BTree;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.MVCC;
 
@@ -13,14 +15,87 @@ using DataVo.Core.MVCC;
 /// </summary>
 public class TransactionContext
 {
+    private static readonly RowKey[] EmptyRowKeys = [];
+
     private readonly Dictionary<string, BufferedStateSnapshot> _savepoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _savepointOrder = [];
+    private readonly Dictionary<string, Dictionary<RowKey, int>> _updatedIndexByRowId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string TableName, string ColumnName), BufferedColumnIndex> _columnIndexes = new(TableColumnComparer.Instance);
+    private readonly Dictionary<string, TablePendingKeyState> _pendingKeysByTable = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed class BufferedStateSnapshot
     {
         public required Dictionary<string, List<Dictionary<string, object?>>> InsertedRows { get; init; }
         public required Dictionary<string, HashSet<RowKey>> DeletedRowIds { get; init; }
         public required Dictionary<string, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)>> UpdatedRows { get; init; }
+    }
+
+    private sealed class BufferedColumnIndex
+    {
+        private readonly Dictionary<string, HashSet<RowKey>> _rowsByKey = new(StringComparer.Ordinal);
+        private readonly Dictionary<RowKey, string> _keyByRowId = [];
+
+        public void Upsert(RowKey rowId, IReadOnlyDictionary<string, object?> row, string columnName)
+        {
+            Remove(rowId);
+            if (!IndexKeyEncoder.TryBuildSingleColumnKey(row, columnName, out string key))
+            {
+                return;
+            }
+
+            if (!_rowsByKey.TryGetValue(key, out HashSet<RowKey>? set))
+            {
+                set = [];
+                _rowsByKey[key] = set;
+            }
+
+            set.Add(rowId);
+            _keyByRowId[rowId] = key;
+        }
+
+        public void Remove(RowKey rowId)
+        {
+            if (!_keyByRowId.Remove(rowId, out string? oldKey))
+            {
+                return;
+            }
+
+            if (_rowsByKey.TryGetValue(oldKey, out HashSet<RowKey>? set))
+            {
+                set.Remove(rowId);
+                if (set.Count == 0)
+                {
+                    _rowsByKey.Remove(oldKey);
+                }
+            }
+        }
+
+        public IReadOnlyCollection<RowKey> Lookup(string key) =>
+            _rowsByKey.TryGetValue(key, out HashSet<RowKey>? set) ? set : EmptyRowKeys;
+    }
+
+    internal sealed class TablePendingKeyState
+    {
+        public Dictionary<RowKey, Dictionary<string, object?>> CommittedRows { get; } = [];
+        public HashSet<RowKey> KeyModifiedRowIds { get; } = [];
+        public Parser.DML.InsertRowService.PendingKeys? CachedKeysWithInserts { get; set; }
+        public int ProcessedInsertCount { get; set; }
+        public int ProcessedUpdateCount { get; set; }
+        public bool Dirty { get; set; } = true;
+    }
+
+    private sealed class TableColumnComparer : IEqualityComparer<(string TableName, string ColumnName)>
+    {
+        public static readonly TableColumnComparer Instance = new();
+
+        public bool Equals((string TableName, string ColumnName) x, (string TableName, string ColumnName) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.TableName, y.TableName)
+            && StringComparer.OrdinalIgnoreCase.Equals(x.ColumnName, y.ColumnName);
+
+        public int GetHashCode((string TableName, string ColumnName) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.TableName),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ColumnName));
     }
 
     /// <summary>
@@ -78,10 +153,15 @@ public class TransactionContext
     /// <param name="row">The row data as a column-value dictionary.</param>
     public void BufferInsert(string tableName, Dictionary<string, object?> row)
     {
-        if (!InsertedRows.ContainsKey(tableName))
-            InsertedRows[tableName] = [];
+        if (!InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? inserted))
+        {
+            inserted = [];
+            InsertedRows[tableName] = inserted;
+        }
 
-        InsertedRows[tableName].Add(row);
+        int position = inserted.Count;
+        inserted.Add(row);
+        UpdateBufferedColumnIndexes(tableName, BufferedRowKey(position), row);
     }
 
     /// <summary>
@@ -91,17 +171,19 @@ public class TransactionContext
     /// <param name="rowId">The physical row ID to delete.</param>
     public void BufferDelete(string tableName, RowKey rowId)
     {
-        if (!DeletedRowIds.ContainsKey(tableName))
-            DeletedRowIds[tableName] = [];
+        if (!DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted))
+        {
+            deleted = [];
+            DeletedRowIds[tableName] = deleted;
+        }
 
-        DeletedRowIds[tableName].Add(rowId);
+        deleted.Add(rowId);
 
         // An update buffered earlier for this row is void: COMMIT deletes the row, and a row inserted later
         // with the same key must not receive it.
-        if (UpdatedRows.TryGetValue(tableName, out var updates))
-        {
-            updates.RemoveAll(entry => entry.RowId == rowId);
-        }
+        RemoveBufferedUpdate(tableName, rowId);
+        RemoveFromBufferedColumnIndexes(tableName, rowId);
+        InvalidatePendingKeys(tableName);
     }
 
     /// <summary>
@@ -126,7 +208,10 @@ public class TransactionContext
     /// <param name="tableName">The target table name.</param>
     /// <param name="rowId">The physical row ID being updated.</param>
     /// <param name="updatedColumns">The column-value pairs to overwrite (usually the whole new row).</param>
-    public void BufferUpdate(string tableName, RowKey rowId, Dictionary<string, object?> updatedColumns)
+    /// <param name="keyColumnsUnchanged">
+    /// <see langword="true"/> when the update statement leaves every primary-key and unique-key column unchanged.
+    /// </param>
+    public void BufferUpdate(string tableName, RowKey rowId, Dictionary<string, object?> updatedColumns, bool keyColumnsUnchanged = false)
     {
         if (!UpdatedRows.TryGetValue(tableName, out var updates))
         {
@@ -134,34 +219,57 @@ public class TransactionContext
             UpdatedRows[tableName] = updates;
         }
 
-        for (int i = 0; i < updates.Count; i++)
+        if (!_updatedIndexByRowId.TryGetValue(tableName, out Dictionary<RowKey, int>? indexByRowId))
         {
-            if (updates[i].RowId == rowId)
-            {
-                Dictionary<string, object?> merged = updates[i].UpdatedColumns;
-                foreach (KeyValuePair<string, object?> column in updatedColumns)
-                {
-                    merged[column.Key] = column.Value;
-                }
-
-                return;
-            }
+            indexByRowId = [];
+            _updatedIndexByRowId[tableName] = indexByRowId;
         }
 
-        updates.Add((rowId, updatedColumns));
+        Dictionary<string, object?> currentRow;
+        if (indexByRowId.TryGetValue(rowId, out int existingIndex))
+        {
+            currentRow = updates[existingIndex].UpdatedColumns;
+            foreach (KeyValuePair<string, object?> column in updatedColumns)
+            {
+                currentRow[column.Key] = column.Value;
+            }
+        }
+        else
+        {
+            indexByRowId[rowId] = updates.Count;
+            updates.Add((rowId, updatedColumns));
+            currentRow = updatedColumns;
+        }
+
+        UpdateBufferedColumnIndexes(tableName, rowId, currentRow);
+        if (!keyColumnsUnchanged)
+        {
+            TablePendingKeyState state = GetOrCreatePendingKeyState(tableName);
+            state.KeyModifiedRowIds.Add(rowId);
+            state.Dirty = true;
+        }
     }
 
     /// <summary>Replaces a buffered insert with its updated values (an UPDATE of a row this transaction inserted).</summary>
     /// <param name="tableName">The target table name.</param>
     /// <param name="rowId">The buffered row's reserved key (see <see cref="BufferedRowKey"/>).</param>
     /// <param name="row">The row's new values.</param>
-    internal void ReplaceBufferedInsert(string tableName, RowKey rowId, Dictionary<string, object?> row)
+    /// <param name="keyColumnsUnchanged">
+    /// <see langword="true"/> when the update statement leaves every primary-key and unique-key column unchanged.
+    /// </param>
+    internal void ReplaceBufferedInsert(string tableName, RowKey rowId, Dictionary<string, object?> row, bool keyColumnsUnchanged = false)
     {
         List<Dictionary<string, object?>> rows = InsertedRows[tableName];
         Dictionary<string, object?> current = rows[(int)rowId.Low];
         foreach (KeyValuePair<string, object?> column in row)
         {
             current[column.Key] = column.Value;
+        }
+
+        UpdateBufferedColumnIndexes(tableName, rowId, current);
+        if (!keyColumnsUnchanged)
+        {
+            InvalidatePendingKeys(tableName);
         }
     }
 
@@ -178,14 +286,78 @@ public class TransactionContext
             return;
         }
 
+        bool removedAny = false;
         foreach (int position in rowIds.Select(rowId => (int)rowId.Low).Distinct().OrderByDescending(position => position))
         {
             if (position < rows.Count)
             {
                 rows.RemoveAt(position);
+                removedAny = true;
             }
         }
+
+        if (removedAny)
+        {
+            InvalidateBufferedColumnIndexes(tableName);
+            InvalidatePendingKeys(tableName);
+        }
     }
+
+    /// <summary>Gets whether the given stored row has been marked for deletion in this transaction.</summary>
+    internal bool IsDeleted(string tableName, RowKey rowId) =>
+        DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted) && deleted.Contains(rowId);
+
+    /// <summary>
+    /// Looks up the latest buffered update for <paramref name="rowId"/> in <paramref name="tableName"/> in O(1) time.
+    /// </summary>
+    internal bool TryGetUpdatedRow(string tableName, RowKey rowId, [NotNullWhen(true)] out Dictionary<string, object?>? updatedRow)
+    {
+        if (_updatedIndexByRowId.TryGetValue(tableName, out Dictionary<RowKey, int>? indexByRowId)
+            && indexByRowId.TryGetValue(rowId, out int index)
+            && UpdatedRows.TryGetValue(tableName, out var updates)
+            && (uint)index < (uint)updates.Count)
+        {
+            updatedRow = updates[index].UpdatedColumns;
+            return true;
+        }
+
+        updatedRow = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the buffered row identifiers (both updated stored rows and buffered inserts) whose current value for
+    /// <paramref name="columnName"/> encodes to <paramref name="key"/>. Builds a per-column lookup table on first use
+    /// and maintains it incrementally as subsequent writes are buffered.
+    /// </summary>
+    internal IReadOnlyCollection<RowKey> GetMatchingBufferedRowIds(string tableName, string columnName, string key)
+    {
+        var indexKey = (tableName, columnName);
+        if (!_columnIndexes.TryGetValue(indexKey, out BufferedColumnIndex? columnIndex))
+        {
+            columnIndex = BuildBufferedColumnIndex(tableName, columnName);
+            _columnIndexes[indexKey] = columnIndex;
+        }
+
+        return columnIndex.Lookup(key);
+    }
+
+    /// <summary>Gets or creates the cached pending-key state for <paramref name="tableName"/>.</summary>
+    internal TablePendingKeyState GetOrCreatePendingKeyState(string tableName)
+    {
+        if (!_pendingKeysByTable.TryGetValue(tableName, out TablePendingKeyState? state))
+        {
+            state = new TablePendingKeyState();
+            _pendingKeysByTable[tableName] = state;
+        }
+
+        return state;
+    }
+
+    /// <summary>Gets whether any buffered update on <paramref name="tableName"/> may have modified a key column.</summary>
+    internal bool HasKeyModifyingUpdates(string tableName) =>
+        _pendingKeysByTable.TryGetValue(tableName, out TablePendingKeyState? state)
+        && state.KeyModifiedRowIds.Count > 0;
 
     /// <summary>
     /// Captures the current buffered DML state under the supplied savepoint name.
@@ -277,9 +449,132 @@ public class TransactionContext
         }
 
         UpdatedRows.Clear();
+        _updatedIndexByRowId.Clear();
+        _pendingKeysByTable.Clear();
         foreach ((string tableName, List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> rows) in CloneUpdatedRows(snapshot.UpdatedRows))
         {
             UpdatedRows[tableName] = rows;
+            var indexMap = new Dictionary<RowKey, int>(rows.Count);
+            TablePendingKeyState pendingState = GetOrCreatePendingKeyState(tableName);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                indexMap[rows[i].RowId] = i;
+                pendingState.KeyModifiedRowIds.Add(rows[i].RowId);
+            }
+
+            _updatedIndexByRowId[tableName] = indexMap;
+        }
+
+        _columnIndexes.Clear();
+    }
+
+    private void RemoveBufferedUpdate(string tableName, RowKey rowId)
+    {
+        if (!_updatedIndexByRowId.TryGetValue(tableName, out Dictionary<RowKey, int>? indexByRowId)
+            || !indexByRowId.Remove(rowId, out int removedIndex)
+            || !UpdatedRows.TryGetValue(tableName, out var updates))
+        {
+            return;
+        }
+
+        updates.RemoveAt(removedIndex);
+        for (int i = removedIndex; i < updates.Count; i++)
+        {
+            indexByRowId[updates[i].RowId] = i;
+        }
+    }
+
+    private BufferedColumnIndex BuildBufferedColumnIndex(string tableName, string columnName)
+    {
+        var index = new BufferedColumnIndex();
+        DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted);
+
+        if (UpdatedRows.TryGetValue(tableName, out var updates))
+        {
+            for (int i = 0; i < updates.Count; i++)
+            {
+                (RowKey rowId, Dictionary<string, object?> updatedRow) = updates[i];
+                if (deleted?.Contains(rowId) != true)
+                {
+                    index.Upsert(rowId, updatedRow, columnName);
+                }
+            }
+        }
+
+        if (InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? inserted))
+        {
+            for (int i = 0; i < inserted.Count; i++)
+            {
+                index.Upsert(BufferedRowKey(i), inserted[i], columnName);
+            }
+        }
+
+        return index;
+    }
+
+    private void UpdateBufferedColumnIndexes(string tableName, RowKey rowId, IReadOnlyDictionary<string, object?> row)
+    {
+        if (_columnIndexes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<(string TableName, string ColumnName), BufferedColumnIndex> entry in _columnIndexes)
+        {
+            if (string.Equals(entry.Key.TableName, tableName, StringComparison.OrdinalIgnoreCase))
+            {
+                entry.Value.Upsert(rowId, row, entry.Key.ColumnName);
+            }
+        }
+    }
+
+    private void RemoveFromBufferedColumnIndexes(string tableName, RowKey rowId)
+    {
+        if (_columnIndexes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<(string TableName, string ColumnName), BufferedColumnIndex> entry in _columnIndexes)
+        {
+            if (string.Equals(entry.Key.TableName, tableName, StringComparison.OrdinalIgnoreCase))
+            {
+                entry.Value.Remove(rowId);
+            }
+        }
+    }
+
+    private void InvalidateBufferedColumnIndexes(string tableName)
+    {
+        if (_columnIndexes.Count == 0)
+        {
+            return;
+        }
+
+        List<(string TableName, string ColumnName)>? keysToRemove = null;
+        foreach ((string TableName, string ColumnName) key in _columnIndexes.Keys)
+        {
+            if (string.Equals(key.TableName, tableName, StringComparison.OrdinalIgnoreCase))
+            {
+                keysToRemove ??= [];
+                keysToRemove.Add(key);
+            }
+        }
+
+        if (keysToRemove is not null)
+        {
+            for (int i = 0; i < keysToRemove.Count; i++)
+            {
+                _columnIndexes.Remove(keysToRemove[i]);
+            }
+        }
+    }
+
+    private void InvalidatePendingKeys(string tableName)
+    {
+        if (_pendingKeysByTable.TryGetValue(tableName, out TablePendingKeyState? state))
+        {
+            state.Dirty = true;
         }
     }
 

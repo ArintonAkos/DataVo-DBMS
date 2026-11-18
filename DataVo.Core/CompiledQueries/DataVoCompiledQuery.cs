@@ -1279,6 +1279,18 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         Func<Dictionary<string, object?>, TResult> mapper)
     {
+        TransactionManager txManager = context.Engine.TransactionManager;
+        TransactionContext? transactionContext = txManager.HasAnyActiveTransaction()
+            ? txManager.GetContext(context.SessionId) ?? MvccExecutionScope.CurrentTransaction
+            : MvccExecutionScope.CurrentTransaction;
+        bool hasActiveSnapshot = transactionContext is not null || MvccExecutionScope.CurrentSnapshot is not null;
+
+        using IDisposable? engineScope = hasActiveSnapshot ? DataVoEngine.PushCurrent(context.Engine) : null;
+        using IDisposable? txScope = transactionContext is not null
+            && !ReferenceEquals(MvccExecutionScope.CurrentTransaction, transactionContext)
+            ? MvccExecutionScope.PushTransaction(transactionContext)
+            : null;
+
         string databaseName = ResolveCurrentDatabase(context);
         plan = StoredTablePlan(context.Engine, plan, databaseName);
         Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
@@ -1395,6 +1407,8 @@ public static class DataVoCompiledQuery
         string databaseName,
         string expectedKey)
     {
+        bool authoritativeSnapshotIndex = MvccExecutionScope.CurrentSnapshot is not null;
+
         // Compile-time fast path: a generator-resolved single-column index skips the per-call primary-key and
         // index catalog lookups below. A wrong/missing tag (IndexException) or an empty result falls through to
         // the runtime resolution, so correctness never depends on the compile-time bet being right.
@@ -1405,7 +1419,7 @@ public static class DataVoCompiledQuery
                 List<KeyValuePair<RowKey, StoredRow>> tagged =
                     ReadStoredRowsViaIndex(context, plan, databaseName, plan.ResolvedIndexName, expectedKey);
 
-                if (tagged.Count > 0)
+                if (tagged.Count > 0 || authoritativeSnapshotIndex)
                 {
                     return tagged;
                 }
@@ -1427,7 +1441,7 @@ public static class DataVoCompiledQuery
                 List<KeyValuePair<RowKey, StoredRow>> matches =
                     ReadStoredRowsViaIndex(context, plan, databaseName, primaryKeyIndexName, expectedKey);
 
-                if (matches.Count > 0)
+                if (matches.Count > 0 || authoritativeSnapshotIndex)
                 {
                     return matches;
                 }
@@ -1448,7 +1462,7 @@ public static class DataVoCompiledQuery
                 List<KeyValuePair<RowKey, StoredRow>> matches =
                     ReadStoredRowsViaIndex(context, plan, databaseName, secondaryIndexName, expectedKey);
 
-                if (matches.Count > 0)
+                if (matches.Count > 0 || authoritativeSnapshotIndex)
                 {
                     return matches;
                 }
@@ -1498,10 +1512,23 @@ public static class DataVoCompiledQuery
         string indexName,
         string expectedKey)
     {
-        List<RowKey> ids =
-        [
-            .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, indexName, plan.TableName, databaseName)
-        ];
+        List<RowKey> ids = MvccExecutionScope.CurrentSnapshot is not null
+            ? MvccCoordinator.FilterUsingIndex(
+                context.Engine,
+                databaseName,
+                plan.TableName,
+                indexName,
+                plan.WhereColumn!,
+                expectedKey)
+            :
+            [
+                .. context.Engine.IndexManager.FilterUsingIndex(expectedKey, indexName, plan.TableName, databaseName)
+            ];
+
+        if (ids.Count == 0)
+        {
+            return [];
+        }
 
         Dictionary<RowKey, StoredRow> indexedRows =
             context.Engine.StorageContext.GetTypedTableContents(ids, plan.TableName, databaseName);
@@ -2031,9 +2058,12 @@ public static class DataVoCompiledQuery
         long statementTxId)
     {
         List<IndexFile> indexFiles = context.Engine.Catalog.GetTableIndexes(tableName, databaseName);
+        bool isClustered = context.Engine.StorageContext.ResolveClusteredKey(databaseName, tableName) is not null;
 
-        // Tombstone the old physical rows, then append the new versions and capture their row ids.
-        context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
+        if (isClustered)
+        {
+            context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
+        }
 
         var newRowIds = new RowKey[newRows.Count];
         for (int i = 0; i < newRows.Count; i++)
@@ -2045,7 +2075,12 @@ public static class DataVoCompiledQuery
 
         foreach (IndexFile index in indexFiles)
         {
-            MaintainIndexForUpdate(context, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
+            MaintainIndexForUpdate(context.Engine, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
+        }
+
+        if (!isClustered)
+        {
+            context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
         }
 
         if (ImplicitWalCommit.IsEnabled(context.Engine))
@@ -2074,8 +2109,8 @@ public static class DataVoCompiledQuery
     /// full-table-scan fallback; other indexes use the delete-by-row-id + reinsert path. This is the fix for the
     /// concurrent-ops allocation trap where every UPDATE evicted its row from the fast lane.
     /// </summary>
-    private static void MaintainIndexForUpdate(
-        DataVoContext context,
+    internal static void MaintainIndexForUpdate(
+        DataVoEngine engine,
         string tableName,
         string databaseName,
         IndexFile index,
@@ -2090,7 +2125,7 @@ public static class DataVoCompiledQuery
             return;
         }
 
-        var indexes = context.Engine.IndexManager;
+        var indexes = engine.IndexManager;
         string indexKind = index.IndexKind ?? string.Empty;
 
         if (indexes.SupportsVectorIndexType(indexKind))

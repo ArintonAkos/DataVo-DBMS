@@ -161,8 +161,11 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
         }
 
-        InsertRowService.PendingKeys? pending = new InsertRowService(Engine, Context, Catalog, Indexes)
-            .BuildPendingKeys(txContext, databaseName, _model.TableName, includeInserts: true);
+        bool modifiesKeyColumns = ModifiesKeyColumns(databaseName);
+        InsertRowService.PendingKeys? pending = modifiesKeyColumns
+            ? new InsertRowService(Engine, Context, Catalog, Indexes)
+                .BuildPendingKeys(txContext, databaseName, _model.TableName, includeInserts: true)
+            : null;
         (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName, pending);
 
         for (int i = 0; i < newRows.Count; i++)
@@ -170,15 +173,36 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             var newRow = new Dictionary<string, object?>(newRows[i], StringComparer.OrdinalIgnoreCase);
             if (TransactionContext.IsBufferedRowKey(oldRowIds[i]))
             {
-                txContext.ReplaceBufferedInsert(_model.TableName, oldRowIds[i], newRow);
+                txContext.ReplaceBufferedInsert(_model.TableName, oldRowIds[i], newRow, keyColumnsUnchanged: !modifiesKeyColumns);
             }
             else
             {
-                txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRow);
+                txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRow, keyColumnsUnchanged: !modifiesKeyColumns);
             }
         }
 
         return newRows.Count;
+    }
+
+    private bool ModifiesKeyColumns(string databaseName)
+    {
+        foreach (string keyColumn in Catalog.GetTablePrimaryKeys(_model.TableName, databaseName))
+        {
+            if (_model.SetExpressions.ContainsKey(keyColumn))
+            {
+                return true;
+            }
+        }
+
+        foreach (string uniqueColumn in Catalog.GetTableUniqueKeys(_model.TableName, databaseName))
+        {
+            if (_model.SetExpressions.ContainsKey(uniqueColumn))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -345,7 +369,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <returns>A new dictionary representing the modified row.</returns>
     private Dictionary<string, object?> ApplySetExpressions(Dictionary<string, object?> oldRow, string databaseName)
     {
-        var newRow = new Dictionary<string, object?>(oldRow);
+        var newRow = new Dictionary<string, object?>(oldRow, StringComparer.OrdinalIgnoreCase);
 
         Dictionary<string, ExpressionNode> setExpressions = GetMaterializedSetExpressions(databaseName);
 
@@ -460,56 +484,50 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
         }
 
-        // Delete old records from storage & indexes
-        Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
-        foreach (var index in indexFiles)
+        var oldRows = new List<Dictionary<string, object?>>(oldRowIds.Count);
+        for (int i = 0; i < oldRowIds.Count; i++)
         {
-            string indexName = index.IndexFileName ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(indexName))
-            {
-                continue;
-            }
-
-            string indexKind = index.IndexKind ?? string.Empty;
-
-            if (Indexes.SupportsVectorIndexType(indexKind))
-            {
-                Indexes.DeleteFromVectorIndex(oldRowIds, indexName, _model.TableName, databaseName, indexKind);
-            }
-            else
-            {
-                // The old rows are known, so remove exact (old key, row id) pairs instead of scanning.
-                var oldEntries = new List<(string Key, RowKey RowId)>(oldRowIds.Count);
-                foreach (RowKey oldRowId in oldRowIds)
-                {
-                    // Same encoding as inserts; removing a pair that was never indexed is a no-op.
-                    if (oldRowsById.TryGetValue(oldRowId, out Dictionary<string, object?>? oldRow)
-                        && index.AttributeNames.All(oldRow.ContainsKey))
-                    {
-                        oldEntries.Add((IndexKeyEncoder.BuildKeyString(oldRow, index.AttributeNames), oldRowId));
-                    }
-                }
-
-                Indexes.DeleteIndexEntries(oldEntries, indexName, _model.TableName, databaseName);
-            }
+            oldRows.Add(oldRowsById[oldRowIds[i]]);
         }
 
-        // Insert new records into storage & indexes
+        bool isClustered = Context.ResolveClusteredKey(databaseName, _model.TableName) is not null;
+        if (isClustered)
+        {
+            Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
+        }
+
         List<RowKey> assignedRowIds = Context.InsertIntoTable(newRows, _model.TableName, databaseName);
         for (int i = 0; i < newRows.Count; i++)
         {
             var newRow = newRows[i];
             RowKey oldRowId = oldRowIds[i];
             RowKey assignedRowId = assignedRowIds[i];
-            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId, oldRowsById.GetValueOrDefault(oldRowId));
+            Dictionary<string, object?> oldRow = oldRows[i];
+            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId, oldRow);
 
-            if (recorder is { IsEnabled: true } && oldRowsById.TryGetValue(oldRowId, out var oldRow))
+            if (recorder is { IsEnabled: true })
             {
                 recorder.RecordUpdate(_model.TableName, assignedRowId, oldRow, newRow);
             }
         }
 
-        InsertUpdatedIndexesBatch(newRows, assignedRowIds, indexFiles, databaseName);
+        foreach (var index in indexFiles)
+        {
+            CompiledQueries.DataVoCompiledQuery.MaintainIndexForUpdate(
+                Engine,
+                _model.TableName,
+                databaseName,
+                index,
+                oldRowIds,
+                oldRows,
+                assignedRowIds,
+                newRows);
+        }
+
+        if (!isClustered)
+        {
+            Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
+        }
 
         if (ImplicitWalCommit.IsEnabled(Engine))
         {

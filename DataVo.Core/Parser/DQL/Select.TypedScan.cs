@@ -157,7 +157,7 @@ internal partial class Select
         // An equality on the primary key or an indexed column reads only the rows the index names. When the
         // index key cannot be built exactly (a composite index, a literal of another type), the general
         // path decides, as before.
-        (string IndexName, string Key)? indexLookup = null;
+        (string IndexName, string ColumnName, string Key)? indexLookup = null;
         List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
         Dictionary<string, string> indexedColumns = _model.FromTable.IndexedColumns ?? [];
         foreach (TypedPredicate predicate in predicates)
@@ -187,7 +187,7 @@ internal partial class Select
 
             if (indexLookup is null || isKey)
             {
-                indexLookup = (indexName, key);
+                indexLookup = (indexName, column, key);
             }
 
             if (isKey)
@@ -223,7 +223,25 @@ internal partial class Select
 
         if (_activeSnapshot is not null)
         {
-            // Inside a transaction the rows come from its snapshot, which committed indexes do not describe.
+            if (indexLookup is { } snapshotLookup)
+            {
+                List<RowKey> rowIds = MVCC.MvccCoordinator.FilterUsingIndex(
+                    engine,
+                    databaseName,
+                    tableName,
+                    snapshotLookup.IndexName,
+                    snapshotLookup.ColumnName,
+                    snapshotLookup.Key);
+                rowIds.Sort();
+                if (!engine.StorageContext.VisitVisibleRowsByKey(tableName, databaseName, rowIds, ref state, RowVisitorOf(state)))
+                {
+                    return null;
+                }
+
+                return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
+            }
+
+            // Inside a transaction a non-indexed read streams the snapshot.
             return ScanSnapshotRows(engine, tableName, databaseName, lower, upper, state);
         }
 

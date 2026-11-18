@@ -557,15 +557,11 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
         /// <summary>
         /// The rows an index names for <c>column = literal</c>, or <see langword="null"/> when no index covers the
-        /// column, a snapshot needs a scan, or the index key cannot be built exactly and the raw lookup finds nothing.
+        /// column, a non-authoritative snapshot lookup needs a scan, or the index key cannot be built exactly and
+        /// the raw lookup finds nothing.
         /// </summary>
         private TableData? TryIndexLookup(ResolvedColumnRefNode column, LiteralNode literal)
         {
-            if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), table.DatabaseName!, table.TableName))
-            {
-                return null;
-            }
-
             string? indexName = table.IndexedColumns!.TryGetValue(column.Column, out string? indexFile)
                 ? indexFile
                 : table.PrimaryKeys!.Contains(column.Column) ? $"_PK_{table.TableName}" : null;
@@ -577,17 +573,25 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             bool bound = literal is BoundValueLiteralNode;
             if (SqlIndexLookupKey.TryBuildAuthoritative(table, column.Column, indexName, literal.Value, out string key, isBoundValue: bound))
             {
-                return Load(key, indexName);
+                return Load(key, indexName, column.Column);
             }
 
-            TableData raw = Load(UnquotedLiteral(literal), indexName);
+            if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), table.DatabaseName!, table.TableName))
+            {
+                return null;
+            }
+
+            TableData raw = Load(UnquotedLiteral(literal), indexName, null);
             return raw.Count > 0 ? raw : null;
         }
 
-        private TableData Load(string key, string indexName)
+        private TableData Load(string key, string indexName, string? authoritativeColumn)
         {
-            List<RowKey> ids = [.. Runtime.DataVoEngine.Current().IndexManager.FilterUsingIndex(key, indexName, table.TableName, table.DatabaseName!)];
-            var internalRows = Runtime.DataVoEngine.Current().StorageContext.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
+            Runtime.DataVoEngine engine = Runtime.DataVoEngine.Current();
+            List<RowKey> ids = authoritativeColumn is not null
+                ? MVCC.MvccCoordinator.FilterUsingIndex(engine, table.DatabaseName!, table.TableName, indexName, authoritativeColumn, key)
+                : [.. engine.IndexManager.FilterUsingIndex(key, indexName, table.TableName, table.DatabaseName!)];
+            var internalRows = engine.StorageContext.SelectFromTable(ids, [], table.TableName, table.DatabaseName!);
 
             TableData rows = [];
             foreach (var kvp in internalRows)

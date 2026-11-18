@@ -2,9 +2,12 @@ using System.Runtime.CompilerServices;
 using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
+using DataVo.Core.MVCC;
+using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.CompiledQueries;
 
@@ -71,6 +74,11 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteIntegerKey(long value)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
+        }
+
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupIntegerPrimaryKey(
                 value,
@@ -96,6 +104,11 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteGuidKey(Guid value)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
+        }
+
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupGuidPrimaryKey(
                 value,
@@ -112,6 +125,11 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteKey(string expectedKey)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(expectedKey, transactionContext);
+        }
+
         if (_indexName is not null)
         {
             try
@@ -129,6 +147,60 @@ public sealed class DataVoPreparedSelectSingle<T>
                         return result;
                     }
                 }
+            }
+            catch (IndexException)
+            {
+            }
+        }
+
+        return ExecuteScanFallback(expectedKey);
+    }
+
+    private bool HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext)
+    {
+        TransactionManager txManager = _context.Engine.TransactionManager;
+        transactionContext = txManager.HasAnyActiveTransaction()
+            ? txManager.GetContext(_context.SessionId) ?? MvccExecutionScope.CurrentTransaction
+            : MvccExecutionScope.CurrentTransaction;
+        return transactionContext is not null || MvccExecutionScope.CurrentSnapshot is not null;
+    }
+
+    private T? ExecuteTransactionalKey(string expectedKey, TransactionContext? transactionContext)
+    {
+        using IDisposable engineScope = DataVoEngine.PushCurrent(_context.Engine);
+        using IDisposable? txScope = transactionContext is not null
+            && !ReferenceEquals(MvccExecutionScope.CurrentTransaction, transactionContext)
+            ? MvccExecutionScope.PushTransaction(transactionContext)
+            : null;
+
+        if (_indexName is not null)
+        {
+            try
+            {
+                List<RowKey> rowIds = MvccCoordinator.FilterUsingIndex(
+                    _context.Engine,
+                    _databaseName,
+                    _plan.TableName,
+                    _indexName,
+                    _plan.WhereColumn!,
+                    expectedKey);
+
+                if (rowIds.Count == 0)
+                {
+                    return default;
+                }
+
+                Dictionary<RowKey, StoredRow> rows =
+                    _context.Engine.StorageContext.GetTypedTableContents(rowIds, _plan.TableName, _databaseName);
+                for (int i = 0; i < rowIds.Count; i++)
+                {
+                    if (rows.TryGetValue(rowIds[i], out StoredRow? row))
+                    {
+                        return _projection.MapStoredRow(row, _mapper);
+                    }
+                }
+
+                return default;
             }
             catch (IndexException)
             {
@@ -249,6 +321,32 @@ internal sealed class PreparedProjection
             {
                 Buffer[projectedOrdinal++] = ordinal < cells.Length ? cells[ordinal] : CellValue.Null;
             }
+        }
+    }
+
+    /// <summary>
+    /// Maps a materialized <see cref="StoredRow"/> through <see cref="ProjectedSchema"/> and <see cref="Buffer"/>
+    /// so both column-name and projected-ordinal readers receive the expected layout.
+    /// </summary>
+    public T MapStoredRow<T>(StoredRow row, CompiledRowMapper<T> mapper)
+    {
+        StoredRowView view = row.AsView();
+        if (Buffer.Length == 0)
+        {
+            return mapper(new CompiledRowReader(view));
+        }
+
+        lock (Buffer)
+        {
+            for (int i = 0; i < Buffer.Length; i++)
+            {
+                string columnName = ProjectedSchema.ColumnAt(i);
+                Buffer[i] = view.Schema.TryGetOrdinal(columnName, out int ordinal)
+                    ? view[ordinal]
+                    : CellValue.Null;
+            }
+
+            return mapper(new CompiledRowReader(new StoredRowView(ProjectedSchema, Buffer)));
         }
     }
 }

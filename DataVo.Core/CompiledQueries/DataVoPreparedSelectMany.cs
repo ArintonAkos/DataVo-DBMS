@@ -1,8 +1,11 @@
 using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
+using DataVo.Core.MVCC;
+using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
+using DataVo.Core.Transactions;
 
 namespace DataVo.Core.CompiledQueries;
 
@@ -63,6 +66,11 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteIntegerKey(long value)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
+        }
+
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupIntegerIndex(
                 value,
@@ -97,6 +105,11 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteGuidKey(Guid value)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
+        }
+
         if (_indexName is not null
             && _context.Engine.IndexManager.TryLookupGuidIndex(
                 value,
@@ -122,6 +135,11 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteKey(string expectedKey)
     {
+        if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
+        {
+            return ExecuteTransactionalKey(expectedKey, transactionContext);
+        }
+
         if (_indexName is not null)
         {
             try
@@ -138,6 +156,61 @@ public sealed class DataVoPreparedSelectMany<T>
                     if (TryProjectRow(rowIds[i], out T? result))
                     {
                         results.Add(result!);
+                    }
+                }
+
+                return results;
+            }
+            catch (IndexException)
+            {
+            }
+        }
+
+        return ExecuteScanFallback(expectedKey);
+    }
+
+    private bool HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext)
+    {
+        TransactionManager txManager = _context.Engine.TransactionManager;
+        transactionContext = txManager.HasAnyActiveTransaction()
+            ? txManager.GetContext(_context.SessionId) ?? MvccExecutionScope.CurrentTransaction
+            : MvccExecutionScope.CurrentTransaction;
+        return transactionContext is not null || MvccExecutionScope.CurrentSnapshot is not null;
+    }
+
+    private IReadOnlyList<T> ExecuteTransactionalKey(string expectedKey, TransactionContext? transactionContext)
+    {
+        using IDisposable engineScope = DataVoEngine.PushCurrent(_context.Engine);
+        using IDisposable? txScope = transactionContext is not null
+            && !ReferenceEquals(MvccExecutionScope.CurrentTransaction, transactionContext)
+            ? MvccExecutionScope.PushTransaction(transactionContext)
+            : null;
+
+        if (_indexName is not null)
+        {
+            try
+            {
+                List<RowKey> rowIds = MvccCoordinator.FilterUsingIndex(
+                    _context.Engine,
+                    _databaseName,
+                    _plan.TableName,
+                    _indexName,
+                    _plan.WhereColumn!,
+                    expectedKey);
+
+                if (rowIds.Count == 0)
+                {
+                    return [];
+                }
+
+                Dictionary<RowKey, StoredRow> rows =
+                    _context.Engine.StorageContext.GetTypedTableContents(rowIds, _plan.TableName, _databaseName);
+                var results = new List<T>(rowIds.Count);
+                for (int i = 0; i < rowIds.Count; i++)
+                {
+                    if (rows.TryGetValue(rowIds[i], out StoredRow? row))
+                    {
+                        results.Add(_projection.MapStoredRow(row, _mapper));
                     }
                 }
 

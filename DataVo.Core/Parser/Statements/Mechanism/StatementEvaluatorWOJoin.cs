@@ -90,16 +90,16 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                 rightValue = rightValue[1..^1];
             }
 
-            if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), _table.DatabaseName!, _table.TableName))
-            {
-                return EvaluateUsingFullScan(leftValue, rightLit.Value);
-            }
-
             if (_table.IndexedColumns!.TryGetValue(leftValue, out string? indexFile))
             {
                 if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, indexFile, rightLit.Value, out string secondaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
                 {
-                    return EvaluateUsingSecondaryIndex(secondaryKey, indexFile);
+                    return EvaluateUsingAuthoritativeIndex(secondaryKey, indexFile, leftValue);
+                }
+
+                if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), _table.DatabaseName!, _table.TableName))
+                {
+                    return EvaluateUsingFullScan(leftValue, rightLit.Value);
                 }
 
                 HashSet<RowKey> indexed = EvaluateUsingSecondaryIndex(rightValue, indexFile);
@@ -111,9 +111,15 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             int columnIndex = _table.PrimaryKeys!.IndexOf(leftValue);
             if (columnIndex > -1)
             {
-                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, $"_PK_{_table.TableName}", rightLit.Value, out string primaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
+                string primaryKeyIndex = $"_PK_{_table.TableName}";
+                if (SqlIndexLookupKey.TryBuildAuthoritative(_table, leftValue, primaryKeyIndex, rightLit.Value, out string primaryKey, isBoundValue: rightLit is BoundValueLiteralNode))
                 {
-                    return EvaluateUsingPrimaryKey(primaryKey);
+                    return EvaluateUsingAuthoritativeIndex(primaryKey, primaryKeyIndex, leftValue);
+                }
+
+                if (MVCC.MvccCoordinator.SnapshotRequiresScan(Runtime.DataVoEngine.Current(), _table.DatabaseName!, _table.TableName))
+                {
+                    return EvaluateUsingFullScan(leftValue, rightLit.Value);
                 }
 
                 HashSet<RowKey> indexed = EvaluateUsingPrimaryKey(rightValue);
@@ -123,6 +129,15 @@ namespace DataVo.Core.Parser.Statements.Mechanism
             }
 
             return EvaluateUsingFullScan(leftValue, rightLit.Value);
+        }
+
+        /// <summary>
+        /// Performs an MVCC-aware B-Tree lookup against an authoritative single-column index, combining committed
+        /// index entries with visible retained images and the current transaction's buffered writes.
+        /// </summary>
+        private HashSet<RowKey> EvaluateUsingAuthoritativeIndex(string key, string indexFile, string columnName)
+        {
+            return [.. MVCC.MvccCoordinator.FilterUsingIndex(Runtime.DataVoEngine.Current(), _table.DatabaseName!, _table.TableName, indexFile, columnName, key)];
         }
 
         /// <summary>

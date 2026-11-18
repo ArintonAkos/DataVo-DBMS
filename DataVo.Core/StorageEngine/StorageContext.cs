@@ -1295,6 +1295,36 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
             yield break;
         }
 
+        if (requestedIds is not null)
+        {
+            transaction.InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? requestedInserted);
+            for (int i = 0; i < requestedIds.Count; i++)
+            {
+                RowKey rowId = requestedIds[i];
+                if (TransactionContext.IsBufferedRowKey(rowId))
+                {
+                    int position = (int)rowId.Low;
+                    if (requestedInserted is not null && (uint)position < (uint)requestedInserted.Count)
+                    {
+                        yield return (rowId, requestedInserted[position]);
+                    }
+
+                    continue;
+                }
+
+                if (transaction.IsDeleted(tableName, rowId))
+                {
+                    yield return (rowId, null);
+                }
+                else if (isVisible(rowId) && transaction.TryGetUpdatedRow(tableName, rowId, out Dictionary<string, object?>? updatedRow))
+                {
+                    yield return (rowId, updatedRow);
+                }
+            }
+
+            yield break;
+        }
+
         if (transaction.UpdatedRows.TryGetValue(tableName, out var updates))
         {
             foreach ((RowKey rowId, Dictionary<string, object?> updatedRow) in updates)
@@ -1318,11 +1348,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         {
             for (int index = 0; index < inserted.Count; index++)
             {
-                var rowId = new RowKey(BufferedRowKeyHigh, (ulong)index);
-                if (requestedIds is null || requestedIds.Contains(rowId))
-                {
-                    yield return (rowId, inserted[index]);
-                }
+                yield return (new RowKey(BufferedRowKeyHigh, (ulong)index), inserted[index]);
             }
         }
     }

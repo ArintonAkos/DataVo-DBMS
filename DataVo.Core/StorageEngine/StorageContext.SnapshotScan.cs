@@ -1,5 +1,6 @@
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
@@ -50,6 +51,169 @@ public partial class StorageContext
 
         state = scan.State;
         return true;
+    }
+
+    /// <summary>
+    /// Visits the specified rows as the current MVCC snapshot sees them, combining committed storage with retained
+    /// images and the current transaction's buffered updates, deletes, and inserts without scanning the whole table.
+    /// </summary>
+    internal bool VisitVisibleRowsByKey<TState>(
+        string tableName,
+        string databaseName,
+        IReadOnlyList<RowKey> rowIds,
+        ref TState state,
+        RawRowVisitor<TState> visit)
+    {
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot is null)
+        {
+            return VisitRowsByKey(tableName, databaseName, rowIds, ref state, visit);
+        }
+
+        if (LsmEngine is { } lsm && lsm.HasStagedWrites(databaseName, tableName))
+        {
+            return false;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, rowIds.Count);
+        if (rowIds.Count == 0)
+        {
+            return true;
+        }
+
+        DataVoEngine engine = DataVoEngine.Current();
+        TransactionContext? transaction = MvccExecutionScope.CurrentTransaction;
+        Dictionary<RowKey, IReadOnlyDictionary<string, object?>>? visibleImages = BuildVisibleImageMap(engine, databaseName, tableName, snapshot);
+        List<Dictionary<string, object?>>? bufferedInserts = null;
+        transaction?.InsertedRows.TryGetValue(tableName, out bufferedInserts);
+
+        for (int i = 0; i < rowIds.Count; i++)
+        {
+            RowKey rowId = rowIds[i];
+            if (TransactionContext.IsBufferedRowKey(rowId))
+            {
+                int position = (int)rowId.Low;
+                if (bufferedInserts is not null
+                    && (uint)position < (uint)bufferedInserts.Count
+                    && !visit(ref state, rowId, SerializeOverlayRow(bufferedInserts[position], tableName, databaseName), default))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (transaction?.IsDeleted(tableName, rowId) == true)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, object?>? imageRow = null;
+            bool hasImage = visibleImages is not null && visibleImages.TryGetValue(rowId, out imageRow);
+            if (transaction is not null && transaction.TryGetUpdatedRow(tableName, rowId, out Dictionary<string, object?>? updatedRow))
+            {
+                bool baseVisible = hasImage
+                    || SnapshotVisibilityEvaluator.IsVersionVisible(MvccCoordinator.GetVersionOrBase(engine, databaseName, tableName, rowId), snapshot);
+                if (baseVisible && !visit(ref state, rowId, SerializeOverlayRow(updatedRow, tableName, databaseName), default))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (hasImage)
+            {
+                if (!visit(ref state, rowId, SerializeOverlayRow(imageRow!, tableName, databaseName), default))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!SnapshotVisibilityEvaluator.IsVersionVisible(MvccCoordinator.GetVersionOrBase(engine, databaseName, tableName, rowId), snapshot))
+            {
+                continue;
+            }
+
+            if (!VisitSingleCommittedRowByKey(tableName, databaseName, rowId, ref state, visit))
+            {
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    private static Dictionary<RowKey, IReadOnlyDictionary<string, object?>>? BuildVisibleImageMap(
+        DataVoEngine engine,
+        string databaseName,
+        string tableName,
+        TransactionSnapshot snapshot)
+    {
+        if (!engine.VersionStorageManager.HasRetainedImages(databaseName, tableName))
+        {
+            return null;
+        }
+
+        List<RetainedRowImage> images = engine.VersionStorageManager.GetVisibleImages(databaseName, tableName, snapshot);
+        if (images.Count == 0)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<RowKey, IReadOnlyDictionary<string, object?>>(images.Count);
+        for (int i = 0; i < images.Count; i++)
+        {
+            map[images[i].RowId] = images[i].Row;
+        }
+
+        return map;
+    }
+
+    private bool VisitSingleCommittedRowByKey<TState>(
+        string tableName,
+        string databaseName,
+        RowKey rowId,
+        ref TState state,
+        RawRowVisitor<TState> visit)
+    {
+        if (LsmEngine is { } lsm)
+        {
+            var box = (State: state, Visit: visit, KeepGoing: true);
+            lsm.TryVisitStoredRowByKey(
+                databaseName,
+                tableName,
+                rowId,
+                ref box,
+                static (ref (TState State, RawRowVisitor<TState> Visit, bool KeepGoing) b, RowKey id, ReadOnlySpan<byte> bytes) =>
+                {
+                    b.KeepGoing = b.Visit(ref b.State, id, bytes, default);
+                    return b.KeepGoing;
+                });
+            state = box.State;
+            return box.KeepGoing;
+        }
+
+        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        {
+            var keyed = new TypedRangeScan<TState>(state, visit, null, null);
+            bool found = typedStorage.TryVisitTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), ref keyed, VisitTypedRowInRange);
+            state = keyed.State;
+            if (keyed.Stopped)
+            {
+                return false;
+            }
+
+            if (found)
+            {
+                return true;
+            }
+        }
+
+        byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
+        return bytes is null || visit(ref state, rowId, bytes, default);
     }
 
     /// <summary>What the snapshot overlay says about one committed row key.</summary>

@@ -143,6 +143,11 @@ internal class Commit : BaseDbAction
         string tableName,
         List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> updates)
     {
+        if (!context.HasKeyModifyingUpdates(tableName))
+        {
+            return;
+        }
+
         var primaryKeys = Catalog.GetTablePrimaryKeys(tableName, databaseName);
         var uniqueKeys = Catalog.GetTableUniqueKeys(tableName, databaseName);
         if (primaryKeys.Count == 0 && uniqueKeys.Count == 0)
@@ -424,40 +429,81 @@ internal class Commit : BaseDbAction
                     rows.Add((rowId, oldRow, newRow));
                 }
 
-                // Phase 1: retire every old version (its image stays for older snapshots) and remove the old rows.
+                bool modifiesKeys = context.HasKeyModifyingUpdates(tableName);
+                bool isClustered = engine.StorageContext.ResolveClusteredKey(databaseName, tableName) is not null;
+
+                // Phase 1: retire every old version (its image stays for older snapshots).
                 var oldRows = new Dictionary<RowKey, Dictionary<string, object?>>(rows.Count);
-                foreach (var (rowId, oldRow, _) in rows)
+                var oldRowsList = new List<Dictionary<string, object?>>(rows.Count);
+                var newRowsList = new List<Dictionary<string, object?>>(rows.Count);
+                foreach (var (rowId, oldRow, newRow) in rows)
                 {
                     RememberVersion(tableName, rowId);
                     MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId, oldRow);
                     oldRows[rowId] = oldRow;
+                    oldRowsList.Add(oldRow);
+                    newRowsList.Add(newRow);
                 }
 
                 List<RowKey> oldRowIds = [.. oldRows.Keys];
                 if (oldRowIds.Count > 0)
                 {
-                    engine.StorageContext.DeleteFromTable(oldRowIds, tableName, databaseName);
+                    if (isClustered || modifiesKeys)
+                    {
+                        engine.StorageContext.DeleteFromTable(oldRowIds, tableName, databaseName);
+                    }
+
                     foreach (var (rowId, oldRow, _) in rows)
                     {
                         Journal(tableName, rowId, oldRow, inserted: false);
                     }
 
-                    foreach (var index in indexFiles)
+                    if (modifiesKeys)
                     {
-                        RemoveIndexEntries(engine, index, oldRowIds, oldRows, tableName, databaseName);
+                        foreach (var index in indexFiles)
+                        {
+                            RemoveIndexEntries(engine, index, oldRowIds, oldRows, tableName, databaseName);
+                        }
                     }
                 }
 
                 // Phase 2: write every new row; a key an old row released may now be reused.
+                var newRowIds = new List<RowKey>(rows.Count);
                 foreach (var (_, oldRow, newRow) in rows)
                 {
                     RowKey newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
+                    newRowIds.Add(newRowId);
                     Journal(tableName, newRowId, newRow, inserted: true);
                     RememberVersion(tableName, newRowId);
                     MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, newRowId, txId);
                     recorder?.RecordUpdate(tableName, newRowId, oldRow, newRow);
-                    AddIndexEntries(engine, indexFiles, newRow, newRowId, tableName, databaseName);
+                    if (modifiesKeys)
+                    {
+                        AddIndexEntries(engine, indexFiles, newRow, newRowId, tableName, databaseName);
+                    }
+
                     _updated.Add((tableName, oldRow, newRow));
+                }
+
+                if (!modifiesKeys && oldRowIds.Count > 0)
+                {
+                    foreach (var index in indexFiles)
+                    {
+                        CompiledQueries.DataVoCompiledQuery.MaintainIndexForUpdate(
+                            engine,
+                            tableName,
+                            databaseName,
+                            index,
+                            oldRowIds,
+                            oldRowsList,
+                            newRowIds,
+                            newRowsList);
+                    }
+
+                    if (!isClustered)
+                    {
+                        engine.StorageContext.DeleteFromTable(oldRowIds, tableName, databaseName);
+                    }
                 }
             }
         }

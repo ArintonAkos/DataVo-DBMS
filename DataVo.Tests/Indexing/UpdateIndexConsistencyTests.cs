@@ -65,7 +65,7 @@ public sealed class UpdateIndexConsistencyTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Modes))]
-    public void UpdatesThatKeepTheKey_NeverHideTheRowFromKeyedReaders(StorageMode mode)
+    public async Task UpdatesThatKeepTheKey_NeverHideTheRowFromKeyedReaders(StorageMode mode)
     {
         DataVoContext context = Open(mode);
         Ok(context, "INSERT INTO P VALUES (1, 0, 'a')");
@@ -92,7 +92,7 @@ public sealed class UpdateIndexConsistencyTests : IDisposable
         }
 
         stop.Cancel();
-        reader.Wait();
+        await reader;
         Assert.Equal(0, misses);
         Assert.Equal("1:2000", Single(context, "SELECT Id, Hp FROM P WHERE Id = 1"));
     }
