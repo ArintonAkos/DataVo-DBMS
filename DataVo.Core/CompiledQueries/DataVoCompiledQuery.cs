@@ -2132,22 +2132,19 @@ public static class DataVoCompiledQuery
             return;
         }
 
-        // Remove the exact old (key, row id) pairs from every lane first, as SQL UPDATE does. The fast-lane
-        // branches below only overwrite their own lane, so without this an entry that another write path put
-        // in the scalar tree kept pointing at the replaced row, and a later delete left the key behind: the
-        // next insert of that key then failed with a primary key violation for a row that no longer existed.
-        var oldEntries = new List<(string Key, RowKey RowId)>(oldRows.Count);
-        for (int i = 0; i < oldRows.Count; i++)
+        bool isPrimaryKeyIndex = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
+        bool fastLane = (isPrimaryKeyIndex && indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
+            || indexes.HasIntegerIndexFastLane(indexName, tableName, databaseName)
+            || (isPrimaryKeyIndex && indexes.HasGuidPrimaryKeyFastLane(indexName, tableName, databaseName))
+            || indexes.HasGuidIndexFastLane(indexName, tableName, databaseName);
+        if (fastLane)
         {
-            if (IndexKeyEncoder.HasCompleteKey(oldRows[i], index.AttributeNames))
-            {
-                oldEntries.Add((IndexKeyEncoder.BuildKeyString(oldRows[i], index.AttributeNames), oldRowIds[i]));
-            }
+            // The lanes below re-point keys in place (no gap for readers), but another write path (SQL UPDATE)
+            // may have mirrored the old pair into the scalar tree; drop just that mirror, or a later delete
+            // leaves the key behind and the next insert of it fails with a phantom primary key violation.
+            indexes.DeleteScalarIndexEntries(OldIndexEntries(index, oldRowIds, oldRows), indexName, tableName, databaseName);
         }
 
-        indexes.DeleteIndexEntries(oldEntries, indexName, tableName, databaseName);
-
-        bool isPrimaryKeyIndex = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
         if (isPrimaryKeyIndex && indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
         {
             for (int i = 0; i < newRows.Count; i++)
@@ -2246,6 +2243,21 @@ public static class DataVoCompiledQuery
             string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
             indexes.InsertIntoIndex(indexValue, newRowIds[i], indexName, tableName, databaseName);
         }
+    }
+
+    /// <summary>Builds the (key, row id) pairs the old rows had in an index; rows with a NULL key part have none.</summary>
+    private static List<(string Key, RowKey RowId)> OldIndexEntries(IndexFile index, IReadOnlyList<RowKey> oldRowIds, IReadOnlyList<Dictionary<string, object?>> oldRows)
+    {
+        var entries = new List<(string Key, RowKey RowId)>(oldRows.Count);
+        for (int i = 0; i < oldRows.Count; i++)
+        {
+            if (IndexKeyEncoder.HasCompleteKey(oldRows[i], index.AttributeNames))
+            {
+                entries.Add((IndexKeyEncoder.BuildKeyString(oldRows[i], index.AttributeNames), oldRowIds[i]));
+            }
+        }
+
+        return entries;
     }
 
     private static bool TryGetSingleIntegerKey(

@@ -2591,29 +2591,76 @@ public partial class IndexManager : IDisposable
                 }
             }
 
-            IIndex? index = TryGetScalarIndexNoLock(indexName, tableName, databaseName);
-            if (index is null)
+            if (!RemoveScalarPairsNoLock(entries, indexName, tableName, databaseName, cacheKey))
             {
                 return;
             }
-
-            if (index is JsonBTreeIndex json)
-            {
-                foreach ((string key, RowKey rowId) in entries)
-                {
-                    json.RemoveValue(key, rowId);
-                }
-            }
-            else
-            {
-                index.DeleteValues([.. entries.Select(entry => entry.RowId)]);
-            }
-
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
         TrackMutation(cacheKey);
+    }
+
+    /// <summary>
+    /// Removes exact (key, row id) pairs from the scalar tree of a heap index only, leaving its integer and
+    /// GUID fast lanes untouched. An update that re-points a key in a fast lane uses this to drop a stale
+    /// mirror of the old pair without removing the key from the lane, so lane readers never see a gap.
+    /// Does nothing for LSM indexes, which have no separate lanes.
+    /// </summary>
+    /// <param name="entries">The pairs to remove; pairs that are not in the tree are ignored.</param>
+    /// <param name="indexName">The index.</param>
+    /// <param name="tableName">The table.</param>
+    /// <param name="databaseName">The database.</param>
+    internal void DeleteScalarIndexEntries(IReadOnlyList<(string Key, RowKey RowId)> entries, string indexName, string tableName, string databaseName)
+    {
+        if (_lsmStore is not null || entries.Count == 0)
+        {
+            return;
+        }
+
+        // Index changes become visible with the statement, after its commit record is durable.
+        if (DeferredPublication.Current is not null)
+        {
+            (string Key, RowKey RowId)[] copy = [.. entries];
+            DeferredPublication.TryDefer(() => DeleteScalarIndexEntries(copy, indexName, tableName, databaseName));
+            return;
+        }
+
+        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
+        lock (_lock)
+        {
+            if (!RemoveScalarPairsNoLock(entries, indexName, tableName, databaseName, cacheKey))
+            {
+                return;
+            }
+        }
+
+        TrackMutation(cacheKey);
+    }
+
+    /// <summary>Removes pairs from a loaded scalar tree; returns <see langword="false"/> when the tree is not loaded.</summary>
+    private bool RemoveScalarPairsNoLock(IReadOnlyList<(string Key, RowKey RowId)> entries, string indexName, string tableName, string databaseName, IndexCacheKey cacheKey)
+    {
+        IIndex? index = TryGetScalarIndexNoLock(indexName, tableName, databaseName);
+        if (index is null)
+        {
+            return false;
+        }
+
+        if (index is JsonBTreeIndex json)
+        {
+            foreach ((string key, RowKey rowId) in entries)
+            {
+                json.RemoveValue(key, rowId);
+            }
+        }
+        else
+        {
+            index.DeleteValues([.. entries.Select(entry => entry.RowId)]);
+        }
+
+        MarkDirtyNoLock(cacheKey);
+        FlushIfImmediate(cacheKey);
+        return true;
     }
 
     private static void RemoveFromLaneBucket<TKey>(Dictionary<TKey, List<RowKey>>? lane, TKey key, RowKey rowId)

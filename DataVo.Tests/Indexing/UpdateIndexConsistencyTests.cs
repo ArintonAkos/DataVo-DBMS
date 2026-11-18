@@ -47,6 +47,56 @@ public sealed class UpdateIndexConsistencyTests : IDisposable
         Assert.Equal("5:2", Single(context, "SELECT Id, Hp FROM P WHERE Id = 5"));
     }
 
+    [Fact]
+    public void ScalarCleanup_LeavesTheIntegerFastLaneEntryInPlace()
+    {
+        DataVoContext context = Open(StorageMode.InMemory);
+        Ok(context, "INSERT INTO P VALUES (1, 1, 'a')");
+        var indexes = context.Engine.IndexManager;
+        Assert.True(indexes.HasIntegerPrimaryKeyFastLane("_PK_P", "P", "U"));
+        Assert.True(indexes.TryLookupIntegerPrimaryKey(1, "_PK_P", "P", "U", out RowKey rowId));
+        string key = DataVo.Core.BTree.IndexKeyEncoder.BuildKeyString(new Dictionary<string, object?> { ["Id"] = 1 }, ["Id"]);
+
+        indexes.DeleteScalarIndexEntries([(key, rowId)], "_PK_P", "P", "U");
+
+        Assert.True(indexes.TryLookupIntegerPrimaryKey(1, "_PK_P", "P", "U", out RowKey still));
+        Assert.Equal(rowId, still);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void UpdatesThatKeepTheKey_NeverHideTheRowFromKeyedReaders(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "INSERT INTO P VALUES (1, 0, 'a')");
+        var hp = new DataVoBatchLayout("P", ["Id", "Hp"]);
+        int misses = 0;
+        using var stop = new CancellationTokenSource();
+        Task reader = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (!context.Engine.IndexManager.FilterUsingIndex("1", "_PK_P", "P", "U").Any())
+                {
+                    Interlocked.Increment(ref misses);
+                }
+            }
+        });
+
+        var batch = new DataVoWriteBatch();
+        for (int i = 1; i <= 2_000; i++)
+        {
+            batch.Clear();
+            batch.Update(hp, 1, i);
+            context.ApplyBatch(batch);
+        }
+
+        stop.Cancel();
+        reader.Wait();
+        Assert.Equal(0, misses);
+        Assert.Equal("1:2000", Single(context, "SELECT Id, Hp FROM P WHERE Id = 1"));
+    }
+
     [Theory]
     [MemberData(nameof(Modes))]
     public void RandomMixOfSqlAndBatches_KeepsKeyedLookupsAndScansInAgreement(StorageMode mode)
