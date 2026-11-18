@@ -112,7 +112,7 @@ public sealed class DataVoWriteBatch
 /// <summary>What <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/> did to the stored rows.</summary>
 /// <param name="Inserted">Rows that did not exist and were inserted.</param>
 /// <param name="Updated">Existing rows whose values changed.</param>
-/// <param name="Deleted">Existing rows that were deleted.</param>
+/// <param name="Deleted">Existing rows that were deleted, including rows removed by <c>ON DELETE CASCADE</c>.</param>
 /// <param name="Unchanged">
 /// Rows the batch left as they were: an upsert that matched the stored values, or a delete of a missing row.
 /// Re-applying a batch therefore reports every row here.

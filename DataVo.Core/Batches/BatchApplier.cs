@@ -11,8 +11,8 @@ namespace DataVo.Core.Batches;
 
 /// <summary>
 /// Carries out <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/>: folds the batch into one final state per row, finds the
-/// stored rows through their primary-key index, validates everything, and only then writes deletes, updates
-/// and inserts through the same row writers SQL uses.
+/// stored rows through their primary-key index, validates everything against the batch's final state (see
+/// <see cref="BatchIntegrity"/>), and only then writes deletes, updates and inserts through the row writers SQL uses.
 /// </summary>
 /// <remarks>
 /// The caller owns the write unit and the table locks; this class only reads and writes rows. Rows are found
@@ -69,18 +69,18 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
             Classify(table);
         }
 
-        foreach (TablePlan table in _order)
-        {
-            Validate(table);
-        }
+        // Every constraint is decided against the batch's final state before anything is written, so the
+        // writers below run without their own foreign-key checks and cannot stop half-way.
+        BatchIntegrity integrity = Validate();
 
-        // Deletes go first so a row that leaves a unique value or a parent free does so before others claim it.
-        foreach (TablePlan table in _order)
+        // Deletes (cascaded rows included) go first, so the keys, unique values and parents they give up are
+        // free before updates and inserts claim them.
+        int deleted = 0;
+        foreach (string table in integrity.TablesWithDeletes.ToList())
         {
-            if (table.DeleteIds.Count > 0)
-            {
-                RowDeleter.Delete(context.Engine, table.DeleteIds, table.Name, databaseName, statementTxId, recorder);
-            }
+            List<RowKey> rows = [.. integrity.DeletedRows(table)];
+            deleted += rows.Count;
+            RowDeleter.Delete(context.Engine, rows, table, databaseName, statementTxId, recorder, followForeignKeys: false);
         }
 
         foreach (TablePlan table in _order)
@@ -88,12 +88,12 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
             WriteUpdates(table, statementTxId, recorder);
         }
 
-        foreach (TablePlan table in _order)
+        foreach (string table in integrity.ParentsFirst([.. _order.Where(plan => plan.Inserts.Count > 0).Select(plan => plan.Name)]))
         {
-            WriteInserts(table, statementTxId, recorder);
+            WriteInserts(_tables[table], statementTxId, recorder);
         }
 
-        return Summarize();
+        return Summarize(deleted);
     }
 
     private LayoutPlan LayoutOf(DataVoBatchLayout layout)
@@ -208,6 +208,7 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         }
 
         table.DeleteIds.Add(rowId);
+        table.DeleteRows[rowId] = existing;
     }
 
     private void AddUpdate(TablePlan table, PendingRow row, Dictionary<string, object?> existing, RowKey rowId)
@@ -231,26 +232,25 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         table.UpdateNewRows.Add(updated);
     }
 
-    /// <summary>Checks every change against MVCC, keys, uniqueness and types before anything is written.</summary>
-    private void Validate(TablePlan table)
+    /// <summary>
+    /// Checks MVCC, keys, uniqueness, references and delete restrictions against the batch's final state, and
+    /// works out what cascades remove. Updates of rows a cascade removes are dropped: those rows end deleted.
+    /// </summary>
+    private BatchIntegrity Validate()
     {
-        foreach (RowKey rowId in table.DeleteIds)
+        var integrity = new BatchIntegrity(context.Engine, databaseName, InsertService);
+        foreach (TablePlan table in _order)
         {
-            MvccCoordinator.ValidateCanModifyRow(context.Engine, databaseName, table.Name, rowId, null, "DELETE");
+            integrity.AddTable(table.Name, table.DeleteRows, table.UpdateIds, table.UpdateOldRows, table.UpdateNewRows, table.Inserts);
         }
 
-        foreach (RowKey rowId in table.UpdateIds)
+        integrity.Validate();
+        foreach (TablePlan table in _order)
         {
-            MvccCoordinator.ValidateCanModifyRow(context.Engine, databaseName, table.Name, rowId, null, "UPDATE");
+            table.DropUpdatesOf(integrity.DeletedRows(table.Name));
         }
 
-        if (table.UpdateIds.Count > 0)
-        {
-            DataVoCompiledQuery.ValidateUpdatedRows(context, table.Name, databaseName, table.UpdateIds, table.UpdateOldRows, table.UpdateNewRows);
-        }
-
-        // Foreign keys of new rows are checked when they are written, so parents inserted by this batch count.
-        InsertService.ValidatePendingInserts(databaseName, table.Name, table.Inserts, checkForeignKeys: false);
+        return integrity;
     }
 
     private void WriteUpdates(TablePlan table, long statementTxId, ChangeRecorder? recorder)
@@ -280,21 +280,20 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
     {
         if (table.Inserts.Count > 0)
         {
-            InsertService.InsertRows(databaseName, table.Name, table.Inserts, txContext: null, statementTxId, recorder);
+            InsertService.InsertRows(databaseName, table.Name, table.Inserts, txContext: null, statementTxId, recorder, checkForeignKeys: false);
         }
     }
 
     private InsertRowService InsertService =>
         field ??= new InsertRowService(context.Engine, context.Engine.StorageContext, context.Engine.Catalog, context.Engine.IndexManager);
 
-    private DataVoBatchResult Summarize()
+    private DataVoBatchResult Summarize(int deleted)
     {
-        int inserted = 0, updated = 0, deleted = 0;
+        int inserted = 0, updated = 0;
         foreach (TablePlan table in _order)
         {
             inserted += table.Inserts.Count;
             updated += table.UpdateIds.Count;
-            deleted += table.DeleteIds.Count;
         }
 
         return new DataVoBatchResult(inserted, updated, deleted, _unchanged, _missing);
@@ -394,6 +393,9 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
 
         public List<RowKey> DeleteIds { get; } = [];
 
+        /// <summary>Gets the stored values of the rows the batch deletes, by row id.</summary>
+        public Dictionary<RowKey, Dictionary<string, object?>> DeleteRows { get; } = [];
+
         public List<RowKey> UpdateIds { get; } = [];
 
         public Dictionary<RowKey, Dictionary<string, object?>> UpdateOldRows { get; } = [];
@@ -401,6 +403,25 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         public List<Dictionary<string, object?>> UpdateNewRows { get; } = [];
 
         public List<Dictionary<string, object?>> Inserts { get; } = [];
+
+        /// <summary>Drops the updates of rows that end up deleted (a cascade removes them).</summary>
+        public void DropUpdatesOf(IReadOnlyCollection<RowKey> deleted)
+        {
+            if (deleted.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = UpdateIds.Count - 1; i >= 0; i--)
+            {
+                if (deleted.Contains(UpdateIds[i]))
+                {
+                    UpdateOldRows.Remove(UpdateIds[i]);
+                    UpdateIds.RemoveAt(i);
+                    UpdateNewRows.RemoveAt(i);
+                }
+            }
+        }
 
         public Column ColumnNamed(string name) =>
             _columns.TryGetValue(name, out Column? column)

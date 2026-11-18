@@ -208,6 +208,30 @@ internal sealed partial class InsertRowService(
         }
 
         PendingKeys? pending = owner is null ? null : BuildPendingKeys(owner, databaseName, tableName, includeInserts: false);
+        ValidatePendingInserts(databaseName, tableName, rows, pending, checkForeignKeys);
+    }
+
+    /// <summary>
+    /// Checks rows about to be inserted (types, NOT NULL, lengths, primary and unique keys, and optionally
+    /// foreign keys) against storage seen through <paramref name="pending"/>: keys it frees count as available
+    /// and keys it takes as used. Throws <see cref="ConstraintViolationException"/> before anything is written.
+    /// </summary>
+    /// <param name="databaseName">The database.</param>
+    /// <param name="tableName">The table.</param>
+    /// <param name="rows">The rows to insert.</param>
+    /// <param name="pending">Keys freed and taken by other writes of the same unit, or <see langword="null"/>.</param>
+    /// <param name="checkForeignKeys">Whether to check foreign keys against storage.</param>
+    internal void ValidatePendingInserts(
+        string databaseName,
+        string tableName,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        PendingKeys? pending,
+        bool checkForeignKeys)
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
 
         TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
         var messages = new List<string>();
@@ -291,7 +315,8 @@ internal sealed partial class InsertRowService(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
         TransactionContext? txContext,
         long statementTxId,
-        ChangeRecorder? recorder = null)
+        ChangeRecorder? recorder = null,
+        bool checkForeignKeys = true)
     {
         if (string.IsNullOrWhiteSpace(tableName))
         {
@@ -311,7 +336,8 @@ internal sealed partial class InsertRowService(
         IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
         IReadOnlyList<Column> tableColumns = metadata.Columns;
         HashSet<string> columnNames = metadata.ColumnNames;
-        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
+        // A caller that validated the references against its own final state (a write batch) skips them here.
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = checkForeignKeys ? metadata.ForeignKeysByAttribute : NoForeignKeys;
 
         var acceptedRows = new List<Dictionary<string, object?>>(rows.Count);
         var messages = new List<string>();

@@ -648,8 +648,10 @@ public sealed class DataVoContext : IDisposable
     /// All changes share one write unit: on the LSM engine one log batch and one commit stamp, published to
     /// readers in one step, with one <see cref="Runtime.Changes.ChangeSet"/> for subscribers that carries the
     /// current <see cref="Runtime.Changes.ChangeCapture.CurrentOrigin"/>. Types, NOT NULL, lengths, primary and
-    /// unique keys and MVCC conflicts are checked for every row before anything is written; foreign keys of
-    /// inserted rows are checked as they are written, so parents inserted by the same batch count.
+    /// unique keys, foreign keys, <c>ON DELETE RESTRICT</c> and MVCC conflicts are checked against the state the
+    /// batch leaves behind before anything is written, so values and parents the batch itself frees or adds
+    /// count, and a batch either writes completely or not at all. <c>ON DELETE CASCADE</c> children are deleted
+    /// in the same unit, and their tables are locked with the batch's.
     /// </para>
     /// <para>
     /// Supported on the in-memory and LSM engines. Every table needs a primary key.
@@ -711,7 +713,8 @@ public sealed class DataVoContext : IDisposable
 
         var applier = new Batches.BatchApplier(this, databaseName);
         applier.Prepare(batch);
-        string[] tables = [.. applier.Tables.OrderBy(static table => table, StringComparer.OrdinalIgnoreCase)];
+        // The batch's tables and every table its deletes can cascade into, locked in a fixed order.
+        string[] tables = [.. Batches.BatchIntegrity.TablesToLock(Engine, databaseName, applier.Tables).OrderBy(static table => table, StringComparer.OrdinalIgnoreCase)];
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
         // The stamp is taken in the write unit and before the table locks (see CommitClock).

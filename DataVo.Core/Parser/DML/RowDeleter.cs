@@ -24,18 +24,22 @@ internal static class RowDeleter
     /// <param name="databaseName">The database.</param>
     /// <param name="statementTxId">The statement's MVCC transaction id.</param>
     /// <param name="recorder">The change recorder, or <see langword="null"/> when capture is off.</param>
+    /// <param name="followForeignKeys">
+    /// Whether to check RESTRICT and follow CASCADE for child tables. A caller that has already validated the
+    /// whole delete set (cascades included) against its final state passes <see langword="false"/>.
+    /// </param>
     /// <exception cref="EvaluationException">A RESTRICT foreign key still references a deleted row.</exception>
     /// <example>
     /// <code>
     /// RowDeleter.Delete(engine, [rowId], "Players", "Game", statementTxId, recorder);
     /// </code>
     /// </example>
-    public static void Delete(DataVoEngine engine, List<RowKey> toBeDeleted, string tableName, string databaseName, long statementTxId, ChangeRecorder? recorder)
+    public static void Delete(DataVoEngine engine, List<RowKey> toBeDeleted, string tableName, string databaseName, long statementTxId, ChangeRecorder? recorder, bool followForeignKeys = true)
     {
         if (toBeDeleted.Count == 0) return;
 
         // FK enforcement: check child tables before deleting
-        var childFks = engine.Catalog.GetChildForeignKeys(tableName, databaseName);
+        var childFks = followForeignKeys ? engine.Catalog.GetChildForeignKeys(tableName, databaseName) : [];
 
         if (childFks.Count > 0)
         {

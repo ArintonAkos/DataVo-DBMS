@@ -308,6 +308,172 @@ public sealed class ApplyBatchTests : IDisposable
         Assert.Equal(new Dictionary<int, int> { [1] = 70, [3] = 99 }, live);
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void ForeignKeyFailure_LateInTheBatch_LeavesNothingWritten(StorageMode mode)
+    {
+        DataVoContext context = OpenWithTeams(mode);
+        Ok(context, "INSERT INTO Players VALUES (1, 'Ann', 100), (2, 'Bob', 80)");
+
+        var batch = new DataVoWriteBatch();
+        batch.Delete(Players, 2, null, null);          // a delete,
+        batch.Upsert(PlayerHp, 1, 5);                  // an update,
+        batch.Upsert(TeamLayout, 9, "New");            // an insert,
+        batch.Upsert(MemberLayout, 30, 99);            // then a reference to a team nobody has
+
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:100", "2:Bob:80"], Rows(context));
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM Teams WHERE Id = 9"));
+        Assert.Equal("2", Scalar(context, "SELECT COUNT(*) FROM Members"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OnDeleteRestrict_RejectsTheWholeBatch(StorageMode mode)
+    {
+        DataVoContext context = OpenWithTeams(mode);
+        Ok(context, "INSERT INTO Players VALUES (1, 'Ann', 100)");
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(PlayerHp, 1, 5);
+        batch.Delete(TeamLayout, 1, null); // member 10 still points at it
+
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:100"], Rows(context));
+        Assert.Equal("1", Scalar(context, "SELECT COUNT(*) FROM Teams WHERE Id = 1"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OnDeleteRestrict_PassesWhenTheBatchDeletesOrMovesTheChildren(StorageMode mode)
+    {
+        DataVoContext context = OpenWithTeams(mode);
+
+        var batch = new DataVoWriteBatch();
+        batch.Delete(TeamLayout, 1, null);            // parent first in the batch ...
+        batch.Delete(MemberLayout, 10, null);         // ... its child later: still fine
+        batch.Upsert(MemberLayout, 20, 1);            // member 20 moves from team 2 to team 1? no: team 1 is gone
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+        Assert.Equal("2", Scalar(context, "SELECT COUNT(*) FROM Members"));
+
+        batch.Clear();
+        batch.Delete(TeamLayout, 1, null);
+        batch.Upsert(MemberLayout, 10, 2);            // the child moves to another team
+        context.ApplyBatch(batch);
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM Teams WHERE Id = 1"));
+        Assert.Equal("2", Scalar(context, "SELECT TeamId FROM Members WHERE Id = 10"));
+
+        batch.Clear();
+        batch.Delete(TeamLayout, 2, null);
+        batch.Delete(MemberLayout, 10, null);
+        batch.Delete(MemberLayout, 20, null);
+        Assert.Equal(3, context.ApplyBatch(batch).Deleted);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OnDeleteCascade_RemovesChildren_AndARestrictGrandchildStopsEverything(StorageMode mode)
+    {
+        DataVoContext context = OpenWithOrders(mode);
+        var orders = new DataVoBatchLayout("Orders", ["Id", "Note"]);
+
+        var batch = new DataVoWriteBatch();
+        batch.Delete(orders, 1, null);
+        DataVoBatchResult result = context.ApplyBatch(batch);
+        Assert.Equal(3, result.Deleted); // the order and its two lines
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM OrderLines WHERE OrderId = 1"));
+
+        batch.Clear();
+        batch.Upsert(orders, 3, "kept?");
+        batch.Delete(orders, 2, null);   // line 21 has a RESTRICT refund
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+        Assert.Equal("1", Scalar(context, "SELECT COUNT(*) FROM Orders WHERE Id = 2"));
+        Assert.Equal("1", Scalar(context, "SELECT COUNT(*) FROM OrderLines WHERE OrderId = 2"));
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM Orders WHERE Id = 3"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void UpdateOfARowACascadeRemoves_EndsDeleted(StorageMode mode)
+    {
+        DataVoContext context = OpenWithOrders(mode);
+        var lines = new DataVoBatchLayout("OrderLines", ["Id", "Qty"]);
+        var orders = new DataVoBatchLayout("Orders", ["Id", "Note"]);
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(lines, 10, 99);
+        batch.Delete(orders, 1, null);
+        context.ApplyBatch(batch);
+
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM OrderLines WHERE Id = 10"));
+    }
+
+    [Fact]
+    public void CascadeChildTables_AreLockedWithTheBatch()
+    {
+        DataVoContext context = OpenWithOrders(StorageMode.InMemory);
+
+        IReadOnlyCollection<string> locked = DataVo.Core.Batches.BatchIntegrity.TablesToLock(context.Engine, "B", ["Orders"]);
+
+        Assert.Equal(["OrderLines", "Orders"], locked.Order(StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void UniqueValues_CanBeSwappedFreedAndReused_InOneBatch(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Users (Id INT PRIMARY KEY, Email VARCHAR(40) UNIQUE)");
+        Ok(context, "INSERT INTO Users VALUES (1, 'a@x'), (2, 'b@x'), (3, 'c@x')");
+        var users = new DataVoBatchLayout("Users", ["Id", "Email"]);
+
+        var swap = new DataVoWriteBatch();
+        swap.Upsert(users, 1, "b@x");
+        swap.Upsert(users, 2, "a@x");
+        context.ApplyBatch(swap);
+        Assert.Equal("b@x", Scalar(context, "SELECT Email FROM Users WHERE Id = 1"));
+        Assert.Equal("a@x", Scalar(context, "SELECT Email FROM Users WHERE Id = 2"));
+
+        var reuse = new DataVoWriteBatch();
+        reuse.Delete(users, 3, null);
+        reuse.Upsert(users, 4, "c@x");      // freed by the delete
+        reuse.Upsert(users, 1, "z@x");
+        reuse.Upsert(users, 5, "b@x");      // freed by the update of row 1
+        context.ApplyBatch(reuse);
+        Assert.Equal("c@x", Scalar(context, "SELECT Email FROM Users WHERE Id = 4"));
+        Assert.Equal("b@x", Scalar(context, "SELECT Email FROM Users WHERE Id = 5"));
+
+        var clash = new DataVoWriteBatch();
+        clash.Upsert(users, 6, "a@x");      // row 2 still holds it
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(clash));
+        clash.Clear();
+        clash.Upsert(users, 2, "q@x");
+        clash.Upsert(users, 6, "q@x");      // taken by the update in the same batch
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(clash));
+        Assert.Equal("a@x", Scalar(context, "SELECT Email FROM Users WHERE Id = 2"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void UpdatedReferences_SeeParentsTheBatchAddsOrRemoves(StorageMode mode)
+    {
+        DataVoContext context = OpenWithTeams(mode);
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(MemberLayout, 10, 3);  // the parent comes later in the batch
+        batch.Upsert(TeamLayout, 3, "Blue");
+        context.ApplyBatch(batch);
+        Assert.Equal("3", Scalar(context, "SELECT TeamId FROM Members WHERE Id = 10"));
+
+        batch.Clear();
+        batch.Upsert(MemberLayout, 20, 3);
+        batch.Delete(MemberLayout, 10, null);
+        batch.Delete(TeamLayout, 3, null);  // the new parent of member 20 goes away in the same batch
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+        Assert.Equal("2", Scalar(context, "SELECT TeamId FROM Members WHERE Id = 20"));
+        Assert.Equal("1", Scalar(context, "SELECT COUNT(*) FROM Teams WHERE Id = 3"));
+    }
+
     [Fact]
     public void Lsm_BatchIsDurableAcrossReopen()
     {
@@ -439,6 +605,33 @@ public sealed class ApplyBatchTests : IDisposable
         DataVoContext context = Create(mode, mode == StorageMode.InMemory ? null : NewRoot());
         _contexts.Add(context);
         Setup(context);
+        return context;
+    }
+
+    private static readonly DataVoBatchLayout TeamLayout = new("Teams", ["Id", "Name"]);
+    private static readonly DataVoBatchLayout MemberLayout = new("Members", ["Id", "TeamId"]);
+
+    /// <summary>Teams 1 and 2, with members 10 (team 1) and 20 (team 2); members restrict team deletes.</summary>
+    private DataVoContext OpenWithTeams(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Teams (Id INT PRIMARY KEY, Name VARCHAR(20))");
+        Ok(context, "CREATE TABLE Members (Id INT PRIMARY KEY, TeamId INT REFERENCES Teams(Id))");
+        Ok(context, "INSERT INTO Teams VALUES (1, 'Red'), (2, 'Green')");
+        Ok(context, "INSERT INTO Members VALUES (10, 1), (20, 2)");
+        return context;
+    }
+
+    /// <summary>Orders 1 and 2; lines cascade with their order; a refund restricts deleting line 21.</summary>
+    private DataVoContext OpenWithOrders(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, Note VARCHAR(20))");
+        Ok(context, "CREATE TABLE OrderLines (Id INT PRIMARY KEY, OrderId INT REFERENCES Orders(Id) ON DELETE CASCADE, Qty INT)");
+        Ok(context, "CREATE TABLE Refunds (Id INT PRIMARY KEY, LineId INT REFERENCES OrderLines(Id))");
+        Ok(context, "INSERT INTO Orders VALUES (1, 'a'), (2, 'b')");
+        Ok(context, "INSERT INTO OrderLines VALUES (10, 1, 1), (11, 1, 2), (21, 2, 3)");
+        Ok(context, "INSERT INTO Refunds VALUES (100, 21)");
         return context;
     }
 
