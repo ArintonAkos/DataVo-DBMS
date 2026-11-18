@@ -99,7 +99,7 @@ Repeated updates of one row coalesce into a single pending version. Key checks i
 
 Two transactions that change the same row conflict, and the first to commit wins. The second one fails with a conflict error — either at the `UPDATE`/`DELETE` statement, if the other commit already finished, or at its own `COMMIT`. A failed `COMMIT` ends the transaction; retry it from `BEGIN`.
 
-At `COMMIT` the engine also re-checks, against what other sessions committed meanwhile, the primary and unique keys of buffered inserts and of updated values, and the foreign keys of buffered inserts.
+At `COMMIT` the engine also re-checks, against what other sessions committed meanwhile, the primary and unique keys of buffered inserts and of updated values, and the foreign keys of buffered inserts and of updated rows (an update cannot point a child at a parent that was deleted in the meantime). Swapping or rotating key values among the transaction's own rows is allowed: the commit removes every old row before it writes any new one.
 
 ## Atomic commit
 
@@ -107,7 +107,7 @@ A `COMMIT` is all or nothing. Write conflicts and key checks run before anything
 
 ## Concurrency behaviour
 
-Readers outside transactions never wait for MVCC. While at least one transaction is open, a statement that reads through a snapshot and a write statement that must record versions for it do not overlap: each waits for the other's *statement* to finish (never for a whole transaction). Write statements do not wait for each other because of MVCC; they coordinate only through row and table locks.
+Readers outside transactions never wait for MVCC. While at least one transaction is open, a statement that reads through a snapshot and a write statement that must record versions for it do not overlap: each waits for the other's *statement* to finish (never for a whole transaction), at most `LockAcquireTimeoutMs`, after which the waiting statement fails with a timeout error and the transaction stays usable. Write statements do not wait for each other because of MVCC; they coordinate only through row and table locks.
 
 Version metadata and retained row images are dropped as soon as no open snapshot can need them. The cleanup work follows the commits made while transactions were open; it never scans the whole table or version map.
 
