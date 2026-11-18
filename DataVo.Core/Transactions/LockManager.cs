@@ -50,7 +50,9 @@ public sealed class LockManager
     }
 
     // Locks the current thread holds, across all lock managers: a writer that already holds locks must not queue
-    // behind waiting snapshot readers (see SnapshotPublicationGate).
+    // behind waiting snapshot readers (see SnapshotPublicationGate). Thread-static like the locks themselves (a
+    // ReaderWriterLockSlim is thread-affine): statements acquire and release on one thread and never await while
+    // holding a lock; asynchronous work in the engine is blocked on synchronously by the calling thread.
     [ThreadStatic] private static int t_heldLocks;
 
     /// <summary>Gets whether the current thread holds any table or row lock.</summary>
@@ -651,8 +653,14 @@ public sealed class LockManager
     {
         lock (tableLock.OwnershipSync)
         {
+            // Counted once per ownership, like the read owners: a NoRecursion lock cannot be re-entered by its owner
+            // (re-acquiring a write lock whose release is deferred never reaches here), so this is defensive.
+            if (tableLock.WriteOwnerThreadId != threadId)
+            {
+                t_heldLocks++;
+            }
+
             tableLock.WriteOwnerThreadId = threadId;
-            t_heldLocks++;
         }
     }
 
@@ -694,8 +702,14 @@ public sealed class LockManager
     {
         lock (rowLock.OwnershipSync)
         {
+            // Counted once per ownership, like the read owners: a NoRecursion lock cannot be re-entered by its owner
+            // (re-acquiring a write lock whose release is deferred never reaches here), so this is defensive.
+            if (rowLock.WriteOwnerThreadId != threadId)
+            {
+                t_heldLocks++;
+            }
+
             rowLock.WriteOwnerThreadId = threadId;
-            t_heldLocks++;
         }
     }
 

@@ -13,6 +13,8 @@ namespace DataVo.Core.MVCC;
 /// locks), which keeps the gate out of any lock cycle. Entries nest per thread; a nested entry of either kind
 /// joins the thread's outer entry. Every wait is bounded: when the other group does not leave in time (a stalled
 /// statement), the entry fails with <see cref="TimeoutException"/> and leaves the gate's bookkeeping as it was.
+/// Entries are per thread: a statement enters and exits on its own thread and never awaits in between (transactional
+/// reads are never streamed lazily; the engine's asynchronous work is blocked on synchronously).
 /// </remarks>
 /// <param name="waitTimeoutMs">How long an entry waits for the other group, in milliseconds.</param>
 internal sealed class SnapshotPublicationGate(int waitTimeoutMs = 30000)
