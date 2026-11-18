@@ -1724,7 +1724,7 @@ public static class DataVoCompiledQuery
         return newRow;
     }
 
-    private static object? NormalizeAssignedValue(Column columnMetadata, object? rawValue)
+    internal static object? NormalizeAssignedValue(Column columnMetadata, object? rawValue)
     {
         if (rawValue == null || rawValue is DBNull)
         {
@@ -1842,7 +1842,7 @@ public static class DataVoCompiledQuery
         return parsedValue;
     }
 
-    private static void ValidateUpdatedRows(
+    internal static void ValidateUpdatedRows(
         DataVoContext context,
         string tableName,
         string databaseName,
@@ -2021,7 +2021,7 @@ public static class DataVoCompiledQuery
             .ToList();
     }
 
-    private static RowKey[] ReplaceRows(
+    internal static RowKey[] ReplaceRows(
         DataVoContext context,
         string tableName,
         string databaseName,

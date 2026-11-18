@@ -634,6 +634,96 @@ public sealed class DataVoContext : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes a batch of primary-key upserts and deletes, possibly across several tables of the current
+    /// database, as one atomic unit without parsing SQL.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every row is found through its table's primary-key index, so the cost grows with the batch, not with
+    /// the tables. Operations on the same row are folded first (see <see cref="DataVoWriteBatch"/>), and an
+    /// upsert that would not change the stored row is skipped, so re-applying a batch is harmless.
+    /// </para>
+    /// <para>
+    /// All changes share one write unit: on the LSM engine one log batch and one commit stamp, published to
+    /// readers in one step, with one <see cref="Runtime.Changes.ChangeSet"/> for subscribers that carries the
+    /// current <see cref="Runtime.Changes.ChangeCapture.CurrentOrigin"/>. Types, NOT NULL, lengths, primary and
+    /// unique keys and MVCC conflicts are checked for every row before anything is written; foreign keys of
+    /// inserted rows are checked as they are written, so parents inserted by the same batch count.
+    /// </para>
+    /// <para>
+    /// Supported on the in-memory and LSM engines. Every table needs a primary key.
+    /// </para>
+    /// </remarks>
+    /// <param name="batch">The operations to write.</param>
+    /// <returns>How many rows were inserted, updated, deleted, or left unchanged.</returns>
+    /// <exception cref="NotSupportedException">The context uses the legacy <c>Disk</c> storage mode.</exception>
+    /// <exception cref="InvalidOperationException">The session has an open transaction, or a table has no primary key.</exception>
+    /// <exception cref="ArgumentException">A table or column does not exist, a layout lacks a key column, or a key is NULL.</exception>
+    /// <example>
+    /// <code>
+    /// var players = new DataVoBatchLayout("Players", ["Id", "Name", "Hp"]);
+    /// var position = new DataVoBatchLayout("ImportState", ["Source", "Offset"]);
+    /// var batch = new DataVoWriteBatch();
+    /// batch.Upsert(players, 1, "Ann", 100);
+    /// batch.Delete(players, 2, null, null);
+    /// batch.Upsert(position, "feed-a", 4711L); // committed together with the rows
+    /// DataVoBatchResult result = context.ApplyBatch(batch);
+    /// </code>
+    /// </example>
+    public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(batch);
+        if (Engine.Config.StorageMode == StorageMode.Disk)
+        {
+            throw new NotSupportedException("ApplyBatch supports the InMemory and Lsm storage modes; the legacy Disk mode is not supported.");
+        }
+
+        if (batch.Count == 0)
+        {
+            return default;
+        }
+
+        using IDisposable engineScope = DataVoEngine.PushCurrent(Engine);
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
+        string databaseName = ResolveCurrentDatabase();
+        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        {
+            throw new InvalidOperationException("ApplyBatch cannot run while the current session has an active transaction.");
+        }
+
+        var applier = new Batches.BatchApplier(this, databaseName);
+        applier.Prepare(batch);
+        string[] tables = [.. applier.Tables.OrderBy(static table => table, StringComparer.OrdinalIgnoreCase)];
+
+        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        // The stamp is taken in the write unit and before the table locks (see CommitClock).
+        using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
+        int locked = 0;
+        try
+        {
+            // A fixed order keeps two batches over the same tables from deadlocking.
+            for (; locked < tables.Length; locked++)
+            {
+                Engine.LockManager.AcquireWriteLock(databaseName, tables[locked]);
+            }
+
+            using IWriteBatchScope writeBatch = Engine.StorageContext.BeginWriteBatch();
+            DataVoBatchResult result = applier.Execute(statementTxId, recorder);
+            recorder?.Publish();
+            writeBatch.Complete();
+            return result;
+        }
+        finally
+        {
+            for (int i = locked - 1; i >= 0; i--)
+            {
+                Engine.LockManager.ReleaseWriteLock(databaseName, tables[i]);
+            }
+        }
+    }
+
     private string StoredTableName(string tableName)
     {
         string? databaseName = Engine.Sessions.Get(SessionId);
