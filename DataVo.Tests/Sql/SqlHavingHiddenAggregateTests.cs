@@ -52,7 +52,9 @@ public sealed class SqlHavingHiddenAggregateTests : IDisposable
                 $"SELECT t.CustomerId, COUNT(*) AS C FROM T t JOIN Customers c ON t.CustomerId = c.Id GROUP BY t.CustomerId HAVING {having} ORDER BY t.CustomerId",
             })
             {
-                List<string> actual = [.. Query(db, sql).Data.Select(row => $"{row.Values.First()}:{row["C"]}")];
+                QueryResult result = Query(db, sql);
+                AssertOnlySelectedColumns(result, sql);
+                List<string> actual = [.. result.Data.Select(row => $"{row.Values.First()}:{row["C"]}")];
                 Assert.True(expected.SequenceEqual(actual), $"{sql}\nexpected {string.Join(" ", expected)}\nactual   {string.Join(" ", actual)}");
             }
         }
@@ -76,6 +78,17 @@ public sealed class SqlHavingHiddenAggregateTests : IDisposable
             .OrderBy(group => group.Key)
             .Select(group => $"{group.Key}:{group.LongCount()}")
             .ToList();
+        foreach (string sql in new[]
+        {
+            "SELECT CustomerId, COUNT(*) AS C FROM T GROUP BY CustomerId HAVING COUNT(Tag) >= 2 ORDER BY CustomerId",
+            "SELECT t.CustomerId, COUNT(*) AS C FROM T t JOIN Customers c ON t.CustomerId = c.Id GROUP BY t.CustomerId HAVING COUNT(Tag) >= 2 ORDER BY t.CustomerId",
+        })
+        {
+            QueryResult inTransaction = Query(db, sql, tx);
+            AssertOnlySelectedColumns(inTransaction, sql + " (in a transaction)");
+            Assert.Equal(expected, [.. inTransaction.Data.Select(row => $"{row.Values.First()}:{row["C"]}")]);
+        }
+
         List<string> actual = [.. Query(db, "SELECT CustomerId, COUNT(*) AS C FROM T GROUP BY CustomerId HAVING COUNT(Tag) >= 2 ORDER BY CustomerId", tx)
             .Data.Select(row => $"{row["CustomerId"]}:{row["C"]}")];
 
@@ -97,6 +110,41 @@ public sealed class SqlHavingHiddenAggregateTests : IDisposable
         Dictionary<string, object?> row = Assert.Single(result.Data);
         Assert.Equal(1, row["CustomerId"]);
         Assert.Equal(2L, row.Values.Last());
+    }
+
+    [Theory]
+    [MemberData(nameof(Shapes))]
+    public void HiddenAggregates_NeverBecomeColumns_OnTheIndexGroupPath(StorageMode mode, bool indexed)
+    {
+        using DataVoContext db = Seed(mode, indexed);
+
+        // COUNT(*) only, HAVING on COUNT(*) and COUNT of the key, ordered by the key: the shape the index group walk answers.
+        foreach (string sql in new[]
+        {
+            "SELECT CustomerId, COUNT(*) AS C FROM T GROUP BY CustomerId HAVING COUNT(CustomerId) >= 10 ORDER BY CustomerId",
+            "SELECT CustomerId FROM T GROUP BY CustomerId HAVING COUNT(*) >= 10 ORDER BY CustomerId",
+            "SELECT CustomerId FROM T GROUP BY CustomerId HAVING COUNT(Tag) >= 10 ORDER BY CustomerId",
+        })
+        {
+            QueryResult result = Query(db, sql);
+            int columns = sql.Contains("AS C", StringComparison.Ordinal) ? 2 : 1;
+            Assert.Equal(columns, result.Fields.Count);
+            Assert.All(result.Data, row => Assert.Equal(columns, row.Count));
+            Assert.Equal("CustomerId", result.Fields[0]);
+        }
+
+        // HAVING alone (no aggregate selected) still filters by the hidden aggregate.
+        List<int> expected = [.. _rows.GroupBy(row => row.Customer).Where(group => group.Count(row => row.Tag is not null) >= 10).Select(group => group.Key).Order()];
+        Assert.Equal(expected, [.. Query(db, "SELECT CustomerId FROM T GROUP BY CustomerId HAVING COUNT(Tag) >= 10 ORDER BY CustomerId").Data.Select(row => (int)row["CustomerId"]!)]);
+    }
+
+    /// <summary>The result has exactly the SELECT list's two columns, in every row: no hidden aggregate leaks.</summary>
+    private static void AssertOnlySelectedColumns(QueryResult result, string sql)
+    {
+        Assert.True(result.Fields.Count == 2, $"{sql}: fields [{string.Join(", ", result.Fields)}]");
+        Assert.Equal("C", result.Fields[1]);
+        Assert.EndsWith("CustomerId", result.Fields[0], StringComparison.OrdinalIgnoreCase);
+        Assert.All(result.Data, row => Assert.True(row.Count == 2, $"{sql}: row has [{string.Join(", ", row.Keys)}]"));
     }
 
     private static IEnumerable<(string Having, Func<IGrouping<int, (int Id, int Customer, string? Tag, int? V)>, bool> Keep)> Predicates()

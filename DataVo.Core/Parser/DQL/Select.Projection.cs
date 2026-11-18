@@ -48,23 +48,22 @@ internal partial class Select
             }
         }
 
+        // With no row (every group filtered out), the result still has the SELECT list's columns.
         JoinedRow? firstRow = filteredTable.FirstOrDefault();
-        if (firstRow != null)
+        bool aggregated = firstRow is null ? _model.GetAggregateColumns().Count > 0 : firstRow.ContainsKey(GroupBy.HASH_VALUE);
+        foreach (var expressionColumn in _model.GetComputedExpressionColumns())
         {
-            foreach (var expressionColumn in _model.GetComputedExpressionColumns())
-            {
-                fields.Add(expressionColumn.Alias ?? expressionColumn.RawExpression);
-                positions.Add(SelectListPosition(expressionColumn));
-            }
-
-            foreach (var windowColumn in _model.GetWindowFunctionColumns())
-            {
-                fields.Add(windowColumn.Alias ?? windowColumn.RawExpression);
-                positions.Add(SelectListPosition(windowColumn));
-            }
+            fields.Add(expressionColumn.Alias ?? expressionColumn.RawExpression);
+            positions.Add(SelectListPosition(expressionColumn));
         }
 
-        if (firstRow != null && firstRow.ContainsKey(GroupBy.HASH_VALUE))
+        foreach (var windowColumn in _model.GetWindowFunctionColumns())
+        {
+            fields.Add(windowColumn.Alias ?? windowColumn.RawExpression);
+            positions.Add(SelectListPosition(windowColumn));
+        }
+
+        if (aggregated)
         {
             foreach (var aggregateColumn in _model.GetAggregateColumns())
             {
@@ -78,7 +77,7 @@ internal partial class Select
                 if (aggregateColumn.Expression is AggregateExpressionNode aggregateExpression)
                 {
                     string canonicalKey = AggregateExpressionFormatter.BuildHeader(aggregateExpression);
-                    string outputName = firstRow[GroupBy.HASH_VALUE].ContainsKey(canonicalKey)
+                    string outputName = firstRow is null || firstRow[GroupBy.HASH_VALUE].ContainsKey(canonicalKey)
                         ? canonicalKey
                         : ResolveAggregateKey(aggregateExpression, firstRow);
 
