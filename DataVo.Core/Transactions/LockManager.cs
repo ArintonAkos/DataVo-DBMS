@@ -49,6 +49,13 @@ public sealed class LockManager
         public static readonly WaitRegistration None = new(0, false);
     }
 
+    // Locks the current thread holds, across all lock managers: a writer that already holds locks must not queue
+    // behind waiting snapshot readers (see SnapshotPublicationGate).
+    [ThreadStatic] private static int t_heldLocks;
+
+    /// <summary>Gets whether the current thread holds any table or row lock.</summary>
+    internal static bool CurrentThreadHoldsLocks => t_heldLocks > 0;
+
     private static readonly Lazy<LockManager> _instance = new(() => new LockManager());
 
     private readonly ConcurrentDictionary<string, TableLockEntry> _tableLocks =
@@ -622,7 +629,10 @@ public sealed class LockManager
     {
         lock (tableLock.OwnershipSync)
         {
-            tableLock.ReadOwnerThreadIds.Add(threadId);
+            if (tableLock.ReadOwnerThreadIds.Add(threadId))
+            {
+                t_heldLocks++;
+            }
         }
     }
 
@@ -630,7 +640,10 @@ public sealed class LockManager
     {
         lock (tableLock.OwnershipSync)
         {
-            tableLock.ReadOwnerThreadIds.Remove(threadId);
+            if (tableLock.ReadOwnerThreadIds.Remove(threadId))
+            {
+                t_heldLocks--;
+            }
         }
     }
 
@@ -639,6 +652,7 @@ public sealed class LockManager
         lock (tableLock.OwnershipSync)
         {
             tableLock.WriteOwnerThreadId = threadId;
+            t_heldLocks++;
         }
     }
 
@@ -649,6 +663,7 @@ public sealed class LockManager
             if (tableLock.WriteOwnerThreadId == threadId)
             {
                 tableLock.WriteOwnerThreadId = null;
+                t_heldLocks--;
             }
         }
     }
@@ -657,7 +672,10 @@ public sealed class LockManager
     {
         lock (rowLock.OwnershipSync)
         {
-            rowLock.ReadOwnerThreadIds.Add(threadId);
+            if (rowLock.ReadOwnerThreadIds.Add(threadId))
+            {
+                t_heldLocks++;
+            }
         }
     }
 
@@ -665,7 +683,10 @@ public sealed class LockManager
     {
         lock (rowLock.OwnershipSync)
         {
-            rowLock.ReadOwnerThreadIds.Remove(threadId);
+            if (rowLock.ReadOwnerThreadIds.Remove(threadId))
+            {
+                t_heldLocks--;
+            }
         }
     }
 
@@ -674,6 +695,7 @@ public sealed class LockManager
         lock (rowLock.OwnershipSync)
         {
             rowLock.WriteOwnerThreadId = threadId;
+            t_heldLocks++;
         }
     }
 
@@ -684,6 +706,7 @@ public sealed class LockManager
             if (rowLock.WriteOwnerThreadId == threadId)
             {
                 rowLock.WriteOwnerThreadId = null;
+                t_heldLocks--;
             }
         }
     }

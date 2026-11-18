@@ -419,6 +419,8 @@ public sealed class DataVoContext : IDisposable
             Engine.IndexManager);
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        // The stamp is taken in the write unit and before the table lock (see CommitClock).
+        using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
         Engine.LockManager.AcquireWriteLock(databaseName, tableName);
 
@@ -507,6 +509,8 @@ public sealed class DataVoContext : IDisposable
             Engine.IndexManager);
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        // The stamp is taken in the write unit and before the table lock (see CommitClock).
+        using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
         string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
         Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
@@ -600,6 +604,8 @@ public sealed class DataVoContext : IDisposable
             Engine.IndexManager);
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+        // The stamp is taken in the write unit and before the table lock (see CommitClock).
+        using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
         string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
         Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);

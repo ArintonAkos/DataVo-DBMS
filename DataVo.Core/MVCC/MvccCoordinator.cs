@@ -11,8 +11,10 @@ public static class MvccCoordinator
     private const long LegacyBootstrapXmin = 0;
 
     /// <summary>
-    /// Resolves the transaction identifier for the current statement.
-    /// Uses the explicit transaction ID when available; otherwise allocates an auto-commit ID.
+    /// Resolves the MVCC identifier of the current statement: the transaction's id inside an explicit transaction
+    /// (its writes are buffered until COMMIT), otherwise the commit stamp of the statement's write unit
+    /// (see <see cref="CommitClock"/>). Taking the stamp fixes whether the statement records versions, so callers
+    /// resolve it before they take row or table locks and before they write.
     /// </summary>
     public static long ResolveStatementTransactionId(DataVoEngine engine, long? explicitTransactionId)
     {
@@ -21,11 +23,21 @@ public static class MvccCoordinator
             return explicitTransactionId.Value;
         }
 
-        return engine.TransactionIdAllocator.AllocateTransactionId();
+        return engine.CommitClock.AcquireStamp();
     }
 
     /// <summary>
+    /// Gets whether the current write unit records MVCC versions: true when a transaction was open when the unit
+    /// took its stamp, so some snapshot may need the versions it replaces.
+    /// </summary>
+    /// <param name="engine">The owning engine.</param>
+    /// <returns><see langword="true"/> when versions and retained images must be recorded.</returns>
+    public static bool RecordsVersions(DataVoEngine engine) => engine.CommitClock.CurrentUnitRecordsVersions();
+
+    /// <summary>
     /// Ensures a row has version metadata. Legacy rows are bootstrapped as always-visible base versions.
+    /// Writers use this before marking a version obsolete; readers use <see cref="GetVersionOrBase"/>, which
+    /// records nothing.
     /// </summary>
     public static RowVersion EnsureRowVersionExists(DataVoEngine engine, string databaseName, string tableName, RowKey rowId)
     {
@@ -39,6 +51,13 @@ public static class MvccCoordinator
     }
 
     /// <summary>
+    /// Gets a row's version metadata, or the always-visible base version when none is recorded, without
+    /// recording anything (absent metadata means the row predates every open snapshot).
+    /// </summary>
+    public static RowVersion GetVersionOrBase(DataVoEngine engine, string databaseName, string tableName, RowKey rowId) =>
+        engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId) ?? new RowVersion(LegacyBootstrapXmin);
+
+    /// <summary>
     /// Throws when the target row cannot be modified under MVCC rules.
     /// </summary>
     public static void ValidateCanModifyRow(
@@ -49,25 +68,13 @@ public static class MvccCoordinator
         TransactionSnapshot? snapshot,
         string operationName)
     {
-        if (snapshot is null && !engine.TransactionManager.HasAnyActiveTransaction())
-        {
-            RowVersion? existing = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId);
-            if (existing.HasValue && existing.Value.Xmax != 0)
-            {
-                throw new InvalidOperationException($"MVCC conflict: row {rowId} in {tableName} was already modified/deleted.");
-            }
-
-            return;
-        }
-
-        RowVersion version = EnsureRowVersionExists(engine, databaseName, tableName, rowId);
-
-        if (version.Xmax != 0)
+        RowVersion? existing = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId);
+        if (existing is { Xmax: not 0 })
         {
             throw new InvalidOperationException($"MVCC conflict: row {rowId} in {tableName} was already modified/deleted.");
         }
 
-        if (snapshot != null && !SnapshotVisibilityEvaluator.CanUpdateRow(version, snapshot))
+        if (snapshot != null && !SnapshotVisibilityEvaluator.CanUpdateRow(existing ?? new RowVersion(LegacyBootstrapXmin), snapshot))
         {
             throw new InvalidOperationException($"MVCC conflict: {operationName} cannot modify non-visible row {rowId} in {tableName}.");
         }
@@ -85,7 +92,7 @@ public static class MvccCoordinator
             return;
         }
 
-        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        if (!RecordsVersions(engine))
         {
             // No snapshot can need this version. A clustered key may be re-inserted after a delete, so
             // drop whatever an earlier version left behind (its xmax would read as a conflict).
@@ -117,7 +124,7 @@ public static class MvccCoordinator
             return;
         }
 
-        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        if (!RecordsVersions(engine))
         {
             engine.VersionStorageManager.RemoveVersions(databaseName, tableName, rowIds); // see RegisterInsertVersion
             return;
@@ -144,7 +151,7 @@ public static class MvccCoordinator
             return;
         }
 
-        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        if (!RecordsVersions(engine))
         {
             // No snapshot can see either version: keep no metadata (absent reads as always visible).
             engine.VersionStorageManager.RemoveVersion(databaseName, tableName, oldRowId);
@@ -178,7 +185,7 @@ public static class MvccCoordinator
             return;
         }
 
-        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        if (!RecordsVersions(engine))
         {
             // A deleted row no snapshot can see needs no metadata; keeping it would also make a re-insert
             // of the same clustered key look already deleted.
@@ -209,10 +216,17 @@ public static class MvccCoordinator
         && (engine.VersionStorageManager.HasRetainedImages(databaseName, tableName)
             || MvccExecutionScope.CurrentTransaction?.HasBufferedWrites(tableName) == true);
 
-    /// <summary>Drops retained images no open snapshot can read. Call when a transaction ends.</summary>
+    /// <summary>
+    /// Drops retained images and version metadata no open snapshot can need. Call when a transaction ends; the
+    /// cost is bounded by the versions recorded since, not by the size of the version map.
+    /// </summary>
     /// <param name="engine">The owning engine.</param>
-    public static void PruneRetainedImages(DataVoEngine engine) =>
-        engine.VersionStorageManager.PruneImages(engine.TransactionManager.OldestActiveSnapshot());
+    public static void PruneRetainedImages(DataVoEngine engine)
+    {
+        long? oldest = engine.TransactionManager.OldestActiveSnapshot();
+        engine.VersionStorageManager.PruneImages(oldest);
+        engine.VersionStorageManager.VacuumVersions(oldest);
+    }
 
     private static void RetainImage(
         DataVoEngine engine,

@@ -225,6 +225,6 @@ public partial class StorageContext
 
     private static bool IsVisibleToSnapshot<TState>(ref SnapshotScan<TState> scan, RowKey rowId) =>
         SnapshotVisibilityEvaluator.IsVersionVisible(
-            MvccCoordinator.EnsureRowVersionExists(scan.Engine, scan.DatabaseName, scan.TableName, rowId),
+            MvccCoordinator.GetVersionOrBase(scan.Engine, scan.DatabaseName, scan.TableName, rowId),
             scan.Snapshot);
 }

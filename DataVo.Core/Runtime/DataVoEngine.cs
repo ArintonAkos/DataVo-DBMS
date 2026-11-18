@@ -63,6 +63,17 @@ public sealed partial class DataVoEngine : IDisposable
         }
         VersionStorageManager = new VersionStorageManager();
         TransactionIdAllocator = new TransactionIdAllocator();
+        CommitClock = new CommitClock(
+            TransactionIdAllocator,
+            TransactionManager.HasAnyOtherActiveTransaction,
+            Config.LockAcquireTimeoutMs,
+            versionedUnitRetired: () =>
+            {
+                if (!TransactionManager.HasAnyActiveTransaction())
+                {
+                    MvccCoordinator.PruneRetainedImages(this);
+                }
+            });
         Diagnostics = new DataVoDiagnostics();
         Changes = new ChangeCapture();
         Reactive = new ReactiveRegistry(this);
@@ -169,6 +180,11 @@ public sealed partial class DataVoEngine : IDisposable
     /// Gets the transaction ID allocator that assigns globally unique transaction IDs.
     /// </summary>
     public TransactionIdAllocator TransactionIdAllocator { get; }
+
+    /// <summary>
+    /// Gets the clock that orders commits against transaction snapshots (commit stamps and in-flight write units).
+    /// </summary>
+    public CommitClock CommitClock { get; }
 
     /// <summary>
     /// Gets the runtime diagnostics collector owned by this engine.

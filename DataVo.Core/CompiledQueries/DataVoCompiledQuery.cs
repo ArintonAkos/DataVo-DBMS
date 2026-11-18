@@ -401,6 +401,10 @@ public static class DataVoCompiledQuery
         }
 
         List<RowKey> candidateRowIds = candidates.Select(static pair => pair.Key).ToList();
+
+        // The statement's stamp is taken in its write unit before any row lock (see CommitClock).
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(context.Engine, null);
         List<RowKey> rowWriteLocks = context.Engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, candidateRowIds);
 
         try
@@ -434,7 +438,6 @@ public static class DataVoCompiledQuery
 
             ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows);
 
-            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(context.Engine, null);
             List<Dictionary<string, object?>> oldRows = orderedRowIds
                 .Select(rowId => existingRows[rowId])
                 .ToList();
@@ -601,6 +604,8 @@ public static class DataVoCompiledQuery
             throw new NotSupportedException("Batched fixed-width primary-key updates require an eligible integer primary-key update plan.");
         }
 
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
+        long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
         var operations = new List<FixedWidthPatchOperation>(updates.Count);
         for (int i = 0; i < updates.Count; i++)
         {
@@ -619,7 +624,7 @@ public static class DataVoCompiledQuery
             operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
         }
 
-        RetainImagesBeforeBatchPatch(engine, databaseName, plan.TableName, operations);
+        RetainImagesBeforeBatchPatch(engine, databaseName, plan.TableName, operations, statementTxId);
         return engine.StorageContext.TryPatchFixedWidthRows(
             plan.TableName,
             databaseName,
@@ -645,6 +650,8 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         out int affected)
     {
+        // One write unit: whether it records versions is fixed before anything is read or locked.
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         affected = 0;
         DataVoEngine engine = context.Engine;
 
@@ -652,7 +659,7 @@ public static class DataVoCompiledQuery
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
             || engine.Changes.Enabled
-            || engine.TransactionManager.HasAnyActiveTransaction())
+            || MvccCoordinator.RecordsVersions(engine))
         {
             return false;
         }
@@ -753,13 +760,15 @@ public static class DataVoCompiledQuery
         ReadOnlySpan<DataVoFixedWidthQueryParameter> parameters,
         out int affected)
     {
+        // One write unit: whether it records versions is fixed before anything is read or locked.
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         affected = 0;
         DataVoEngine engine = context.Engine;
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
             || engine.Changes.Enabled
-            || engine.TransactionManager.HasAnyActiveTransaction())
+            || MvccCoordinator.RecordsVersions(engine))
         {
             return false;
         }
@@ -872,6 +881,8 @@ public static class DataVoCompiledQuery
         ReadOnlySpan<DataVoFixedWidthValue> assignmentValues,
         out int affected)
     {
+        // One write unit: whether it records versions is fixed before anything is read or locked.
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         return TryUpdateFixedWidthByPrimaryKeyFastPath(
             context.Engine,
             ResolveCurrentDatabase(context),
@@ -889,13 +900,15 @@ public static class DataVoCompiledQuery
         ReadOnlySpan<DataVoFixedWidthValue> assignmentValues,
         out int affected)
     {
+        // One write unit: whether it records versions is fixed before anything is read or locked.
+        using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         affected = 0;
         plan = StoredTablePlan(engine, plan, databaseName);
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
             || engine.Changes.Enabled
-            || engine.TransactionManager.HasAnyActiveTransaction())
+            || MvccCoordinator.RecordsVersions(engine))
         {
             return false;
         }
@@ -1645,14 +1658,14 @@ public static class DataVoCompiledQuery
         DataVoEngine engine,
         string databaseName,
         string tableName,
-        List<FixedWidthPatchOperation> operations)
+        List<FixedWidthPatchOperation> operations,
+        long transactionId)
     {
-        if (!engine.TransactionManager.HasAnyActiveTransaction())
+        if (!MvccCoordinator.RecordsVersions(engine))
         {
             return;
         }
 
-        long transactionId = engine.TransactionIdAllocator.AllocateTransactionId();
         List<RowKey> rowIds = [.. operations.Select(operation => operation.RowId)];
         foreach (KeyValuePair<RowKey, Dictionary<string, object?>> row in engine.StorageContext.GetTableContents(rowIds, tableName, databaseName))
         {

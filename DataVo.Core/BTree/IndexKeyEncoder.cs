@@ -75,6 +75,40 @@ public static class IndexKeyEncoder
     }
 
     /// <summary>
+    /// Gets whether a row has a value for every indexed attribute. NULL keys are never indexed: a row with a
+    /// NULL (or absent) key column gets no entry in a scalar index, on every write and rebuild path.
+    /// </summary>
+    /// <param name="row">The row values keyed by column name.</param>
+    /// <param name="attributes">The indexed attributes.</param>
+    /// <returns><see langword="true"/> when the row has an index entry.</returns>
+    public static bool HasCompleteKey(IReadOnlyDictionary<string, object?> row, IReadOnlyList<string> attributes)
+    {
+        for (int i = 0; i < attributes.Count; i++)
+        {
+            if (!row.TryGetValue(attributes[i], out object? value) || value is null || value is DBNull)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Gets whether typed cells have a non-NULL value for every indexed attribute (see <see cref="HasCompleteKey(IReadOnlyDictionary{string, object?}, IReadOnlyList{string})"/>).</summary>
+    internal static bool HasCompleteKey(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells, IReadOnlyList<string> attributes)
+    {
+        for (int i = 0; i < attributes.Count; i++)
+        {
+            if (!schema.TryGetOrdinal(attributes[i], out int ordinal) || cells[ordinal].Type == CellType.Null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Builds a logical key string from typed cells and a sequence of indexed attributes, producing a key
     /// identical to the dictionary <see cref="BuildKeyString(Dictionary{string, object?}, IEnumerable{string})"/>
     /// overload. This is the typed-storage path (no dictionary materialization).

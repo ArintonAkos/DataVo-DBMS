@@ -20,6 +20,10 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     private readonly ReaderWriterLockSlim _versionLock = new();
 
+    // Every version change in the order it was recorded, with the stamp that made it: VacuumVersions walks this
+    // from the front instead of scanning the whole map. Guarded by _versionLock.
+    private readonly Queue<(string Database, string Table, RowKey RowId, long Stamp)> _recorded = new();
+
     // Storage keeps one version of each row, so the images an open snapshot may still need live here.
     private readonly ConcurrentDictionary<(string Database, string Table), List<RetainedRowImage>> _retainedImages = new();
 
@@ -36,6 +40,7 @@ public class VersionStorageManager : IDisposable
         try
         {
             _versionMetadata[key] = version;
+            _recorded.Enqueue((databaseName, tableName, rowId, xmin));
         }
         finally
         {
@@ -63,6 +68,7 @@ public class VersionStorageManager : IDisposable
             for (int i = 0; i < rowIds.Count; i++)
             {
                 _versionMetadata[(databaseName, tableName, rowIds[i])] = version;
+                _recorded.Enqueue((databaseName, tableName, rowIds[i], xmin));
             }
         }
         finally
@@ -93,6 +99,33 @@ public class VersionStorageManager : IDisposable
         finally
         {
             _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>Sets a row's version metadata as it was before a failed commit changed it.</summary>
+    public void SetVersion(string databaseName, string tableName, RowKey rowId, RowVersion version)
+    {
+        _versionLock.EnterWriteLock();
+        try
+        {
+            _versionMetadata[(databaseName, tableName, rowId)] = version;
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>Drops the images a failed commit retained (the ones it ended).</summary>
+    /// <param name="xmax">The failed commit's stamp.</param>
+    public void DiscardImages(long xmax)
+    {
+        foreach (KeyValuePair<(string Database, string Table), List<RetainedRowImage>> table in _retainedImages)
+        {
+            lock (table.Value)
+            {
+                table.Value.RemoveAll(image => image.Version.Xmax == xmax);
+            }
         }
     }
 
@@ -138,6 +171,7 @@ public class VersionStorageManager : IDisposable
             {
                 currentVersion.Xmax = xmax;
                 _versionMetadata[key] = currentVersion;
+                _recorded.Enqueue((databaseName, tableName, rowId, xmax));
             }
         }
         finally
@@ -235,6 +269,7 @@ public class VersionStorageManager : IDisposable
         try
         {
             _versionMetadata.Clear();
+            _recorded.Clear();
         }
         finally
         {
@@ -305,7 +340,60 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>
-    /// Removes version metadata entries whose backing physical rows no longer exist.
+    /// Drops version metadata no open snapshot can need: a version created and (if ended) ended before the oldest
+    /// open snapshot reads the same as having no metadata (an always-visible row, or a row that is gone for
+    /// everyone). Walks the versions recorded since the last pass in recording order and stops at the first one
+    /// an open snapshot may still need, so the cost follows the commits, not the size of the version map. With no
+    /// open transaction everything is dropped.
+    /// </summary>
+    /// <param name="oldestSnapshot">The oldest open snapshot, or <see langword="null"/> when no transaction is open.</param>
+    /// <returns>The number of metadata entries removed.</returns>
+    public int VacuumVersions(long? oldestSnapshot)
+    {
+        if (_versionMetadata.IsEmpty && _recorded.Count == 0)
+        {
+            return 0;
+        }
+
+        _versionLock.EnterWriteLock();
+        try
+        {
+            if (oldestSnapshot is not { } oldest)
+            {
+                int count = _versionMetadata.Count;
+                _versionMetadata.Clear();
+                _recorded.Clear();
+                return count;
+            }
+
+            int removed = 0;
+            while (_recorded.Count > 0 && _recorded.Peek().Stamp < oldest)
+            {
+                (string database, string table, RowKey rowId, _) = _recorded.Dequeue();
+                var key = (database, table, rowId);
+                if (_versionMetadata.TryGetValue(key, out RowVersion version)
+                    && version.Xmin < oldest
+                    && (version.Xmax == 0 || version.Xmax < oldest)
+                    && _versionMetadata.TryRemove(key, out _))
+                {
+                    removed++;
+                }
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>Gets the number of rows that currently carry version metadata (diagnostics and tests).</summary>
+    public int VersionCount => _versionMetadata.Count;
+
+    /// <summary>
+    /// Removes version metadata entries whose backing physical rows no longer exist. A full scan of the
+    /// database's metadata; commits use <see cref="VacuumVersions"/> instead.
     /// </summary>
     public int VacuumTable(string databaseName, StorageContext storageContext)
     {

@@ -4,19 +4,19 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.CrashHarness;
 
-// Usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar]
+// Usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar|mvcc]
 // Writes until killed. A line is printed only after the write call returned successfully:
 //   INS <id> <value>   row <id> was inserted with <value>
 //   UPD <id> <value>   row <id> was updated to <value>
 //   TRY <id> <value>   an update of row <id> is about to start (diagnostic, not acknowledged)
-//   TXN <id> 0         transaction <id> committed (txn workload)
+//   TXN <id> 0         transaction <id> committed (txn and mvcc workloads)
 // The columnar workload (see ColumnarCrashWorkload) prints four-part lines instead:
 //   TRY <op> <a> <b>   a transaction is about to start (not acknowledged)
 //   ACK <op> <a> <b>   that transaction committed
 //   DIA <F|C> 0 0      a flush or compaction finished (diagnostic)
 if (args.Length is not (3 or 4))
 {
-    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar]");
+    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar|mvcc]");
     return 2;
 }
 
@@ -40,6 +40,11 @@ Console.Out.Flush();
 if (workload == "columnar")
 {
     RunColumnar(db, nextId, output);
+}
+
+if (workload == "mvcc")
+{
+    RunTransfers(db, nextId, output);
 }
 
 if (workload == "txn")
@@ -82,6 +87,73 @@ for (long id = nextId; ; id++)
             output.WriteLine($"UPD {target} {updated}");
             output.Flush();
         }
+    }
+}
+
+// Concurrent sessions move money between accounts in explicit transactions that conflict with each other, use a
+// savepoint and roll part of their work back. Each committed transfer also logs itself, so after a crash the test
+// can check that the balances are exactly the initial ones plus every logged transfer — no transfer half applied.
+static void RunTransfers(DataVoContext db, long nextId, TextWriter output)
+{
+    const int Sessions = 4;
+    long transferId = nextId - 1;
+    var outputLock = new object();
+    var workers = new Thread[Sessions];
+    for (int worker = 0; worker < Sessions; worker++)
+    {
+        int seed = unchecked((int)(nextId * 31 + worker));
+        workers[worker] = new Thread(() =>
+        {
+            Guid session = Guid.NewGuid();
+            Require(db.Execute("USE CrashDb", session));
+            var random = new Random(seed);
+            while (true)
+            {
+                long id = Interlocked.Increment(ref transferId);
+                int from = random.Next(1, 9);
+                int to = 1 + (from + random.Next(0, 7)) % 8;
+                int amount = random.Next(1, 20);
+                string[] statements =
+                [
+                    "BEGIN",
+                    $"UPDATE Accounts SET Bal = Bal - {amount} WHERE Id = {from}",
+                    "SAVEPOINT s1",
+                    $"UPDATE Accounts SET Bal = Bal + 1000 WHERE Id = {to}",
+                    "ROLLBACK TO SAVEPOINT s1",
+                    $"UPDATE Accounts SET Bal = Bal + {amount} WHERE Id = {to}",
+                    $"INSERT INTO Transfers (Id, Src, Dst, Amount) VALUES ({id}, {from}, {to}, {amount})",
+                    "COMMIT",
+                ];
+
+                bool committed = true;
+                foreach (string sql in statements)
+                {
+                    if (db.Execute(sql, session)[^1].IsError)
+                    {
+                        // A write conflict with another session: abandon this transfer.
+                        committed = false;
+                        db.Execute("ROLLBACK", session);
+                        break;
+                    }
+                }
+
+                if (committed)
+                {
+                    lock (outputLock)
+                    {
+                        output.WriteLine($"TXN {id} 0");
+                        output.Flush();
+                    }
+                }
+            }
+        })
+        { IsBackground = true };
+        workers[worker].Start();
+    }
+
+    foreach (Thread worker in workers)
+    {
+        worker.Join();
     }
 }
 

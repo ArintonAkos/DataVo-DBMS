@@ -29,22 +29,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                List<RowKey> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
-                txContext.ExcludeDeleted(_model.TableName, toBeDeleted);
-
-                if (toBeDeleted.Count == 0)
-                {
-                    Messages.Add("Rows affected: 0");
-                    return;
-                }
-
-                foreach (RowKey rowId in toBeDeleted)
-                {
-                    MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "DELETE");
-                    txContext.BufferDelete(_model.TableName, rowId);
-                }
-
-                Messages.Add($"Rows affected: {toBeDeleted.Count}");
+                Messages.Add($"Rows affected: {DeleteInTransaction(txContext, databaseName)}");
             }
             else
             {
@@ -83,6 +68,45 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             Logger.Error(ex.Message);
             AddError(ex);
         }
+    }
+
+    /// <summary>
+    /// Buffers the delete inside an explicit transaction. The WHERE clause reads through the transaction's snapshot
+    /// and its own uncommitted writes, so rows it inserted or updated earlier match by their current values. Rows
+    /// the transaction inserted are dropped from its insert buffer; stored rows are marked for deletion.
+    /// </summary>
+    /// <returns>The number of rows deleted.</returns>
+    private int DeleteInTransaction(TransactionContext txContext, string databaseName)
+    {
+        List<RowKey> toBeDeleted;
+        using (MvccExecutionScope.PushTransaction(txContext))
+        {
+            toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).Distinct().ToList();
+        }
+
+        txContext.ExcludeDeleted(_model.TableName, toBeDeleted);
+        var buffered = new List<RowKey>();
+        foreach (RowKey rowId in toBeDeleted)
+        {
+            if (TransactionContext.IsBufferedRowKey(rowId))
+            {
+                buffered.Add(rowId);
+                continue;
+            }
+
+            MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "DELETE");
+        }
+
+        foreach (RowKey rowId in toBeDeleted)
+        {
+            if (!TransactionContext.IsBufferedRowKey(rowId))
+            {
+                txContext.BufferDelete(_model.TableName, rowId);
+            }
+        }
+
+        txContext.RemoveBufferedInserts(_model.TableName, buffered);
+        return toBeDeleted.Count;
     }
 
     private List<RowKey> RevalidateRowsAfterLock(
@@ -203,7 +227,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
         // exact entries instead of scanning every key for the row ids.
         List<Models.Catalog.IndexFile> indexFiles = Catalog.GetTableIndexes(tableName, databaseName);
         Dictionary<RowKey, Dictionary<string, object?>>? deletedRows =
-            recorder is { IsEnabled: true } || indexFiles.Count > 0 || Engine.TransactionManager.HasAnyActiveTransaction()
+            recorder is { IsEnabled: true } || indexFiles.Count > 0 || MvccCoordinator.RecordsVersions(Engine)
                 ? Context.GetTableContents(toBeDeleted, tableName, databaseName)
                 : null;
 

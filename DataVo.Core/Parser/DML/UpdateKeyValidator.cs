@@ -12,7 +12,16 @@ namespace DataVo.Core.Parser.DML;
 /// row; each UNIQUE column is its own constraint. Keys are probed in the key indexes with the encoding
 /// INSERT uses, and the table is scanned only when an index cannot be read.
 /// </summary>
-internal sealed class UpdateKeyValidator(IndexManager indexes, StorageContext storage, string tableName, string databaseName)
+/// <remarks>
+/// Inside a transaction, <c>pending</c> describes the keys the transaction's buffered writes free and take: a freed
+/// key no longer clashes, a taken one does.
+/// </remarks>
+internal sealed class UpdateKeyValidator(
+    IndexManager indexes,
+    StorageContext storage,
+    string tableName,
+    string databaseName,
+    InsertRowService.PendingKeys? pending = null)
 {
     private const string PrimaryKeySlot = "\0primary-key";
     private readonly Dictionary<string, HashSet<string>> _assigned = new(StringComparer.OrdinalIgnoreCase);
@@ -42,7 +51,8 @@ internal sealed class UpdateKeyValidator(IndexManager indexes, StorageContext st
                 throw new EvaluationException($"Primary key violation: the UPDATE gives two rows the key ({shown}) in table {tableName}.");
             }
 
-            if (KeyExists(key, $"_PK_{tableName}", primaryKeys))
+            if (pending?.TakenPrimaryKeys.Contains(key) == true
+                || (pending?.FreedPrimaryKeys.Contains(key) != true && KeyExists(key, $"_PK_{tableName}", primaryKeys)))
             {
                 throw new EvaluationException($"Primary key violation: a row with key ({shown}) already exists in table {tableName} (row {rowNumber} of the UPDATE).");
             }
@@ -62,7 +72,8 @@ internal sealed class UpdateKeyValidator(IndexManager indexes, StorageContext st
                 throw new EvaluationException($"Update conflict: Duplicate value '{shown}' generated within the same batch for unique column {col}.");
             }
 
-            if (KeyExists(key, $"_UK_{col}", [col]))
+            if ((pending is not null && InsertRowService.PendingKeys.Has(pending.TakenUniqueValues, col, key))
+                || (pending is null || !InsertRowService.PendingKeys.Has(pending.FreedUniqueValues, col, key)) && KeyExists(key, $"_UK_{col}", [col]))
             {
                 throw new EvaluationException($"Constraint violation: Duplicate value '{shown}' for unique column {col} in row {rowNumber}.");
             }

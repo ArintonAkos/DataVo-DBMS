@@ -75,88 +75,110 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         {
             string databaseName = GetDatabaseName(session);
             ValidateAssignedColumns(databaseName);
-            _ = GetMaterializedSetExpressions(databaseName);
 
             var txContext = Transactions.GetContext(session);
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
-                txContext.ExcludeDeleted(_model.TableName, toBeUpdated);
-                if (toBeUpdated.Count == 0)
-                {
-                    Messages.Add("Rows affected: 0");
-                    return;
-                }
-
-                var existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
-
-                foreach (RowKey rowId in toBeUpdated)
-                {
-                    MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "UPDATE");
-                }
-
-                (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName);
-
-                for (int i = 0; i < newRows.Count; i++)
-                {
-                    txContext.BufferUpdate(
-                        _model.TableName,
-                        oldRowIds[i],
-                        newRows[i].ToDictionary(pair => pair.Key, pair => (object?)pair.Value, newRows[i].Comparer));
-                }
-
-                Messages.Add($"Rows affected: {newRows.Count}");
+                Messages.Add($"Rows affected: {UpdateInTransaction(txContext, databaseName)}");
+                return;
             }
-            else
+
+            _ = GetMaterializedSetExpressions(databaseName);
+            List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+            if (toBeUpdated.Count == 0)
             {
-                List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
-                if (toBeUpdated.Count == 0)
-                {
-                    Messages.Add("Rows affected: 0");
-                    return;
-                }
-
-                List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
-                int rowsAffected;
-
-                try
-                {
-                    List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
-                    Dictionary<RowKey, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
-
-                    if (revalidatedRows.Count == 0)
-                    {
-                        rowsAffected = 0;
-                    }
-                    else
-                    {
-                        (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
-
-                        foreach (RowKey rowId in oldRowIds)
-                        {
-                            MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "UPDATE");
-                        }
-
-                        ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
-                        ExecuteUpdate(newRows, oldRowIds, revalidatedRows, databaseName, statementTxId, recorder);
-                        recorder?.Publish();
-                        rowsAffected = newRows.Count;
-                    }
-                }
-                finally
-                {
-                    Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
-                }
-
-                Messages.Add($"Rows affected: {rowsAffected}");
+                Messages.Add("Rows affected: 0");
+                return;
             }
+
+            List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
+            int rowsAffected;
+
+            try
+            {
+                List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
+                Dictionary<RowKey, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
+
+                if (revalidatedRows.Count == 0)
+                {
+                    rowsAffected = 0;
+                }
+                else
+                {
+                    (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
+
+                    foreach (RowKey rowId in oldRowIds)
+                    {
+                        MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "UPDATE");
+                    }
+
+                    ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
+                    ExecuteUpdate(newRows, oldRowIds, revalidatedRows, databaseName, statementTxId, recorder);
+                    recorder?.Publish();
+                    rowsAffected = newRows.Count;
+                }
+            }
+            finally
+            {
+                Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
+            }
+
+            Messages.Add($"Rows affected: {rowsAffected}");
         }
         catch (Exception ex)
         {
             Logger.Error(ex.Message);
             AddError(ex);
         }
+    }
+
+    /// <summary>
+    /// Buffers the update inside an explicit transaction. The WHERE clause, the SET expressions (and their
+    /// subqueries) and the constraint checks all read through the transaction's snapshot and its own uncommitted
+    /// writes, so rows it inserted or updated earlier match by their current values. A row the transaction inserted
+    /// is updated in its insert buffer; a stored row gets one coalesced buffered update.
+    /// </summary>
+    /// <returns>The number of rows updated.</returns>
+    private int UpdateInTransaction(TransactionContext txContext, string databaseName)
+    {
+        using IDisposable scope = MvccExecutionScope.PushTransaction(txContext);
+        _ = GetMaterializedSetExpressions(databaseName);
+
+        List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
+        txContext.ExcludeDeleted(_model.TableName, toBeUpdated);
+        if (toBeUpdated.Count == 0)
+        {
+            return 0;
+        }
+
+        Dictionary<RowKey, Dictionary<string, object?>> existingRows = Context.GetTableContents(toBeUpdated, _model.TableName, databaseName);
+        foreach (RowKey rowId in existingRows.Keys)
+        {
+            if (!TransactionContext.IsBufferedRowKey(rowId))
+            {
+                MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, txContext.Snapshot, "UPDATE");
+            }
+        }
+
+        InsertRowService.PendingKeys? pending = new InsertRowService(Engine, Context, Catalog, Indexes)
+            .BuildPendingKeys(txContext, databaseName, _model.TableName, includeInserts: true);
+        (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(existingRows, databaseName, pending);
+
+        for (int i = 0; i < newRows.Count; i++)
+        {
+            var newRow = new Dictionary<string, object?>(newRows[i], StringComparer.OrdinalIgnoreCase);
+            if (TransactionContext.IsBufferedRowKey(oldRowIds[i]))
+            {
+                txContext.ReplaceBufferedInsert(_model.TableName, oldRowIds[i], newRow);
+            }
+            else
+            {
+                txContext.BufferUpdate(_model.TableName, oldRowIds[i], newRow);
+            }
+        }
+
+        return newRows.Count;
     }
 
     /// <summary>
@@ -246,10 +268,12 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// </summary>
     /// <param name="existingRows">Dictionary of existing row IDs mapping to old row data.</param>
     /// <param name="databaseName">The active database name.</param>
+    /// <param name="pending">Inside a transaction, the keys its buffered writes free and take.</param>
     /// <returns>A tuple containing the newly evaluated rows and the corresponding old row IDs.</returns>
     private (List<Dictionary<string, object?>> NewRows, List<RowKey> OldRowIds) EvaluateAndVerifyConstraints(
         Dictionary<RowKey, Dictionary<string, object?>> existingRows,
-        string databaseName)
+        string databaseName,
+        InsertRowService.PendingKeys? pending = null)
     {
         List<Dictionary<string, object?>> newRows = new(existingRows.Count);
         List<RowKey> oldRowIds = new(existingRows.Count);
@@ -259,7 +283,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var foreignKeysList = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
-        var keyValidator = new UpdateKeyValidator(Indexes, Context, _model.TableName, databaseName);
+        var keyValidator = new UpdateKeyValidator(Indexes, Context, _model.TableName, databaseName, pending);
         List<Models.Catalog.Column> assignedColumns = [];
         foreach (Models.Catalog.Column column in Catalog.GetTableColumnsReadOnly(_model.TableName, databaseName))
         {

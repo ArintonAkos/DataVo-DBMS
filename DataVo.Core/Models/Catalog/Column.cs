@@ -43,6 +43,15 @@ public class Column : IColumn
     }
 
     /// <summary>
+    /// Parses a raw value as this column's type, like <see cref="ParsedValue"/> but without storing it in
+    /// <see cref="Value"/>: catalog columns are shared by every session, so a per-statement value must never be
+    /// written into them.
+    /// </summary>
+    /// <param name="rawValue">The value as text.</param>
+    /// <returns>The typed value, or the text when it does not parse as the column's type.</returns>
+    public object? ParseValue(string? rawValue) => ParseTypedValue(rawValue);
+
+    /// <summary>
     /// Gets the raw string type of the column.
     /// </summary>
     /// <returns>The raw data type string.</returns>

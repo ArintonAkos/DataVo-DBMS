@@ -136,12 +136,19 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Forces all buffered disk writes to the physical device, when the active backend is disk-backed.
-    /// Used by the WAL checkpointer to make data-file writes durable before advancing the checkpoint LSN.
+    /// Opens one statement's (or one COMMIT's) atomic write unit; see <see cref="IWriteBatchScope"/>.
     /// </summary>
-    internal IWriteBatchScope BeginWriteBatch() =>
-        _storageEngine is LsmStorageBackend lsm ? lsm.BeginWriteBatch() : NoWriteBatch.Instance;
+    /// <remarks>
+    /// The scope is also the statement's MVCC write unit (<see cref="MVCC.CommitClock"/>): its commit stamp stays in
+    /// flight until the scope — including the LSM commit and its deferred publication — is disposed.
+    /// </remarks>
+    internal IWriteBatchScope BeginWriteBatch()
+    {
+        MVCC.CommitClock.EnterUnit();
+        return _storageEngine is LsmStorageBackend lsm ? new UnitWriteBatch(lsm.BeginWriteBatch()) : NoWriteBatch.Instance;
+    }
 
+    /// <summary>A write unit without a storage batch (in-memory and Disk modes): disposing it ends the unit.</summary>
     private sealed class NoWriteBatch : IWriteBatchScope
     {
         public static readonly NoWriteBatch Instance = new();
@@ -150,11 +157,39 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         {
         }
 
+        public void Dispose() => MVCC.CommitClock.ExitUnit();
+    }
+
+    /// <summary>A write unit around an LSM write batch: the unit ends after the batch has committed and published.</summary>
+    private sealed class UnitWriteBatch(IWriteBatchScope inner) : IWriteBatchScope
+    {
+        private bool _disposed;
+
+        public void Complete() => inner.Complete();
+
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            try
+            {
+                inner.Dispose();
+            }
+            finally
+            {
+                MVCC.CommitClock.ExitUnit();
+            }
         }
     }
 
+    /// <summary>
+    /// Forces all buffered disk writes to the physical device, when the active backend is disk-backed.
+    /// Used by the WAL checkpointer to make data-file writes durable before advancing the checkpoint LSN.
+    /// </summary>
     internal void FlushBackendToDisk()
     {
         if (_storageEngine is DiskStorageBackend diskBackend)
@@ -586,7 +621,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         }
 
         DataVoEngine engine = DataVoEngine.Current();
-        RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+        RowVersion version = MvccCoordinator.GetVersionOrBase(engine, databaseName, tableName, rowId);
         return SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot);
     }
 
@@ -1208,7 +1243,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (RowKey rowId in rows.Keys)
         {
-            RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+            RowVersion version = MvccCoordinator.GetVersionOrBase(engine, databaseName, tableName, rowId);
             if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
             {
                 toRemove.Add(rowId);
@@ -1241,7 +1276,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>A buffered insert has no storage key yet; reads identify it by this reserved key range.</summary>
-    private const ulong BufferedRowKeyHigh = ulong.MaxValue;
+    private const ulong BufferedRowKeyHigh = TransactionContext.BufferedRowKeyHigh;
 
     private static List<RowKey> WithoutBufferedRowKeys(List<RowKey> rowIds) =>
         MvccExecutionScope.CurrentTransaction is null ? rowIds : rowIds.FindAll(rowId => rowId.High != BufferedRowKeyHigh);
@@ -1349,7 +1384,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
 
         foreach (RowKey rowId in rows.Keys)
         {
-            RowVersion version = MvccCoordinator.EnsureRowVersionExists(engine, databaseName, tableName, rowId);
+            RowVersion version = MvccCoordinator.GetVersionOrBase(engine, databaseName, tableName, rowId);
             if (!SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot))
             {
                 toRemove.Add(rowId);

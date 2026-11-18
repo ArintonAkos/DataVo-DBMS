@@ -140,6 +140,65 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Four sessions run conflicting money transfers in explicit transactions (with a savepoint rolled back inside
+    /// each) and the process is killed at random. After every recovery the balances must equal the initial balances
+    /// plus exactly the logged transfers — a transfer is all or nothing — every acknowledged commit must be there,
+    /// and the total must be unchanged.
+    /// </summary>
+    [Fact]
+    public void ConcurrentConflictingTransactions_AreAtomicAndDurableAcrossHardCrashes()
+    {
+        string directory = TestStorageDirectories.Create("crash_mvcc");
+        var random = new Random(9173);
+        const int Accounts = 8;
+        const long Initial = 1_000;
+
+        using (DataVoContext setup = Open(directory, "lsm"))
+        {
+            AssertOk(setup.Execute("CREATE DATABASE CrashDb"));
+            AssertOk(setup.Execute("USE CrashDb"));
+            AssertOk(setup.Execute("CREATE TABLE Accounts (Id INT PRIMARY KEY, Bal BIGINT)"));
+            AssertOk(setup.Execute("CREATE TABLE Transfers (Id BIGINT PRIMARY KEY, Src INT, Dst INT, Amount BIGINT)"));
+            for (int id = 1; id <= Accounts; id++)
+            {
+                AssertOk(setup.Execute($"INSERT INTO Accounts (Id, Bal) VALUES ({id}, {Initial})"));
+            }
+        }
+
+        long nextId = 1;
+        var acknowledged = new HashSet<long>();
+        for (int cycle = 0; cycle < CrashCycles; cycle++)
+        {
+            CrashRun run = RunUntilKilled(directory, "lsm", nextId, random.Next(20, 120), "mvcc");
+            acknowledged.UnionWith(run.Transactions);
+
+            using DataVoContext context = Open(directory, "lsm");
+            AssertOk(context.Execute("USE CrashDb"));
+            var expected = Enumerable.Range(1, Accounts).ToDictionary(id => id, _ => Initial);
+            var logged = new HashSet<long>();
+            foreach (Dictionary<string, object?> row in context.Execute("SELECT Id, Src, Dst, Amount FROM Transfers")[0].Data)
+            {
+                long amount = Convert.ToInt64(row["Amount"]);
+                expected[Convert.ToInt32(row["Src"])] -= amount;
+                expected[Convert.ToInt32(row["Dst"])] += amount;
+                logged.Add(Convert.ToInt64(row["Id"]));
+            }
+
+            var balances = context.Execute("SELECT Id, Bal FROM Accounts")[0].Data
+                .ToDictionary(row => Convert.ToInt32(row["Id"]), row => Convert.ToInt64(row["Bal"]));
+
+            Assert.Equal(expected, balances);
+            Assert.Equal(Accounts * Initial, balances.Values.Sum());
+            long[] missing = [.. acknowledged.Where(id => !logged.Contains(id)).Order()];
+            Assert.True(
+                missing.Length == 0,
+                $"cycle {cycle}: acknowledged transfers missing after recovery: {string.Join(",", missing)} (logged {logged.Count}, max {(logged.Count == 0 ? 0 : logged.Max())}, acknowledged this run {run.Transactions.Count})");
+            output.WriteLine($"cycle {cycle}: {run.Transactions.Count} transfers acknowledged; {logged.Count} logged in total");
+            nextId = (logged.Count == 0 ? 0 : logged.Max()) + 1_000;
+        }
+    }
+
+    /// <summary>
     /// A table with a <c>USING COLUMNAR</c> index takes interleaved inserts, updates, deletes and multi-row
     /// statements, flushes and compactions, and is killed at random. After every crash its rows must be the
     /// acknowledged ones (plus at most the one transaction in flight), every SSTable must carry a usable columnar

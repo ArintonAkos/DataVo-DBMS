@@ -1955,6 +1955,14 @@ public sealed partial class DataVoPreparedStatement
         RowKey rowId = RowKey.FromInt64(pk);
         string tableName = plan.TableName;
         using IWriteBatchScope batch = _engine.StorageContext.BeginWriteBatch();
+
+        // Taking the statement's stamp fixes, before the row lock, whether it records versions: a transaction that
+        // opened since the check above needs the deleted row's image, which the general path keeps.
+        if (MvccCoordinator.RecordsVersions(_engine))
+        {
+            return false;
+        }
+
         _engine.LockManager.AcquireRowWriteLock(databaseName, tableName, rowId);
         try
         {

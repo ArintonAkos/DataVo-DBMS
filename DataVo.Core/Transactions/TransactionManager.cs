@@ -50,10 +50,32 @@ public sealed class TransactionManager
     public void Begin(Guid session, TransactionIdAllocator idAllocator)
     {
         long txId = idAllocator.AllocateTransactionId();
-        var snapshot = new TransactionSnapshot(snapshotTimestamp: txId, transactionId: txId);
+        Register(session, new TransactionSnapshot(snapshotTimestamp: txId, transactionId: txId));
+    }
+
+    /// <summary>
+    /// Opens a new explicit transaction whose snapshot is ordered by commit: it sees exactly the commits that
+    /// finished before it began (see <see cref="CommitClock.BeginSnapshot"/>), never a transaction that was still
+    /// open or committing at that point.
+    /// </summary>
+    /// <param name="session">The unique session identifier.</param>
+    /// <param name="clock">The engine's commit clock.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a transaction is already active for this session.</exception>
+    public void Begin(Guid session, CommitClock clock)
+    {
+        if (_activeTransactions.ContainsKey(session))
+        {
+            throw new InvalidOperationException("A transaction is already active for this session.");
+        }
+
+        clock.BeginSnapshot(snapshot => Register(session, snapshot), () => _activeTransactions.TryRemove(session, out _));
+    }
+
+    private void Register(Guid session, TransactionSnapshot snapshot)
+    {
         var context = new TransactionContext
         {
-            TransactionId = txId,
+            TransactionId = snapshot.TransactionId,
             Snapshot = snapshot
         };
 
@@ -62,7 +84,7 @@ public sealed class TransactionManager
             throw new InvalidOperationException("A transaction is already active for this session.");
         }
 
-        Logger.Info($"Transaction started with ID {txId}.");
+        Logger.Info($"Transaction started with ID {snapshot.TransactionId}.");
     }
 
     /// <summary>
@@ -81,6 +103,34 @@ public sealed class TransactionManager
 
         Logger.Info("Transaction committed.");
         return context;
+    }
+
+    /// <summary>
+    /// Starts committing the session's transaction: returns its buffered context but keeps it registered (and its
+    /// snapshot counted as open) until <see cref="EndCommit"/>, so the version metadata its conflict checks read is
+    /// not vacuumed while it validates and applies.
+    /// </summary>
+    /// <param name="session">The unique session identifier.</param>
+    /// <returns>The <see cref="TransactionContext"/> containing all buffered operations.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session.</exception>
+    public TransactionContext BeginCommit(Guid session)
+    {
+        if (!_activeTransactions.TryGetValue(session, out var context))
+        {
+            throw new InvalidOperationException("No active transaction to commit.");
+        }
+
+        return context;
+    }
+
+    /// <summary>Ends the commit started by <see cref="BeginCommit"/>, whether it succeeded or failed.</summary>
+    /// <param name="session">The unique session identifier.</param>
+    public void EndCommit(Guid session)
+    {
+        if (_activeTransactions.TryRemove(session, out _))
+        {
+            Logger.Info("Transaction committed.");
+        }
     }
 
     /// <summary>
@@ -147,6 +197,29 @@ public sealed class TransactionManager
     public bool HasAnyActiveTransaction()
     {
         return !_activeTransactions.IsEmpty;
+    }
+
+    /// <summary>
+    /// Determines whether any transaction other than <paramref name="excludedTransactionId"/> is active: whether a
+    /// write by that transaction's commit (or an auto-commit statement, with 0) can matter to another snapshot.
+    /// </summary>
+    /// <param name="excludedTransactionId">The committing transaction's id, or 0.</param>
+    public bool HasAnyOtherActiveTransaction(long excludedTransactionId)
+    {
+        if (_activeTransactions.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (TransactionContext context in _activeTransactions.Values)
+        {
+            if (context.TransactionId != excludedTransactionId)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Gets the oldest open snapshot, or <see langword="null"/> when no transaction is open.</summary>

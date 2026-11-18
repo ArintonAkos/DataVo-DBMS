@@ -20,8 +20,7 @@ internal class BeginTransaction : BaseDbAction
     {
         try
         {
-            var allocator = Engine.TransactionIdAllocator;
-            Transactions.Begin(session, allocator);
+            Transactions.Begin(session, Engine.CommitClock);
             Messages.Add("Transaction started.");
         }
         catch (Exception ex)

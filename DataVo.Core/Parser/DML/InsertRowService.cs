@@ -55,6 +55,19 @@ internal sealed partial class InsertRowService(
         public bool IsEmpty => FreedPrimaryKeys.Count == 0 && TakenPrimaryKeys.Count == 0
             && FreedUniqueValues.Count == 0 && TakenUniqueValues.Count == 0;
 
+        /// <summary>A copy with only the freed keys: what COMMIT checks a buffered update's new key against.</summary>
+        public PendingKeys FreedOnly()
+        {
+            var copy = new PendingKeys();
+            copy.FreedPrimaryKeys.UnionWith(FreedPrimaryKeys);
+            foreach ((string column, HashSet<string> values) in FreedUniqueValues)
+            {
+                copy.FreedUniqueValues[column] = new HashSet<string>(values, StringComparer.Ordinal);
+            }
+
+            return copy;
+        }
+
         public static bool Has(Dictionary<string, HashSet<string>> byColumn, string column, string value) =>
             byColumn.TryGetValue(column, out HashSet<string>? values) && values.Contains(value);
 
@@ -90,9 +103,14 @@ internal sealed partial class InsertRowService(
         var touched = new List<RowKey>();
         if (deleted is not null) touched.AddRange(deleted);
         if (updated is not null) touched.AddRange(updated.Select(entry => entry.RowId));
-        Dictionary<RowKey, Dictionary<string, object?>> oldRows = touched.Count > 0
-            ? context.GetTableContents(touched.Distinct().ToList(), tableName, databaseName)
-            : [];
+        // The keys the transaction frees are those of the committed rows, not of its own overlay.
+        Dictionary<RowKey, Dictionary<string, object?>> oldRows;
+        using (MvccExecutionScope.PushSnapshot(null))
+        {
+            oldRows = touched.Count > 0
+                ? context.GetTableContents(touched.Where(rowId => !TransactionContext.IsBufferedRowKey(rowId)).Distinct().ToList(), tableName, databaseName)
+                : [];
+        }
 
         void Free(Dictionary<string, object?> row)
         {
@@ -1074,10 +1092,8 @@ internal sealed partial class InsertRowService(
             return true;
         }
 
-        string formattedValue = FormatColumnValue(rawValue, column.Type);
-        column.Value = formattedValue;
-
-        object? parsedValue = column.ParsedValue;
+        // The catalog column is shared by every session: parse without writing the value into it.
+        object? parsedValue = column.ParseValue(FormatColumnValue(rawValue, column.Type));
         if (!IsParsedValueCompatible(column, parsedValue))
         {
             return false;
