@@ -8,7 +8,7 @@ using DataVo.Core.Transactions;
 namespace DataVo.Core.Parser.DML;
 
 /// <summary>
-/// The physical delete shared by SQL <c>DELETE</c> and <see cref="DataVoContext.ApplyBatch"/>: given row ids
+/// The physical delete shared by SQL <c>DELETE</c> and <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/>: given row ids
 /// that are already locked and validated, it removes them and keeps foreign keys, indexes, MVCC versions,
 /// change capture and the write-ahead log consistent.
 /// </summary>
