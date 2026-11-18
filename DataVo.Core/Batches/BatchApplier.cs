@@ -10,7 +10,7 @@ using DataVo.Core.ValueConversion;
 namespace DataVo.Core.Batches;
 
 /// <summary>
-/// Carries out <see cref="DataVoContext.ApplyBatch"/>: folds the batch into one final state per row, finds the
+/// Carries out <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/>: folds the batch into one final state per row, finds the
 /// stored rows through their primary-key index, validates everything, and only then writes deletes, updates
 /// and inserts through the same row writers SQL uses.
 /// </summary>

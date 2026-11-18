@@ -11,7 +11,7 @@ public enum DataVoBatchOperation
 }
 
 /// <summary>
-/// An ordered list of primary-key upserts and deletes that <see cref="DataVoContext.ApplyBatch"/> writes as one
+/// An ordered list of primary-key upserts and deletes that <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/> writes as one
 /// atomic unit, without SQL.
 /// </summary>
 /// <remarks>
@@ -99,7 +99,7 @@ public sealed class DataVoWriteBatch
     internal readonly record struct Entry(DataVoBatchLayout Layout, DataVoBatchOperation Operation, int Offset);
 }
 
-/// <summary>What <see cref="DataVoContext.ApplyBatch"/> did to the stored rows.</summary>
+/// <summary>What <see cref="DataVoContext.ApplyBatch(DataVoWriteBatch)"/> did to the stored rows.</summary>
 /// <param name="Inserted">Rows that did not exist and were inserted.</param>
 /// <param name="Updated">Existing rows whose values changed.</param>
 /// <param name="Deleted">Existing rows that were deleted.</param>
