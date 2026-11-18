@@ -122,7 +122,7 @@ internal class Commit : BaseDbAction
                 MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, tableName, rowId, context.Snapshot, "UPDATE");
             }
 
-            ValidateUpdatedKeys(service, context, databaseName, tableName, updates);
+            ValidateUpdatedKeys(context, databaseName, tableName, updates);
         }
 
         foreach (var (tableName, rows) in context.InsertedRows)
@@ -133,11 +133,11 @@ internal class Commit : BaseDbAction
 
     /// <summary>
     /// Checks that the new primary-key and unique values of a table's buffered updates are still free in committed
-    /// storage, apart from keys this transaction frees itself. Duplicates among the transaction's own rows were
-    /// rejected when the statements ran.
+    /// storage. Every key a row this transaction updates or deletes held before the transaction counts as free — the
+    /// commit removes all of those rows before it writes any new one — so swaps and rotations of keys between the
+    /// transaction's own rows pass; two of its final rows with the same key still clash.
     /// </summary>
     private void ValidateUpdatedKeys(
-        DML.InsertRowService service,
         TransactionContext context,
         string databaseName,
         string tableName,
@@ -151,11 +151,31 @@ internal class Commit : BaseDbAction
         }
 
         context.DeletedRowIds.TryGetValue(tableName, out HashSet<RowKey>? deleted);
-        Dictionary<RowKey, Dictionary<string, object?>> committed =
-            Context.GetTableContents([.. updates.Select(update => update.RowId)], tableName, databaseName);
-        DML.InsertRowService.PendingKeys? pending = service.BuildPendingKeys(context, databaseName, tableName, includeInserts: false)?.FreedOnly();
-        var validator = new DML.UpdateKeyValidator(Indexes, Context, tableName, databaseName, pending);
+        List<RowKey> touched = [.. updates.Select(update => update.RowId)];
+        if (deleted is not null)
+        {
+            touched.AddRange(deleted);
+        }
 
+        Dictionary<RowKey, Dictionary<string, object?>> committed = Context.GetTableContents([.. touched.Distinct()], tableName, databaseName);
+        var released = new DML.InsertRowService.PendingKeys();
+        foreach (Dictionary<string, object?> original in committed.Values)
+        {
+            if (primaryKeys.Count > 0 && IndexKeyEncoder.HasCompleteKey(original, primaryKeys))
+            {
+                released.FreedPrimaryKeys.Add(IndexKeyEncoder.BuildKeyString(original, primaryKeys));
+            }
+
+            foreach (string column in uniqueKeys)
+            {
+                if (original.TryGetValue(column, out object? value) && value is not null)
+                {
+                    DML.InsertRowService.PendingKeys.Add(released.FreedUniqueValues, column, IndexKeyEncoder.BuildKeyString(original, [column]));
+                }
+            }
+        }
+
+        var validator = new DML.UpdateKeyValidator(Indexes, Context, tableName, databaseName, released);
         int rowNumber = 1;
         foreach (var (rowId, newRow) in updates)
         {
@@ -240,6 +260,7 @@ internal class Commit : BaseDbAction
             apply.FlushDeletes(context);
             apply.FlushUpdates(context);
             apply.FlushInserts(context);
+            apply.ValidateUpdatedForeignKeys();
         }
         catch
         {
@@ -328,6 +349,7 @@ internal class Commit : BaseDbAction
     {
         private readonly List<(string Table, RowKey RowId, Dictionary<string, object?> Row, bool Inserted)> _steps = [];
         private readonly Dictionary<(string Table, RowKey RowId), RowVersion?> _versionsBefore = [];
+        private readonly List<(string Table, Dictionary<string, object?> OldRow, Dictionary<string, object?> NewRow)> _updated = [];
 
         /// <summary>Applies the buffered deletes and purges their index entries.</summary>
         public void FlushDeletes(TransactionContext context)
@@ -376,17 +398,20 @@ internal class Commit : BaseDbAction
             }
         }
 
-        /// <summary>Applies the buffered updates out of place (delete old row, insert new row).</summary>
+        /// <summary>
+        /// Applies the buffered updates out of place, in two phases per table: every old row (with its index entries)
+        /// is removed before any new row is written. Row by row, a swap or rotation of key values among the
+        /// transaction's rows would write a key while the row that still holds it was not yet removed.
+        /// </summary>
         public void FlushUpdates(TransactionContext context)
         {
             foreach (var (tableName, updates) in context.UpdatedRows)
             {
                 var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
-
+                var rows = new List<(RowKey RowId, Dictionary<string, object?> OldRow, Dictionary<string, object?> NewRow)>(updates.Count);
                 foreach (var (rowId, updatedColumns) in updates)
                 {
                     MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, context.Snapshot, "UPDATE");
-
                     var existingRows = engine.StorageContext.GetTableContents([rowId], tableName, databaseName);
                     if (!existingRows.TryGetValue(rowId, out var oldRow)) continue;
 
@@ -396,21 +421,62 @@ internal class Commit : BaseDbAction
                         newRow[col] = val;
                     }
 
-                    engine.StorageContext.DeleteFromTable([rowId], tableName, databaseName);
-                    Journal(tableName, rowId, oldRow, inserted: false);
-                    foreach (var index in indexFiles)
+                    rows.Add((rowId, oldRow, newRow));
+                }
+
+                // Phase 1: retire every old version (its image stays for older snapshots) and remove the old rows.
+                var oldRows = new Dictionary<RowKey, Dictionary<string, object?>>(rows.Count);
+                foreach (var (rowId, oldRow, _) in rows)
+                {
+                    RememberVersion(tableName, rowId);
+                    MvccCoordinator.RegisterDeleteVersion(engine, databaseName, tableName, rowId, txId, oldRow);
+                    oldRows[rowId] = oldRow;
+                }
+
+                List<RowKey> oldRowIds = [.. oldRows.Keys];
+                if (oldRowIds.Count > 0)
+                {
+                    engine.StorageContext.DeleteFromTable(oldRowIds, tableName, databaseName);
+                    foreach (var (rowId, oldRow, _) in rows)
                     {
-                        RemoveIndexEntries(engine, index, [rowId], existingRows, tableName, databaseName);
+                        Journal(tableName, rowId, oldRow, inserted: false);
                     }
 
+                    foreach (var index in indexFiles)
+                    {
+                        RemoveIndexEntries(engine, index, oldRowIds, oldRows, tableName, databaseName);
+                    }
+                }
+
+                // Phase 2: write every new row; a key an old row released may now be reused.
+                foreach (var (_, oldRow, newRow) in rows)
+                {
                     RowKey newRowId = engine.StorageContext.InsertOneIntoTable(newRow, tableName, databaseName);
                     Journal(tableName, newRowId, newRow, inserted: true);
-                    RememberVersion(tableName, rowId);
                     RememberVersion(tableName, newRowId);
-                    MvccCoordinator.RegisterUpdateVersion(engine, databaseName, tableName, rowId, newRowId, txId, oldRow);
+                    MvccCoordinator.RegisterInsertVersion(engine, databaseName, tableName, newRowId, txId);
                     recorder?.RecordUpdate(tableName, newRowId, oldRow, newRow);
                     AddIndexEntries(engine, indexFiles, newRow, newRowId, tableName, databaseName);
+                    _updated.Add((tableName, oldRow, newRow));
                 }
+            }
+        }
+
+        /// <summary>
+        /// Checks the foreign keys of updated rows once the whole commit is applied: a parent may be one this
+        /// transaction inserts (applied after the updates), or one it — or another session meanwhile — deleted.
+        /// </summary>
+        public void ValidateUpdatedForeignKeys()
+        {
+            if (_updated.Count == 0)
+            {
+                return;
+            }
+
+            var validator = new DML.InsertRowService(engine, engine.StorageContext, engine.Catalog, engine.IndexManager);
+            foreach (IGrouping<string, (string Table, Dictionary<string, object?> OldRow, Dictionary<string, object?> NewRow)> table in _updated.GroupBy(row => row.Table, StringComparer.OrdinalIgnoreCase))
+            {
+                validator.ValidateChangedForeignKeys(databaseName, table.Key, [.. table.Select(row => (row.OldRow, row.NewRow))]);
             }
         }
 

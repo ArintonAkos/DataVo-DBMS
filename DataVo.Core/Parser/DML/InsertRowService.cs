@@ -55,19 +55,6 @@ internal sealed partial class InsertRowService(
         public bool IsEmpty => FreedPrimaryKeys.Count == 0 && TakenPrimaryKeys.Count == 0
             && FreedUniqueValues.Count == 0 && TakenUniqueValues.Count == 0;
 
-        /// <summary>A copy with only the freed keys: what COMMIT checks a buffered update's new key against.</summary>
-        public PendingKeys FreedOnly()
-        {
-            var copy = new PendingKeys();
-            copy.FreedPrimaryKeys.UnionWith(FreedPrimaryKeys);
-            foreach ((string column, HashSet<string> values) in FreedUniqueValues)
-            {
-                copy.FreedUniqueValues[column] = new HashSet<string>(values, StringComparer.Ordinal);
-            }
-
-            return copy;
-        }
-
         public static bool Has(Dictionary<string, HashSet<string>> byColumn, string column, string value) =>
             byColumn.TryGetValue(column, out HashSet<string>? values) && values.Contains(value);
 
@@ -246,6 +233,50 @@ internal sealed partial class InsertRowService(
                 messages,
                 out _,
                 pending);
+        }
+
+        if (messages.Count > 0)
+        {
+            throw RejectedRows(tableName, messages);
+        }
+    }
+
+    /// <summary>
+    /// Checks the foreign keys an UPDATE changed: each new non-NULL value must reference an existing parent row.
+    /// COMMIT calls this after applying the transaction, so the parents it inserted count and the ones it (or another
+    /// session) deleted do not. Throws <see cref="ConstraintViolationException"/>.
+    /// </summary>
+    /// <param name="databaseName">The owning database.</param>
+    /// <param name="tableName">The updated table.</param>
+    /// <param name="rows">Each updated row before and after the update.</param>
+    internal void ValidateChangedForeignKeys(string databaseName, string tableName, IReadOnlyList<(Dictionary<string, object?> OldRow, Dictionary<string, object?> NewRow)> rows)
+    {
+        IReadOnlyDictionary<string, ForeignKey> foreignKeys = catalog.GetTableValidationMetadata(tableName, databaseName).ForeignKeysByAttribute;
+        if (foreignKeys.Count == 0)
+        {
+            return;
+        }
+
+        var messages = new List<string>();
+        for (int i = 0; i < rows.Count; i++)
+        {
+            (Dictionary<string, object?> oldRow, Dictionary<string, object?> newRow) = rows[i];
+            foreach ((string column, ForeignKey foreignKey) in foreignKeys)
+            {
+                if (!newRow.TryGetValue(column, out object? value) || value is null)
+                {
+                    continue; // NULL references nothing
+                }
+
+                string candidate = IndexKeyEncoder.BuildKeyString(newRow, [column]);
+                bool changed = !oldRow.TryGetValue(column, out object? before) || before is null
+                    || !string.Equals(IndexKeyEncoder.BuildKeyString(oldRow, [column]), candidate, StringComparison.Ordinal);
+                if (changed && !ReferenceExists(foreignKey, candidate, databaseName))
+                {
+                    messages.Add($"Foreign key violation in row {i + 1}!");
+                    break;
+                }
+            }
         }
 
         if (messages.Count > 0)
