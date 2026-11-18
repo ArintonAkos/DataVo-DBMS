@@ -159,7 +159,13 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
 
         foreach (KeyValuePair<RowKey, Dictionary<string, object?>> row in tableData)
         {
-            string key = ExtractIndexKeyFromRow(row.Value);
+            // NULL keys are never indexed (see IndexKeyEncoder.HasCompleteKey), the same rule every write path uses.
+            if (!IndexKeyEncoder.HasCompleteKey(row.Value, _model.Attributes))
+            {
+                continue;
+            }
+
+            string key = IndexKeyEncoder.BuildKeyString(row.Value, _model.Attributes);
 
             if (indexContentDict.TryGetValue(key, out var rowIds))
             {
@@ -172,24 +178,5 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         }
 
         return indexContentDict;
-    }
-
-    /// <summary>
-    /// Extracts the values of the indexed columns from a single row and concatenates them
-    /// into a composite key string, using <c>"##"</c> as the delimiter between values.
-    /// </summary>
-    /// <param name="rowColumns">A dictionary of all column name/value pairs for a single row.</param>
-    /// <returns>
-    /// The composite index key string (e.g., <c>"Smith##John"</c> for a composite index on LastName and FirstName).
-    /// Returns an empty string if none of the indexed columns are found in the row.
-    /// </returns>
-    private string ExtractIndexKeyFromRow(Dictionary<string, object?> rowColumns)
-    {
-        if (_model.Attributes.Any(attr => !rowColumns.ContainsKey(attr) || rowColumns[attr] == null))
-        {
-            return string.Empty;
-        }
-
-        return IndexKeyEncoder.BuildKeyString(rowColumns, _model.Attributes);
     }
 }

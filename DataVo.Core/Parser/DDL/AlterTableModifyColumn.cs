@@ -138,6 +138,11 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
 
             for (int i = 0; i < rows.Count; i++)
             {
+                if (!IndexKeyEncoder.HasCompleteKey(rows[i], index.AttributeNames))
+                {
+                    continue; // NULL keys are never indexed
+                }
+
                 string key = IndexKeyEncoder.BuildKeyString(rows[i], index.AttributeNames);
                 if (!indexData.TryGetValue(key, out var ids))
                 {

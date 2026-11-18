@@ -73,6 +73,11 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
                         null,
                         Catalog,
                         Engine.Id.ToString("N"));
+                    if (!IndexKeyEncoder.HasCompleteKey(row, index.AttributeNames))
+                    {
+                        continue; // NULL keys are never indexed
+                    }
+
                     string indexKey = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
 
                     if (!indexData.ContainsKey(indexKey))
