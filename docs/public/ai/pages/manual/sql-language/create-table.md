@@ -78,6 +78,8 @@ CREATE INDEX ix_users_active_score
 ON Users (IsActive, Score);
 ```
 
+A scalar index holds only rows whose indexed columns are all non-NULL: a row with a NULL key gets no entry, on every write path and when the index is built or rebuilt. `IS NULL` predicates therefore read rows, and any number of NULLs may share a `UNIQUE` column.
+
 Create vector indexes on vector columns. Use `FLAT` for exact scan behavior on small datasets and `HNSW` when a larger dataset needs faster approximate nearest-neighbor search.
 
 ```sql

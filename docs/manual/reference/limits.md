@@ -84,4 +84,5 @@ On the LSM engine a full scan reads every row from memory-mapped SSTables, so wi
 | Long-term storage format compatibility guarantee | Planned | Prerelease files may require migration or rebuild across major storage upgrades. |
 | PostgreSQL-wire clients | Planned, unscheduled | DBeaver, DataGrip, and pgAdmin require a future `DataVo.Server` bridge. |
 | Cloud/server administration model | Not Supported | No server replication daemon, backup daemon, or HA cluster system. |
+| Transaction isolation | Supported (snapshot isolation) | Snapshots are ordered by commit; conflicting writers fail first-committer-wins. Serializable isolation is not offered: write skew is possible. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
 | Columnar HTAP scan acceleration | Supported (`InMemory` & `Lsm`) | Synchronized `InMemory` column buffers and out-of-core format-v8 `Lsm` SSTable columnar segments with zone-map chunk pruning. |

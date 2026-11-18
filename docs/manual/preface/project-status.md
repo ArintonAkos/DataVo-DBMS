@@ -20,7 +20,7 @@ DataVo is a C#-native embedded database engine. The **0.4.0-rc.1** packages on n
 | In-Memory storage | Release candidate | Ephemeral by design. |
 | LSM-Tree storage | Release candidate | The recommended persistent engine: WAL, MemTable, SSTables, strict fsync by default. |
 | Disk storage (paged) | Legacy | Kept for existing data. It receives no further durability work. Prefer LSM. |
-| Transactions and MVCC | Release candidate | No serializable guarantee for arbitrary multi-row predicates. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
+| Transactions and MVCC | Release candidate | Snapshot isolation ordered by commit, read-your-own-writes across chained DML and savepoints, first-committer-wins conflicts, atomic `COMMIT`. Not serializable (write skew is possible). See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
 | Compiled LINQ and source generators | Release candidate | Supported shapes are listed in [Roslyn Source Generators](/manual/client-interfaces/source-generators). Other shapes still return the right rows by scanning. No Entity Framework dependency. |
 | Vector search (HNSW and FLAT) | Release candidate | Cosine and L2 distance, filtered and joined searches with exact cost-based fallback, HNSW parameters in SQL (v0.4). See [Vector Search and Indexes](/manual/sql-language/vector-search-syntax). |
 | Columnar indexes | Release candidate (v0.3, persisted in v0.4) | In-memory column buffers; on LSM, columnar SSTable segments with zone maps. Included in `0.4.0-rc.1`. |

@@ -91,6 +91,8 @@ GROUP BY IsActive
 HAVING COUNT(*) > 0;
 ```
 
+`COUNT` returns a 64-bit integer (`long`) on every query shape. `HAVING` may use aggregates the select list does not return, such as `HAVING COUNT(Tag) >= 2` with only `COUNT(*)` selected; each is computed on its own.
+
 `HAVING` also works without `GROUP BY`. The whole filtered table is then one group, and `HAVING` decides whether its single result row is returned.
 
 ```sql
