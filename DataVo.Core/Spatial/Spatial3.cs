@@ -29,25 +29,31 @@ public static class Spatial3
     /// <summary>The number of components in a 3D coordinate.</summary>
     public const int Dimensions = 3;
 
+    /// <summary>
+    /// Inlined where the caller is optimized, and compiled fully optimized up front where it is not: the helpers
+    /// skip tiered recompilation, so a hot loop never pays a late re-JIT (or its allocations) after warm-up.
+    /// </summary>
+    internal const MethodImplOptions HotMath = MethodImplOptions.AggressiveInlining | Compat.MethodImplCompat.AggressiveOptimization;
+
     /// <summary>Gets the Euclidean distance between two points.</summary>
     /// <param name="a">The first point.</param>
     /// <param name="b">The second point.</param>
     /// <returns>The distance.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(HotMath)]
     public static float Distance(Vector3 a, Vector3 b) => Vector3.Distance(a, b);
 
     /// <summary>Gets the squared Euclidean distance between two points, which orders points like the distance without a square root.</summary>
     /// <param name="a">The first point.</param>
     /// <param name="b">The second point.</param>
     /// <returns>The squared distance.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(HotMath)]
     public static float DistanceSquared(Vector3 a, Vector3 b) => Vector3.DistanceSquared(a, b);
 
     /// <summary>Gets the squared Euclidean distance between two points in double precision.</summary>
     /// <param name="a">The first point.</param>
     /// <param name="b">The second point.</param>
     /// <returns>The squared distance.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(HotMath)]
     public static double DistanceSquaredPrecise(Vector3 a, Vector3 b) =>
         DistanceSquaredPrecise(a.X, a.Y, a.Z, b);
 
@@ -56,6 +62,7 @@ public static class Spatial3
     /// <param name="point">The point.</param>
     /// <returns>The squared distance.</returns>
     /// <exception cref="ArgumentException"><paramref name="coordinates"/> does not hold exactly three values.</exception>
+    [MethodImpl(Compat.MethodImplCompat.AggressiveOptimization)]
     public static double DistanceSquaredPrecise(ReadOnlySpan<float> coordinates, Vector3 point)
     {
         if (coordinates.Length != Dimensions)
@@ -71,7 +78,7 @@ public static class Spatial3
     /// <param name="center">The sphere's center.</param>
     /// <param name="radius">The sphere's radius.</param>
     /// <returns><see langword="true"/> when the point is inside or on the sphere.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(HotMath)]
     public static bool IsWithinRadius(Vector3 point, Vector3 center, float radius) =>
         DistanceSquaredPrecise(point, center) <= (double)radius * radius;
 
@@ -81,6 +88,7 @@ public static class Spatial3
     /// <param name="radius">The sphere's radius.</param>
     /// <returns><see langword="true"/> when the point is inside or on the sphere.</returns>
     /// <exception cref="ArgumentException"><paramref name="coordinates"/> does not hold exactly three values.</exception>
+    [MethodImpl(Compat.MethodImplCompat.AggressiveOptimization)]
     public static bool IsWithinRadius(ReadOnlySpan<float> coordinates, Vector3 center, float radius) =>
         DistanceSquaredPrecise(coordinates, center) <= (double)radius * radius;
 
@@ -89,6 +97,7 @@ public static class Spatial3
     /// <param name="box">The box.</param>
     /// <returns><see langword="true"/> when the point is inside.</returns>
     /// <exception cref="ArgumentException"><paramref name="coordinates"/> does not hold exactly three values.</exception>
+    [MethodImpl(Compat.MethodImplCompat.AggressiveOptimization)]
     public static bool IsInside(ReadOnlySpan<float> coordinates, in BoundingBox3 box)
     {
         if (coordinates.Length != Dimensions)
@@ -103,6 +112,7 @@ public static class Spatial3
     /// <param name="coordinates">The stored X, Y and Z.</param>
     /// <returns>The point.</returns>
     /// <exception cref="ArgumentException"><paramref name="coordinates"/> does not hold exactly three values.</exception>
+    [MethodImpl(Compat.MethodImplCompat.AggressiveOptimization)]
     public static Vector3 ToVector3(ReadOnlySpan<float> coordinates)
     {
         if (coordinates.Length != Dimensions)
@@ -117,6 +127,7 @@ public static class Spatial3
     /// <param name="point">The point.</param>
     /// <param name="destination">Where to write the coordinates.</param>
     /// <exception cref="ArgumentException"><paramref name="destination"/> is shorter than three values.</exception>
+    [MethodImpl(Compat.MethodImplCompat.AggressiveOptimization)]
     public static void CopyTo(Vector3 point, Span<float> destination)
     {
         if (destination.Length < Dimensions)

@@ -66,7 +66,7 @@ public readonly struct BoundingBox3 : IEquatable<BoundingBox3>
     /// <summary>Gets whether a point is inside the box or on its surface.</summary>
     /// <param name="point">The point to test.</param>
     /// <returns><see langword="true"/> when the point is inside.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Spatial3.HotMath)]
     public bool Contains(Vector3 point) =>
         point.X >= Min.X && point.X <= Max.X
         && point.Y >= Min.Y && point.Y <= Max.Y
@@ -77,7 +77,7 @@ public readonly struct BoundingBox3 : IEquatable<BoundingBox3>
     /// <param name="y">The Y coordinate.</param>
     /// <param name="z">The Z coordinate.</param>
     /// <returns><see langword="true"/> when the point is inside.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Spatial3.HotMath)]
     public bool Contains(float x, float y, float z) =>
         x >= Min.X && x <= Max.X
         && y >= Min.Y && y <= Max.Y
@@ -86,11 +86,13 @@ public readonly struct BoundingBox3 : IEquatable<BoundingBox3>
     /// <summary>Gets whether another box lies entirely inside this one.</summary>
     /// <param name="other">The box to test.</param>
     /// <returns><see langword="true"/> when <paramref name="other"/> is inside.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public bool Contains(BoundingBox3 other) => Contains(other.Min) && Contains(other.Max);
 
     /// <summary>Gets whether two boxes overlap or touch.</summary>
     /// <param name="other">The other box.</param>
     /// <returns><see langword="true"/> when they share at least one point.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public bool Intersects(BoundingBox3 other) =>
         Min.X <= other.Max.X && Max.X >= other.Min.X
         && Min.Y <= other.Max.Y && Max.Y >= other.Min.Y
@@ -100,21 +102,25 @@ public readonly struct BoundingBox3 : IEquatable<BoundingBox3>
     /// <param name="center">The sphere's center.</param>
     /// <param name="radius">The sphere's radius.</param>
     /// <returns><see langword="true"/> when they overlap or touch.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public bool Intersects(Vector3 center, float radius) => DistanceSquared(center) <= radius * radius;
 
     /// <summary>Gets the point in the box closest to a given point.</summary>
     /// <param name="point">The point.</param>
     /// <returns>The point itself when inside, otherwise the nearest point on the surface.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public Vector3 ClosestPoint(Vector3 point) => Vector3.Clamp(point, Min, Max);
 
     /// <summary>Gets the squared distance from a point to the box; zero when the point is inside.</summary>
     /// <param name="point">The point.</param>
     /// <returns>The squared distance.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public float DistanceSquared(Vector3 point) => Vector3.DistanceSquared(point, ClosestPoint(point));
 
     /// <summary>Returns a box grown to hold a point.</summary>
     /// <param name="point">The point to include.</param>
     /// <returns>The grown box.</returns>
+    [MethodImpl(Spatial3.HotMath)]
     public BoundingBox3 Encapsulate(Vector3 point) => new(Vector3.Min(Min, point), Vector3.Max(Max, point));
 
     /// <inheritdoc/>

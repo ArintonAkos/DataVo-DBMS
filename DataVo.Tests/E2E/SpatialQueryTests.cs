@@ -503,6 +503,9 @@ public sealed class SpatialQueryTests : IDisposable
         Assert.True(peak < 1_000_000, $"live heap grew by {peak} bytes while enumerating");
     }
 
+    // Compiled fully optimized at first call: the measured loop itself must not be re-JIT'd (tier-up or on-stack
+    // replacement) half-way through the measurement under a loaded test run.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     private static double RunMath(BoundingBox3 box, float[] stored, Vector3 center, int iterations)
     {
         double sum = 0;
