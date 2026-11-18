@@ -340,40 +340,40 @@ internal partial class Select
         return aggMap[resolvedKey];
     }
 
+    /// <summary>
+    /// Finds the grouped row's entry for an aggregate whose canonical header is not present. Only an entry that is
+    /// certainly the same aggregate qualifies (the star form, or the same function over the same column, written
+    /// with a qualifier): reading another aggregate of the same function would silently give a wrong value.
+    /// </summary>
     private string ResolveAggregateKey(AggregateExpressionNode aggNode, JoinedRow row)
     {
         Row aggMap = row[GroupBy.HASH_VALUE];
         string funcName = aggNode.FunctionName.ToUpperInvariant();
-
-        if (aggNode.IsStar)
-        {
-            string? key = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
-            if (key != null)
+        string? argument = aggNode.IsStar
+            ? "*"
+            : aggNode.Argument switch
             {
-                return key;
-            }
+                ColumnRefNode column => column.Column,
+                ResolvedColumnRefNode resolved => resolved.Column,
+                _ => null,
+            };
 
-            throw new EvaluationException($"Aggregate result '{funcName}(*)' not found in grouped row.");
-        }
-
-        if (aggNode.Argument is ColumnRefNode argCol)
+        if (argument is not null)
         {
-            string? key = aggMap.Keys.FirstOrDefault(k =>
-                k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase)
-                && k.Contains(argCol.Column, StringComparison.OrdinalIgnoreCase));
-            if (key != null)
+            string distinct = aggNode.IsDistinct ? "DISTINCT " : string.Empty;
+            foreach (string key in aggMap.Keys)
             {
-                return key;
+                if (key.StartsWith(funcName + "(" + distinct, StringComparison.OrdinalIgnoreCase)
+                    && key.EndsWith(")", StringComparison.Ordinal)
+                    && (key.EndsWith("(" + distinct + argument + ")", StringComparison.OrdinalIgnoreCase)
+                        || key.EndsWith("." + argument + ")", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return key;
+                }
             }
         }
 
-        string? anyKey = aggMap.Keys.FirstOrDefault(k => k.StartsWith(funcName, StringComparison.OrdinalIgnoreCase));
-        if (anyKey != null)
-        {
-            return anyKey;
-        }
-
-        throw new EvaluationException($"Aggregate result for {funcName} not found in grouped row.");
+        throw new EvaluationException($"Aggregate result {AggregateExpressionFormatter.BuildHeader(aggNode)} not found in grouped row.");
     }
 
     private object? ResolveColumnValue(JoinedRow row, string columnReference)

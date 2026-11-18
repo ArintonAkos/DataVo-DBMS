@@ -371,7 +371,7 @@ internal partial class Select
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (TypedAggregate aggregate in state.Aggregates!)
         {
-            values[aggregate.Spec.OutputColumn] = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Count ? 0 : null;
+            values[aggregate.Spec.OutputColumn] = aggregate.Spec.Function == HashAggregateOperator.AggregateFunction.Count ? 0L : null;
         }
 
         var row = new JoinedRow();

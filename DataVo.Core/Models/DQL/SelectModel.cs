@@ -2,6 +2,7 @@ using DataVo.Core.Models.Statement.Utils;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Binding;
 using DataVo.Core.Parser.Statements;
+using DataVo.Core.Parser.Utils;
 using DataVo.Core.Services;
 using DataVo.Core.Constants;
 using DataVo.Core.Enums;
@@ -96,6 +97,78 @@ internal class SelectModel
         return [.. Ast.Columns.Where(c => c.Expression is AggregateExpressionNode)];
     }
 
+    private List<SelectColumnNode>? _computedAggregateColumns;
+
+    /// <summary>
+    /// Gets every aggregate the statement computes: the SELECT list's aggregates, then — as hidden columns that are
+    /// never projected — each distinct aggregate that only <c>HAVING</c> references. Each is computed on its own,
+    /// so a predicate on <c>COUNT(Tag)</c> never reads another aggregate of the same function.
+    /// </summary>
+    /// <returns>The select-list aggregates followed by the hidden ones.</returns>
+    public List<SelectColumnNode> GetComputedAggregateColumns()
+    {
+        if (_computedAggregateColumns is not null)
+        {
+            return _computedAggregateColumns;
+        }
+
+        List<SelectColumnNode> computed = GetAggregateColumns();
+        if (Ast.HavingExpression is { } having)
+        {
+            var headers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (SelectColumnNode column in computed)
+            {
+                headers.Add(AggregateExpressionFormatter.BuildHeader((AggregateExpressionNode)column.Expression!));
+            }
+
+            foreach (AggregateExpressionNode aggregate in AggregatesIn(having))
+            {
+                string header = AggregateExpressionFormatter.BuildHeader(aggregate);
+                if (headers.Add(header))
+                {
+                    computed.Add(new SelectColumnNode { Expression = aggregate, RawExpression = header });
+                }
+            }
+        }
+
+        _computedAggregateColumns = computed;
+        return computed;
+    }
+
+    /// <summary>Gets whether a computed aggregate column is hidden (referenced by HAVING only, never projected).</summary>
+    public bool IsHiddenAggregate(SelectColumnNode column) => !Ast.Columns.Contains(column);
+
+    private static IEnumerable<AggregateExpressionNode> AggregatesIn(ExpressionNode node)
+    {
+        switch (node)
+        {
+            case AggregateExpressionNode aggregate:
+                yield return aggregate;
+                break;
+            case BinaryExpressionNode binary:
+                foreach (AggregateExpressionNode inner in AggregatesIn(binary.Left).Concat(AggregatesIn(binary.Right)))
+                {
+                    yield return inner;
+                }
+
+                break;
+            case ScalarFunctionExpressionNode function:
+                foreach (AggregateExpressionNode inner in function.Arguments.SelectMany(AggregatesIn))
+                {
+                    yield return inner;
+                }
+
+                break;
+            case InSubqueryExpressionNode inSubquery:
+                foreach (AggregateExpressionNode inner in AggregatesIn(inSubquery.Left))
+                {
+                    yield return inner;
+                }
+
+                break;
+        }
+    }
+
     public List<SelectColumnNode> GetComputedExpressionColumns()
     {
         return [.. Ast.Columns.Where(c => IsComputedExpression(c.Expression))];
@@ -167,7 +240,7 @@ internal class SelectModel
         var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
         JoinStatement = new Join(boundJoinModel, TableService);
         GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
-        AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
+        AggregateStatement = new Aggregate([.. Ast.Columns, .. GetComputedAggregateColumns().Where(IsHiddenAggregate)], databaseName, TableService);
         WhereStatement.Prepare(TableService);
 
         TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService, SelectedColumnPositions);
@@ -190,7 +263,7 @@ internal class SelectModel
         var boundJoinModel = SelectBinder.BindJoins(Ast, TableService);
         JoinStatement = new Join(boundJoinModel, TableService);
         GroupByStatement = new GroupBy(Ast.GroupByExpression, databaseName, TableService);
-        AggregateStatement = new Aggregate(Ast.Columns, databaseName, TableService);
+        AggregateStatement = new Aggregate([.. Ast.Columns, .. GetComputedAggregateColumns().Where(IsHiddenAggregate)], databaseName, TableService);
 
         TableColumnsInUse = ParseSelectColumnsFromAst(Ast.Columns, TableService, SelectedColumnPositions);
 

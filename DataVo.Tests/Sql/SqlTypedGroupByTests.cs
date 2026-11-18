@@ -108,10 +108,10 @@ public sealed class SqlTypedGroupByTests
     {
         WithSchema(mode, context =>
         {
-            // One row: COUNT 0 (an int, as the general path returns it), the other aggregates NULL.
+            // One row: COUNT 0 (a long, as on every path), the other aggregates NULL.
             QueryResult empty = Run(context, "SELECT COUNT(*), COUNT(CustomerId), SUM(Amount), AVG(Amount), MIN(Status), MAX(Id) FROM Orders WHERE Amount > 100000");
-            Assert.Equal([0, 0, null, null, null, null], Assert.Single(empty.Data).Values.ToArray());
-            Assert.IsType<int>(empty.Data[0].Values.First());
+            Assert.Equal([0L, 0L, null, null, null, null], Assert.Single(empty.Data).Values.ToArray());
+            Assert.IsType<long>(empty.Data[0].Values.First());
 
             // ORDER BY and LIMIT see that row; with GROUP BY there is no group and no row.
             Assert.Single(Run(context, "SELECT COUNT(*) AS n FROM Orders WHERE Amount > 100000 ORDER BY n LIMIT 5").Data);
@@ -119,7 +119,7 @@ public sealed class SqlTypedGroupByTests
 
             // The same through a columnar index, which answers it without reading rows.
             Execute(context, "CREATE INDEX cx ON Orders (Amount, Id) USING COLUMNAR");
-            Assert.Equal([0, null], Assert.Single(Run(context, "SELECT COUNT(*), SUM(Id) FROM Orders WHERE Amount > 100000").Data).Values.ToArray());
+            Assert.Equal([0L, null], Assert.Single(Run(context, "SELECT COUNT(*), SUM(Id) FROM Orders WHERE Amount > 100000").Data).Values.ToArray());
         });
     }
 
@@ -134,7 +134,7 @@ public sealed class SqlTypedGroupByTests
         WithSchema(mode, context =>
         {
             (QueryResult result, long bytes) = Measure(context, "SELECT COUNT(*), SUM(Amount) FROM Orders WHERE Amount > 100000");
-            Assert.Equal([0, null], Assert.Single(result.Data).Values.ToArray());
+            Assert.Equal([0L, null], Assert.Single(result.Data).Values.ToArray());
             Assert.True(bytes / Orders.Length < 64, $"{mode}: {bytes / Orders.Length} B per row");
         });
     }

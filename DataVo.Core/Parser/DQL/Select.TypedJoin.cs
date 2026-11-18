@@ -93,7 +93,7 @@ internal partial class Select
     private sealed class JoinGroup(JoinedRow representative, int aggregates)
     {
         public JoinedRow Representative { get; } = representative;
-        public int[] Counts { get; } = new int[aggregates];
+        public long[] Counts { get; } = new long[aggregates];
         public double[] Sums { get; } = new double[aggregates];
         public DataVo.Core.Execution.SqlSumAccumulator[] Totals { get; } = new DataVo.Core.Execution.SqlSumAccumulator[aggregates];
         public object?[] Extremes { get; } = new object?[aggregates];
@@ -491,7 +491,7 @@ internal partial class Select
 
     private static object? FinishJoinAggregate(JoinAggregateKind kind, JoinGroup group, int i) => kind switch
     {
-        // The general aggregate functions: COUNT is an int, SUM is an integer for integers, AVG a double; both NULL over no values.
+        // As the general aggregate functions: COUNT is a long, SUM is an integer for integers, AVG a double; both NULL over no values.
         JoinAggregateKind.CountRows or JoinAggregateKind.CountValues => group.Counts[i],
         JoinAggregateKind.Sum => group.Totals[i].Result,
         JoinAggregateKind.Avg => group.Counts[i] == 0 ? null : group.Sums[i] / group.Counts[i],

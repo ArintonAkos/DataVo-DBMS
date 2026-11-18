@@ -168,7 +168,7 @@ public sealed class SqlTypedJoinBuildSideTests
             // One row: COUNT 0 and NULL for the rest, as SQL (and the general path) define it.
             QueryResult empty = Run(context, "SELECT COUNT(*), COUNT(c.Id), SUM(o.Amount), AVG(o.Qty), MIN(c.Name), MAX(o.Id)" + FromLeftC + " WHERE c.Region = 'R9'");
             object?[] row = [.. Assert.Single(empty.Data).Values];
-            Assert.Equal([0, 0, null, null, null, null], row);
+            Assert.Equal([0L, 0L, null, null, null, null], row);
             AssertTyped(context);
 
             // With GROUP BY there is no group, so no row.

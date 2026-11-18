@@ -4,6 +4,7 @@ using DataVo.Core.Parser.Types;
 
 namespace DataVo.Core.Parser.Aggregations
 {
+    /// <summary>SQL <c>COUNT</c>: a 64-bit count (<see cref="long"/>) on every execution path.</summary>
     internal class Count(Column? field, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string? headerName = null)
         : Aggregation(field, expression, valueSelector, headerName)
     {
@@ -11,12 +12,12 @@ namespace DataVo.Core.Parser.Aggregations
         {
             if (_field?.TableName == "*" && _expression == null)
             {
-                return rows.Count;
+                return (long)rows.Count;
             }
 
             return rows.Select(SelectColumn)
                 .Where(c => c != null)
-                .Count();
+                .LongCount();
         }
     }
 }

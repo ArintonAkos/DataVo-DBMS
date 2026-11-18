@@ -60,7 +60,7 @@ internal partial class Select
         var predicates = new List<TypedPredicate>();
         ExpressionNode? where = _model.WhereStatement.IsEvaluatable() ? _model.WhereStatement.GetExpression() : null;
         if (columns.Count == 0
-            || _model.GetAggregateColumns().Count > 0
+            || _model.GetComputedAggregateColumns().Count > 0
             || _model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
             || (where is not null && !TryCollectTypedPredicates(where, tableName, columns, predicates))

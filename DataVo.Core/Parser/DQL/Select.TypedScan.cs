@@ -211,7 +211,7 @@ internal partial class Select
         var filterMask = new bool[columns.Count];
         MarkFilterColumns(predicates, filterMask);
 
-        TypedScanState? state = _model.GetAggregateColumns().Count > 0
+        TypedScanState? state = _model.GetComputedAggregateColumns().Count > 0
             ? BuildAggregateScan(tableName, columns, predicates, filterMask, clusteredOrdinal, clusteredIsGuid)
             : _model.GroupByStatement.Model.Columns.Count > 0
                 ? null
@@ -832,7 +832,7 @@ internal partial class Select
             return null;
         }
 
-        List<SelectColumnNode> aggregateColumns = _model.GetAggregateColumns();
+        List<SelectColumnNode> aggregateColumns = _model.GetComputedAggregateColumns();
         if (aggregateColumns.Count != specs.Count)
         {
             return null;

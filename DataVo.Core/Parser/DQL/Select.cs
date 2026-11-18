@@ -2776,7 +2776,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
-            || _model.GetAggregateColumns().Count > 0)
+            || _model.GetComputedAggregateColumns().Count > 0)
         {
             return false;
         }
@@ -2834,7 +2834,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
-            || _model.GetAggregateColumns().Count > 0)
+            || _model.GetComputedAggregateColumns().Count > 0)
         {
             return false;
         }
@@ -2906,7 +2906,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return false;
         }
 
-        var aggregateColumns = _model.GetAggregateColumns();
+        var aggregateColumns = _model.GetComputedAggregateColumns();
         if (aggregateColumns.Count == 0)
         {
             return false;
@@ -3087,7 +3087,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
-            || _model.GetAggregateColumns().Count > 0)
+            || _model.GetComputedAggregateColumns().Count > 0)
         {
             return false;
         }
@@ -3238,7 +3238,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
-            || _model.GetAggregateColumns().Count > 0)
+            || _model.GetComputedAggregateColumns().Count > 0)
         {
             return false;
         }
@@ -3299,7 +3299,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (_model.GetComputedExpressionColumns().Count > 0
             || _model.GetWindowFunctionColumns().Count > 0
-            || _model.GetAggregateColumns().Count > 0)
+            || _model.GetComputedAggregateColumns().Count > 0)
         {
             return false;
         }
