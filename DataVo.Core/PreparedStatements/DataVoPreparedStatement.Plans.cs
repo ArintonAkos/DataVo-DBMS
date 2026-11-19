@@ -114,6 +114,12 @@ public sealed partial class DataVoPreparedStatement
             return false;
         }
 
+        // A list of plain aggregates is planned as a fused range aggregate (see DataVoPreparedStatement.Aggregates).
+        if (IsAggregateOnlySelectList(select.Columns))
+        {
+            return select.LimitExpression is null;
+        }
+
         for (int i = 0; i < select.Columns.Count; i++)
         {
             SelectColumnNode col = select.Columns[i];
@@ -186,8 +192,27 @@ public sealed partial class DataVoPreparedStatement
             return Ineligible();
         }
 
+        var colTypes = new FastColumnType[columns.Count];
+        for (int i = 0; i < columns.Count; i++)
+        {
+            colTypes[i] = ClassifyColumnType(columns[i].Type);
+        }
+
         string? tableAlias = select.FromAlias?.Name;
-        if (!TryResolveProjection(select.Columns, tableName, tableAlias, columns, out List<string> fields, out (string Field, int Ordinal)[] directOutput))
+        List<string> fields;
+        (string Field, int Ordinal)[] directOutput;
+        CompiledAggregate[]? aggregates = null;
+        if (IsAggregateOnlySelectList(select.Columns))
+        {
+            if (!TryResolveAggregateProjection(select.Columns, tableName, tableAlias, columns, colTypes, out fields, out CompiledAggregate[] resolved))
+            {
+                return Ineligible();
+            }
+
+            aggregates = resolved;
+            directOutput = [.. resolved.Select(aggregate => (aggregate.Field, aggregate.Ordinal))];
+        }
+        else if (!TryResolveProjection(select.Columns, tableName, tableAlias, columns, out fields, out directOutput))
         {
             return Ineligible();
         }
@@ -205,16 +230,13 @@ public sealed partial class DataVoPreparedStatement
             && string.Equals(columns[clusteredOrdinal].Type, "GUID", StringComparison.OrdinalIgnoreCase);
         int keyRangeOrdinal = clustered is null ? IntegerPrimaryKeyOrdinal(tableName, databaseName, columns) : -1;
 
-        var colTypes = new FastColumnType[columns.Count];
-        for (int i = 0; i < columns.Count; i++)
-        {
-            colTypes[i] = ClassifyColumnType(columns[i].Type);
-        }
-
         var outputMask = new bool[columns.Count];
         for (int i = 0; i < directOutput.Length; i++)
         {
-            outputMask[directOutput[i].Ordinal] = true;
+            if (directOutput[i].Ordinal >= 0)
+            {
+                outputMask[directOutput[i].Ordinal] = true; // COUNT(*) reads no column
+            }
         }
 
         var filterMask = new bool[columns.Count];
@@ -242,6 +264,46 @@ public sealed partial class DataVoPreparedStatement
 
         int limitSkip = select.LimitExpression?.SkipTarget ?? 0;
         int limitTake = select.LimitExpression?.TakeTarget ?? -1;
+
+        // Aggregates are folded over a key range only; an equality on a key or indexed column is left to the
+        // general path, whose index lookups answer it.
+        if (aggregates is not null)
+        {
+            if (HasEqualityOnIndexedOrKeyColumn(tableName, databaseName, columns, predicateSlots))
+            {
+                return Ineligible();
+            }
+
+            return new CompiledSelectPlan
+            {
+                DatabaseName = databaseName,
+                TableName = tableName,
+                SchemaVersion = schemaVersion,
+                Eligible = true,
+                AccessKind = SelectAccessKind.RangeOrFilteredScan,
+                Columns = columns,
+                ColumnTypes = colTypes,
+                Fields = fields,
+                DirectOutput = directOutput,
+                DecodeMask = decodeMask,
+                FilterMask = filterMask,
+                RestMask = restMask,
+                OutputMask = outputMask,
+                LastDecodedOrdinal = lastDecodedOrdinal,
+                ClusteredOrdinal = clusteredOrdinal,
+                ClusteredIsGuid = clusteredIsGuid,
+                PrimaryKeyRangeOrdinal = keyRangeOrdinal,
+                Predicates = [.. predicateSlots],
+                IndexName = $"_PK_{tableName}",
+                Aggregates = aggregates,
+                EmptyResult = new QueryResult
+                {
+                    Fields = fields,
+                    Data = EmptyDataRows,
+                    Messages = RowsSelected0Messages,
+                },
+            };
+        }
 
         // Check for clustered primary-key point lookup: single equality predicate on ClusteredOrdinal.
         if (clusteredOrdinal >= 0
@@ -1067,6 +1129,7 @@ public sealed partial class DataVoPreparedStatement
         out QueryResult? result)
     {
         result = null;
+        long writeLockEpoch = _engine.LockManager.RowWriteLockEpoch;
         if (_engine.LockManager.HasActiveRowWriteLocks)
         {
             return false;
@@ -1083,7 +1146,7 @@ public sealed partial class DataVoPreparedStatement
 
             if (alwaysFalse)
             {
-                result = plan.EmptyResult;
+                result = plan.Aggregates is null ? plan.EmptyResult : AggregateOverNoRows(plan, workspace);
                 return true;
             }
         }
@@ -1091,6 +1154,11 @@ public sealed partial class DataVoPreparedStatement
         (RowKey? lower, RowKey? upper) = plan.ClusteredOrdinal >= 0 && !plan.ClusteredIsGuid
             ? ComputeClusteredKeyRange(boundPredicates.AsSpan(0, plan.Predicates.Length), plan.ClusteredOrdinal)
             : (null, null);
+
+        if (plan.Aggregates is not null)
+        {
+            return TryExecuteAggregateRange(plan, workspace, boundPredicates.AsSpan(0, plan.Predicates.Length), lower, upper, writeLockEpoch, out result);
+        }
 
         if (lower is { } l && upper is { } u && l >= u)
         {
@@ -1123,7 +1191,9 @@ public sealed partial class DataVoPreparedStatement
         bool read = keyRangeRows is not null
             ? _engine.StorageContext.VisitRowsByKey(plan.TableName, plan.DatabaseName, keyRangeRows, ref state, VisitScanMaterializedRow)
             : _engine.StorageContext.ScanTableRows(plan.TableName, plan.DatabaseName, lower, upper, ref state, VisitScanMaterializedRow);
-        if (!read)
+        // A writer that started during a multi-row read could be seen half applied; the general path re-reads
+        // those rows under row locks.
+        if (!read || (rows.Count > 1 && _engine.LockManager.RowWriteLockEpoch != writeLockEpoch))
         {
             return false;
         }
@@ -1347,7 +1417,7 @@ public sealed partial class DataVoPreparedStatement
 
     /// <summary>
     /// The rows a range on an InMemory table's integer primary key selects, from its key lane (see
-    /// <see cref="IndexManager.TryPrimaryKeyRangeRows"/>); null when the predicates bound no range or a scan is cheaper.
+    /// <see cref="IndexManager.TryPrimaryKeyRangeRows(string, string, long?, long?, long)"/>); null when the predicates bound no range or a scan is cheaper.
     /// </summary>
     private List<RowKey>? TryPrimaryKeyRangeRows(CompiledSelectPlan plan, ReadOnlySpan<BoundScanPredicate> predicates)
     {
@@ -1361,6 +1431,32 @@ public sealed partial class DataVoPreparedStatement
         return lower is { } from && upper is { } to && from >= to
             ? []
             : _engine.IndexManager.TryPrimaryKeyRangeRows(plan.TableName, plan.DatabaseName, lower?.AsInt64(), upper?.AsInt64(), tableRows);
+    }
+
+    /// <summary>
+    /// As <see cref="TryPrimaryKeyRangeRows(CompiledSelectPlan, ReadOnlySpan{BoundScanPredicate})"/>, but into the
+    /// thread workspace's reused lists, so listing the range allocates nothing; an empty range is an empty list.
+    /// </summary>
+    private List<RowKey>? TryPrimaryKeyRangeRows(CompiledSelectPlan plan, ReadOnlySpan<BoundScanPredicate> predicates, ThreadSelectWorkspace workspace)
+    {
+        (RowKey? lower, RowKey? upper) = ComputeClusteredKeyRange(predicates, plan.PrimaryKeyRangeOrdinal);
+        List<RowKey> rows = workspace.RangeRows;
+        rows.Clear();
+        if ((lower is null && upper is null)
+            || !_engine.StorageContext.TryEstimateRowCount(plan.TableName, plan.DatabaseName, out long tableRows))
+        {
+            return null;
+        }
+
+        if (lower is { } from && upper is { } to && from >= to)
+        {
+            return rows;
+        }
+
+        return _engine.IndexManager.TryPrimaryKeyRangeRows(
+            plan.TableName, plan.DatabaseName, plan.IndexName!, lower?.AsInt64(), upper?.AsInt64(), tableRows, workspace.RangeRowIds, rows)
+            ? rows
+            : null;
     }
 
     /// <summary>The ordinal of a table's primary key when it is one INT or BIGINT column; else -1.</summary>
@@ -2255,6 +2351,14 @@ public sealed partial class DataVoPreparedStatement
         public int PrimaryKeyRangeOrdinal { get; init; } = -1;
         public CompiledPredicateSlot[] Predicates { get; init; } = [];
         public string? IndexName { get; init; }
+
+        /// <summary>The SELECT list's aggregates when it is made only of them (a fused range aggregate); otherwise null.</summary>
+        public CompiledAggregate[]? Aggregates { get; init; }
+
+        /// <summary>Every column a matched row is read in (<see cref="FilterMask"/> or <see cref="RestMask"/>).</summary>
+        public bool[] ReadMask => _readMask ??= [.. FilterMask.Select((filter, i) => filter || RestMask[i])];
+
+        private bool[]? _readMask;
         public int LimitSkip { get; init; }
         public int LimitTake { get; init; } = -1;
         public QueryResult EmptyResult { get; init; } = null!;
@@ -2279,12 +2383,22 @@ public sealed partial class DataVoPreparedStatement
         public readonly CellValue[] Cells;
         public readonly BoundScanPredicate[] BoundPredicates;
 
+        /// <summary>One accumulator per aggregate of a fused range aggregate; empty otherwise.</summary>
+        public readonly AggregateAccumulator[] Accumulators;
+
+        /// <summary>Reused list for the row ids a primary-key range's lane lookup returns.</summary>
+        public readonly List<long> RangeRowIds = [];
+
+        /// <summary>Reused list for those row ids as sorted row keys, the order a scan visits them in.</summary>
+        public readonly List<RowKey> RangeRows = [];
+
         public ThreadSelectWorkspace(CompiledSelectPlan plan)
         {
             int colCount = plan.Columns.Count;
             DecodedValuesByOrdinal = new object?[colCount];
             Cells = new CellValue[colCount];
             BoundPredicates = new BoundScanPredicate[plan.Predicates.Length];
+            Accumulators = new AggregateAccumulator[plan.Aggregates?.Length ?? 0];
             _stringCachesByColumn = new Utf8CacheEntry[]?[colCount];
 
             for (int i = 0; i < RingSize; i++)
@@ -2359,7 +2473,8 @@ public sealed partial class DataVoPreparedStatement
 
         public RowResultSlot(CompiledSelectPlan plan)
         {
-            int colCount = plan.Columns.Count;
+            // Boxes are indexed by column ordinal, or by aggregate position for a fused aggregate.
+            int colCount = Math.Max(plan.Columns.Count, plan.DirectOutput.Length);
             Row = new Dictionary<string, object?>(plan.DirectOutput.Length);
             for (int i = 0; i < plan.DirectOutput.Length; i++)
             {
