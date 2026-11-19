@@ -445,6 +445,113 @@ public class LockManagerRowLevelTests
         Assert.Contains($"{db}.{firstTable}", deadlock.Message);
     }
 
+    [Fact]
+    public async Task RowWriteLock_BlocksConcurrentTableWriteLock_UntilReleased()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 50);
+        const string db = "db";
+        const string table = "users";
+
+        var rowHeld = new ManualResetEventSlim(false);
+        var releaseRow = new ManualResetEventSlim(false);
+
+        Task rowWriter = Task.Run(() =>
+        {
+            locks.AcquireRowWriteLock(db, table, 1);
+            rowHeld.Set();
+            try
+            {
+                releaseRow.Wait();
+            }
+            finally
+            {
+                locks.ReleaseRowWriteLock(db, table, 1);
+            }
+        });
+
+        Assert.True(rowHeld.Wait(3000), "Row writer should acquire row write lock first.");
+        try
+        {
+            TimeoutException ex = Assert.Throws<TimeoutException>(() => locks.AcquireWriteLock(db, table));
+            Assert.Contains("Timed out acquiring table write lock", ex.Message);
+        }
+        finally
+        {
+            releaseRow.Set();
+            await rowWriter;
+        }
+
+        locks.AcquireWriteLock(db, table);
+        locks.ReleaseWriteLock(db, table);
+        Assert.Equal(0, GetPrivateRowLockCount(locks));
+        Assert.Equal(0, GetPrivateTableLockCount(locks));
+    }
+
+    [Fact]
+    public async Task TableWriteLock_BlocksConcurrentRowWriteLock_UntilReleased()
+    {
+        var locks = new LockManager(lockAcquireTimeoutMs: 50);
+        const string db = "db";
+        const string table = "users";
+
+        var tableHeld = new ManualResetEventSlim(false);
+        var releaseTable = new ManualResetEventSlim(false);
+
+        Task tableWriter = Task.Run(() =>
+        {
+            locks.AcquireWriteLock(db, table);
+            tableHeld.Set();
+            try
+            {
+                releaseTable.Wait();
+            }
+            finally
+            {
+                locks.ReleaseWriteLock(db, table);
+            }
+        });
+
+        Assert.True(tableHeld.Wait(3000), "Table writer should acquire table write lock first.");
+        try
+        {
+            TimeoutException ex = Assert.Throws<TimeoutException>(() => locks.AcquireRowWriteLock(db, table, 1));
+            Assert.Contains("Timed out acquiring table read lock", ex.Message);
+        }
+        finally
+        {
+            releaseTable.Set();
+            await tableWriter;
+        }
+
+        locks.AcquireRowWriteLock(db, table, 1);
+        locks.ReleaseRowWriteLock(db, table, 1);
+        Assert.Equal(0, GetPrivateRowLockCount(locks));
+        Assert.Equal(0, GetPrivateTableLockCount(locks));
+    }
+
+    [Fact]
+    public void TableWriteOwner_CanAcquireNestedRowWriteLock_WithoutRecursionFailure()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+
+        locks.AcquireWriteLock(db, table);
+        try
+        {
+            locks.AcquireRowWriteLock(db, table, 1);
+            locks.ReleaseRowWriteLock(db, table, 1);
+        }
+        finally
+        {
+            locks.ReleaseWriteLock(db, table);
+        }
+
+        Assert.False(LockManager.CurrentThreadHoldsLocks);
+        Assert.Equal(0, GetPrivateRowLockCount(locks));
+        Assert.Equal(0, GetPrivateTableLockCount(locks));
+    }
+
     private static int GetPrivateRowLockCount(LockManager locks)
     {
         var field = typeof(LockManager).GetField("_rowLocks", BindingFlags.Instance | BindingFlags.NonPublic);

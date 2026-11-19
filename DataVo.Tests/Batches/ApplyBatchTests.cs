@@ -474,6 +474,51 @@ public sealed class ApplyBatchTests : IDisposable
         Assert.Equal("1", Scalar(context, "SELECT COUNT(*) FROM Teams WHERE Id = 3"));
     }
 
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public async Task ConcurrentSqlUpdateAndApplyBatch_NeverCreateDuplicatePrimaryKeys(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        for (int id = 1; id <= 5; id++)
+        {
+            Ok(context, $"INSERT INTO Players (Id, Name, Hp) VALUES ({id}, 'x', 0)");
+        }
+
+        int sqlFailures = 0;
+        Task sqlUpdater = Task.Run(() =>
+        {
+            var random = new Random(11);
+            for (int i = 0; i < 300; i++)
+            {
+                int id = random.Next(1, 6);
+                var result = context.Execute($"UPDATE Players SET Hp = {random.Next(1000)} WHERE Id = {id}")[^1];
+                if (result.IsError)
+                {
+                    Interlocked.Increment(ref sqlFailures);
+                }
+            }
+        });
+
+        Task batchApplier = Task.Run(() =>
+        {
+            var random = new Random(29);
+            for (int i = 0; i < 300; i++)
+            {
+                int id = random.Next(1, 6);
+                var batch = new DataVoWriteBatch();
+                batch.Upsert(Players, id, "x", random.Next(1000));
+                context.ApplyBatch(batch);
+            }
+        });
+
+        await Task.WhenAll(sqlUpdater, batchApplier);
+
+        Assert.Equal(0, sqlFailures);
+        List<string> allRows = Rows(context);
+        Assert.Equal(5, allRows.Count);
+        Assert.Equal(["1", "2", "3", "4", "5"], allRows.Select(r => r.Split(':')[0]).OrderBy(x => x).ToList());
+    }
+
     [Fact]
     public void Lsm_BatchIsDurableAcrossReopen()
     {

@@ -26,7 +26,7 @@ public sealed class LockManager
         public ReaderWriterLockSlim Lock { get; }
         public int ActiveUsers;
         public readonly object OwnershipSync = new();
-        public readonly HashSet<int> ReadOwnerThreadIds = [];
+        public readonly Dictionary<int, int> ReadOwnerCounts = [];
         public int? WriteOwnerThreadId;
     }
 
@@ -42,6 +42,7 @@ public sealed class LockManager
         public readonly object OwnershipSync = new();
         public readonly HashSet<int> ReadOwnerThreadIds = [];
         public int? WriteOwnerThreadId;
+        public string? TableIntentKey;
     }
 
     private readonly record struct WaitRegistration(int ThreadId, bool Active)
@@ -193,7 +194,8 @@ public sealed class LockManager
     }
 
     /// <summary>
-    /// Acquires a row-level write lock.
+    /// Acquires a row-level write lock, coordinated with a table-level intent read lock so exclusive table writers
+    /// (such as <see cref="AcquireWriteLock(string, string)"/>) never run concurrently with row-level writers.
     /// </summary>
     /// <param name="databaseName">The database name.</param>
     /// <param name="tableName">The table name.</param>
@@ -205,6 +207,9 @@ public sealed class LockManager
         {
             return;
         }
+
+        string tableKey = BuildTableKey(databaseName, tableName);
+        bool acquiredTableIntent = AcquireTableIntentReadForRowWrite(tableKey);
 
         RowLockEntry rowLock = RetainRowLock(rowKey);
         Interlocked.Increment(ref _activeRowWriteLocks);
@@ -224,11 +229,17 @@ public sealed class LockManager
             // See AcquireTableLock: edges must be gone before ownership becomes visible.
             waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
             RegisterRowWriteOwner(rowLock, threadId);
+            rowLock.TableIntentKey = acquiredTableIntent ? tableKey : null;
         }
         catch
         {
             Interlocked.Decrement(ref _activeRowWriteLocks);
             ReleaseRowLock(rowKey, rowLock);
+            if (acquiredTableIntent)
+            {
+                ReleaseTableReadLockCore(tableKey, removeWhenIdle: true);
+            }
+
             throw;
         }
         finally
@@ -287,10 +298,18 @@ public sealed class LockManager
             throw new InvalidOperationException($"Row write lock not found for key '{rowKey}'.");
         }
 
+        string? tableIntentKey = rowLock.TableIntentKey;
+        rowLock.TableIntentKey = null;
+
         UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
         rowLock.Lock.ExitWriteLock();
         ReleaseRowLock(rowKey, rowLock);
         Interlocked.Decrement(ref _activeRowWriteLocks);
+
+        if (tableIntentKey is not null)
+        {
+            ReleaseTableReadLockCore(tableIntentKey, removeWhenIdle: true);
+        }
     }
 
     /// <summary>
@@ -410,6 +429,67 @@ public sealed class LockManager
         ReleaseTableLock(tableKey, write: true, removeWhenIdle: false);
     }
 
+    /// <summary>
+    /// Acquires a shared table read lock on <paramref name="tableKey"/> to act as an intent lock for a row-level
+    /// write, blocking exclusive table writers while allowing concurrent row-level writers on other rows. Skips
+    /// acquisition when the current thread already holds the table write lock.
+    /// </summary>
+    private bool AcquireTableIntentReadForRowWrite(string tableKey)
+    {
+        TableLockEntry tableLock = RetainTableLock(tableKey);
+        int threadId = Environment.CurrentManagedThreadId;
+
+        bool alreadyWriteOwner = false;
+        bool alreadyReadOwner = false;
+        lock (tableLock.OwnershipSync)
+        {
+            if (tableLock.WriteOwnerThreadId == threadId)
+            {
+                alreadyWriteOwner = true;
+            }
+            else if (tableLock.ReadOwnerCounts.TryGetValue(threadId, out int count) && count > 0)
+            {
+                tableLock.ReadOwnerCounts[threadId] = count + 1;
+                alreadyReadOwner = true;
+            }
+        }
+
+        if (alreadyWriteOwner)
+        {
+            ReleaseTableLockEntry(tableKey, tableLock);
+            return false;
+        }
+
+        if (alreadyReadOwner)
+        {
+            return true;
+        }
+
+        WaitRegistration waitRegistration = WaitRegistration.None;
+        try
+        {
+            waitRegistration = RegisterWaitIfBlocked(tableKey, "table read", GetTableBlockingThreads(tableLock, threadId, write: false), threadId, tableLock, write: false);
+
+            if (!tableLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
+            {
+                throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
+            }
+
+            waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
+            RegisterTableReadOwner(tableLock, threadId);
+            return true;
+        }
+        catch
+        {
+            ReleaseTableLockEntry(tableKey, tableLock);
+            throw;
+        }
+        finally
+        {
+            ClearWaitRegistration(waitRegistration);
+        }
+    }
+
     private void AcquireTableLock(string tableKey, bool write)
     {
         // A write lock whose release is deferred until publication is still held by this flow.
@@ -420,6 +500,19 @@ public sealed class LockManager
 
         TableLockEntry tableLock = RetainTableLock(tableKey);
         int threadId = Environment.CurrentManagedThreadId;
+
+        if (!write)
+        {
+            lock (tableLock.OwnershipSync)
+            {
+                if (tableLock.ReadOwnerCounts.TryGetValue(threadId, out int count) && count > 0)
+                {
+                    tableLock.ReadOwnerCounts[threadId] = count + 1;
+                    return;
+                }
+            }
+        }
+
         WaitRegistration waitRegistration = WaitRegistration.None;
 
         try
@@ -475,19 +568,32 @@ public sealed class LockManager
 
     private void ReleaseTableLockCore(string tableKey, bool write, bool removeWhenIdle)
     {
-        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
+        if (!write)
         {
-            throw new InvalidOperationException($"Table {(write ? "write" : "read")} lock not found for key '{tableKey}'.");
+            ReleaseTableReadLockCore(tableKey, removeWhenIdle);
+            return;
         }
 
-        if (write)
+        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
         {
-            UnregisterTableWriteOwner(tableLock, Environment.CurrentManagedThreadId);
-            tableLock.Lock.ExitWriteLock();
+            throw new InvalidOperationException($"Table write lock not found for key '{tableKey}'.");
         }
-        else
+
+        UnregisterTableWriteOwner(tableLock, Environment.CurrentManagedThreadId);
+        tableLock.Lock.ExitWriteLock();
+        ReleaseTableLockEntry(tableKey, tableLock, removeWhenIdle);
+    }
+
+    private void ReleaseTableReadLockCore(string tableKey, bool removeWhenIdle)
+    {
+        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
         {
-            UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
+            throw new InvalidOperationException($"Table read lock not found for key '{tableKey}'.");
+        }
+
+        bool exitReadLock = UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
+        if (exitReadLock)
+        {
             tableLock.Lock.ExitReadLock();
         }
 
@@ -588,7 +694,7 @@ public sealed class LockManager
 
             if (write)
             {
-                foreach (int readerId in tableLock.ReadOwnerThreadIds)
+                foreach (int readerId in tableLock.ReadOwnerCounts.Keys)
                 {
                     if (readerId != threadId)
                     {
@@ -631,21 +737,36 @@ public sealed class LockManager
     {
         lock (tableLock.OwnershipSync)
         {
-            if (tableLock.ReadOwnerThreadIds.Add(threadId))
+            if (tableLock.ReadOwnerCounts.TryGetValue(threadId, out int count))
             {
+                tableLock.ReadOwnerCounts[threadId] = count + 1;
+            }
+            else
+            {
+                tableLock.ReadOwnerCounts[threadId] = 1;
                 t_heldLocks++;
             }
         }
     }
 
-    private static void UnregisterTableReadOwner(TableLockEntry tableLock, int threadId)
+    private static bool UnregisterTableReadOwner(TableLockEntry tableLock, int threadId)
     {
         lock (tableLock.OwnershipSync)
         {
-            if (tableLock.ReadOwnerThreadIds.Remove(threadId))
+            if (!tableLock.ReadOwnerCounts.TryGetValue(threadId, out int count))
             {
-                t_heldLocks--;
+                return false;
             }
+
+            if (count > 1)
+            {
+                tableLock.ReadOwnerCounts[threadId] = count - 1;
+                return false;
+            }
+
+            tableLock.ReadOwnerCounts.Remove(threadId);
+            t_heldLocks--;
+            return true;
         }
     }
 

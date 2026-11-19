@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DataVo.Core.BTree;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Exceptions;
@@ -23,7 +24,7 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
 {
     private readonly Dictionary<string, TablePlan> _tables = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<TablePlan> _order = [];
-    private readonly Dictionary<DataVoBatchLayout, LayoutPlan> _layouts = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<DataVoBatchLayout, LayoutPlan> _layouts = new(LayoutReferenceComparer.Instance);
     private int _unchanged;
     private int _missing;
 
@@ -511,5 +512,18 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         }
 
         private bool _deleted;
+    }
+
+    /// <summary>
+    /// Compares <see cref="DataVoBatchLayout"/> instances by reference identity across all target frameworks,
+    /// including <c>netstandard2.1</c> where <c>ReferenceEqualityComparer</c> is unavailable.
+    /// </summary>
+    private sealed class LayoutReferenceComparer : IEqualityComparer<DataVoBatchLayout>
+    {
+        public static readonly LayoutReferenceComparer Instance = new();
+
+        public bool Equals(DataVoBatchLayout? x, DataVoBatchLayout? y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(DataVoBatchLayout obj) => RuntimeHelpers.GetHashCode(obj);
     }
 }
