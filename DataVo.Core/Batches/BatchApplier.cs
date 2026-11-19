@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using DataVo.Core.BTree;
 using DataVo.Core.CompiledQueries;
@@ -6,6 +7,8 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Parser.DML;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.StorageEngine;
 using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.Batches;
@@ -22,9 +25,22 @@ namespace DataVo.Core.Batches;
 /// </remarks>
 internal sealed class BatchApplier(DataVoContext context, string databaseName)
 {
+    [ThreadStatic]
+    private static HashSet<long>? _fastIntKeyScratch;
+
+    [ThreadStatic]
+    private static HashSet<Guid>? _fastGuidKeyScratch;
+
+    [ThreadStatic]
+    private static HashSet<string>? _fastStringKeyScratch;
+
+    [ThreadStatic]
+    private static TypedRowBufferPool? _rowBufferPool;
+
     private readonly Dictionary<string, TablePlan> _tables = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<TablePlan> _order = [];
     private readonly Dictionary<DataVoBatchLayout, LayoutPlan> _layouts = new(LayoutReferenceComparer.Instance);
+    private DataVoWriteBatch? _batch;
     private int _unchanged;
     private int _missing;
 
@@ -39,20 +55,32 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
     /// <exception cref="ArgumentException">A table or column does not exist, a layout misses a key column, or a key is NULL.</exception>
     public void Prepare(DataVoWriteBatch batch)
     {
+        _batch = batch;
         for (int i = 0; i < batch.Count; i++)
         {
             DataVoWriteBatch.Entry entry = batch[i];
             LayoutPlan layout = LayoutOf(entry.Layout);
-            ReadOnlySpan<object?> values = batch.ValuesOf(entry);
-            PendingRow row = layout.Table.Pending(KeyOf(layout, values, out Dictionary<string, object?> keyValues), keyValues);
-            if (entry.Operation == DataVoBatchOperation.Delete)
+            TablePlan table = layout.Table;
+
+            if (table.FastPathEligible
+                && entry.IsTyped
+                && entry.Operation == DataVoBatchOperation.Upsert
+                && layout.IsFullTypedLayout
+                && (table.FastLayout is null || ReferenceEquals(table.FastLayout, layout)))
             {
-                row.MarkDeleted();
+                ReadOnlySpan<CellValue> cells = batch.TypedValuesOf(entry);
+                ValidateTypedPrimaryKeysNonNull(layout, cells);
+                table.FastLayout ??= layout;
+                (table.FastEntries ??= []).Add(i);
+                continue;
             }
-            else
+
+            if (table.FastPathEligible)
             {
-                row.Set(layout, values, BindAndNormalize, updateOnly: entry.Operation == DataVoBatchOperation.Update);
+                DemoteTable(table);
             }
+
+            FoldGeneralEntry(entry, layout);
         }
     }
 
@@ -65,36 +93,78 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
     /// <returns>What happened to the stored rows.</returns>
     public DataVoBatchResult Execute(long statementTxId, ChangeRecorder? recorder)
     {
-        foreach (TablePlan table in _order)
+        List<FastInsertPlan>? fastPlans = null;
+        try
         {
-            Classify(table);
+            fastPlans = PrepareFastInserts();
+
+            bool hasGeneralTables = false;
+            foreach (TablePlan table in _order)
+            {
+                if (!table.FastPathEligible)
+                {
+                    hasGeneralTables = true;
+                    Classify(table);
+                }
+            }
+
+            // Every constraint is decided against the batch's final state before anything is written, so the
+            // writers below run without their own foreign-key checks and cannot stop half-way.
+            int deleted = 0;
+            if (hasGeneralTables)
+            {
+                BatchIntegrity integrity = Validate();
+
+                // Deletes (cascaded rows included) go first, so the keys, unique values and parents they give up are
+                // free before updates and inserts claim them.
+                foreach (string table in integrity.TablesWithDeletes.ToList())
+                {
+                    List<RowKey> rows = [.. integrity.DeletedRows(table)];
+                    deleted += rows.Count;
+                    RowDeleter.Delete(context.Engine, rows, table, databaseName, statementTxId, recorder, followForeignKeys: false);
+                }
+
+                foreach (TablePlan table in _order)
+                {
+                    if (!table.FastPathEligible)
+                    {
+                        WriteUpdates(table, statementTxId, recorder);
+                    }
+                }
+
+                foreach (string table in integrity.ParentsFirst([.. _order.Where(plan => !plan.FastPathEligible && plan.Inserts.Count > 0).Select(plan => plan.Name)]))
+                {
+                    WriteInserts(_tables[table], statementTxId, recorder);
+                }
+            }
+
+            if (fastPlans is not null)
+            {
+                foreach (FastInsertPlan fastPlan in fastPlans)
+                {
+                    InsertService.WriteValidatedTypedInsertRows(
+                        databaseName,
+                        fastPlan.Table.Name,
+                        fastPlan.Prepared,
+                        statementTxId,
+                        recorder,
+                        callerOwnsRowBuffers: true);
+                    fastPlan.Table.FastInsertedCount = fastPlan.Prepared.Rows.Count;
+                }
+            }
+
+            return Summarize(deleted);
         }
-
-        // Every constraint is decided against the batch's final state before anything is written, so the
-        // writers below run without their own foreign-key checks and cannot stop half-way.
-        BatchIntegrity integrity = Validate();
-
-        // Deletes (cascaded rows included) go first, so the keys, unique values and parents they give up are
-        // free before updates and inserts claim them.
-        int deleted = 0;
-        foreach (string table in integrity.TablesWithDeletes.ToList())
+        finally
         {
-            List<RowKey> rows = [.. integrity.DeletedRows(table)];
-            deleted += rows.Count;
-            RowDeleter.Delete(context.Engine, rows, table, databaseName, statementTxId, recorder, followForeignKeys: false);
+            if (fastPlans is not null)
+            {
+                foreach (FastInsertPlan fastPlan in fastPlans)
+                {
+                    fastPlan.Dispose();
+                }
+            }
         }
-
-        foreach (TablePlan table in _order)
-        {
-            WriteUpdates(table, statementTxId, recorder);
-        }
-
-        foreach (string table in integrity.ParentsFirst([.. _order.Where(plan => plan.Inserts.Count > 0).Select(plan => plan.Name)]))
-        {
-            WriteInserts(_tables[table], statementTxId, recorder);
-        }
-
-        return Summarize(deleted);
     }
 
     private LayoutPlan LayoutOf(DataVoBatchLayout layout)
@@ -242,13 +312,19 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         var integrity = new BatchIntegrity(context.Engine, databaseName, InsertService);
         foreach (TablePlan table in _order)
         {
-            integrity.AddTable(table.Name, table.DeleteRows, table.UpdateIds, table.UpdateOldRows, table.UpdateNewRows, table.Inserts);
+            if (!table.FastPathEligible)
+            {
+                integrity.AddTable(table.Name, table.DeleteRows, table.UpdateIds, table.UpdateOldRows, table.UpdateNewRows, table.Inserts);
+            }
         }
 
         integrity.Validate();
         foreach (TablePlan table in _order)
         {
-            table.DropUpdatesOf(integrity.DeletedRows(table.Name));
+            if (!table.FastPathEligible)
+            {
+                table.DropUpdatesOf(integrity.DeletedRows(table.Name));
+            }
         }
 
         return integrity;
@@ -288,12 +364,384 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
     private InsertRowService InsertService =>
         field ??= new InsertRowService(context.Engine, context.Engine.StorageContext, context.Engine.Catalog, context.Engine.IndexManager);
 
+    private void FoldGeneralEntry(DataVoWriteBatch.Entry entry, LayoutPlan layout)
+    {
+        if (!entry.IsTyped)
+        {
+            FoldValues(entry.Operation, layout, _batch!.ValuesOf(entry));
+            return;
+        }
+
+        ReadOnlySpan<CellValue> cells = _batch!.TypedValuesOf(entry);
+        object?[] boxed = ArrayPool<object?>.Shared.Rent(cells.Length);
+        try
+        {
+            for (int i = 0; i < cells.Length; i++)
+            {
+                boxed[i] = cells[i].ToObject();
+            }
+
+            FoldValues(entry.Operation, layout, boxed.AsSpan(0, cells.Length));
+        }
+        finally
+        {
+            Array.Clear(boxed, 0, cells.Length);
+            ArrayPool<object?>.Shared.Return(boxed);
+        }
+    }
+
+    private void FoldValues(DataVoBatchOperation operation, LayoutPlan layout, ReadOnlySpan<object?> values)
+    {
+        PendingRow row = layout.Table.Pending(KeyOf(layout, values, out Dictionary<string, object?> keyValues), keyValues);
+        if (operation == DataVoBatchOperation.Delete)
+        {
+            row.MarkDeleted();
+        }
+        else
+        {
+            row.Set(layout, values, BindAndNormalize, updateOnly: operation == DataVoBatchOperation.Update);
+        }
+    }
+
+    private void DemoteTable(TablePlan table)
+    {
+        table.FastPathEligible = false;
+        if (table.FastEntries is null || table.FastEntries.Count == 0)
+        {
+            return;
+        }
+
+        LayoutPlan layout = table.FastLayout!;
+        foreach (int entryIndex in table.FastEntries)
+        {
+            FoldGeneralEntry(_batch![entryIndex], layout);
+        }
+
+        table.FastEntries.Clear();
+    }
+
+    private static void ValidateTypedPrimaryKeysNonNull(LayoutPlan layout, ReadOnlySpan<CellValue> cells)
+    {
+        for (int k = 0; k < layout.KeyPositions.Length; k++)
+        {
+            if (cells[layout.KeyPositions[k]].IsNull)
+            {
+                throw new ArgumentException($"Primary key column {layout.KeyColumns[k].Name} of {layout.Table.Name} cannot be NULL in a batch.");
+            }
+        }
+    }
+
+    private List<FastInsertPlan>? PrepareFastInserts()
+    {
+        List<FastInsertPlan>? plans = null;
+        foreach (TablePlan table in _order)
+        {
+            if (!table.FastPathEligible || table.FastEntries is null || table.FastEntries.Count == 0)
+            {
+                table.FastPathEligible = false;
+                continue;
+            }
+
+            if (TryPrepareFastInsert(table, out FastInsertPlan? plan))
+            {
+                (plans ??= []).Add(plan!);
+            }
+            else
+            {
+                DemoteTable(table);
+            }
+        }
+
+        return plans;
+    }
+
+    private bool TryPrepareFastInsert(TablePlan table, out FastInsertPlan? plan)
+    {
+        plan = null;
+        if (context.Engine.Catalog.GetTableForeignKeys(table.Name, databaseName).Count > 0
+            || IsReferencedByAnotherBatchTable(table.Name))
+        {
+            return false;
+        }
+
+        List<int> entryIndices = table.FastEntries!;
+        LayoutPlan layout = table.FastLayout!;
+        int rowCount = entryIndices.Count;
+        int columnCount = table.AllColumns.Count;
+        CellType[] expectedTypes = table.ExpectedCellTypes!;
+
+        TypedRowBufferPool pool = _rowBufferPool ??= new TypedRowBufferPool();
+        List<CellValue[]> rowBuffers = pool.Rent(rowCount, columnCount);
+        long[]? integerKeys = null;
+        bool committedToPlan = false;
+        try
+        {
+            if (!FillTypedRowBuffers(layout, expectedTypes, entryIndices, rowBuffers))
+            {
+                return false;
+            }
+
+            ReactiveRowSchema schema = table.GetReactiveSchema();
+            string[]? primaryKeyValues = null;
+            if (!TryCheckDisjointPrimaryKeys(table, schema, rowBuffers, out integerKeys, out primaryKeyValues))
+            {
+                return false;
+            }
+
+            InsertRowService.PreparedTypedInsert prepared = InsertService.ValidateTypedInsertRows(
+                databaseName,
+                table.Name,
+                schema,
+                rowBuffers,
+                checkForeignKeys: false,
+                primaryKeysAlreadyValidated: true,
+                prevalidatedIntegerPrimaryKeys: integerKeys,
+                prevalidatedPrimaryKeyValues: primaryKeyValues);
+            plan = new FastInsertPlan(table, pool, rowBuffers, columnCount, integerKeys, prepared);
+            committedToPlan = true;
+            return true;
+        }
+        finally
+        {
+            if (!committedToPlan)
+            {
+                if (integerKeys is not null)
+                {
+                    ArrayPool<long>.Shared.Return(integerKeys);
+                }
+
+                pool.Return(rowBuffers, columnCount);
+            }
+        }
+    }
+
+    private bool IsReferencedByAnotherBatchTable(string parentTable)
+    {
+        if (_order.Count <= 1)
+        {
+            return false;
+        }
+
+        foreach (var child in context.Engine.Catalog.GetChildForeignKeys(parentTable, databaseName))
+        {
+            if (!child.ChildTable.Equals(parentTable, StringComparison.OrdinalIgnoreCase)
+                && _tables.ContainsKey(child.ChildTable))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool FillTypedRowBuffers(
+        LayoutPlan layout,
+        CellType[] expectedTypes,
+        List<int> entryIndices,
+        List<CellValue[]> rowBuffers)
+    {
+        int[] layoutToCatalog = layout.LayoutToCatalog;
+        bool isCatalogOrder = layout.IsCatalogOrder;
+        int columnCount = expectedTypes.Length;
+
+        for (int r = 0; r < entryIndices.Count; r++)
+        {
+            ReadOnlySpan<CellValue> source = _batch!.TypedValuesOf(_batch[entryIndices[r]]);
+            CellValue[] dest = rowBuffers[r];
+            for (int i = 0; i < columnCount; i++)
+            {
+                int catalogOrdinal = isCatalogOrder ? i : layoutToCatalog[i];
+                CellValue cell = source[i];
+                if (!cell.IsNull)
+                {
+                    CellType expected = expectedTypes[catalogOrdinal];
+                    if (cell.Type != expected)
+                    {
+                        if (!TryCoerceTypedCell(cell, expected, out cell))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                dest[catalogOrdinal] = cell;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryCoerceTypedCell(CellValue cell, CellType expected, out CellValue coerced)
+    {
+        if (cell.Type == CellType.Int32 && expected == CellType.Int64)
+        {
+            coerced = CellValue.From((long)cell.AsInt32());
+            return true;
+        }
+
+        if (cell.Type == CellType.Int64 && expected == CellType.Int32)
+        {
+            long value = cell.AsInt64();
+            if (value >= int.MinValue && value <= int.MaxValue)
+            {
+                coerced = CellValue.From((int)value);
+                return true;
+            }
+        }
+
+        coerced = default;
+        return false;
+    }
+
+    private bool TryCheckDisjointPrimaryKeys(
+        TablePlan table,
+        ReactiveRowSchema schema,
+        List<CellValue[]> rows,
+        out long[]? integerKeys,
+        out string[]? stringKeys)
+    {
+        integerKeys = null;
+        stringKeys = null;
+        bool isEmpty = context.Engine.StorageContext.IsTableEmpty(table.Name, databaseName);
+        string pkIndex = $"_PK_{table.Name}";
+
+        if (table.SingleIntegerPrimaryKeyCatalogOrdinal >= 0)
+        {
+            int pkOrdinal = table.SingleIntegerPrimaryKeyCatalogOrdinal;
+            long[] keys = ArrayPool<long>.Shared.Rent(rows.Count);
+            HashSet<long> seen = _fastIntKeyScratch ??= [];
+            seen.Clear();
+            Indexing.ConcurrentInt64Int64Map? lane = isEmpty
+                ? null
+                : context.Engine.IndexManager.GetIntegerPrimaryKeyLane(pkIndex, table.Name, databaseName);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                CellValue cell = rows[i][pkOrdinal];
+                long pk = cell.Type == CellType.Int32 ? cell.AsInt32() : cell.AsInt64();
+                if (!seen.Add(pk)
+                    || (!isEmpty && IntegerPrimaryKeyExists(table.Name, pkIndex, lane, pk)))
+                {
+                    ArrayPool<long>.Shared.Return(keys);
+                    return false;
+                }
+
+                keys[i] = pk;
+            }
+
+            integerKeys = keys;
+            return true;
+        }
+
+        if (table.SingleGuidPrimaryKeyCatalogOrdinal >= 0)
+        {
+            int pkOrdinal = table.SingleGuidPrimaryKeyCatalogOrdinal;
+            HashSet<Guid> seen = _fastGuidKeyScratch ??= [];
+            seen.Clear();
+            bool hasGuidFastLane = !isEmpty
+                && context.Engine.IndexManager.HasGuidPrimaryKeyFastLane(pkIndex, table.Name, databaseName);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                Guid pk = rows[i][pkOrdinal].AsGuid();
+                if (!seen.Add(pk)
+                    || (!isEmpty && GuidPrimaryKeyExists(table.Name, pkIndex, hasGuidFastLane, pk, schema, rows[i], table.PrimaryKeys)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        HashSet<string> seenStrings = _fastStringKeyScratch ??= new HashSet<string>(StringComparer.Ordinal);
+        seenStrings.Clear();
+        var keysArr = new string[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            string key = IndexKeyEncoder.BuildKeyString(schema, rows[i], table.PrimaryKeys);
+            if (!seenStrings.Add(key) || (!isEmpty && GenericPrimaryKeyExists(table.Name, pkIndex, key)))
+            {
+                return false;
+            }
+
+            keysArr[i] = key;
+        }
+
+        stringKeys = keysArr;
+        return true;
+    }
+
+    private bool IntegerPrimaryKeyExists(
+        string tableName,
+        string pkIndex,
+        Indexing.ConcurrentInt64Int64Map? lane,
+        long pk)
+    {
+        if (lane is not null)
+        {
+            return lane.TryGetValue(pk, out _);
+        }
+
+        if (context.Engine.IndexManager.PersistedIntegerPrimaryKeyExists(pk, pkIndex, tableName, databaseName) is bool persisted)
+        {
+            return persisted;
+        }
+
+        if (context.Engine.IndexManager.TryLookupIntegerPrimaryKey(pk, pkIndex, tableName, databaseName, out _))
+        {
+            return true;
+        }
+
+        if (context.Engine.IndexManager.HasIntegerPrimaryKeyFastLane(pkIndex, tableName, databaseName))
+        {
+            return false;
+        }
+
+        return GenericPrimaryKeyExists(tableName, pkIndex, $"[{pk}]");
+    }
+
+    private bool GuidPrimaryKeyExists(
+        string tableName,
+        string pkIndex,
+        bool hasGuidFastLane,
+        Guid pk,
+        ReactiveRowSchema schema,
+        CellValue[] row,
+        IReadOnlyList<string> primaryKeys)
+    {
+        if (context.Engine.IndexManager.TryLookupGuidPrimaryKey(pk, pkIndex, tableName, databaseName, out _))
+        {
+            return true;
+        }
+
+        if (hasGuidFastLane || context.Engine.Config.StorageMode == StorageEngine.Config.StorageMode.Lsm)
+        {
+            return false;
+        }
+
+        string key = IndexKeyEncoder.BuildKeyString(schema, row, primaryKeys);
+        return GenericPrimaryKeyExists(tableName, pkIndex, key);
+    }
+
+    private bool GenericPrimaryKeyExists(string tableName, string pkIndex, string key)
+    {
+        try
+        {
+            return context.Engine.IndexManager.IndexContainsKey(key, pkIndex, tableName, databaseName);
+        }
+        catch (IndexException exception)
+        {
+            throw new InvalidOperationException($"Table {tableName} has no primary-key index to apply a batch against.", exception);
+        }
+    }
+
     private DataVoBatchResult Summarize(int deleted)
     {
         int inserted = 0, updated = 0;
         foreach (TablePlan table in _order)
         {
-            inserted += table.Inserts.Count;
+            inserted += table.FastPathEligible ? table.FastInsertedCount : table.Inserts.Count;
             updated += table.UpdateIds.Count;
         }
 
@@ -337,10 +785,22 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         {
             Table = table;
             Columns = new Column[layout.Columns.Count];
+            LayoutToCatalog = new int[layout.Columns.Count];
+            bool catalogOrder = layout.Columns.Count == table.AllColumns.Count;
             for (int i = 0; i < Columns.Length; i++)
             {
-                Columns[i] = table.ColumnNamed(layout.Columns[i]);
+                Column column = table.ColumnNamed(layout.Columns[i]);
+                Columns[i] = column;
+                int catalogOrdinal = table.CatalogOrdinalOf(column.Name);
+                LayoutToCatalog[i] = catalogOrdinal;
+                if (catalogOrdinal != i)
+                {
+                    catalogOrder = false;
+                }
             }
+
+            IsCatalogOrder = catalogOrder;
+            IsFullTypedLayout = Columns.Length == table.AllColumns.Count && table.ExpectedCellTypes is not null;
 
             KeyColumns = new Column[table.PrimaryKeys.Count];
             KeyPositions = new int[table.PrimaryKeys.Count];
@@ -363,13 +823,21 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         public Column[] KeyColumns { get; }
 
         public int[] KeyPositions { get; }
+
+        public int[] LayoutToCatalog { get; }
+
+        public bool IsCatalogOrder { get; }
+
+        public bool IsFullTypedLayout { get; }
     }
 
     /// <summary>One table's pending rows and, once classified, the rows to delete, update and insert.</summary>
     private sealed class TablePlan
     {
         private readonly Dictionary<string, Column> _columns;
+        private readonly Dictionary<string, int> _catalogOrdinals;
         private readonly Dictionary<string, PendingRow> _pending = new(StringComparer.Ordinal);
+        private ReactiveRowSchema? _reactiveSchema;
 
         public TablePlan(string name, List<Column> columns, List<string> primaryKeys)
         {
@@ -380,8 +848,35 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
 
             Name = name;
             AllColumns = columns;
-            _columns = columns.ToDictionary(static column => column.Name, StringComparer.OrdinalIgnoreCase);
+            _columns = new Dictionary<string, Column>(columns.Count, StringComparer.OrdinalIgnoreCase);
+            _catalogOrdinals = new Dictionary<string, int>(columns.Count, StringComparer.OrdinalIgnoreCase);
+            CellType[]? expected = new CellType[columns.Count];
+            bool allTyped = true;
+            for (int i = 0; i < columns.Count; i++)
+            {
+                _columns[columns[i].Name] = columns[i];
+                _catalogOrdinals[columns[i].Name] = i;
+                if (!ColumnCellTypes.TryGet(columns[i].Type, out expected[i]))
+                {
+                    allTyped = false;
+                }
+            }
+
+            ExpectedCellTypes = allTyped ? expected : null;
             PrimaryKeys = primaryKeys;
+            SingleIntegerPrimaryKeyCatalogOrdinal = -1;
+            SingleGuidPrimaryKeyCatalogOrdinal = -1;
+            if (allTyped && primaryKeys.Count == 1 && _catalogOrdinals.TryGetValue(primaryKeys[0], out int pkOrd))
+            {
+                if (expected[pkOrd] is CellType.Int32 or CellType.Int64)
+                {
+                    SingleIntegerPrimaryKeyCatalogOrdinal = pkOrd;
+                }
+                else if (expected[pkOrd] == CellType.Guid)
+                {
+                    SingleGuidPrimaryKeyCatalogOrdinal = pkOrd;
+                }
+            }
         }
 
         public string Name { get; }
@@ -389,6 +884,38 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         public List<Column> AllColumns { get; }
 
         public List<string> PrimaryKeys { get; }
+
+        public CellType[]? ExpectedCellTypes { get; }
+
+        public int SingleIntegerPrimaryKeyCatalogOrdinal { get; }
+
+        public int SingleGuidPrimaryKeyCatalogOrdinal { get; }
+
+        public bool FastPathEligible { get; set; } = true;
+
+        public LayoutPlan? FastLayout { get; set; }
+
+        public List<int>? FastEntries { get; set; }
+
+        public int FastInsertedCount { get; set; }
+
+        public int CatalogOrdinalOf(string name) => _catalogOrdinals[name];
+
+        public ReactiveRowSchema GetReactiveSchema()
+        {
+            if (_reactiveSchema is null)
+            {
+                var names = new string[AllColumns.Count];
+                for (int i = 0; i < names.Length; i++)
+                {
+                    names[i] = AllColumns[i].Name;
+                }
+
+                _reactiveSchema = new ReactiveRowSchema(names);
+            }
+
+            return _reactiveSchema;
+        }
 
         public List<PendingRow> Rows { get; } = [];
 
@@ -512,6 +1039,96 @@ internal sealed class BatchApplier(DataVoContext context, string databaseName)
         }
 
         private bool _deleted;
+    }
+
+    /// <summary>
+    /// Thread-local pool of exact-width <see cref="CellValue"/> row arrays reused across typed batch applies so
+    /// multi-page bulk ingests avoid allocating a fresh array per row.
+    /// </summary>
+    private sealed class TypedRowBufferPool
+    {
+        private readonly List<CellValue[]> _rows = [];
+        private readonly List<CellValue[]> _active = [];
+        private int _columnCount;
+        private bool _inUse;
+
+        public List<CellValue[]> Rent(int rowCount, int columnCount)
+        {
+            if (_inUse)
+            {
+                // Multi-table fast path in one batch: allocate an independent list for the secondary table.
+                var extra = new List<CellValue[]>(rowCount);
+                for (int i = 0; i < rowCount; i++)
+                {
+                    extra.Add(new CellValue[columnCount]);
+                }
+
+                return extra;
+            }
+
+            _inUse = true;
+            if (_columnCount != columnCount)
+            {
+                _rows.Clear();
+                _columnCount = columnCount;
+            }
+
+            while (_rows.Count < rowCount)
+            {
+                _rows.Add(new CellValue[columnCount]);
+            }
+
+            _active.Clear();
+            if (_active.Capacity < rowCount)
+            {
+                _active.Capacity = rowCount;
+            }
+
+            for (int i = 0; i < rowCount; i++)
+            {
+                _active.Add(_rows[i]);
+            }
+
+            return _active;
+        }
+
+        public void Return(List<CellValue[]> rows, int columnCount)
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                Array.Clear(rows[i], 0, columnCount);
+            }
+
+            if (ReferenceEquals(rows, _active))
+            {
+                _active.Clear();
+                _inUse = false;
+            }
+        }
+    }
+
+    private sealed class FastInsertPlan(
+        TablePlan table,
+        TypedRowBufferPool pool,
+        List<CellValue[]> rowBuffers,
+        int columnCount,
+        long[]? integerKeys,
+        InsertRowService.PreparedTypedInsert prepared) : IDisposable
+    {
+        public TablePlan Table { get; } = table;
+
+        public InsertRowService.PreparedTypedInsert Prepared { get; } = prepared;
+
+        public void Dispose()
+        {
+            Prepared.Dispose();
+            if (integerKeys is not null)
+            {
+                ArrayPool<long>.Shared.Return(integerKeys);
+            }
+
+            pool.Return(rowBuffers, columnCount);
+        }
     }
 
     /// <summary>

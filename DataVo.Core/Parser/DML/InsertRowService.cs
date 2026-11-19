@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using DataVo.Core.BTree;
 using DataVo.Core.Compat;
@@ -623,6 +624,50 @@ internal sealed partial class InsertRowService(
         return rowId;
     }
 
+    /// <summary>
+    /// Pre-validated typed insert payload ready to be written to storage and indexes. Disposing returns any
+    /// pooled key buffers.
+    /// </summary>
+    internal readonly struct PreparedTypedInsert : IDisposable
+    {
+        public PreparedTypedInsert(
+            ReactiveRowSchema schema,
+            IReadOnlyList<CellValue[]> rows,
+            IReadOnlyList<Column> tableColumns,
+            IReadOnlyList<IndexFile> indexFiles,
+            IReadOnlyList<string> primaryKeys,
+            string[]? primaryKeyValues,
+            long[]? integerPrimaryKeyValues,
+            bool ownsIntegerPrimaryKeyValues)
+        {
+            Schema = schema;
+            Rows = rows;
+            TableColumns = tableColumns;
+            IndexFiles = indexFiles;
+            PrimaryKeys = primaryKeys;
+            PrimaryKeyValues = primaryKeyValues;
+            IntegerPrimaryKeyValues = integerPrimaryKeyValues;
+            OwnsIntegerPrimaryKeyValues = ownsIntegerPrimaryKeyValues;
+        }
+
+        public ReactiveRowSchema Schema { get; }
+        public IReadOnlyList<CellValue[]> Rows { get; }
+        public IReadOnlyList<Column> TableColumns { get; }
+        public IReadOnlyList<IndexFile> IndexFiles { get; }
+        public IReadOnlyList<string> PrimaryKeys { get; }
+        public string[]? PrimaryKeyValues { get; }
+        public long[]? IntegerPrimaryKeyValues { get; }
+        public bool OwnsIntegerPrimaryKeyValues { get; }
+
+        public void Dispose()
+        {
+            if (OwnsIntegerPrimaryKeyValues && IntegerPrimaryKeyValues is not null)
+            {
+                ArrayPool<long>.Shared.Return(IntegerPrimaryKeyValues);
+            }
+        }
+    }
+
     public IReadOnlyList<RowKey> InsertTypedRows(
         string databaseName,
         string tableName,
@@ -642,12 +687,41 @@ internal sealed partial class InsertRowService(
             return [];
         }
 
+        using PreparedTypedInsert prepared = ValidateTypedInsertRows(
+            databaseName,
+            tableName,
+            columns,
+            rows,
+            checkForeignKeys: true);
+        return WriteValidatedTypedInsertRows(
+            databaseName,
+            tableName,
+            prepared,
+            statementTxId,
+            recorder,
+            callerOwnsRowBuffers);
+    }
+
+    /// <summary>
+    /// Validates a batch of full typed cell rows against column rules, primary keys, unique keys, and optional
+    /// foreign keys without writing to storage.
+    /// </summary>
+    internal PreparedTypedInsert ValidateTypedInsertRows(
+        string databaseName,
+        string tableName,
+        ReactiveRowSchema columns,
+        IReadOnlyList<CellValue[]> rows,
+        bool checkForeignKeys,
+        bool primaryKeysAlreadyValidated = false,
+        long[]? prevalidatedIntegerPrimaryKeys = null,
+        string[]? prevalidatedPrimaryKeyValues = null)
+    {
         TableValidationMetadata metadata = catalog.GetTableValidationMetadata(tableName, databaseName);
         IReadOnlyList<Column> tableColumns = metadata.Columns;
         IReadOnlyList<string> primaryKeys = metadata.PrimaryKeys;
         IReadOnlyList<string> uniqueKeys = metadata.UniqueKeys;
         IReadOnlyList<IndexFile> indexFiles = metadata.Indexes;
-        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = metadata.ForeignKeysByAttribute;
+        IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute = checkForeignKeys ? metadata.ForeignKeysByAttribute : NoForeignKeys;
 
         EnsureTypedSchemaMatchesCatalog(columns, tableColumns, tableName);
 
@@ -659,10 +733,14 @@ internal sealed partial class InsertRowService(
             primaryKeys = [];
         }
 
-        bool hasIntegerPrimaryKey = TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, tableColumns, out int integerPrimaryKeyOrdinal);
-        bool hasConstraints = primaryKeys.Count > 0 || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
+        bool validatePrimaryKeys = !primaryKeysAlreadyValidated && primaryKeys.Count > 0;
+        int integerPrimaryKeyOrdinal = -1;
+        bool hasIntegerPrimaryKey = validatePrimaryKeys
+            && TryResolveIntegerPrimaryKeyOrdinal(primaryKeys, columns, tableColumns, out integerPrimaryKeyOrdinal);
+
+        bool hasConstraints = validatePrimaryKeys || uniqueKeys.Count > 0 || foreignKeysByAttribute.Count > 0;
         List<string>? messages = hasConstraints ? [] : null;
-        HashSet<string>? acceptedPrimaryKeys = hasConstraints && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
+        HashSet<string>? acceptedPrimaryKeys = validatePrimaryKeys && !hasIntegerPrimaryKey ? new HashSet<string>(StringComparer.Ordinal) : null;
         HashSet<long>? acceptedIntegerPrimaryKeys = null;
         if (hasIntegerPrimaryKey)
         {
@@ -671,13 +749,14 @@ internal sealed partial class InsertRowService(
             acceptedIntegerPrimaryKeys = _integerPrimaryKeyScratch ??= [];
             acceptedIntegerPrimaryKeys.Clear();
         }
-        IReadOnlyDictionary<string, HashSet<string>>? acceptedUniqueValues = hasConstraints
+
+        IReadOnlyDictionary<string, HashSet<string>>? acceptedUniqueValues = uniqueKeys.Count > 0
             ? uniqueKeys.ToDictionary(
                 key => key,
                 _ => new HashSet<string>(StringComparer.Ordinal),
                 StringComparer.OrdinalIgnoreCase)
             : null;
-        bool skipExistingPrimaryKeyLookup = primaryKeys.Count > 0 && context.IsTableEmpty(tableName, databaseName);
+        bool skipExistingPrimaryKeyLookup = validatePrimaryKeys && context.IsTableEmpty(tableName, databaseName);
 
         // Resolve the fast lane once per batch: the per-row existence probe then skips the
         // cache-key hash and dictionary hop that dominated validation CPU on bulk ingest.
@@ -686,77 +765,120 @@ internal sealed partial class InsertRowService(
                 ? indexes.GetIntegerPrimaryKeyLane(GetPrimaryKeyIndexName(tableName), tableName, databaseName)
                 : null;
 
-        string[]? primaryKeyValues = primaryKeys.Count > 0 && !hasIntegerPrimaryKey ? new string[rows.Count] : null;
-        long[]? integerPrimaryKeyValues = hasIntegerPrimaryKey ? new long[rows.Count] : null;
-        for (int i = 0; i < rows.Count; i++)
+        string[]? primaryKeyValues = prevalidatedPrimaryKeyValues
+            ?? (validatePrimaryKeys && !hasIntegerPrimaryKey ? new string[rows.Count] : null);
+        bool ownsIntegerKeys = prevalidatedIntegerPrimaryKeys is null && hasIntegerPrimaryKey;
+        long[]? integerPrimaryKeyValues = prevalidatedIntegerPrimaryKeys
+            ?? (ownsIntegerKeys ? ArrayPool<long>.Shared.Rent(rows.Count) : null);
+
+        try
         {
-            CellValue[] row = rows[i];
-            if (columns.ColumnCount != row.Length)
+            for (int i = 0; i < rows.Count; i++)
             {
-                throw new ArgumentException(
-                    $"Typed row schema has {columns.ColumnCount} columns but row {i + 1} has {row.Length} cells.",
-                    nameof(rows));
+                CellValue[] row = rows[i];
+                if (columns.ColumnCount != row.Length)
+                {
+                    throw new ArgumentException(
+                        $"Typed row schema has {columns.ColumnCount} columns but row {i + 1} has {row.Length} cells.",
+                        nameof(rows));
+                }
+
+                ValidateTypedCells(tableColumns, row);
+
+                if (!hasConstraints)
+                {
+                    continue;
+                }
+
+                int rowNumber = i + 1;
+                string? primaryKeyValue = null;
+                bool primaryKeyValid = !validatePrimaryKeys || (hasIntegerPrimaryKey
+                    ? ValidateTypedIntegerPrimaryKey(
+                        tableName,
+                        databaseName,
+                        rowNumber,
+                        row,
+                        integerPrimaryKeyOrdinal,
+                        acceptedIntegerPrimaryKeys!,
+                        messages!,
+                        skipExistingPrimaryKeyLookup,
+                        integerPrimaryKeyLane,
+                        out integerPrimaryKeyValues![i])
+                    : ValidateTypedPrimaryKeys(
+                        tableName,
+                        databaseName,
+                        rowNumber,
+                        row,
+                        columns,
+                        primaryKeys,
+                        acceptedPrimaryKeys!,
+                        messages!,
+                        skipExistingPrimaryKeyLookup,
+                        out primaryKeyValue));
+
+                if (!primaryKeyValid
+                    || (uniqueKeys.Count > 0 && !ValidateTypedUniqueKeys(
+                        tableName,
+                        databaseName,
+                        rowNumber,
+                        row,
+                        columns,
+                        uniqueKeys,
+                        acceptedUniqueValues!,
+                        messages!))
+                    || (foreignKeysByAttribute.Count > 0 && !ValidateTypedForeignKeys(
+                        databaseName,
+                        rowNumber,
+                        row,
+                        columns,
+                        foreignKeysByAttribute,
+                        messages!)))
+                {
+                    throw RejectedRows(tableName, messages!);
+                }
+
+                if (validatePrimaryKeys && primaryKeyValues is not null)
+                {
+                    primaryKeyValues[i] = primaryKeyValue!;
+                }
             }
 
-            ValidateTypedCells(tableColumns, row);
-
-            if (!hasConstraints)
-            {
-                continue;
-            }
-
-            int rowNumber = i + 1;
-            string? primaryKeyValue = null;
-            bool primaryKeyValid = hasIntegerPrimaryKey
-                ? ValidateTypedIntegerPrimaryKey(
-                    tableName,
-                    databaseName,
-                    rowNumber,
-                    row,
-                    integerPrimaryKeyOrdinal,
-                    acceptedIntegerPrimaryKeys!,
-                    messages!,
-                    skipExistingPrimaryKeyLookup,
-                    integerPrimaryKeyLane,
-                    out integerPrimaryKeyValues![i])
-                : ValidateTypedPrimaryKeys(
-                    tableName,
-                    databaseName,
-                    rowNumber,
-                    row,
-                    columns,
-                    primaryKeys,
-                    acceptedPrimaryKeys!,
-                    messages!,
-                    skipExistingPrimaryKeyLookup,
-                    out primaryKeyValue);
-
-            if (!primaryKeyValid
-                || !ValidateTypedUniqueKeys(
-                    tableName,
-                    databaseName,
-                    rowNumber,
-                    row,
-                    columns,
-                    uniqueKeys,
-                    acceptedUniqueValues!,
-                    messages!)
-                || !ValidateTypedForeignKeys(
-                    databaseName,
-                    rowNumber,
-                    row,
-                    columns,
-                    foreignKeysByAttribute,
-                    messages!))
-            {
-                throw RejectedRows(tableName, messages!);
-            }
-
-            if (primaryKeyValues is not null)
-            {
-                primaryKeyValues[i] = primaryKeyValue!;
-            }
+            return new PreparedTypedInsert(
+                columns,
+                rows,
+                tableColumns,
+                indexFiles,
+                primaryKeys,
+                primaryKeyValues,
+                integerPrimaryKeyValues,
+                ownsIntegerKeys);
         }
+        catch
+        {
+            if (ownsIntegerKeys && integerPrimaryKeyValues is not null)
+            {
+                ArrayPool<long>.Shared.Return(integerPrimaryKeyValues);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Writes a batch previously validated by <see cref="ValidateTypedInsertRows"/> to storage, MVCC, indexes,
+    /// change capture, and implicit WAL.
+    /// </summary>
+    internal IReadOnlyList<RowKey> WriteValidatedTypedInsertRows(
+        string databaseName,
+        string tableName,
+        in PreparedTypedInsert prepared,
+        long statementTxId,
+        ChangeRecorder? recorder = null,
+        bool callerOwnsRowBuffers = false)
+    {
+        IReadOnlyList<CellValue[]> rows = prepared.Rows;
+        ReactiveRowSchema columns = prepared.Schema;
+        IReadOnlyList<Column> tableColumns = prepared.TableColumns;
 
         // Caller-owned buffers are copied only when something retains cells past this call, and only a
         // change recorder does: it captures the after-image. Every backend reads the cells during the
@@ -790,10 +912,10 @@ internal sealed partial class InsertRowService(
             columns,
             rows,
             rowIds,
-            indexFiles,
-            primaryKeys,
-            primaryKeyValues,
-            integerPrimaryKeyValues);
+            prepared.IndexFiles,
+            prepared.PrimaryKeys,
+            prepared.PrimaryKeyValues,
+            prepared.IntegerPrimaryKeyValues);
 
         if (recorder is not null)
         {

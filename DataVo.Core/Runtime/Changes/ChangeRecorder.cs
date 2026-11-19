@@ -20,30 +20,35 @@ internal sealed class ChangeRecorder
     private readonly string? _origin;
     private List<RowChange>? _changes;
 
-    private ChangeRecorder(ChangeCapture capture, string databaseName)
+    private ChangeRecorder(ChangeCapture capture, string databaseName, string? origin)
     {
         _capture = capture;
         _databaseName = databaseName;
         // Captured now: publication may be deferred to a commit callback that runs outside the origin scope.
-        _origin = ChangeCapture.CurrentOrigin;
+        _origin = origin;
     }
 
     /// <summary>
     /// Creates a recorder bound to the engine's capture service, or <c>null</c> when capture is disabled
-    /// so callers can cheaply skip all change-tracking work.
+    /// or no subscriber is interested in the current write origin so callers can skip all change-tracking work.
     /// </summary>
     public static ChangeRecorder? TryCreate(DataVoEngine engine, string databaseName)
     {
         ChangeCapture capture = engine.Changes;
-        return capture.Enabled ? new ChangeRecorder(capture, databaseName) : null;
+        if (!capture.Enabled)
+        {
+            return null;
+        }
+
+        string? origin = ChangeCapture.CurrentOrigin;
+        return capture.HasInterestedSubscribers(origin) ? new ChangeRecorder(capture, databaseName, origin) : null;
     }
 
     /// <summary>Gets a value indicating whether the bound capture service is enabled.</summary>
     public bool IsEnabled => _capture.Enabled;
 
-    /// <summary>Records an inserted row image.</summary>
     /// <summary>Gets whether a subscriber wants changes announced before they are written.</summary>
-    public bool WantsAnnouncements => _capture.HasRecordingSubscribers;
+    public bool WantsAnnouncements => _capture.HasInterestedRecordingSubscribers(_origin);
 
     /// <summary>Announces an insert before it is written. Call ahead of any storage or log write.</summary>
     public void AnnounceInsert(string table, IReadOnlyDictionary<string, object?> after)
@@ -81,7 +86,7 @@ internal sealed class ChangeRecorder
         }
     }
 
-    private void Announce(RowChange change) => _capture.PublishRecording(_databaseName, change);
+    private void Announce(RowChange change) => _capture.PublishRecording(_databaseName, change, _origin);
 
     public void RecordInsert(string table, RowKey rowId, IReadOnlyDictionary<string, object?> after)
         => Add(new RowChange(table, rowId, ChangeKind.Insert, before: null, after: Clone(after)));

@@ -1,5 +1,7 @@
 using DataVo.Core;
+using DataVo.Core.Exceptions;
 using DataVo.Core.Runtime.Changes;
+using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Tests.Batches;
@@ -636,6 +638,159 @@ public sealed class ApplyBatchTests : IDisposable
         Assert.Throws<ArgumentException>(() => Apply(context, Players, null, "x", 1));
         Assert.Throws<InvalidOperationException>(() => Apply(context, new DataVoBatchLayout("NoKey", ["A", "B"]), 1, 2));
         Assert.Throws<ArgumentException>(() => new DataVoWriteBatch().Upsert(Players, 1, "too few"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void TypedBatch_PureInsertsAndReorderedLayout_Succeed(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR(32) NOT NULL, Score DOUBLE, Active BIT, Created DATE, Uid GUID, Stamp BIGINT)");
+        var reordered = new DataVoBatchLayout("Items", ["Id", "Uid", "Name", "Score", "Active", "Created", "Stamp"]);
+        var batch = new DataVoWriteBatch();
+        Guid g1 = Guid.NewGuid();
+        Guid g2 = Guid.NewGuid();
+        var d1 = DataVoDate.FromDateTime(new DateTime(2026, 3, 15));
+        var d2 = DataVoDate.FromDateTime(new DateTime(2026, 4, 20));
+
+        batch.Upsert(reordered, [CellValue.From(1), CellValue.From(g1), CellValue.From("Alpha"), CellValue.From(12.5), CellValue.From(true), CellValue.From(d1), CellValue.From(100L)]);
+        batch.Upsert(reordered, [CellValue.From(2), CellValue.From(g2), CellValue.From("Beta"), CellValue.Null, CellValue.From(false), CellValue.From(d2), CellValue.From(200)]);
+
+        Assert.Equal(new DataVoBatchResult(Inserted: 2, Updated: 0, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+        Assert.Equal("2", Scalar(context, "SELECT COUNT(*) FROM Items"));
+        Assert.Equal("Alpha", Scalar(context, "SELECT Name FROM Items WHERE Id = 1"));
+        Assert.Equal("200", Scalar(context, "SELECT Stamp FROM Items WHERE Id = 2"));
+
+        // Second page with disjoint keys also takes the fast path.
+        batch.Clear();
+        batch.Upsert(reordered, [CellValue.From(3), CellValue.From(Guid.NewGuid()), CellValue.From("Gamma"), CellValue.From(3.5), CellValue.From(true), CellValue.From(d1), CellValue.From(300L)]);
+        Assert.Equal(new DataVoBatchResult(Inserted: 1, Updated: 0, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+        Assert.Equal("3", Scalar(context, "SELECT COUNT(*) FROM Items"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void TypedBatch_DuplicateAndExistingKeys_DemoteCleanly(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        var batch = new DataVoWriteBatch();
+
+        // Duplicate key inside the same typed batch: later upsert wins.
+        batch.Upsert(Players, [CellValue.From(1), CellValue.From("Ann"), CellValue.From(10)]);
+        batch.Upsert(Players, [CellValue.From(1), CellValue.From("Ann"), CellValue.From(25)]);
+        batch.Upsert(Players, [CellValue.From(2), CellValue.From("Bob"), CellValue.From(30)]);
+        Assert.Equal(new DataVoBatchResult(Inserted: 2, Updated: 0, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:25", "2:Bob:30"], Rows(context));
+
+        // Existing key + new key + update + delete in a typed batch.
+        batch.Clear();
+        batch.Upsert(Players, [CellValue.From(1), CellValue.From("Ann"), CellValue.From(25)]); // unchanged
+        batch.Upsert(Players, [CellValue.From(2), CellValue.From("Bob"), CellValue.From(99)]); // updated
+        batch.Upsert(Players, [CellValue.From(3), CellValue.From("Cid"), CellValue.From(40)]); // inserted
+        Assert.Equal(new DataVoBatchResult(Inserted: 1, Updated: 1, Deleted: 0, Unchanged: 1), context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:25", "2:Bob:99", "3:Cid:40"], Rows(context));
+
+        batch.Clear();
+        batch.Delete(Players, [CellValue.From(2), CellValue.Null, CellValue.Null]);
+        batch.Update(PlayerHp, [CellValue.From(3), CellValue.From(55)]);
+        batch.Update(PlayerHp, [CellValue.From(99), CellValue.From(1)]);
+        Assert.Equal(new DataVoBatchResult(Inserted: 0, Updated: 1, Deleted: 1, Unchanged: 0, Missing: 1), context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:25", "3:Cid:55"], Rows(context));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void TypedBatch_MultiTableFastInsertAndCheckpointUpdate_AreAtomic(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Checkpoint (Slot VARCHAR(32) PRIMARY KEY, Pos BIGINT)");
+        var checkpoint = new DataVoBatchLayout("Checkpoint", ["Slot", "Pos"]);
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(Players, [CellValue.From(1), CellValue.From("Ann"), CellValue.From(10)]);
+        batch.Upsert(checkpoint, "main", 100L);
+        Assert.Equal(new DataVoBatchResult(Inserted: 2, Updated: 0, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+
+        // Second commit: Players is pure typed insert, Checkpoint is an update in the same batch.
+        batch.Clear();
+        batch.Upsert(Players, [CellValue.From(2), CellValue.From("Bob"), CellValue.From(20)]);
+        batch.Upsert(checkpoint, "main", 200L);
+        Assert.Equal(new DataVoBatchResult(Inserted: 1, Updated: 1, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:10", "2:Bob:20"], Rows(context));
+        Assert.Equal("200", Scalar(context, "SELECT Pos FROM Checkpoint WHERE Slot = 'main'"));
+
+        // Length violation in the typed table rolls back the whole batch: checkpoint must not move.
+        batch.Clear();
+        batch.Upsert(Players, [CellValue.From(3), CellValue.From(new string('x', 50)), CellValue.From(30)]);
+        batch.Upsert(checkpoint, "main", 300L);
+        Assert.Throws<ConstraintViolationException>(() => context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:10", "2:Bob:20"], Rows(context));
+        Assert.Equal("200", Scalar(context, "SELECT Pos FROM Checkpoint WHERE Slot = 'main'"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void TypedBatch_GuidPrimaryKey_FastPathWorks(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "CREATE TABLE Docs (Id GUID PRIMARY KEY, Title VARCHAR(32))");
+        var layout = new DataVoBatchLayout("Docs", ["Id", "Title"]);
+        Guid a = Guid.NewGuid();
+        Guid b = Guid.NewGuid();
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(layout, [CellValue.From(a), CellValue.From("One")]);
+        batch.Upsert(layout, [CellValue.From(b), CellValue.From("Two")]);
+        Assert.Equal(new DataVoBatchResult(Inserted: 2, Updated: 0, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+
+        batch.Clear();
+        batch.Upsert(layout, [CellValue.From(a), CellValue.From("One-Updated")]);
+        Assert.Equal(new DataVoBatchResult(Inserted: 0, Updated: 1, Deleted: 0, Unchanged: 0), context.ApplyBatch(batch));
+        Assert.Equal("2", Scalar(context, "SELECT COUNT(*) FROM Docs"));
+    }
+
+    [Fact]
+    public void ChangeCapture_FilteredSubscriberSkipsIgnoredOrigin_WhileUnfilteredReceivesIt()
+    {
+        DataVoContext context = Open(StorageMode.InMemory);
+        context.Engine.Changes.Enabled = true;
+        int filteredCount = 0;
+        int unfilteredCount = 0;
+
+        using IDisposable filtered = context.Engine.Changes.Subscribe(_ => filteredCount++, ignoreOrigin: "import");
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(Players, [CellValue.From(1), CellValue.From("Ann"), CellValue.From(10)]);
+        using (ChangeCapture.BeginOrigin("import"))
+        {
+            context.ApplyBatch(batch);
+        }
+
+        Assert.Equal(0, filteredCount);
+
+        batch.Clear();
+        batch.Upsert(Players, [CellValue.From(2), CellValue.From("Bob"), CellValue.From(20)]);
+        context.ApplyBatch(batch);
+        Assert.Equal(1, filteredCount);
+
+        // An unfiltered subscriber still sees changes from "import".
+        Action<ChangeSet> listener = _ => unfilteredCount++;
+        context.Engine.Changes.Captured += listener;
+        try
+        {
+            batch.Clear();
+            batch.Upsert(Players, [CellValue.From(3), CellValue.From("Cid"), CellValue.From(30)]);
+            using (ChangeCapture.BeginOrigin("import"))
+            {
+                context.ApplyBatch(batch);
+            }
+
+            Assert.Equal(1, filteredCount);
+            Assert.Equal(1, unfilteredCount);
+        }
+        finally
+        {
+            context.Engine.Changes.Captured -= listener;
+        }
     }
 
     private static void Apply(DataVoContext context, DataVoBatchLayout layout, params object?[] values)
