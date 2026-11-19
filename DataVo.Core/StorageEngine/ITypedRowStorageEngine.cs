@@ -40,6 +40,16 @@ internal interface ITypedRowStorageEngine
     bool TryVisitTypedCells<TState>(string databaseName, string tableName, long rowId, ref TState state, TypedCellsVisitor<TState> visit);
 
     /// <summary>
+    /// Hands the cells of the live typed rows named by <paramref name="rowIds"/>, from <paramref name="start"/> on and
+    /// in the order given, to a visitor, without a lock and without allocating; the table is found once for the
+    /// whole list. Stops at the first id that names no live typed row, so the caller can read it another way and
+    /// continue after it.
+    /// </summary>
+    /// <param name="columns">When set, only the flagged columns are decoded and the others hold stale values.</param>
+    /// <returns>The index of the first id not served as a typed row; <c>rowIds.Count</c> when all were; -1 when the visitor stopped.</returns>
+    int VisitTypedCellsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds, int start, bool[]? columns, ref TState state, TypedCellsVisitor<TState> visit);
+
+    /// <summary>
     /// Hands the cells of each live typed row to a visitor in row id order, without a lock and without
     /// allocating, until the visitor returns <see langword="false"/>. Rows added after the visit began are
     /// not visited.

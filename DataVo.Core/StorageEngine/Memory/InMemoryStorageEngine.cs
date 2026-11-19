@@ -766,6 +766,39 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         }
     }
 
+    int ITypedRowStorageEngine.VisitTypedCellsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds, int start, bool[]? columns, ref TState state, TypedCellsVisitor<TState> visit)
+    {
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return start < rowIds.Count ? start : rowIds.Count;
+        }
+
+        var reader = new PackedRowReader();
+        try
+        {
+            for (int i = start; i < rowIds.Count; i++)
+            {
+                long rowId = RowKeyConversions.ToRowId(rowIds[i]);
+                TableRows rows = store.Rows; // read per row, as a single-row visit reads it
+                if (rowId < 1 || rowId > rows.Count || !rows.TryReadTypedCells((int)(rowId - 1), ref reader, out ReadOnlySpan<CellValue> cells, columns))
+                {
+                    return i;
+                }
+
+                if (!visit(ref state, rowId, cells))
+                {
+                    return -1;
+                }
+            }
+
+            return rowIds.Count;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
     /// <summary>
     /// Visits every live row of a table in position order: a serialized row as its bytes, a typed row as its cells.
     /// Stops when <paramref name="visit"/> returns false. Unlike <see cref="ReadAllRows"/> nothing table-sized is

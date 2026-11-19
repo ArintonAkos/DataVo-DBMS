@@ -22,6 +22,8 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
         ((ITypedRowStorageEngine)_inner).HasTypedRow(databaseName, tableName, rowId);
     public bool TryVisitTypedCells<TState>(string databaseName, string tableName, long rowId, ref TState state, TypedCellsVisitor<TState> visit) =>
         ((ITypedRowStorageEngine)_inner).TryVisitTypedCells(databaseName, tableName, rowId, ref state, visit);
+    public int VisitTypedCellsByKey<TState>(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds, int start, bool[]? columns, ref TState state, TypedCellsVisitor<TState> visit) =>
+        ((ITypedRowStorageEngine)_inner).VisitTypedCellsByKey(databaseName, tableName, rowIds, start, columns, ref state, visit);
     public void VisitTypedRows<TState>(string databaseName, string tableName, ref TState state, TypedCellsVisitor<TState> visit) =>
         ((ITypedRowStorageEngine)_inner).VisitTypedRows(databaseName, tableName, ref state, visit);
     /// <summary>Visits every live row in position order without copying the table; see <see cref="InMemoryStorageEngine.VisitAllRows{TState}"/>.</summary>

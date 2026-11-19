@@ -2282,9 +2282,15 @@ public partial class IndexManager : IDisposable
     /// False, with nothing appended, on the LSM backend (its clustered keys are ranges already), when the lane is
     /// not known to hold every key, or when more than <paramref name="maxRows"/> rows are in the range.
     /// </summary>
-    internal bool TryCollectPrimaryKeyRange(string tableName, string databaseName, long? lower, long? upperExclusive, int maxRows, List<long> rowIds)
+    internal bool TryCollectPrimaryKeyRange(string tableName, string databaseName, long? lower, long? upperExclusive, int maxRows, List<long> rowIds) =>
+        TryCollectPrimaryKeyRange(tableName, databaseName, $"_PK_{tableName}", lower, upperExclusive, maxRows, rowIds);
+
+    /// <summary>
+    /// As <see cref="TryCollectPrimaryKeyRange(string, string, long?, long?, int, List{long})"/>, with the primary-key
+    /// index name (<c>_PK_</c> + table) given by a caller that keeps it, so no name is built per call.
+    /// </summary>
+    internal bool TryCollectPrimaryKeyRange(string tableName, string databaseName, string indexName, long? lower, long? upperExclusive, int maxRows, List<long> rowIds)
     {
-        string indexName = $"_PK_{tableName}";
         IndexCacheKey cacheKey = GetCacheKey(indexName, tableName, databaseName);
         if (_lsmStore is not null
             || !IsLaneComplete(cacheKey)
@@ -2320,6 +2326,38 @@ public partial class IndexManager : IDisposable
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// As <see cref="TryPrimaryKeyRangeRows(string, string, long?, long?, long)"/>, but into caller-owned lists that
+    /// are cleared first (<paramref name="scratch"/> for the lane's values, <paramref name="rows"/> for the result),
+    /// so a caller that reuses them lists a range without allocating. False when the lane cannot answer.
+    /// </summary>
+    internal bool TryPrimaryKeyRangeRows(
+        string tableName,
+        string databaseName,
+        string indexName,
+        long? lower,
+        long? upperExclusive,
+        long tableRows,
+        List<long> scratch,
+        List<RowKey> rows)
+    {
+        scratch.Clear();
+        rows.Clear();
+        int maxRows = (int)Math.Min(int.MaxValue, Math.Max(16, tableRows / 4));
+        if (!TryCollectPrimaryKeyRange(tableName, databaseName, indexName, lower, upperExclusive, maxRows, scratch))
+        {
+            return false;
+        }
+
+        scratch.Sort();
+        foreach (long rowId in scratch)
+        {
+            rows.Add(rowId);
+        }
+
+        return true;
     }
 
     public bool TryLookupIntegerPrimaryKey(

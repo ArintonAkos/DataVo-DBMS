@@ -81,6 +81,12 @@ internal struct SqlSumAccumulator
     /// <summary>NULL over no values; otherwise a <see cref="long"/> for an all-integer sum, else a <see cref="double"/>.</summary>
     public readonly object? Result => Count == 0 ? null : _isReal ? (object)_real : _integer;
 
+    /// <summary>Whether the sum is still an exact integer (<see cref="Integer"/>); otherwise it is <see cref="Real"/>.</summary>
+    public readonly bool IsInteger => !_isReal;
+
+    /// <summary>The exact integer sum while <see cref="IsInteger"/> holds.</summary>
+    public readonly long Integer => _integer;
+
     /// <summary>The running sum as a double (for AVG).</summary>
     public readonly double Real => _real;
 }

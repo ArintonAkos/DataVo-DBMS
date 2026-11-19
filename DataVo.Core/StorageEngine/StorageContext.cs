@@ -1149,7 +1149,8 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     /// Visits the given rows (missing or deleted ones are skipped) in the order given, as serialized bytes
     /// or typed rows. Returns false when this read must take the general path (an active snapshot).
     /// </summary>
-    internal bool VisitRowsByKey<TState>(string tableName, string databaseName, IReadOnlyList<RowKey> rowIds, ref TState state, RawRowVisitor<TState> visit)
+    /// <param name="typedColumns">When set, a typed row is decoded only in the flagged columns and the visitor reads no others.</param>
+    internal bool VisitRowsByKey<TState>(string tableName, string databaseName, IReadOnlyList<RowKey> rowIds, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
     {
         if (MvccExecutionScope.CurrentSnapshot is not null)
         {
@@ -1157,6 +1158,15 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         }
 
         RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, rowIds.Count);
+        return VisitStoredRowsByKey(tableName, databaseName, rowIds, ref state, visit, typedColumns);
+    }
+
+    /// <summary>
+    /// Visits the given stored rows as <see cref="VisitRowsByKey{TState}"/> does, whatever snapshot is active: the
+    /// committed rows a snapshot read walks before applying its overlay. Always true.
+    /// </summary>
+    private bool VisitStoredRowsByKey<TState>(string tableName, string databaseName, IReadOnlyList<RowKey> rowIds, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns)
+    {
         if (LsmEngine is { } lsm && !lsm.HasStagedWrites(databaseName, tableName))
         {
             var box = (State: state, Visit: visit);
@@ -1166,26 +1176,23 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
             return true;
         }
 
-        foreach (RowKey rowId in rowIds)
+        ITypedRowStorageEngine? typedStorage = _storageEngine as ITypedRowStorageEngine;
+        for (int i = 0; i < rowIds.Count; i++)
         {
-            if (_storageEngine is ITypedRowStorageEngine typedStorage)
+            if (typedStorage is not null)
             {
+                // The typed rows from here on are read in one pass; it stops at a row stored as bytes.
                 var keyed = new TypedRangeScan<TState>(state, visit, null, null);
-                bool found = typedStorage.TryVisitTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), ref keyed, VisitTypedRowInRange);
+                i = typedStorage.VisitTypedCellsByKey(databaseName, tableName, rowIds, i, typedColumns, ref keyed, VisitTypedRowInRange);
                 state = keyed.State;
-                if (keyed.Stopped)
+                if (i < 0 || i >= rowIds.Count)
                 {
                     break;
                 }
-
-                if (found)
-                {
-                    continue;
-                }
             }
 
-            byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
-            if (bytes is not null && !visit(ref state, rowId, bytes, default))
+            byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowIds[i]);
+            if (bytes is not null && !visit(ref state, rowIds[i], bytes, default))
             {
                 break;
             }

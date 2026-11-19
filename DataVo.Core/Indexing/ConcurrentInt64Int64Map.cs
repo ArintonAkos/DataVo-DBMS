@@ -157,7 +157,7 @@ internal sealed class ConcurrentInt64Int64Map
         {
             _sortedKeys ??= SortKeysNoLock();
             sorted = _sortedKeys.Keys;
-            inserted = [.. _sortedKeys.Inserted.Where(key => InRange(key, lower, upperExclusive))];
+            inserted = InsertedInRangeNoLock(_sortedKeys.Inserted, lower, upperExclusive);
         }
 
         int from = lower is { } low ? LowerBound(sorted, low) : 0;
@@ -185,6 +185,36 @@ internal sealed class ConcurrentInt64Int64Map
         }
 
         return true;
+    }
+
+    /// <summary>The logged inserted keys in range, as a new array only when there are some.</summary>
+    private static long[] InsertedInRangeNoLock(List<long> inserted, long? lower, long? upperExclusive)
+    {
+        int count = 0;
+        foreach (long key in inserted)
+        {
+            if (InRange(key, lower, upperExclusive))
+            {
+                count++;
+            }
+        }
+
+        if (count == 0)
+        {
+            return [];
+        }
+
+        var keys = new long[count];
+        count = 0;
+        foreach (long key in inserted)
+        {
+            if (InRange(key, lower, upperExclusive))
+            {
+                keys[count++] = key;
+            }
+        }
+
+        return keys;
     }
 
     private static bool InRange(long key, long? lower, long? upperExclusive) =>
